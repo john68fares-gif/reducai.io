@@ -2,55 +2,21 @@
 import Link from "next/link";
 
 export default function Home() {
-  const card: React.CSSProperties = {
-    maxWidth: 820,
-    margin: "40px auto",
-    padding: 24,
-    border: "1px solid #2b2f36",
-    borderRadius: 14,
-    background: "#0d0f11",
-    boxShadow: "0 6px 20px rgba(0,0,0,.25)",
-    color: "#fff",
-    fontFamily:
-      "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif",
-  };
-  const btn: React.CSSProperties = {
-    display: "inline-block",
-    padding: "12px 16px",
-    borderRadius: 10,
-    fontWeight: 700,
-    textDecoration: "none",
-    color: "#001018",
-    marginRight: 12,
-  };
-
   return (
-    <main style={{ minHeight: "100vh", background: "#0b0c10", padding: 24 }}>
-      <div style={card}>
-        <h1 style={{ marginTop: 0 }}>Reduc.ai — Welcome</h1>
-        <p style={{ opacity: 0.9, marginBottom: 18 }}>
-          Choose where you want to go:
-        </p>
+    <main style={{ minHeight: "100vh", background: "#0b0c10", color: "#fff", padding: 24 }}>
+      <h1 style={{ marginTop: 0 }}>🚀 WELCOME v3 — This is the NEW home</h1>
+      <p style={{ opacity: 0.9 }}>If you still see “Vercel is up”, you’re on an old deployment URL or cached page.</p>
 
-        <Link href="/builder" style={{ ...btn, background: "#00ffc2" }}>
+      <div style={{ display: "flex", gap: 12, marginTop: 16 }}>
+        <Link href="/builder" style={{ padding: "10px 14px", background: "#00ffc2", borderRadius: 10, color: "#001018", fontWeight: 700, textDecoration: "none" }}>
           Open Builder
         </Link>
-
-        <Link href="/voice-agent" style={{ ...btn, background: "#0bd" }}>
-          Voice Agent (Attach Number)
+        <Link href="/voice-agent" style={{ padding: "10px 14px", background: "#0bd", borderRadius: 10, color: "#001018", fontWeight: 700, textDecoration: "none" }}>
+          Voice Agent
         </Link>
-
-        <Link
-          href="/api/voice/twilio/incoming"
-          style={{ ...btn, background: "#ffea00" }}
-        >
-          Test Twilio Webhook (XML)
+        <Link href="/api/voice/twilio/incoming" style={{ padding: "10px 14px", background: "#ffea00", borderRadius: 10, color: "#001018", fontWeight: 700, textDecoration: "none" }}>
+          Test Webhook (XML)
         </Link>
-
-        <div style={{ marginTop: 22, opacity: 0.8 }}>
-          Webhook for Twilio “A CALL COMES IN”:
-          <code style={{ marginLeft: 6 }}>/api/voice/twilio/incoming</code>
-        </div>
       </div>
     </main>
   );
