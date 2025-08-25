@@ -1,0 +1,20 @@
+@font-face {
+  font-family: 'Movatif Bold';
+  src: url('/fonts/Movatif-Bold.ttf') format('truetype');
+  font-weight: bold;
+  font-style: normal;
+}
+
+/* Keep Tailwind imports */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ✅ Remove Manrope import if no longer needed */
+html, body {
+  font-family: 'Movatif Bold', sans-serif;
+  background: #0b0c10;
+  color: white;
+  margin: 0;
+  padding: 0;
+}
