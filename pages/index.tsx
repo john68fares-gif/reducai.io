@@ -32,17 +32,14 @@ export default function Home() {
           Choose where you want to go:
         </p>
 
-        {/* Open the internal app (dashboard menu) */}
-        <Link href="/app" style={{ ...btn, background: "#00ffc2" }}>
-          Open App
+        <Link href="/builder" style={{ ...btn, background: "#00ffc2" }}>
+          Open Builder
         </Link>
 
-        {/* Go straight to Voice Agent attach page */}
         <Link href="/voice-agent" style={{ ...btn, background: "#0bd" }}>
-          Voice Agent
+          Voice Agent (Attach Number)
         </Link>
 
-        {/* Quick check that Twilio webhook is reachable */}
         <Link
           href="/api/voice/twilio/incoming"
           style={{ ...btn, background: "#ffea00" }}
