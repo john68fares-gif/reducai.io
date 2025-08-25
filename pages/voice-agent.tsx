@@ -1,71 +1,54 @@
-import { useState } from 'react';
+// pages/voice-agent.tsx
+import React, { useState } from "react";
 
-export default function VoiceAgentPage() {
-  const [agentId, setAgentId] = useState('agent_default');
-  const [phoneNumber, setPhoneNumber] = useState('');
-  const [msg, setMsg] = useState('');
-  const [loading, setLoading] = useState(false);
+export default function VoiceAgent() {
+  const [agentId, setAgentId] = useState("");
+  const [phoneNumber, setPhoneNumber] = useState("");
+  const [msg, setMsg] = useState<string | null>(null);
 
   async function attach() {
-    setLoading(true);
-    setMsg('');
+    setMsg("Attaching…");
     try {
-      const r = await fetch('/api/telephony/attach-number', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const res = await fetch("/api/telephony/attach-number", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ agentId, phoneNumber }),
       });
-      const j = await r.json();
-      if (!r.ok || !j.ok) throw new Error(j?.error || 'Attach failed');
-      setMsg(`✅ Attached: ${j.phoneNumber}. Incoming webhook: ${window.location.origin}/api/voice/twilio/incoming`);
+      const data = await res.json().catch(() => ({}));
+      if (data?.ok) setMsg(`✅ Attached to ${data?.data?.number || phoneNumber}`);
+      else setMsg(`❌ ${data?.error || "Attach failed"}`);
     } catch (e: any) {
-      setMsg(`❌ ${e?.message || 'Failed'}`);
-    } finally {
-      setLoading(false);
+      setMsg(`❌ ${e?.message || "Network error"}`);
     }
   }
 
   return (
-    <main style={{padding:24,fontFamily:'system-ui',color:'#fff',background:'#0d0f11',minHeight:'100vh'}}>
-      <h1 style={{marginTop:0}}>Voice Agent</h1>
-      <div style={{display:'grid',gap:12,maxWidth:520}}>
-        <label>
-          <div style={{opacity:.8, marginBottom:4}}>Agent ID</div>
-          <input
-            value={agentId}
-            onChange={(e)=>setAgentId(e.target.value)}
-            placeholder="agent_default"
-            style={{width:'100%',padding:10,borderRadius:8,border:'1px solid #2b2f36',background:'#111319',color:'#fff'}}
-          />
-        </label>
-        <label>
-          <div style={{opacity:.8, marginBottom:4}}>Twilio Phone Number (E.164)</div>
-          <input
-            value={phoneNumber}
-            onChange={(e)=>setPhoneNumber(e.target.value)}
-            placeholder="+12025550123"
-            style={{width:'100%',padding:10,borderRadius:8,border:'1px solid #2b2f36',background:'#111319',color:'#fff'}}
-          />
-        </label>
+    <main style={{ minHeight: "100vh", background: "#0b0c10", color: "#fff", padding: 24 }}>
+      <h1 style={{ marginTop: 0 }}>Voice Agent</h1>
+      <p style={{ opacity: 0.9 }}>
+        Twilio webhook for “A CALL COMES IN”: <code>/api/voice/twilio/incoming</code>
+      </p>
+
+      <div style={{ display: "grid", gap: 10, maxWidth: 520, marginTop: 16 }}>
+        <input
+          value={agentId}
+          onChange={(e) => setAgentId(e.target.value)}
+          placeholder="agentId"
+          style={{ padding: 10, borderRadius: 8, border: "1px solid #2b2f36", background: "#111319", color: "#fff" }}
+        />
+        <input
+          value={phoneNumber}
+          onChange={(e) => setPhoneNumber(e.target.value)}
+          placeholder="+316…"
+          style={{ padding: 10, borderRadius: 8, border: "1px solid #2b2f36", background: "#111319", color: "#fff" }}
+        />
         <button
           onClick={attach}
-          disabled={!phoneNumber || loading}
-          style={{
-            padding:'10px 14px',
-            background: loading ? '#2b6' : '#0bd',
-            border:'none',
-            borderRadius:10,
-            color:'#001018',
-            fontWeight:700,
-            cursor: loading ? 'not-allowed' : 'pointer'
-          }}
+          style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #2b2f36", background: "#00ffc2", color: "#001018", fontWeight: 700 }}
         >
-          {loading ? 'Attaching…' : 'Attach Number'}
+          Attach Number
         </button>
-        {msg && <div style={{whiteSpace:'pre-wrap',opacity:.95}}>{msg}</div>}
-        <div style={{marginTop:8,opacity:.7}}>
-          Webhook (set in Twilio “A CALL COMES IN”): <code>/api/voice/twilio/incoming</code>
-        </div>
+        {msg && <div style={{ marginTop: 6, opacity: 0.9 }}>{msg}</div>}
       </div>
     </main>
   );
