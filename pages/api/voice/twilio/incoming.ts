@@ -1,14 +1,14 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import Twilio from 'twilio';
 
 /**
- * Minimal “call works” webhook:
- * - Says a disclosure
- * - Says a short greeting
+ * Use a *dynamic* import for `twilio` so the bundler doesn't choke during Vercel build.
+ * (Top-level ESM import of twilio can fail during static analysis.)
  */
-export default function handler(_req: NextApiRequest, res: NextApiResponse) {
-  const twiml = new Twilio.twiml.VoiceResponse();
+export default async function handler(_req: NextApiRequest, res: NextApiResponse) {
+  const twilio = await import('twilio');
+  const VoiceResponse = (twilio as any).twiml.VoiceResponse as typeof twilio.twiml.VoiceResponse;
 
+  const twiml = new VoiceResponse();
   twiml.say(
     { voice: 'Polly.Joanna', language: 'en-US' },
     'This call may be recorded to capture your details.'
