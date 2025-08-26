@@ -1,8 +1,15 @@
-export default function VoiceAgent(){
+// pages/voice-agent.tsx
+import dynamic from 'next/dynamic';
+
+const VoiceAgentSection = dynamic(
+  () => import('@/components/voice/VoiceAgentSection'),
+  { ssr: false }
+);
+
+export default function VoiceAgentPage() {
   return (
-    <main style={{minHeight:"100vh",background:"#0b0c10",color:"#fff",padding:24}}>
-      <h1>🔊 Voice Agent — simple page</h1>
-      <p>Webhook: <code>/api/voice/twilio/incoming</code></p>
-    </main>
+    <div style={{ padding: 20 }}>
+      <VoiceAgentSection />
+    </div>
   );
 }
