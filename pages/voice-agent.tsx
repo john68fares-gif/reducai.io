@@ -1,8 +1,9 @@
 // pages/voice-agent.tsx
-import dynamic from 'next/dynamic';
+import dynamic from "next/dynamic";
 
+// IMPORTANT: relative path (NO "@/")
 const VoiceAgentSection = dynamic(
-  () => import('../components/voice/VoiceAgentSection'), // <-- use relative path
+  () => import("../components/voice/VoiceAgentSection"),
   { ssr: false }
 );
 
