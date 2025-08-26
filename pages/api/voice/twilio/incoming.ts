@@ -1,24 +1,22 @@
+// pages/api/voice/twilio/incoming.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
+import { getStore } from '../../../../lib/store';
 
-/**
- * Use a *dynamic* import for `twilio` so the bundler doesn't choke during Vercel build.
- * (Top-level ESM import of twilio can fail during static analysis.)
- */
-export default async function handler(_req: NextApiRequest, res: NextApiResponse) {
-  const twilio = await import('twilio');
-  const VoiceResponse = (twilio as any).twiml.VoiceResponse as typeof twilio.twiml.VoiceResponse;
+export default function handler(req: NextApiRequest, res: NextApiResponse) {
+  const store = getStore?.() || { settings: {} as any };
+  const voice = store.settings.ttsVoice || 'Polly.Joanna';
+  const agentId = (req.query.agentId as string) || 'agent_default';
 
-  const twiml = new VoiceResponse();
-  twiml.say(
-    { voice: 'Polly.Joanna', language: 'en-US' },
-    'This call may be recorded to capture your details.'
-  );
-  twiml.pause({ length: 1 });
-  twiml.say(
-    { voice: 'Polly.Joanna', language: 'en-US' },
-    'Hello. Your voice agent is connected.'
-  );
+  const greeting =
+    (store.settings.systemPrompt || '').slice(0, 160) ||
+    `Hello! Your voice agent "${agentId}" is connected and ready.`;
+
+  const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say voice="${voice}">${greeting}</Say>
+  <Pause length="60"/>
+</Response>`;
 
   res.setHeader('Content-Type', 'text/xml');
-  res.status(200).send(twiml.toString());
+  res.status(200).send(twiml);
 }
