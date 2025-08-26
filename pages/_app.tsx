@@ -1,18 +1,23 @@
 // pages/_app.tsx
 import type { AppProps } from 'next/app';
 import Head from 'next/head';
-import '@/styles/globals.css'; // keep this path if your CSS is at /styles/globals.css
+import '../styles/globals.css';               // <- relative (no @)
+import Sidebar from '../components/ui/Sidebar'; // <- relative (no @)
 
-export default function App({ Component, pageProps }: AppProps) {
+export default function MyApp({ Component, pageProps }: AppProps) {
   return (
     <>
       <Head>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>reduc.ai</title>
+        <title>Reduc AI</title>
       </Head>
 
-      {/* Render the page */}
-      <Component {...pageProps} />
+      <div className="min-h-screen bg-[#0b0c10] text-white">
+        <Sidebar />
+        <main className="pl-[260px]">
+          <Component {...pageProps} />
+        </main>
+      </div>
     </>
   );
 }
