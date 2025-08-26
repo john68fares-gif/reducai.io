@@ -1,9 +1,9 @@
 // pages/api/voice/twilio/incoming.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { getStore } from '../../../../lib/store';
+import { getStore } from '../../../../lib/store'; // <-- exactly four ../
 
 export default function handler(req: NextApiRequest, res: NextApiResponse) {
-  const store = getStore?.() || { settings: {} as any };
+  const store = getStore();
   const voice = store.settings.ttsVoice || 'Polly.Joanna';
   const agentId = (req.query.agentId as string) || 'agent_default';
 
