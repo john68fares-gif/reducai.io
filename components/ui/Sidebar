@@ -26,7 +26,6 @@ export default function Sidebar() {
       }}
     >
       <div style={{ fontWeight: 700, marginBottom: 12, opacity: 0.9 }}>reduc.ai</div>
-
       <nav style={{ display: 'grid', gap: 8 }}>
         {nav.map((item) => {
           const active = pathname === item.href;
