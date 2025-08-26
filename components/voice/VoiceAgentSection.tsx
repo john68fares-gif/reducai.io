@@ -1,3 +1,4 @@
+// components/voice/VoiceAgentSection.tsx
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
@@ -54,7 +55,7 @@ type NumberItem = { id: string; e164?: string; label?: string; provider?: string
 type Bot = { id: string; name: string; industry?: string; language?: string; prompt?: string };
 
 const LS_SETTINGS_KEY = 'voice:settings:backup';
-const CHATBOTS_KEY = 'chatbots'; // from Builder (if present)
+const CHATBOTS_KEY = 'chatbots'; // used by your Builder
 
 async function getJSON<T = any>(url: string): Promise<T> {
   const r = await fetch(url);
@@ -190,6 +191,7 @@ function InlineSelect({
     return options.filter(o => o.label.toLowerCase().includes(q));
   }, [options, query]);
 
+  // placement
   useLayoutEffect(() => {
     if (!open) return;
     const update = () => {
@@ -209,6 +211,7 @@ function InlineSelect({
     };
   }, [open]);
 
+  // close on outside click
   useEffect(() => {
     if (!open) return;
     const onClick = (e: MouseEvent) => {
@@ -352,7 +355,6 @@ export default function VoiceAgentSection() {
 
   const mountedRef = useRef(false);
 
-  /* load settings + numbers + builds */
   useEffect(() => {
     (async () => {
       try {
@@ -457,7 +459,6 @@ export default function VoiceAgentSection() {
     }
   }
 
-  /** Create agent (server builds and wires it). */
   async function createAgent() {
     setCreating(true); setMsg(null);
     try {
@@ -499,7 +500,7 @@ export default function VoiceAgentSection() {
   async function onAttachClick() {
     setMsg(null);
     if (!selectedBotId) { setMsg('Select a Build first to use as agentId.'); return; }
-    if (!settings.fromE164) { setMsg('Pick or enter a number in “From Number” first.'); return; }
+    if (!settings.fromE164) { setMsg('Pick a number in “From Number” first.'); return; }
     try {
       setAttaching(true);
       await attachNumber(selectedBotId, settings.fromE164);
@@ -688,18 +689,6 @@ export default function VoiceAgentSection() {
                   placeholder={numsArr.length ? '— Choose —' : 'No numbers imported'}
                 />
               </Field>
-
-              {/* Fallback manual entry if none imported */}
-              {numberOptions.length === 0 && (
-                <Field label="Or enter number manually">
-                  <input
-                    value={settings.fromE164}
-                    onChange={(e)=>setSettings({...settings, fromE164: e.target.value})}
-                    placeholder="+12025550123"
-                    className="w-[320px] rounded-[14px] border border-white/20 bg-black/30 px-3 h-[42px] text-sm outline-none focus:border-[#6af7d1] text-white"
-                  />
-                </Field>
-              )}
 
               <GreenButton className="ml-auto w-[220px]" onClick={refreshNumbers}>
                 <RefreshCw className="w-4 h-4 text-white" />
