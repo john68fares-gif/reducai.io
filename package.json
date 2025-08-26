@@ -1,16 +1,15 @@
 {
-  "name": "reducai-io",
+  "name": "reducai.io",
   "private": true,
-  "scripts": { "dev": "next dev", "build": "next build", "start": "next start" },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
   "dependencies": {
     "next": "14.2.5",
     "react": "18.2.0",
     "react-dom": "18.2.0",
-    "twilio": "^4.22.0"
-  },
-  "devDependencies": {
-    "typescript": "5.4.5",
-    "@types/react": "18.2.73",
-    "@types/node": "20.12.12"
+    "lucide-react": "^0.453.0"
   }
 }
