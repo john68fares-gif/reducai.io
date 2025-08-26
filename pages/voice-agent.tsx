@@ -2,7 +2,7 @@
 import dynamic from 'next/dynamic';
 
 const VoiceAgentSection = dynamic(
-  () => import('@/components/voice/VoiceAgentSection'),
+  () => import('../components/voice/VoiceAgentSection'), // <-- use relative path
   { ssr: false }
 );
 
