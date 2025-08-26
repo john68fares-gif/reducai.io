@@ -1,8 +1,0 @@
-export default function BuilderDashboard(){
-  return (
-    <main style={{minHeight:"100vh",background:"#0b0c10",color:"#fff",padding:24}}>
-      <h1>Builder Dashboard (stub)</h1>
-      <p>This is a placeholder. We’ll wire the full UI after it’s stable.</p>
-    </main>
-  );
-}
