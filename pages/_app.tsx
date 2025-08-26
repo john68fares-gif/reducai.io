@@ -1,8 +1,8 @@
 // pages/_app.tsx
 import type { AppProps } from 'next/app';
 import Head from 'next/head';
-import '../styles/globals.css';               // <- relative (no @)
-import Sidebar from '../components/ui/Sidebar'; // <- relative (no @)
+import Sidebar from '@/components/ui/Sidebar';
+import '@/styles/globals.css';
 
 export default function MyApp({ Component, pageProps }: AppProps) {
   return (
@@ -14,6 +14,7 @@ export default function MyApp({ Component, pageProps }: AppProps) {
 
       <div className="min-h-screen bg-[#0b0c10] text-white">
         <Sidebar />
+        {/* Push content to the right of the fixed 260px sidebar */}
         <main className="pl-[260px]">
           <Component {...pageProps} />
         </main>
