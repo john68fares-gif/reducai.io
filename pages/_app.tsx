@@ -1,8 +1,11 @@
 // pages/_app.tsx
 import type { AppProps } from 'next/app';
 import Head from 'next/head';
-import Sidebar from '@/components/ui/Sidebar';
-import '@/styles/globals.css';
+
+// ❌ was "@/components/ui/Sidebar"
+import Sidebar from '../components/ui/Sidebar';
+// ❌ was "@/styles/globals.css"
+import '../styles/globals.css';
 
 export default function MyApp({ Component, pageProps }: AppProps) {
   return (
@@ -12,10 +15,11 @@ export default function MyApp({ Component, pageProps }: AppProps) {
         <title>Reduc AI</title>
       </Head>
 
-      <div className="min-h-screen bg-[#0b0c10] text-white">
+      {/* No Tailwind here; use inline styles so it works in your setup */}
+      <div style={{ minHeight: '100vh', background: '#0b0c10', color: '#ffffff' }}>
         <Sidebar />
-        {/* Push content to the right of the fixed 260px sidebar */}
-        <main className="pl-[260px]">
+        {/* Sidebar is 260px fixed; actually pad the main content by 260px */}
+        <main style={{ paddingLeft: 260, paddingRight: 20, paddingTop: 20, paddingBottom: 20 }}>
           <Component {...pageProps} />
         </main>
       </div>
