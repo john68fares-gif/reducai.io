@@ -1,32 +1,84 @@
+// pages/api/telephony/attach-number.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
 
-// Uses dynamic import so the build never chokes on 'twilio'
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Method not allowed' });
+type Env = {
+  TWILIO_ACCOUNT_SID?: string;
+  TWILIO_AUTH_TOKEN?: string;
+};
+type BodyIn = { agentId?: string; phoneNumber?: string };
+type Out = { ok: true } | { ok: false; error: string };
+
+function baseUrlFromEnv(req: NextApiRequest) {
+  // Prefer explicit base url; fall back to Vercel's
+  const v = process.env.NEXT_PUBLIC_BASE_URL || process.env.VERCEL_URL;
+  const host = v || req.headers.host || '';
+  return host.startsWith('http') ? host : `https://${host}`;
+}
+
+export default async function handler(req: NextApiRequest, res: NextApiResponse<Out>) {
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', 'POST');
+    return res.status(405).json({ ok: false, error: 'Method Not Allowed' });
+  }
+
+  const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN } = process.env as Env;
+  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN) {
+    return res.status(500).json({ ok: false, error: 'Missing Twilio env vars' });
+  }
+
+  const { agentId, phoneNumber } = (req.body || {}) as BodyIn;
+  if (!agentId || !phoneNumber) {
+    return res.status(400).json({ ok: false, error: 'agentId and phoneNumber required' });
+  }
+
+  const authHeader = 'Basic ' + Buffer.from(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`).toString('base64');
 
   try {
-    const { agentId = 'agent_default', phoneNumber } =
-      typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
-    if (!phoneNumber) throw new Error('phoneNumber is required');
+    // 1) Find the number SID by E.164
+    const searchUrl =
+      `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/IncomingPhoneNumbers.json` +
+      `?PhoneNumber=${encodeURIComponent(phoneNumber)}`;
 
-    const SID = process.env.TWILIO_ACCOUNT_SID;
-    const TOKEN = process.env.TWILIO_AUTH_TOKEN;
-    if (!SID || !TOKEN) throw new Error('Missing TWILIO_ACCOUNT_SID or TWILIO_AUTH_TOKEN');
+    const listResp = await fetch(searchUrl, {
+      headers: { Authorization: authHeader }
+    });
 
-    const twilioModule: any = await import('twilio');
-    const client = twilioModule.default(SID, TOKEN);
+    if (!listResp.ok) {
+      const t = await listResp.text();
+      throw new Error(`Twilio search failed: ${listResp.status} ${t}`);
+    }
+    const listJson: any = await listResp.json();
+    const phone = listJson?.incoming_phone_numbers?.[0];
+    if (!phone?.sid) throw new Error('Number not found on your Twilio account');
 
-    // Stable domain for Twilio: prefer APP_URL if set, otherwise use current host
-    const host = process.env.APP_URL || `https://${req.headers.host}`;
-    const voiceUrl = `${host}/api/voice/twilio/incoming`;
+    // 2) Set Voice URL to your webhook, pass agentId as query param
+    const base = baseUrlFromEnv(req);
+    const voiceUrl = `${base}/api/voice/twilio/incoming?agentId=${encodeURIComponent(agentId)}`;
 
-    // Look up the number in your Twilio account and point it to the webhook
-    const [num] = await client.incomingPhoneNumbers.list({ phoneNumber, limit: 1 });
-    if (!num) throw new Error('Phone number not found in your Twilio account');
-    await client.incomingPhoneNumbers(num.sid).update({ voiceUrl, voiceMethod: 'POST' });
+    const updateUrl =
+      `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/IncomingPhoneNumbers/${phone.sid}.json`;
 
-    return res.status(200).json({ ok: true, phoneNumber, agentId, voiceUrl });
-  } catch (err: any) {
-    return res.status(500).json({ ok: false, error: err?.message || 'failed' });
+    const form = new URLSearchParams();
+    form.set('VoiceUrl', voiceUrl);
+    form.set('VoiceMethod', 'POST');
+
+    const updResp = await fetch(updateUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: authHeader,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: form.toString()
+    });
+
+    if (!updResp.ok) {
+      const t = await updResp.text();
+      throw new Error(`Twilio update failed: ${updResp.status} ${t}`);
+      // optional: handle 400s for numbers without voice capability
+    }
+
+    return res.status(200).json({ ok: true });
+  } catch (e: any) {
+    return res.status(500).json({ ok: false, error: e?.message || 'Attach failed' });
   }
 }
