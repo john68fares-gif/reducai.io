@@ -1,44 +1,19 @@
-// lib/store.ts
+// utils/safe.ts
 
-export type VoiceSettings = {
-  systemPrompt: string;
-  ttsVoice: string;
-  language: string;
-  fromE164: string;
-  assistantId?: string;
-  publicKey?: string;
+/** Always return a string. Never calls .trim() on unknown input. */
+export const s = (v: any, fb = ''): string => {
+  if (typeof v === 'string') return v;   // already a string
+  if (v == null) return fb;              // null/undefined -> fallback
+  try {
+    return String(v);                    // numbers/booleans/objects -> string
+  } catch {
+    return fb;
+  }
 };
 
-type PhoneNum = { id: string; e164: string; label?: string; provider?: string; status?: string };
+/** Trimmed version of s(). Still null-safe. */
+export const st = (v: any, fb = ''): string => s(v, fb).trim();
 
-type Store = {
-  settings: VoiceSettings;
-  numbers: PhoneNum[];
-  attachments: Record<string, string>; // agentId -> phone number
-};
-
-const defaultSettings: VoiceSettings = {
-  systemPrompt: '',
-  ttsVoice: 'Polly.Joanna',
-  language: 'en-US',
-  fromE164: '',
-  assistantId: '',
-  publicKey: '',
-};
-
-let __store: Store =
-  (global as any).__VOICE_STORE__ ??
-  {
-    settings: defaultSettings,
-    numbers: [
-      { id: 'n1', e164: '+12025550123', label: 'Sales US', provider: 'twilio', status: 'active' },
-      { id: 'n2', e164: '+442071231234', label: 'UK',        provider: 'twilio', status: 'active' },
-    ],
-    attachments: {},
-  };
-
-export function getStore(): Store {
-  return __store;
-}
-
-(global as any).__VOICE_STORE__ = __store;
+/** Optional helper: coerce to boolean with fallback. */
+export const sb = (v: any, fb = false): boolean =>
+  typeof v === 'boolean' ? v : (v == null ? fb : Boolean(v));
