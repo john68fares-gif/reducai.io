@@ -2,20 +2,16 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Keep custom base styles inside a layer so Tailwind/PostCSS are happy */
-@layer base {
-  @font-face {
-    font-family: "Movatif Bold";
-    src: url("/fonts/Movatif-Bold.ttf") format("truetype");
-    font-weight: bold;
-    font-style: normal;
-  }
+/* your font + global styles can be below */
+@font-face {
+  font-family: 'Movatif Bold';
+  src: url('/fonts/Movatif-Bold.ttf') format('truetype');
+  font-weight: bold;
+  font-style: normal;
+}
 
-  html, body {
-    font-family: "Movatif Bold", sans-serif;
-    background: #0b0c10;
-    color: #fff;
-    margin: 0;
-    padding: 0;
-  }
+html, body {
+  font-family: 'Movatif Bold', sans-serif;
+  background: #0b0c10;
+  color: white;
 }
