@@ -12,33 +12,60 @@ type Props = {
 
 type ApiKey = { id: string; name: string; key: string };
 
+/* ---------- Models ---------- */
 const MODEL_OPTIONS = [
-  { value: 'gpt-4o',        label: 'GPT-4o',         icon: Bolt },
-  { value: 'gpt-4o-mini',   label: 'GPT-4o mini',    icon: Rocket },
-  { value: 'gpt-4.1',       label: 'GPT-4.1',        icon: Cpu },
-  { value: 'gpt-4.1-mini',  label: 'GPT-4.1 mini',   icon: Gauge },
-  { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo',  icon: Cpu },
+  { value: 'gpt-4o',        label: 'GPT-4o',        icon: Bolt },
+  { value: 'gpt-4o-mini',   label: 'GPT-4o mini',   icon: Rocket },
+  { value: 'gpt-4.1',       label: 'GPT-4.1',       icon: Cpu },
+  { value: 'gpt-4.1-mini',  label: 'GPT-4.1 mini',  icon: Gauge },
+  { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo', icon: Cpu },
 ];
 
-/* === EXACT same button colors as Step1 === */
+/* ---------- Buttons (keep Step1 look) ---------- */
 const BTN_GREEN = '#59d9b3';
 const BTN_GREEN_HOVER = '#54cfa9';
 const BTN_DISABLED = '#2e6f63';
 
+/* ---------- LocalStorage compatibility helpers ---------- */
+const LS_LIST_NEW = 'apiKeys.v1';
+const LS_LIST_OLD = 'apiKeys';
+const LS_ACTIVE   = 'apiKeys.activeId';
+
+function loadApiKeysCompat(): { list: ApiKey[]; activeId: string | null } {
+  let list: ApiKey[] = [];
+  try {
+    const rawNew = localStorage.getItem(LS_LIST_NEW);
+    const rawOld = localStorage.getItem(LS_LIST_OLD);
+    if (rawNew) list = JSON.parse(rawNew);
+    else if (rawOld) list = JSON.parse(rawOld);
+  } catch {}
+  if (!Array.isArray(list)) list = [];
+  const activeId = localStorage.getItem(LS_ACTIVE);
+  return { list, activeId };
+}
+
+/* ---------- Public helper used elsewhere in the app ---------- */
 export async function createOpenAIAssistantFromLocalSelections(opts?: {
   nameOverride?: string;
   instructionsOverride?: string;
 }) {
+  // Step 2 selection (model + chosen key id)
   const s2 = JSON.parse(localStorage.getItem('builder:step2') || 'null') as
-    | { model: string; apiKeyId: string }
+    | { model: string; apiKeyId?: string }
     | null;
-  if (!s2?.model || !s2?.apiKeyId) throw new Error('Missing step 2 selections.');
 
-  const keys = JSON.parse(localStorage.getItem('apiKeys') || '[]') as ApiKey[];
-  const found = keys.find((k) => k.id === s2.apiKeyId);
+  const { list: keys, activeId } = loadApiKeysCompat();
+  const resolvedKeyId =
+    s2?.apiKeyId ||
+    activeId ||
+    (keys[0]?.id ?? '');
+
+  if (!s2?.model || !resolvedKeyId) throw new Error('Missing model or API key.');
+  const found = keys.find(k => k.id === resolvedKeyId);
   if (!found?.key) throw new Error('Selected API key not found.');
   const apiKey = found.key;
 
+  // Step 1 info (for name + language/industry context)
   const s1 = JSON.parse(localStorage.getItem('builder:step1') || 'null') as
     | { name?: string; industry?: string; language?: string }
     | null;
@@ -57,21 +84,35 @@ export async function createOpenAIAssistantFromLocalSelections(opts?: {
   return res.json();
 }
 
+/* ---------- Component ---------- */
 export default function Step2ModelSettings({ onBack, onNext }: Props) {
   const [model, setModel] = useState<string>('gpt-4o');
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [apiKeyId, setApiKeyId] = useState<string>('');
 
   useEffect(() => {
+    // Load saved step values first
+    let savedModel: string | undefined;
+    let savedApiKeyId: string | undefined;
     try {
       const saved = JSON.parse(localStorage.getItem('builder:step2') || 'null');
-      if (saved?.model) setModel(String(saved.model));
-      if (saved?.apiKeyId) setApiKeyId(String(saved.apiKeyId));
+      if (saved?.model) savedModel = String(saved.model);
+      if (saved?.apiKeyId) savedApiKeyId = String(saved.apiKeyId);
     } catch {}
-    try {
-      const stored = JSON.parse(localStorage.getItem('apiKeys') || '[]');
-      if (Array.isArray(stored)) setApiKeys(stored);
-    } catch {}
+
+    // Load keys from new or old storage + activeId
+    const { list, activeId } = loadApiKeysCompat();
+    setApiKeys(list);
+
+    // Resolve initial apiKeyId preference:
+    // 1) previously chosen in step2, 2) active key from /apikeys, 3) first available
+    const initialKeyId =
+      savedApiKeyId && list.some(k => k.id === savedApiKeyId)
+        ? savedApiKeyId
+        : (activeId && list.some(k => k.id === activeId) ? activeId : (list[0]?.id || ''));
+
+    if (initialKeyId) setApiKeyId(initialKeyId);
+    if (savedModel) setModel(savedModel);
   }, []);
 
   const selectedMeta = useMemo(
@@ -80,7 +121,7 @@ export default function Step2ModelSettings({ onBack, onNext }: Props) {
   );
 
   const canContinue = useMemo(
-    () => !!model && !!apiKeyId && apiKeys.some((k) => k.id === apiKeyId && k.key),
+    () => !!model && !!apiKeyId && apiKeys.some((k) => k.id === apiKeyId && !!k.key),
     [model, apiKeyId, apiKeys]
   );
 
@@ -174,7 +215,6 @@ export default function Step2ModelSettings({ onBack, onNext }: Props) {
               Previous
             </button>
 
-            {/* === EXACT COPY OF STEP 1 NEXT BUTTON === */}
             <button
               disabled={!canContinue}
               onClick={handleNext}
