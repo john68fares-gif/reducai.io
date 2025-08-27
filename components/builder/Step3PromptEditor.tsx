@@ -15,11 +15,11 @@ import {
   Plus,
   Edit3,
   Sparkles,
-  CircleHelp
+  CircleHelp,
 } from 'lucide-react';
 import { st } from '@/utils/safe';
 
-/* ----------------------------- local helpers ----------------------------- */
+/* ----------------------------- helpers ----------------------------- */
 function jget<T>(key: string, fallback: T): T {
   try {
     const raw = typeof window !== 'undefined' ? localStorage.getItem(key) : null;
@@ -29,6 +29,59 @@ function jget<T>(key: string, fallback: T): T {
   }
 }
 
+/** Clean HTML/JSON from /api/scrape into readable plain text */
+function htmlToPlainText(input: string): string {
+  // If API responded with JSON, unwrap a text-like field first
+  try {
+    const j = JSON.parse(input);
+    if (j && typeof j === 'object') {
+      const txt = (j as any).text ?? (j as any).content ?? (j as any).body ?? '';
+      if (typeof txt === 'string' && txt.trim()) input = txt;
+    }
+  } catch {}
+
+  // Browser path: use DOMParser for accurate extraction
+  if (typeof window !== 'undefined' && 'DOMParser' in window) {
+    try {
+      const doc = new DOMParser().parseFromString(input, 'text/html');
+
+      // remove non-content nodes
+      doc
+        .querySelectorAll('script,style,noscript,iframe,svg,canvas,picture,video,audio')
+        .forEach((el) => el.remove());
+      doc.querySelectorAll('header,footer,nav,aside').forEach((el) => el.remove());
+
+      let text = doc.body?.innerText || doc.documentElement?.innerText || input;
+
+      text = text
+        .replace(/\r/g, '')
+        .replace(/[ \t]+/g, ' ')
+        .replace(/\n{3,}/g, '\n\n') // collapse huge gaps
+        .replace(/https?:\/\/\S+/g, '') // strip raw URLs (optional)
+        .replace(/\/{2,}/g, '/') // collapse //// -> /
+        .replace(/[|]{2,}/g, '|')
+        .trim();
+
+      const MAX = 20000; // keep UI snappy
+      if (text.length > MAX) text = text.slice(0, MAX) + '\n\n[...truncated…]';
+      return text;
+    } catch {}
+  }
+
+  // SSR / fallback
+  return input
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\r/g, '')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/https?:\/\/\S+/g, '')
+    .replace(/\/{2,}/g, '/')
+    .trim();
+}
+
+/* ----------------------------- types ----------------------------- */
 type Props = { onNext?: () => void; onBack?: () => void };
 type AIKind = 'sales' | 'support' | 'blank';
 type SectionKey = 'language' | 'description' | 'rules' | 'flow' | 'company';
@@ -68,16 +121,13 @@ const CARD_STYLE: React.CSSProperties = {
   border: '1px solid rgba(255,255,255,0.30)',
   borderRadius: 20,
 };
-
-/* === Same green as Step 2 === */
 const BTN_GREEN = '#59d9b3';
 const BTN_GREEN_HOVER = '#54cfa9';
 const BTN_DISABLED = '#2e6f63';
-
-/* === Shorter preview heights === */
 const PREVIEW_LANG_H = 'h-[110px]';
 const PREVIEW_STD_H = 'h-[160px]';
 
+/* ------------------------------------------------------------------------ */
 export default function Step3PromptEditor({ onNext, onBack }: Props) {
   const [kind, setKind] = useState<AIKind>('sales');
   const [industry, setIndustry] = useState<string>('');
@@ -244,14 +294,33 @@ Be friendly, concise, and helpful. Qualify inquiries, answer questions, and offe
 
     try {
       const out: string[] = [];
+
       for (let i = 0; i < validUrls.length; i++) {
         const url = validUrls[i];
         const res = await fetch(`/api/scrape?url=${encodeURIComponent(url)}`);
         if (!res.ok) throw new Error('Bad response');
-        const body = await res.text();
-        out.push(`Website ${i + 1} (${url}):\n${body}`);
+
+        const ct = res.headers.get('content-type') || '';
+        let raw = '';
+
+        if (ct.includes('application/json')) {
+          // JSON response: try common text fields
+          const j = await res.json();
+          raw =
+            typeof j === 'string'
+              ? j
+              : (j.text ?? j.content ?? j.body ?? JSON.stringify(j));
+        } else {
+          // text/HTML
+          raw = await res.text();
+        }
+
+        const clean = htmlToPlainText(raw);
+
+        out.push(`Website ${i + 1}: ${url}\n\n${clean}`);
       }
-      const compiled = out.join('\n\n');
+
+      const compiled = out.join('\n\n------------------------\n\n');
       const existing = values[companyIdx] || '';
       setValue(companyIdx, [existing, compiled].filter(Boolean).join('\n\n'));
       setImportOpen(false);
@@ -272,7 +341,9 @@ Be friendly, concise, and helpful. Qualify inquiries, answer questions, and offe
             <h2 className="text-3xl md:text-4xl font-semibold tracking-tight">
               Personality & Knowledge{industry ? ` — ${industry}` : ''}
             </h2>
-            <div className="text-white/70 mt-1 text-sm">Define your AI’s behavior, rules, and knowledge base</div>
+            <div className="text-white/70 mt-1 text-sm">
+              Define your AI’s behavior, rules, and knowledge base
+            </div>
           </div>
           <div className="text-sm text-white/60 hidden md:block">Step 3 of 4</div>
         </div>
@@ -281,6 +352,10 @@ Be friendly, concise, and helpful. Qualify inquiries, answer questions, and offe
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {defs.map((d, i) => {
             const isCompany = d.key === 'company';
+            const previewText =
+              (values[i] || '')
+                .replace(/https?:\/\/\S+/g, '') // keep previews tidy
+                .replace(/\/{2,}/g, '/');
 
             return (
               <div
@@ -289,13 +364,18 @@ Be friendly, concise, and helpful. Qualify inquiries, answer questions, and offe
                 style={{
                   background: 'rgba(13,15,17,0.92)',
                   border: '1px solid rgba(106,247,209,0.18)',
-                  boxShadow: 'inset 0 0 22px rgba(0,0,0,0.28), 0 0 18px rgba(106,247,209,0.05)',
+                  boxShadow:
+                    'inset 0 0 22px rgba(0,0,0,0.28), 0 0 18px rgba(106,247,209,0.05)',
                 }}
               >
                 <div
                   aria-hidden
                   className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
-                  style={{ background: 'radial-gradient(circle, rgba(106,247,209,0.10) 0%, transparent 70%)', filter: 'blur(38px)' }}
+                  style={{
+                    background:
+                      'radial-gradient(circle, rgba(106,247,209,0.10) 0%, transparent 70%)',
+                    filter: 'blur(38px)',
+                  }}
                 />
 
                 {/* Edit button */}
@@ -319,7 +399,7 @@ Be friendly, concise, and helpful. Qualify inquiries, answer questions, and offe
                 </h3>
                 <p className="text-[12px] text-white/55 mb-2">{d.subtitle}</p>
 
-                {/* Company actions — no preview box here; compact buttons */}
+                {/* Company actions */}
                 {isCompany ? (
                   <div className="space-y-2">
                     <button
@@ -330,10 +410,12 @@ Be friendly, concise, and helpful. Qualify inquiries, answer questions, and offe
                         boxShadow: 'inset 0 0 12px rgba(0,0,0,0.38)',
                       }}
                       onMouseEnter={(e) => {
-                        (e.currentTarget as HTMLButtonElement).style.border = '1px solid rgba(0,255,194,0.55)';
+                        (e.currentTarget as HTMLButtonElement).style.border =
+                          '1px solid rgba(0,255,194,0.55)';
                       }}
                       onMouseLeave={(e) => {
-                        (e.currentTarget as HTMLButtonElement).style.border = '1px solid rgba(255,255,255,0.30)';
+                        (e.currentTarget as HTMLButtonElement).style.border =
+                          '1px solid rgba(255,255,255,0.30)';
                       }}
                     >
                       <Sparkles className="w-4 h-4" />
@@ -349,10 +431,12 @@ Be friendly, concise, and helpful. Qualify inquiries, answer questions, and offe
                           boxShadow: 'inset 0 0 12px rgba(0,0,0,0.38)',
                         }}
                         onMouseEnter={(e) => {
-                          (e.currentTarget as HTMLButtonElement).style.border = '1px solid rgba(0,255,194,0.55)';
+                          (e.currentTarget as HTMLButtonElement).style.border =
+                            '1px solid rgba(0,255,194,0.55)';
                         }}
                         onMouseLeave={(e) => {
-                          (e.currentTarget as HTMLButtonElement).style.border = '1px solid rgba(255,255,255,0.30)';
+                          (e.currentTarget as HTMLButtonElement).style.border =
+                            '1px solid rgba(255,255,255,0.30)';
                         }}
                       >
                         <Globe className="w-4 h-4" />
@@ -373,7 +457,7 @@ Be friendly, concise, and helpful. Qualify inquiries, answer questions, and offe
                     </div>
                   </div>
                 ) : (
-                  // Preview boxes shortened
+                  // Preview boxes
                   <div
                     role="button"
                     tabIndex={0}
@@ -389,21 +473,34 @@ Be friendly, concise, and helpful. Qualify inquiries, answer questions, and offe
                       color: '#ffffff',
                     }}
                   >
-                    {values[i] || <span className="text-white/40 italic">(Not set yet)</span>}
+                    {previewText || <span className="text-white/40 italic">(Not set yet)</span>}
                   </div>
                 )}
 
                 {/* Modal editor */}
                 {editIdx === i && (
-                  <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: 'rgba(0,0,0,0.5)' }}>
-                    <div className="relative w-full max-w-[980px] max-h-[88vh] flex flex-col text-white font-movatif" style={FRAME_STYLE}>
+                  <div
+                    className="fixed inset-0 z-50 flex items-center justify-center px-4"
+                    style={{ background: 'rgba(0,0,0,0.5)' }}
+                  >
+                    <div
+                      className="relative w-full max-w-[980px] max-h-[88vh] flex flex-col text-white font-movatif"
+                      style={FRAME_STYLE}
+                    >
                       {/* Header */}
-                      <div className="flex items-center justify-between px-6 py-4 rounded-t-[30px]" style={HEADER_BORDER}>
+                      <div
+                        className="flex items-center justify-between px-6 py-4 rounded-t-[30px]"
+                        style={HEADER_BORDER}
+                      >
                         <div className="min-w-0">
                           <h4 className="text-white text-lg font-semibold truncate">{d.title}</h4>
                           <div className="text-white/80 text-xs truncate">{d.subtitle}</div>
                         </div>
-                        <button onClick={() => setEditIdx(null)} className="p-2 rounded-full hover:bg-white/10" aria-label="Close">
+                        <button
+                          onClick={() => setEditIdx(null)}
+                          className="p-2 rounded-full hover:bg-white/10"
+                          aria-label="Close"
+                        >
                           <X className="w-5 h-5 text-white" />
                         </button>
                       </div>
@@ -426,7 +523,10 @@ Be friendly, concise, and helpful. Qualify inquiries, answer questions, and offe
                       </div>
 
                       {/* Footer */}
-                      <div className="px-6 py-4 rounded-b-[30px]" style={{ borderTop: '1px solid rgba(255,255,255,0.3)', background: '#101314' }}>
+                      <div
+                        className="px-6 py-4 rounded-b-[30px]"
+                        style={{ borderTop: '1px solid rgba(255,255,255,0.3)', background: '#101314' }}
+                      >
                         <div className="flex justify-end">
                           <button
                             onClick={() => {
@@ -439,8 +539,12 @@ Be friendly, concise, and helpful. Qualify inquiries, answer questions, and offe
                               color: '#ffffff',
                               boxShadow: '0 1px 0 rgba(0,0,0,0.18)',
                             }}
-                            onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER)}
-                            onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN)}
+                            onMouseEnter={(e) =>
+                              ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER)
+                            }
+                            onMouseLeave={(e) =>
+                              ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN)
+                            }
                           >
                             Save Changes
                           </button>
@@ -469,7 +573,9 @@ Be friendly, concise, and helpful. Qualify inquiries, answer questions, and offe
               <div className="flex items-start justify-between">
                 <div>
                   <h4 className="text-lg font-semibold">Import Website Content</h4>
-                  <p className="text-sm text-white/70 mt-1">Import content from up to 10 websites to enrich your AI’s knowledge base</p>
+                  <p className="text-sm text-white/70 mt-1">
+                    Import content from up to 10 websites to enrich your AI’s knowledge base
+                  </p>
                 </div>
                 <button className="p-1 rounded-2xl border border-white/15" onClick={() => setImportOpen(false)}>
                   <X className="w-4 h-4" />
@@ -573,8 +679,12 @@ Be friendly, concise, and helpful. Qualify inquiries, answer questions, and offe
               color: '#ffffff',
               boxShadow: '0 1px 0 rgba(0,0,0,0.18)',
             }}
-            onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER)}
-            onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN)}
+            onMouseEnter={(e) =>
+              ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER)
+            }
+            onMouseLeave={(e) =>
+              ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN)
+            }
           >
             Next →
           </button>
