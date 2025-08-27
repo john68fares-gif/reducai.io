@@ -1,27 +1,28 @@
 // utils/safe.ts
-export const isBrowser = typeof window !== 'undefined';
+// Tiny helpers used by the Builder steps.
+// Drop this at: /utils/safe.ts  (so imports like `@/utils/safe` work)
 
-export const st = {
-  get<T = unknown>(key: string, fallback: T): T {
-    if (!isBrowser) return fallback;
-    try {
-      const raw = localStorage.getItem(key);
-      if (!raw) return fallback;
-      return JSON.parse(raw) as T;
-    } catch {
-      return fallback;
-    }
-  },
-  set(key: string, value: unknown) {
-    if (!isBrowser) return;
-    try {
-      localStorage.setItem(key, JSON.stringify(value));
-    } catch {}
-  },
-  remove(key: string) {
-    if (!isBrowser) return;
-    try {
-      localStorage.removeItem(key);
-    } catch {}
-  },
-};
+export function s(v?: unknown): string {
+  return String(v ?? '').trim();
+}
+
+export function st(v?: unknown, fallback = ''): string {
+  const out = s(v);
+  return out.length ? out : fallback;
+}
+
+export function jget<T = unknown>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+export function jset(key: string, value: unknown) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {}
+}
