@@ -1,28 +1,40 @@
 // utils/safe.ts
-// Tiny helpers used by the Builder steps.
-// Drop this at: /utils/safe.ts  (so imports like `@/utils/safe` work)
 
-export function s(v?: unknown): string {
-  return String(v ?? '').trim();
+// String helpers
+export function s(v: any, fallback = ''): string {
+  if (v == null) return fallback;
+  return typeof v === 'string' ? v : String(v);
 }
 
-export function st(v?: unknown, fallback = ''): string {
-  const out = s(v);
-  return out.length ? out : fallback;
+// We export 'st' as a function *and* attach storage helpers on it.
+// So you can call st('  hi  ') -> 'hi'  AND  st.get('key', fallback)
+export function st(v: any, fallback = ''): string {
+  return s(v, fallback).trim();
 }
 
-export function jget<T = unknown>(key: string, fallback: T): T {
+// --- attach localStorage helpers onto the function object ---
+const isBrowser = typeof window !== 'undefined';
+
+(st as any).get = function <T = unknown>(key: string, fallback: T): T {
+  if (!isBrowser) return fallback;
   try {
     const raw = localStorage.getItem(key);
-    if (!raw) return fallback;
-    return JSON.parse(raw) as T;
+    return raw ? (JSON.parse(raw) as T) : fallback;
   } catch {
     return fallback;
   }
-}
+};
 
-export function jset(key: string, value: unknown) {
+(st as any).set = function (key: string, value: unknown) {
+  if (!isBrowser) return;
   try {
     localStorage.setItem(key, JSON.stringify(value));
   } catch {}
-}
+};
+
+(st as any).remove = function (key: string) {
+  if (!isBrowser) return;
+  try {
+    localStorage.removeItem(key);
+  } catch {}
+};
