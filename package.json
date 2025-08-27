@@ -1,5 +1,5 @@
 {
-  "name": "voice-agent-starter",
+  "name": "reducai.io",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -8,20 +8,25 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@react-three/fiber": "8.15.17",
+    "autoprefixer": "10.4.20",
+    "framer-motion": "11.2.10",
+    "lucide-react": "0.454.0",
     "next": "14.2.5",
+    "postcss": "8.4.41",
     "react": "18.3.1",
     "react-dom": "18.3.1",
-    "lucide-react": "0.454.0",
-    "framer-motion": "11.2.10"
+    "tailwindcss": "3.4.10",
+    "three": "0.160.0",
+    "twilio": "5.3.4",
+    "ws": "8.18.0"
   },
   "devDependencies": {
-    "typescript": "5.5.4",
-    "@types/react": "18.3.3",
     "@types/node": "20.12.12",
+    "@types/react": "18.3.3",
+    "@types/three": "0.160.0",
     "eslint": "8.57.0",
     "eslint-config-next": "14.2.5",
-    "tailwindcss": "^3.4.10",
-    "postcss": "^8.4.41",
-    "autoprefixer": "^10.4.19"
+    "typescript": "5.5.4"
   }
 }
