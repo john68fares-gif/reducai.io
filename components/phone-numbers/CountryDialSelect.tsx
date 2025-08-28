@@ -5,14 +5,97 @@ import React, {
   useEffect, useMemo, useRef, useState, useLayoutEffect,
 } from 'react';
 import { createPortal } from 'react-dom';
-
-// ✅ use the lean core API + min metadata
-import { getCountries, getCountryCallingCode } from 'libphonenumber-js/core';
-import metadata from 'libphonenumber-js/metadata.min.json';
-
 import { Search, ChevronDown } from 'lucide-react';
 
 type Option = { iso2: string; name: string; dial: string };
+
+/**
+ * Minimal, no-deps list of countries with dial codes.
+ * Add or edit rows as needed. Names are English; UI will localize with Intl.DisplayNames when available.
+ */
+const ALL_COUNTRIES: Option[] = [
+  { iso2: 'US', name: 'United States', dial: '1' },
+  { iso2: 'CA', name: 'Canada', dial: '1' },
+  { iso2: 'GB', name: 'United Kingdom', dial: '44' },
+  { iso2: 'IE', name: 'Ireland', dial: '353' },
+  { iso2: 'FR', name: 'France', dial: '33' },
+  { iso2: 'DE', name: 'Germany', dial: '49' },
+  { iso2: 'ES', name: 'Spain', dial: '34' },
+  { iso2: 'PT', name: 'Portugal', dial: '351' },
+  { iso2: 'IT', name: 'Italy', dial: '39' },
+  { iso2: 'NL', name: 'Netherlands', dial: '31' },
+  { iso2: 'BE', name: 'Belgium', dial: '32' },
+  { iso2: 'CH', name: 'Switzerland', dial: '41' },
+  { iso2: 'AT', name: 'Austria', dial: '43' },
+  { iso2: 'SE', name: 'Sweden', dial: '46' },
+  { iso2: 'NO', name: 'Norway', dial: '47' },
+  { iso2: 'DK', name: 'Denmark', dial: '45' },
+  { iso2: 'FI', name: 'Finland', dial: '358' },
+  { iso2: 'IS', name: 'Iceland', dial: '354' },
+  { iso2: 'CZ', name: 'Czechia', dial: '420' },
+  { iso2: 'SK', name: 'Slovakia', dial: '421' },
+  { iso2: 'PL', name: 'Poland', dial: '48' },
+  { iso2: 'HU', name: 'Hungary', dial: '36' },
+  { iso2: 'RO', name: 'Romania', dial: '40' },
+  { iso2: 'BG', name: 'Bulgaria', dial: '359' },
+  { iso2: 'GR', name: 'Greece', dial: '30' },
+  { iso2: 'TR', name: 'Türkiye', dial: '90' },
+  { iso2: 'RU', name: 'Russia', dial: '7' },
+  { iso2: 'UA', name: 'Ukraine', dial: '380' },
+  { iso2: 'LT', name: 'Lithuania', dial: '370' },
+  { iso2: 'LV', name: 'Latvia', dial: '371' },
+  { iso2: 'EE', name: 'Estonia', dial: '372' },
+  { iso2: 'HK', name: 'Hong Kong', dial: '852' },
+  { iso2: 'MO', name: 'Macao', dial: '853' },
+  { iso2: 'CN', name: 'China', dial: '86' },
+  { iso2: 'JP', name: 'Japan', dial: '81' },
+  { iso2: 'KR', name: 'South Korea', dial: '82' },
+  { iso2: 'TW', name: 'Taiwan', dial: '886' },
+  { iso2: 'SG', name: 'Singapore', dial: '65' },
+  { iso2: 'MY', name: 'Malaysia', dial: '60' },
+  { iso2: 'TH', name: 'Thailand', dial: '66' },
+  { iso2: 'VN', name: 'Vietnam', dial: '84' },
+  { iso2: 'PH', name: 'Philippines', dial: '63' },
+  { iso2: 'ID', name: 'Indonesia', dial: '62' },
+  { iso2: 'IN', name: 'India', dial: '91' },
+  { iso2: 'PK', name: 'Pakistan', dial: '92' },
+  { iso2: 'BD', name: 'Bangladesh', dial: '880' },
+  { iso2: 'LK', name: 'Sri Lanka', dial: '94' },
+  { iso2: 'AE', name: 'United Arab Emirates', dial: '971' },
+  { iso2: 'SA', name: 'Saudi Arabia', dial: '966' },
+  { iso2: 'QA', name: 'Qatar', dial: '974' },
+  { iso2: 'KW', name: 'Kuwait', dial: '965' },
+  { iso2: 'BH', name: 'Bahrain', dial: '973' },
+  { iso2: 'OM', name: 'Oman', dial: '968' },
+  { iso2: 'IL', name: 'Israel', dial: '972' },
+  { iso2: 'EG', name: 'Egypt', dial: '20' },
+  { iso2: 'MA', name: 'Morocco', dial: '212' },
+  { iso2: 'TN', name: 'Tunisia', dial: '216' },
+  { iso2: 'ZA', name: 'South Africa', dial: '27' },
+  { iso2: 'NG', name: 'Nigeria', dial: '234' },
+  { iso2: 'KE', name: 'Kenya', dial: '254' },
+  { iso2: 'GH', name: 'Ghana', dial: '233' },
+  { iso2: 'ET', name: 'Ethiopia', dial: '251' },
+  { iso2: 'AU', name: 'Australia', dial: '61' },
+  { iso2: 'NZ', name: 'New Zealand', dial: '64' },
+  { iso2: 'AR', name: 'Argentina', dial: '54' },
+  { iso2: 'CL', name: 'Chile', dial: '56' },
+  { iso2: 'CO', name: 'Colombia', dial: '57' },
+  { iso2: 'PE', name: 'Peru', dial: '51' },
+  { iso2: 'MX', name: 'Mexico', dial: '52' },
+  { iso2: 'BR', name: 'Brazil', dial: '55' },
+  { iso2: 'UY', name: 'Uruguay', dial: '598' },
+  { iso2: 'PY', name: 'Paraguay', dial: '595' },
+  { iso2: 'BO', name: 'Bolivia', dial: '591' },
+  { iso2: 'EC', name: 'Ecuador', dial: '593' },
+  { iso2: 'VE', name: 'Venezuela', dial: '58' },
+  { iso2: 'CR', name: 'Costa Rica', dial: '506' },
+  { iso2: 'PA', name: 'Panama', dial: '507' },
+  { iso2: 'DO', name: 'Dominican Republic', dial: '1' },
+  { iso2: 'PR', name: 'Puerto Rico', dial: '1' },
+  { iso2: 'JM', name: 'Jamaica', dial: '1' },
+  // add more if you need them
+];
 
 export default function CountryDialSelect({
   value,
@@ -30,15 +113,14 @@ export default function CountryDialSelect({
   useEffect(() => { try { setLocale(navigator.language || 'en'); } catch {} }, []);
 
   const options: Option[] = useMemo(() => {
-    const regions = getCountries(metadata as any) as string[];
-    const dn = new Intl.DisplayNames([locale], { type: 'region' });
-    return regions
-      .map((iso2) => ({
-        iso2,
-        name: dn.of(iso2) || iso2,
-        dial: getCountryCallingCode(iso2 as any, metadata as any),
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name));
+    // localize display names if possible
+    let dn: Intl.DisplayNames | null = null;
+    try { dn = new Intl.DisplayNames([locale], { type: 'region' }); } catch {}
+    const named = ALL_COUNTRIES.map((o) => ({
+      ...o,
+      name: dn?.of(o.iso2) || o.name,
+    }));
+    return named.sort((a, b) => a.name.localeCompare(b.name));
   }, [locale]);
 
   const selectedIso = value && options.find((o) => o.iso2 === value) ? value : 'US';
@@ -56,7 +138,7 @@ export default function CountryDialSelect({
   const portalRef = useRef<HTMLDivElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
 
-  // holds the very first character typed while the button has focus
+  // capture the first key typed while button focused
   const seedKeyRef = useRef<string | null>(null);
 
   const [rect, setRect] = useState<{ top: number; left: number; width: number; openUp: boolean } | null>(null);
@@ -158,7 +240,7 @@ export default function CountryDialSelect({
     return () => window.removeEventListener('mousedown', onClick);
   }, [open]);
 
-  /* ---------- keyboard (single-letter seed; no duplicates) ---------- */
+  /* ---------- keyboard (seed search) ---------- */
   function focusSearchAndApplySeed() {
     requestAnimationFrame(() => {
       const input = searchRef.current;
@@ -232,8 +314,8 @@ export default function CountryDialSelect({
           <span className="text-[18px]">
             {selected.iso2.toUpperCase().replace(/./g, (c) => String.fromCodePoint(127397 + c.charCodeAt(0)))}
           </span>
-          <span className="truncate">{selected.name}</span>
-          <span className="text-white/60 shrink-0">(+{selected.dial})</span>
+        <span className="truncate">{selected.name}</span>
+        <span className="text-white/60 shrink-0">(+{selected.dial})</span>
         </span>
         <ChevronDown className="w-4 h-4 opacity-80" />
       </button>
