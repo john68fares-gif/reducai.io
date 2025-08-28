@@ -8,20 +8,14 @@ function twiml(xml: string) {
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  // Twilio sends x-www-form-urlencoded. Next usually parses it; be defensive:
   const to = (req.body?.To as string) || (req.query?.To as string) || ''
   const calledSid = (req.body?.CalledSid as string) || (req.query?.CalledSid as string) || ''
   const phoneNumberId = calledSid || to || 'default'
 
-  const actionUrl = `${BASE_URL}/api/telephony/voice/handle?phoneNumberId=${encodeURIComponent(
-    phoneNumberId
-  )}`
-
-  const greeting =
-    'Hey! You’re speaking with Reduc AI. How can I help you today?'
+  const actionUrl = `${BASE_URL}/api/telephony/voice/handle?phoneNumberId=${encodeURIComponent(phoneNumberId)}`
 
   const xml = twiml(`
-    <Say voice="Polly.Joanna">${greeting}</Say>
+    <Say voice="Polly.Joanna">Hey! You’re speaking with Reduc AI. How can I help you today?</Say>
     <Gather input="speech" action="${actionUrl}" method="POST" language="en-US" speechTimeout="auto">
       <Say voice="Polly.Joanna">I’m listening… please speak after the tone.</Say>
     </Gather>
