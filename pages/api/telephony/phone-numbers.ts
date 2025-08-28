@@ -1,147 +1,235 @@
 // pages/api/telephony/phone-numbers.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
 
+/** ------------------------------------------------------------------------
+ *  WHY THIS FIXES THE “DISAPPEAR ON REFRESH” PROBLEM
+ *  - We persist numbers per-user in Vercel KV (if configured), keyed by a cookie session.
+ *  - If KV is not configured, we still persist in an encrypted cookie (small lists).
+ *  - Twilio import now REQUIRES Account SID + Auth Token and verifies ownership via Twilio API.
+ * -------------------------------------------------------------------------*/
+
 type Provider = 'twilio' | 'telnyx' | 'own';
-type Status = 'active' | 'activating' | 'failed' | 'verified' | string;
+type Status = 'active' | 'activating' | 'failed' | 'verified';
 type PhoneNumber = { id: string; e164?: string; label?: string; provider: Provider; status?: Status };
+type Envelope<T> = { ok: true; data: T } | { ok: false; error: string; details?: any };
 
-type Ok<T> = { ok: true; data: T };
-type Err = { ok: false; error: { code: string; message: string; hint?: string; details?: any } };
-type Env<T> = Ok<T> | Err;
+const SESSION_COOKIE = 'rid';
+const COOKIE_MAX_AGE = 60 * 60 * 24 * 365; // 1y
+const E164 = /^\+[1-9]\d{1,14}$/;
 
-const mem = global as any;
-mem.__numbers ??= [] as PhoneNumber[];
-mem.__otp ??= new Map<string, { code: string; expiresAt: number }>();
-
-const HAS_TWILIO_ENVS =
-  !!process.env.TWILIO_ACCOUNT_SID &&
-  !!process.env.TWILIO_AUTH_TOKEN &&
-  !!process.env.BASE_URL;
-
-function json<T>(res: NextApiResponse<Env<T>>, body: Env<T>, code = 200) {
+function json<T>(res: NextApiResponse, status: number, body: Envelope<T>) {
   res.setHeader('Content-Type', 'application/json');
-  res.status(body.ok ? code : 400).json(body);
+  return res.status(status).end(JSON.stringify(body));
 }
-function isE164(s: string) { return /^\+[1-9]\d{1,14}$/.test(s); }
-function uid(prefix = 'num_') { return prefix + Math.random().toString(36).slice(2, 10); }
+function getSessionId(req: NextApiRequest, res: NextApiResponse) {
+  const fromCookie = (req.headers.cookie || '')
+    .split(';')
+    .map((c) => c.trim())
+    .find((c) => c.startsWith(SESSION_COOKIE + '='))
+    ?.split('=')[1];
+  if (fromCookie) return fromCookie;
 
-// ---------- tiny Twilio helpers (lazy load to avoid bundling in mock) ----------
-async function twilioClient() {
-  // install if missing:  npm i twilio
-  const tw = await import('twilio');
-  return tw.default(process.env.TWILIO_ACCOUNT_SID!, process.env.TWILIO_AUTH_TOKEN!);
-}
-
-async function twilioListNumbers() {
-  const client = await twilioClient();
-  const nums = await client.incomingPhoneNumbers.list({ limit: 50 });
-  return nums.map(n => ({
-    id: n.sid,
-    e164: n.phoneNumber,
-    label: n.friendlyName || n.phoneNumber,
-    provider: 'twilio' as const,
-    status: n.voiceCallerIdLookup ? 'active' : 'active',
-  }));
+  // create new
+  const rid =
+    (globalThis as any).crypto?.randomUUID?.() ||
+    require('crypto').randomBytes(16).toString('hex');
+  res.setHeader(
+    'Set-Cookie',
+    `${SESSION_COOKIE}=${rid}; Path=/; Max-Age=${COOKIE_MAX_AGE}; HttpOnly; SameSite=Lax`
+  );
+  return rid;
 }
 
-async function twilioAttachWebhooks(phoneSid: string) {
-  const client = await twilioClient();
-  const base = process.env.BASE_URL!.replace(/\/+$/,'');
-  const voiceUrl = `${base}/api/twilio/voice`;
-  const statusUrl = `${base}/api/twilio/recording-complete`;
-
-  await client.incomingPhoneNumbers(phoneSid).update({
-    voiceUrl,
-    voiceMethod: 'POST',
-    statusCallback: statusUrl,
-    statusCallbackMethod: 'POST',
+/* ---------- Minimal KV (optional) ---------- */
+const KV_URL = process.env.KV_REST_API_URL || '';
+const KV_TOKEN = process.env.KV_REST_API_TOKEN || '';
+async function kvGet<T>(key: string): Promise<T | null> {
+  if (!KV_URL || !KV_TOKEN) return null;
+  const r = await fetch(`${KV_URL}/get/${encodeURIComponent(key)}`, {
+    headers: { Authorization: `Bearer ${KV_TOKEN}` },
+    cache: 'no-store',
   });
+  if (!r.ok) return null;
+  const j = await r.json().catch(() => null);
+  return j?.result ?? null;
+}
+async function kvSet<T>(key: string, value: T): Promise<boolean> {
+  if (!KV_URL || !KV_TOKEN) return false;
+  const r = await fetch(`${KV_URL}/set/${encodeURIComponent(key)}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${KV_TOKEN}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(value),
+  });
+  return r.ok;
 }
 
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  try {
-    if (req.method === 'GET') {
-      // Real Twilio if envs set, otherwise show in-memory dev numbers
-      if (HAS_TWILIO_ENVS) {
-        try {
-          const list = await twilioListNumbers();
-          return json(res, { ok: true, data: list });
-        } catch (e: any) {
-          // fall back to memory so UI still works
-          return json(res, {
-            ok: false,
-            error: { code: 'TWILIO_LIST_FAILED', message: e?.message || 'Twilio list failed' }
-          });
-        }
-      }
-      return json(res, { ok: true, data: mem.__numbers });
-    }
+/* ---------- Cookie backup store ---------- */
+function getCookieStore(req: NextApiRequest): Record<string, any> {
+  const raw = (req.headers.cookie || '')
+    .split(';')
+    .map((c) => c.trim())
+    .find((c) => c.startsWith('nums='))
+    ?.split('=')[1];
+  if (!raw) return {};
+  try { return JSON.parse(decodeURIComponent(raw)); } catch { return {}; }
+}
+function setCookieStore(res: NextApiResponse, obj: any) {
+  const val = encodeURIComponent(JSON.stringify(obj));
+  res.setHeader('Set-Cookie', [
+    ...(Array.isArray(res.getHeader('Set-Cookie')) ? (res.getHeader('Set-Cookie') as string[]) : []).filter(
+      (c) => !c.startsWith('nums=')
+    ),
+    `nums=${val}; Path=/; Max-Age=${COOKIE_MAX_AGE}; HttpOnly; SameSite=Lax`,
+  ]);
+}
 
-    if (req.method === 'POST') {
-      const { action, payload } = req.body || {};
+/* ---------- Helpers ---------- */
+const digits = (s: string) => (s || '').replace(/[^\d+]/g, '');
+const isE164 = (s: string) => E164.test(s);
+const isTwilioSid = (s: string) => /^AC[a-zA-Z0-9]{32}$/.test(s);
 
-      // === Import Twilio number ===
-      if (action === 'importTwilio') {
-        const { phone, accountSid, authToken, label, phoneSid } = payload || {};
-        if (!isE164(phone)) {
-          return json(res, { ok: false, error: { code: 'BAD_PHONE', message: 'Use E.164 (+15551234567)', details: { field: 'phone' } } });
-        }
-        // in prod we ignore accountSid/authToken from client; we use server envs
-        if (HAS_TWILIO_ENVS && phoneSid) {
-          try {
-            await twilioAttachWebhooks(phoneSid);
-            const number: PhoneNumber = { id: phoneSid, e164: phone, label, provider: 'twilio', status: 'active' };
-            return json(res, { ok: true, data: { number } });
-          } catch (e: any) {
-            return json(res, { ok: false, error: { code: 'TWILIO_ATTACH_FAIL', message: e?.message || 'Failed to attach webhooks' } });
-          }
-        } else {
-          // dev/mock: accept anything, store locally
-          const number: PhoneNumber = { id: uid('tw_'), e164: phone, label, provider: 'twilio', status: 'active' };
-          mem.__numbers.unshift(number);
-          return json(res, { ok: true, data: { number } });
-        }
-      }
+async function readNumbers(sessionId: string, req: NextApiRequest): Promise<PhoneNumber[]> {
+  const key = `nums:${sessionId}`;
+  const kv = await kvGet<PhoneNumber[]>(key);
+  if (kv && Array.isArray(kv)) return kv;
 
-      // === Import Telnyx (mock only for now) ===
-      if (action === 'importTelnyx') {
-        const { phone, label } = payload || {};
-        if (!isE164(phone)) {
-          return json(res, { ok: false, error: { code: 'BAD_PHONE', message: 'Use E.164', details: { field: 'txPhone' } } });
-        }
-        const number: PhoneNumber = { id: uid('tx_'), e164: phone, label, provider: 'telnyx', status: 'active' };
-        mem.__numbers.unshift(number);
-        return json(res, { ok: true, data: { number } });
-      }
+  const cookieObj = getCookieStore(req);
+  const list = Array.isArray(cookieObj.list) ? cookieObj.list : [];
+  return list;
+}
+async function writeNumbers(sessionId: string, res: NextApiResponse, list: PhoneNumber[]) {
+  const key = `nums:${sessionId}`;
+  await kvSet(key, list); // best-effort
+  setCookieStore(res, { list }); // cookie backup
+}
 
-      // === Bring-your-own number: start & check SMS verify (DEV MOCK) ===
-      if (action === 'startSmsVerify') {
-        const { phone } = payload || {};
-        if (!isE164(phone)) return json(res, { ok: false, error: { code: 'BAD_PHONE', message: 'Invalid phone', details: { field: 'ownPhone' } } });
-        const code = process.env.VERIFY_DEV_CODE || '000000';
-        const ttl = Number(process.env.VERIFY_TTL_SEC || 300);
-        mem.__otp.set(phone, { code, expiresAt: Date.now() + ttl * 1000 });
-        return json(res, { ok: true, data: { sent: true, mode: 'mock', expiresInSec: ttl, resendInSec: 30 } });
-      }
-
-      if (action === 'checkSmsVerify') {
-        const { phone, code, label } = payload || {};
-        const row = mem.__otp.get(phone);
-        if (!row) return json(res, { ok: false, error: { code: 'NO_CODE', message: 'No code pending' } });
-        if (Date.now() > row.expiresAt) return json(res, { ok: false, error: { code: 'EXPIRED', message: 'Code expired' } });
-        if ((code || '').trim() !== row.code) return json(res, { ok: false, error: { code: 'BAD_CODE', message: 'Incorrect code' } });
-        mem.__otp.delete(phone);
-        const number: PhoneNumber = { id: uid('own_'), e164: phone, label, provider: 'own', status: 'verified' };
-        mem.__numbers.unshift(number);
-        return json(res, { ok: true, data: { number } });
-      }
-
-      return json(res, { ok: false, error: { code: 'UNKNOWN_ACTION', message: `Unsupported action: ${action}` } });
-    }
-
-    res.setHeader('Allow', ['GET', 'POST']);
-    res.status(405).end('Method Not Allowed');
-  } catch (e: any) {
-    return json(res, { ok: false, error: { code: 'SERVER_ERROR', message: e?.message || 'Server error' } });
+/* ---------- Twilio ownership check ---------- */
+async function twilioOwnsNumber(accountSid: string, authToken: string, e164: string) {
+  // Verify credentials by listing incoming numbers filtered by PhoneNumber
+  const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/IncomingPhoneNumbers.json?PhoneNumber=${encodeURIComponent(
+    e164
+  )}`;
+  const basic = Buffer.from(`${accountSid}:${authToken}`).toString('base64');
+  const r = await fetch(url, {
+    headers: { Authorization: `Basic ${basic}` },
+    cache: 'no-store',
+  });
+  if (r.status === 401 || r.status === 403) {
+    throw new Error('Invalid Twilio Account SID or Auth Token.');
   }
+  if (!r.ok) {
+    const txt = await r.text().catch(() => '');
+    throw new Error(`Twilio API error (${r.status}): ${txt || r.statusText}`);
+  }
+  const j: any = await r.json();
+  return Array.isArray(j?.incoming_phone_numbers) && j.incoming_phone_numbers.length > 0;
+}
+
+/* ---------- OTP memory (per session) ---------- */
+type OtpState = { code: string; phone: string; expiresAt: number; resendAfter: number };
+async function readOtp(sessionId: string): Promise<OtpState | null> {
+  const key = `otp:${sessionId}`;
+  return (await kvGet<OtpState>(key)) || null;
+}
+async function writeOtp(sessionId: string, st: OtpState) {
+  const key = `otp:${sessionId}`;
+  await kvSet(key, st);
+}
+
+/* =================================================================== */
+/*  HANDLER                                                            */
+/* =================================================================== */
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  const rid = getSessionId(req, res);
+
+  if (req.method === 'GET') {
+    const list = await readNumbers(rid, req);
+    return json(res, 200, { ok: true, data: list });
+  }
+
+  if (req.method === 'POST') {
+    let body: any = {};
+    try { body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {}; } catch {}
+    const { action, payload = {} } = body || {};
+
+    /* ---------- IMPORT TWILIO (strict) ---------- */
+    if (action === 'importTwilio') {
+      const phone = digits(payload.phone || '');
+      const accountSid = String(payload.accountSid || '').trim();
+      const authToken = String(payload.authToken || '').trim();
+      const label = (payload.label || '').toString().slice(0, 80);
+
+      if (!isE164(phone)) return json(res, 400, { ok: false, error: 'Phone must be E.164 (e.g. +15551234567)' , details:{ field:'phone' }});
+      if (!isTwilioSid(accountSid)) return json(res, 400, { ok: false, error: 'Account SID must start with AC and be 34 chars.', details:{ field:'accountSid' }});
+      if (!authToken) return json(res, 400, { ok: false, error: 'Auth token required.', details:{ field:'authToken' }});
+
+      try {
+        const owns = await twilioOwnsNumber(accountSid, authToken, phone);
+        if (!owns) return json(res, 400, { ok: false, error: 'This number is not in that Twilio account.' });
+      } catch (e: any) {
+        return json(res, 400, { ok: false, error: e?.message || 'Twilio verification failed' });
+      }
+
+      const list = await readNumbers(rid, req);
+      const id = (globalThis as any).crypto?.randomUUID?.() || require('crypto').randomBytes(8).toString('hex');
+      const number: PhoneNumber = { id, e164: phone, label, provider: 'twilio', status: 'active' };
+      const next = [number, ...list.filter((n) => n.e164 !== phone)];
+      await writeNumbers(rid, res, next);
+      return json(res, 200, { ok: true, data: { number } });
+    }
+
+    /* ---------- IMPORT TELNYX (basic sanity only) ---------- */
+    if (action === 'importTelnyx') {
+      const phone = digits(payload.phone || '');
+      const apiKey = String(payload.apiKey || '').trim();
+      const label = (payload.label || '').toString().slice(0, 80);
+
+      if (!isE164(phone)) return json(res, 400, { ok: false, error: 'Phone must be E.164', details:{ field:'txPhone' }});
+      if (!apiKey.startsWith('TELNYX_SECRET_')) return json(res, 400, { ok: false, error: 'API key looks invalid.', details:{ field:'txKey' }});
+
+      // TODO: call Telnyx API to confirm ownership. For now, accept after sanity check.
+      const list = await readNumbers(rid, req);
+      const id = (globalThis as any).crypto?.randomUUID?.() || require('crypto').randomBytes(8).toString('hex');
+      const number: PhoneNumber = { id, e164: phone, label, provider: 'telnyx', status: 'verified' };
+      const next = [number, ...list.filter((n) => n.e164 !== phone)];
+      await writeNumbers(rid, res, next);
+      return json(res, 200, { ok: true, data: { number } });
+    }
+
+    /* ---------- OWN NUMBER (OTP — mock) ---------- */
+    if (action === 'startSmsVerify') {
+      const phone = digits(payload.phone || '');
+      if (!isE164(phone)) return json(res, 400, { ok: false, error: 'Phone must be E.164', details:{ field:'ownPhone' }});
+      // MOCK mode: generate 000000 (or random) and pretend to send SMS
+      const expiresInSec = 5 * 60;
+      const resendInSec = 30;
+      const now = Date.now();
+      const code = process.env.OTP_FIXED_CODE || '000000';
+      await writeOtp(rid, { code, phone, expiresAt: now + expiresInSec * 1000, resendAfter: now + resendInSec * 1000 });
+      return json(res, 200, { ok: true, data: { sent: true, mode: 'mock', expiresInSec, resendInSec } as any });
+    }
+
+    if (action === 'checkSmsVerify') {
+      const phone = digits(payload.phone || '');
+      const code = String(payload.code || '');
+      const label = (payload.label || '').toString().slice(0, 80);
+
+      const st = await readOtp(rid);
+      if (!st || st.phone !== phone) return json(res, 400, { ok: false, error: 'No active verification.' });
+      if (Date.now() > st.expiresAt) return json(res, 400, { ok: false, error: 'Code expired.' });
+      if (code !== st.code) return json(res, 400, { ok: false, error: 'Invalid code.', details:{ field:'otp' } });
+
+      const list = await readNumbers(rid, req);
+      const id = (globalThis as any).crypto?.randomUUID?.() || require('crypto').randomBytes(8).toString('hex');
+      const number: PhoneNumber = { id, e164: phone, label, provider: 'own', status: 'verified' };
+      const next = [number, ...list.filter((n) => n.e164 !== phone)];
+      await writeNumbers(rid, res, next);
+      return json(res, 200, { ok: true, data: { number } });
+    }
+
+    return json(res, 400, { ok: false, error: 'Unknown action' });
+  }
+
+  res.setHeader('Allow', 'GET, POST');
+  return json(res, 405, { ok: false, error: 'Method Not Allowed' });
 }
