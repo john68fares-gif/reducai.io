@@ -5,8 +5,11 @@ import React, {
   useEffect, useMemo, useRef, useState, useLayoutEffect,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { getCountries, getCountryCallingCode } from 'libphonenumber-js';
+
+// ✅ use the lean core API + min metadata
+import { getCountries, getCountryCallingCode } from 'libphonenumber-js/core';
 import metadata from 'libphonenumber-js/metadata.min.json';
+
 import { Search, ChevronDown } from 'lucide-react';
 
 type Option = { iso2: string; name: string; dial: string };
@@ -100,11 +103,6 @@ export default function CountryDialSelect({
   }, [open, query]);
 
   /* ---------- helpers ---------- */
-  function flagEmoji(iso2: string) {
-    return iso2
-      .toUpperCase()
-      .replace(/./g, (c) => String.fromCodePoint(127397 + c.charCodeAt(0)));
-  }
   function selectAt(i: number) {
     const o = filtered[i];
     if (!o) return;
@@ -167,7 +165,6 @@ export default function CountryDialSelect({
       if (!input) return;
       input.focus({ preventScroll: true });
       if (seedKeyRef.current) {
-        // set exactly one character; do NOT simulate typing
         setQuery(seedKeyRef.current);
         seedKeyRef.current = null;
       }
@@ -182,7 +179,6 @@ export default function CountryDialSelect({
       return;
     }
     if (/^[a-zA-Z0-9+ ]$/.test(e.key)) {
-      // capture the first key and consume the event so it can't be typed again
       e.preventDefault();
       e.stopPropagation();
       seedKeyRef.current = e.key;
