@@ -1,3 +1,4 @@
+// components/phone-numbers/PhoneNumbersSection.tsx
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -171,20 +172,21 @@ export default function PhoneNumbersSection() {
     const e164 = normalizeOwnE164();
     if (!isE164(e164)) { setFieldErrors({ ownPhone: 'Use a valid number. Example: +15555550123' }); setSubmitting(false); return; }
     try {
-      const r = await post<{ sent:boolean; mode:'mock'|'live'; expiresInSec:number; resendInSec:number }>({
-        action:'startSmsVerify', payload:{ phone: e164 }
-      });
+      const r = await post<{ sent:boolean; mode:'mock'|'live'; expiresInSec:number; resendInSec:number }>(
+        { action:'startSmsVerify', payload:{ phone: e164 } }
+      );
       setOtpSent(true);
       const now = Date.now();
       setOtpMeta({ expiresAt: now + r.expiresInSec*1000, resendAfter: now + r.resendInSec*1000 });
       setOwnPhone(e164); // lock normalized
       setBanner('We sent a 6-digit code by SMS.');
-      // auto-hide banner after 6s
       setTimeout(() => setBanner(null), 6000);
     } catch (e: any) {
       setBanner(e?.message || 'Failed to send code');
       if (e?.details?.field) setFieldErrors({ [e.details.field]: e.message });
-    } finally { setSubmitting(false); }
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   async function verifyOtp() {
@@ -192,9 +194,9 @@ export default function PhoneNumbersSection() {
     verifyingRef.current = true;
     setSubmitting(true); setFieldErrors({}); setBanner(null);
     try {
-      const data = await post<{ number: PhoneNumber }>({
-        action:'checkSmsVerify', payload:{ phone: ownPhone, code: otpCode, label: ownLabel || undefined }
-      });
+      const data = await post<{ number: PhoneNumber }>(
+        { action:'checkSmsVerify', payload:{ phone: ownPhone, code: otpCode, label: ownLabel || undefined } }
+      );
       const n = data.number; setItems(p => [n, ...p]); select(n.id); setOpen(false);
     } catch (e: any) {
       setBanner(e?.message || 'Verification failed');
@@ -562,3 +564,4 @@ function Field({ label, error, children }: { label: string; error?: string; chil
     </div>
   );
 }
+s
