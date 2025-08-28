@@ -1,35 +1,27 @@
 // server/voiceAgent.ts
-// Minimal "voice agent" that uses your builder prompt.
-// If OPENAI_API_KEY is set, it will use OpenAI; otherwise it echoes politely.
+import { getAgentByPhoneNumberId } from '@/lib/store'
 
-type PhonePromptMap = Record<string, string>
-
-// TODO: replace this with your real Builder storage lookup
-const PROMPTS: PhonePromptMap = {
-  // Map Twilio CalledSid or E.164 to a builder prompt
-  default:
-    "You are Reduc AI's helpful voice agent. Be concise, friendly, and ask one question at a time.",
+export async function ensureAgent(phoneNumberId: string) {
+  const agent = await getAgentByPhoneNumberId(phoneNumberId)
+  if (!agent || !agent.enabled || !agent.openaiApiKey) return null
+  return agent
 }
 
-// Grab the prompt for a phone number (fallback to default)
-export function getPromptForPhone(phoneNumberId: string): string {
-  return PROMPTS[phoneNumberId] || PROMPTS.default
-}
-
-export async function runAgent(systemPrompt: string, userText: string): Promise<string> {
-  const apiKey = process.env.OPENAI_API_KEY
-
-  // No LLM? Fallback behavior so calls still work.
-  if (!apiKey) {
-    if (!userText) return "Sorry, I didn't hear anything. Could you repeat that?"
-    return `You said: "${userText}". How else can I help?`
+export async function runAgent(phoneNumberId: string, userText: string): Promise<string> {
+  const agent = await ensureAgent(phoneNumberId)
+  if (!agent) {
+    // No configured agent: return nullish signal, caller handles TwiML messaging.
+    return ''
   }
 
-  // With OpenAI (SDK-less fetch to avoid adding deps)
+  if (!agent.openaiApiKey) {
+    return "I'm missing an API key for this agent."
+  }
+
   const body = {
-    model: 'gpt-4o-mini',
+    model: agent.model || 'gpt-4o-mini',
     messages: [
-      { role: 'system', content: systemPrompt },
+      { role: 'system', content: agent.prompt },
       { role: 'user', content: userText || 'Greet the caller.' },
     ],
     temperature: 0.6,
@@ -40,7 +32,7 @@ export async function runAgent(systemPrompt: string, userText: string): Promise<
     const resp = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${agent.openaiApiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(body),
