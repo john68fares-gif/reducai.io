@@ -1,16 +1,28 @@
+// pages/api/voice/twilio/incoming.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
-import twilio from 'twilio';
 
 export default function handler(req: NextApiRequest, res: NextApiResponse) {
-  const twiml = new (twilio as any).twiml.VoiceResponse();
-  const speech = (req.body?.SpeechResult || '').trim();
+  // Always return valid TwiML so calls never fail, even before your agent is wired up.
+  const { greeting = 'Your Reduc A I test line is live. Say something after the beep.' } =
+    (req.method === 'GET' ? req.query : req.body) as Record<string, string>;
 
-  if (speech) {
-    twiml.say({ voice: 'Polly.Matthew' }, `Thanks, I heard: ${speech}. We will get back to you shortly.`);
-  } else {
-    twiml.say({ voice: 'Polly.Matthew' }, 'Thanks for calling. Goodbye.');
-  }
+  const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say voice="alice" language="en-US">${escapeXml(greeting)}</Say>
+  <Pause length="1"/>
+  <Record maxLength="10" playBeep="true"/>
+  <Hangup/>
+</Response>`;
 
-  res.setHeader('Content-Type', 'text/xml');
-  res.status(200).send(twiml.toString());
+  res.setHeader('Content-Type', 'text/xml; charset=utf-8');
+  res.status(200).send(twiml);
+}
+
+function escapeXml(s: string) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
 }
