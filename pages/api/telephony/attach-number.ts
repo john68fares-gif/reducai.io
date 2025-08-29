@@ -1,95 +1,124 @@
 // pages/api/telephony/attach-number.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
 
-type Ok<T>  = { ok: true; data: T };
-type Err    = { ok: false; error: string; details?: any };
-type TwilioCreds = { accountSid?: string; authToken?: string };
+type Ok<T> = { ok: true; data: T };
+type Err = { ok: false; error: string; hint?: string; details?: any };
 
-const send = (res: NextApiResponse, code: number, body: Ok<any> | Err) =>
-  res
-    .status(code)
-    .setHeader('Content-Type', 'application/json')
-    .end(JSON.stringify(body));
+function json<T>(res: NextApiResponse, body: Ok<T> | Err, status = 200) {
+  res.status(status).setHeader('Content-Type', 'application/json').end(JSON.stringify(body));
+}
 
+function requireFields<T extends Record<string, any>>(obj: T, fields: (keyof T)[]) {
+  const miss = fields.filter((k) => !obj[k]);
+  if (miss.length) throw new Error(`Missing field(s): ${miss.join(', ')}`);
+}
+
+function basicAuthHeader(sid: string, token: string) {
+  // Twilio uses HTTP Basic (sid:token)
+  const b = Buffer.from(`${sid}:${token}`).toString('base64');
+  return `Basic ${b}`;
+}
+
+async function findIncomingNumberSid(
+  accountSid: string,
+  authToken: string,
+  e164: string
+): Promise<string | null> {
+  const url = new URL(
+    `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/IncomingPhoneNumbers.json`
+  );
+  url.searchParams.set('PhoneNumber', e164);
+
+  const r = await fetch(url.toString(), {
+    headers: { Authorization: basicAuthHeader(accountSid, authToken) },
+  });
+
+  if (!r.ok) {
+    const text = await r.text().catch(() => '');
+    throw new Error(`Twilio lookup failed (${r.status}). ${text || ''}`.trim());
+  }
+
+  const j = await r.json().catch(() => null);
+  const sid = j?.incoming_phone_numbers?.[0]?.sid as string | undefined;
+  return sid || null;
+}
+
+async function updateIncomingNumber(
+  accountSid: string,
+  authToken: string,
+  phoneSid: string,
+  params: Record<string, string>
+) {
+  const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/IncomingPhoneNumbers/${phoneSid}.json`;
+  const form = new URLSearchParams(params);
+
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: basicAuthHeader(accountSid, authToken),
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: form.toString(),
+  });
+
+  if (!r.ok) {
+    const text = await r.text().catch(() => '');
+    throw new Error(`Twilio update failed (${r.status}). ${text || ''}`.trim());
+  }
+  return r.json();
+}
+
+// POST /api/telephony/attach-number
+// Body: { accountSid, authToken, phoneNumber, agentId, baseUrl? }
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== 'POST') return send(res, 405, { ok: false, error: 'Method not allowed' });
+  if (req.method !== 'POST') {
+    return json(res, { ok: false, error: 'Method not allowed' }, 405);
+  }
 
   try {
-    const { agentId, phoneNumber, twilio, siteUrl } = (req.body || {}) as {
-      agentId?: string;
-      phoneNumber?: string; // E.164
-      twilio?: TwilioCreds; // user-supplied OR env fallback
-      siteUrl?: string;     // optional override for base URL
-    };
+    const { accountSid, authToken, phoneNumber, agentId, baseUrl } = req.body || {};
 
-    if (!agentId) return send(res, 400, { ok: false, error: 'Missing agentId' });
-    if (!phoneNumber) return send(res, 400, { ok: false, error: 'Missing phoneNumber (E.164)' });
-
-    const creds: TwilioCreds = {
-      accountSid: twilio?.accountSid || process.env.TWILIO_ACCOUNT_SID,
-      authToken:  twilio?.authToken  || process.env.TWILIO_AUTH_TOKEN,
-    };
-    if (!creds.accountSid || !creds.authToken) {
-      return send(res, 400, { ok: false, error: 'Missing Twilio env vars or request credentials' });
-    }
-
-    // Resolve public base URL
-    const baseUrl =
-      siteUrl ||
-      process.env.NEXT_PUBLIC_SITE_URL ||
-      `${req.headers['x-forwarded-proto'] || 'https'}://${req.headers['host']}`;
-
-    // 1) Lookup the IncomingPhoneNumber SID by E.164
-    const listUrl = new URL(
-      `https://api.twilio.com/2010-04-01/Accounts/${creds.accountSid}/IncomingPhoneNumbers.json`
-    );
-    listUrl.searchParams.set('PhoneNumber', phoneNumber);
-
-    const auth = 'Basic ' + Buffer.from(`${creds.accountSid}:${creds.authToken}`).toString('base64');
-
-    const listResp = await fetch(listUrl.toString(), {
-      headers: { Authorization: auth, Accept: 'application/json' },
-    });
-    if (!listResp.ok) {
-      const t = await listResp.text().catch(() => '');
-      return send(res, listResp.status, { ok: false, error: 'Twilio lookup failed', details: t });
-    }
-    const list = (await listResp.json().catch(() => null)) as any;
-    const match = Array.isArray(list?.incoming_phone_numbers) ? list.incoming_phone_numbers[0] : null;
-    if (!match?.sid)
-      return send(res, 404, { ok: false, error: 'Phone number not found in this Twilio account' });
-    const phoneSid = match.sid as string;
-
-    // 2) Update VoiceUrl to your inbound webhook
-    const voiceUrl = `${baseUrl}/api/voice/inbound?agentId=${encodeURIComponent(agentId)}`;
-    const form = new URLSearchParams();
-    form.set('VoiceUrl', voiceUrl);
-    form.set('VoiceMethod', 'POST');
-
-    const updResp = await fetch(
-      `https://api.twilio.com/2010-04-01/Accounts/${creds.accountSid}/IncomingPhoneNumbers/${phoneSid}.json`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: auth,
-          Accept: 'application/json',
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: form.toString(),
-      }
+    requireFields(
+      { accountSid, authToken, phoneNumber, agentId },
+      ['accountSid', 'authToken', 'phoneNumber', 'agentId']
     );
 
-    if (!updResp.ok) {
-      const t = await updResp.text().catch(() => '');
-      return send(res, updResp.status, { ok: false, error: 'Twilio update failed', details: t });
+    // Basic sanity checks
+    if (!/^AC[a-zA-Z0-9]{32}$/.test(accountSid)) {
+      return json(res, { ok: false, error: 'Invalid Twilio Account SID', hint: 'Must start with AC and be 34 chars.' }, 400);
     }
-    const updated = await updResp.json().catch(() => null);
+    if (!/^\+[1-9]\d{1,14}$/.test(phoneNumber)) {
+      return json(res, { ok: false, error: 'Invalid E.164 phone number', hint: 'Example: +15555550123' }, 400);
+    }
 
-    return send(res, 200, {
-      ok: true,
-      data: { sid: phoneSid, phoneNumber, voiceUrl, friendlyName: updated?.friendly_name ?? null },
+    // Voice webhook we will set on the number
+    // Default to your current origin if baseUrl not passed
+    const origin =
+      (typeof baseUrl === 'string' && /^https?:\/\//i.test(baseUrl) ? baseUrl : '') ||
+      `${req.headers['x-forwarded-proto'] || 'https'}://${req.headers.host}`;
+
+    const voiceUrl = `${origin}/api/voice/twilio/incoming?agent=${encodeURIComponent(agentId)}`;
+
+    // 1) Find the phone SID for that E.164 on the user’s account
+    const phoneSid = await findIncomingNumberSid(accountSid, authToken, phoneNumber);
+    if (!phoneSid) {
+      return json(
+        res,
+        { ok: false, error: 'Twilio number not found on this account', hint: 'Make sure the number belongs to the provided account SID.' },
+        404
+      );
+    }
+
+    // 2) Update the number to point to our webhook
+    await updateIncomingNumber(accountSid, authToken, phoneSid, {
+      VoiceUrl: voiceUrl,
+      VoiceMethod: 'POST',
+      // Optional: set a friendly name that includes your agent id
+      FriendlyName: `Agent:${agentId}`,
     });
+
+    return json(res, { ok: true, data: { attached: true, phoneSid, voiceUrl } });
   } catch (e: any) {
-    return send(res, 500, { ok: false, error: e?.message || 'Server error' });
+    return json(res, { ok: false, error: e?.message || 'Attach failed' }, 500);
   }
 }
