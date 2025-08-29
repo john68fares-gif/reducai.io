@@ -1,87 +1,62 @@
 // pages/api/voice/agents.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
 
-// very simple in-memory “db” so the value survives hot reloads
-// (globalThis is shared across reloads in dev)
-type AgentRecord = {
-  agentId: string;
-  prompt: string;
-  language?: string;
-  voice?: string;
-  fromNumber?: string; // we only record it here; attaching is done in another route
-  createdAt: number;
-};
-declare global {
-  // eslint-disable-next-line no-var
-  var __AGENTS__: Map<string, AgentRecord> | undefined;
-}
-const AGENTS = (global.__AGENTS__ ||= new Map<string, AgentRecord>());
+type Ok<T> = { ok: true; [key: string]: any } & { data?: T };
+type Err   = { ok: false; error: string };
 
-function bad(res: NextApiResponse, code: number, message: string, details?: any) {
-  return res
-    .status(code)
-    .json({ ok: false, error: { code: String(code), message, details } });
-}
+export default async function handler(
+  req: NextApiRequest,
+  res: NextApiResponse<Ok<{ agentId: string }> | Err>
+) {
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', 'POST');
+    return res.status(405).json({ ok: false, error: 'Method Not Allowed' });
+  }
 
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   try {
-    if (req.method !== 'POST') {
-      res.setHeader('Allow', 'POST');
-      return bad(res, 405, 'Method not allowed');
-    }
+    // Body from the VoiceAgentSection "createAgent" call
+    const {
+      agentId: requestedAgentId,
+      fromNumber,
+      voice,
+      language,
+      prompt,
+    } = req.body || {};
 
-    // Accept JSON only
-    if (!req.headers['content-type']?.includes('application/json')) {
-      return bad(res, 415, 'Use application/json');
-    }
-
-    const { agentId, prompt, language, voice, fromNumber } = (req.body || {}) as {
-      agentId?: string;
-      prompt?: string;
-      language?: string;
-      voice?: string;
-      fromNumber?: string;
-    };
-
-    // Basic validation so users must provide real inputs
+    // Basic validations so users must fill real info on the site
     if (!prompt || typeof prompt !== 'string' || prompt.trim().length < 10) {
-      return bad(res, 400, 'Prompt is required and must be at least 10 characters.', {
-        field: 'prompt',
-      });
+      return res.status(400).json({ ok: false, error: 'Prompt is required and should be at least 10 characters.' });
+    }
+    if (language && typeof language !== 'string') {
+      return res.status(400).json({ ok: false, error: 'Invalid language.' });
+    }
+    if (voice && typeof voice !== 'string') {
+      return res.status(400).json({ ok: false, error: 'Invalid voice.' });
+    }
+    if (fromNumber && !/^\+[1-9]\d{1,14}$/.test(fromNumber)) {
+      return res.status(400).json({ ok: false, error: 'From number must be E.164 (e.g. +15551234567).' });
     }
 
-    // Generate an id if not provided by your Builder
+    // In a real app you would create the agent with your provider here.
+    // For now we "mock" creation and hand back an agentId that your UI can use.
     const id =
-      (agentId && String(agentId)) ||
-      'agent_' +
-        Math.random().toString(36).slice(2, 8) +
-        Date.now().toString(36).slice(-6);
+      (requestedAgentId && String(requestedAgentId)) ||
+      `agent_${Math.random().toString(36).slice(2, 10)}`;
 
-    const record: AgentRecord = {
-      agentId: id,
-      prompt: prompt.trim(),
-      language: language || 'en-US',
-      voice: voice || 'Polly.Joanna',
-      fromNumber: fromNumber || undefined,
-      createdAt: Date.now(),
-    };
-
-    AGENTS.set(id, record);
-
-    // Always return JSON
+    // Return shape the UI expects
     return res.status(200).json({
       ok: true,
-      data: {
-        agentId: id,
-        saved: true,
-        hasFromNumber: !!fromNumber,
+      agentId: id,
+      data: { agentId: id },
+      meta: {
+        created: true,
+        provider: 'mock',
+        language: language || 'en-US',
+        voice: voice || 'default',
+        fromNumber: fromNumber || null,
       },
     });
-  } catch (err: any) {
-    return bad(res, 500, err?.message || 'Unexpected server error');
+  } catch (e: any) {
+    return res.status(500).json({ ok: false, error: e?.message || 'Server error' });
   }
 }
-
-// Optional helper GET to debug in dev (not used by UI but handy)
-// curl /api/voice/agents?id=agent_xxx
-export const config = { api: { bodyParser: true } };
