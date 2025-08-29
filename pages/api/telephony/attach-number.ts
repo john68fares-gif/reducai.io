@@ -2,123 +2,123 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 
 type Ok<T> = { ok: true; data: T };
-type Err = { ok: false; error: string; hint?: string; details?: any };
+type Err = { ok: false; error: string; details?: any };
 
-function json<T>(res: NextApiResponse, body: Ok<T> | Err, status = 200) {
-  res.status(status).setHeader('Content-Type', 'application/json').end(JSON.stringify(body));
+function json<T>(res: NextApiResponse, status: number, body: Ok<T> | Err) {
+  res.status(status).json(body);
 }
 
-function requireFields<T extends Record<string, any>>(obj: T, fields: (keyof T)[]) {
-  const miss = fields.filter((k) => !obj[k]);
-  if (miss.length) throw new Error(`Missing field(s): ${miss.join(', ')}`);
-}
-
-function basicAuthHeader(sid: string, token: string) {
-  // Twilio uses HTTP Basic (sid:token)
-  const b = Buffer.from(`${sid}:${token}`).toString('base64');
-  return `Basic ${b}`;
-}
-
-async function findIncomingNumberSid(
-  accountSid: string,
-  authToken: string,
-  e164: string
-): Promise<string | null> {
-  const url = new URL(
-    `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/IncomingPhoneNumbers.json`
-  );
-  url.searchParams.set('PhoneNumber', e164);
-
-  const r = await fetch(url.toString(), {
-    headers: { Authorization: basicAuthHeader(accountSid, authToken) },
-  });
-
-  if (!r.ok) {
-    const text = await r.text().catch(() => '');
-    throw new Error(`Twilio lookup failed (${r.status}). ${text || ''}`.trim());
-  }
-
-  const j = await r.json().catch(() => null);
-  const sid = j?.incoming_phone_numbers?.[0]?.sid as string | undefined;
-  return sid || null;
-}
-
-async function updateIncomingNumber(
-  accountSid: string,
-  authToken: string,
-  phoneSid: string,
-  params: Record<string, string>
-) {
-  const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/IncomingPhoneNumbers/${phoneSid}.json`;
-  const form = new URLSearchParams(params);
-
-  const r = await fetch(url, {
-    method: 'POST',
-    headers: {
-      Authorization: basicAuthHeader(accountSid, authToken),
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    body: form.toString(),
-  });
-
-  if (!r.ok) {
-    const text = await r.text().catch(() => '');
-    throw new Error(`Twilio update failed (${r.status}). ${text || ''}`.trim());
-  }
-  return r.json();
-}
-
-// POST /api/telephony/attach-number
-// Body: { accountSid, authToken, phoneNumber, agentId, baseUrl? }
+/**
+ * POST /api/telephony/attach-number
+ * Body: {
+ *   accountSid: string;         // user's Twilio Account SID (AC...)
+ *   authToken: string;          // user's Twilio Auth Token
+ *   phoneNumber: string;        // E.164, e.g. "+15551234567"
+ *   domain: string;             // your deployed domain, e.g. "https://reducai-io-....vercel.app"
+ *   key: string;                // user's OpenAI key (for your voice agent flow)
+ *   prompt?: string; voice?: string; lang?: string; greeting?: string;
+ * }
+ *
+ * Effect: finds the Twilio IncomingPhoneNumber by E.164, then sets its VoiceUrl to:
+ *   {domain}/api/voice/twilio/incoming?key=...&prompt=...&voice=...&lang=...&greeting=...
+ */
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== 'POST') {
-    return json(res, { ok: false, error: 'Method not allowed' }, 405);
-  }
+  if (req.method !== 'POST') return json(res, 405, { ok: false, error: 'Use POST' });
 
   try {
-    const { accountSid, authToken, phoneNumber, agentId, baseUrl } = req.body || {};
+    const {
+      accountSid,
+      authToken,
+      phoneNumber,
+      domain,
+      key,
+      prompt = 'You are a concise, friendly Reduc AI phone agent.',
+      voice = 'alice',
+      lang = 'en-US',
+      greeting = 'Reduc A I agent here. After the beep, tell me what you need.',
+    } = (req.body || {}) as Record<string, string>;
 
-    requireFields(
-      { accountSid, authToken, phoneNumber, agentId },
-      ['accountSid', 'authToken', 'phoneNumber', 'agentId']
+    if (!accountSid || !authToken || !phoneNumber || !domain || !key) {
+      return json(res, 400, { ok: false, error: 'Missing fields (accountSid, authToken, phoneNumber, domain, key).' });
+    }
+
+    const auth = 'Basic ' + Buffer.from(`${accountSid}:${authToken}`).toString('base64');
+
+    // 1) Look up the Twilio IncomingPhoneNumber by E.164 to get its SID
+    const searchUrl = new URL(
+      `/2010-04-01/Accounts/${encodeURIComponent(accountSid)}/IncomingPhoneNumbers.json`,
+      'https://api.twilio.com'
     );
+    searchUrl.searchParams.set('PhoneNumber', phoneNumber);
 
-    // Basic sanity checks
-    if (!/^AC[a-zA-Z0-9]{32}$/.test(accountSid)) {
-      return json(res, { ok: false, error: 'Invalid Twilio Account SID', hint: 'Must start with AC and be 34 chars.' }, 400);
-    }
-    if (!/^\+[1-9]\d{1,14}$/.test(phoneNumber)) {
-      return json(res, { ok: false, error: 'Invalid E.164 phone number', hint: 'Example: +15555550123' }, 400);
-    }
-
-    // Voice webhook we will set on the number
-    // Default to your current origin if baseUrl not passed
-    const origin =
-      (typeof baseUrl === 'string' && /^https?:\/\//i.test(baseUrl) ? baseUrl : '') ||
-      `${req.headers['x-forwarded-proto'] || 'https'}://${req.headers.host}`;
-
-    const voiceUrl = `${origin}/api/voice/twilio/incoming?agent=${encodeURIComponent(agentId)}`;
-
-    // 1) Find the phone SID for that E.164 on the user’s account
-    const phoneSid = await findIncomingNumberSid(accountSid, authToken, phoneNumber);
-    if (!phoneSid) {
-      return json(
-        res,
-        { ok: false, error: 'Twilio number not found on this account', hint: 'Make sure the number belongs to the provided account SID.' },
-        404
-      );
-    }
-
-    // 2) Update the number to point to our webhook
-    await updateIncomingNumber(accountSid, authToken, phoneSid, {
-      VoiceUrl: voiceUrl,
-      VoiceMethod: 'POST',
-      // Optional: set a friendly name that includes your agent id
-      FriendlyName: `Agent:${agentId}`,
+    const lookup = await fetch(searchUrl.toString(), {
+      method: 'GET',
+      headers: { Authorization: auth },
     });
 
-    return json(res, { ok: true, data: { attached: true, phoneSid, voiceUrl } });
+    if (!lookup.ok) {
+      const text = await lookup.text();
+      return json(res, 400, { ok: false, error: 'Failed to query Twilio numbers', details: text });
+    }
+
+    const list = (await lookup.json()) as { incoming_phone_numbers?: Array<{ sid: string; phone_number: string }> };
+    const match = (list.incoming_phone_numbers || []).find((n) => n.phone_number === phoneNumber);
+
+    if (!match) {
+      return json(res, 404, { ok: false, error: 'Number not found in this Twilio account.' });
+    }
+
+    // 2) Build the VoiceUrl pointing to your webhook with per-user settings
+    const qs = new URLSearchParams({
+      key,
+      prompt,
+      voice,
+      lang,
+      greeting,
+    }).toString();
+
+    // Ensure domain includes protocol and no trailing slash
+    const base = domain.replace(/\/+$/, '');
+    const voiceUrl = `${base}/api/voice/twilio/incoming?${qs}`;
+
+    // 3) Update the number’s VoiceUrl
+    const updateUrl = new URL(
+      `/2010-04-01/Accounts/${encodeURIComponent(accountSid)}/IncomingPhoneNumbers/${encodeURIComponent(
+        match.sid
+      )}.json`,
+      'https://api.twilio.com'
+    );
+
+    const form = new URLSearchParams({
+      VoiceUrl: voiceUrl,
+      VoiceMethod: 'POST',
+    });
+
+    const update = await fetch(updateUrl.toString(), {
+      method: 'POST',
+      headers: {
+        Authorization: auth,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: form.toString(),
+    });
+
+    if (!update.ok) {
+      const text = await update.text();
+      return json(res, 400, { ok: false, error: 'Failed to update VoiceUrl', details: text });
+    }
+
+    const updated = await update.json();
+
+    return json(res, 200, {
+      ok: true,
+      data: {
+        numberSid: updated.sid,
+        phoneNumber,
+        voiceUrl,
+      },
+    });
   } catch (e: any) {
-    return json(res, { ok: false, error: e?.message || 'Attach failed' }, 500);
+    return json(res, 500, { ok: false, error: e?.message || 'Server error' });
   }
 }
