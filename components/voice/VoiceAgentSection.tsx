@@ -508,4 +508,35 @@ export default function VoiceAgentPage() {
             <Section title="Quick Tests">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <div className="text-sm text-white/90 mb-2 flex items-cen
+                  <div className="text-sm text-white/90 mb-2 flex items-center gap-2">
+                    <Volume2 className="w-4 h-4" /> Audio Ping
+                  </div>
+                  <div className="flex gap-2">
+                    <GreenButton onClick={startTone}>Play</GreenButton>
+                    <GreenButton onClick={stopTone}><Square className="w-4 h-4" /> Stop</GreenButton>
+                  </div>
+                  <p className="text-xs text-white/60 mt-2">Simple tone to confirm output device.</p>
+                </div>
+                <div className="text-white/60 text-sm">
+                  Calls go through Twilio only—no third-party voice SDK.
+                </div>
+              </div>
+            </Section>
+          </div>
+
+          {msg && (
+            <div className="mt-6 rounded-[14px] px-4 py-3 text-sm"
+                 style={{ ...CARD, border: '1px solid rgba(255,193,7,0.35)', background: 'rgba(255,193,7,0.10)' }}>
+              <span className="text-amber-200">{msg}</span>
+            </div>
+          )}
+        </div>
+      </main>
+
+      <style jsx global>{`
+        body { background:#0b0c10; color:#fff; }
+        select { background-color: rgba(0,0,0,.30); color: white; }
+      `}</style>
+    </>
+  );
+}
