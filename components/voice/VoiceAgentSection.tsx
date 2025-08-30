@@ -39,6 +39,14 @@ type Settings = {
   language: string;
   ttsVoice: string;
   fromE164: string;
+
+  // NEW voice & behavior config
+  greeting?: string;
+  speakingStyle?: 'conversational' | 'professional' | 'newscaster' | '';
+  responseDelayMs?: number;   // 0..5000
+  speakingRatePct?: number;   // 60..140
+  pitchSemitones?: number;    // -6..+6
+  bargeIn?: boolean;
 };
 type TwilioCreds = { accountSid: string; authToken: string } | null;
 type BotSummary = {
@@ -213,7 +221,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 /* ----------------------------- page ----------------------------- */
 export default function VoiceAgentPage() {
-  // builds (AI) selector
+  // builds (AI) selector (not rendered; we only use it for prompt seeding)
   const [bots, setBots] = useState<BotSummary[]>([]);
   const [selectedBotId, setSelectedBotId] = useState<string>('');
 
@@ -223,6 +231,14 @@ export default function VoiceAgentPage() {
     language: 'en-US',
     ttsVoice: 'Polly.Joanna',
     fromE164: '',
+
+    // NEW defaults
+    greeting: 'Thank you for calling. How can I help today?',
+    speakingStyle: 'professional',
+    responseDelayMs: 300,
+    speakingRatePct: 100,
+    pitchSemitones: 0,
+    bargeIn: true,
   });
   const [msg, setMsg] = useState<string|null>(null);
   const [saving, setSaving] = useState(false);
@@ -248,7 +264,7 @@ export default function VoiceAgentPage() {
         } catch { setNums([]); }
         const local = loadLocalSettings();
         if (local) setSettings((p) => ({ ...p, ...local }));
-        // chatbots (build selector)
+        // chatbots (build selector + seed prompt if empty)
         try {
           const raw = localStorage.getItem(CHATBOTS_KEY);
           const arr: BotSummary[] = raw ? JSON.parse(raw) : [];
@@ -256,7 +272,7 @@ export default function VoiceAgentPage() {
           if (Array.isArray(arr) && arr.length && !selectedBotId) {
             setSelectedBotId(arr[arr.length - 1].id);
           }
-          if (Array.isArray(arr) && arr[0]?.name && !local?.systemPrompt) {
+          if (Array.isArray(arr) && arr[0]?.name && !(local && local.systemPrompt)) {
             const seed = `Company: ${arr[0].name}\n\n${arr[0].prompt || ''}`.trim();
             setSettings((p)=>({ ...p, systemPrompt: shapePromptForScheduling(seed, { org: arr[0].name }) }));
           }
@@ -269,7 +285,7 @@ export default function VoiceAgentPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // when a build is selected, seed prompt + language from it
+  // if a build is selected, seed prompt + language from it
   useEffect(() => {
     if (!selectedBotId) return;
     const bot = bots.find(b => b.id === selectedBotId);
@@ -351,7 +367,6 @@ export default function VoiceAgentPage() {
       if (!j?.ok) throw new Error(j?.error || 'Create failed');
       setMsg(`Agent created${settings.fromE164 ? ` — live at ${settings.fromE164}` : ''}.`);
     } catch (e:any) {
-      // If your server expects a provider key we aren't using, just treat this as optional.
       saveLocalSettings(settings);
       setMsg('Agent settings saved locally.');
     } finally { setCreating(false); }
@@ -362,25 +377,51 @@ export default function VoiceAgentPage() {
     if (!settings.fromE164) { setMsg('Select a phone number first.'); return; }
 
     // Prefer valid typed creds; else fall back to saved creds.
-    const typed = { accountSid: sanitizeSid(twilioSid), authToken: (twilioToken || '').trim() };
+    const sidTyped = sanitizeSid(twilioSid);
+    const tokTyped = (twilioToken || '').trim();
     const saved = loadTwilioCreds();
-    const creds = (isValidSid(typed.accountSid) && !!typed.authToken) ? typed : saved || null;
+    const useSid = isValidSid(sidTyped) ? sidTyped : (saved?.accountSid || '');
+    const useTok = tokTyped || (saved?.authToken || '');
 
-    if (!creds) { setMsg('No Twilio credentials found. Enter and save them first.'); return; }
-    if (!isValidSid(creds.accountSid)) { setMsg('Invalid or missing Twilio Account SID.'); return; }
+    if (!isValidSid(useSid)) { setMsg('Invalid or missing Twilio Account SID.'); return; }
+    if (!useTok) { setMsg('Missing Twilio Auth Token.'); return; }
+
+    // clamp config values
+    const delayMs = Math.max(0, Math.min(5000, Number(settings.responseDelayMs ?? 0)));
+    const rate    = Math.max(60, Math.min(140, Number(settings.speakingRatePct ?? 100)));
+    const pitch   = Math.max(-6, Math.min(6, Number(settings.pitchSemitones ?? 0)));
 
     try {
       setAttaching(true);
       const r = await fetch('/api/telephony/attach-number', {
         method:'POST',
         headers:{ 'Content-Type':'application/json' },
-        body: JSON.stringify({ phoneNumber: settings.fromE164, credentials: creds }),
+        // IMPORTANT: flat fields + voice config
+        body: JSON.stringify({
+          accountSid: useSid,
+          authToken: useTok,
+          phoneNumber: settings.fromE164,
+
+          // NEW — config baked into the webhook URL
+          language: settings.language,                           // e.g., "en-US"
+          voice: settings.ttsVoice,                              // e.g., "Polly.Joanna" or "alice"
+          greeting: settings.greeting || 'Thank you for calling. How can I help today?',
+          style: settings.speakingStyle || 'professional',       // 'conversational' | 'professional' | 'newscaster' | ''
+          delayMs,                                               // 0..5000
+          rate,                                                  // 60..140
+          pitch,                                                 // -6..+6
+          bargeIn: !!settings.bargeIn,                           // boolean
+        }),
       });
       const j = await r.json();
       if (!j?.ok) throw new Error(j?.error || 'Attach failed');
-      setMsg(`Agent live at ${settings.fromE164}`);
-    } catch (e:any) { setMsg(e?.message || 'Attach failed.'); }
-    finally { setAttaching(false); }
+      saveTwilioCreds({ accountSid: useSid, authToken: useTok });
+      setMsg(`Agent live at ${settings.fromE164} → ${j.data?.voiceUrl || ''}`);
+    } catch (e:any) {
+      setMsg(e?.message || 'Attach failed.');
+    } finally {
+      setAttaching(false);
+    }
   }
 
   function improvePrompt() {
@@ -409,8 +450,6 @@ export default function VoiceAgentPage() {
     try { audioCtxRef.current?.close(); } catch {}
     oscRef.current = null; gainRef.current = null; audioCtxRef.current = null;
   }
-
-  const sidLen = sanitizeSid(twilioSid).length;
 
   return (
     <>
@@ -459,8 +498,73 @@ export default function VoiceAgentPage() {
                     />
                   </label>
                 </div>
+
+                {/* NEW: Voice & behavior controls (kept inside the same card to preserve visuals) */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <label className="text-xs text-white/70">Greeting (first sentence)
+                    <input
+                      value={settings.greeting || ''}
+                      onChange={(e)=>setSettings({...settings, greeting: e.target.value})}
+                      placeholder="Thank you for calling. How can I help today?"
+                      className="mt-1 w-full rounded-[12px] border border-white/20 bg-black/30 px-3 h-[38px] text-sm outline-none focus:border-[#6af7d1] text-white"
+                    />
+                  </label>
+                  <label className="text-xs text-white/70">Speaking style
+                    <select
+                      value={settings.speakingStyle || 'professional'}
+                      onChange={(e)=>setSettings({...settings, speakingStyle: e.target.value as Settings['speakingStyle']})}
+                      className="mt-1 w-full rounded-[12px] border border-white/20 bg-black/30 px-3 h-[38px] text-sm outline-none focus:border-[#6af7d1] text-white"
+                    >
+                      <option value="professional">Professional</option>
+                      <option value="conversational">Conversational</option>
+                      <option value="newscaster">Newscaster</option>
+                      <option value="">None</option>
+                    </select>
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <label className="text-xs text-white/70">Response delay (ms)
+                    <input
+                      type="number" min={0} max={5000} step={50}
+                      value={settings.responseDelayMs ?? 0}
+                      onChange={(e)=>setSettings({...settings, responseDelayMs: Math.max(0, Math.min(5000, Number(e.target.value || 0)))})}
+                      placeholder="300"
+                      className="mt-1 w-full rounded-[12px] border border-white/20 bg-black/30 px-3 h-[38px] text-sm outline-none focus:border-[#6af7d1] text-white"
+                    />
+                  </label>
+                  <label className="text-xs text-white/70">Speaking rate (%)
+                    <input
+                      type="number" min={60} max={140}
+                      value={settings.speakingRatePct ?? 100}
+                      onChange={(e)=>setSettings({...settings, speakingRatePct: Math.max(60, Math.min(140, Number(e.target.value || 100)))})}
+                      placeholder="100"
+                      className="mt-1 w-full rounded-[12px] border border-white/20 bg-black/30 px-3 h-[38px] text-sm outline-none focus:border-[#6af7d1] text-white"
+                    />
+                  </label>
+                  <label className="text-xs text-white/70">Pitch (semitones)
+                    <input
+                      type="number" min={-6} max={6} step={1}
+                      value={settings.pitchSemitones ?? 0}
+                      onChange={(e)=>setSettings({...settings, pitchSemitones: Math.max(-6, Math.min(6, Number(e.target.value || 0)))})}
+                      placeholder="0"
+                      className="mt-1 w-full rounded-[12px] border border-white/20 bg-black/30 px-3 h-[38px] text-sm outline-none focus:border-[#6af7d1] text-white"
+                    />
+                  </label>
+                </div>
+
+                <label className="text-xs text-white/70 flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={!!settings.bargeIn}
+                    onChange={(e)=>setSettings({...settings, bargeIn: e.target.checked})}
+                    className="h-[16px] w-[16px] accent-[#6af7d1]"
+                  />
+                  Allow barge-in (caller can interrupt)
+                </label>
+
                 <textarea
-                  rows={16}
+                  rows={14}
                   value={settings.systemPrompt}
                   onChange={(e)=>setSettings({...settings, systemPrompt: e.target.value })}
                   placeholder="Paste your business notes or prompt. Click “Improve” to reshape into a production scheduling prompt."
