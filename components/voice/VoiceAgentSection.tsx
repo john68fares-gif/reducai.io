@@ -44,7 +44,10 @@ type Settings = {
 };
 type TwilioCreds = { accountSid: string; authToken: string };
 type Banner = { kind: 'success' | 'error' | 'info'; message: string } | null;
-type BotSummary = { id: string; name?: string; title?: string; language?: string; industry?: string; questionFlow?: string[]; faq?: any[]; notes?: string; rawNotes?: string; additionalContext?: string };
+type BotSummary = {
+  id: string; name?: string; title?: string; language?: string; industry?: string;
+  questionFlow?: string[]; faq?: any[]; notes?: string; rawNotes?: string; additionalContext?: string
+};
 
 /* --------------------------- utils/store -------------------------- */
 const LS_SETTINGS_KEY = 'voice:settings:backup';
@@ -147,14 +150,21 @@ function buildBusinessContextFromBot(bot: BotSummary | undefined | null): string
 }
 
 /* ---------------------- tiny UI atoms ---------------------- */
-function GreenButton({ children, onClick, disabled, className }:{ children: React.ReactNode; onClick?: ()=>void; disabled?: boolean; className?: string; }) {
+function GreenButton({ children, onClick, disabled, className }:{
+  children: React.ReactNode; onClick?: ()=>void; disabled?: boolean; className?: string;
+}) {
   const isDisabled = !!disabled;
   return (
     <button
       onClick={onClick}
       disabled={isDisabled}
       className={`inline-flex items-center justify-center gap-2 px-4 h-[42px] rounded-[14px] font-semibold select-none transition-colors disabled:cursor-not-allowed ${className||''}`}
-      style={{ background: isDisabled ? BTN_DISABLED : BTN_GREEN, color: '#ffffff', boxShadow: isDisabled ? 'none' : '0 1px 0 rgba(0,0,0,0.18)', filter: isDisabled ? 'saturate(85%) opacity(0.9)' : 'none' }}
+      style={{
+        background: isDisabled ? BTN_DISABLED : BTN_GREEN,
+        color: '#ffffff',
+        boxShadow: isDisabled ? 'none' : '0 1px 0 rgba(0,0,0,0.18)',
+        filter: isDisabled ? 'saturate(85%) opacity(0.9)' : 'none',
+      }}
       onMouseEnter={(e) => { if (!isDisabled) (e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER; }}
       onMouseLeave={(e) => { if (!isDisabled) (e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN; }}
     >
@@ -264,6 +274,28 @@ export default function VoiceAgentSection() {
     } catch (e:any) { showBanner({ kind:'error', message: e?.message || 'Server did not return JSON.' }); }
   }
 
+  function isValidSid(s: string) {
+    return /^AC[a-zA-Z0-9]{32}$/.test((s || '').trim());
+  }
+  function saveCreds() {
+    const sid = (twilio?.accountSid || '').trim();
+    const token = (twilio?.authToken || '').trim();
+
+    if (!isValidSid(sid)) {
+      showBanner({ kind: 'error', message: 'Invalid or missing Twilio Account SID.' });
+      return;
+    }
+    if (!token) {
+      showBanner({ kind: 'error', message: 'Missing Twilio Auth Token.' });
+      return;
+    }
+
+    const creds = { accountSid: sid, authToken: token };
+    setTwilio(creds);
+    saveTwilioCredsToStorage(creds);
+    showBanner({ kind: 'success', message: 'Twilio credentials saved.' });
+  }
+
   async function save() {
     setSaving(true); showBanner(null);
     try {
@@ -304,8 +336,11 @@ export default function VoiceAgentSection() {
   async function onAttachClick() {
     showBanner(null);
     if (!settings.fromE164) { showBanner({ kind:'error', message:'Select a phone number first.' }); return; }
+
     const creds = twilio || loadTwilioCredsFromStorage();
     if (!creds) { showBanner({ kind:'error', message:'No Twilio credentials found from import. Import a number with Twilio first.' }); return; }
+    if (!isValidSid(creds.accountSid)) { showBanner({ kind:'error', message:'Invalid or missing Twilio Account SID.' }); return; }
+
     try {
       setAttaching(true);
       const r = await fetch('/api/telephony/attach-number', {
@@ -377,6 +412,10 @@ export default function VoiceAgentSection() {
   }
 
   // UI
+  const numberOptions: Option[] = useMemo(
+    () => nums.map((n) => ({ value: n.e164 || '', label: (n.e164 ? n.e164 : n.id) + (n.label ? ` — ${n.label}` : '') })),
+    [nums],
+  );
   const maskedToken = twilio?.authToken ? `****${twilio.authToken.slice(-4)}` : '';
 
   return (
@@ -457,7 +496,7 @@ export default function VoiceAgentSection() {
                   <input
                     value={twilio?.accountSid || ''}
                     onChange={(e)=> setTwilio((p)=> ({ ...(p||{accountSid:'',authToken:''}), accountSid: e.target.value }))}
-                    placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                    placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
                     className="mt-1 w-full rounded-[12px] border border-white/20 bg-black/30 px-3 h-[38px] text-sm outline-none focus:border-[#6af7d1] text-white"
                   />
                 </label>
@@ -471,9 +510,7 @@ export default function VoiceAgentSection() {
                 </label>
               </div>
               <div className="flex flex-wrap gap-2">
-                <GreenButton onClick={()=> { if (twilio?.accountSid && twilio?.authToken) { saveTwilioCredsToStorage(twilio); showBanner({ kind:'success', message:'Twilio credentials saved.' }); } else { showBanner({ kind:'error', message:'Enter Account SID and Auth Token.' }); }}}>
-                  Save Twilio Credentials
-                </GreenButton>
+                <GreenButton onClick={saveCreds}>Save Twilio Credentials</GreenButton>
                 <GreenButton onClick={refreshNumbers}><RefreshCw className="w-4 h-4 text-white" /> Refresh Imported Numbers</GreenButton>
                 <GreenButton onClick={onAttachClick} disabled={!settings.fromE164 || attaching}>
                   <LinkIcon className="w-4 h-4 text-white" />
