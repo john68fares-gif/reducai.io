@@ -1,7 +1,7 @@
+// components/voice/VoiceAgentSection.tsx
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import Head from 'next/head';
 import {
   Phone as PhoneIcon,
   Save as SaveIcon,
@@ -36,30 +36,33 @@ type NumberItem = { id: string; e164?: string; label?: string; provider?: string
 type Option = { value: string; label: string };
 type Settings = {
   systemPrompt: string;
-  language: string;
-  ttsVoice: string;
-  fromE164: string;
-  assistantId?: string;
-  publicKey?: string;
+  language: string;      // e.g. "en-US"
+  ttsVoice: string;      // e.g. "Polly.Joanna" or "alice"
+  fromE164: string;      // selected imported number
+  assistantId?: string;  // optional for widget test
+  publicKey?: string;    // optional for widget test
 };
 type TwilioCreds = { accountSid: string; authToken: string } | null;
-
 type Banner = { kind: 'success' | 'error' | 'info'; message: string } | null;
 
 /* --------------------------- utils/store -------------------------- */
 const LS_SETTINGS_KEY = 'voice:settings:backup';
-const CHATBOTS_KEY = 'chatbots';                          // builder saves here
-const TWILIO_CREDS_KEYS = ['telephony:twilioCreds','twilio:lastCreds']; // reused creds from Phone Numbers page
+const CHATBOTS_KEY = 'chatbots'; // builder saves here
+const TWILIO_CREDS_KEYS = ['telephony:twilioCreds', 'twilio:lastCreds']; // compatibility
 
-async function getJSON<T=any>(url: string): Promise<T> {
+async function getJSON<T = any>(url: string): Promise<T> {
   const r = await fetch(url);
   const ct = r.headers.get('content-type') || '';
   if (!ct.includes('application/json')) throw new Error('Server did not return JSON.');
   const j = await r.json();
   return (j?.ok ? j.data : j) as T;
 }
-function saveLocalSettings(v: Partial<Settings>) { try { localStorage.setItem(LS_SETTINGS_KEY, JSON.stringify(v)); } catch {} }
-function loadLocalSettings(): Partial<Settings> | null { try { const raw = localStorage.getItem(LS_SETTINGS_KEY); return raw ? JSON.parse(raw) : null; } catch { return null; } }
+function saveLocalSettings(v: Partial<Settings>) {
+  try { localStorage.setItem(LS_SETTINGS_KEY, JSON.stringify(v)); } catch {}
+}
+function loadLocalSettings(): Partial<Settings> | null {
+  try { const raw = localStorage.getItem(LS_SETTINGS_KEY); return raw ? JSON.parse(raw) : null; } catch { return null; }
+}
 function loadTwilioCreds(): TwilioCreds {
   try {
     for (const k of TWILIO_CREDS_KEYS) {
@@ -78,6 +81,7 @@ function loadTwilioCreds(): TwilioCreds {
 function shapePromptForScheduling(raw: string, businessContext?: string) {
   const cleaned = (raw || '').trim();
   const extra = (businessContext || '').trim();
+
   return [
     `# Appointment Scheduling Agent Prompt`,
     ``,
@@ -121,15 +125,14 @@ function shapePromptForScheduling(raw: string, businessContext?: string) {
     ``,
     `## Call Management`,
     `- If call drops, call back if system allows. If human requested, offer callback and collect time.`,
-    extra ? `
-## Additional Business Context
-${extra}` : '',
+    extra ? `\n## Additional Business Context\n${extra}` : '',
     ``,
     `---`,
     `# Source Material (reference only — do not read verbatim)`,
     cleaned ? cleaned : `No additional raw notes provided.`,
-  ].filter(Boolean).join('
-');
+  ]
+    .filter(Boolean)
+    .join('\n'); // keep on one line to avoid unterminated string
 }
 
 /* --------- try to seed prompt from last chatbot (Builder) --------- */
@@ -155,8 +158,7 @@ function trySeedFromBuilder(): { prompt: string; language?: string } | null {
       Array.isArray(flow) && flow.length ? `Question Flow: ${flow.join(' | ')}` : '',
       Array.isArray(faq) && faq.length ? `FAQ: ${faq.map((f:any)=> typeof f==='string'? f : f?.q).filter(Boolean).join(' | ')}` : '',
       notes ? `Notes: ${notes}` : '',
-    ].filter(Boolean).join('
-');
+    ].filter(Boolean).join('\n');
 
     return { prompt: shapePromptForScheduling('', businessContext), language: lang };
   } catch {
@@ -199,8 +201,8 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-/* ----------------------------- page ----------------------------- */
-export default function VoiceAgentPage() {
+/* ----------------------------- component ----------------------------- */
+export default function VoiceAgentSection() {
   const [nums, setNums] = useState<NumberItem[]>([]);
   const [settings, setSettings] = useState<Settings>({
     systemPrompt: '',
@@ -283,7 +285,7 @@ export default function VoiceAgentPage() {
         // Server save not available, but we still persist locally
         showBanner({ kind:'info', message:'Saved locally. (Server save not available)' });
       }
-    } catch (e:any) {
+    } catch {
       showBanner({ kind:'info', message:'Saved locally. (Server save not available)' });
     } finally {
       saveLocalSettings(settings);
@@ -346,8 +348,7 @@ export default function VoiceAgentPage() {
           last?.industry ? `Industry: ${last.industry}` : '',
           last?.language ? `Language Pref: ${last.language}` : '',
           last?.notes ? `Notes: ${last.notes}` : '',
-        ].filter(Boolean).join('
-');
+        ].filter(Boolean).join('\n');
       }
     } catch {}
     setSettings((p)=>({ ...p, systemPrompt: shapePromptForScheduling(p.systemPrompt, extra) }));
@@ -377,7 +378,10 @@ export default function VoiceAgentPage() {
   }
 
   function mountWidget() {
-    if (!settings.assistantId || !settings.publicKey) { showBanner({ kind:'error', message:'Provide Assistant ID and Public Key first.' }); return; }
+    if (!settings.assistantId || !settings.publicKey) {
+      showBanner({ kind:'error', message:'Provide Assistant ID and Public Key first.' });
+      return;
+    }
     const scId = 'vapi-widget-script';
     if (!document.getElementById(scId)) {
       const sc = document.createElement('script');
@@ -397,137 +401,138 @@ export default function VoiceAgentPage() {
   }
 
   return (
-    <>
-      <Head><title>Voice Agent • reduc.ai</title></Head>
-      <main className="px-6 py-8" style={{ maxWidth: 980, margin:'0 auto' }}>
-        <div className="mb-6 flex items-center justify-between">
-          <div>
-            <h2 className="flex items-center gap-2 text-2xl font-semibold text-white">
-              <PhoneIcon className="h-6 w-6 text-[#6af7d1]" />
-              Voice Agent
-            </h2>
-            <div className="text-white/80 text-xs md:text-sm">Re-use imported Twilio creds, attach a number, test, and deploy.</div>
-          </div>
-          <div className="flex items-center gap-3">
-            <GreenButton onClick={createAgent} disabled={creating || !settings.systemPrompt}>
-              <Rocket className="w-4 h-4 text-white" />
-              {creating ? 'Creating…' : 'Create Agent'}
-            </GreenButton>
-            <GreenButton onClick={save} disabled={saving}>
-              <SaveIcon className="w-4 h-4 text-white" />
-              {saving ? 'Saving…' : 'Save'}
-            </GreenButton>
-          </div>
+    <section className="px-6 py-8" style={{ maxWidth: 980, margin:'0 auto' }}>
+      <div className="mb-6 flex items-center justify-between">
+        <div>
+          <h2 className="flex items-center gap-2 text-2xl font-semibold text-white">
+            <PhoneIcon className="h-6 w-6 text-[#6af7d1]" />
+            Voice Agent
+          </h2>
+          <div className="text-white/80 text-xs md:text-sm">Re-use imported Twilio creds, attach a number, test, and deploy.</div>
         </div>
+        <div className="flex items-center gap-3">
+          <GreenButton onClick={createAgent} disabled={creating || !settings.systemPrompt}>
+            <Rocket className="w-4 h-4 text-white" />
+            {creating ? 'Creating…' : 'Create Agent'}
+          </GreenButton>
+          <GreenButton onClick={save} disabled={saving}>
+            <SaveIcon className="w-4 h-4 text-white" />
+            {saving ? 'Saving…' : 'Save'}
+          </GreenButton>
+        </div>
+      </div>
 
-        <div className="relative p-6 md:p-8" style={{ ...FRAME, overflow:'visible' }}>
-          <div className="grid grid-cols-1 gap-6">
-            {/* Prompt */}
-            <Section title="Prompt (Scheduling Assistant)">
-              <div className="grid gap-3">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <label className="text-xs text-white/70">Language (BCP-47)
-                    <input
-                      value={settings.language}
-                      onChange={(e)=>setSettings({...settings, language: e.target.value})}
-                      placeholder="en-US"
-                      className="mt-1 w-full rounded-[12px] border border-white/20 bg-black/30 px-3 h-[38px] text-sm outline-none focus:border-[#6af7d1] text-white"
-                    />
-                  </label>
-                  <label className="text-xs text-white/70">TTS Voice
-                    <input
-                      value={settings.ttsVoice}
-                      onChange={(e)=>setSettings({...settings, ttsVoice: e.target.value})}
-                      placeholder='alice or Polly.Joanna'
-                      className="mt-1 w-full rounded-[12px] border border-white/20 bg-black/30 px-3 h-[38px] text-sm outline-none focus:border-[#6af7d1] text-white"
-                    />
-                  </label>
+      <div className="relative p-6 md:p-8" style={{ ...FRAME, overflow:'visible' }}>
+        <div className="grid grid-cols-1 gap-6">
+          {/* Prompt */}
+          <Section title="Prompt (Scheduling Assistant)">
+            <div className="grid gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <label className="text-xs text-white/70">Language (BCP-47)
+                  <input
+                    value={settings.language}
+                    onChange={(e)=>setSettings({...settings, language: e.target.value})}
+                    placeholder="en-US"
+                    className="mt-1 w-full rounded-[12px] border border-white/20 bg-black/30 px-3 h-[38px] text-sm outline-none focus:border-[#6af7d1] text-white"
+                  />
+                </label>
+                <label className="text-xs text-white/70">TTS Voice
+                  <input
+                    value={settings.ttsVoice}
+                    onChange={(e)=>setSettings({...settings, ttsVoice: e.target.value})}
+                    placeholder='alice or Polly.Joanna'
+                    className="mt-1 w-full rounded-[12px] border border-white/20 bg-black/30 px-3 h-[38px] text-sm outline-none focus:border-[#6af7d1] text-white"
+                  />
+                </label>
+              </div>
+              <textarea
+                rows={16}
+                value={settings.systemPrompt}
+                onChange={(e)=>setSettings({...settings, systemPrompt: e.target.value })}
+                placeholder="Paste your business notes or prompt. Click “Improve” to reshape into a production scheduling prompt."
+                className="w-full rounded-[14px] border border-white/20 bg-black/30 px-3 py-3 text-sm outline-none focus:border-[#6af7d1] text-white"
+              />
+              <div className="flex flex-wrap gap-2">
+                <GreenButton onClick={improvePrompt}><Wand2 className="w-4 h-4 text-white" /> Improve Prompt</GreenButton>
+                <GreenButton onClick={save}><SaveIcon className="w-4 h-4 text-white" /> Save</GreenButton>
+              </div>
+            </div>
+          </Section>
+
+          {/* Numbers + attach (auto creds reuse) */}
+          <Section title="Number (Imported with Twilio)">
+            <div className="grid gap-3">
+              <label className="text-xs text-white/70">From Number
+                <select
+                  value={settings.fromE164}
+                  onChange={(e)=>setSettings({...settings, fromE164: e.target.value})}
+                  className="mt-1 w-full rounded-[12px] border border-white/20 bg-black/30 px-3 h-[38px] text-sm outline-none focus:border-[#6af7d1] text-white"
+                >
+                  <option value="">{nums.length ? '— Choose —' : 'No numbers imported'}</option>
+                  {numberOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </label>
+
+              <div className="flex flex-wrap gap-2">
+                <GreenButton onClick={refreshNumbers}><RefreshCw className="w-4 h-4 text-white" /> Refresh Imported Numbers</GreenButton>
+                <GreenButton onClick={onAttachClick} disabled={!settings.fromE164 || attaching}>
+                  <LinkIcon className="w-4 h-4 text-white" />
+                  {attaching ? 'Attaching…' : 'Attach Number to Agent'}
+                </GreenButton>
+              </div>
+              <p className="text-xs text-white/60">
+                Uses your Twilio creds saved during import (never asks twice).
+              </p>
+            </div>
+          </Section>
+
+          {/* Quick tests */}
+          <Section title="Quick Tests">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <div className="text-sm text-white/90 mb-2 flex items-center gap-2">
+                  <Volume2 className="w-4 h-4" /> Audio Ping
                 </div>
-                <textarea
-                  rows={16}
-                  value={settings.systemPrompt}
-                  onChange={(e)=>setSettings({...settings, systemPrompt: e.target.value })}
-                  placeholder="Paste your business notes or prompt. Click “Improve” to reshape into a production scheduling prompt."
-                  className="w-full rounded-[14px] border border-white/20 bg-black/30 px-3 py-3 text-sm outline-none focus:border-[#6af7d1] text-white"
-                />
-                <div className="flex flex-wrap gap-2">
-                  <GreenButton onClick={improvePrompt}><Wand2 className="w-4 h-4 text-white" /> Improve Prompt</GreenButton>
+                <div className="flex gap-2">
+                  <GreenButton onClick={startTone}>Play</GreenButton>
+                  <GreenButton onClick={stopTone}><Square className="w-4 h-4" /> Stop</GreenButton>
+                </div>
+                <p className="text-xs text-white/60 mt-2">Simple tone to confirm output device. Stop is reliable even if the tab lost focus.</p>
+              </div>
+
+              <div>
+                <div className="text-sm text-white/90 mb-2 flex items-center gap-2">
+                  <WidgetIcon className="w-4 h-4" /> Browser Widget
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  <input
+                    value={settings.assistantId || ''}
+                    onChange={(e)=>setSettings({...settings, assistantId: e.target.value})}
+                    placeholder="assistant-id"
+                    className="w-full rounded-[12px] border border-white/20 bg-black/30 px-3 h-[38px] text-sm outline-none focus:border-[#6af7d1] text-white"
+                  />
+                  <input
+                    value={settings.publicKey || ''}
+                    onChange={(e)=>setSettings({...settings, publicKey: e.target.value})}
+                    placeholder="public-key"
+                    className="w-full rounded-[12px] border border-white/20 bg-black/30 px-3 h-[38px] text-sm outline-none focus:border-[#6af7d1] text-white"
+                  />
+                </div>
+                <div className="flex gap-2 mt-2">
+                  <GreenButton onClick={mountWidget}>Show Widget</GreenButton>
                   <GreenButton onClick={save}><SaveIcon className="w-4 h-4 text-white" /> Save</GreenButton>
                 </div>
+                <div id="widget-slot" className="mt-3" />
               </div>
-            </Section>
+            </div>
+          </Section>
+        </div>
 
-            {/* Numbers + attach (auto creds reuse) */}
-            <Section title="Number (Imported with Twilio)">
-              <div className="grid gap-3">
-                <label className="text-xs text-white/70">From Number
-                  <select
-                    value={settings.fromE164}
-                    onChange={(e)=>setSettings({...settings, fromE164: e.target.value})}
-                    className="mt-1 w-full rounded-[12px] border border-white/20 bg-black/30 px-3 h-[38px] text-sm outline-none focus:border-[#6af7d1] text-white"
-                  >
-                    <option value="">{nums.length ? '— Choose —' : 'No numbers imported'}</option>
-                    {numberOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
-                </label>
-
-                <div className="flex flex-wrap gap-2">
-                  <GreenButton onClick={refreshNumbers}><RefreshCw className="w-4 h-4 text-white" /> Refresh Imported Numbers</GreenButton>
-                  <GreenButton onClick={onAttachClick} disabled={!settings.fromE164 || attaching}>
-                    <LinkIcon className="w-4 h-4 text-white" />
-                    {attaching ? 'Attaching…' : 'Attach Number to Agent'}
-                  </GreenButton>
-                </div>
-                <p className="text-xs text-white/60">
-                  Uses your Twilio creds saved during import (never asks twice).
-                </p>
-              </div>
-            </Section>
-
-            {/* Quick tests */}
-            <Section title="Quick Tests">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <div className="text-sm text-white/90 mb-2 flex items-center gap-2">
-                    <Volume2 className="w-4 h-4" /> Audio Ping
-                  </div>
-                  <div className="flex gap-2">
-                    <GreenButton onClick={startTone}>Play</GreenButton>
-                    <GreenButton onClick={stopTone}><Square className="w-4 h-4" /> Stop</GreenButton>
-                  </div>
-                  <p className="text-xs text-white/60 mt-2">Simple tone to confirm output device. Stop is reliable even if the tab lost focus.</p>
-                </div>
-
-                <div>
-                  <div className="text-sm text-white/90 mb-2 flex items-center gap-2">
-                    <WidgetIcon className="w-4 h-4" /> Browser Widget
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                    <input
-                      value={settings.assistantId || ''}
-                      onChange={(e)=>setSettings({...settings, assistantId: e.target.value})}
-                      placeholder="assistant-id"
-                      className="w-full rounded-[12px] border border-white/20 bg-black/30 px-3 h-[38px] text-sm outline-none focus:border-[#6af7d1] text-white"
-                    />
-                    <input
-                      value={settings.publicKey || ''}
-                      onChange={(e)=>setSettings({...settings, publicKey: e.target.value})}
-                      placeholder="public-key"
-                      className="w-full rounded-[12px] border border-white/20 bg-black/30 px-3 h-[38px] text-sm outline-none focus:border-[#6af7d1] text-white"
-                    />
-                  </div>
-                  <div className="flex gap-2 mt-2">
-                    <GreenButton onClick={mountWidget}>Show Widget</GreenButton>
-                    <GreenButton onClick={save}><SaveIcon className="w-4 h-4 text-white" /> Save</GreenButton>
-                  </div>
-                  <div id="widget-slot" className="mt-3" />
-                </div>
-              </div>
-            </Section>
-          </div>
-
-          {banner && (
-            <div className="mt-6 rounded-[14px] px-4 py-3 text-sm" style={{ ...CARD,
+        {banner && (
+          <div
+            className="mt-6 rounded-[14px] px-4 py-3 text-sm"
+            style={{
+              ...CARD,
               border: banner.kind==='success' ? '1px solid rgba(16,185,129,0.35)'
                    : banner.kind==='error' ? '1px solid rgba(244,63,94,0.35)'
                    : '1px solid rgba(255,193,7,0.35)',
@@ -535,18 +540,12 @@ export default function VoiceAgentPage() {
                        : banner.kind==='error' ? 'rgba(244,63,94,0.10)'
                        : 'rgba(255,193,7,0.10)'
             }}>
-              <span className={banner.kind==='success' ? 'text-emerald-200' : banner.kind==='error' ? 'text-rose-200' : 'text-amber-200'}>
-                {banner.message}
-              </span>
-            </div>
-          )}
-        </div>
-      </main>
-
-      <style jsx global>{`
-        body { background:#0b0c10; color:#fff; }
-        select { background-color: rgba(0,0,0,.30); color: white; }
-      `}</style>
-    </>
+            <span className={banner.kind==='success' ? 'text-emerald-200' : banner.kind==='error' ? 'text-rose-200' : 'text-amber-200'}>
+              {banner.message}
+            </span>
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
