@@ -10,6 +10,7 @@ import {
   Link as LinkIcon,
   RefreshCw,
   Wand2,
+  ChevronDown,
   Volume2,
   Square,
   Globe as WidgetIcon,
@@ -44,10 +45,6 @@ type Settings = {
   publicKey?: string;
 };
 type TwilioCreds = { accountSid: string; authToken: string } | null;
-type BotSummary = {
-  id: string; name?: string; title?: string; language?: string; industry?: string;
-  prompt?: string; questionFlow?: string[]; faq?: any[]; notes?: string; rawNotes?: string; additionalContext?: string;
-};
 
 /* --------------------------- utils/store -------------------------- */
 const LS_SETTINGS_KEY = 'voice:settings:backup';
@@ -57,7 +54,7 @@ const TWILIO_CREDS_KEYS = ['telephony:twilioCreds','twilio:lastCreds']; // reuse
 async function getJSON<T=any>(url: string): Promise<T> {
   const r = await fetch(url);
   const ct = r.headers.get('content-type') || '';
-  if (!ct.includes('application/json')) throw new Error('Server did not return JSON.');
+  if (!ct.includes('application/json')) throw new Error('Non-JSON response');
   const j = await r.json();
   return j?.ok ? j.data : j;
 }
@@ -74,19 +71,6 @@ function loadTwilioCreds(): TwilioCreds {
     }
   } catch {}
   return null;
-}
-function saveTwilioCreds(creds: { accountSid: string; authToken: string }) {
-  try { localStorage.setItem('telephony:twilioCreds', JSON.stringify(creds)); } catch {}
-}
-
-/* ---------- SID helpers: sanitize on type, validate gently ---------- */
-function sanitizeSid(s: string) {
-  // strip non-alphanumerics and force uppercase
-  return (s || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
-}
-function isValidSid(s: string) {
-  const t = sanitizeSid(s);
-  return /^AC[A-Za-z0-9]{32}$/.test(t);
 }
 
 /* ---------------------- prompt shaper (client) -------------------- */
@@ -227,10 +211,6 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 /* ----------------------------- page ----------------------------- */
 export default function VoiceAgentPage() {
-  // builds (AI) selector
-  const [bots, setBots] = useState<BotSummary[]>([]);
-  const [selectedBotId, setSelectedBotId] = useState<string>('');
-
   const [nums, setNums] = useState<NumberItem[]>([]);
   const [settings, setSettings] = useState<Settings>({
     systemPrompt: '',
@@ -245,16 +225,12 @@ export default function VoiceAgentPage() {
   const [creating, setCreating] = useState(false);
   const [attaching, setAttaching] = useState(false);
 
-  // inline Twilio creds
-  const [twilioSid, setTwilioSid] = useState<string>('');
-  const [twilioToken, setTwilioToken] = useState<string>('');
-
   // audio tester (reliable stop)
   const audioCtxRef = useRef<AudioContext|null>(null);
   const oscRef = useRef<OscillatorNode|null>(null);
   const gainRef = useRef<GainNode|null>(null);
 
-  // load numbers, previous settings, builder prompt, builds, creds
+  // load numbers, previous settings, builder prompt
   useEffect(() => {
     (async () => {
       try {
@@ -264,49 +240,20 @@ export default function VoiceAgentPage() {
         } catch { setNums([]); }
         const local = loadLocalSettings();
         if (local) setSettings((p) => ({ ...p, ...local }));
-        // load chatbots (for build selector)
+        // seed prompt from Builder (Step 1 + 3)
         try {
           const raw = localStorage.getItem(CHATBOTS_KEY);
-          const arr: BotSummary[] = raw ? JSON.parse(raw) : [];
-          setBots(Array.isArray(arr) ? arr : []);
-          if (Array.isArray(arr) && arr.length && !selectedBotId) {
-            setSelectedBotId(arr[arr.length - 1].id);
-          }
-          // seed prompt from first bot only if none set locally
-          if (Array.isArray(arr) && arr[0]?.name && !local?.systemPrompt) {
+          const arr = raw ? JSON.parse(raw) : [];
+          if (Array.isArray(arr) && arr[0]?.name) {
             const seed = `Company: ${arr[0].name}\n\n${arr[0].prompt || ''}`.trim();
-            setSettings((p)=>({ ...p, systemPrompt: shapePromptForScheduling(seed, { org: arr[0].name }) }));
+            if (!local?.systemPrompt) {
+              setSettings((p)=>({ ...p, systemPrompt: shapePromptForScheduling(seed, { org: arr[0].name }) }));
+            }
           }
         } catch {}
-        // load Twilio creds (if previously saved)
-        const creds = loadTwilioCreds();
-        if (creds) { setTwilioSid(creds.accountSid || ''); setTwilioToken(creds.authToken || ''); }
       } catch {}
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // when a build is selected, seed prompt + language from it
-  useEffect(() => {
-    if (!selectedBotId) return;
-    const bot = bots.find(b => b.id === selectedBotId);
-    if (!bot) return;
-
-    const ctxParts = [
-      bot?.name || bot?.title ? `Business Name: ${bot?.name || bot?.title}` : '',
-      bot?.industry ? `Industry: ${bot.industry}` : '',
-      bot?.language ? `Language Pref: ${bot.language}` : '',
-      Array.isArray(bot?.questionFlow) && bot.questionFlow!.length ? `Question Flow: ${bot.questionFlow!.join(' | ')}` : '',
-      Array.isArray(bot?.faq) && bot.faq!.length ? `FAQ: ${bot.faq!.map((f:any)=> typeof f==='string'? f : f?.q).filter(Boolean).join(' | ')}` : '',
-      bot?.notes || bot?.rawNotes || bot?.additionalContext ? `Notes: ${bot?.notes || bot?.rawNotes || bot?.additionalContext}` : '',
-    ].filter(Boolean).join('\n');
-
-    setSettings((p)=>({
-      ...p,
-      systemPrompt: shapePromptForScheduling(ctxParts || '', { org: bot?.name || bot?.title || 'Company' }),
-      language: bot?.language || p.language
-    }));
-  }, [selectedBotId, bots]);
 
   // options
   const numberOptions: Option[] = useMemo(
@@ -320,17 +267,6 @@ export default function VoiceAgentPage() {
       setNums(Array.isArray(list) ? list : []);
       setMsg('Numbers refreshed.');
     } catch { setMsg('Could not refresh numbers (API).'); }
-  }
-
-  function onSaveTwilio() {
-    const sid = sanitizeSid(twilioSid);
-    const tok = (twilioToken || '').trim();
-    if (!isValidSid(sid)) { setMsg('Invalid or missing Twilio Account SID.'); return; }
-    if (!tok) { setMsg('Missing Twilio Auth Token.'); return; }
-    saveTwilioCreds({ accountSid: sid, authToken: tok });
-    setTwilioSid(sid); // reflect sanitized value
-    setTwilioToken(tok);
-    setMsg('Twilio credentials saved (local only).');
   }
 
   async function save() {
@@ -373,16 +309,9 @@ export default function VoiceAgentPage() {
 
   async function onAttachClick() {
     setMsg(null);
-    if (!settings.fromE164) { setMsg('Select a phone number first.'); return; }
-
-    // Prefer typed creds if valid, otherwise use saved creds.
-    const typed = { accountSid: sanitizeSid(twilioSid), authToken: (twilioToken || '').trim() };
-    const saved = loadTwilioCreds();
-    const creds = (isValidSid(typed.accountSid) && !!typed.authToken) ? typed : saved || null;
-
-    if (!creds) { setMsg('No Twilio credentials found. Enter and save them first.'); return; }
-    if (!isValidSid(creds.accountSid)) { setMsg('Invalid or missing Twilio Account SID.'); return; }
-
+    if (!settings.fromE164) { setMsg('Pick a number first.'); return; }
+    const creds = loadTwilioCreds();
+    if (!creds) { setMsg('No Twilio credentials found from import. Import a number with Twilio first.'); return; }
     try {
       setAttaching(true);
       const r = await fetch('/api/telephony/attach-number', {
@@ -443,39 +372,19 @@ export default function VoiceAgentPage() {
     }
   }
 
-  const sidLen = sanitizeSid(twilioSid).length;
-
   return (
     <>
       <Head><title>Voice Agent • reduc.ai</title></Head>
       <main className="px-6 py-8" style={{ maxWidth: 980, margin:'0 auto' }}>
-        <div className="mb-6 flex items-center justify-between gap-3 flex-wrap">
+        <div className="mb-6 flex items-center justify-between">
           <div>
             <h2 className="flex items-center gap-2 text-2xl font-semibold text-white">
               <PhoneIcon className="h-6 w-6 text-[#6af7d1]" />
               Voice Agent
             </h2>
-            <div className="text-white/80 text-xs md:text-sm">Choose a build (AI), shape the prompt, attach a number, test, and deploy.</div>
+            <div className="text-white/80 text-xs md:text-sm">Re-use imported Twilio creds, attach a number, test, and deploy.</div>
           </div>
-
           <div className="flex items-center gap-3">
-            {/* Build selector + create */}
-            <select
-              value={selectedBotId}
-              onChange={(e)=> setSelectedBotId(e.target.value)}
-              className="rounded-[12px] border border-white/20 bg-black/40 text-white h-[38px] px-3 text-sm"
-            >
-              <option value="">{bots.length ? '— Select a Build —' : 'No builds yet'}</option>
-              {bots.map(b => <option key={b.id} value={b.id}>{b.name || b.title || b.id}</option>)}
-            </select>
-            <a
-              href="/agents/create"
-              className="inline-flex items-center justify-center gap-2 px-4 h-[38px] rounded-[12px] text-sm"
-              style={{ background: BTN_GREEN, color:'#fff' }}
-              onMouseEnter={(e)=> (e.currentTarget as HTMLAnchorElement).style.background = BTN_GREEN_HOVER}
-              onMouseLeave={(e)=> (e.currentTarget as HTMLAnchorElement).style.background = BTN_GREEN}
-            >Create Agent</a>
-
             <GreenButton onClick={createAgent} disabled={creating || !settings.systemPrompt}>
               <Rocket className="w-4 h-4 text-white" />
               {creating ? 'Creating…' : 'Create Agent'}
@@ -524,7 +433,7 @@ export default function VoiceAgentPage() {
               </div>
             </Section>
 
-            {/* Numbers + attach (auto creds reuse) + inline creds */}
+            {/* Numbers + attach (auto creds reuse) */}
             <Section title="Number (Imported with Twilio)">
               <div className="grid gap-3">
                 <label className="text-xs text-white/70">From Number
@@ -538,31 +447,7 @@ export default function VoiceAgentPage() {
                   </select>
                 </label>
 
-                {/* Inline Twilio creds */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <label className="text-xs text-white/70">Twilio Account SID
-                    <input
-                      value={twilioSid}
-                      onChange={(e)=> setTwilioSid(sanitizeSid(e.target.value))}
-                      placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-                      className={`mt-1 w-full rounded-[12px] border px-3 h-[38px] text-sm outline-none focus:border-[#6af7d1] text-white ${
-                        isValidSid(twilioSid) || twilioSid.length===0 ? 'border-white/20 bg-black/30' : 'border-rose-400/60 bg-black/30'
-                      }`}
-                    />
-                    <span className="text-[10px] text-white/50">Length: {sidLen}/34</span>
-                  </label>
-                  <label className="text-xs text-white/70">Twilio Auth Token
-                    <input
-                      value={twilioToken}
-                      onChange={(e)=> setTwilioToken(e.target.value.trim())}
-                      placeholder="••••••••••••••••"
-                      className="mt-1 w-full rounded-[12px] border border-white/20 bg-black/30 px-3 h-[38px] text-sm outline-none focus:border-[#6af7d1] text-white"
-                    />
-                  </label>
-                </div>
-
                 <div className="flex flex-wrap gap-2">
-                  <GreenButton onClick={onSaveTwilio}>Save Twilio Credentials</GreenButton>
                   <GreenButton onClick={refreshNumbers}><RefreshCw className="w-4 h-4 text-white" /> Refresh Imported Numbers</GreenButton>
                   <GreenButton onClick={onAttachClick} disabled={!settings.fromE164 || attaching}>
                     <LinkIcon className="w-4 h-4 text-white" />
@@ -570,7 +455,7 @@ export default function VoiceAgentPage() {
                   </GreenButton>
                 </div>
                 <p className="text-xs text-white/60">
-                  Uses your Twilio creds saved during import (or the ones you enter here). Stored in your browser only.
+                  Uses your **Twilio credentials saved during import** (never asks twice). No server env vars needed.
                 </p>
               </div>
             </Section>
