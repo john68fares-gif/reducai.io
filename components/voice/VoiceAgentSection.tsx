@@ -75,8 +75,18 @@ function loadTwilioCreds(): TwilioCreds {
   } catch {}
   return null;
 }
-function saveTwilioCreds(creds: {accountSid:string; authToken:string}) {
+function saveTwilioCreds(creds: { accountSid: string; authToken: string }) {
   try { localStorage.setItem('telephony:twilioCreds', JSON.stringify(creds)); } catch {}
+}
+
+/* ---------- SID helpers: sanitize on type, validate gently ---------- */
+function sanitizeSid(s: string) {
+  // strip non-alphanumerics and force uppercase
+  return (s || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+}
+function isValidSid(s: string) {
+  const t = sanitizeSid(s);
+  return /^AC[A-Za-z0-9]{32}$/.test(t);
 }
 
 /* ---------------------- prompt shaper (client) -------------------- */
@@ -244,8 +254,6 @@ export default function VoiceAgentPage() {
   const oscRef = useRef<OscillatorNode|null>(null);
   const gainRef = useRef<GainNode|null>(null);
 
-  function isValidSid(s: string) { return /^AC[a-zA-Z0-9]{32}$/.test((s||'').trim()); }
-
   // load numbers, previous settings, builder prompt, builds, creds
   useEffect(() => {
     (async () => {
@@ -256,7 +264,7 @@ export default function VoiceAgentPage() {
         } catch { setNums([]); }
         const local = loadLocalSettings();
         if (local) setSettings((p) => ({ ...p, ...local }));
-        // seed prompt from Builder (Step 1 + 3) — if empty
+        // load chatbots (for build selector)
         try {
           const raw = localStorage.getItem(CHATBOTS_KEY);
           const arr: BotSummary[] = raw ? JSON.parse(raw) : [];
@@ -264,6 +272,7 @@ export default function VoiceAgentPage() {
           if (Array.isArray(arr) && arr.length && !selectedBotId) {
             setSelectedBotId(arr[arr.length - 1].id);
           }
+          // seed prompt from first bot only if none set locally
           if (Array.isArray(arr) && arr[0]?.name && !local?.systemPrompt) {
             const seed = `Company: ${arr[0].name}\n\n${arr[0].prompt || ''}`.trim();
             setSettings((p)=>({ ...p, systemPrompt: shapePromptForScheduling(seed, { org: arr[0].name }) }));
@@ -274,7 +283,7 @@ export default function VoiceAgentPage() {
         if (creds) { setTwilioSid(creds.accountSid || ''); setTwilioToken(creds.authToken || ''); }
       } catch {}
     })();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // when a build is selected, seed prompt + language from it
@@ -314,11 +323,13 @@ export default function VoiceAgentPage() {
   }
 
   function onSaveTwilio() {
-    const sid = twilioSid.trim();
-    const tok = twilioToken.trim();
+    const sid = sanitizeSid(twilioSid);
+    const tok = (twilioToken || '').trim();
     if (!isValidSid(sid)) { setMsg('Invalid or missing Twilio Account SID.'); return; }
     if (!tok) { setMsg('Missing Twilio Auth Token.'); return; }
     saveTwilioCreds({ accountSid: sid, authToken: tok });
+    setTwilioSid(sid); // reflect sanitized value
+    setTwilioToken(tok);
     setMsg('Twilio credentials saved (local only).');
   }
 
@@ -363,9 +374,15 @@ export default function VoiceAgentPage() {
   async function onAttachClick() {
     setMsg(null);
     if (!settings.fromE164) { setMsg('Select a phone number first.'); return; }
-    const creds = (twilioSid && twilioToken) ? { accountSid: twilioSid.trim(), authToken: twilioToken.trim() } : loadTwilioCreds();
-    if (!creds) { setMsg('No Twilio credentials found from import. Import a number with Twilio first.'); return; }
+
+    // Prefer typed creds if valid, otherwise use saved creds.
+    const typed = { accountSid: sanitizeSid(twilioSid), authToken: (twilioToken || '').trim() };
+    const saved = loadTwilioCreds();
+    const creds = (isValidSid(typed.accountSid) && !!typed.authToken) ? typed : saved || null;
+
+    if (!creds) { setMsg('No Twilio credentials found. Enter and save them first.'); return; }
     if (!isValidSid(creds.accountSid)) { setMsg('Invalid or missing Twilio Account SID.'); return; }
+
     try {
       setAttaching(true);
       const r = await fetch('/api/telephony/attach-number', {
@@ -426,6 +443,8 @@ export default function VoiceAgentPage() {
     }
   }
 
+  const sidLen = sanitizeSid(twilioSid).length;
+
   return (
     <>
       <Head><title>Voice Agent • reduc.ai</title></Head>
@@ -438,6 +457,7 @@ export default function VoiceAgentPage() {
             </h2>
             <div className="text-white/80 text-xs md:text-sm">Choose a build (AI), shape the prompt, attach a number, test, and deploy.</div>
           </div>
+
           <div className="flex items-center gap-3">
             {/* Build selector + create */}
             <select
@@ -518,20 +538,23 @@ export default function VoiceAgentPage() {
                   </select>
                 </label>
 
-                {/* Inline Twilio creds (optional) */}
+                {/* Inline Twilio creds */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <label className="text-xs text-white/70">Twilio Account SID
                     <input
                       value={twilioSid}
-                      onChange={(e)=> setTwilioSid(e.target.value)}
+                      onChange={(e)=> setTwilioSid(sanitizeSid(e.target.value))}
                       placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-                      className="mt-1 w-full rounded-[12px] border border-white/20 bg-black/30 px-3 h-[38px] text-sm outline-none focus:border-[#6af7d1] text-white"
+                      className={`mt-1 w-full rounded-[12px] border px-3 h-[38px] text-sm outline-none focus:border-[#6af7d1] text-white ${
+                        isValidSid(twilioSid) || twilioSid.length===0 ? 'border-white/20 bg-black/30' : 'border-rose-400/60 bg-black/30'
+                      }`}
                     />
+                    <span className="text-[10px] text-white/50">Length: {sidLen}/34</span>
                   </label>
                   <label className="text-xs text-white/70">Twilio Auth Token
                     <input
                       value={twilioToken}
-                      onChange={(e)=> setTwilioToken(e.target.value)}
+                      onChange={(e)=> setTwilioToken(e.target.value.trim())}
                       placeholder="••••••••••••••••"
                       className="mt-1 w-full rounded-[12px] border border-white/20 bg-black/30 px-3 h-[38px] text-sm outline-none focus:border-[#6af7d1] text-white"
                     />
