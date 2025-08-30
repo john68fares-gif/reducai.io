@@ -40,13 +40,16 @@ type Settings = {
   ttsVoice: string;
   fromE164: string;
 
-  // NEW voice & behavior config
+  // Voice & behavior config
   greeting?: string;
   speakingStyle?: 'conversational' | 'professional' | 'newscaster' | '';
   responseDelayMs?: number;   // 0..5000
   speakingRatePct?: number;   // 60..140
   pitchSemitones?: number;    // -6..+6
   bargeIn?: boolean;
+
+  // NEW: assistant id to actually connect the call after the greeting
+  assistantId?: string;
 };
 type TwilioCreds = { accountSid: string; authToken: string } | null;
 type BotSummary = {
@@ -84,15 +87,9 @@ function saveTwilioCreds(creds: { accountSid: string; authToken: string }) {
   try { localStorage.setItem('telephony:twilioCreds', JSON.stringify(creds)); } catch {}
 }
 
-/* ---------- SID helpers: sanitize on type, validate gently ---------- */
-function sanitizeSid(s: string) {
-  // strip non-alphanumerics and force uppercase
-  return (s || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
-}
-function isValidSid(s: string) {
-  const t = sanitizeSid(s);
-  return /^AC[A-Za-z0-9]{32}$/.test(t);
-}
+/* ---------- SID helpers ---------- */
+function sanitizeSid(s: string) { return (s || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase(); }
+function isValidSid(s: string) { return /^AC[A-Za-z0-9]{32}$/.test(sanitizeSid(s)); }
 
 /* ---------------------- prompt shaper (client) -------------------- */
 function shapePromptForScheduling(raw: string, opts?: { name?: string; org?: string; personaName?: string }) {
@@ -124,58 +121,31 @@ Start with: “Thank you for calling **${company}**. This is ${persona}, your sc
 If they immediately mention an appointment: “Happy to help. I’ll gather a few details to find the right appointment.”
 
 ### Appointment Type Determination
-1. Service: “What type of appointment are you looking to schedule today?”
-2. Provider: “Do you have a specific provider in mind, or should I look for first available?”
-3. New vs Returning: “Have you visited us before, or is this your first appointment?”
-4. Urgency: “Is this urgent or a routine visit?”
+1. Service
+2. Provider
+3. New vs Returning
+4. Urgency
 
 ### Scheduling Process
 1. Collect details
-   - New: “May I have your full name, date of birth, and a phone number?”
-   - Returning: “To pull up your record, your full name and date of birth?”
 2. Offer times
-   - “For [appointment type] with [provider], I have [date/time] or [date/time]. Do either work?”
-   - If none: “Would you consider a different provider or day?”
 3. Confirm
-   - “Great — I’ve reserved [type] with [provider] on [day], [date] at [time]. Does that work?”
 4. Prep instructions
-   - “Please arrive 15 minutes early and bring [required items].”
 
 ### Confirmation & Wrap-up
-- Summarize details and set expectations (duration, prep)
-- Offer a reminder: “Would you like a text or call reminder?”
-- Close: “Thanks for calling **${company}**. Anything else I can help with?”
+- Summarize, reminders, close.
 
 ## Response Guidelines
-- Be concise; ask **one question at a time**
-- Confirm dates/times/names explicitly
-- Use phonetic spelling when needed (“C-H-E-N, like Charlie-Hotel-Echo-November”)
-- Provide clear time estimates
+- One question at a time; confirm details.
 
 ## Scenario Handling
-### New Patients
-- Explain first-visit flow, arrive 20 minutes early
-- Collect contact & brief reason for visit
-- Request insurance card + photo ID
-- Set expectations for the first appointment
-
-### Urgent Requests
-- Brief symptoms to triage
-- True emergencies → advise immediate care
-- Same-day slots when possible; otherwise next urgent slot
-
-### Rescheduling
-- Confirm existing appt; offer 2–3 alternatives; move and confirm
-
-### Insurance & Payment
-- General info only; copay at service; self-pay available
+- New, Urgent, Rescheduling, Insurance & Payment
 
 ## Knowledge Base
 - Types, hours, prep, policies
 
 ## Call Management
 - “Checking availability — one moment.”
-- Handle one need at a time.
 ${clean(raw) ? `
 
 ---
@@ -221,7 +191,6 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 /* ----------------------------- page ----------------------------- */
 export default function VoiceAgentPage() {
-  // builds (AI) selector (not rendered; we only use it for prompt seeding)
   const [bots, setBots] = useState<BotSummary[]>([]);
   const [selectedBotId, setSelectedBotId] = useState<string>('');
 
@@ -232,13 +201,15 @@ export default function VoiceAgentPage() {
     ttsVoice: 'Polly.Joanna',
     fromE164: '',
 
-    // NEW defaults
+    // defaults
     greeting: 'Thank you for calling. How can I help today?',
     speakingStyle: 'professional',
     responseDelayMs: 300,
     speakingRatePct: 100,
     pitchSemitones: 0,
     bargeIn: true,
+
+    assistantId: '', // NEW
   });
   const [msg, setMsg] = useState<string|null>(null);
   const [saving, setSaving] = useState(false);
@@ -264,20 +235,16 @@ export default function VoiceAgentPage() {
         } catch { setNums([]); }
         const local = loadLocalSettings();
         if (local) setSettings((p) => ({ ...p, ...local }));
-        // chatbots (build selector + seed prompt if empty)
         try {
           const raw = localStorage.getItem(CHATBOTS_KEY);
           const arr: BotSummary[] = raw ? JSON.parse(raw) : [];
           setBots(Array.isArray(arr) ? arr : []);
-          if (Array.isArray(arr) && arr.length && !selectedBotId) {
-            setSelectedBotId(arr[arr.length - 1].id);
-          }
+          if (Array.isArray(arr) && arr.length && !selectedBotId) setSelectedBotId(arr[arr.length - 1].id);
           if (Array.isArray(arr) && arr[0]?.name && !(local && local.systemPrompt)) {
             const seed = `Company: ${arr[0].name}\n\n${arr[0].prompt || ''}`.trim();
             setSettings((p)=>({ ...p, systemPrompt: shapePromptForScheduling(seed, { org: arr[0].name }) }));
           }
         } catch {}
-        // saved Twilio creds
         const creds = loadTwilioCreds();
         if (creds) { setTwilioSid(creds.accountSid || ''); setTwilioToken(creds.authToken || ''); }
       } catch {}
@@ -285,12 +252,10 @@ export default function VoiceAgentPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // if a build is selected, seed prompt + language from it
   useEffect(() => {
     if (!selectedBotId) return;
     const bot = bots.find(b => b.id === selectedBotId);
     if (!bot) return;
-
     const ctxParts = [
       bot?.name || bot?.title ? `Business Name: ${bot?.name || bot?.title}` : '',
       bot?.industry ? `Industry: ${bot.industry}` : '',
@@ -307,7 +272,6 @@ export default function VoiceAgentPage() {
     }));
   }, [selectedBotId, bots]);
 
-  // number options
   const numberOptions: Option[] = useMemo(
     () => nums.map((n) => ({ value: n.e164 || '', label: (n.e164 ? n.e164 : n.id) + (n.label ? ` — ${n.label}` : '') })),
     [nums],
@@ -366,7 +330,7 @@ export default function VoiceAgentPage() {
       const j = await r.json();
       if (!j?.ok) throw new Error(j?.error || 'Create failed');
       setMsg(`Agent created${settings.fromE164 ? ` — live at ${settings.fromE164}` : ''}.`);
-    } catch (e:any) {
+    } catch {
       saveLocalSettings(settings);
       setMsg('Agent settings saved locally.');
     } finally { setCreating(false); }
@@ -376,7 +340,6 @@ export default function VoiceAgentPage() {
     setMsg(null);
     if (!settings.fromE164) { setMsg('Select a phone number first.'); return; }
 
-    // Prefer valid typed creds; else fall back to saved creds.
     const sidTyped = sanitizeSid(twilioSid);
     const tokTyped = (twilioToken || '').trim();
     const saved = loadTwilioCreds();
@@ -386,7 +349,6 @@ export default function VoiceAgentPage() {
     if (!isValidSid(useSid)) { setMsg('Invalid or missing Twilio Account SID.'); return; }
     if (!useTok) { setMsg('Missing Twilio Auth Token.'); return; }
 
-    // clamp config values
     const delayMs = Math.max(0, Math.min(5000, Number(settings.responseDelayMs ?? 0)));
     const rate    = Math.max(60, Math.min(140, Number(settings.speakingRatePct ?? 100)));
     const pitch   = Math.max(-6, Math.min(6, Number(settings.pitchSemitones ?? 0)));
@@ -396,27 +358,30 @@ export default function VoiceAgentPage() {
       const r = await fetch('/api/telephony/attach-number', {
         method:'POST',
         headers:{ 'Content-Type':'application/json' },
-        // IMPORTANT: flat fields + voice config
         body: JSON.stringify({
+          // creds
           accountSid: useSid,
           authToken: useTok,
           phoneNumber: settings.fromE164,
 
-          // NEW — config baked into the webhook URL
-          language: settings.language,                           // e.g., "en-US"
-          voice: settings.ttsVoice,                              // e.g., "Polly.Joanna" or "alice"
+          // assistant — THIS is what stops the “greet then hang up”
+          agentId: (settings.assistantId || '').trim(),
+
+          // voice config
+          language: settings.language,
+          voice: settings.ttsVoice,
           greeting: settings.greeting || 'Thank you for calling. How can I help today?',
-          style: settings.speakingStyle || 'professional',       // 'conversational' | 'professional' | 'newscaster' | ''
-          delayMs,                                               // 0..5000
-          rate,                                                  // 60..140
-          pitch,                                                 // -6..+6
-          bargeIn: !!settings.bargeIn,                           // boolean
+          style: settings.speakingStyle || 'professional', // 'conversational' | 'professional' | 'newscaster' | ''
+          delayMs,
+          rate,
+          pitch,
+          bargeIn: !!settings.bargeIn,
         }),
       });
       const j = await r.json();
       if (!j?.ok) throw new Error(j?.error || 'Attach failed');
       saveTwilioCreds({ accountSid: useSid, authToken: useTok });
-      setMsg(`Agent live at ${settings.fromE164} → ${j.data?.voiceUrl || ''}`);
+      setMsg(`Agent live at ${settings.fromE164}`);
     } catch (e:any) {
       setMsg(e?.message || 'Attach failed.');
     } finally {
@@ -436,7 +401,7 @@ export default function VoiceAgentPage() {
     const ctx = new AC();
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
-    gain.gain.value = 0.04; // quiet
+    gain.gain.value = 0.04;
     osc.type = 'sine';
     osc.frequency.value = 880;
     osc.connect(gain); gain.connect(ctx.destination);
@@ -461,7 +426,7 @@ export default function VoiceAgentPage() {
               <PhoneIcon className="h-6 w-6 text-[#6af7d1]" />
               Voice Agent
             </h2>
-            <div className="text-white/80 text-xs md:text-sm">No third-party voice SDKs here — just your number + Twilio webhooks.</div>
+            <div className="text-white/80 text-xs md:text-sm">No third-party browser widgets — just Twilio webhooks + your assistant.</div>
           </div>
           <div className="flex items-center gap-3">
             <GreenButton onClick={createAgent} disabled={creating || !settings.systemPrompt}>
@@ -499,7 +464,7 @@ export default function VoiceAgentPage() {
                   </label>
                 </div>
 
-                {/* NEW: Voice & behavior controls (kept inside the same card to preserve visuals) */}
+                {/* Voice & behavior controls */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <label className="text-xs text-white/70">Greeting (first sentence)
                     <input
@@ -591,6 +556,16 @@ export default function VoiceAgentPage() {
                   </select>
                 </label>
 
+                {/* NEW: Assistant ID */}
+                <label className="text-xs text-white/70">Assistant ID (to route the call)
+                  <input
+                    value={settings.assistantId || ''}
+                    onChange={(e)=>setSettings({...settings, assistantId: e.target.value.trim()})}
+                    placeholder="e.g. asst_123..."
+                    className="mt-1 w-full rounded-[12px] border border-white/20 bg-black/30 px-3 h-[38px] text-sm outline-none focus:border-[#6af7d1] text-white"
+                  />
+                </label>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <label className="text-xs text-white/70">Twilio Account SID
                     <input
@@ -622,12 +597,12 @@ export default function VoiceAgentPage() {
                   </GreenButton>
                 </div>
                 <p className="text-xs text-white/60">
-                  Uses your Twilio creds from above (stored in your browser only). No third-party SDK keys required.
+                  If a call greets then hangs up, set the Assistant ID here and make sure your server has <code>VAPI_API_KEY</code>.
                 </p>
               </div>
             </Section>
 
-            {/* Quick Tests (audio only) */}
+            {/* Quick Tests */}
             <Section title="Quick Tests">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
@@ -638,10 +613,10 @@ export default function VoiceAgentPage() {
                     <GreenButton onClick={startTone}>Play</GreenButton>
                     <GreenButton onClick={stopTone}><Square className="w-4 h-4" /> Stop</GreenButton>
                   </div>
-                  <p className="text-xs text-white/60 mt-2">Simple tone to confirm output device. Stop is reliable even if the tab lost focus.</p>
+                  <p className="text-xs text-white/60 mt-2">Simple tone to confirm output device.</p>
                 </div>
                 <div className="text-white/60 text-sm">
-                  No browser voice widget here (per your request). Calls will go through your Twilio webhook after you attach the number.
+                  Calls go through Twilio. No browser widget on this page.
                 </div>
               </div>
             </Section>
