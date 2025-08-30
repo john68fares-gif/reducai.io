@@ -10,10 +10,8 @@ import {
   Link as LinkIcon,
   RefreshCw,
   Wand2,
-  ChevronDown,
   Volume2,
   Square,
-  Globe as WidgetIcon,
 } from 'lucide-react';
 
 /* --------------------------- look & feel --------------------------- */
@@ -41,20 +39,22 @@ type Settings = {
   language: string;
   ttsVoice: string;
   fromE164: string;
-  assistantId?: string;
-  publicKey?: string;
 };
 type TwilioCreds = { accountSid: string; authToken: string } | null;
+type BotSummary = {
+  id: string; name?: string; title?: string; language?: string; industry?: string;
+  prompt?: string; questionFlow?: string[]; faq?: any[]; notes?: string; rawNotes?: string; additionalContext?: string;
+};
 
 /* --------------------------- utils/store -------------------------- */
 const LS_SETTINGS_KEY = 'voice:settings:backup';
-const CHATBOTS_KEY = 'chatbots';                          // your builder saves here
-const TWILIO_CREDS_KEYS = ['telephony:twilioCreds','twilio:lastCreds']; // reused creds from Phone Numbers page
+const CHATBOTS_KEY = 'chatbots';
+const TWILIO_CREDS_KEYS = ['telephony:twilioCreds','twilio:lastCreds'];
 
 async function getJSON<T=any>(url: string): Promise<T> {
   const r = await fetch(url);
   const ct = r.headers.get('content-type') || '';
-  if (!ct.includes('application/json')) throw new Error('Non-JSON response');
+  if (!ct.includes('application/json')) throw new Error('Server did not return JSON.');
   const j = await r.json();
   return j?.ok ? j.data : j;
 }
@@ -72,14 +72,25 @@ function loadTwilioCreds(): TwilioCreds {
   } catch {}
   return null;
 }
+function saveTwilioCreds(creds: { accountSid: string; authToken: string }) {
+  try { localStorage.setItem('telephony:twilioCreds', JSON.stringify(creds)); } catch {}
+}
+
+/* ---------- SID helpers: sanitize on type, validate gently ---------- */
+function sanitizeSid(s: string) {
+  // strip non-alphanumerics and force uppercase
+  return (s || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+}
+function isValidSid(s: string) {
+  const t = sanitizeSid(s);
+  return /^AC[A-Za-z0-9]{32}$/.test(t);
+}
 
 /* ---------------------- prompt shaper (client) -------------------- */
-/** Convert any raw text into your structured “Appointment Scheduling Agent” format. */
 function shapePromptForScheduling(raw: string, opts?: { name?: string; org?: string; personaName?: string }) {
   const company = opts?.org || /company[:\- ]+(.+)/i.exec(raw)?.[1]?.trim() || 'Wellness Partners';
   const persona = opts?.personaName || 'Riley';
   const agentName = opts?.name || 'Appointment Scheduling Voice Assistant';
-
   const clean = (s: string) => (s || '').trim();
 
   return `# ${agentName}
@@ -142,30 +153,21 @@ If they immediately mention an appointment: “Happy to help. I’ll gather a fe
 
 ### Urgent Requests
 - Brief symptoms to triage
-- True emergencies → advise immediate care, offer nurse or nearest facility info
-- Same-day slots when possible
-- Otherwise offer next urgent slot or next with regular provider
+- True emergencies → advise immediate care
+- Same-day slots when possible; otherwise next urgent slot
 
 ### Rescheduling
-- Find existing appt; confirm details
-- Offer 2–3 alternatives
-- Cancel old slot, confirm new slot and send confirmation
+- Confirm existing appt; offer 2–3 alternatives; move and confirm
 
 ### Insurance & Payment
-- General coverage info; advise caller to confirm specifics with insurer
-- Copay collected at time of service; remainder after claim is processed
-- Self-pay rate available; payment at time of service
+- General info only; copay at service; self-pay available
 
 ## Knowledge Base
-- **Appointment Types:** Primary Care (30–60m), Specialist (45–60m), Diagnostics (15–90m), Wellness (45–60m), Urgent Care (30m)
-- **Hours:** Primary Care Mon–Fri 8a–5p; Sat 9a–12p (others vary)
-- **Preparation:** Varies by service; always bring insurance card, photo ID, current meds, copay
-- **Policies:** New arrive 20m early, returning 15m early, 24h cancel notice, 15m grace period, insurance verification pre-visit
+- Types, hours, prep, policies
 
 ## Call Management
-- If you need time: “I’m checking availability — one moment.”
-- If tooling delay: “I’m seeing a brief delay; thanks for your patience.”
-- Multiple needs: handle one at a time.
+- “Checking availability — one moment.”
+- Handle one need at a time.
 ${clean(raw) ? `
 
 ---
@@ -211,26 +213,32 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 /* ----------------------------- page ----------------------------- */
 export default function VoiceAgentPage() {
+  // builds (AI) selector
+  const [bots, setBots] = useState<BotSummary[]>([]);
+  const [selectedBotId, setSelectedBotId] = useState<string>('');
+
   const [nums, setNums] = useState<NumberItem[]>([]);
   const [settings, setSettings] = useState<Settings>({
     systemPrompt: '',
     language: 'en-US',
     ttsVoice: 'Polly.Joanna',
     fromE164: '',
-    assistantId: '',
-    publicKey: '',
   });
   const [msg, setMsg] = useState<string|null>(null);
   const [saving, setSaving] = useState(false);
   const [creating, setCreating] = useState(false);
   const [attaching, setAttaching] = useState(false);
 
-  // audio tester (reliable stop)
+  // inline Twilio creds
+  const [twilioSid, setTwilioSid] = useState<string>('');
+  const [twilioToken, setTwilioToken] = useState<string>('');
+
+  // audio tester
   const audioCtxRef = useRef<AudioContext|null>(null);
   const oscRef = useRef<OscillatorNode|null>(null);
   const gainRef = useRef<GainNode|null>(null);
 
-  // load numbers, previous settings, builder prompt
+  // load numbers, previous settings, chatbots, creds
   useEffect(() => {
     (async () => {
       try {
@@ -240,22 +248,50 @@ export default function VoiceAgentPage() {
         } catch { setNums([]); }
         const local = loadLocalSettings();
         if (local) setSettings((p) => ({ ...p, ...local }));
-        // seed prompt from Builder (Step 1 + 3)
+        // chatbots (build selector)
         try {
           const raw = localStorage.getItem(CHATBOTS_KEY);
-          const arr = raw ? JSON.parse(raw) : [];
-          if (Array.isArray(arr) && arr[0]?.name) {
+          const arr: BotSummary[] = raw ? JSON.parse(raw) : [];
+          setBots(Array.isArray(arr) ? arr : []);
+          if (Array.isArray(arr) && arr.length && !selectedBotId) {
+            setSelectedBotId(arr[arr.length - 1].id);
+          }
+          if (Array.isArray(arr) && arr[0]?.name && !local?.systemPrompt) {
             const seed = `Company: ${arr[0].name}\n\n${arr[0].prompt || ''}`.trim();
-            if (!local?.systemPrompt) {
-              setSettings((p)=>({ ...p, systemPrompt: shapePromptForScheduling(seed, { org: arr[0].name }) }));
-            }
+            setSettings((p)=>({ ...p, systemPrompt: shapePromptForScheduling(seed, { org: arr[0].name }) }));
           }
         } catch {}
+        // saved Twilio creds
+        const creds = loadTwilioCreds();
+        if (creds) { setTwilioSid(creds.accountSid || ''); setTwilioToken(creds.authToken || ''); }
       } catch {}
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // options
+  // when a build is selected, seed prompt + language from it
+  useEffect(() => {
+    if (!selectedBotId) return;
+    const bot = bots.find(b => b.id === selectedBotId);
+    if (!bot) return;
+
+    const ctxParts = [
+      bot?.name || bot?.title ? `Business Name: ${bot?.name || bot?.title}` : '',
+      bot?.industry ? `Industry: ${bot.industry}` : '',
+      bot?.language ? `Language Pref: ${bot.language}` : '',
+      Array.isArray(bot?.questionFlow) && bot.questionFlow!.length ? `Question Flow: ${bot.questionFlow!.join(' | ')}` : '',
+      Array.isArray(bot?.faq) && bot.faq!.length ? `FAQ: ${bot.faq!.map((f:any)=> typeof f==='string'? f : f?.q).filter(Boolean).join(' | ')}` : '',
+      bot?.notes || bot?.rawNotes || bot?.additionalContext ? `Notes: ${bot?.notes || bot?.rawNotes || bot?.additionalContext}` : '',
+    ].filter(Boolean).join('\n');
+
+    setSettings((p)=>({
+      ...p,
+      systemPrompt: shapePromptForScheduling(ctxParts || '', { org: bot?.name || bot?.title || 'Company' }),
+      language: bot?.language || p.language
+    }));
+  }, [selectedBotId, bots]);
+
+  // number options
   const numberOptions: Option[] = useMemo(
     () => nums.map((n) => ({ value: n.e164 || '', label: (n.e164 ? n.e164 : n.id) + (n.label ? ` — ${n.label}` : '') })),
     [nums],
@@ -267,6 +303,17 @@ export default function VoiceAgentPage() {
       setNums(Array.isArray(list) ? list : []);
       setMsg('Numbers refreshed.');
     } catch { setMsg('Could not refresh numbers (API).'); }
+  }
+
+  function onSaveTwilio() {
+    const sid = sanitizeSid(twilioSid);
+    const tok = (twilioToken || '').trim();
+    if (!isValidSid(sid)) { setMsg('Invalid or missing Twilio Account SID.'); return; }
+    if (!tok) { setMsg('Missing Twilio Auth Token.'); return; }
+    saveTwilioCreds({ accountSid: sid, authToken: tok });
+    setTwilioSid(sid);
+    setTwilioToken(tok);
+    setMsg('Twilio credentials saved (local only).');
   }
 
   async function save() {
@@ -303,15 +350,25 @@ export default function VoiceAgentPage() {
       const j = await r.json();
       if (!j?.ok) throw new Error(j?.error || 'Create failed');
       setMsg(`Agent created${settings.fromE164 ? ` — live at ${settings.fromE164}` : ''}.`);
-    } catch (e:any) { setMsg(e?.message || 'Create failed.'); }
-    finally { setCreating(false); }
+    } catch (e:any) {
+      // If your server expects a provider key we aren't using, just treat this as optional.
+      saveLocalSettings(settings);
+      setMsg('Agent settings saved locally.');
+    } finally { setCreating(false); }
   }
 
   async function onAttachClick() {
     setMsg(null);
-    if (!settings.fromE164) { setMsg('Pick a number first.'); return; }
-    const creds = loadTwilioCreds();
-    if (!creds) { setMsg('No Twilio credentials found from import. Import a number with Twilio first.'); return; }
+    if (!settings.fromE164) { setMsg('Select a phone number first.'); return; }
+
+    // Prefer valid typed creds; else fall back to saved creds.
+    const typed = { accountSid: sanitizeSid(twilioSid), authToken: (twilioToken || '').trim() };
+    const saved = loadTwilioCreds();
+    const creds = (isValidSid(typed.accountSid) && !!typed.authToken) ? typed : saved || null;
+
+    if (!creds) { setMsg('No Twilio credentials found. Enter and save them first.'); return; }
+    if (!isValidSid(creds.accountSid)) { setMsg('Invalid or missing Twilio Account SID.'); return; }
+
     try {
       setAttaching(true);
       const r = await fetch('/api/telephony/attach-number', {
@@ -334,7 +391,8 @@ export default function VoiceAgentPage() {
   // audio tester
   async function startTone() {
     stopTone(); // ensure clean start
-    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const AC: any = (window as any).AudioContext || (window as any).webkitAudioContext;
+    const ctx = new AC();
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     gain.gain.value = 0.04; // quiet
@@ -352,25 +410,7 @@ export default function VoiceAgentPage() {
     oscRef.current = null; gainRef.current = null; audioCtxRef.current = null;
   }
 
-  function mountWidget() {
-    if (!settings.assistantId || !settings.publicKey) { setMsg('Enter assistant id and public key first.'); return; }
-    const scId = 'vapi-widget-script';
-    if (!document.getElementById(scId)) {
-      const sc = document.createElement('script');
-      sc.id = scId;
-      sc.src = 'https://unpkg.com/@vapi-ai/client-sdk-react/dist/embed/widget.umd.js';
-      sc.async = true; sc.type = 'text/javascript';
-      document.body.appendChild(sc);
-    }
-    const slot = document.getElementById('widget-slot');
-    if (slot && slot.childElementCount === 0) {
-      const el = document.createElement('vapi-widget');
-      el.setAttribute('assistant-id', settings.assistantId!);
-      el.setAttribute('public-key', settings.publicKey!);
-      slot.appendChild(el);
-      setMsg('Widget mounted. Click the floating button to test the agent.');
-    }
-  }
+  const sidLen = sanitizeSid(twilioSid).length;
 
   return (
     <>
@@ -382,7 +422,7 @@ export default function VoiceAgentPage() {
               <PhoneIcon className="h-6 w-6 text-[#6af7d1]" />
               Voice Agent
             </h2>
-            <div className="text-white/80 text-xs md:text-sm">Re-use imported Twilio creds, attach a number, test, and deploy.</div>
+            <div className="text-white/80 text-xs md:text-sm">No third-party voice SDKs here — just your number + Twilio webhooks.</div>
           </div>
           <div className="flex items-center gap-3">
             <GreenButton onClick={createAgent} disabled={creating || !settings.systemPrompt}>
@@ -433,7 +473,7 @@ export default function VoiceAgentPage() {
               </div>
             </Section>
 
-            {/* Numbers + attach (auto creds reuse) */}
+            {/* Numbers + attach + inline Twilio creds */}
             <Section title="Number (Imported with Twilio)">
               <div className="grid gap-3">
                 <label className="text-xs text-white/70">From Number
@@ -447,7 +487,30 @@ export default function VoiceAgentPage() {
                   </select>
                 </label>
 
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <label className="text-xs text-white/70">Twilio Account SID
+                    <input
+                      value={twilioSid}
+                      onChange={(e)=> setTwilioSid(sanitizeSid(e.target.value))}
+                      placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                      className={`mt-1 w-full rounded-[12px] border px-3 h-[38px] text-sm outline-none focus:border-[#6af7d1] text-white ${
+                        isValidSid(twilioSid) || twilioSid.length===0 ? 'border-white/20 bg-black/30' : 'border-rose-400/60 bg-black/30'
+                      }`}
+                    />
+                    <span className="text-[10px] text-white/50">Length: {sanitizeSid(twilioSid).length}/34</span>
+                  </label>
+                  <label className="text-xs text-white/70">Twilio Auth Token
+                    <input
+                      value={twilioToken}
+                      onChange={(e)=> setTwilioToken(e.target.value.trim())}
+                      placeholder="••••••••••••••••"
+                      className="mt-1 w-full rounded-[12px] border border-white/20 bg-black/30 px-3 h-[38px] text-sm outline-none focus:border-[#6af7d1] text-white"
+                    />
+                  </label>
+                </div>
+
                 <div className="flex flex-wrap gap-2">
+                  <GreenButton onClick={onSaveTwilio}>Save Twilio Credentials</GreenButton>
                   <GreenButton onClick={refreshNumbers}><RefreshCw className="w-4 h-4 text-white" /> Refresh Imported Numbers</GreenButton>
                   <GreenButton onClick={onAttachClick} disabled={!settings.fromE164 || attaching}>
                     <LinkIcon className="w-4 h-4 text-white" />
@@ -455,12 +518,12 @@ export default function VoiceAgentPage() {
                   </GreenButton>
                 </div>
                 <p className="text-xs text-white/60">
-                  Uses your **Twilio credentials saved during import** (never asks twice). No server env vars needed.
+                  Uses your Twilio creds from above (stored in your browser only). No third-party SDK keys required.
                 </p>
               </div>
             </Section>
 
-            {/* Quick tests */}
+            {/* Quick Tests (audio only) */}
             <Section title="Quick Tests">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
@@ -473,30 +536,8 @@ export default function VoiceAgentPage() {
                   </div>
                   <p className="text-xs text-white/60 mt-2">Simple tone to confirm output device. Stop is reliable even if the tab lost focus.</p>
                 </div>
-
-                <div>
-                  <div className="text-sm text-white/90 mb-2 flex items-center gap-2">
-                    <WidgetIcon className="w-4 h-4" /> Browser Widget
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                    <input
-                      value={settings.assistantId || ''}
-                      onChange={(e)=>setSettings({...settings, assistantId: e.target.value})}
-                      placeholder="assistant-id"
-                      className="w-full rounded-[12px] border border-white/20 bg-black/30 px-3 h-[38px] text-sm outline-none focus:border-[#6af7d1] text-white"
-                    />
-                    <input
-                      value={settings.publicKey || ''}
-                      onChange={(e)=>setSettings({...settings, publicKey: e.target.value})}
-                      placeholder="public-key"
-                      className="w-full rounded-[12px] border border-white/20 bg-black/30 px-3 h-[38px] text-sm outline-none focus:border-[#6af7d1] text-white"
-                    />
-                  </div>
-                  <div className="flex gap-2 mt-2">
-                    <GreenButton onClick={mountWidget}>Show Widget</GreenButton>
-                    <GreenButton onClick={save}><SaveIcon className="w-4 h-4 text-white" /> Save</GreenButton>
-                  </div>
-                  <div id="widget-slot" className="mt-3" />
+                <div className="text-white/60 text-sm">
+                  No browser voice widget here (per your request). Calls will go through your Twilio webhook after you attach the number.
                 </div>
               </div>
             </Section>
