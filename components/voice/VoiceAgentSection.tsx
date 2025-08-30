@@ -36,26 +36,19 @@ type NumberItem = { id: string; e164?: string; label?: string; provider?: string
 type Option = { value: string; label: string };
 type Settings = {
   systemPrompt: string;
-  language: string;
-  ttsVoice: string;
+  language: string;      // e.g. "en-US"
+  ttsVoice: string;      // e.g. "Polly.Joanna" or "alice"
   fromE164: string;
 
-  // Voice & behavior config
+  // Voice & behavior (sent to webhook)
   greeting?: string;
   speakingStyle?: 'conversational' | 'professional' | 'newscaster' | '';
   responseDelayMs?: number;   // 0..5000
   speakingRatePct?: number;   // 60..140
   pitchSemitones?: number;    // -6..+6
   bargeIn?: boolean;
-
-  // NEW: assistant id to actually connect the call after the greeting
-  assistantId?: string;
 };
 type TwilioCreds = { accountSid: string; authToken: string } | null;
-type BotSummary = {
-  id: string; name?: string; title?: string; language?: string; industry?: string;
-  prompt?: string; questionFlow?: string[]; faq?: any[]; notes?: string; rawNotes?: string; additionalContext?: string;
-};
 
 /* --------------------------- utils/store -------------------------- */
 const LS_SETTINGS_KEY = 'voice:settings:backup';
@@ -101,55 +94,20 @@ function shapePromptForScheduling(raw: string, opts?: { name?: string; org?: str
   return `# ${agentName}
 
 ## Identity & Purpose
-You are ${persona}, an appointment scheduling voice assistant for **${company}**, a multi-specialty health clinic. Your purpose is to efficiently schedule, confirm, reschedule, or cancel appointments while giving clear information and a smooth booking experience.
-
-## Voice & Persona
-### Personality
-- Friendly, organized, efficient
-- Patient with elderly or confused callers
-- Warm but professional; confident and competent
-
-### Speech Characteristics
-- Clear, concise, natural contractions
-- Measured pace when confirming dates/times
-- Natural fillers like “Let me check that for you” or “One moment while I look”
-- Pronounce provider names and medical terms clearly
+You are ${persona}, an appointment scheduling voice assistant for **${company}**.
 
 ## Conversation Flow
-### Introduction
-Start with: “Thank you for calling **${company}**. This is ${persona}, your scheduling assistant. How may I help you today?”
-If they immediately mention an appointment: “Happy to help. I’ll gather a few details to find the right appointment.”
+- Intro → Determine need → Schedule/Reschedule/Cancel → Confirm → Wrap.
 
-### Appointment Type Determination
-1. Service
-2. Provider
-3. New vs Returning
-4. Urgency
+## Guidelines
+- One question at a time; confirm dates/times/names.
 
-### Scheduling Process
-1. Collect details
-2. Offer times
-3. Confirm
-4. Prep instructions
-
-### Confirmation & Wrap-up
-- Summarize, reminders, close.
-
-## Response Guidelines
-- One question at a time; confirm details.
-
-## Scenario Handling
-- New, Urgent, Rescheduling, Insurance & Payment
-
-## Knowledge Base
-- Types, hours, prep, policies
-
-## Call Management
-- “Checking availability — one moment.”
+## Knowledge
+- Types, hours, prep, policies.
 ${clean(raw) ? `
 
 ---
-### Additional Business Context (from user notes)
+### Additional Business Context
 ${clean(raw)}
 ` : ''}`.trim();
 }
@@ -191,9 +149,6 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 /* ----------------------------- page ----------------------------- */
 export default function VoiceAgentPage() {
-  const [bots, setBots] = useState<BotSummary[]>([]);
-  const [selectedBotId, setSelectedBotId] = useState<string>('');
-
   const [nums, setNums] = useState<NumberItem[]>([]);
   const [settings, setSettings] = useState<Settings>({
     systemPrompt: '',
@@ -201,15 +156,12 @@ export default function VoiceAgentPage() {
     ttsVoice: 'Polly.Joanna',
     fromE164: '',
 
-    // defaults
     greeting: 'Thank you for calling. How can I help today?',
     speakingStyle: 'professional',
     responseDelayMs: 300,
     speakingRatePct: 100,
     pitchSemitones: 0,
     bargeIn: true,
-
-    assistantId: '', // NEW
   });
   const [msg, setMsg] = useState<string|null>(null);
   const [saving, setSaving] = useState(false);
@@ -225,7 +177,6 @@ export default function VoiceAgentPage() {
   const oscRef = useRef<OscillatorNode|null>(null);
   const gainRef = useRef<GainNode|null>(null);
 
-  // load numbers, previous settings, chatbots, creds
   useEffect(() => {
     (async () => {
       try {
@@ -235,42 +186,11 @@ export default function VoiceAgentPage() {
         } catch { setNums([]); }
         const local = loadLocalSettings();
         if (local) setSettings((p) => ({ ...p, ...local }));
-        try {
-          const raw = localStorage.getItem(CHATBOTS_KEY);
-          const arr: BotSummary[] = raw ? JSON.parse(raw) : [];
-          setBots(Array.isArray(arr) ? arr : []);
-          if (Array.isArray(arr) && arr.length && !selectedBotId) setSelectedBotId(arr[arr.length - 1].id);
-          if (Array.isArray(arr) && arr[0]?.name && !(local && local.systemPrompt)) {
-            const seed = `Company: ${arr[0].name}\n\n${arr[0].prompt || ''}`.trim();
-            setSettings((p)=>({ ...p, systemPrompt: shapePromptForScheduling(seed, { org: arr[0].name }) }));
-          }
-        } catch {}
         const creds = loadTwilioCreds();
         if (creds) { setTwilioSid(creds.accountSid || ''); setTwilioToken(creds.authToken || ''); }
       } catch {}
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  useEffect(() => {
-    if (!selectedBotId) return;
-    const bot = bots.find(b => b.id === selectedBotId);
-    if (!bot) return;
-    const ctxParts = [
-      bot?.name || bot?.title ? `Business Name: ${bot?.name || bot?.title}` : '',
-      bot?.industry ? `Industry: ${bot.industry}` : '',
-      bot?.language ? `Language Pref: ${bot.language}` : '',
-      Array.isArray(bot?.questionFlow) && bot.questionFlow!.length ? `Question Flow: ${bot.questionFlow!.join(' | ')}` : '',
-      Array.isArray(bot?.faq) && bot.faq!.length ? `FAQ: ${bot.faq!.map((f:any)=> typeof f==='string'? f : f?.q).filter(Boolean).join(' | ')}` : '',
-      bot?.notes || bot?.rawNotes || bot?.additionalContext ? `Notes: ${bot?.notes || bot?.rawNotes || bot?.additionalContext}` : '',
-    ].filter(Boolean).join('\n');
-
-    setSettings((p)=>({
-      ...p,
-      systemPrompt: shapePromptForScheduling(ctxParts || '', { org: bot?.name || bot?.title || 'Company' }),
-      language: bot?.language || p.language
-    }));
-  }, [selectedBotId, bots]);
 
   const numberOptions: Option[] = useMemo(
     () => nums.map((n) => ({ value: n.e164 || '', label: (n.e164 ? n.e164 : n.id) + (n.label ? ` — ${n.label}` : '') })),
@@ -359,19 +279,14 @@ export default function VoiceAgentPage() {
         method:'POST',
         headers:{ 'Content-Type':'application/json' },
         body: JSON.stringify({
-          // creds
           accountSid: useSid,
           authToken: useTok,
           phoneNumber: settings.fromE164,
-
-          // assistant — THIS is what stops the “greet then hang up”
-          agentId: (settings.assistantId || '').trim(),
-
-          // voice config
+          // voice config (no Vapi anywhere)
           language: settings.language,
           voice: settings.ttsVoice,
           greeting: settings.greeting || 'Thank you for calling. How can I help today?',
-          style: settings.speakingStyle || 'professional', // 'conversational' | 'professional' | 'newscaster' | ''
+          style: settings.speakingStyle || 'professional',
           delayMs,
           rate,
           pitch,
@@ -389,14 +304,9 @@ export default function VoiceAgentPage() {
     }
   }
 
-  function improvePrompt() {
-    setSettings((p)=>({ ...p, systemPrompt: shapePromptForScheduling(p.systemPrompt) }));
-    setMsg('Prompt re-shaped for voice scheduling.');
-  }
-
   // audio tester
   async function startTone() {
-    stopTone(); // ensure clean start
+    stopTone();
     const AC: any = (window as any).AudioContext || (window as any).webkitAudioContext;
     const ctx = new AC();
     const osc = ctx.createOscillator();
@@ -426,7 +336,7 @@ export default function VoiceAgentPage() {
               <PhoneIcon className="h-6 w-6 text-[#6af7d1]" />
               Voice Agent
             </h2>
-            <div className="text-white/80 text-xs md:text-sm">No third-party browser widgets — just Twilio webhooks + your assistant.</div>
+            <div className="text-white/80 text-xs md:text-sm">Calls are handled with plain Twilio webhooks—no external SDK.</div>
           </div>
           <div className="flex items-center gap-3">
             <GreenButton onClick={createAgent} disabled={creating || !settings.systemPrompt}>
@@ -525,18 +435,20 @@ export default function VoiceAgentPage() {
                     onChange={(e)=>setSettings({...settings, bargeIn: e.target.checked})}
                     className="h-[16px] w-[16px] accent-[#6af7d1]"
                   />
-                  Allow barge-in (caller can interrupt)
+                  Allow barge-in (best effort)
                 </label>
 
                 <textarea
                   rows={14}
                   value={settings.systemPrompt}
                   onChange={(e)=>setSettings({...settings, systemPrompt: e.target.value })}
-                  placeholder="Paste your business notes or prompt. Click “Improve” to reshape into a production scheduling prompt."
+                  placeholder="Paste business notes. “Improve” reshapes to a production scheduling prompt."
                   className="w-full rounded-[14px] border border-white/20 bg-black/30 px-3 py-3 text-sm outline-none focus:border-[#6af7d1] text-white"
                 />
                 <div className="flex flex-wrap gap-2">
-                  <GreenButton onClick={improvePrompt}><Wand2 className="w-4 h-4 text-white" /> Improve Prompt</GreenButton>
+                  <GreenButton onClick={()=>{ setSettings((p)=>({ ...p, systemPrompt: shapePromptForScheduling(p.systemPrompt) })); setMsg('Prompt re-shaped for voice scheduling.'); }}>
+                    <Wand2 className="w-4 h-4 text-white" /> Improve Prompt
+                  </GreenButton>
                   <GreenButton onClick={save}><SaveIcon className="w-4 h-4 text-white" /> Save</GreenButton>
                 </div>
               </div>
@@ -554,16 +466,6 @@ export default function VoiceAgentPage() {
                     <option value="">{nums.length ? '— Choose —' : 'No numbers imported'}</option>
                     {numberOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                   </select>
-                </label>
-
-                {/* NEW: Assistant ID */}
-                <label className="text-xs text-white/70">Assistant ID (to route the call)
-                  <input
-                    value={settings.assistantId || ''}
-                    onChange={(e)=>setSettings({...settings, assistantId: e.target.value.trim()})}
-                    placeholder="e.g. asst_123..."
-                    className="mt-1 w-full rounded-[12px] border border-white/20 bg-black/30 px-3 h-[38px] text-sm outline-none focus:border-[#6af7d1] text-white"
-                  />
                 </label>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -597,7 +499,7 @@ export default function VoiceAgentPage() {
                   </GreenButton>
                 </div>
                 <p className="text-xs text-white/60">
-                  If a call greets then hangs up, set the Assistant ID here and make sure your server has <code>VAPI_API_KEY</code>.
+                  Attaching updates the Twilio webhook to our <code>/api/voice/twilio/incoming</code> with your voice config.
                 </p>
               </div>
             </Section>
@@ -606,35 +508,4 @@ export default function VoiceAgentPage() {
             <Section title="Quick Tests">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <div className="text-sm text-white/90 mb-2 flex items-center gap-2">
-                    <Volume2 className="w-4 h-4" /> Audio Ping
-                  </div>
-                  <div className="flex gap-2">
-                    <GreenButton onClick={startTone}>Play</GreenButton>
-                    <GreenButton onClick={stopTone}><Square className="w-4 h-4" /> Stop</GreenButton>
-                  </div>
-                  <p className="text-xs text-white/60 mt-2">Simple tone to confirm output device.</p>
-                </div>
-                <div className="text-white/60 text-sm">
-                  Calls go through Twilio. No browser widget on this page.
-                </div>
-              </div>
-            </Section>
-          </div>
-
-          {msg && (
-            <div className="mt-6 rounded-[14px] px-4 py-3 text-sm"
-                 style={{ ...CARD, border: '1px solid rgba(255,193,7,0.35)', background: 'rgba(255,193,7,0.10)' }}>
-              <span className="text-amber-200">{msg}</span>
-            </div>
-          )}
-        </div>
-      </main>
-
-      <style jsx global>{`
-        body { background:#0b0c10; color:#fff; }
-        select { background-color: rgba(0,0,0,.30); color: white; }
-      `}</style>
-    </>
-  );
-}
+                  <div className="text-sm text-white/90 mb-2 flex items-cen
