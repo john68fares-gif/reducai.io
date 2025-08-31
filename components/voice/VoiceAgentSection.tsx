@@ -1,109 +1,85 @@
 // components/voice/VoiceAgentSection.tsx
 'use client';
 
-import React, { useState } from 'react';
-import Head from 'next/head';
-import {
-  Phone as PhoneIcon,
-} from 'lucide-react';
+import * as React from 'react';
+import dynamic from 'next/dynamic';
 
-// ↙️ import the steps WE ALREADY CREATED
-import StepV1Basics from '@/components/voice/steps/StepV1Basics';
-import StepV2Telephony from '@/components/voice/steps/StepV2Telephony';
-import StepV3Prompt from '@/components/voice/steps/StepV3Prompt';
-import StepV4Overview from '@/components/voice/steps/StepV4Overview';
+/**
+ * IMPORTANT:
+ * This assumes the step files are in the same folder:
+ *   components/voice/StepProgress.tsx
+ *   components/voice/Step1AIType.tsx
+ *   components/voice/Step2ModelSettings.tsx
+ *   components/voice/Step3PromptEditor.tsx
+ *   components/voice/Step4Overview.tsx
+ *
+ * If they are under a different folder, change the paths below.
+ */
 
-// If you prefer your existing StepProgress from the Builder,
-// swap the local StepProgressInline below with:
-// import StepProgress from '@/components/builder/StepProgress';
+// lazy to avoid SSR issues
+const StepProgress       = dynamic(() => import('./StepProgress'),       { ssr: false });
+const Step1AIType        = dynamic(() => import('./Step1AIType'),        { ssr: false });
+const Step2ModelSettings = dynamic(() => import('./Step2ModelSettings'), { ssr: false });
+const Step3PromptEditor  = dynamic(() => import('./Step3PromptEditor'),  { ssr: false });
+const Step4Overview      = dynamic(() => import('./Step4Overview'),      { ssr: false });
 
 type WizardStep = 1 | 2 | 3 | 4;
 
-/* --------------------------- look & feel (same vibe) --------------------------- */
-const FRAME: React.CSSProperties = {
-  background: 'rgba(13,15,17,0.95)',
-  border: '2px dashed rgba(106,247,209,0.30)',
-  boxShadow: '0 0 40px rgba(0,0,0,0.7)',
-  borderRadius: 30,
-};
-const CARD: React.CSSProperties = {
-  background: '#101314',
-  border: '1px solid rgba(255,255,255,0.30)',
-  borderRadius: 20,
-  boxShadow: 'inset 0 0 22px rgba(0,0,0,0.28), 0 10px 40px rgba(0,0,0,0.35)',
-};
+export default function VoiceAgentSection({
+  startAt = 1,
+  onExit,
+}: {
+  /** which step to start on (default 1) */
+  startAt?: WizardStep;
+  /** optional callback if your page wants to close the wizard */
+  onExit?: () => void;
+}) {
+  const [step, setStep] = React.useState<WizardStep>(startAt);
 
-/* --------------------------- tiny inline progress --------------------------- */
-function StepProgressInline({ current }:{ current: WizardStep }) {
-  const steps: { n: WizardStep; label: string }[] = [
-    { n: 1, label: 'Basics' },
-    { n: 2, label: 'Telephony' },
-    { n: 3, label: 'Prompt' },
-    { n: 4, label: 'Overview' },
-  ];
   return (
-    <div className="mb-6 grid grid-cols-4 gap-2">
-      {steps.map(s => (
-        <div
-          key={s.n}
-          className="flex items-center justify-center rounded-xl px-3 py-2 text-sm"
-          style={{
-            background: s.n === current ? 'rgba(106,247,209,0.15)' : 'rgba(255,255,255,0.06)',
-            border: '1px solid rgba(255,255,255,0.12)',
+    <div className="w-full max-w-7xl mx-auto px-6 md:px-8 pt-6 pb-20 text-white">
+      <div className="mb-6 flex items-center justify-between">
+        <h1 className="text-2xl md:text-3xl font-semibold">Create Voice Agent</h1>
+        <div className="text-xs px-3 py-1 rounded-2xl border border-white/15 bg-white/5">
+          Step {step} of 4
+        </div>
+      </div>
+
+      {/* progress */}
+      <div className="mb-6">
+        <StepProgress current={step} />
+      </div>
+
+      {/* steps */}
+      {step === 1 && (
+        <Step1AIType
+          onNext={() => setStep(2)}
+        />
+      )}
+
+      {step === 2 && (
+        <Step2ModelSettings
+          onBack={() => setStep(1)}
+          onNext={() => setStep(3)}
+        />
+      )}
+
+      {step === 3 && (
+        <Step3PromptEditor
+          onBack={() => setStep(2)}
+          onNext={() => setStep(4)}
+        />
+      )}
+
+      {step === 4 && (
+        <Step4Overview
+          onBack={() => setStep(3)}
+          onFinish={() => {
+            // if the parent page wants to hide the wizard after finishing:
+            onExit?.();
           }}
-        >
-          <span className={s.n === current ? 'text-[#6af7d1]' : 'text-white/70'}>{s.label}</span>
-        </div>
-      ))}
+        />
+      )}
     </div>
-  );
-}
-
-/* ----------------------------- main section ----------------------------- */
-export default function VoiceAgentSection() {
-  const [step, setStep] = useState<WizardStep>(1);
-
-  const go    = (n: WizardStep) => setStep(n);
-  const next  = () => setStep((s) => Math.min(4, (s + 1) as WizardStep));
-  const back  = () => setStep((s) => Math.max(1, (s - 1) as WizardStep));
-
-  return (
-    <>
-      <Head><title>Voice Agent • reduc.ai</title></Head>
-
-      <main className="px-6 py-8" style={{ maxWidth: 980, margin: '0 auto' }}>
-        {/* Header */}
-        <div className="mb-6 flex items-center justify-between">
-          <div>
-            <h2 className="flex items-center gap-2 text-2xl font-semibold text-white">
-              <PhoneIcon className="h-6 w-6 text-[#6af7d1]" />
-              Voice Agent
-            </h2>
-            <div className="text-white/80 text-xs md:text-sm">
-              Create a voice agent in steps. No third-party voice SDKs — just your Twilio webhook.
-            </div>
-          </div>
-        </div>
-
-        {/* Body frame */}
-        <div className="relative p-6 md:p-8" style={{ ...FRAME, overflow: 'visible' }}>
-          <StepProgressInline current={step} />
-
-          <div className="grid grid-cols-1 gap-6" style={CARD}>
-            <div className="p-5">
-              {step === 1 && <StepV1Basics onNext={next} />}
-              {step === 2 && <StepV2Telephony onBack={back} onNext={next} />}
-              {step === 3 && <StepV3Prompt onBack={back} onNext={next} />}
-              {step === 4 && <StepV4Overview onBack={back} />}
-            </div>
-          </div>
-        </div>
-      </main>
-
-      <style jsx global>{`
-        body { background:#0b0c10; color:#fff; }
-        select { background-color: rgba(0,0,0,.30); color: white; }
-      `}</style>
-    </>
   );
 }
