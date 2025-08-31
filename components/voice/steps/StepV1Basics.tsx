@@ -10,6 +10,7 @@ const CARD_STYLE: React.CSSProperties = {
   boxShadow: 'inset 0 0 22px rgba(0,0,0,0.28), 0 0 20px rgba(106,247,209,0.06)',
   borderRadius: 28,
 };
+
 const BTN_GREEN = '#59d9b3';
 const BTN_GREEN_HOVER = '#54cfa9';
 const BTN_DISABLED = '#2e6f63';
@@ -32,7 +33,7 @@ export default function StepV1Basics({ onNext }: { onNext?: () => void }) {
   const [name, setName] = useState('');
   const [industry, setIndustry] = useState('');
   const [langCode, setLangCode] = useState<string>('en');
-  const [accentIso2, setAccentIso2] = useState<string>('US'); // display upper; persist lower as accent2
+  const [accentIso2, setAccentIso2] = useState<string>('US');
 
   useEffect(() => {
     try {
@@ -64,7 +65,7 @@ export default function StepV1Basics({ onNext }: { onNext?: () => void }) {
   const persistAndNext = useCallback(() => {
     const iso2Upper = accentIso2.toUpperCase();
     const iso2Lower = accentIso2.toLowerCase();
-    const locale = `${langCode}-${iso2Upper}`; // e.g., en-US
+    const locale = `${langCode}-${iso2Upper}`;
 
     try {
       localStorage.setItem(
@@ -74,10 +75,10 @@ export default function StepV1Basics({ onNext }: { onNext?: () => void }) {
           industry,
           languageName: LANGUAGES.find(l => l.code === langCode)?.name || 'English',
           languageCode: langCode,
-          language: locale,   // canonical
-          dialect: locale,    // alias for compatibility
+          language: locale,   // canonical (e.g., en-US)
+          dialect: locale,
           countryIso2: iso2Upper,
-          accent2: iso2Lower, // <- what you asked to store
+          accent2: iso2Lower, // store two-letter lower as requested
         }),
       );
     } catch {}
@@ -93,7 +94,7 @@ export default function StepV1Basics({ onNext }: { onNext?: () => void }) {
 
   return (
     <section className="w-full" onKeyDown={onKeyDown}>
-      {/* Header (matches Builder) */}
+      {/* Header like Builder */}
       <div className="mb-8">
         <div
           className="inline-flex items-center gap-2 text-xs tracking-wide px-3 py-1.5 rounded-[20px] border"
@@ -106,8 +107,8 @@ export default function StepV1Basics({ onNext }: { onNext?: () => void }) {
         <p className="text-white/70 mt-1">Name it, set the industry, and choose how it speaks.</p>
       </div>
 
-      {/* Form Card — same width/placements as the Builder screen you showed */}
-      <section className="relative p-6 sm:p-8" style={CARD_STYLE}>
+      {/* Wider form box (same width feel as Builder) */}
+      <section className="relative p-6 sm:p-8 max-w-[1120px] mx-auto" style={CARD_STYLE}>
         <div
           aria-hidden
           className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
@@ -141,7 +142,7 @@ export default function StepV1Basics({ onNext }: { onNext?: () => void }) {
             error={errors.language}
           />
 
-          {/* Accent/Dialect (right) — CountryDialSelect with large size to match input height */}
+          {/* Accent (right) — uses same height/rounding/border as inputs */}
           <div>
             <label className="block mb-2 text-[13px] font-medium text-white/85 tracking-wide">
               Dialect / Accent * <span className="text-white/50">(choose country)</span>
@@ -149,10 +150,7 @@ export default function StepV1Basics({ onNext }: { onNext?: () => void }) {
             <CountryDialSelect
               value={accentIso2}
               onChange={(iso2) => setAccentIso2(iso2.toUpperCase())}
-              label=""
               id="accent-country"
-              size="lg"                           // <-- matches input height
-              buttonClassName="bg-[#101314] border-[#13312b] focus:border-[#00ffc2]" // match Field skin
             />
             {errors.accent && <div className="mt-1 text-xs text-[rgba(255,138,138,0.95)]">{errors.accent}</div>}
           </div>
