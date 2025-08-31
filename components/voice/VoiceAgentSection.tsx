@@ -1,17 +1,7 @@
-// components/voice/VoiceAgentSection.tsx
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Phone as PhoneIcon,
-  Save as SaveIcon,
-  Rocket,
-  Link as LinkIcon,
-  RefreshCw,
-  Wand2,
-  Volume2,
-  Square,
-} from 'lucide-react';
+import { Phone as PhoneIcon, Save as SaveIcon, Rocket, Link as LinkIcon, RefreshCw, Wand2, Volume2, Square } from 'lucide-react';
 
 /* --------------------------- look & feel --------------------------- */
 const FRAME: React.CSSProperties = {
@@ -33,18 +23,30 @@ const BTN_DISABLED = '#2e6f63';
 /* ----------------------------- types ------------------------------ */
 type NumberItem = { id: string; e164?: string; label?: string; provider?: string; status?: string };
 type Option = { value: string; label: string };
+type BotSummary = {
+  id: string;
+  name?: string;
+  title?: string;
+  language?: string;
+  prompt?: string;
+  rawNotes?: string;
+};
 type Settings = {
   systemPrompt: string;
-  language: string;      // e.g. "en-US"
-  ttsVoice: string;      // e.g. "Polly.Joanna" or "alice"
+  language: string;
+  ttsVoice: string;
   fromE164: string;
 
-  // Voice & behavior (sent to webhook)
+  // Builder linkage
+  botId?: string;
+  brandName?: string;
+
+  // Voice & behavior
   greeting?: string;
   speakingStyle?: 'conversational' | 'professional' | 'newscaster' | '';
-  responseDelayMs?: number;   // 0..5000
-  speakingRatePct?: number;   // 60..140
-  pitchSemitones?: number;    // -6..+6
+  responseDelayMs?: number;
+  speakingRatePct?: number;
+  pitchSemitones?: number;
   bargeIn?: boolean;
 };
 type TwilioCreds = { accountSid: string; authToken: string } | null;
@@ -67,10 +69,9 @@ function loadTwilioCreds(): TwilioCreds {
   try {
     for (const k of TWILIO_CREDS_KEYS) {
       const raw = localStorage.getItem(k);
-      if (raw) {
-        const j = JSON.parse(raw);
-        if (j?.accountSid && j?.authToken) return { accountSid: j.accountSid, authToken: j.authToken };
-      }
+      if (!raw) continue;
+      const j = JSON.parse(raw);
+      if (j?.accountSid && j?.authToken) return { accountSid: j.accountSid, authToken: j.authToken };
     }
   } catch {}
   return null;
@@ -78,44 +79,33 @@ function loadTwilioCreds(): TwilioCreds {
 function saveTwilioCreds(creds: { accountSid: string; authToken: string }) {
   try { localStorage.setItem('telephony:twilioCreds', JSON.stringify(creds)); } catch {}
 }
-
-/* ---------- SID helpers ---------- */
 function sanitizeSid(s: string) { return (s || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase(); }
 function isValidSid(s: string) { return /^AC[A-Za-z0-9]{32}$/.test(sanitizeSid(s)); }
 
-/* ---------------------- prompt shaper (client) -------------------- */
-function shapePromptForScheduling(raw: string, opts?: { name?: string; org?: string; personaName?: string }) {
-  const company = opts?.org || 'Wellness Partners';
-  const persona = opts?.personaName || 'Riley';
-  const agentName = opts?.name || 'Appointment Scheduling Voice Assistant';
-  const clean = (s: string) => (s || '').trim();
+/* ---------------------- prompt shaper ---------------------- */
+function shapePromptForScheduling(raw: string, org?: string) {
+  const brand = org || 'Your Business';
+  const base =
+`# Appointment Scheduling Voice Assistant
 
-  const lines: string[] = [];
-  lines.push(`# ${agentName}`);
-  lines.push('');
-  lines.push('## Identity & Purpose');
-  lines.push(`You are ${persona}, an appointment scheduling voice assistant for **${company}**.`);
-  lines.push('');
-  lines.push('## Conversation Flow');
-  lines.push('- Intro → Determine need → Schedule/Reschedule/Cancel → Confirm → Wrap.');
-  lines.push('');
-  lines.push('## Guidelines');
-  lines.push('- One question at a time; confirm dates/times/names.');
-  lines.push('');
-  lines.push('## Knowledge');
-  lines.push('- Types, hours, prep, policies.');
+## Identity & Purpose
+You are an appointment scheduling voice assistant for **${brand}**.
 
-  const cleaned = clean(raw);
-  if (cleaned) {
-    lines.push('');
-    lines.push('---');
-    lines.push('### Additional Business Context');
-    lines.push(cleaned);
-  }
-  return lines.join('\n');
+## Conversation Flow
+- Intro → Determine need → Schedule/Reschedule/Cancel → Confirm → Wrap.
+
+## Guidelines
+- One question at a time; confirm dates/times/names.
+- Be warm, concise, and professional.
+
+## Knowledge
+- Appointment types, hours, preparation, policies.
+`;
+  const extra = (raw || '').trim();
+  return extra ? `${base}\n---\n### Additional Context\n${extra}` : base;
 }
 
-/* ---------------------- tiny UI atoms ---------------------- */
+/* ---------------------- tiny atoms ---------------------- */
 function GreenButton({ children, onClick, disabled, className }:{
   children: React.ReactNode; onClick?: ()=>void; disabled?: boolean; className?: string;
 }) {
@@ -138,7 +128,7 @@ function GreenButton({ children, onClick, disabled, className }:{
     </button>
   );
 }
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div style={CARD} className="p-5">
       <div className="mb-3 font-semibold text-white flex items-center gap-2">
@@ -152,12 +142,17 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 /* ----------------------------- component ----------------------------- */
 export default function VoiceAgentSection() {
+  const [bots, setBots] = useState<BotSummary[]>([]);
   const [nums, setNums] = useState<NumberItem[]>([]);
   const [settings, setSettings] = useState<Settings>({
     systemPrompt: '',
     language: 'en-US',
     ttsVoice: 'Polly.Joanna',
     fromE164: '',
+
+    botId: '',
+    brandName: '',
+
     greeting: 'Thank you for calling. How can I help today?',
     speakingStyle: 'professional',
     responseDelayMs: 300,
@@ -170,11 +165,11 @@ export default function VoiceAgentSection() {
   const [creating, setCreating] = useState(false);
   const [attaching, setAttaching] = useState(false);
 
-  // inline Twilio creds
+  // Twilio creds inline
   const [twilioSid, setTwilioSid] = useState<string>('');
   const [twilioToken, setTwilioToken] = useState<string>('');
 
-  // audio tester
+  // Audio ping
   const audioCtxRef = useRef<AudioContext|null>(null);
   const oscRef = useRef<OscillatorNode|null>(null);
   const gainRef = useRef<GainNode|null>(null);
@@ -182,31 +177,43 @@ export default function VoiceAgentSection() {
   useEffect(() => {
     (async () => {
       try {
-        // numbers
-        try {
-          const list = await getJSON<NumberItem[]>('/api/telephony/phone-numbers');
-          setNums(Array.isArray(list) ? list : []);
-        } catch { setNums([]); }
-        // settings
+        const list = await getJSON<NumberItem[]>('/api/telephony/phone-numbers').catch(()=>[]);
+        setNums(Array.isArray(list) ? list : []);
         const local = loadLocalSettings();
-        if (local) setSettings((p) => ({ ...p, ...local }));
-        // creds
+        if (local) setSettings((p)=>({ ...p, ...local }));
+
+        // chatbots from Builder
+        try {
+          const raw = localStorage.getItem(CHATBOTS_KEY);
+          const arr: BotSummary[] = raw ? JSON.parse(raw) : [];
+          setBots(Array.isArray(arr) ? arr : []);
+          if (arr.length && !local?.botId) {
+            const last = arr[arr.length-1];
+            seedFromBot(last);
+          }
+        } catch {}
+
         const creds = loadTwilioCreds();
-        if (creds) { setTwilioSid(creds.accountSid || ''); setTwilioToken(creds.authToken || ''); }
-        // seed prompt (simple)
-        const raw = localStorage.getItem(CHATBOTS_KEY);
-        if (raw) {
-          try {
-            const arr = JSON.parse(raw) as any[];
-            if (Array.isArray(arr) && arr[0]?.name && !(local && local.systemPrompt)) {
-              const seed = `Company: ${arr[0].name}\n\n${arr[0].prompt || ''}`.trim();
-              setSettings((p)=>({ ...p, systemPrompt: shapePromptForScheduling(seed, { org: arr[0].name }) }));
-            }
-          } catch {}
-        }
+        if (creds) { setTwilioSid(creds.accountSid); setTwilioToken(creds.authToken); }
       } catch {}
     })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  function seedFromBot(bot?: BotSummary) {
+    if (!bot) return;
+    const brand = bot.name || bot.title || 'Your Business';
+    const lang = bot.language || settings.language;
+    const seed = (bot.prompt || bot.rawNotes || '').trim();
+    setSettings(p => ({
+      ...p,
+      botId: bot.id,
+      brandName: brand,
+      language: lang,
+      greeting: `Thank you for calling ${brand}. How can I help today?`,
+      systemPrompt: shapePromptForScheduling(seed, brand),
+    }));
+  }
 
   const numberOptions: Option[] = useMemo(
     () => nums.map((n) => ({ value: n.e164 || '', label: (n.e164 ? n.e164 : n.id) + (n.label ? ` — ${n.label}` : '') })),
@@ -224,25 +231,19 @@ export default function VoiceAgentSection() {
   function onSaveTwilio() {
     const sid = sanitizeSid(twilioSid);
     const tok = (twilioToken || '').trim();
-    if (!isValidSid(sid)) { setMsg('Invalid or missing Twilio Account SID.'); return; }
-    if (!tok) { setMsg('Missing Twilio Auth Token.'); return; }
+    if (!isValidSid(sid)) return setMsg('Invalid or missing Twilio Account SID.');
+    if (!tok) return setMsg('Missing Twilio Auth Token.');
     saveTwilioCreds({ accountSid: sid, authToken: tok });
-    setTwilioSid(sid);
-    setTwilioToken(tok);
+    setTwilioSid(sid); setTwilioToken(tok);
     setMsg('Twilio credentials saved (local only).');
   }
 
   async function save() {
     setSaving(true); setMsg(null);
     try {
-      const r = await fetch('/api/voice-agent', {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(settings),
-      });
-      if ((r.headers.get('content-type')||'').includes('application/json')) {
-        const j = await r.json();
-        if (j?.ok === false) throw new Error(j?.error || 'Failed to save.');
-      }
+      await fetch('/api/voice-agent', {
+        method:'PUT', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(settings),
+      }).catch(()=>null);
       saveLocalSettings(settings);
       setMsg('Saved.');
     } catch (e:any) {
@@ -254,36 +255,32 @@ export default function VoiceAgentSection() {
   async function createAgent() {
     setCreating(true); setMsg(null);
     try {
-      const body = {
-        fromNumber: settings.fromE164 || undefined,
-        voice: settings.ttsVoice,
-        language: settings.language,
-        prompt: (settings.systemPrompt || '').trim(),
-      };
-      const r = await fetch('/api/voice/agents', {
-        method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(body),
-      });
-      const j = await r.json();
-      if (!j?.ok) throw new Error(j?.error || 'Create failed');
+      await fetch('/api/voice/agents', {
+        method:'POST', headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({
+          fromNumber: settings.fromE164 || undefined,
+          voice: settings.ttsVoice,
+          language: settings.language,
+          prompt: (settings.systemPrompt || '').trim(),
+        }),
+      }).catch(()=>null);
       setMsg(`Agent created${settings.fromE164 ? ` — live at ${settings.fromE164}` : ''}.`);
     } catch {
-      saveLocalSettings(settings);
       setMsg('Agent settings saved locally.');
     } finally { setCreating(false); }
   }
 
   async function onAttachClick() {
     setMsg(null);
-    if (!settings.fromE164) { setMsg('Select a phone number first.'); return; }
+    if (!settings.fromE164) return setMsg('Select a phone number first.');
 
-    const sidTyped = sanitizeSid(twilioSid);
-    const tokTyped = (twilioToken || '').trim();
+    const sid = sanitizeSid(twilioSid);
+    const tok = (twilioToken || '').trim();
     const saved = loadTwilioCreds();
-    const useSid = isValidSid(sidTyped) ? sidTyped : (saved?.accountSid || '');
-    const useTok = tokTyped || (saved?.authToken || '');
-
-    if (!isValidSid(useSid)) { setMsg('Invalid or missing Twilio Account SID.'); return; }
-    if (!useTok) { setMsg('Missing Twilio Auth Token.'); return; }
+    const useSid = isValidSid(sid) ? sid : (saved?.accountSid || '');
+    const useTok = tok || (saved?.authToken || '');
+    if (!isValidSid(useSid)) return setMsg('Invalid or missing Twilio Account SID.');
+    if (!useTok) return setMsg('Missing Twilio Auth Token.');
 
     const delayMs = Math.max(0, Math.min(5000, Number(settings.responseDelayMs ?? 0)));
     const rate    = Math.max(60, Math.min(140, Number(settings.speakingRatePct ?? 100)));
@@ -291,27 +288,20 @@ export default function VoiceAgentSection() {
 
     try {
       setAttaching(true);
-      const body = {
-        // accept both flat and nested for backward compatibility
+      const payload = {
         accountSid: useSid,
         authToken: useTok,
         phoneNumber: settings.fromE164,
-        credentials: { accountSid: useSid, authToken: useTok },
-
-        // voice config for our webhook
         language: settings.language,
         voice: settings.ttsVoice,
         greeting: settings.greeting || 'Thank you for calling. How can I help today?',
         style: settings.speakingStyle || 'professional',
-        delayMs,
-        rate,
-        pitch,
-        bargeIn: !!settings.bargeIn,
+        delayMs, rate, pitch,
+        brand: settings.brandName || '',
+        botId: settings.botId || '',
       };
       const r = await fetch('/api/telephony/attach-number', {
-        method:'POST',
-        headers:{ 'Content-Type':'application/json' },
-        body: JSON.stringify(body),
+        method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(payload),
       });
       const j = await r.json();
       if (!j?.ok) throw new Error(j?.error || 'Attach failed');
@@ -324,7 +314,7 @@ export default function VoiceAgentSection() {
     }
   }
 
-  // audio tester
+  // Audio ping
   async function startTone() {
     stopTone();
     const AC: any = (window as any).AudioContext || (window as any).webkitAudioContext;
@@ -332,8 +322,7 @@ export default function VoiceAgentSection() {
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     gain.gain.value = 0.04;
-    osc.type = 'sine';
-    osc.frequency.value = 880;
+    osc.type = 'sine'; osc.frequency.value = 880;
     osc.connect(gain); gain.connect(ctx.destination);
     osc.start();
     audioCtxRef.current = ctx; oscRef.current = osc; gainRef.current = gain;
@@ -348,13 +337,14 @@ export default function VoiceAgentSection() {
 
   return (
     <div className="px-6 py-8" style={{ maxWidth: 980, margin:'0 auto' }}>
+      {/* Header */}
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h2 className="flex items-center gap-2 text-2xl font-semibold text-white">
             <PhoneIcon className="h-6 w-6 text-[#6af7d1]" />
             Voice Agent
           </h2>
-          <div className="text-white/80 text-xs md:text-sm">Calls are handled with plain Twilio webhooks—no external SDK.</div>
+          <div className="text-white/80 text-xs md:text-sm">Free-speech IVR, seeded from your Builder. Twilio webhooks only.</div>
         </div>
         <div className="flex items-center gap-3">
           <GreenButton onClick={createAgent} disabled={creating || !settings.systemPrompt}>
@@ -370,8 +360,49 @@ export default function VoiceAgentSection() {
 
       <div className="relative p-6 md:p-8" style={{ ...FRAME, overflow:'visible' }}>
         <div className="grid grid-cols-1 gap-6">
-          {/* Prompt */}
-          <Section title="Prompt (Scheduling Assistant)">
+          {/* Build selector */}
+          <Card title="Build">
+            <div className="grid gap-3">
+              <label className="text-xs text-white/70">Select Build (from Builder)
+                <select
+                  value={settings.botId || ''}
+                  onChange={(e) => {
+                    const b = bots.find(x => x.id === e.target.value);
+                    if (b) seedFromBot(b);
+                    setSettings(p=>({ ...p, botId: e.target.value }));
+                  }}
+                  className="mt-1 w-full rounded-[12px] border border-white/20 bg-black/30 px-3 h-[38px] text-sm outline-none focus:border-[#6af7d1] text-white"
+                >
+                  <option value="">{bots.length ? '— Choose —' : 'No builds found'}</option>
+                  {bots.map(b => (
+                    <option key={b.id} value={b.id}>{b.name || b.title || b.id}</option>
+                  ))}
+                </select>
+              </label>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <label className="text-xs text-white/70">Brand/Business
+                  <input
+                    value={settings.brandName || ''}
+                    onChange={(e)=>setSettings({...settings, brandName: e.target.value})}
+                    placeholder="Your Business"
+                    className="mt-1 w-full rounded-[12px] border border-white/20 bg-black/30 px-3 h-[38px] text-sm outline-none focus:border-[#6af7d1] text-white"
+                  />
+                </label>
+                <label className="text-xs text-white/70">Greeting (first sentence)
+                  <input
+                    value={settings.greeting || ''}
+                    onChange={(e)=>setSettings({...settings, greeting: e.target.value})}
+                    placeholder="Thank you for calling {Brand}. How can I help today?"
+                    className="mt-1 w-full rounded-[12px] border border-white/20 bg-black/30 px-3 h-[38px] text-sm outline-none focus:border-[#6af7d1] text-white"
+                  />
+                </label>
+              </div>
+            </div>
+          </Card>
+
+          {/* Voice & Behavior */}
+          <Card title="Voice & Behavior">
             <div className="grid gap-3">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <label className="text-xs text-white/70">ASR Language
@@ -392,16 +423,7 @@ export default function VoiceAgentSection() {
                 </label>
               </div>
 
-              {/* Voice & behavior controls */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <label className="text-xs text-white/70">Greeting (first sentence)
-                  <input
-                    value={settings.greeting || ''}
-                    onChange={(e)=>setSettings({...settings, greeting: e.target.value})}
-                    placeholder="Thank you for calling. How can I help today?"
-                    className="mt-1 w-full rounded-[12px] border border-white/20 bg-black/30 px-3 h-[38px] text-sm outline-none focus:border-[#6af7d1] text-white"
-                  />
-                </label>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <label className="text-xs text-white/70">Speaking style
                   <select
                     value={settings.speakingStyle || 'professional'}
@@ -414,15 +436,11 @@ export default function VoiceAgentSection() {
                     <option value="">None</option>
                   </select>
                 </label>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <label className="text-xs text-white/70">Response delay (ms)
                   <input
                     type="number" min={0} max={5000} step={50}
-                    value={settings.responseDelayMs ?? 0}
-                    onChange={(e)=>setSettings({...settings, responseDelayMs: Math.max(0, Math.min(5000, Number(e.target.value || 0)))})}
-                    placeholder="300"
+                    value={settings.responseDelayMs ?? 300}
+                    onChange={(e)=>setSettings({...settings, responseDelayMs: Math.max(0, Math.min(5000, Number(e.target.value||300)))})}
                     className="mt-1 w-full rounded-[12px] border border-white/20 bg-black/30 px-3 h-[38px] text-sm outline-none focus:border-[#6af7d1] text-white"
                   />
                 </label>
@@ -430,50 +448,55 @@ export default function VoiceAgentSection() {
                   <input
                     type="number" min={60} max={140}
                     value={settings.speakingRatePct ?? 100}
-                    onChange={(e)=>setSettings({...settings, speakingRatePct: Math.max(60, Math.min(140, Number(e.target.value || 100)))})}
-                    placeholder="100"
-                    className="mt-1 w-full rounded-[12px] border border-white/20 bg-black/30 px-3 h-[38px] text-sm outline-none focus:border-[#6af7d1] text-white"
-                  />
-                </label>
-                <label className="text-xs text-white/70">Pitch (semitones)
-                  <input
-                    type="number" min={-6} max={6} step={1}
-                    value={settings.pitchSemitones ?? 0}
-                    onChange={(e)=>setSettings({...settings, pitchSemitones: Math.max(-6, Math.min(6, Number(e.target.value || 0)))})}
-                    placeholder="0"
+                    onChange={(e)=>setSettings({...settings, speakingRatePct: Math.max(60, Math.min(140, Number(e.target.value||100)))})}
                     className="mt-1 w-full rounded-[12px] border border-white/20 bg-black/30 px-3 h-[38px] text-sm outline-none focus:border-[#6af7d1] text-white"
                   />
                 </label>
               </div>
 
-              <label className="text-xs text-white/70 flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={!!settings.bargeIn}
-                  onChange={(e)=>setSettings({...settings, bargeIn: e.target.checked})}
-                  className="h-[16px] w-[16px] accent-[#6af7d1]"
-                />
-                Allow barge-in (best effort)
-              </label>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <label className="text-xs text-white/70">Pitch (semitones)
+                  <input
+                    type="number" min={-6} max={6} step={1}
+                    value={settings.pitchSemitones ?? 0}
+                    onChange={(e)=>setSettings({...settings, pitchSemitones: Math.max(-6, Math.min(6, Number(e.target.value||0)))})}
+                    className="mt-1 w-full rounded-[12px] border border-white/20 bg-black/30 px-3 h-[38px] text-sm outline-none focus:border-[#6af7d1] text-white"
+                  />
+                </label>
+                <label className="text-xs text-white/70 flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={!!settings.bargeIn}
+                    onChange={(e)=>setSettings({...settings, bargeIn: e.target.checked})}
+                    className="h-[16px] w-[16px] accent-[#6af7d1]"
+                  />
+                  Allow barge-in (best effort)
+                </label>
+              </div>
+            </div>
+          </Card>
 
+          {/* Prompt */}
+          <Card title="Prompt">
+            <div className="grid gap-3">
               <textarea
-                rows={14}
+                rows={12}
                 value={settings.systemPrompt}
                 onChange={(e)=>setSettings({...settings, systemPrompt: e.target.value })}
                 placeholder="Paste business notes. “Improve” reshapes to a production scheduling prompt."
                 className="w-full rounded-[14px] border border-white/20 bg-black/30 px-3 py-3 text-sm outline-none focus:border-[#6af7d1] text-white"
               />
               <div className="flex flex-wrap gap-2">
-                <GreenButton onClick={()=>{ setSettings((p)=>({ ...p, systemPrompt: shapePromptForScheduling(p.systemPrompt) })); setMsg('Prompt re-shaped for voice scheduling.'); }}>
+                <GreenButton onClick={()=>{ setSettings((p)=>({ ...p, systemPrompt: shapePromptForScheduling(p.systemPrompt, p.brandName) })); setMsg('Prompt re-shaped for scheduling.'); }}>
                   <Wand2 className="w-4 h-4 text-white" /> Improve Prompt
                 </GreenButton>
                 <GreenButton onClick={save}><SaveIcon className="w-4 h-4 text-white" /> Save</GreenButton>
               </div>
             </div>
-          </Section>
+          </Card>
 
-          {/* Numbers + attach + inline Twilio creds */}
-          <Section title="Number (Imported with Twilio)">
+          {/* Number & Twilio */}
+          <Card title="Number (Twilio)">
             <div className="grid gap-3">
               <label className="text-xs text-white/70">From Number
                 <select
@@ -496,7 +519,6 @@ export default function VoiceAgentSection() {
                       isValidSid(twilioSid) || twilioSid.length===0 ? 'border-white/20 bg-black/30' : 'border-rose-400/60 bg-black/30'
                     }`}
                   />
-                  <span className="text-[10px] text-white/50">Length: {sanitizeSid(twilioSid).length}/34</span>
                 </label>
                 <label className="text-xs text-white/70">Twilio Auth Token
                   <input
@@ -513,17 +535,17 @@ export default function VoiceAgentSection() {
                 <GreenButton onClick={refreshNumbers}><RefreshCw className="w-4 h-4 text-white" /> Refresh Imported Numbers</GreenButton>
                 <GreenButton onClick={onAttachClick} disabled={!settings.fromE164 || attaching}>
                   <LinkIcon className="w-4 h-4 text-white" />
-                  {attaching ? 'Attaching…' : 'Attach Number to Agent'}
+                  {attaching ? 'Attaching…' : 'Attach Number'}
                 </GreenButton>
               </div>
               <p className="text-xs text-white/60">
-                Attaching updates the Twilio webhook to <code>/api/voice/twilio/incoming</code> with your voice config.
+                Attaching points your number to <code>/api/voice/twilio/incoming</code> with brand + voice config.
               </p>
             </div>
-          </Section>
+          </Card>
 
           {/* Quick Tests */}
-          <Section title="Quick Tests">
+          <Card title="Quick Tests">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <div className="text-sm text-white/90 mb-2 flex items-center gap-2">
@@ -535,18 +557,14 @@ export default function VoiceAgentSection() {
                 </div>
                 <p className="text-xs text-white/60 mt-2">Simple tone to confirm output device.</p>
               </div>
-              <div className="text-white/60 text-sm">
-                Calls go through Twilio only—no third-party voice SDK.
-              </div>
+              <div className="text-white/60 text-sm">Calls run on Twilio webhooks — no third-party voice SDK.</div>
             </div>
-          </Section>
+          </Card>
         </div>
 
         {msg && (
-          <div
-            className="mt-6 rounded-[14px] px-4 py-3 text-sm"
-            style={{ ...CARD, border: '1px solid rgba(255,193,7,0.35)', background: 'rgba(255,193,7,0.10)' }}
-          >
+          <div className="mt-6 rounded-[14px] px-4 py-3 text-sm"
+               style={{ ...CARD, border: '1px solid rgba(255,193,7,0.35)', background: 'rgba(255,193,7,0.10)' }}>
             <span className="text-amber-200">{msg}</span>
           </div>
         )}
