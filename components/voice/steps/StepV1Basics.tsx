@@ -2,8 +2,9 @@
 
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { Sparkles, Building2, Languages, ArrowRight } from 'lucide-react';
+import CountryDialSelect from '@/components/phone-numbers/CountryDialSelect';
 
-/* ——— Visuals match your Builder Step1 ——— */
+/* --- Same card + button styling as Builder Step1 --- */
 const CARD_STYLE: React.CSSProperties = {
   background: 'rgba(13,15,17,0.92)',
   border: '2px solid rgba(106,247,209,0.32)',
@@ -14,103 +15,48 @@ const BTN_GREEN = '#59d9b3';
 const BTN_GREEN_HOVER = '#54cfa9';
 const BTN_DISABLED = '#2e6f63';
 
-/** Language + Dialect options (expand as needed) */
-type Dialect = { label: string; value: string };
-type Lang = { name: string; code: string; dialects: Dialect[] };
-
+/** Supported languages (simple, clean list) */
+type Lang = { name: string; code: string };
 const LANGUAGES: Lang[] = [
-  {
-    name: 'English',
-    code: 'en',
-    dialects: [
-      { label: 'English (US)', value: 'en-US' },
-      { label: 'English (UK)', value: 'en-GB' },
-      { label: 'English (Australia)', value: 'en-AU' },
-      { label: 'English (India)', value: 'en-IN' },
-    ],
-  },
-  {
-    name: 'Spanish',
-    code: 'es',
-    dialects: [
-      { label: 'Spanish (US)', value: 'es-US' },
-      { label: 'Spanish (Spain)', value: 'es-ES' },
-      { label: 'Spanish (Mexico)', value: 'es-MX' },
-    ],
-  },
-  {
-    name: 'French',
-    code: 'fr',
-    dialects: [
-      { label: 'French (France)', value: 'fr-FR' },
-      { label: 'French (Canada)', value: 'fr-CA' },
-    ],
-  },
-  {
-    name: 'Arabic',
-    code: 'ar',
-    dialects: [
-      { label: 'Arabic (Egypt)', value: 'ar-EG' },
-      { label: 'Arabic (Saudi Arabia)', value: 'ar-SA' },
-    ],
-  },
-  {
-    name: 'German',
-    code: 'de',
-    dialects: [{ label: 'German (Germany)', value: 'de-DE' }],
-  },
-  {
-    name: 'Portuguese',
-    code: 'pt',
-    dialects: [
-      { label: 'Portuguese (Brazil)', value: 'pt-BR' },
-      { label: 'Portuguese (Portugal)', value: 'pt-PT' },
-    ],
-  },
-  {
-    name: 'Chinese',
-    code: 'zh',
-    dialects: [
-      { label: 'Chinese (Mainland)', value: 'zh-CN' },
-      { label: 'Chinese (Taiwan)', value: 'zh-TW' },
-    ],
-  },
-  {
-    name: 'Japanese',
-    code: 'ja',
-    dialects: [{ label: 'Japanese (Japan)', value: 'ja-JP' }],
-  },
+  { name: 'English', code: 'en' },
+  { name: 'Spanish', code: 'es' },
+  { name: 'French', code: 'fr' },
+  { name: 'Arabic', code: 'ar' },
+  { name: 'German', code: 'de' },
+  { name: 'Portuguese', code: 'pt' },
+  { name: 'Chinese', code: 'zh' },
+  { name: 'Japanese', code: 'ja' },
 ];
 
-/** tiny safe getter */
+/* tiny safe getter */
 const s = (v: any, d = '') => (typeof v === 'string' ? v : d);
 
 export default function StepV1Basics({ onNext }: { onNext?: () => void }) {
-  // fields
   const [name, setName] = useState('');
   const [industry, setIndustry] = useState('');
 
-  // language & dialect
-  const [langCode, setLangCode] = useState<string>('en'); // e.g., 'en'
-  const [dialect, setDialect] = useState<string>('en-US'); // e.g., 'en-US'
+  // language (base) + accent country (2-letter ISO)
+  const [langCode, setLangCode] = useState<string>('en');
+  const [accentIso2, setAccentIso2] = useState<string>('US'); // stored/displayed upper, persisted lower
 
-  // hydrate from previous save (voicebuilder:step1)
+  // hydrate from previous saves
   useEffect(() => {
     try {
       const saved = JSON.parse(localStorage.getItem('voicebuilder:step1') || 'null');
       if (saved && typeof saved === 'object') {
         setName(s(saved.name));
         setIndustry(s(saved.industry));
-        // prefer saved dialect (locale) and infer language code from it
-        if (typeof saved.language === 'string' && saved.language.trim()) {
-          setDialect(saved.language.trim());
-          const match = LANGUAGES.find((L) => saved.language.startsWith(L.code + '-')) || LANGUAGES[0];
-          setLangCode(match.code);
-        } else {
-          // or saved languageCode + dialect
-          if (typeof saved.languageCode === 'string') setLangCode(saved.languageCode);
-          if (typeof saved.dialect === 'string') setDialect(saved.dialect);
-        }
+
+        // Try to restore language & country from earlier structures
+        if (typeof saved.languageCode === 'string') setLangCode(saved.languageCode);
+        else if (typeof saved.language === 'string' && /^[a-z]{2}-[A-Z]{2}$/.test(saved.language))
+          setLangCode(saved.language.split('-')[0]);
+
+        if (typeof saved.countryIso2 === 'string') setAccentIso2(saved.countryIso2.toUpperCase());
+        else if (typeof saved.language === 'string' && /^[a-z]{2}-[A-Z]{2}$/.test(saved.language))
+          setAccentIso2(saved.language.split('-')[1]);
+        else if (typeof saved.dialect === 'string' && /^[a-z]{2}-[A-Z]{2}$/.test(saved.dialect))
+          setAccentIso2(saved.dialect.split('-')[1]);
       }
     } catch {}
   }, []);
@@ -120,27 +66,23 @@ export default function StepV1Basics({ onNext }: { onNext?: () => void }) {
     [langCode]
   );
 
-  // keep dialect valid when language changes
-  useEffect(() => {
-    if (!language.dialects.find((d) => d.value === dialect)) {
-      setDialect(language.dialects[0]?.value || '');
-    }
-  }, [language, dialect]);
-
-  // validation
   const errors = useMemo(() => {
     const e: Record<string, string> = {};
     if (!name.trim()) e.name = 'Please enter a name.';
     if (!industry.trim()) e.industry = 'Please enter your industry.';
-    if (!dialect) e.dialect = 'Pick a dialect/accent.';
+    if (!langCode) e.language = 'Pick a language.';
+    if (!accentIso2) e.accent = 'Pick a country.';
     return e;
-  }, [name, industry, dialect]);
+  }, [name, industry, langCode, accentIso2]);
 
   const canContinue = Object.keys(errors).length === 0;
 
   const persistAndNext = useCallback(() => {
+    const iso2Upper = accentIso2.toUpperCase();
+    const iso2Lower = accentIso2.toLowerCase();
+    const locale = `${langCode}-${iso2Upper}`; // e.g., en-US
+
     try {
-      // Save both the display language and the specific locale
       localStorage.setItem(
         'voicebuilder:step1',
         JSON.stringify({
@@ -148,15 +90,16 @@ export default function StepV1Basics({ onNext }: { onNext?: () => void }) {
           industry,
           languageName: language.name, // e.g., "English"
           languageCode: langCode,      // e.g., "en"
-          language: dialect,           // canonical locale used later: "en-US"
-          dialect,                     // duplicate key for clarity
+          language: locale,            // keep a canonical full locale for consumers
+          dialect: locale,             // alias for compatibility
+          countryIso2: iso2Upper,      // e.g., "US"
+          accent2: iso2Lower,          // e.g., "us"  <-- what you asked to store
         })
       );
     } catch {}
     onNext?.();
-  }, [name, industry, language.name, langCode, dialect, onNext]);
+  }, [name, industry, language.name, langCode, accentIso2, onNext]);
 
-  // Enter key to continue
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && canContinue) {
       e.preventDefault();
@@ -166,7 +109,7 @@ export default function StepV1Basics({ onNext }: { onNext?: () => void }) {
 
   return (
     <section className="w-full" onKeyDown={onKeyDown}>
-      {/* Header (matches Builder tone) */}
+      {/* Header (Builder vibe) */}
       <div className="mb-8">
         <div
           className="inline-flex items-center gap-2 text-xs tracking-wide px-3 py-1.5 rounded-[20px] border"
@@ -179,7 +122,7 @@ export default function StepV1Basics({ onNext }: { onNext?: () => void }) {
         <p className="text-white/70 mt-1">Name it, set the industry, and choose how it speaks.</p>
       </div>
 
-      {/* Form card — bigger area, same style as Builder */}
+      {/* Form Card (wider like Builder; language + accent span 2 cols) */}
       <section className="relative p-7 md:p-8" style={CARD_STYLE}>
         <div
           aria-hidden
@@ -194,7 +137,7 @@ export default function StepV1Basics({ onNext }: { onNext?: () => void }) {
             placeholder="Enter agent name…"
             icon={<Sparkles className="w-4 h-4 text-[#6af7d1]" />}
             error={errors.name}
-            hint="Shown in your Voice builds & analytics."
+            hint="Shown in Voice builds & analytics."
           />
           <Field
             label="Industry *"
@@ -206,26 +149,39 @@ export default function StepV1Basics({ onNext }: { onNext?: () => void }) {
             hint="Used in your prompt shaping."
           />
 
-          {/* Language select */}
+          {/* Language (full-width) */}
           <SelectField
+            className="md:col-span-2"
             label="Language *"
             value={langCode}
             onChange={setLangCode}
             options={LANGUAGES.map((l) => ({ label: l.name, value: l.code }))}
             icon={<Languages className="w-4 h-4 text-[#6af7d1]" />}
-            hint="Base language used for ASR/TTS."
+            error={errors.language}
+            hint="Base language for ASR/TTS."
           />
 
-          {/* Dialect/Accent select — same height & style */}
-          <SelectField
-            label="Dialect / Accent *"
-            value={dialect}
-            onChange={setDialect}
-            options={language.dialects}
-            icon={<Languages className="w-4 h-4 text-[#6af7d1]" />}
-            error={errors.dialect}
-            hint="Specific locale (e.g., en-US)."
-          />
+          {/* Dialect / Accent via CountryDialSelect (full-width, same dropdown style) */}
+          <div className="md:col-span-2">
+            <label className="block mb-2 text-[13px] font-medium text-white/85 tracking-wide">
+              Dialect / Accent * <span className="text-white/50">(choose country)</span>
+            </label>
+
+            {/* Your styled country dropdown */}
+            <CountryDialSelect
+              value={accentIso2}
+              onChange={(iso2 /* , dial */) => setAccentIso2(iso2.toUpperCase())}
+              label=""
+              id="accent-country"
+            />
+
+            {/* Little code pill showing the 2-letter we will save */}
+            <div className="mt-2 text-xs text-white/70">
+              Saving as: <span className="px-2 py-0.5 rounded-[10px] bg-white/10 border border-white/20">{accentIso2.toLowerCase()}</span>{' '}
+              · Locale: <span className="px-2 py-0.5 rounded-[10px] bg-white/10 border border-white/20">{`${langCode}-${accentIso2}`}</span>
+            </div>
+            {errors.accent && <div className="mt-1 text-xs text-[rgba(255,138,138,0.95)]">{errors.accent}</div>}
+          </div>
         </div>
 
         {/* Next button */}
@@ -257,7 +213,7 @@ export default function StepV1Basics({ onNext }: { onNext?: () => void }) {
   );
 }
 
-/* ---------- Text Field (matches Builder) ---------- */
+/* ---------- Text Field (Builder-style) ---------- */
 function Field({
   label,
   value,
@@ -302,7 +258,7 @@ function Field({
   );
 }
 
-/* ---------- Select Field (same height/box as Field) ---------- */
+/* ---------- Select Field (same size as Field) ---------- */
 function SelectField({
   label,
   value,
