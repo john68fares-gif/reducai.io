@@ -1,523 +1,482 @@
-// components/voice/VoiceAssistantEditor.tsx
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  X, Save, Settings2, Cpu, FileText, MessageSquareText, Mic2, HeadphonesIcon,
-  Wrench, LineChart, ShieldCheck, Code2, PhoneForwarded, Keypad, Power, Check
+  ArrowLeft, Save, Rocket, Settings2, Cpu, FileText, KeyRound, Music,
+  Waves, Library, ListChecks, MessageSquareText, Shield, Mic, Wand2,
 } from 'lucide-react';
+import { motion } from 'framer-motion';
+
+type Props = { id: string; onExit: () => void; onSaved?: () => void };
 
 type Bot = {
   id: string;
   name: string;
-  type?: 'voice' | string;
+  type?: string;
   industry?: string;
   language?: string;
   model?: string;
-  prompt?: string;           // system prompt
-  createdAt?: string;
-  updatedAt?: string;
-  ttsVoice?: string;
-  config?: {
-    greeting?: string;
-    speakingStyle?: string;
-    responseDelayMs?: number;
-    speakingRatePct?: number;
-    pitchSemitones?: number;
-    bargeIn?: boolean;
-  };
+  prompt?: string;
   fromE164?: string;
-  settings?: any;            // editor saves here
+  updatedAt?: string;
+  createdAt?: string;
+  config?: any;
 };
 
-const FRAME: React.CSSProperties = {
-  background: 'rgba(13,15,17,0.96)',
-  border: '2px dashed rgba(106,247,209,0.30)',
-  borderRadius: 30,
-  boxShadow: '0 0 40px rgba(0,0,0,0.7)',
-};
-
-const THIN_BORDER = '1px solid rgba(255,255,255,0.18)';
-const OUTER_CARD: React.CSSProperties = {
+const WRAP = 'w-full max-w-[1720px] mx-auto px-6 2xl:px-12 pt-8 pb-28';
+const CARD: React.CSSProperties = {
   background: 'rgba(13,15,17,0.92)',
   border: '1px solid rgba(106,247,209,0.18)',
   boxShadow: 'inset 0 0 22px rgba(0,0,0,0.28), 0 0 18px rgba(106,247,209,0.05)',
-  borderRadius: 24,
+  borderRadius: 28,
 };
-const INNER_CARD: React.CSSProperties = {
+const INNER: React.CSSProperties = {
   background: '#101314',
-  border: THIN_BORDER,
-  borderRadius: 16,
-  boxShadow: 'inset 0 0 12px rgba(0,0,0,0.38)',
+  border: '1px solid rgba(255,255,255,0.28)',
+  borderRadius: 18,
+  boxShadow: 'inset 0 0 12px rgba(0,0,0,0.35)',
 };
-const ORB: React.CSSProperties = {
-  background: 'radial-gradient(circle, rgba(106,247,209,0.10) 0%, transparent 70%)',
-  filter: 'blur(38px)',
-};
+const ORB = { background: 'radial-gradient(circle, rgba(106,247,209,0.10) 0%, transparent 70%)', filter: 'blur(38px)' };
 
-const BTN_GREEN = '#59d9b3';
-const BTN_GREEN_HOVER = '#54cfa9';
+const TABS = ['Model', 'Voice', 'Transcriber', 'Tools', 'Analysis', 'Advanced', 'Widget'] as const;
+type Tab = typeof TABS[number];
 
-function s(v: any, d: any = '') { return v == null ? d : v; }
-function loadBots(): Bot[] { try { return JSON.parse(localStorage.getItem('chatbots') || '[]'); } catch { return []; } }
-function saveBots(arr: Bot[]) { try { localStorage.setItem('chatbots', JSON.stringify(arr)); } catch {} }
+/* helpers */
+function safeParse<T>(raw: string | null, fallback: T): T {
+  try { return raw ? (JSON.parse(raw) as T) : fallback; } catch { return fallback; }
+}
+function assignPath(obj: any, path: string, value: any) {
+  if (!obj || typeof obj !== 'object') return;
+  const parts = path.split('.');
+  let cur = obj;
+  for (let i = 0; i < parts.length - 1; i++) {
+    const k = parts[i];
+    if (!(k in cur) || typeof cur[k] !== 'object') cur[k] = {};
+    cur = cur[k];
+  }
+  cur[parts[parts.length - 1]] = value;
+}
+function clampInt(v: any, min: number, max: number, d: number) {
+  const n = parseInt(String(v), 10);
+  return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : d;
+}
+function clampFloat(v: any, min: number, max: number, d: number) {
+  const n = parseFloat(String(v));
+  return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : d;
+}
 
-type Props = {
-  bot: Bot;
-  onClose: () => void;
-  onSaved: (updated: Bot) => void;
-};
-
-export default function VoiceAssistantEditor({ bot, onClose, onSaved }: Props) {
-  const initial = useMemo(() => ({
-    modelProvider: 'OpenAI',
-    model: s(bot.model, 'gpt-4o-mini'),
-    firstMessage: s(bot.config?.greeting, 'Hello.'),
-    systemPrompt: s(bot.prompt, 'This is a blank template with minimal defaults.'),
-    maxTokens: 250,
-    temperature: 0.5,
-
-    voiceProvider: 'Vapi',
-    voiceName: s(bot.ttsVoice, 'Elliot'),
-
-    transcriberProvider: 'Deepgram',
-    transcriberModel: 'Nova 2',
-    transcriberLang: s(bot.language, 'en'),
-
-    tools: {
-      endCall: true,
-      dialKeypad: true,
-      forwardNumber: s(bot.fromE164, '') || '',
-    },
-
-    analysis: {
-      summaryPrompt:
-        'You are an expert note-taker. Summarize the call in 2–3 sentences.',
-      successPrompt:
-        'You are an expert call evaluator. Based on the transcript and system prompt, decide if objectives were met.',
-      structuredDataPrompt:
-        'Extract key entities mentioned during the call as JSON.',
-      successTimeout: 10,
-      summaryTimeout: 10,
-      structuredTimeout: 10,
-      minMsgsForSummary: 2,
-    },
-
-    advanced: {
-      hipaa: false,
-      pci: false,
-      recordAudio: true,
-      startSpeakingWait: 0.4,
-      smartEndpointing: false,
-      punctuationSecs: 0.1,
-      noPunctSecs: 1.5,
-      numberSecs: 0.5,
-      voicemailProvider: 'Off',
-      stopWords: 0,
-      stopVoiceSecs: 0.2,
-      backoffSecs: 1,
-      silenceTimeout: 30,
-      maxDuration: 600,
-      keypadEnabled: true,
-      keypadTimeout: 2,
-      keypadDelimiter: '',
-      serverUrl: 'https://api.example.com/function',
-      serverTimeout: 20,
-      headers: [] as Array<{ key: string; value: string }>,
-      voicemailMsg: 'Please call back when you’re available.',
-      endCallMsg: 'Goodbye.',
-      maxIdleMsg: 3,
-      idleTimeout: 7.5,
-    },
-
-    widget: {
-      publicKey: '',
-    },
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [bot.id]);
-
-  const [tab, setTab] = useState<'model'|'voice'|'transcriber'|'tools'|'analysis'|'advanced'|'widget'>('model');
-  const [draft, setDraft] = useState(initial);
+export default function VoiceAssistantEditor({ id, onExit, onSaved }: Props) {
+  const [bot, setBot] = useState<Bot | null>(null);
+  const [tab, setTab] = useState<Tab>('Model');
   const [saving, setSaving] = useState(false);
-  const [savedToast, setSavedToast] = useState(false);
 
-  useEffect(() => { setDraft(initial); setTab('model'); }, [bot.id]); // when changing bot
+  useEffect(() => {
+    try {
+      const arr: Bot[] = safeParse<Bot[]>(localStorage.getItem('chatbots'), []);
+      const found = arr.find((b) => String(b?.id) === String(id));
+      if (found) {
+        // Hard default to avoid undefined access anywhere
+        setBot({
+          id: String(found.id),
+          name: found.name || 'Untitled',
+          type: found.type || 'voice',
+          industry: found.industry || '',
+          language: found.language || '',
+          model: found.model || 'gpt-4o-mini',
+          prompt: found.prompt || '',
+          fromE164: found.fromE164 || '',
+          updatedAt: found.updatedAt || found.createdAt,
+          createdAt: found.createdAt,
+          config: { ...(found.config || {}) },
+        });
+      } else {
+        setBot(null);
+      }
+    } catch {
+      setBot(null);
+    }
+  }, [id]);
 
-  const save = () => {
-    setSaving(true);
-    const all = loadBots();
-    const idx = all.findIndex(b => b.id === bot.id);
-    const updated: Bot = {
-      ...bot,
-      model: draft.model,
-      prompt: draft.systemPrompt,
-      ttsVoice: draft.voiceName,
-      language: draft.transcriberLang,
-      config: {
-        ...bot.config,
-        greeting: draft.firstMessage,
-        speakingStyle: bot.config?.speakingStyle,
-      },
-      fromE164: draft.tools.forwardNumber || bot.fromE164,
-      settings: draft,
-      updatedAt: new Date().toISOString(),
-    };
-    if (idx >= 0) all[idx] = updated; else all.unshift(updated);
-    saveBots(all);
-    setSaving(false);
-    setSavedToast(true);
-    onSaved(updated);
-    setTimeout(() => setSavedToast(false), 1600);
+  const setCfg = (path: string, value: any) => {
+    setBot((prev) => {
+      if (!prev) return prev;
+      const cfg = { ...(prev.config || {}) };
+      assignPath(cfg, path, value);
+      return { ...prev, config: cfg };
+    });
   };
 
+  const save = async () => {
+    if (!bot) return;
+    setSaving(true);
+    try {
+      const arr: Bot[] = safeParse<Bot[]>(localStorage.getItem('chatbots'), []);
+      const idx = arr.findIndex((b) => String(b?.id) === String(bot.id));
+      if (idx !== -1) {
+        arr[idx] = { ...arr[idx], ...bot, updatedAt: new Date().toISOString() };
+        localStorage.setItem('chatbots', JSON.stringify(arr));
+      }
+      onSaved?.();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!bot) {
+    return (
+      <div className="min-h-screen bg-[#0b0c10] text-white font-movatif">
+        <div className={WRAP}>
+          <button onClick={onExit} className="inline-flex items-center gap-2 rounded-[12px] border border-white/15 px-4 py-2 hover:bg-white/10">
+            <ArrowLeft className="w-4 h-4" /> Back
+          </button>
+          <div className="mt-8 rounded-2xl border p-6" style={{ borderColor:'rgba(255,255,255,0.16)', background:'#101314' }}>
+            <div className="text-lg font-semibold mb-1">Agent not found</div>
+            <div className="text-white/70 text-sm">The item you tried to edit doesn’t exist or local data is corrupted.</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background:'rgba(0,0,0,0.55)' }}>
-      <div className="relative w-full max-w-[1280px] max-h-[92vh] flex flex-col text-white font-movatif overflow-hidden" style={FRAME}>
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 rounded-t-[30px]" style={{ borderBottom: '1px solid rgba(255,255,255,0.4)' }}>
+    <div className="min-h-screen bg-[#0b0c10] text-white font-movatif">
+      <div className={WRAP}>
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22 }}
+          className="flex items-center justify-between mb-6">
           <div className="min-w-0">
-            <div className="text-xl font-semibold truncate">Edit Assistant — {bot.name}</div>
-            <div className="text-white/70 text-xs truncate">{bot.industry || '—'}{bot.language ? ` · ${bot.language}` : ''}</div>
+            <div className="text-xs text-white/60">Editor</div>
+            <h1 className="text-2xl md:text-3xl font-semibold truncate">
+              {bot.name} <span className="text-white/50">— Voice Assistant</span>
+            </h1>
           </div>
           <div className="flex items-center gap-2">
+            <button onClick={onExit} className="inline-flex items-center gap-2 rounded-[12px] border border-white/15 px-4 py-2 hover:bg-white/10">
+              <ArrowLeft className="w-4 h-4" /> Back
+            </button>
+            <button onClick={save} className="inline-flex items-center gap-2 rounded-[12px] px-4 py-2 font-semibold" style={{ background: '#59d9b3', color: '#0b0c10' }}>
+              <Save className="w-4 h-4" /> {saving ? 'Saving…' : 'Save'}
+            </button>
+            <button onClick={() => {}} className="inline-flex items-center gap-2 rounded-[12px] px-4 py-2 font-semibold border border-[#2b6] hover:bg-white/10">
+              <Rocket className="w-4 h-4" /> Publish
+            </button>
+          </div>
+        </motion.div>
+
+        <div className="flex items-center gap-2 mb-6 overflow-x-auto">
+          {TABS.map((t) => (
             <button
-              onClick={save}
-              className="inline-flex items-center gap-2 rounded-[14px] px-3.5 py-2 text-sm"
-              style={{ background: BTN_GREEN, color:'#000', boxShadow:'0 0 12px rgba(106,247,209,0.18)' }}
-              onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER)}
-              onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN)}
+              key={t}
+              onClick={() => setTab(t)}
+              className={`px-3 py-1.5 rounded-[10px] text-sm transition ${t===tab ? 'bg-[#123129] text-[#6af7d1]' : 'bg-transparent text-white/80 hover:bg-white/10'}`}
+              style={{ border: '1px solid rgba(106,247,209,0.24)' }}
             >
-              <Save className="w-4 h-4" /> Save
+              {t}
             </button>
-            <button onClick={onClose} className="p-2 rounded-full hover:bg-white/10" aria-label="Close">
-              <X className="w-5 h-5" />
-            </button>
-          </div>
+          ))}
         </div>
 
-        {/* Tabs */}
-        <div className="px-6 pt-4">
-          <div className="flex flex-wrap gap-1.5">
-            <Tab id="model"       icon={<Cpu className="w-3.5 h-3.5" />}         cur={tab} set={setTab}>Model</Tab>
-            <Tab id="voice"       icon={<Mic2 className="w-3.5 h-3.5" />}         cur={tab} set={setTab}>Voice</Tab>
-            <Tab id="transcriber" icon={<HeadphonesIcon className="w-3.5 h-3.5" />} cur={tab} set={setTab}>Transcriber</Tab>
-            <Tab id="tools"       icon={<Wrench className="w-3.5 h-3.5" />}       cur={tab} set={setTab}>Tools</Tab>
-            <Tab id="analysis"    icon={<LineChart className="w-3.5 h-3.5" />}    cur={tab} set={setTab}>Analysis</Tab>
-            <Tab id="advanced"    icon={<ShieldCheck className="w-3.5 h-3.5" />}   cur={tab} set={setTab}>Advanced</Tab>
-            <Tab id="widget"      icon={<Code2 className="w-3.5 h-3.5" />}        cur={tab} set={setTab}>Widget</Tab>
-          </div>
-        </div>
-
-        {/* Body */}
-        <div className="flex-1 overflow-y-auto p-6">
+        <div style={CARD} className="p-6 rounded-[28px] relative">
           <div aria-hidden className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full" style={ORB} />
-          {tab === 'model' && <TabModel    draft={draft} setDraft={setDraft} />}
-          {tab === 'voice' && <TabVoice    draft={draft} setDraft={setDraft} />}
-          {tab === 'transcriber' && <TabTranscriber draft={draft} setDraft={setDraft} />}
-          {tab === 'tools' && <TabTools    draft={draft} setDraft={setDraft} />}
-          {tab === 'analysis' && <TabAnalysis draft={draft} setDraft={setDraft} />}
-          {tab === 'advanced' && <TabAdvanced draft={draft} setDraft={setDraft} />}
-          {tab === 'widget' && <TabWidget  draft={draft} setDraft={setDraft} />}
-        </div>
 
-        {/* Footer */}
-        <div className="px-6 py-4 rounded-b-[30px] flex items-center justify-between" style={{ borderTop: '1px solid rgba(255,255,255,0.35)', background:'#101314' }}>
-          <div className="text-xs text-white/60 inline-flex items-center gap-2"><Settings2 className="w-3.5 h-3.5" /> Thin borders, same palette as builder.</div>
-          <button
-            onClick={save}
-            className="inline-flex items-center gap-2 rounded-[14px] px-4 py-2 text-sm"
-            style={{ background: BTN_GREEN, color:'#000', boxShadow:'0 0 12px rgba(106,247,209,0.18)' }}
-            onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER)}
-            onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN)}
-          >
-            <Save className="w-4 h-4" /> Save changes
-          </button>
+          {tab === 'Model' && <ModelTab bot={bot} setCfg={setCfg} />}
+          {tab === 'Voice' && <VoiceTab bot={bot} setCfg={setCfg} />}
+          {tab === 'Transcriber' && <TranscriberTab bot={bot} setCfg={setCfg} />}
+          {tab === 'Tools' && <ToolsTab bot={bot} setCfg={setCfg} />}
+          {tab === 'Analysis' && <AnalysisTab bot={bot} setCfg={setCfg} />}
+          {tab === 'Advanced' && <AdvancedTab bot={bot} setCfg={setCfg} />}
+          {tab === 'Widget' && <WidgetTab bot={bot} />}
         </div>
-
-        {/* saved toast */}
-        {savedToast && (
-          <div className="absolute bottom-5 right-6 rounded-[12px] px-3.5 py-2.5 text-sm"
-               style={{ background:'rgba(16,19,20,0.95)', border:'1px solid rgba(106,247,209,0.40)', boxShadow:'0 0 14px rgba(106,247,209,0.18)' }}>
-            <div className="flex items-center gap-2"><Check className="w-4 h-4 text-[#6af7d1]" /> Saved.</div>
-          </div>
-        )}
       </div>
     </div>
   );
 }
 
-/* ---------------- UI atoms ---------------- */
-function Tab({
-  id, cur, set, children, icon,
-}: { id: any; cur: any; set: (v:any)=>void; children: React.ReactNode; icon?: React.ReactNode }) {
-  const active = cur === id;
+/* ---------- atoms ---------- */
+function Row({ label, children, icon }:{ label: string; children: React.ReactNode; icon?: React.ReactNode }) {
   return (
-    <button
-      onClick={() => set(id)}
-      className="px-3 py-1.5 rounded-[12px] text-sm inline-flex items-center gap-1.5"
-      style={{
-        border: THIN_BORDER,
-        background: active ? 'rgba(0,255,194,0.12)' : 'rgba(255,255,255,0.03)',
-      }}
-    >
-      {icon}{children}
-    </button>
-  );
-}
-
-function Row({ children }: { children: React.ReactNode }) {
-  return <div className="grid grid-cols-1 md:grid-cols-2 gap-4">{children}</div>;
-}
-function Card({ title, icon, children }: { title: string; icon?: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <div style={OUTER_CARD} className="p-5 rounded-[24px] relative">
-      <div aria-hidden className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full" style={ORB} />
-      <div className="flex items-center gap-2 mb-3 text-white/90 font-semibold">{icon}{title}</div>
-      <div className="grid gap-3">{children}</div>
-    </div>
-  );
-}
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div style={INNER_CARD} className="p-3 rounded-[16px]">
-      <div className="text-xs text-white/60 mb-1">{label}</div>
+    <div style={INNER} className="p-4 rounded-[18px]">
+      <div className="flex items-center gap-2 text-white/90 font-semibold mb-3">{icon}{label}</div>
       {children}
     </div>
   );
 }
 function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
-  return <input {...props} className={`w-full rounded-[10px] bg-[#0b0e0f] border px-3 py-2 text-sm outline-none focus:border-[#00ffc2]`} style={{ borderColor:'rgba(255,255,255,0.18)' }} />;
+  return <input {...props} className={`w-full px-3 py-2 rounded-[10px] bg-[#0b0e0f] border border-white/10 outline-none focus:border-[#00ffc2] ${props.className || ''}`} />;
+}
+function Text(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  return <textarea {...props} className={`w-full px-3 py-3 rounded-[10px] bg-[#0b0e0f] border border-white/10 outline-none focus:border-[#00ffc2] ${props.className || ''}`} />;
 }
 function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
-  return <select {...props} className="w-full rounded-[10px] bg-[#0b0e0f] border px-3 py-2 text-sm outline-none focus:border-[#00ffc2]" style={{ borderColor:'rgba(255,255,255,0.18)' }} />;
+  return <select {...props} className={`w-full px-3 py-2 rounded-[10px] bg-[#0b0e0f] border border-white/10 outline-none focus:border-[#00ffc2] ${props.className || ''}`} />;
 }
-function Textarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
-  return <textarea {...props} className="w-full rounded-[10px] bg-[#0b0e0f] border px-3 py-2 text-sm outline-none focus:border-[#00ffc2]" style={{ borderColor:'rgba(255,255,255,0.18)', minHeight: 140 }} />;
-}
-
-/* ---------------- Tabs ---------------- */
-function TabModel({ draft, setDraft }: any) {
+function Toggle({ label, checked, onChange }:{ label:string; checked:boolean; onChange:(v:boolean)=>void }) {
   return (
-    <Row>
-      <Card title="Model" icon={<Cpu className="w-4 h-4 text-[#6af7d1]" />}>
-        <Field label="Provider">
-          <Select value={draft.modelProvider} onChange={(e)=>setDraft((d:any)=>({ ...d, modelProvider: e.target.value }))}>
-            <option>OpenAI</option>
-            <option>Anthropic</option>
-            <option>Cohere</option>
-          </Select>
-        </Field>
-        <Field label="Model">
-          <Select value={draft.model} onChange={(e)=>setDraft((d:any)=>({ ...d, model: e.target.value }))}>
-            <option>gpt-4o-mini</option>
-            <option>gpt-4o</option>
-            <option>gpt-4o-realtime</option>
-          </Select>
-        </Field>
-        <Field label="First Message">
-          <Input value={draft.firstMessage} onChange={(e)=>setDraft((d:any)=>({ ...d, firstMessage: e.target.value }))} />
-        </Field>
-        <Field label="System Prompt">
-          <Textarea value={draft.systemPrompt} onChange={(e)=>setDraft((d:any)=>({ ...d, systemPrompt: e.target.value }))} />
-        </Field>
-        <Field label="Max Tokens"><Input type="number" value={draft.maxTokens} onChange={(e)=>setDraft((d:any)=>({ ...d, maxTokens: +e.target.value }))} /></Field>
-        <Field label="Temperature"><Input type="number" step="0.1" value={draft.temperature} onChange={(e)=>setDraft((d:any)=>({ ...d, temperature: +e.target.value }))} /></Field>
-      </Card>
-
-      <Card title="Preview" icon={<FileText className="w-4 h-4 text-[#6af7d1]" />}>
-        <Field label="Header">
-          <div className="text-sm text-white/90">{draft.firstMessage}</div>
-        </Field>
-        <Field label="Prompt">
-          <pre className="whitespace-pre-wrap text-sm leading-6">{draft.systemPrompt}</pre>
-        </Field>
-      </Card>
-    </Row>
+    <label className="flex items-center gap-3 cursor-pointer select-none">
+      <button type="button" onClick={() => onChange(!checked)} className={`w-12 h-7 rounded-full relative transition ${checked ? 'bg-emerald-400/80' : 'bg-white/10'}`}>
+        <span className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white transition-transform ${checked ? 'translate-x-5' : ''}`} />
+      </button>
+      <span className="text-sm">{label}</span>
+    </label>
   );
 }
 
-function TabVoice({ draft, setDraft }: any) {
+/* ---------- tabs ---------- */
+function ModelTab({ bot, setCfg }: { bot: Bot; setCfg: (p: string, v: any) => void }) {
+  const cfg = bot.config || {};
   return (
-    <Row>
-      <Card title="Voice Configuration" icon={<Mic2 className="w-4 h-4 text-[#6af7d1]" />}>
-        <Field label="Provider">
-          <Select value={draft.voiceProvider} onChange={(e)=>setDraft((d:any)=>({ ...d, voiceProvider: e.target.value }))}>
-            <option>Vapi</option>
-            <option>ElevenLabs</option>
-            <option>Amazon Polly</option>
-          </Select>
-        </Field>
-        <Field label="Voice">
-          <Select value={draft.voiceName} onChange={(e)=>setDraft((d:any)=>({ ...d, voiceName: e.target.value }))}>
-            <option>Elliot</option>
-            <option>Joanna</option>
-            <option>Alloy</option>
-          </Select>
-        </Field>
-      </Card>
-
-      <Card title="Pacing & Barge-In">
-        <Field label="Response Delay (ms)"><Input type="number" value={draft?.responseDelayMs ?? 600} onChange={(e)=>setDraft((d:any)=>({ ...d, responseDelayMs:+e.target.value }))} /></Field>
-        <Field label="Speaking Rate (%)"><Input type="number" value={draft?.speakingRatePct ?? 100} onChange={(e)=>setDraft((d:any)=>({ ...d, speakingRatePct:+e.target.value }))} /></Field>
-        <Field label="Pitch (semitones)"><Input type="number" value={draft?.pitchSemitones ?? 0} onChange={(e)=>setDraft((d:any)=>({ ...d, pitchSemitones:+e.target.value }))} /></Field>
-      </Card>
-    </Row>
-  );
-}
-
-function TabTranscriber({ draft, setDraft }: any) {
-  return (
-    <Row>
-      <Card title="Transcriber" icon={<HeadphonesIcon className="w-4 h-4 text-[#6af7d1]" />}>
-        <Field label="Provider">
-          <Select value={draft.transcriberProvider} onChange={(e)=>setDraft((d:any)=>({ ...d, transcriberProvider: e.target.value }))}>
-            <option>Deepgram</option>
-            <option>OpenAI</option>
-            <option>Google</option>
-          </Select>
-        </Field>
-        <Field label="Model">
-          <Select value={draft.transcriberModel} onChange={(e)=>setDraft((d:any)=>({ ...d, transcriberModel: e.target.value }))}>
-            <option>Nova 2</option>
-            <option>Whisper</option>
-          </Select>
-        </Field>
-        <Field label="Language"><Input value={draft.transcriberLang} onChange={(e)=>setDraft((d:any)=>({ ...d, transcriberLang:e.target.value }))} /></Field>
-      </Card>
-
-      <Card title="Noise & Confidence">
-        <Field label="Background denoising"><Toggle value={true} onChange={()=>{}} /></Field>
-        <Field label="Confidence threshold (0..1)"><Input type="number" min={0} max={1} step="0.05" value={0.4} onChange={()=>{}}/></Field>
-        <Field label="Use numerals"><Toggle value={true} onChange={()=>{}} /></Field>
-      </Card>
-    </Row>
-  );
-}
-
-function TabTools({ draft, setDraft }: any) {
-  return (
-    <Row>
-      <Card title="Predefined Functions" icon={<Wrench className="w-4 h-4 text-[#6af7d1]" />}>
-        <Field label="Enable End Call"><Toggle value={draft.tools.endCall} onChange={(v)=>setDraft((d:any)=>({ ...d, tools:{ ...d.tools, endCall:v } }))} /></Field>
-        <Field label="Dial Keypad"><Toggle value={draft.tools.dialKeypad} onChange={(v)=>setDraft((d:any)=>({ ...d, tools:{ ...d.tools, dialKeypad:v } }))} /></Field>
-        <Field label="Forwarding Phone Number">
-          <div className="flex items-center gap-2">
-            <PhoneForwarded className="w-4 h-4 text-white/60" />
-            <Input placeholder="+15551234567" value={draft.tools.forwardNumber} onChange={(e)=>setDraft((d:any)=>({ ...d, tools:{ ...d.tools, forwardNumber: e.target.value } }))} />
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <Row label="Model" icon={<Cpu className="w-4 h-4 text-[#6af7d1]" />}>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <div className="text-xs text-white/60 mb-1">Provider</div>
+            <Select value={String(cfg.model?.provider ?? 'openai')} onChange={e => setCfg('model.provider', e.target.value)}>
+              <option value="openai">OpenAI</option>
+              <option value="anthropic">Anthropic</option>
+              <option value="google">Google</option>
+            </Select>
           </div>
-        </Field>
-      </Card>
+          <div>
+            <div className="text-xs text-white/60 mb-1">Model</div>
+            <Select value={String(cfg.model?.name ?? 'gpt-4o-mini')} onChange={e => setCfg('model.name', e.target.value)}>
+              <option value="gpt-4o-mini">GPT-4o Mini</option>
+              <option value="gpt-4o">GPT-4o</option>
+              <option value="gpt-4.1-mini">GPT-4.1 Mini</option>
+            </Select>
+          </div>
+          <div className="col-span-2">
+            <div className="text-xs text-white/60 mb-1">First Message</div>
+            <Input value={String(cfg.model?.firstMessage ?? 'Hello.')} onChange={e => setCfg('model.firstMessage', e.target.value)} />
+          </div>
+          <div className="col-span-2">
+            <div className="text-xs text-white/60 mb-1">System Prompt</div>
+            <Text rows={8} value={String(cfg.model?.systemPrompt ?? bot.prompt ?? '')} onChange={e => setCfg('model.systemPrompt', e.target.value)} />
+          </div>
+        </div>
+      </Row>
 
-      <Card title="Keypad">
-        <Field label="Enable keypad input"><Toggle value={true} onChange={()=>{}} /></Field>
-        <Field label="Timeout (sec)"><Input type="number" value={2} onChange={()=>{}} /></Field>
-        <Field label="Delimiter"><Input placeholder="#" disabled /></Field>
-      </Card>
-    </Row>
+      <Row label="API" icon={<KeyRound className="w-4 h-4 text-[#6af7d1]" />}>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <div className="text-xs text-white/60 mb-1">Max Tokens</div>
+            <Input type="number" value={Number(cfg.model?.maxTokens ?? 250)} onChange={e => setCfg('model.maxTokens', clampInt(e.target.value, 1, 4000, 250))} />
+          </div>
+          <div>
+            <div className="text-xs text-white/60 mb-1">Temperature</div>
+            <Input type="number" step="0.1" value={Number(cfg.model?.temperature ?? 0.5)} onChange={e => setCfg('model.temperature', clampFloat(e.target.value, 0, 2, 0.5))} />
+          </div>
+        </div>
+      </Row>
+
+      <Row label="Description" icon={<FileText className="w-4 h-4 text-[#6af7d1]" />}>
+        <Text rows={6} placeholder="Short description of the assistant…" value={String(bot.prompt ?? '')} onChange={e => setCfg('meta.description', e.target.value)} />
+      </Row>
+
+      <Row label="Settings" icon={<Settings2 className="w-4 h-4 text-[#6af7d1]" />}>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <div className="text-xs text-white/60 mb-1">Language</div>
+            <Input value={String(bot.language ?? '')} onChange={e => setCfg('meta.language', e.target.value)} />
+          </div>
+          <div>
+            <div className="text-xs text-white/60 mb-1">Industry</div>
+            <Input value={String(bot.industry ?? '')} onChange={e => setCfg('meta.industry', e.target.value)} />
+          </div>
+        </div>
+      </Row>
+    </div>
   );
 }
 
-function TabAnalysis({ draft, setDraft }: any) {
+function VoiceTab({ bot, setCfg }: { bot: Bot; setCfg: (p: string, v: any) => void }) {
+  const cfg = bot.config || {};
   return (
-    <Row>
-      <Card title="Summary" icon={<MessageSquareText className="w-4 h-4 text-[#6af7d1]" />}>
-        <Field label="Prompt"><Textarea value={draft.analysis.summaryPrompt} onChange={(e)=>setDraft((d:any)=>({ ...d, analysis:{ ...d.analysis, summaryPrompt:e.target.value } }))} /></Field>
-        <Field label="Timeout (sec)"><Input type="number" value={draft.analysis.summaryTimeout} onChange={(e)=>setDraft((d:any)=>({ ...d, analysis:{ ...d.analysis, summaryTimeout:+e.target.value } }))} /></Field>
-        <Field label="Min messages to trigger"><Input type="number" value={draft.analysis.minMsgsForSummary} onChange={(e)=>setDraft((d:any)=>({ ...d, analysis:{ ...d.analysis, minMsgsForSummary:+e.target.value } }))} /></Field>
-      </Card>
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <Row label="Voice Configuration" icon={<Waves className="w-4 h-4 text-[#6af7d1]" />}>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <div className="text-xs text-white/60 mb-1">Provider</div>
+            <Select value={String(cfg.voice?.provider ?? 'vapi')} onChange={e => setCfg('voice.provider', e.target.value)}>
+              <option value="vapi">Vapi</option>
+              <option value="11labs">ElevenLabs</option>
+              <option value="polly">Polly</option>
+            </Select>
+          </div>
+          <div>
+            <div className="text-xs text-white/60 mb-1">Voice</div>
+            <Select value={String(cfg.voice?.name ?? 'Elliot')} onChange={e => setCfg('voice.name', e.target.value)}>
+              <option value="Elliot">Elliot</option>
+              <option value="Joanna">Joanna</option>
+              <option value="Alloy">Alloy</option>
+            </Select>
+          </div>
+          <div>
+            <div className="text-xs text-white/60 mb-1">Speaking Rate %</div>
+            <Input type="number" value={Number(cfg.voice?.rate ?? 100)} onChange={e => setCfg('voice.rate', clampInt(e.target.value, 60, 140, 100))} />
+          </div>
+          <div>
+            <div className="text-xs text-white/60 mb-1">Pitch (semitones)</div>
+            <Input type="number" value={Number(cfg.voice?.pitch ?? 0)} onChange={e => setCfg('voice.pitch', clampInt(e.target.value, -6, 6, 0))} />
+          </div>
+        </div>
+      </Row>
 
-      <Card title="Success Evaluation">
-        <Field label="Prompt"><Textarea value={draft.analysis.successPrompt} onChange={(e)=>setDraft((d:any)=>({ ...d, analysis:{ ...d.analysis, successPrompt:e.target.value } }))} /></Field>
-        <Field label="Timeout (sec)"><Input type="number" value={draft.analysis.successTimeout} onChange={(e)=>setDraft((d:any)=>({ ...d, analysis:{ ...d.analysis, successTimeout:+e.target.value } }))} /></Field>
-      </Card>
-
-      <Card title="Structured Data">
-        <Field label="Prompt"><Textarea value={draft.analysis.structuredDataPrompt} onChange={(e)=>setDraft((d:any)=>({ ...d, analysis:{ ...d.analysis, structuredDataPrompt:e.target.value } }))} /></Field>
-        <Field label="Timeout (sec)"><Input type="number" value={draft.analysis.structuredTimeout} onChange={(e)=>setDraft((d:any)=>({ ...d, analysis:{ ...d.analysis, structuredTimeout:+e.target.value } }))} /></Field>
-      </Card>
-    </Row>
+      <Row label="Background Sound" icon={<Music className="w-4 h-4 text-[#6af7d1]" />}>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <div className="text-xs text-white/60 mb-1">Preset</div>
+            <Select value={String(cfg.voice?.bgPreset ?? 'default')} onChange={e => setCfg('voice.bgPreset', e.target.value)}>
+              <option value="default">Default</option>
+              <option value="office">Office</option>
+              <option value="lounge">Lounge</option>
+            </Select>
+          </div>
+          <div className="col-span-2">
+            <div className="text-xs text-white/60 mb-1">Custom URL</div>
+            <Input placeholder="https://…" value={String(cfg.voice?.bgUrl ?? '')} onChange={e => setCfg('voice.bgUrl', e.target.value)} />
+          </div>
+        </div>
+      </Row>
+    </div>
   );
 }
 
-function TabAdvanced({ draft, setDraft }: any) {
-  const A = draft.advanced;
+function TranscriberTab({ bot, setCfg }: { bot: Bot; setCfg: (p: string, v: any) => void }) {
+  const cfg = bot.config || {};
   return (
-    <Row>
-      <Card title="Privacy & Recording" icon={<ShieldCheck className="w-4 h-4 text-[#6af7d1]" />}>
-        <Field label="HIPAA Compliance"><Toggle value={A.hipaa} onChange={(v)=>setDraft((d:any)=>({ ...d, advanced:{ ...d.advanced, hipaa:v } }))} /></Field>
-        <Field label="PCI Compliance"><Toggle value={A.pci} onChange={(v)=>setDraft((d:any)=>({ ...d, advanced:{ ...d.advanced, pci:v } }))} /></Field>
-        <Field label="Audio Recording"><Toggle value={A.recordAudio} onChange={(v)=>setDraft((d:any)=>({ ...d, advanced:{ ...d.advanced, recordAudio:v } }))} /></Field>
-      </Card>
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <Row label="Transcriber" icon={<Mic className="w-4 h-4 text-[#6af7d1]" />}>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <div className="text-xs text-white/60 mb-1">Provider</div>
+            <Select value={String(cfg.asr?.provider ?? 'deepgram')} onChange={e => setCfg('asr.provider', e.target.value)}>
+              <option value="deepgram">Deepgram</option>
+              <option value="openai">OpenAI</option>
+              <option value="google">Google</option>
+            </Select>
+          </div>
+          <div>
+            <div className="text-xs text-white/60 mb-1">Model</div>
+            <Select value={String(cfg.asr?.model ?? 'nova-2')} onChange={e => setCfg('asr.model', e.target.value)}>
+              <option value="nova-2">Nova 2</option>
+              <option value="whisper-1">Whisper 1</option>
+            </Select>
+          </div>
+          <div>
+            <div className="text-xs text-white/60 mb-1">Confidence Threshold</div>
+            <Input type="number" step="0.05" value={Number(cfg.asr?.threshold ?? 0.4)} onChange={e => setCfg('asr.threshold', clampFloat(e.target.value, 0, 1, 0.4))} />
+          </div>
+        </div>
+      </Row>
 
-      <Card title="Start Speaking Plan">
-        <Field label="Wait seconds"><Input type="number" step="0.1" value={A.startSpeakingWait} onChange={(e)=>setDraft((d:any)=>({ ...d, advanced:{ ...d.advanced, startSpeakingWait:+e.target.value } }))} /></Field>
-        <Field label="Smart endpointing"><Toggle value={A.smartEndpointing} onChange={(v)=>setDraft((d:any)=>({ ...d, advanced:{ ...d.advanced, smartEndpointing:v } }))} /></Field>
-        <Field label="On punctuation seconds"><Input type="number" step="0.1" value={A.punctuationSecs} onChange={(e)=>setDraft((d:any)=>({ ...d, advanced:{ ...d.advanced, punctuationSecs:+e.target.value } }))} /></Field>
-        <Field label="On no punctuation seconds"><Input type="number" step="0.1" value={A.noPunctSecs} onChange={(e)=>setDraft((d:any)=>({ ...d, advanced:{ ...d.advanced, noPunctSecs:+e.target.value } }))} /></Field>
-        <Field label="On number seconds"><Input type="number" step="0.1" value={A.numberSecs} onChange={(e)=>setDraft((d:any)=>({ ...d, advanced:{ ...d.advanced, numberSecs:+e.target.value } }))} /></Field>
-      </Card>
-
-      <Card title="Stop Speaking Plan">
-        <Field label="Number of words"><Input type="number" value={A.stopWords} onChange={(e)=>setDraft((d:any)=>({ ...d, advanced:{ ...d.advanced, stopWords:+e.target.value } }))} /></Field>
-        <Field label="Voice seconds"><Input type="number" step="0.1" value={A.stopVoiceSecs} onChange={(e)=>setDraft((d:any)=>({ ...d, advanced:{ ...d.advanced, stopVoiceSecs:+e.target.value } }))} /></Field>
-        <Field label="Backoff seconds"><Input type="number" step="0.1" value={A.backoffSecs} onChange={(e)=>setDraft((d:any)=>({ ...d, advanced:{ ...d.advanced, backoffSecs:+e.target.value } }))} /></Field>
-      </Card>
-
-      <Card title="Timeouts & Keypad">
-        <Field label="Silence timeout (sec)"><Input type="number" value={A.silenceTimeout} onChange={(e)=>setDraft((d:any)=>({ ...d, advanced:{ ...d.advanced, silenceTimeout:+e.target.value } }))} /></Field>
-        <Field label="Max duration (sec)"><Input type="number" value={A.maxDuration} onChange={(e)=>setDraft((d:any)=>({ ...d, advanced:{ ...d.advanced, maxDuration:+e.target.value } }))} /></Field>
-        <Field label="Enable keypad"><Toggle value={A.keypadEnabled} onChange={(v)=>setDraft((d:any)=>({ ...d, advanced:{ ...d.advanced, keypadEnabled:v } }))} /></Field>
-        <Field label="Keypad timeout (sec)"><Input type="number" value={A.keypadTimeout} onChange={(e)=>setDraft((d:any)=>({ ...d, advanced:{ ...d.advanced, keypadTimeout:+e.target.value } }))} /></Field>
-        <Field label="Delimiter (optional)"><Input value={A.keypadDelimiter} onChange={(e)=>setDraft((d:any)=>({ ...d, advanced:{ ...d.advanced, keypadDelimiter:e.target.value } }))} /></Field>
-      </Card>
-
-      <Card title="Messaging">
-        <Field label="Server URL"><Input value={A.serverUrl} onChange={(e)=>setDraft((d:any)=>({ ...d, advanced:{ ...d.advanced, serverUrl:e.target.value } }))} /></Field>
-        <Field label="Timeout (sec)"><Input type="number" value={A.serverTimeout} onChange={(e)=>setDraft((d:any)=>({ ...d, advanced:{ ...d.advanced, serverTimeout:+e.target.value } }))} /></Field>
-        <Field label="HTTP Headers (key:value, one per line)">
-          <Textarea
-            placeholder="x-api-key: abc123"
-            value={(A.headers || []).map((h:any)=>`${h.key}: ${h.value}`).join('\n')}
-            onChange={(e)=>{
-              const lines = e.target.value.split('\n').map(l=>l.trim()).filter(Boolean);
-              const headers = lines.map(l => {
-                const i = l.indexOf(':');
-                return i === -1 ? { key:l, value:'' } : { key:l.slice(0,i).trim(), value:l.slice(i+1).trim() };
-              });
-              setDraft((d:any)=>({ ...d, advanced:{ ...d.advanced, headers } }));
-            }}
-          />
-        </Field>
-      </Card>
-
-      <Card title="Messages">
-        <Field label="Voicemail Message"><Input value={A.voicemailMsg} onChange={(e)=>setDraft((d:any)=>({ ...d, advanced:{ ...d.advanced, voicemailMsg:e.target.value } }))} /></Field>
-        <Field label="End Call Message"><Input value={A.endCallMsg} onChange={(e)=>setDraft((d:any)=>({ ...d, advanced:{ ...d.advanced, endCallMsg:e.target.value } }))} /></Field>
-        <Field label="Max Idle Messages"><Input type="number" value={A.maxIdleMsg} onChange={(e)=>setDraft((d:any)=>({ ...d, advanced:{ ...d.advanced, maxIdleMsg:+e.target.value } }))} /></Field>
-        <Field label="Idle Timeout (sec)"><Input type="number" step="0.1" value={A.idleTimeout} onChange={(e)=>setDraft((d:any)=>({ ...d, advanced:{ ...d.advanced, idleTimeout:+e.target.value } }))} /></Field>
-      </Card>
-    </Row>
+      <Row label="Punctuation & Endpointing" icon={<Library className="w-4 h-4 text-[#6af7d1]" />}>
+        <div className="grid grid-cols-3 gap-3">
+          <div>
+            <div className="text-xs text-white/60 mb-1">On Punctuation (s)</div>
+            <Input type="number" step="0.1" value={Number(cfg.asr?.onPunct ?? 0.1)} onChange={e => setCfg('asr.onPunct', clampFloat(e.target.value, 0, 3, 0.1))} />
+          </div>
+          <div>
+            <div className="text-xs text-white/60 mb-1">No Punctuation (s)</div>
+            <Input type="number" step="0.1" value={Number(cfg.asr?.noPunct ?? 1.5)} onChange={e => setCfg('asr.noPunct', clampFloat(e.target.value, 0, 3, 1.5))} />
+          </div>
+          <div>
+            <div className="text-xs text-white/60 mb-1">On Number (s)</div>
+            <Input type="number" step="0.1" value={Number(cfg.asr?.onNumber ?? 0.5)} onChange={e => setCfg('asr.onNumber', clampFloat(e.target.value, 0, 3, 0.5))} />
+          </div>
+        </div>
+      </Row>
+    </div>
   );
 }
 
-function TabWidget({ draft, setDraft }: any) {
-  const embed = `<vapi-widget assistant-id="YOUR_ID" public-key="${draft.widget.publicKey}"></vapi-widget>\n<script src="https://unpkg.com/@vapi-ai/client-sdk-react/dist/embed/widget.umd.js" async></script>`;
+function ToolsTab({ bot, setCfg }: { bot: Bot; setCfg: (p: string, v: any) => void }) {
+  const cfg = bot.config || {};
   return (
-    <Row>
-      <Card title="Widget" icon={<Code2 className="w-4 h-4 text-[#6af7d1]" />}>
-        <Field label="Public key"><Input value={draft.widget.publicKey} onChange={(e)=>setDraft((d:any)=>({ ...d, widget:{ ...d.widget, publicKey: e.target.value } }))} /></Field>
-        <Field label="Embed code">
-          <Textarea readOnly value={embed} />
-        </Field>
-      </Card>
-    </Row>
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <Row label="Predefined Functions" icon={<ListChecks className="w-4 h-4 text-[#6af7d1]" />}>
+        <div className="grid grid-cols-2 gap-3">
+          <Toggle label="Enable End Call" checked={!!cfg.tools?.endCall} onChange={v => setCfg('tools.endCall', v)} />
+          <Toggle label="Dial Keypad" checked={!!cfg.tools?.keypad} onChange={v => setCfg('tools.keypad', v)} />
+          <div className="col-span-2">
+            <div className="text-xs text-white/60 mb-1">Forwarding Number</div>
+            <Input placeholder="+1…" value={String(cfg.tools?.forwardE164 ?? '')} onChange={e => setCfg('tools.forwardE164', e.target.value)} />
+          </div>
+        </div>
+      </Row>
+
+      <Row label="Server Hooks" icon={<Wand2 className="w-4 h-4 text-[#6af7d1]" />}>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="col-span-2">
+            <div className="text-xs text-white/60 mb-1">Server URL</div>
+            <Input placeholder="https://api.example.com/function" value={String(cfg.tools?.serverUrl ?? '')} onChange={e => setCfg('tools.serverUrl', e.target.value)} />
+          </div>
+          <div>
+            <div className="text-xs text-white/60 mb-1">Timeout (s)</div>
+            <Input type="number" value={Number(cfg.tools?.timeout ?? 20)} onChange={e => setCfg('tools.timeout', clampInt(e.target.value, 1, 120, 20))} />
+          </div>
+        </div>
+      </Row>
+    </div>
   );
 }
 
-function Toggle({ value, onChange }: { value: boolean; onChange: (v:boolean)=>void }) {
+function AnalysisTab({ bot, setCfg }: { bot: Bot; setCfg: (p: string, v: any) => void }) {
+  const cfg = bot.config || {};
   return (
-    <button type="button" onClick={()=>onChange(!value)} className="w-12 h-7 rounded-full relative transition" style={{ background: value ? 'rgba(16,185,129,0.8)' : 'rgba(255,255,255,0.10)' }}>
-      <span className="absolute top-1 left-1 w-5 h-5 rounded-full bg-white transition-transform" style={{ transform: value ? 'translateX(20px)' : 'translateX(0)' }} />
-    </button>
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <Row label="Summary" icon={<MessageSquareText className="w-4 h-4 text-[#6af7d1]" />}>
+        <Text rows={6} placeholder="You are an expert note-taker…" value={String(cfg.analysis?.summary ?? '')} onChange={e => setCfg('analysis.summary', e.target.value)} />
+      </Row>
+      <Row label="Success Evaluation" icon={<Library className="w-4 h-4 text-[#6af7d1]" />}>
+        <Text rows={6} placeholder="You are an expert call evaluator…" value={String(cfg.analysis?.success ?? '')} onChange={e => setCfg('analysis.success', e.target.value)} />
+      </Row>
+      <Row label="Structured Data" icon={<FileText className="w-4 h-4 text-[#6af7d1]" />}>
+        <Text rows={6} placeholder="Extract structured data from the call…" value={String(cfg.analysis?.structured ?? '')} onChange={e => setCfg('analysis.structured', e.target.value)} />
+      </Row>
+    </div>
+  );
+}
+
+function AdvancedTab({ bot, setCfg }: { bot: Bot; setCfg: (p: string, v: any) => void }) {
+  const cfg = bot.config || {};
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <Row label="Privacy" icon={<Shield className="w-4 h-4 text-[#6af7d1]" />}>
+        <div className="grid grid-cols-2 gap-3">
+          <Toggle label="HIPAA Compliance" checked={!!cfg.privacy?.hipaa} onChange={v => setCfg('privacy.hipaa', v)} />
+          <Toggle label="PCI Compliance" checked={!!cfg.privacy?.pci} onChange={v => setCfg('privacy.pci', v)} />
+          <Toggle label="Audio Recording" checked={!!cfg.privacy?.audio} onChange={v => setCfg('privacy.audio', v)} />
+        </div>
+      </Row>
+
+      <Row label="Keypad Input" icon={<ListChecks className="w-4 h-4 text-[#6af7d1]" />}>
+        <div className="grid grid-cols-3 gap-3">
+          <Toggle label="Enable Keypad" checked={!!cfg.keypad?.enable} onChange={v => setCfg('keypad.enable', v)} />
+          <div>
+            <div className="text-xs text-white/60 mb-1">Timeout (s)</div>
+            <Input type="number" value={Number(cfg.keypad?.timeout ?? 2)} onChange={e => setCfg('keypad.timeout', clampInt(e.target.value, 0, 10, 2))} />
+          </div>
+          <div>
+            <div className="text-xs text-white/60 mb-1">Delimiter</div>
+            <Input placeholder="#" value={String(cfg.keypad?.delimiter ?? '')} onChange={e => setCfg('keypad.delimiter', e.target.value)} />
+          </div>
+        </div>
+      </Row>
+    </div>
+  );
+}
+
+function WidgetTab({ bot }: { bot: Bot }) {
+  return (
+    <div className="space-y-4">
+      <Row label="Embed Widget" icon={<Settings2 className="w-4 h-4 text-[#6af7d1]" />}>
+        <div className="text-sm text-white/80">Use your public key + assistant id to embed a web widget.</div>
+        <div className="mt-3" style={INNER}>
+          <pre className="p-4 text-xs whitespace-pre-wrap">
+{`<vapi-widget assistant-id="${bot.id}" public-key="YOUR_PUBLIC_KEY"></vapi-widget>
+<script src="https://unpkg.com/@vapi-ai/client-sdk-react/dist/embed/widget.umd.js" async></script>`}
+          </pre>
+        </div>
+      </Row>
+    </div>
   );
 }
