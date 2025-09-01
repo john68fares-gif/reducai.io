@@ -27,26 +27,20 @@ const LANGUAGES: Lang[] = [
   { name: 'Japanese', code: 'ja' },
 ];
 
-const s = (v: any, d = '') => (typeof v === 'string' ? v : d);
-
 export default function StepV1Basics({ onNext }: { onNext?: () => void }) {
   const [name, setName] = useState('');
   const [industry, setIndustry] = useState('');
-  const [langCode, setLangCode] = useState<string>('en');
-  const [accentIso2, setAccentIso2] = useState<string>('US');
+  const [langCode, setLangCode] = useState('en');
+  const [accentIso2, setAccentIso2] = useState('US');
 
   useEffect(() => {
     try {
       const saved = JSON.parse(localStorage.getItem('voicebuilder:step1') || 'null');
-      if (saved && typeof saved === 'object') {
-        setName(s(saved.name));
-        setIndustry(s(saved.industry));
-        if (typeof saved.languageCode === 'string') setLangCode(saved.languageCode);
-        else if (typeof saved.language === 'string' && /^[a-z]{2}-[A-Z]{2}$/.test(saved.language))
-          setLangCode(saved.language.split('-')[0]);
-        if (typeof saved.countryIso2 === 'string') setAccentIso2(saved.countryIso2.toUpperCase());
-        else if (typeof saved.dialect === 'string' && /^[a-z]{2}-[A-Z]{2}$/.test(saved.dialect))
-          setAccentIso2(saved.dialect.split('-')[1]);
+      if (saved) {
+        setName(saved.name || '');
+        setIndustry(saved.industry || '');
+        setLangCode(saved.languageCode || saved.language?.split('-')?.[0] || 'en');
+        setAccentIso2((saved.countryIso2 || saved.dialect?.split('-')?.[1] || 'US').toUpperCase());
       }
     } catch {}
   }, []);
@@ -63,25 +57,20 @@ export default function StepV1Basics({ onNext }: { onNext?: () => void }) {
   const canContinue = Object.keys(errors).length === 0;
 
   const persistAndNext = useCallback(() => {
-    const iso2Upper = accentIso2.toUpperCase();
-    const iso2Lower = accentIso2.toLowerCase();
-    const locale = `${langCode}-${iso2Upper}`;
-
-    try {
-      localStorage.setItem(
-        'voicebuilder:step1',
-        JSON.stringify({
-          name,
-          industry,
-          languageName: LANGUAGES.find(l => l.code === langCode)?.name || 'English',
-          languageCode: langCode,
-          language: locale,   // canonical (e.g., en-US)
-          dialect: locale,
-          countryIso2: iso2Upper,
-          accent2: iso2Lower, // store two-letter lower as requested
-        }),
-      );
-    } catch {}
+    const locale = `${langCode}-${accentIso2.toUpperCase()}`;
+    localStorage.setItem(
+      'voicebuilder:step1',
+      JSON.stringify({
+        name,
+        industry,
+        languageName: LANGUAGES.find((l) => l.code === langCode)?.name || 'English',
+        languageCode: langCode,
+        language: locale,   // e.g., en-US
+        dialect: locale,
+        countryIso2: accentIso2.toUpperCase(),
+        accent2: accentIso2.toLowerCase(), // store two-letter lower like "us", "uk", "nl"
+      }),
+    );
     onNext?.();
   }, [name, industry, langCode, accentIso2, onNext]);
 
@@ -94,7 +83,7 @@ export default function StepV1Basics({ onNext }: { onNext?: () => void }) {
 
   return (
     <section className="w-full" onKeyDown={onKeyDown}>
-      {/* Header like Builder */}
+      {/* header matches Builder */}
       <div className="mb-8">
         <div
           className="inline-flex items-center gap-2 text-xs tracking-wide px-3 py-1.5 rounded-[20px] border"
@@ -107,8 +96,8 @@ export default function StepV1Basics({ onNext }: { onNext?: () => void }) {
         <p className="text-white/70 mt-1">Name it, set the industry, and choose how it speaks.</p>
       </div>
 
-      {/* Wider form box (same width feel as Builder) */}
-      <section className="relative p-6 sm:p-8 max-w-[1120px] mx-auto" style={CARD_STYLE}>
+      {/* WIDE form card — fills the same 7xl container as Builder */}
+      <section className="relative p-6 sm:p-8 w-full" style={CARD_STYLE}>
         <div
           aria-hidden
           className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
@@ -132,7 +121,6 @@ export default function StepV1Basics({ onNext }: { onNext?: () => void }) {
             error={errors.industry}
           />
 
-          {/* Language (left) */}
           <SelectField
             label="Language *"
             value={langCode}
@@ -142,7 +130,7 @@ export default function StepV1Basics({ onNext }: { onNext?: () => void }) {
             error={errors.language}
           />
 
-          {/* Accent (right) — uses same height/rounding/border as inputs */}
+          {/* Country dropdown styled EXACTLY like inputs */}
           <div>
             <label className="block mb-2 text-[13px] font-medium text-white/85 tracking-wide">
               Dialect / Accent * <span className="text-white/50">(choose country)</span>
@@ -184,30 +172,17 @@ export default function StepV1Basics({ onNext }: { onNext?: () => void }) {
   );
 }
 
-/* ------- Builder-style Field ------- */
+/* ---- Builder-style input ---- */
 function Field({
-  label,
-  value,
-  onChange,
-  placeholder,
-  icon,
-  error,
+  label, value, onChange, placeholder, icon, error,
 }: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder?: string;
-  icon?: React.ReactNode;
-  error?: string;
+  label: string; value: string; onChange: (v: string) => void; placeholder?: string; icon?: React.ReactNode; error?: string;
 }) {
   const borderBase = error ? 'rgba(255,120,120,0.55)' : '#13312b';
   return (
     <div>
       <label className="block mb-2 text-[13px] font-medium text-white/85 tracking-wide">{label}</label>
-      <div
-        className="flex items-center gap-2 rounded-2xl bg-[#101314] px-4 py-3.5 border outline-none"
-        style={{ borderColor: borderBase }}
-      >
+      <div className="flex items-center gap-2 rounded-2xl bg-[#101314] px-4 py-3.5 border outline-none" style={{ borderColor: borderBase }}>
         {icon}
         <input
           value={value}
@@ -223,30 +198,17 @@ function Field({
   );
 }
 
-/* ------- Builder-style Select ------- */
+/* ---- Builder-style select ---- */
 function SelectField({
-  label,
-  value,
-  onChange,
-  options,
-  icon,
-  error,
+  label, value, onChange, options, icon, error,
 }: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  options: { label: string; value: string }[];
-  icon?: React.ReactNode;
-  error?: string;
+  label: string; value: string; onChange: (v: string) => void; options: { label: string; value: string }[]; icon?: React.ReactNode; error?: string;
 }) {
   const borderBase = error ? 'rgba(255,120,120,0.55)' : '#13312b';
   return (
     <div>
       <label className="block mb-2 text-[13px] font-medium text-white/85 tracking-wide">{label}</label>
-      <div
-        className="flex items-center gap-2 rounded-2xl bg-[#101314] px-4 py-3.5 border outline-none"
-        style={{ borderColor: borderBase }}
-      >
+      <div className="flex items-center gap-2 rounded-2xl bg-[#101314] px-4 py-3.5 border outline-none" style={{ borderColor: borderBase }}>
         {icon}
         <select
           value={value}
