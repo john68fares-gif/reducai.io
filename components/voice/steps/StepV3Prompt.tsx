@@ -2,35 +2,34 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Eye,
-  Copy,
-  ChevronLeft,
-  ChevronRight,
-} from 'lucide-react';
+import { Eye, Copy, ArrowLeft, ArrowRight, X } from 'lucide-react';
 
-/* ---------- shared style (matches your Builder) ---------- */
-const CARD_STYLE: React.CSSProperties = {
+/* ------------------------------- SHARED UI ------------------------------- */
+// From your Step3PromptEditor.tsx (kept identical vibes)
+const FRAME_STYLE: React.CSSProperties = {
   background: 'rgba(13,15,17,0.95)',
-  border: '2px solid rgba(0,255,194,0.16)',
-  borderRadius: 20,
-  boxShadow: '0 0 40px -12px rgba(0,255,194,0.25)',
+  border: '2px dashed rgba(106,247,209,0.30)',
+  boxShadow: '0 0 40px rgba(0,0,0,0.7)',
+  borderRadius: 30,
 };
-const BTN_OK =
-  'inline-flex items-center gap-2 px-4 py-2 rounded-md bg-emerald-500/20 text-emerald-200 border border-emerald-400/40 hover:bg-emerald-500/25';
-const BTN_MUTE =
-  'inline-flex items-center gap-2 px-4 py-2 rounded-md bg-white/10 text-white border border-white/15 hover:bg-white/15';
-const BTN_DISABLED =
-  'inline-flex items-center gap-2 px-4 py-2 rounded-md bg-white/5 text-white/40 border border-white/10 cursor-not-allowed';
+const HEADER_BORDER = { borderBottom: '1px solid rgba(255,255,255,0.4)' };
+const CARD_STYLE: React.CSSProperties = {
+  background: '#101314',
+  border: '1px solid rgba(255,255,255,0.30)',
+  borderRadius: 20,
+};
+/* Same green as your Step 2/3 builder */
+const BTN_GREEN = '#59d9b3';
+const BTN_GREEN_HOVER = '#54cfa9';
+const BTN_DISABLED = '#2e6f63';
 
-/* ---------- types ---------- */
+/* ------------------------------- TYPES/LS ------------------------------- */
 type Step1Lite = {
   language: string;
   accentIso2?: string;
   responseDelayMs?: number;
   allowBargeIn?: boolean;
 };
-
 type Step3 = {
   personaName: string;
   style: 'professional' | 'conversational' | 'empathetic' | 'upbeat';
@@ -57,16 +56,14 @@ type Step3 = {
   ttsVoice?: string;
   compiled?: string;
 };
-
-/* ---------- storage keys ---------- */
 const LS_STEP1 = 'voicebuilder:step1';
 const LS_STEP3 = 'voicebuilder:step3';
 const LS_BACKUP = 'voice:settings:backup';
 
-/* ---------- helpers ---------- */
+/* -------------------------------- HELPERS ------------------------------- */
 function readLS<T>(k: string): T | null {
   try {
-    const raw = localStorage.getItem(k);
+    const raw = typeof window !== 'undefined' ? localStorage.getItem(k) : null;
     return raw ? (JSON.parse(raw) as T) : null;
   } catch {
     return null;
@@ -77,11 +74,13 @@ function writeLS<T>(k: string, v: T) {
     localStorage.setItem(k, JSON.stringify(v));
   } catch {}
 }
+function isE164(v: string) {
+  return /^\+[1-9]\d{6,14}$/.test(v);
+}
 function useDebouncedSaver<T>(value: T, delay = 400, onSave: (v: T) => void) {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const t = useRef<number | null>(null);
-
   useEffect(() => {
     setSaving(true);
     setSaved(false);
@@ -92,19 +91,13 @@ function useDebouncedSaver<T>(value: T, delay = 400, onSave: (v: T) => void) {
       setSaved(true);
       window.setTimeout(() => setSaved(false), 1200);
     }, delay);
-    return () => {
-      if (t.current) window.clearTimeout(t.current);
-    };
+    return () => t.current && window.clearTimeout(t.current);
   }, [value, delay, onSave]);
-
   return { saving, saved };
 }
-function isE164(v: string) {
-  return /^\+[1-9]\d{6,14}$/.test(v);
-}
 
-/* ---------- tiny UI atoms (in-file) ---------- */
-function Toggle({ checked, onChange, label, hint }: { checked: boolean; onChange: (v: boolean) => void; label?: string; hint?: string; }) {
+/* ------------------------------- INLINE ATOMS --------------------------- */
+function Toggle({ checked, onChange, label, hint }: { checked: boolean; onChange: (v: boolean) => void; label?: string; hint?: string }) {
   return (
     <label className="flex items-start gap-3 cursor-pointer select-none">
       <button
@@ -211,13 +204,13 @@ function ListEditor({
             value={r.title}
             onChange={(e) => edit(r.id, 'title', e.target.value)}
             placeholder="Title"
-            className="md:col-span-2 px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm"
+            className="md:col-span-2 px-3 py-2 rounded-2xl bg-[#0b0e0f] text-white border border-white/15 text-sm"
           />
           <textarea
             value={r.text}
             onChange={(e) => edit(r.id, 'text', e.target.value)}
             placeholder="Short text"
-            className="md:col-span-3 px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm min-h-[38px]"
+            className="md:col-span-3 px-3 py-2 rounded-2xl bg-[#0b0e0f] text-white border border-white/15 text-sm min-h-[38px]"
           />
           <div className="md:col-span-5 flex justify-end">
             <button type="button" onClick={() => remove(r.id)} className="text-xs text-red-300/90 hover:text-red-200">
@@ -226,7 +219,12 @@ function ListEditor({
           </div>
         </div>
       ))}
-      <button type="button" onClick={add} className="px-3 py-1.5 rounded-md bg-emerald-500/20 text-emerald-200 text-sm border border-emerald-400/40">
+      <button
+        type="button"
+        onClick={add}
+        className="px-3 py-2 rounded-2xl text-emerald-200 text-sm"
+        style={{ ...CARD_STYLE, border: '1px dashed rgba(0,255,194,0.35)' }}
+      >
         {addLabel}
       </button>
     </div>
@@ -249,7 +247,8 @@ function PhoneInput({
         value={value || ''}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className={`w-full px-3 py-2 rounded-lg bg-white/5 border text-sm ${error ? 'border-red-400/70' : 'border-white/10'}`}
+        className="w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] text-white border text-sm"
+        style={{ borderColor: error ? 'rgba(255,99,99,0.7)' : 'rgba(255,255,255,0.15)' }}
       />
       {error && <p className="text-xs text-red-400 mt-1">{error}</p>}
     </div>
@@ -268,21 +267,43 @@ function Modal({
 }) {
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70">
-      <div style={CARD_STYLE} className="w-full max-w-3xl p-5 border border-emerald-500/10 relative">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-emerald-300 font-semibold">{title}</h3>
-          <button className="text-white/60 hover:text-white" onClick={onClose}>
-            ✕
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: 'rgba(0,0,0,0.5)' }}>
+      <div className="relative w-full max-w-[980px] max-h-[88vh] flex flex-col text-white font-movatif" style={FRAME_STYLE}>
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 rounded-t-[30px]" style={HEADER_BORDER}>
+          <div className="min-w-0">
+            <h4 className="text-white text-lg font-semibold truncate">{title}</h4>
+            <div className="text-white/80 text-xs truncate">Exactly what will be sent as the System Prompt</div>
+          </div>
+          <button onClick={onClose} className="p-2 rounded-full hover:bg-white/10" aria-label="Close">
+            <X className="w-5 h-5 text-white" />
           </button>
         </div>
-        <div className="max-h-[65vh] overflow-auto">{children}</div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto p-6">
+          <div style={CARD_STYLE} className="p-5">
+            <pre className="whitespace-pre-wrap text-sm leading-6">{children}</pre>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-4 rounded-b-[30px]" style={{ borderTop: '1px solid rgba(255,255,255,0.3)', background: '#101314' }}>
+          <div className="flex justify-end">
+            <button
+              onClick={onClose}
+              className="px-6 py-2 rounded-[24px] border border-white/15 hover:bg-white/10 transition"
+            >
+              Close
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
 }
 
-/* ---------- compiler (pure function) ---------- */
+/* -------------------------------- COMPILER ------------------------------- */
 const STYLE_LABEL: Record<Step3['style'], string> = {
   professional: 'Professional and concise',
   conversational: 'Natural and conversational',
@@ -393,7 +414,7 @@ ${(s3.escalate.criteria || '')
     .join('\n');
 }
 
-/* ---------- constants ---------- */
+/* ------------------------------ CONSTANTS ------------------------------- */
 const INTENT_OPTIONS = ['Scheduling', 'Reschedule', 'Cancel', 'FAQs', 'Lead Capture', 'Handover to Human'];
 const COLLECT_OPTIONS = ['Name', 'Phone', 'Email', 'Date/Time', 'Service Type', 'Account/Order #', 'Notes'];
 
@@ -419,10 +440,7 @@ const DEFAULT_S3: Step3 = {
   compiled: '',
 };
 
-/* =========================================================
-   STEP 3 — Personality & Knowledge
-   (two-column niche boxes, autosave, validation, preview)
-========================================================= */
+/* =============================== COMPONENT ============================== */
 export default function StepV3Prompt({ onBack, onNext }: { onBack?: () => void; onNext?: () => void }) {
   const step1 = (readLS<Step1Lite>(LS_STEP1)) || { language: 'en', accentIso2: '', responseDelayMs: 600, allowBargeIn: true };
   const restored = readLS<Step3>(LS_STEP3);
@@ -438,12 +456,10 @@ export default function StepV3Prompt({ onBack, onNext }: { onBack?: () => void; 
     };
   });
 
-  // compile + autosave
   const compiled = useMemo(() => compileVoicePrompt(step1, s3), [step1, s3]);
   const full = useMemo(() => ({ ...s3, compiled }), [s3, compiled]);
   const { saving, saved } = useDebouncedSaver(full, 400, (v) => writeLS(LS_STEP3, v));
 
-  // validation
   const errors = useMemo(() => {
     const e: Record<string, string> = {};
     if (!s3.greetingLine.trim()) e.greeting = 'Greeting is required';
@@ -471,216 +487,170 @@ export default function StepV3Prompt({ onBack, onNext }: { onBack?: () => void; 
   }
 
   const saveBadge = (
-    <span className="text-xs px-2 py-1 rounded-md border border-white/15 text-white/70">
+    <span className="text-xs px-2 py-1 rounded-2xl border border-white/15 text-white/70">
       {saving ? 'Saving…' : saved ? 'Saved' : 'Auto-save'}
     </span>
   );
   const [previewOpen, setPreviewOpen] = useState(false);
 
   return (
-    <div className="w-full mx-auto max-w-6xl">
-      {/* header */}
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h2 className="text-xl md:text-2xl font-semibold text-white">Personality & Knowledge</h2>
-          <p className="text-white/60 text-sm">Step 3 / 4</p>
+    <div className="min-h-screen w-full bg-[#0b0c10] text-white font-movatif">
+      <div className="w-full max-w-7xl mx-auto px-6 md:px-8 pt-10 pb-24">
+        {/* Header (Step 3 / 4) */}
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <h2 className="text-3xl md:text-4xl font-semibold tracking-tight">Personality & Knowledge</h2>
+            <div className="text-white/70 mt-1 text-sm">Compose voice-first behavior from niche boxes — autosaved & compiled</div>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setPreviewOpen(true)}
+              className="inline-flex items-center gap-2 rounded-[24px] border border-white/15 bg-transparent px-4 py-2 text-white hover:bg-white/10 transition"
+            >
+              <Eye className="w-4 h-4" /> Preview compiled prompt
+            </button>
+            {saveBadge}
+            <div className="text-sm text-white/60 hidden md:block">Step 3 of 4</div>
+          </div>
         </div>
-        <div className="flex items-center gap-3">
-          <button type="button" onClick={() => setPreviewOpen(true)} className={BTN_MUTE}>
-            <Eye className="w-4 h-4" /> Preview compiled prompt
-          </button>
-          {saveBadge}
-        </div>
-      </div>
 
-      {/* big glowing card */}
-      <div style={CARD_STYLE} className="p-4 md:p-6 border border-emerald-500/10">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
-          {/* Persona & Tone */}
-          <section style={CARD_STYLE} className="p-4 border border-emerald-500/10">
-            <div className="flex items-start justify-between mb-3">
-              <div>
-                <h3 className="text-emerald-300 text-sm md:text-base font-semibold">Persona & Tone</h3>
-                <p className="text-emerald-200/60 text-xs md:text-sm mt-1">Voice-first personality settings.</p>
+        {/* Big frame (glow/dashed like builder) */}
+        <div className="rounded-[30px] p-6 relative" style={FRAME_STYLE}>
+          {/* soft radial glow accent */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -top-[18%] -left-[22%] w-[60%] h-[60%] rounded-full"
+            style={{ background: 'radial-gradient(circle, rgba(106,247,209,0.10) 0%, transparent 70%)', filter: 'blur(38px)' }}
+          />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Persona & Tone */}
+            <Box title="Persona & Tone" subtitle="Voice-first personality settings." saveBadge={saveBadge}>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="col-span-2 text-xs text-white/70">Persona name</label>
+                <input
+                  value={s3.personaName}
+                  onChange={(e) => set('personaName', e.target.value)}
+                  className="col-span-2 px-3 py-2 rounded-2xl bg-[#0b0e0f] text-white border border-white/15 text-sm"
+                  placeholder="Riley"
+                />
+                <label className="text-xs text-white/70">Style</label>
+                <select
+                  value={s3.style}
+                  onChange={(e) => set('style', e.target.value as Step3['style'])}
+                  className="px-3 py-2 rounded-2xl bg-[#0b0e0f] text-white border border-white/15 text-sm"
+                >
+                  <option value="professional">Professional</option>
+                  <option value="conversational">Conversational</option>
+                  <option value="empathetic">Empathetic</option>
+                  <option value="upbeat">Upbeat</option>
+                </select>
+                <label className="text-xs text-white/70">Politeness</label>
+                <select
+                  value={s3.politeness}
+                  onChange={(e) => set('politeness', e.target.value as Step3['politeness'])}
+                  className="px-3 py-2 rounded-2xl bg-[#0b0e0f] text-white border border-white/15 text-sm"
+                >
+                  <option value="low">Low</option>
+                  <option value="med">Medium</option>
+                  <option value="high">High</option>
+                </select>
               </div>
-              {saveBadge}
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <label className="col-span-2 text-xs text-white/70">Persona name</label>
+            </Box>
+
+            {/* Greeting */}
+            <Box title="Opening / Greeting" subtitle="One-liner greeting (max 120 chars)." error={errors.greeting || errors.greetingLen}>
               <input
-                value={s3.personaName}
-                onChange={(e) => set('personaName', e.target.value)}
-                className="col-span-2 px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm"
-                placeholder="Riley"
+                value={s3.greetingLine}
+                onChange={(e) => set('greetingLine', e.target.value)}
+                placeholder={`Hi, you're speaking with ${s3.personaName}.`}
+                className="w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] text-white border border-white/15 text-sm"
               />
+              <input
+                value={s3.introExplain || ''}
+                onChange={(e) => set('introExplain', e.target.value)}
+                placeholder="(Optional) 'I can help with bookings.'"
+                className="mt-2 w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] text-white border border-white/15 text-sm"
+              />
+              <div className="text-xs text-white/50 text-right mt-1">{s3.greetingLine.length}/120</div>
+            </Box>
 
-              <label className="text-xs text-white/70">Style</label>
-              <select
-                value={s3.style}
-                onChange={(e) => set('style', e.target.value as Step3['style'])}
-                className="px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm"
-              >
-                <option value="professional">Professional</option>
-                <option value="conversational">Conversational</option>
-                <option value="empathetic">Empathetic</option>
-                <option value="upbeat">Upbeat</option>
-              </select>
-
-              <label className="text-xs text-white/70">Politeness</label>
-              <select
-                value={s3.politeness}
-                onChange={(e) => set('politeness', e.target.value as Step3['politeness'])}
-                className="px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm"
-              >
-                <option value="low">Low</option>
-                <option value="med">Medium</option>
-                <option value="high">High</option>
-              </select>
-            </div>
-          </section>
-
-          {/* Opening / Greeting */}
-          <section style={CARD_STYLE} className="p-4 border border-emerald-500/10">
-            <h3 className="text-emerald-300 text-sm md:text-base font-semibold">Opening / Greeting</h3>
-            <p className="text-emerald-200/60 text-xs md:text-sm mt-1">One-liner greeting (max 120 chars).</p>
-            <input
-              value={s3.greetingLine}
-              onChange={(e) => set('greetingLine', e.target.value)}
-              placeholder={`Hi, you're speaking with ${s3.personaName}.`}
-              className="mt-3 w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm"
-            />
-            <input
-              value={s3.introExplain || ''}
-              onChange={(e) => set('introExplain', e.target.value)}
-              placeholder="(Optional) Short line about role, e.g., “I can help with bookings.”"
-              className="mt-2 w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm"
-            />
-            <div className="text-xs text-white/50 text-right mt-1">{s3.greetingLine.length}/120</div>
-            {(errors.greeting || errors.greetingLen) && (
-              <p className="mt-2 text-xs text-red-400">{errors.greeting || errors.greetingLen}</p>
-            )}
-          </section>
-
-          {/* Core Tasks / Intents */}
-          <section style={CARD_STYLE} className="p-4 border border-emerald-500/10">
-            <h3 className="text-emerald-300 text-sm md:text-base font-semibold">Core Tasks / Intents</h3>
-            <p className="text-emerald-200/60 text-xs md:text-sm mt-1">Choose what this agent can do.</p>
-            <div className="mt-3">
+            {/* Intents */}
+            <Box title="Core Tasks / Intents" subtitle="Choose what this agent can do." error={errors.intents}>
               <ChipList options={INTENT_OPTIONS} value={s3.intents} onChange={(v) => set('intents', v)} />
-            </div>
-            <input
-              value={s3.otherTasks || ''}
-              onChange={(e) => set('otherTasks', e.target.value)}
-              placeholder="Other tasks (optional)"
-              className="mt-3 w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm"
-            />
-            {errors.intents && <p className="mt-2 text-xs text-red-400">{errors.intents}</p>}
-          </section>
+              <input
+                value={s3.otherTasks || ''}
+                onChange={(e) => set('otherTasks', e.target.value)}
+                placeholder="Other tasks (optional)"
+                className="mt-3 w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] text-white border border-white/15 text-sm"
+              />
+            </Box>
 
-          {/* Information to Collect */}
-          <section style={CARD_STYLE} className="p-4 border border-emerald-500/10">
-            <h3 className="text-emerald-300 text-sm md:text-base font-semibold">Information to Collect</h3>
-            <p className="text-emerald-200/60 text-xs md:text-sm mt-1">Order determines ask order.</p>
-            <div className="mt-3">
-              <ChipList
-                options={COLLECT_OPTIONS}
-                value={s3.collect}
-                onChange={(v) => set('collect', v)}
-                reorderable
-              />
-            </div>
-            {errors.collect && <p className="mt-2 text-xs text-red-400">{errors.collect}</p>}
-          </section>
+            {/* Collect */}
+            <Box title="Information to Collect" subtitle="Order determines ask order." error={errors.collect}>
+              <ChipList options={COLLECT_OPTIONS} value={s3.collect} onChange={(v) => set('collect', v)} reorderable />
+            </Box>
 
-          {/* Confirmation Rules */}
-          <section style={CARD_STYLE} className="p-4 border border-emerald-500/10">
-            <h3 className="text-emerald-300 text-sm md:text-base font-semibold">Confirmation Rules</h3>
-            <div className="mt-3 space-y-2">
-              <Toggle
-                checked={s3.confirmation.confirmNames}
-                onChange={(v) => set('confirmation', { ...s3.confirmation, confirmNames: v })}
-                label="Confirm names"
-              />
-              <Toggle
-                checked={s3.confirmation.repeatDateTime}
-                onChange={(v) => set('confirmation', { ...s3.confirmation, repeatDateTime: v })}
-                label="Repeat date/time"
-              />
-              <Toggle
-                checked={s3.confirmation.spellBackUnusual}
-                onChange={(v) => set('confirmation', { ...s3.confirmation, spellBackUnusual: v })}
-                label="Spell back unusual terms"
-              />
-              <textarea
-                value={s3.confirmation.template || ''}
-                onChange={(e) => set('confirmation', { ...s3.confirmation, template: e.target.value })}
-                placeholder="(Optional) Short confirmation template"
-                className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm min-h-[70px]"
-              />
-            </div>
-          </section>
+            {/* Confirmation */}
+            <Box title="Confirmation Rules" subtitle="How to confirm details with caller.">
+              <div className="space-y-2">
+                <Toggle checked={s3.confirmation.confirmNames} onChange={(v) => set('confirmation', { ...s3.confirmation, confirmNames: v })} label="Confirm names" />
+                <Toggle checked={s3.confirmation.repeatDateTime} onChange={(v) => set('confirmation', { ...s3.confirmation, repeatDateTime: v })} label="Repeat date/time" />
+                <Toggle checked={s3.confirmation.spellBackUnusual} onChange={(v) => set('confirmation', { ...s3.confirmation, spellBackUnusual: v })} label="Spell back unusual terms" />
+                <textarea
+                  value={s3.confirmation.template || ''}
+                  onChange={(e) => set('confirmation', { ...s3.confirmation, template: e.target.value })}
+                  placeholder="(Optional) Short confirmation template"
+                  className="w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] text-white border border-white/15 text-sm min-h-[70px]"
+                />
+              </div>
+            </Box>
 
-          {/* Interruptions & Barge-in */}
-          <section style={CARD_STYLE} className="p-4 border border-emerald-500/10">
-            <h3 className="text-emerald-300 text-sm md:text-base font-semibold">Interruptions & Barge-in</h3>
-            <p className="text-emerald-200/60 text-xs md:text-sm mt-1">How to handle interruptions.</p>
-            <div className="mt-3 space-y-2">
-              <Toggle
-                checked={s3.barge.allow}
-                onChange={(v) => set('barge', { ...s3.barge, allow: v })}
-                label="Allow barge-in"
-              />
+            {/* Barge-in */}
+            <Box title="Interruptions & Barge-in" subtitle="How to handle interruptions.">
+              <Toggle checked={s3.barge.allow} onChange={(v) => set('barge', { ...s3.barge, allow: v })} label="Allow barge-in" />
               <textarea
                 value={s3.barge.phrases || ''}
                 onChange={(e) => set('barge', { ...s3.barge, phrases: e.target.value })}
-                placeholder="What to say when interrupted (short phrases)"
-                className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm min-h-[70px]"
+                placeholder="Short acknowledgements when interrupted"
+                className="w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] text-white border border-white/15 text-sm min-h-[70px]"
               />
-            </div>
-          </section>
+            </Box>
 
-          {/* Latency Cover / Thinking Filler */}
-          <section style={CARD_STYLE} className="p-4 border border-emerald-500/10">
-            <h3 className="text-emerald-300 text-sm md:text-base font-semibold">Latency Cover / Thinking Filler</h3>
-            <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3 items-center">
-              <div>
-                <label className="text-xs text-white/70">Response delay (ms)</label>
-                <input
-                  type="number"
-                  min={0}
-                  value={s3.latency.delayMs}
-                  onChange={(e) => set('latency', { ...s3.latency, delayMs: Number(e.target.value || 0) })}
-                  className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm"
-                />
+            {/* Latency */}
+            <Box title="Latency Cover / Thinking Filler" subtitle="Short fillers while thinking.">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-center">
+                <div>
+                  <label className="text-xs text-white/70">Response delay (ms)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={s3.latency.delayMs}
+                    onChange={(e) => set('latency', { ...s3.latency, delayMs: Number(e.target.value || 0) })}
+                    className="w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] text-white border border-white/15 text-sm"
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="text-xs text-white/70">Delay fillers</label>
+                  <textarea
+                    value={s3.latency.fillers || ''}
+                    onChange={(e) => set('latency', { ...s3.latency, fillers: e.target.value })}
+                    placeholder="e.g., One moment while I check that."
+                    className="w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] text-white border border-white/15 text-sm min-h-[70px]"
+                  />
+                </div>
               </div>
-              <div className="md:col-span-2">
-                <label className="text-xs text-white/70">Delay fillers</label>
-                <textarea
-                  value={s3.latency.fillers || ''}
-                  onChange={(e) => set('latency', { ...s3.latency, fillers: e.target.value })}
-                  placeholder="e.g., One moment while I check that."
-                  className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm min-h-[70px]"
-                />
-              </div>
-            </div>
-          </section>
+            </Box>
 
-          {/* Escalation / Transfer */}
-          <section style={CARD_STYLE} className="p-4 border border-emerald-500/10">
-            <h3 className="text-emerald-300 text-sm md:text-base font-semibold">Escalation / Transfer</h3>
-            <div className="mt-3 space-y-2">
-              <Toggle
-                checked={!!s3.escalate?.enable}
-                onChange={(v) => set('escalate', { ...s3.escalate!, enable: v })}
-                label="Enable escalation"
-              />
+            {/* Escalation */}
+            <Box title="Escalation / Transfer" subtitle="Configure human transfer." error={errors.handover}>
+              <Toggle checked={!!s3.escalate?.enable} onChange={(v) => set('escalate', { ...s3.escalate!, enable: v })} label="Enable escalation" />
               {s3.escalate?.enable && (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-2">
                   <input
                     value={s3.escalate?.humanHours || ''}
                     onChange={(e) => set('escalate', { ...s3.escalate!, humanHours: e.target.value })}
                     placeholder="Human hours"
-                    className="px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm"
+                    className="px-3 py-2 rounded-2xl bg-[#0b0e0f] text-white border border-white/15 text-sm"
                   />
                   <PhoneInput
                     value={s3.escalate?.handoverNumber || ''}
@@ -692,116 +662,163 @@ export default function StepV3Prompt({ onBack, onNext }: { onBack?: () => void; 
                     value={s3.escalate?.criteria || ''}
                     onChange={(e) => set('escalate', { ...s3.escalate!, criteria: e.target.value })}
                     placeholder="Handover criteria (one per line)"
-                    className="px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm min-h-[38px]"
+                    className="px-3 py-2 rounded-2xl bg-[#0b0e0f] text-white border border-white/15 text-sm min-h-[38px]"
                   />
                 </div>
               )}
-            </div>
-          </section>
+            </Box>
 
-          {/* Out-of-Scope & Safety */}
-          <section style={CARD_STYLE} className="p-4 border border-emerald-500/10">
-            <h3 className="text-emerald-300 text-sm md:text-base font-semibold">Out-of-Scope & Safety</h3>
-            <textarea
-              value={s3.deflect?.script || ''}
-              onChange={(e) => set('deflect', { ...s3.deflect!, script: e.target.value })}
-              placeholder="How to decline or redirect"
-              className="mt-3 w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm min-h-[70px]"
-            />
-            <div className="mt-2">
-              <Toggle
-                checked={!!s3.deflect?.noSensitive}
-                onChange={(v) => set('deflect', { ...s3.deflect!, noSensitive: v })}
-                label="No medical/legal advice"
+            {/* Out-of-scope */}
+            <Box title="Out-of-Scope & Safety" subtitle="Deflection & compliance.">
+              <textarea
+                value={s3.deflect?.script || ''}
+                onChange={(e) => set('deflect', { ...s3.deflect!, script: e.target.value })}
+                placeholder="How to decline or redirect"
+                className="w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] text-white border border-white/15 text-sm min-h-[70px]"
               />
-            </div>
-          </section>
+              <div className="mt-2">
+                <Toggle checked={!!s3.deflect?.noSensitive} onChange={(v) => set('deflect', { ...s3.deflect!, noSensitive: v })} label="No medical/legal advice" />
+              </div>
+            </Box>
 
-          {/* Knowledge Snippets */}
-          <section style={CARD_STYLE} className="p-4 border border-emerald-500/10">
-            <h3 className="text-emerald-300 text-sm md:text-base font-semibold">Knowledge Snippets</h3>
-            <p className="text-emerald-200/60 text-xs md:text-sm mt-1">Business facts: hours, location, policies.</p>
-            <div className="mt-3">
+            {/* Knowledge */}
+            <Box title="Knowledge Snippets" subtitle="Business facts: hours, location, policies." error={errors.knowledge}>
               <ListEditor
                 rows={s3.knowledge.map((k, i) => ({ id: String(i), title: k.title, text: k.text }))}
                 onChange={(rows) => set('knowledge', rows.map((r) => ({ title: r.title, text: r.text })))}
                 addLabel="Add knowledge"
               />
-            </div>
-            {errors.knowledge && <p className="mt-2 text-xs text-red-400">{errors.knowledge}</p>}
-          </section>
+            </Box>
 
-          {/* DTMF / Keypad */}
-          <section style={CARD_STYLE} className="p-4 border border-emerald-500/10">
-            <h3 className="text-emerald-300 text-sm md:text-base font-semibold">DTMF / Keypad Shortcuts (optional)</h3>
-            <p className="text-emerald-200/60 text-xs md:text-sm mt-1">Map digits to actions.</p>
-            <div className="grid grid-cols-5 gap-2 mt-3">
-              {[...'0123456789'].map((d) => (
-                <div key={d} className="col-span-1">
-                  <label className="text-xs text-white/60">{d}</label>
+            {/* DTMF */}
+            <Box title="DTMF / Keypad Shortcuts (optional)" subtitle="Map digits to actions.">
+              <div className="grid grid-cols-5 gap-2">
+                {[...'0123456789'].map((d) => (
+                  <div key={d}>
+                    <label className="text-xs text-white/60">{d}</label>
+                    <input
+                      value={s3.dtmf?.[d] || ''}
+                      onChange={(e) => set('dtmf', { ...(s3.dtmf || {}), [d]: e.target.value })}
+                      placeholder="Action"
+                      className="w-full px-2 py-2 rounded-2xl bg-[#0b0e0f] text-white border border-white/15 text-xs"
+                    />
+                  </div>
+                ))}
+              </div>
+            </Box>
+
+            {/* Language helpers */}
+            <Box title="Language Helpers" subtitle="Mirrors Step 1; voice is optional.">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div>
+                  <label className="text-xs text-white/70">Language</label>
+                  <input value={s3.language} readOnly className="w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] text-white border border-white/15 text-sm opacity-70" />
+                </div>
+                <div>
+                  <label className="text-xs text-white/70">Accent (ISO2)</label>
+                  <input value={s3.accentIso2 || ''} readOnly className="w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] text-white border border-white/15 text-sm opacity-70" />
+                </div>
+                <div>
+                  <label className="text-xs text-white/70">TTS voice (optional)</label>
                   <input
-                    value={s3.dtmf?.[d] || ''}
-                    onChange={(e) => set('dtmf', { ...(s3.dtmf || {}), [d]: e.target.value })}
-                    placeholder="Action"
-                    className="w-full px-2 py-2 rounded-lg bg-white/5 border border-white/10 text-xs"
+                    value={s3.ttsVoice || ''}
+                    onChange={(e) => set('ttsVoice', e.target.value)}
+                    placeholder="Vendor-agnostic voice label"
+                    className="w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] text-white border border-white/15 text-sm"
                   />
                 </div>
-              ))}
-            </div>
-          </section>
-
-          {/* Language Helpers (read-only) */}
-          <section style={CARD_STYLE} className="p-4 border border-emerald-500/10">
-            <h3 className="text-emerald-300 text-sm md:text-base font-semibold">Language Helpers</h3>
-            <p className="text-emerald-200/60 text-xs md:text-sm mt-1">Mirrors Step 1; voice is optional.</p>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
-              <div>
-                <label className="text-xs text-white/70">Language</label>
-                <input value={s3.language} readOnly className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm opacity-70" />
               </div>
-              <div>
-                <label className="text-xs text-white/70">Accent (ISO2)</label>
-                <input value={s3.accentIso2 || ''} readOnly className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm opacity-70" />
-              </div>
-              <div>
-                <label className="text-xs text-white/70">TTS voice (optional)</label>
-                <input
-                  value={s3.ttsVoice || ''}
-                  onChange={(e) => set('ttsVoice', e.target.value)}
-                  placeholder="Vendor-agnostic voice label"
-                  className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-sm"
-                />
-              </div>
-            </div>
-          </section>
+            </Box>
+          </div>
         </div>
-      </div>
 
-      {/* bottom bar */}
-      <div className="mt-6 flex items-center justify-between">
-        <button type="button" onClick={onBack} className={BTN_MUTE}>
-          <ChevronLeft className="w-4 h-4" /> Back
-        </button>
-        <div className="flex items-center gap-3">
+        {/* Footer (same buttons style) */}
+        <div className="mt-8 flex items-center justify-between">
           <button
-            type="button"
-            onClick={() => navigator.clipboard.writeText(compiled).catch(() => {})}
-            className={BTN_MUTE}
+            onClick={onBack}
+            className="inline-flex items-center gap-2 rounded-[24px] border border-white/15 bg-transparent px-4 py-2 text-white hover:bg-white/10 transition"
           >
-            <Copy className="w-4 h-4" /> Copy compiled prompt
+            <ArrowLeft className="w-4 h-4" />
+            Previous
           </button>
-          <button type="button" disabled={!valid} onClick={goNext} className={valid ? BTN_OK : BTN_DISABLED}>
-            Next <ChevronRight className="w-4 h-4" />
-          </button>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => navigator.clipboard.writeText(compiled).catch(() => {})}
+              className="inline-flex items-center gap-2 rounded-[24px] border border-white/15 bg-transparent px-4 py-2 text-white hover:bg-white/10 transition"
+            >
+              <Copy className="w-4 h-4" />
+              Copy compiled prompt
+            </button>
+            <button
+              onClick={goNext}
+              disabled={!valid}
+              className="inline-flex items-center gap-2 px-8 py-2.5 rounded-[24px] font-semibold select-none transition-colors duration-150 disabled:cursor-not-allowed"
+              style={{
+                background: valid ? BTN_GREEN : BTN_DISABLED,
+                color: '#ffffff',
+                boxShadow: valid ? '0 1px 0 rgba(0,0,0,0.18)' : 'none',
+              }}
+              onMouseEnter={(e) => {
+                if (!valid) return;
+                (e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER;
+              }}
+              onMouseLeave={(e) => {
+                if (!valid) return;
+                (e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN;
+              }}
+            >
+              Next →
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* preview modal */}
+      {/* Preview Modal (matches your modal frame) */}
       <Modal open={previewOpen} onClose={() => setPreviewOpen(false)} title="Compiled System Prompt">
-        <pre className="whitespace-pre-wrap text-sm leading-relaxed text-white/90 bg-black/30 p-4 rounded-lg border border-white/10">
-{compiled}
-        </pre>
+        {compiled}
       </Modal>
+    </div>
+  );
+}
+
+/* ------------------------------ BOX WRAPPER ------------------------------ */
+function Box({
+  title,
+  subtitle,
+  children,
+  saveBadge,
+  error,
+}: {
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+  saveBadge?: React.ReactNode;
+  error?: string;
+}) {
+  return (
+    <div
+      className="relative rounded-3xl p-6"
+      style={{
+        background: 'rgba(13,15,17,0.92)',
+        border: '1px solid rgba(106,247,209,0.18)',
+        boxShadow: 'inset 0 0 22px rgba(0,0,0,0.28), 0 0 18px rgba(106,247,209,0.05)',
+      }}
+    >
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
+        style={{ background: 'radial-gradient(circle, rgba(106,247,209,0.10) 0%, transparent 70%)', filter: 'blur(38px)' }}
+      />
+      <div className="flex items-start justify-between mb-3">
+        <div>
+          <h3 className="text-[13px] font-semibold text-white/90">{title}</h3>
+          {subtitle && <p className="text-[12px] text-white/55 mt-0.5">{subtitle}</p>}
+        </div>
+        {saveBadge}
+      </div>
+      <div className="space-y-3">{children}</div>
+      {error && <p className="mt-3 text-xs text-red-400">{error}</p>}
     </div>
   );
 }
