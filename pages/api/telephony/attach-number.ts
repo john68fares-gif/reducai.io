@@ -1,4 +1,3 @@
-// pages/api/telephony/attach-number.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
 
 type Ok<T>  = { ok: true; data: T };
@@ -18,23 +17,29 @@ export default async function attachNumberHandler(
 
   try {
     const b = (req.body || {}) as any;
-    // Accept old shape { credentials:{ accountSid, authToken }, phoneNumber } and new flat shape
-    const accountSid = (b.accountSid || b?.credentials?.accountSid || '').toString().trim();
-    const authToken  = (b.authToken  || b?.credentials?.authToken  || '').toString().trim();
 
-    const phoneNumber = (b.phoneNumber || '').toString().trim();
+    // Accept either inline creds OR fall back to platform env vars
+    const bodySid   = (b.accountSid || b?.credentials?.accountSid || '').toString().trim();
+    const bodyToken = (b.authToken  || b?.credentials?.authToken  || '').toString().trim();
+    const envSid    = (process.env.TWILIO_ACCOUNT_SID || '').trim();
+    const envToken  = (process.env.TWILIO_AUTH_TOKEN  || '').trim();
+
+    const accountSid = /^AC[a-zA-Z0-9]{32}$/.test(bodySid) ? bodySid : envSid;
+    const authToken  = bodyToken || envToken;
 
     if (!/^AC[a-zA-Z0-9]{32}$/.test(accountSid)) {
-      return res.status(400).json({ ok: false, error: 'Invalid or missing Twilio Account SID.' });
+      return res.status(400).json({ ok: false, error: 'Missing Twilio Account SID (body or env).' });
     }
     if (!authToken) {
-      return res.status(400).json({ ok: false, error: 'Missing Twilio Auth Token.' });
+      return res.status(400).json({ ok: false, error: 'Missing Twilio Auth Token (body or env).' });
     }
+
+    const phoneNumber = (b.phoneNumber || '').toString().trim();
     if (!E164.test(phoneNumber)) {
       return res.status(400).json({ ok: false, error: 'Phone number must be E.164 like +15551234567.' });
     }
 
-    // Config passed from UI (optional)
+    // Optional config
     const cfg = {
       language: (b.language || '').toString().trim(),
       voice: (b.voice || '').toString().trim(),
@@ -44,6 +49,7 @@ export default async function attachNumberHandler(
       rate: Number(b.rate || 100),
       pitch: Number(b.pitch || 0),
       bargeIn: !!b.bargeIn,
+      agentId: (b.agentId || '').toString().trim(),
     };
 
     // Build public base URL
@@ -60,6 +66,7 @@ export default async function attachNumberHandler(
     const baseUrl = `${proto}://${host}`.replace(/\/+$/, '');
 
     const url = new URL(`${baseUrl}/api/voice/twilio/incoming`);
+    if (cfg.agentId) url.searchParams.set('agent', cfg.agentId);
     if (cfg.language) url.searchParams.set('lang', cfg.language);
     if (cfg.voice) url.searchParams.set('voice', cfg.voice);
     if (cfg.greeting) url.searchParams.set('greet', cfg.greeting);
@@ -68,7 +75,6 @@ export default async function attachNumberHandler(
     url.searchParams.set('rate',  String(Math.max(60, Math.min(140, cfg.rate))));
     url.searchParams.set('pitch', String(Math.max(-6, Math.min(6, cfg.pitch))));
     url.searchParams.set('barge', cfg.bargeIn ? '1' : '0');
-
     const voiceUrl = url.toString();
 
     // Twilio REST
@@ -97,13 +103,9 @@ export default async function attachNumberHandler(
 
     const updResp = await fetch(updateUrl, {
       method: 'POST',
-      headers: {
-        Authorization: authHeader,
-        'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
-      },
+      headers: { Authorization: authHeader, 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
       body: form.toString(),
     });
-
     if (!updResp.ok) {
       const txt = await safeText(updResp);
       return res.status(updResp.status).json({ ok: false, error: `Twilio update failed: ${txt}` });
