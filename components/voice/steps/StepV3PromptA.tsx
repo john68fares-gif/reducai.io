@@ -1,10 +1,10 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Eye, Copy, ArrowLeft, X, User, MessageSquare, ClipboardList } from 'lucide-react';
+import { Eye, Copy, ArrowLeft, X, User, MessageSquare, ClipboardList, Lightbulb } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-/* ============================ THEME ============================ */
+/* ============ THEME ============ */
 const UI = {
   bg: '#0b0c10',
   cardBg: 'rgba(13,15,17,0.92)',
@@ -14,14 +14,12 @@ const UI = {
   greenHover: '#54cfa9',
   greenDisabled: '#2e6f63',
 };
-
 const CARD: React.CSSProperties = {
   background: UI.cardBg,
   border: UI.border,
   borderRadius: 20,
   boxShadow: 'inset 0 0 22px rgba(0,0,0,0.28), 0 0 18px rgba(106,247,209,0.05)',
 };
-
 const MODAL: React.CSSProperties = {
   background: 'rgba(13,15,17,0.96)',
   border: '2px dashed rgba(106,247,209,0.30)',
@@ -29,12 +27,12 @@ const MODAL: React.CSSProperties = {
   borderRadius: 30,
 };
 
-/* ============================ TYPES / LS ============================ */
+/* ============ TYPES / STORAGE ============ */
 type Step1Lite = { language: string; accentIso2?: string; responseDelayMs?: number; allowBargeIn?: boolean; };
 type Step3 = {
   personaName: string;
-  style: 'professional' | 'conversational' | 'empathetic' | 'upbeat';
-  politeness: 'low' | 'med' | 'high';
+  style: 'professional'|'conversational'|'empathetic'|'upbeat';
+  politeness: 'low'|'med'|'high';
   greetingLine: string;
   introExplain?: string;
   intents: string[];
@@ -49,7 +47,6 @@ type Step3 = {
   dtmf?: { [digit: string]: string };
   language: string; accentIso2: string; ttsVoice?: string; compiled?: string;
 };
-
 const LS_STEP1 = 'voicebuilder:step1';
 const LS_STEP3 = 'voicebuilder:step3';
 const LS_BACKUP = 'voice:settings:backup';
@@ -65,7 +62,60 @@ function useDebouncedSaver<T>(value: T, delay = 350, onSave: (v: T) => void) {
   return { saving, saved };
 }
 
-/* ============================ ATOMS ============================ */
+/* ============ EXAMPLES (visible inspiration) ============ */
+const EX = {
+  greeting: `Hi, this is Riley with Wellness Partners — how can I help today?`,
+  intro: `I can book or reschedule appointments, answer quick FAQs, and hand you to a teammate if needed.`,
+  intentsNote: `Tip: Keep it focused. Recommended: Scheduling, Reschedule, FAQs.`,
+};
+
+/* ============ DEFAULTS (non-empty) ============ */
+const DEFAULT_S3: Step3 = {
+  personaName: 'Riley',
+  style: 'professional',
+  politeness: 'med',
+  greetingLine: EX.greeting,
+  introExplain: EX.intro,
+  intents: ['Scheduling','Reschedule','FAQs'],
+  otherTasks: '',
+  collect: ['Name','Phone','Date/Time','Service Type'],
+  confirmation: { confirmNames: true, repeatDateTime: true, spellBackUnusual: true, template: '' },
+  barge: { allow: true, phrases: '' },
+  latency: { delayMs: 600, fillers: 'One moment while I check that.\nLet me pull that up.' },
+  escalate: { enable: false, humanHours: '', handoverNumber: '', criteria: '' },
+  deflect: { script: 'Sorry, I can’t help with that. Let me connect you with a teammate.', noSensitive: true },
+  knowledge: [],
+  dtmf: {},
+  language: 'en',
+  accentIso2: 'us',
+  ttsVoice: '',
+  compiled: '',
+};
+const INTENTS = ['Scheduling','Reschedule','Cancel','FAQs','Lead Capture','Handover to Human'];
+const COLLECT = ['Name','Phone','Email','Date/Time','Service Type','Account/Order #','Notes'];
+
+/* ============ HELPERS ============ */
+const STYLE = { professional:'Professional + concise', conversational:'Natural + casual', empathetic:'Warm + patient', upbeat:'Positive + quick' } as const;
+const politeness = (p: Step3['politeness']) => p==='low' ? 'Direct.' : p==='high' ? 'Very polite.' : 'Balanced.';
+const bullets = (a: string[]) => a.filter(Boolean).map(s => `- ${s}`).join('\n');
+
+function compile(step1: Partial<Step1Lite>, s3: Step3): string {
+  const voice = bullets([`${STYLE[s3.style]}`, politeness(s3.politeness), s3.barge.allow ? 'Allow barge-in.' : 'No barge-in.']);
+  const flow = s3.collect?.length ? s3.collect.map((c, i) => `${i + 1}. Ask for ${c}.`).join('\n') : '';
+  const intents = s3.intents?.length ? `Intents: ${s3.intents.join(', ')}${s3.otherTasks ? `; Other: ${s3.otherTasks}` : ''}.` : '';
+  const latency = `Target latency ~${s3.latency.delayMs ?? step1.responseDelayMs ?? 600}ms.`;
+  const lang = bullets([`Language: ${s3.language || step1.language || 'en'}.`, s3.accentIso2 ? `Accent: ${s3.accentIso2}.` : '', s3.ttsVoice ? `TTS: ${s3.ttsVoice}.` : '']);
+  return [
+    `# Voice Agent — ${s3.personaName || 'Agent'}`, '',
+    `${s3.greetingLine}${s3.introExplain ? ` ${s3.introExplain}` : ''}`, intents, '',
+    '## Voice', voice, '',
+    flow ? '## Flow\n' + flow : '', '',
+    '## Latency', `- ${latency}`, '',
+    '## Language', lang,
+  ].filter(Boolean).join('\n');
+}
+
+/* ============ ATOMS ============ */
 function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
   return (
     <label className="flex items-center gap-3 cursor-pointer select-none">
@@ -77,7 +127,6 @@ function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: 
     </label>
   );
 }
-
 function Chips({ options, value, onChange }:{ options: string[]; value: string[]; onChange: (next: string[]) => void; }) {
   const toggle = (opt: string) => onChange(value.includes(opt) ? value.filter(v => v !== opt) : [...value, opt]);
   return (
@@ -125,28 +174,25 @@ function Modal({ open, onClose, title, children }:{ open: boolean; onClose: () =
   );
 }
 
-function Box({ title, icon, children, editable, renderEdit, error, saveBadge }:{
-  title: string; icon?: React.ReactNode; children: React.ReactNode;
-  editable?: boolean; renderEdit?: () => React.ReactNode; error?: string; saveBadge?: React.ReactNode;
-}) {
+/* Box with size control (lg for text-heavy, md default, sm compact) */
+function Box({
+  title, icon, children, editable, renderEdit, error, saveBadge, size='md',
+}:{ title: string; icon?: React.ReactNode; children: React.ReactNode; editable?: boolean; renderEdit?: () => React.ReactNode; error?: string; saveBadge?: React.ReactNode; size?: 'sm'|'md'|'lg'; }) {
   const [open, setOpen] = useState(false);
+  const minH = size === 'lg' ? 'min-h-[360px]' : size === 'sm' ? 'min-h-[220px]' : 'min-h-[300px]';
   return (
     <>
-      <motion.div
-        layout initial={{ opacity: 0, y: 10, scale: 0.985 }} animate={{ opacity: 1, y: 0, scale: 1 }}
+      <motion.div layout initial={{ opacity: 0, y: 10, scale: 0.985 }} animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ duration: 0.22 }} whileHover={{ y: -2 }}
-        className="relative p-6 flex flex-col h-full min-h-[310px]" style={CARD}
-      >
+        className={`relative p-6 flex flex-col h-full ${minH}`} style={CARD}>
         <div aria-hidden className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
-          style={{ background: UI.glow, filter: 'blur(38px)' }} />
+             style={{ background: UI.glow, filter: 'blur(38px)' }} />
         <div className="flex items-start justify-between mb-3">
           <h3 className="text-[13px] font-semibold flex items-center gap-2">{icon}{title}</h3>
           <div className="flex items-center gap-2">
             {editable && (
-              <button onClick={() => setOpen(true)}
-                className="text-xs px-3 py-1.5 rounded-2xl border border-white/20 hover:bg-white/10 inline-flex items-center gap-1.5">
-                <MessageSquare className="w-3.5 h-3.5" />
-                Edit
+              <button onClick={() => setOpen(true)} className="text-xs px-3 py-1.5 rounded-2xl border border-white/20 hover:bg-white/10 inline-flex items-center gap-1.5">
+                <MessageSquare className="w-3.5 h-3.5" /> Edit
               </button>
             )}
             {saveBadge}
@@ -155,72 +201,56 @@ function Box({ title, icon, children, editable, renderEdit, error, saveBadge }:{
         <div className="space-y-3 flex-1">{children}</div>
         {error && <p className="mt-3 text-xs text-red-400">{error}</p>}
       </motion.div>
-
-      {editable && renderEdit && (
-        <Modal open={open} onClose={() => setOpen(false)} title={title}>
-          {renderEdit()}
-        </Modal>
-      )}
+      {editable && renderEdit && <Modal open={open} onClose={() => setOpen(false)} title={title}>{renderEdit()}</Modal>}
     </>
   );
 }
 
-/* ============================ COMPILER (compact) ============================ */
-const STYLE = { professional:'Professional + concise', conversational:'Natural + casual', empathetic:'Warm + patient', upbeat:'Positive + quick' } as const;
-const politeness = (p: Step3['politeness']) => p==='low' ? 'Direct.' : p==='high' ? 'Very polite.' : 'Balanced.';
-const bullets = (a: string[]) => a.filter(Boolean).map(s => `- ${s}`).join('\n');
-
-function compile(step1: Partial<Step1Lite>, s3: Step3): string {
-  const name = s3.personaName?.trim() || 'Agent';
-  const greet = s3.greetingLine?.trim();
-  const intro = (s3.introExplain || '').trim();
-  const voice = bullets([`${STYLE[s3.style]}`, politeness(s3.politeness), s3.barge.allow ? 'Allow barge-in.' : 'No barge-in.']);
-  const flow = s3.collect?.length ? s3.collect.map((c, i) => `${i + 1}. Ask for ${c}.`).join('\n') : '';
-  const intents = s3.intents?.length ? `Intents: ${s3.intents.join(', ')}${s3.otherTasks ? `; Other: ${s3.otherTasks}` : ''}.` : '';
-  const latency = `Target latency ~${s3.latency.delayMs ?? step1.responseDelayMs ?? 600}ms.`; 
-  const lang = bullets([`Language: ${s3.language || step1.language || 'en'}.`, s3.accentIso2 ? `Accent: ${s3.accentIso2}.` : '', s3.ttsVoice ? `TTS: ${s3.ttsVoice}.` : '']);
-  return [
-    `# Voice Agent — ${name}`, '',
-    greet ? `${greet}${intro ? ` ${intro}` : ''}` : intro, intents, '',
-    '## Voice', voice, '',
-    flow ? '## Flow\n' + flow : '', '',
-    '## Latency', `- ${latency}`, '',
-    '## Language', lang,
-  ].filter(Boolean).join('\n');
+function InspirationRow({ text, onImport }:{ text: string; onImport: () => void }) {
+  return (
+    <div className="rounded-2xl border border-dashed border-white/15 p-3 bg-white/5">
+      <div className="flex items-center gap-2 text-white/80 text-xs mb-1"><Lightbulb className="w-3.5 h-3.5" /> Inspiration (click to use)</div>
+      <div className="text-sm text-white/70">{text}</div>
+      <div className="mt-2 flex justify-end">
+        <button onClick={onImport} className="px-3 py-1.5 rounded-[18px] text-sm border border-white/15 hover:bg-white/10">Import</button>
+      </div>
+    </div>
+  );
 }
 
-/* ============================ DEFAULTS (prefilled) ============================ */
-const INTENTS = ['Scheduling','Reschedule','Cancel','FAQs','Lead Capture','Handover to Human'];
-const COLLECT = ['Name','Phone','Email','Date/Time','Service Type','Account/Order #','Notes'];
-
-const DEFAULT_S3: Step3 = {
-  personaName: 'Riley',
-  style: 'professional',
-  politeness: 'med',
-  greetingLine: 'Hi, this is Riley — how can I help today?',
-  introExplain: 'I can book or reschedule appointments and answer quick questions.',
-  intents: ['Scheduling','Reschedule','FAQs'],
-  otherTasks: '',
-  collect: ['Name','Phone','Date/Time','Service Type'],
-  confirmation: { confirmNames: true, repeatDateTime: true, spellBackUnusual: true, template: '' },
-  barge: { allow: true, phrases: '' },
-  latency: { delayMs: 600, fillers: '' },
-  escalate: { enable: false, humanHours: '', handoverNumber: '', criteria: '' },
-  deflect: { script: '', noSensitive: true },
-  knowledge: [],
-  dtmf: {},
-  language: 'en',
-  accentIso2: 'us',
-  ttsVoice: '',
-  compiled: '',
-};
-
-/* ============================ COMPONENT ============================ */
+/* ============ COMPONENT ============ */
 export default function StepV3PromptA({ onBack, onNext }: { onBack?: () => void; onNext?: () => void }) {
   const step1 = readLS<Step1Lite>(LS_STEP1) || { language: 'en', accentIso2: 'us', responseDelayMs: 600, allowBargeIn: true };
   const restored = readLS<Step3>(LS_STEP3);
-  const [s3, setS3] = useState<Step3>(() => ({ ...DEFAULT_S3, ...(restored || {}) }));
 
+  // backfill blanks with defaults so nothing feels empty
+  const hydrate = (raw?: Step3 | null): Step3 => {
+    const r = raw || {};
+    const pick = <T,>(v: any, d: T): T => (v === undefined || v === null || (typeof v === 'string' && v.trim() === '')) ? d : v;
+    return {
+      personaName: pick(r.personaName, DEFAULT_S3.personaName),
+      style: pick(r.style, DEFAULT_S3.style),
+      politeness: pick(r.politeness, DEFAULT_S3.politeness),
+      greetingLine: pick(r.greetingLine, DEFAULT_S3.greetingLine),
+      introExplain: pick(r.introExplain, DEFAULT_S3.introExplain),
+      intents: Array.isArray(r.intents) && r.intents.length ? r.intents : DEFAULT_S3.intents,
+      otherTasks: pick(r.otherTasks, DEFAULT_S3.otherTasks),
+      collect: Array.isArray(r.collect) && r.collect.length ? r.collect : DEFAULT_S3.collect,
+      confirmation: { ...DEFAULT_S3.confirmation, ...(r.confirmation || {}) },
+      barge: { allow: r?.barge?.allow ?? DEFAULT_S3.barge.allow, phrases: pick(r?.barge?.phrases, DEFAULT_S3.barge.phrases) },
+      latency: { delayMs: r?.latency?.delayMs ?? DEFAULT_S3.latency.delayMs, fillers: pick(r?.latency?.fillers, DEFAULT_S3.latency.fillers) },
+      escalate: { ...DEFAULT_S3.escalate, ...(r.escalate || {}) },
+      deflect: { ...DEFAULT_S3.deflect, ...(r.deflect || {}) },
+      knowledge: Array.isArray(r.knowledge) ? r.knowledge : [],
+      dtmf: r.dtmf || {},
+      language: pick(r.language, step1.language || DEFAULT_S3.language),
+      accentIso2: pick(r.accentIso2, step1.accentIso2 || DEFAULT_S3.accentIso2),
+      ttsVoice: pick(r.ttsVoice, DEFAULT_S3.ttsVoice),
+      compiled: '',
+    };
+  };
+
+  const [s3, setS3] = useState<Step3>(() => hydrate(restored));
   const compiled = useMemo(() => compile(step1, s3), [step1, s3]);
   const full = useMemo(() => ({ ...s3, compiled }), [s3, compiled]);
   const { saving, saved } = useDebouncedSaver(full, 350, (v) => writeLS(LS_STEP3, v));
@@ -248,8 +278,8 @@ export default function StepV3PromptA({ onBack, onNext }: { onBack?: () => void;
 
   return (
     <div className="min-h-screen w-full text-white font-movatif" style={{ background: UI.bg }}>
-      <div className="w-full max-w-[1800px] mx-auto px-6 2xl:px-12 pt-10 pb-24">
-        {/* Head */}
+      <div className="w-full max-w-[1840px] mx-auto px-6 2xl:px-12 pt-10 pb-24">
+        {/* Header */}
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22 }} className="flex items-center justify-between mb-8">
           <h2 className="text-3xl md:text-4xl font-semibold tracking-tight">Personality & Knowledge</h2>
           <div className="flex items-center gap-3">
@@ -260,30 +290,23 @@ export default function StepV3PromptA({ onBack, onNext }: { onBack?: () => void;
           </div>
         </motion.div>
 
-        {/* Wider grid: 3 columns, big gaps, equal-height cards */}
+        {/* Grid — 3 large cards on top, compact utility at bottom */}
         <div className="grid grid-cols-12 gap-8">
-          {/* Persona */}
+          {/* Persona (lg) */}
           <div className="col-span-12 md:col-span-6 xl:col-span-4">
-            <Box title="Persona" icon={<User className="w-4 h-4 text-[#6af7d1]" />} editable
+            <Box title="Persona" size="lg" icon={<User className="w-4 h-4 text-[#6af7d1]" />} editable
               renderEdit={() => (
                 <div style={CARD} className="p-5 space-y-3">
                   <div className="grid grid-cols-2 gap-3">
                     <label className="col-span-2 text-xs text-white/70">Name</label>
-                    <input value={s3.personaName} onChange={(e) => set('personaName', e.target.value)}
-                      className="col-span-2 px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15" />
-
+                    <input value={s3.personaName} onChange={(e) => set('personaName', e.target.value)} className="col-span-2 px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15" />
                     <label className="text-xs text-white/70">Style</label>
-                    <select value={s3.style} onChange={(e) => set('style', e.target.value as Step3['style'])}
-                      className="px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15">
-                      <option value="professional">Professional</option>
-                      <option value="conversational">Conversational</option>
-                      <option value="empathetic">Empathetic</option>
-                      <option value="upbeat">Upbeat</option>
+                    <select value={s3.style} onChange={(e) => set('style', e.target.value as Step3['style'])} className="px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15">
+                      <option value="professional">Professional</option><option value="conversational">Conversational</option>
+                      <option value="empathetic">Empathetic</option><option value="upbeat">Upbeat</option>
                     </select>
-
                     <label className="text-xs text-white/70">Politeness</label>
-                    <select value={s3.politeness} onChange={(e) => set('politeness', e.target.value as Step3['politeness'])}
-                      className="px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15">
+                    <select value={s3.politeness} onChange={(e) => set('politeness', e.target.value as Step3['politeness'])} className="px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15">
                       <option value="low">Low</option><option value="med">Medium</option><option value="high">High</option>
                     </select>
                   </div>
@@ -293,72 +316,60 @@ export default function StepV3PromptA({ onBack, onNext }: { onBack?: () => void;
             >
               <div className="grid grid-cols-2 gap-3">
                 <label className="col-span-2 text-xs text-white/70">Name</label>
-                <input value={s3.personaName} onChange={(e) => set('personaName', e.target.value)}
-                  className="col-span-2 px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15 text-sm" />
+                <input value={s3.personaName} onChange={(e) => set('personaName', e.target.value)} className="col-span-2 px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15 text-sm" />
                 <label className="text-xs text-white/70">Style</label>
-                <select value={s3.style} onChange={(e) => set('style', e.target.value as Step3['style'])}
-                  className="px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15 text-sm">
-                  <option value="professional">Professional</option>
-                  <option value="conversational">Conversational</option>
-                  <option value="empathetic">Empathetic</option>
-                  <option value="upbeat">Upbeat</option>
+                <select value={s3.style} onChange={(e) => set('style', e.target.value as Step3['style'])} className="px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15 text-sm">
+                  <option value="professional">Professional</option><option value="conversational">Conversational</option>
+                  <option value="empathetic">Empathetic</option><option value="upbeat">Upbeat</option>
                 </select>
                 <label className="text-xs text-white/70">Politeness</label>
-                <select value={s3.politeness} onChange={(e) => set('politeness', e.target.value as Step3['politeness'])}
-                  className="px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15 text-sm">
+                <select value={s3.politeness} onChange={(e) => set('politeness', e.target.value as Step3['politeness'])} className="px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15 text-sm">
                   <option value="low">Low</option><option value="med">Medium</option><option value="high">High</option>
                 </select>
               </div>
             </Box>
           </div>
 
-          {/* Greeting */}
+          {/* Greeting (lg) */}
           <div className="col-span-12 md:col-span-6 xl:col-span-4">
-            <Box title="Greeting" icon={<MessageSquare className="w-4 h-4 text-[#6af7d1]" />} editable
+            <Box title="Greeting" size="lg" icon={<MessageSquare className="w-4 h-4 text-[#6af7d1]" />} editable
               renderEdit={() => (
                 <div style={CARD} className="p-5 space-y-3">
-                  <input value={s3.greetingLine} onChange={(e) => set('greetingLine', e.target.value)}
-                    placeholder="Hi, this is Riley — how can I help today?" className="w-full px-3 py-3 rounded-2xl bg-[#0b0e0f] border border-white/15" />
-                  <input value={s3.introExplain || ''} onChange={(e) => set('introExplain', e.target.value)}
-                    placeholder="I can book or reschedule and answer quick questions." className="w-full px-3 py-3 rounded-2xl bg-[#0b0e0f] border border-white/15" />
+                  <input value={s3.greetingLine} onChange={(e) => set('greetingLine', e.target.value)} placeholder={EX.greeting} className="w-full px-3 py-3 rounded-2xl bg-[#0b0e0f] border border-white/15" />
+                  <input value={s3.introExplain || ''} onChange={(e) => set('introExplain', e.target.value)} placeholder={EX.intro} className="w-full px-3 py-3 rounded-2xl bg-[#0b0e0f] border border-white/15" />
                 </div>
               )}
-              saveBadge={saveBadge}
-              error={errors.greeting || errors.greetingLen}
+              saveBadge={saveBadge} error={errors.greeting || errors.greetingLen}
             >
-              <input value={s3.greetingLine} onChange={(e) => set('greetingLine', e.target.value)}
-                className="w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15 text-sm" />
-              <input value={s3.introExplain || ''} onChange={(e) => set('introExplain', e.target.value)}
-                className="mt-2 w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15 text-sm" />
+              <input value={s3.greetingLine} onChange={(e) => set('greetingLine', e.target.value)} className="w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15 text-sm" />
+              <input value={s3.introExplain || ''} onChange={(e) => set('introExplain', e.target.value)} className="mt-2 w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15 text-sm" />
               <div className="text-xs text-white/50 text-right mt-1">{s3.greetingLine.length}/120</div>
+              <InspirationRow text={`${EX.greeting} ${EX.intro}`} onImport={() => { set('greetingLine', EX.greeting); set('introExplain', EX.intro); }} />
             </Box>
           </div>
 
-          {/* Intents */}
+          {/* Intents (lg) */}
           <div className="col-span-12 md:col-span-6 xl:col-span-4">
-            <Box title="Intents" icon={<ClipboardList className="w-4 h-4 text-[#6af7d1]" />} editable
+            <Box title="Intents" size="lg" icon={<ClipboardList className="w-4 h-4 text-[#6af7d1]" />} editable
               renderEdit={() => (
                 <div style={CARD} className="p-5 space-y-3">
                   <Chips options={INTENTS} value={s3.intents} onChange={(v) => set('intents', v)} />
-                  <input value={s3.otherTasks || ''} onChange={(e) => set('otherTasks', e.target.value)} placeholder="Other (optional)"
-                    className="w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15" />
+                  <input value={s3.otherTasks || ''} onChange={(e) => set('otherTasks', e.target.value)} placeholder="Other (optional)" className="w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15" />
                 </div>
               )}
-              saveBadge={saveBadge}
-              error={errors.intents}
+              saveBadge={saveBadge} error={errors.intents}
             >
               <Chips options={INTENTS} value={s3.intents} onChange={(v) => set('intents', v)} />
-              <input value={s3.otherTasks || ''} onChange={(e) => set('otherTasks', e.target.value)} placeholder="Other (optional)"
-                className="mt-3 w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15 text-sm" />
+              <input value={s3.otherTasks || ''} onChange={(e) => set('otherTasks', e.target.value)} placeholder="Other (optional)" className="mt-3 w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15 text-sm" />
+              <div className="text-xs text-white/60">{EX.intentsNote}</div>
             </Box>
           </div>
 
-          {/* Collect — full width so everything breathes */}
+          {/* Collect (sm) — not oversized anymore */}
           <div className="col-span-12">
-            <Box title="Collect" icon={<ClipboardList className="w-4 h-4 text-[#6af7d1]" />} editable
+            <Box title="Collect" size="sm" icon={<ClipboardList className="w-4 h-4 text-[#6af7d1]" />} editable
               renderEdit={() => (<div style={CARD} className="p-5"><Chips options={COLLECT} value={s3.collect} onChange={(v) => set('collect', v)} /></div>)}
-              saveBadge={saveBadge}
-              error={errors.collect}
+              saveBadge={saveBadge} error={errors.collect}
             >
               <Chips options={COLLECT} value={s3.collect} onChange={(v) => set('collect', v)} />
             </Box>
@@ -370,22 +381,22 @@ export default function StepV3PromptA({ onBack, onNext }: { onBack?: () => void;
           <button onClick={onBack} className="inline-flex items-center gap-2 rounded-[24px] border border-white/15 px-4 py-2 hover:bg-white/10">
             <ArrowLeft className="w-4 h-4" /> Previous
           </button>
-          <div className="flex items-center gap-2">
-            <button onClick={() => navigator.clipboard.writeText(compiled).catch(() => {})}
-              className="inline-flex items-center gap-2 rounded-[24px] border border-white/15 px-4 py-2 hover:bg-white/10">
-              <Copy className="w-4 h-4" /> Copy
-            </button>
-            <button
-              onClick={goNext}
-              disabled={!valid}
-              className="inline-flex items-center gap-2 px-8 py-2.5 rounded-[24px] font-semibold disabled:cursor-not-allowed"
-              style={{ background: valid ? UI.green : UI.greenDisabled, color:'#fff', boxShadow: valid ? '0 1px 0 rgba(0,0,0,0.18)' : 'none' }}
-              onMouseEnter={(e)=>{ if(!valid) return; (e.currentTarget as HTMLButtonElement).style.background=UI.greenHover; }}
-              onMouseLeave={(e)=>{ if(!valid) return; (e.currentTarget as HTMLButtonElement).style.background=UI.green; }}
-            >
-              Next →
-            </button>
-          </div>
+            <div className="flex items-center gap-2">
+              <button onClick={() => navigator.clipboard.writeText(compiled).catch(() => {})}
+                className="inline-flex items-center gap-2 rounded-[24px] border border-white/15 px-4 py-2 hover:bg-white/10">
+                <Copy className="w-4 h-4" /> Copy
+              </button>
+              <button
+                onClick={goNext}
+                disabled={!valid}
+                className="inline-flex items-center gap-2 px-8 py-2.5 rounded-[24px] font-semibold disabled:cursor-not-allowed"
+                style={{ background: valid ? UI.green : UI.greenDisabled, color:'#fff', boxShadow: valid ? '0 1px 0 rgba(0,0,0,0.18)' : 'none' }}
+                onMouseEnter={(e)=>{ if(!valid) return; (e.currentTarget as HTMLButtonElement).style.background=UI.greenHover; }}
+                onMouseLeave={(e)=>{ if(!valid) return; (e.currentTarget as HTMLButtonElement).style.background=UI.green; }}
+              >
+                Next →
+              </button>
+            </div>
         </motion.div>
       </div>
 
