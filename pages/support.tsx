@@ -1,10 +1,10 @@
 // pages/support.tsx
 'use client';
 
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Head from 'next/head';
 import {
-  HelpCircle, BookOpen, MessageSquare, ChevronDown, FileText, Video, Shield, Send
+  HelpCircle, BookOpen, MessageSquare, ChevronDown, FileText, Video, Shield, Send, CornerDownLeft
 } from 'lucide-react';
 
 /* ---------- Simple styles to fit your dark / glow UI ---------- */
@@ -65,77 +65,257 @@ function AccordionItem({
   );
 }
 
-/* ---------- Support Page ---------- */
-export default function SupportPage() {
-  // Helpline keys (load from voice backup if present)
-  const [assistantId, setAssistantId] = useState('');
-  const [publicKey, setPublicKey] = useState('');
-  const [mounted, setMounted] = useState(false);
-  const [savedMsg, setSavedMsg] = useState('');
+/* ===========================
+   Use YOUR agents + YOUR API keys from localStorage
+   =========================== */
+
+type StoredKey = { id: string; name: string; key: string; createdAt: number };
+type Chatbot = {
+  id: string;
+  name?: string;
+  description?: string;
+  provider?: 'openai'|'anthropic'|'google'|string;
+  model?: string;
+  // any other fields your Builder stores…
+};
+
+function loadApiKeys(): StoredKey[] {
+  try { return JSON.parse(localStorage.getItem('apiKeys.v1') || '[]') || []; } catch { return []; }
+}
+function getSelectedKeyId(): string | null {
+  try { return localStorage.getItem('apiKeys.selectedId'); } catch { return null; }
+}
+function resolveApiKey(): StoredKey | null {
+  const list = loadApiKeys();
+  if (!list.length) return null;
+  const sel = getSelectedKeyId();
+  if (sel) {
+    const found = list.find(k => k.id === sel);
+    if (found) return found;
+  }
+  // fallback to most recent by createdAt
+  return [...list].sort((a,b) => b.createdAt - a.createdAt)[0];
+}
+
+function readAllChatbots(): Chatbot[] {
+  try {
+    const bots = JSON.parse(localStorage.getItem('chatbots') || '[]');
+    return Array.isArray(bots) ? bots : [];
+  } catch { return []; }
+}
+function readPublishedIds(): string[] {
+  const raw = localStorage.getItem('support:publishedAgentIds') || '';
+  return raw.split(',').map(s=>s.trim()).filter(Boolean);
+}
+
+function useSupportAgents() {
+  const [agents, setAgents] = useState<Chatbot[]>([]);
+  useEffect(()=>{ setAgents(readAllChatbots()); },[]);
+  const publishedIds = useMemo(() => readPublishedIds(), []);
+  const list = useMemo(() => {
+    if (!publishedIds.length) return agents; // show all until curated
+    const allow = new Set(publishedIds);
+    return agents.filter(a => a.id && allow.has(a.id));
+  }, [agents, publishedIds]);
+  return list;
+}
+
+/** Minimal chat UI that calls YOUR backend. Backend should read server-side key. */
+function LocalAgentChat({ agent }: { agent: Chatbot }) {
+  type Msg = { role: 'user' | 'assistant' | 'system'; content: string };
+  const [messages, setMessages] = useState<Msg[]>([
+    { role: 'assistant', content: 'Hi — ask me anything about the platform. I answer short and clearly.' }
+  ]);
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [keyInfo, setKeyInfo] = useState<StoredKey | null>(null);
+  const boxRef = useRef<HTMLDivElement | null>(null);
+
+  const provider = agent.provider || 'openai';
+  const model = agent.model || 'gpt-4o-mini'; // safe default
 
   useEffect(() => {
-    setMounted(true);
-    try {
-      // load from support-specific keys
-      const aid = localStorage.getItem('support:assistantId');
-      const pk = localStorage.getItem('support:publicKey');
-      if (aid) setAssistantId(aid);
-      if (pk) setPublicKey(pk);
+    setKeyInfo(resolveApiKey());
+  }, []);
 
-      // fallback: load from voice backup (if you saved there previously)
-      if (!aid || !pk) {
-        const vs = localStorage.getItem('voice:settings:backup');
-        if (vs) {
-          const j = JSON.parse(vs || '{}');
-          if (!aid && j?.assistantId) setAssistantId(j.assistantId);
-          if (!pk && j?.publicKey) setPublicKey(j.publicKey);
+  useEffect(() => {
+    boxRef.current?.scrollTo({ top: boxRef.current.scrollHeight, behavior: 'smooth' });
+  }, [messages]);
+
+  async function send() {
+    const content = text.trim();
+    if (!content || busy) return;
+    setText('');
+    const next = [...messages, { role: 'user', content } as Msg];
+    setMessages(next);
+    setBusy(true);
+
+    // Request payload; server should fetch the key based on session/config.
+    const payload = {
+      agentId: agent.id,
+      provider,
+      model,
+      messages: next,
+    };
+
+    const headers: Record<string,string> = { 'Content-Type': 'application/json' };
+    // If your current server expects the key from client, TEMPORARILY uncomment:
+    // if (keyInfo?.key) headers['x-api-key'] = keyInfo.key;
+
+    let reply: string | null = null;
+
+    // 1) Try /api/agents/chat
+    try {
+      const r1 = await fetch('/api/agents/chat', { method:'POST', headers, body: JSON.stringify(payload) });
+      if (r1.ok) {
+        const j = await r1.json();
+        reply = j?.reply || j?.message || j?.text || null;
+      }
+    } catch {}
+
+    // 2) Fallback /api/agents
+    try {
+      if (!reply) {
+        const r2 = await fetch('/api/agents', { method:'POST', headers, body: JSON.stringify(payload) });
+        if (r2.ok) {
+          const j = await r2.json();
+          reply = j?.reply || j?.message || j?.text || null;
         }
       }
     } catch {}
-  }, []);
 
-  // Mount widget whenever both keys exist
-  useEffect(() => {
-    if (!mounted) return;
-    if (!assistantId || !publicKey) return;
-
-    const scId = 'vapi-widget-script';
-    if (!document.getElementById(scId)) {
-      const sc = document.createElement('script');
-      sc.id = scId;
-      sc.src = 'https://unpkg.com/@vapi-ai/client-sdk-react/dist/embed/widget.umd.js';
-      sc.async = true;
-      sc.type = 'text/javascript';
-      document.body.appendChild(sc);
+    // 3) Nothing wired yet
+    if (!reply) {
+      reply = keyInfo
+        ? 'Backend not wired yet. Point this to /api/agents/chat (server should read your stored key).'
+        : 'No API key found. Add one on the API Keys page.';
     }
 
-    const slot = document.getElementById('support-widget-slot');
-    if (slot && slot.childElementCount === 0) {
-      const el = document.createElement('vapi-widget');
-      el.setAttribute('assistant-id', assistantId);
-      el.setAttribute('public-key', publicKey);
-      // keep messages short & tidy is handled by your assistant’s prompt/config
-      slot.appendChild(el);
-    }
-  }, [assistantId, publicKey, mounted]);
-
-  function saveKeys() {
-    localStorage.setItem('support:assistantId', assistantId);
-    localStorage.setItem('support:publicKey', publicKey);
-    setSavedMsg('Saved. Reloading widget…');
-    setTimeout(() => setSavedMsg(''), 1500);
-    // soft re-mount (remove old, re-add)
-    const slot = document.getElementById('support-widget-slot');
-    if (slot) slot.innerHTML = '';
-    // trigger effect
-    setTimeout(() => {
-      const evt = new Event('rebuild');
-      window.dispatchEvent(evt);
-      // effect will run due to state still same; force by tiny toggle
-      setAssistantId(prev => prev + '');
-    }, 10);
+    setMessages(m => [...m, { role: 'assistant', content: reply! }]);
+    setBusy(false);
   }
 
+  function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      send();
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-white/15 bg-black/20">
+      {!keyInfo && (
+        <div className="px-3 py-2 text-xs text-yellow-300/80 border-b border-white/10">
+          No API key found. Add one on <a href="/apikeys" className="underline">API Keys</a>.
+        </div>
+      )}
+      <div
+        ref={boxRef}
+        className="h-[360px] overflow-y-auto px-3 py-3 space-y-2"
+        style={{ scrollbarWidth: 'thin' }}
+      >
+        {messages.map((m, i) => (
+          <div key={i} className="flex">
+            <div
+              className={`max-w-[86%] text-sm px-3 py-2 rounded-lg ${
+                m.role === 'user'
+                  ? 'bg-[#0f4136] text-[#d9fff5]'
+                  : 'bg-[#0f1314] text-white/90 border border-white/10'
+              }`}
+            >
+              {m.content}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="p-2 flex gap-2">
+        <input
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={onKeyDown}
+          placeholder="Type your message…"
+          className="flex-1 h-[40px] rounded-[12px] border border-white/20 bg-black/40 px-3 text-white outline-none focus:border-[#6af7d1]"
+        />
+        <button
+          onClick={send}
+          disabled={busy}
+          className="inline-flex items-center gap-2 h-[40px] px-3 rounded-[12px]"
+          style={{ background: '#59d9b3', color: '#0b0c10', opacity: busy ? 0.7 : 1 }}
+          title="Send"
+        >
+          <CornerDownLeft className="w-4 h-4" />
+          Send
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Selector + chat wrapper */
+function HelpdeskAssistantsBlock() {
+  const agents = useSupportAgents();
+  const [selectedId, setSelectedId] = useState<string>('');
+
+  useEffect(() => {
+    if (!agents.length) return;
+    // default to last created
+    setSelectedId(prev => prev || agents[agents.length - 1].id);
+  }, [agents.length]);
+
+  const current = useMemo(
+    () => agents.find(a => a.id === selectedId) || null,
+    [agents, selectedId]
+  );
+
+  return (
+    <div className="space-y-3">
+      {/* Selector */}
+      <div className="grid gap-2">
+        <label className="text-white/80 text-sm">Choose an Assistant</label>
+        <select
+          value={selectedId}
+          onChange={(e)=>setSelectedId(e.target.value)}
+          className="w-full rounded-[12px] border border-white/20 bg-black/30 px-3 h-[38px] text-white outline-none focus:border-[#6af7d1]"
+        >
+          {agents.length ? (
+            agents.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name || `Agent ${p.id.slice(0, 6)}`}
+              </option>
+            ))
+          ) : (
+            <option value="">No assistants found (create one in Builder)</option>
+          )}
+        </select>
+        <div className="text-xs text-white/60">
+          Admin tip: to curate which agents show here, set
+          {' '}
+          <code className="text-white/80">localStorage.support:publishedAgentIds</code>
+          {' '}
+          to a comma-separated list of agent ids.
+        </div>
+      </div>
+
+      {/* Chat */}
+      {current ? (
+        <LocalAgentChat agent={current} />
+      ) : (
+        <div className="rounded-xl border border-white/15 bg-black/20 p-3 text-white/70">
+          Pick an assistant to start chatting.
+        </div>
+      )}
+
+      {/* “Still stuck?” line */}
+      <div className="mt-3 text-white/70 text-sm">
+        Still stuck? Email: <span className="italic">add this later</span>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Support Page ---------- */
+export default function SupportPage() {
   /* Help Form (local only for now) */
   const [hfEmail, setHfEmail] = useState('');
   const [hfSubject, setHfSubject] = useState('');
@@ -186,46 +366,12 @@ export default function SupportPage() {
             <div className="mt-3 text-white/70 text-sm italic">add this later</div>
           </AccordionItem>
 
-          {/* AI HELPLINE */}
+          {/* HELP DESK ASSISTANTS (your own agents) */}
           <AccordionItem
             title="AI Helpline (chat with our site assistant)"
             icon={<MessageSquare className="w-5 h-5 text-[#6af7d1]" />}
           >
-            <p className="text-white/80 text-sm mb-3">
-              Short, tidy answers. Knows the product (you’ll wire the prompt). If keys are set, widget loads below.
-            </p>
-
-            {/* Keys */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm mb-3">
-              <input
-                value={assistantId}
-                onChange={(e)=>setAssistantId(e.target.value)}
-                placeholder="assistant-id"
-                className="w-full rounded-[12px] border border-white/20 bg-black/30 px-3 h-[38px] text-white outline-none focus:border-[#6af7d1]"
-              />
-              <input
-                value={publicKey}
-                onChange={(e)=>setPublicKey(e.target.value)}
-                placeholder="public-key"
-                className="w-full rounded-[12px] border border-white/20 bg-black/30 px-3 h-[38px] text-white outline-none focus:border-[#6af7d1]"
-              />
-              <button
-                onClick={saveKeys}
-                className="inline-flex items-center justify-center gap-2 px-4 h-[38px] rounded-[12px] text-sm md:col-span-2"
-                style={{ background:'#59d9b3', color:'#fff' }}
-              >
-                Save & Load Widget
-              </button>
-            </div>
-            {!!savedMsg && <div className="text-xs text-white/60 mb-2">{savedMsg}</div>}
-
-            {/* Widget Slot */}
-            <div id="support-widget-slot" className="min-h-[80px] rounded-xl border border-white/15 bg-black/20 p-3" />
-
-            {/* “Still stuck?” line (placeholder) */}
-            <div className="mt-3 text-white/70 text-sm">
-              Still stuck? Email: <span className="italic">add this later</span>
-            </div>
+            <HelpdeskAssistantsBlock />
           </AccordionItem>
 
           {/* FAQ */}
