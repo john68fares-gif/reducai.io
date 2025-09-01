@@ -2,26 +2,21 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Eye, Copy, ArrowLeft, ArrowRight, X, User, MessageSquare, ClipboardList,
-  CheckCheck, Timer, Lightbulb
+  Eye, Copy, ArrowLeft, X, User, MessageSquare, ClipboardList, Lightbulb
 } from 'lucide-react';
 
-/* ------------------------------- SHARED UI ------------------------------- */
-const FRAME_STYLE: React.CSSProperties = {
-  background: 'rgba(13,15,17,0.95)',
-  border: '2px dashed rgba(106,247,209,0.30)',
-  boxShadow: '0 0 40px rgba(0,0,0,0.7)',
-  borderRadius: 30,
+/* ------------------------------- CLEAN THEME ------------------------------ */
+/* Subtle, trustworthy styling: no neon, no dashed borders, no glow */
+const CARD: React.CSSProperties = {
+  background: '#0f1115',
+  border: '1px solid rgba(255,255,255,0.10)',
+  borderRadius: 16,
+  boxShadow: '0 8px 28px rgba(0,0,0,0.35)',
 };
-const HEADER_BORDER = { borderBottom: '1px solid rgba(255,255,255,0.4)' };
-const CARD_STYLE: React.CSSProperties = {
-  background: '#101314',
-  border: '1px solid rgba(255,255,255,0.30)',
-  borderRadius: 20,
-};
-const BTN_GREEN = '#59d9b3';
-const BTN_GREEN_HOVER = '#54cfa9';
-const BTN_DISABLED = '#2e6f63';
+
+const BTN_PRI = '#3fb07f';
+const BTN_PRI_HOVER = '#36a073';
+const BTN_DISABLED = '#2d3b37';
 
 type Step1Lite = { language: string; accentIso2?: string; responseDelayMs?: number; allowBargeIn?: boolean; };
 type Step3 = {
@@ -52,7 +47,7 @@ function writeLS<T>(k: string, v: T) { try { localStorage.setItem(k, JSON.string
 function useDebouncedSaver<T>(value: T, delay = 400, onSave: (v: T) => void) {
   const [saving, setSaving] = useState(false); const [saved, setSaved] = useState(false); const t = useRef<number | null>(null);
   useEffect(() => { setSaving(true); setSaved(false); if (t.current) window.clearTimeout(t.current);
-    t.current = window.setTimeout(() => { onSave(value); setSaving(false); setSaved(true); window.setTimeout(() => setSaved(false), 1200); }, delay);
+    t.current = window.setTimeout(() => { onSave(value); setSaving(false); setSaved(true); window.setTimeout(() => setSaved(false), 1000); }, delay);
     return () => t.current && window.clearTimeout(t.current);
   }, [value, delay, onSave]);
   return { saving, saved };
@@ -62,13 +57,14 @@ function useDebouncedSaver<T>(value: T, delay = 400, onSave: (v: T) => void) {
 function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
   return (
     <label className="flex items-center gap-3 cursor-pointer select-none">
-      <button type="button" onClick={() => onChange(!checked)} className={`w-12 h-7 rounded-full relative ${checked ? 'bg-emerald-400/80' : 'bg-white/10'}`}>
-        <span className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-black transition-transform ${checked ? 'translate-x-5' : ''}`} />
+      <button type="button" onClick={() => onChange(!checked)} className={`w-11 h-6 rounded-full relative transition ${checked ? 'bg-emerald-500/70' : 'bg-white/10'}`}>
+        <span className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-black transition-transform ${checked ? 'translate-x-5' : ''}`} />
       </button>
       <span className="text-sm text-white/90">{label}</span>
     </label>
   );
 }
+
 function ChipList({ options, value, onChange, reorderable }: { options: string[]; value: string[]; onChange: (next: string[]) => void; reorderable?: boolean; }) {
   const [dragIndex, setDragIndex] = useState<number | null>(null); const over = useRef<number | null>(null);
   function toggle(opt: string) { onChange(value.includes(opt) ? value.filter(v => v !== opt) : [...value, opt]); }
@@ -79,7 +75,9 @@ function ChipList({ options, value, onChange, reorderable }: { options: string[]
           const active = value.includes(opt);
           return (
             <button key={opt} type="button" onClick={() => toggle(opt)}
-              className={`px-3 py-1 rounded-full border text-xs md:text-sm ${active ? 'bg-emerald-500/20 border-emerald-400 text-emerald-200' : 'bg-black/30 border-white/15 text-white/70'}`}>
+              className={`px-3 py-1.5 rounded-full border text-xs md:text-sm transition ${
+                active ? 'bg-emerald-500/10 border-emerald-400 text-emerald-200' : 'bg-white/5 border-white/10 text-white/75 hover:bg-white/10'
+              }`}>
               {opt}
             </button>
           );
@@ -92,8 +90,8 @@ function ChipList({ options, value, onChange, reorderable }: { options: string[]
               const from = dragIndex, to = over.current; setDragIndex(null); over.current = null;
               if (from == null || to == null || from === to) return;
               const next = [...value]; const [moved] = next.splice(from, 1); next.splice(to, 0, moved); onChange(next);
-            }} className="px-3 py-2 rounded-2xl bg-[#0b0e0f] text-white border border-white/15 text-sm">
-              <span className="opacity-70 mr-2">≡</span>{i + 1}. {v}
+            }} className="px-3 py-2 rounded-xl bg-[#0f1115] text-white border border-white/10 text-sm">
+              <span className="opacity-60 mr-2">≡</span>{i + 1}. {v}
             </div>
           ))}
         </div>
@@ -101,58 +99,68 @@ function ChipList({ options, value, onChange, reorderable }: { options: string[]
     </div>
   );
 }
-function ModalFrame({ open, onClose, title, children }: { open: boolean; onClose: () => void; title: string; children: React.ReactNode; }) {
+
+function Modal({ open, onClose, title, children }:{ open:boolean; onClose:()=>void; title:string; children:React.ReactNode }) {
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: 'rgba(0,0,0,0.5)' }}>
-      <div className="relative w-full max-w-[980px] max-h-[88vh] flex flex-col text-white font-movatif" style={FRAME_STYLE}>
-        <div className="flex items-center justify-between px-6 py-4 rounded-t-[30px]" style={HEADER_BORDER}>
-          <div className="min-w-0"><h4 className="text-white text-lg font-semibold truncate">{title}</h4><div className="text-white/80 text-xs">Edit section</div></div>
-          <button onClick={onClose} className="p-2 rounded-full hover:bg-white/10"><X className="w-5 h-5 text-white" /></button>
+    <div className="fixed inset-0 z-50 grid place-items-center px-4" style={{ background:'rgba(0,0,0,0.55)' }}>
+      <div className="w-full max-w-[920px] max-h-[86vh] flex flex-col text-white font-movatif" style={CARD}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
+          <div className="min-w-0">
+            <h4 className="text-white text-base font-semibold truncate">{title}</h4>
+            <p className="text-xs text-white/60">Edit section</p>
+          </div>
+          <button onClick={onClose} className="p-2 rounded-full hover:bg-white/10" aria-label="Close">
+            <X className="w-5 h-5 text-white" />
+          </button>
         </div>
-        <div className="flex-1 overflow-y-auto p-6">{children}</div>
-        <div className="px-6 py-4 rounded-b-[30px]" style={{ borderTop: '1px solid rgba(255,255,255,0.3)', background: '#101314' }}>
-          <div className="flex justify-end"><button onClick={onClose} className="px-6 py-2 rounded-[24px] border border-white/15 hover:bg-white/10">Close</button></div>
+        <div className="flex-1 overflow-y-auto p-5">{children}</div>
+        <div className="px-5 py-4 border-t border-white/10 flex justify-end">
+          <button onClick={onClose} className="px-5 py-2 rounded-[10px] border border-white/10 hover:bg-white/10">Close</button>
         </div>
       </div>
     </div>
   );
 }
-function Box({ title, subtitle, icon, children, editable, renderEdit, error, saveBadge }:{
+
+function CardBox({ title, subtitle, icon, children, editable, renderEdit, error, saveBadge }:{
   title: string; subtitle?: string; icon?: React.ReactNode; children: React.ReactNode;
   editable?: boolean; renderEdit?: () => React.ReactNode; error?: string; saveBadge?: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="relative rounded-3xl p-6"
-         style={{ background:'rgba(13,15,17,0.92)', border:'1px solid rgba(106,247,209,0.18)', boxShadow:'inset 0 0 22px rgba(0,0,0,0.28), 0 0 18px rgba(106,247,209,0.05)' }}>
-      <div aria-hidden className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
-           style={{ background:'radial-gradient(circle, rgba(106,247,209,0.10) 0%, transparent 70%)', filter:'blur(38px)' }} />
+    <div className="relative p-5" style={CARD}>
       <div className="flex items-start justify-between mb-3">
         <div>
           <h3 className="text-[13px] font-semibold text-white/90 flex items-center gap-2">{icon}{title}</h3>
           {subtitle && <p className="text-[12px] text-white/55 mt-0.5">{subtitle}</p>}
         </div>
         <div className="flex items-center gap-2">
-          {editable && <button onClick={() => setOpen(true)} className="text-xs px-3 py-1.5 rounded-2xl border inline-flex items-center gap-1.5"
-                               style={{ background:'rgba(16,19,20,0.88)', border:'1px solid rgba(255,255,255,0.16)', boxShadow:'0 0 12px rgba(0,0,0,0.25)' }}>
-            <MessageSquare className="w-3.5 h-3.5 text-white/80" /><span className="text-white/90">Edit</span></button>}
+          {editable && (
+            <button onClick={() => setOpen(true)} className="text-xs px-3 py-1.5 rounded-[10px] border border-white/10 hover:bg-white/10 inline-flex items-center gap-1.5">
+              <MessageSquare className="w-3.5 h-3.5 text-white/80" />
+              <span className="text-white/90">Edit</span>
+            </button>
+          )}
           {saveBadge}
         </div>
       </div>
       <div className="space-y-3">{children}</div>
       {error && <p className="mt-3 text-xs text-red-400">{error}</p>}
-      {editable && renderEdit && <ModalFrame open={open} onClose={() => setOpen(false)} title={title}>{renderEdit()}</ModalFrame>}
+      {editable && renderEdit && <Modal open={open} onClose={() => setOpen(false)} title={title}>{renderEdit()}</Modal>}
     </div>
   );
 }
+
 function Inspiration({ text, onImport, label='Import inspiration text' }:{ text:string; onImport:()=>void; label?:string }) {
   return (
-    <div className="rounded-2xl border border-dashed border-white/15 p-3 bg-white/5">
-      <div className="flex items-center gap-2 text-white/80 text-xs mb-2"><Lightbulb className="w-3.5 h-3.5" /> Inspiration (doesn’t count until imported)</div>
-      <div className="text-sm text-white/70 whitespace-pre-wrap">{text}</div>
+    <div className="rounded-[10px] border border-dashed border-white/12 p-3 bg-white/5">
+      <div className="flex items-center gap-2 text-white/80 text-xs mb-2">
+        <Lightbulb className="w-3.5 h-3.5" /> Inspiration (doesn’t count until imported)
+      </div>
+      <div className="text-sm text-white/75 whitespace-pre-wrap">{text}</div>
       <div className="mt-2 flex justify-end">
-        <button type="button" onClick={onImport} className="px-3 py-1.5 rounded-[18px] text-sm border border-white/15 hover:bg-white/10">{label}</button>
+        <button type="button" onClick={onImport} className="px-3 py-1.5 rounded-[10px] text-sm border border-white/10 hover:bg-white/10">{label}</button>
       </div>
     </div>
   );
@@ -194,36 +202,29 @@ function compileVoicePrompt(step1: Partial<Step1Lite>, s3: Step3): string {
   ].filter(Boolean).join('\n');
 }
 
-/* ------------------------------ Constants -------------------------------- */
+/* ------------------------------ Defaults --------------------------------- */
 const INTENT_OPTIONS = ['Scheduling','Reschedule','Cancel','FAQs','Lead Capture','Handover to Human'];
 const COLLECT_OPTIONS = ['Name','Phone','Email','Date/Time','Service Type','Account/Order #','Notes'];
 const INSPIRATION = {
   greeting: `Hi, you're speaking with Riley. I'm here to help with scheduling, questions, and quick updates.`,
   intro: `I can book and reschedule appointments, answer common questions, and connect you with a teammate when needed.`,
-  confirm: `Great — just to confirm: {name} on {date} at {time}. Is that correct?`,
-  fillers: `One moment while I check that.\nLet me pull that up.\nThanks — almost done.`,
 };
 
-// ✅ Prefilled defaults so users don’t start blank
+// Prefilled baseline (clean & realistic)
 const DEFAULT_S3: Step3 = {
   personaName: 'Riley',
   style: 'professional',
   politeness: 'med',
-  greetingLine: 'Hi, this is Riley from Wellness Partners, how can I help today?',
+  greetingLine: 'Hi, this is Riley from Wellness Partners — how can I help today?',
   introExplain: 'I can book, reschedule, or answer questions for you.',
   intents: ['Scheduling', 'Reschedule', 'Cancel', 'FAQs'],
   otherTasks: '',
   collect: ['Name', 'Phone', 'Date/Time', 'Service Type'],
-  confirmation: {
-    confirmNames: true,
-    repeatDateTime: true,
-    spellBackUnusual: true,
-    template: 'Great — just to confirm: {name} on {date} at {time}, correct?',
-  },
-  barge: { allow: true, phrases: 'Go ahead… Got it… One sec.' },
-  latency: { delayMs: 600, fillers: 'One moment while I check that.' },
+  confirmation: { confirmNames: true, repeatDateTime: true, spellBackUnusual: true, template: '' },
+  barge: { allow: true, phrases: '' },
+  latency: { delayMs: 600, fillers: '' },
   escalate: { enable: false, humanHours: '', handoverNumber: '', criteria: '' },
-  deflect: { script: 'Sorry, I can’t help with that. Let me connect you with someone else.', noSensitive: true },
+  deflect: { script: '', noSensitive: true },
   knowledge: [],
   dtmf: {},
   language: 'en',
@@ -232,19 +233,19 @@ const DEFAULT_S3: Step3 = {
   compiled: '',
 };
 
-/* ============================== Component A ============================== */
+/* ============================== Step 3 — A =============================== */
+/* A keeps only 4 boxes now: Persona, Greeting, Intents, Collect
+   (Confirmation & Latency moved to Step 3B so the editor feels lighter) */
 export default function StepV3PromptA({ onBack, onNext }: { onBack?: () => void; onNext?: () => void }) {
-  const step1 = (readLS<Step1Lite>(LS_STEP1)) || { language: 'en', accentIso2: '', responseDelayMs: 600, allowBargeIn: true };
+  const step1 = (readLS<Step1Lite>(LS_STEP1)) || { language: 'en', accentIso2: 'us', responseDelayMs: 600, allowBargeIn: true };
   const restored = readLS<Step3>(LS_STEP3);
   const [s3, setS3] = useState<Step3>(() => {
     const base = restored || DEFAULT_S3;
     return {
-      ...DEFAULT_S3, // ensure prefilled baseline
+      ...DEFAULT_S3,
       ...base,
       language: base.language || step1.language || 'en',
       accentIso2: base.accentIso2 || step1.accentIso2 || 'us',
-      latency: { delayMs: base.latency?.delayMs ?? step1.responseDelayMs ?? 600, fillers: base.latency?.fillers || DEFAULT_S3.latency.fillers },
-      barge: { allow: base.barge?.allow ?? !!step1.allowBargeIn, phrases: base.barge?.phrases || DEFAULT_S3.barge.phrases },
     };
   });
 
@@ -268,7 +269,7 @@ export default function StepV3PromptA({ onBack, onNext }: { onBack?: () => void;
     const backup = readLS<any>(LS_BACKUP) || {}; writeLS(LS_BACKUP, { ...backup, step3: final });
     onNext?.();
   }
-  const saveBadge = <span className="text-xs px-2 py-1 rounded-2xl border border-white/15 text-white/70">{saving ? 'Saving…' : saved ? 'Saved' : 'Auto-save'}</span>;
+  const saveBadge = <span className="text-xs px-2 py-1 rounded-[8px] border border-white/10 text-white/70">{saving ? 'Saving…' : saved ? 'Saved' : 'Auto-save'}</span>;
   const [previewOpen, setPreviewOpen] = useState(false);
 
   return (
@@ -278,51 +279,50 @@ export default function StepV3PromptA({ onBack, onNext }: { onBack?: () => void;
         <div className="flex items-center justify-between mb-8">
           <div>
             <h2 className="text-3xl md:text-4xl font-semibold tracking-tight">Personality & Knowledge</h2>
-            <div className="text-white/70 mt-1 text-sm">Step 3 — Part A (behavior & flow)</div>
+            <div className="text-white/70 mt-1 text-sm">Step 3 — Part A (core behavior)</div>
           </div>
           <div className="flex items-center gap-3">
-            <button onClick={() => setPreviewOpen(true)} className="inline-flex items-center gap-2 rounded-[24px] border border-white/15 px-4 py-2 hover:bg-white/10">
+            <button onClick={() => setPreviewOpen(true)} className="inline-flex items-center gap-2 rounded-[10px] border border-white/10 px-4 py-2 hover:bg-white/10">
               <Eye className="w-4 h-4" /> Preview compiled prompt
             </button>
             {saveBadge}
-            <div className="text-sm text-white/60 hidden md:block">Step 3 of 4</div>
           </div>
         </div>
 
-        {/* ✅ No outer frame — just a wide 3-up grid like Build Step 3 */}
+        {/* Clean, wide 3-up grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
           {/* Persona & Tone */}
-          <Box title="Persona & Tone" subtitle="Voice-first personality." icon={<User className="w-4 h-4 text-[#6af7d1]" />} editable
-               renderEdit={() => (
-                 <div style={CARD_STYLE} className="p-5 space-y-3">
-                   <div className="grid grid-cols-2 gap-3">
-                     <label className="col-span-2 text-xs text-white/70">Persona name</label>
-                     <input value={s3.personaName} onChange={e => set('personaName', e.target.value)}
-                            className="col-span-2 px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15" />
-                     <label className="text-xs text-white/70">Style</label>
-                     <select value={s3.style} onChange={e => set('style', e.target.value as Step3['style'])}
-                             className="px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15">
-                       <option value="professional">Professional</option>
-                       <option value="conversational">Conversational</option>
-                       <option value="empathetic">Empathetic</option>
-                       <option value="upbeat">Upbeat</option>
-                     </select>
-                     <label className="text-xs text-white/70">Politeness</label>
-                     <select value={s3.politeness} onChange={e => set('politeness', e.target.value as Step3['politeness'])}
-                             className="px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15">
-                       <option value="low">Low</option><option value="med">Medium</option><option value="high">High</option>
-                     </select>
-                   </div>
-                 </div>
-               )}
-               saveBadge={saveBadge}>
+          <CardBox title="Persona & Tone" subtitle="Voice personality" icon={<User className="w-4 h-4 text-white/80" />} editable
+                   renderEdit={() => (
+                     <div style={CARD} className="p-5 space-y-3">
+                       <div className="grid grid-cols-2 gap-3">
+                         <label className="col-span-2 text-xs text-white/70">Persona name</label>
+                         <input value={s3.personaName} onChange={e => set('personaName', e.target.value)}
+                                className="col-span-2 px-3 py-2 rounded-[10px] bg-[#0b0e0f] border border-white/10" />
+                         <label className="text-xs text-white/70">Style</label>
+                         <select value={s3.style} onChange={e => set('style', e.target.value as Step3['style'])}
+                                 className="px-3 py-2 rounded-[10px] bg-[#0b0e0f] border border-white/10">
+                           <option value="professional">Professional</option>
+                           <option value="conversational">Conversational</option>
+                           <option value="empathetic">Empathetic</option>
+                           <option value="upbeat">Upbeat</option>
+                         </select>
+                         <label className="text-xs text-white/70">Politeness</label>
+                         <select value={s3.politeness} onChange={e => set('politeness', e.target.value as Step3['politeness'])}
+                                 className="px-3 py-2 rounded-[10px] bg-[#0b0e0f] border border-white/10">
+                           <option value="low">Low</option><option value="med">Medium</option><option value="high">High</option>
+                         </select>
+                       </div>
+                     </div>
+                   )}
+                   saveBadge={saveBadge}>
             <div className="grid grid-cols-2 gap-3">
               <label className="col-span-2 text-xs text-white/70">Persona name</label>
               <input value={s3.personaName} onChange={e => set('personaName', e.target.value)}
-                     className="col-span-2 px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15 text-sm" />
+                     className="col-span-2 px-3 py-2 rounded-[10px] bg-[#0b0e0f] border border-white/10 text-sm" />
               <label className="text-xs text-white/70">Style</label>
               <select value={s3.style} onChange={e => set('style', e.target.value as Step3['style'])}
-                      className="px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15 text-sm">
+                      className="px-3 py-2 rounded-[10px] bg-[#0b0e0f] border border-white/10 text-sm">
                 <option value="professional">Professional</option>
                 <option value="conversational">Conversational</option>
                 <option value="empathetic">Empathetic</option>
@@ -330,119 +330,72 @@ export default function StepV3PromptA({ onBack, onNext }: { onBack?: () => void;
               </select>
               <label className="text-xs text-white/70">Politeness</label>
               <select value={s3.politeness} onChange={e => set('politeness', e.target.value as Step3['politeness'])}
-                      className="px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15 text-sm">
+                      className="px-3 py-2 rounded-[10px] bg-[#0b0e0f] border border-white/10 text-sm">
                 <option value="low">Low</option><option value="med">Medium</option><option value="high">High</option>
               </select>
             </div>
-          </Box>
+          </CardBox>
 
           {/* Greeting */}
-          <Box title="Opening / Greeting" subtitle="One-liner (≤120 chars)." icon={<MessageSquare className="w-4 h-4 text-[#6af7d1]" />}
-               error={errors.greeting || errors.greetingLen} editable
-               renderEdit={() => (
-                 <div style={CARD_STYLE} className="p-5 space-y-4">
-                   <input value={s3.greetingLine} onChange={e => set('greetingLine', e.target.value)}
-                          placeholder="Hi, you're speaking with Riley." className="w-full px-3 py-3 rounded-2xl bg-[#0b0e0f] border border-white/15" />
-                   <input value={s3.introExplain || ''} onChange={e => set('introExplain', e.target.value)}
-                          placeholder="I can help with bookings, questions, and updates." className="w-full px-3 py-3 rounded-2xl bg-[#0b0e0f] border border-white/15" />
-                   <Inspiration text={`${INSPIRATION.greeting}\n\n${INSPIRATION.intro}`} onImport={() => { set('greetingLine', INSPIRATION.greeting); set('introExplain', INSPIRATION.intro); }} />
-                 </div>
-               )}
-               saveBadge={saveBadge}>
+          <CardBox title="Opening / Greeting" subtitle="One-liner (≤120 chars)" icon={<MessageSquare className="w-4 h-4 text-white/80" />}
+                   error={errors.greeting || errors.greetingLen} editable
+                   renderEdit={() => (
+                     <div style={CARD} className="p-5 space-y-4">
+                       <input value={s3.greetingLine} onChange={e => set('greetingLine', e.target.value)}
+                              placeholder="Hi, you're speaking with Riley." className="w-full px-3 py-3 rounded-[10px] bg-[#0b0e0f] border border-white/10" />
+                       <input value={s3.introExplain || ''} onChange={e => set('introExplain', e.target.value)}
+                              placeholder="I can help with bookings, questions, and updates." className="w-full px-3 py-3 rounded-[10px] bg-[#0b0e0f] border border-white/10" />
+                       <Inspiration text={`${INSPIRATION.greeting}\n\n${INSPIRATION.intro}`} onImport={() => { set('greetingLine', INSPIRATION.greeting); set('introExplain', INSPIRATION.intro); }} />
+                     </div>
+                   )}
+                   saveBadge={saveBadge}>
             <input value={s3.greetingLine} onChange={e => set('greetingLine', e.target.value)} placeholder="Hi, you're speaking with Riley."
-                   className="w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15 text-sm" />
+                   className="w-full px-3 py-2 rounded-[10px] bg-[#0b0e0f] border border-white/10 text-sm" />
             <input value={s3.introExplain || ''} onChange={e => set('introExplain', e.target.value)} placeholder="(Optional) short role line"
-                   className="mt-2 w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15 text-sm" />
+                   className="mt-2 w-full px-3 py-2 rounded-[10px] bg-[#0b0e0f] border border-white/10 text-sm" />
             <div className="text-xs text-white/50 text-right mt-1">{s3.greetingLine.length}/120</div>
-          </Box>
+          </CardBox>
 
           {/* Intents */}
-          <Box title="Core Tasks / Intents" subtitle="Choose what this agent can do." icon={<ClipboardList className="w-4 h-4 text-[#6af7d1]" />}
-               error={errors.intents} editable
-               renderEdit={() => (
-                 <div style={CARD_STYLE} className="p-5 space-y-3">
-                   <ChipList options={INTENT_OPTIONS} value={s3.intents} onChange={v => set('intents', v)} />
-                   <input value={s3.otherTasks || ''} onChange={e => set('otherTasks', e.target.value)} placeholder="Other tasks (optional)"
-                          className="w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15" />
-                 </div>
-               )}
-               saveBadge={saveBadge}>
+          <CardBox title="Core Tasks / Intents" subtitle="What the agent can do" icon={<ClipboardList className="w-4 h-4 text-white/80" />}
+                   error={errors.intents} editable
+                   renderEdit={() => (
+                     <div style={CARD} className="p-5 space-y-3">
+                       <ChipList options={INTENT_OPTIONS} value={s3.intents} onChange={v => set('intents', v)} />
+                       <input value={s3.otherTasks || ''} onChange={e => set('otherTasks', e.target.value)} placeholder="Other tasks (optional)"
+                              className="w-full px-3 py-2 rounded-[10px] bg-[#0b0e0f] border border-white/10" />
+                     </div>
+                   )}
+                   saveBadge={saveBadge}>
             <ChipList options={INTENT_OPTIONS} value={s3.intents} onChange={v => set('intents', v)} />
             <input value={s3.otherTasks || ''} onChange={e => set('otherTasks', e.target.value)} placeholder="Other tasks (optional)"
-                   className="mt-3 w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15 text-sm" />
-          </Box>
+                   className="mt-3 w-full px-3 py-2 rounded-[10px] bg-[#0b0e0f] border border-white/10 text-sm" />
+          </CardBox>
 
           {/* Collect */}
-          <Box title="Information to Collect" subtitle="Drag to set ask order." icon={<ClipboardList className="w-4 h-4 text-[#6af7d1]" />}
-               error={errors.collect} editable
-               renderEdit={() => (<div style={CARD_STYLE} className="p-5"><ChipList options={COLLECT_OPTIONS} value={s3.collect} onChange={v => set('collect', v)} reorderable /></div>)}
-               saveBadge={saveBadge}>
+          <CardBox title="Information to Collect" subtitle="Drag to set ask order" icon={<ClipboardList className="w-4 h-4 text-white/80" />}
+                   error={errors.collect} editable
+                   renderEdit={() => (<div style={CARD} className="p-5"><ChipList options={COLLECT_OPTIONS} value={s3.collect} onChange={v => set('collect', v)} reorderable /></div>)}
+                   saveBadge={saveBadge}>
             <ChipList options={COLLECT_OPTIONS} value={s3.collect} onChange={v => set('collect', v)} reorderable />
-          </Box>
-
-          {/* Confirmation */}
-          <Box title="Confirmation Rules" subtitle="How to confirm details." icon={<CheckCheck className="w-4 h-4 text-[#6af7d1]" />} editable
-               renderEdit={() => (
-                 <div style={CARD_STYLE} className="p-5 space-y-3">
-                   <Toggle checked={s3.confirmation.confirmNames} onChange={v => set('confirmation', { ...s3.confirmation, confirmNames: v })} label="Confirm names" />
-                   <Toggle checked={s3.confirmation.repeatDateTime} onChange={v => set('confirmation', { ...s3.confirmation, repeatDateTime: v })} label="Repeat date/time" />
-                   <Toggle checked={s3.confirmation.spellBackUnusual} onChange={v => set('confirmation', { ...s3.confirmation, spellBackUnusual: v })} label="Spell back unusual terms" />
-                   <textarea value={s3.confirmation.template || ''} onChange={e => set('confirmation', { ...s3.confirmation, template: e.target.value })}
-                             placeholder="(Optional) confirmation template" className="w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15 min-h-[120px]" />
-                   <Inspiration text={INSPIRATION.confirm} onImport={() => set('confirmation', { ...s3.confirmation, template: INSPIRATION.confirm })} />
-                 </div>
-               )}
-               saveBadge={saveBadge}>
-            <div className="space-y-2">
-              <Toggle checked={s3.confirmation.confirmNames} onChange={v => set('confirmation', { ...s3.confirmation, confirmNames: v })} label="Confirm names" />
-              <Toggle checked={s3.confirmation.repeatDateTime} onChange={v => set('confirmation', { ...s3.confirmation, repeatDateTime: v })} label="Repeat date/time" />
-              <Toggle checked={s3.confirmation.spellBackUnusual} onChange={v => set('confirmation', { ...s3.confirmation, spellBackUnusual: v })} label="Spell back unusual terms" />
-              <textarea value={s3.confirmation.template || ''} onChange={e => set('confirmation', { ...s3.confirmation, template: e.target.value })}
-                        placeholder="(Optional) template" className="w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15 text-sm min-h-[70px]" />
-            </div>
-          </Box>
-
-          {/* Latency */}
-          <Box title="Latency Cover / Thinking Filler" subtitle="Short fillers while thinking." icon={<Timer className="w-4 h-4 text-[#6af7d1]" />} editable
-               renderEdit={() => (
-                 <div style={CARD_STYLE} className="p-5 space-y-3">
-                   <label className="text-xs text-white/70">Response delay (ms)</label>
-                   <input type="number" min={0} value={s3.latency.delayMs} onChange={e => set('latency', { ...s3.latency, delayMs: Number(e.target.value || 0) })}
-                          className="w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15" />
-                   <textarea value={s3.latency.fillers || ''} onChange={e => set('latency', { ...s3.latency, fillers: e.target.value })}
-                             placeholder="e.g., One moment while I check that." className="w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15 min-h-[120px]" />
-                   <Inspiration text={INSPIRATION.fillers} onImport={() => set('latency', { ...s3.latency, fillers: INSPIRATION.fillers })} />
-                 </div>
-               )}
-               saveBadge={saveBadge}>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-center">
-              <div>
-                <label className="text-xs text-white/70">Response delay (ms)</label>
-                <input type="number" min={0} value={s3.latency.delayMs} onChange={e => set('latency', { ...s3.latency, delayMs: Number(e.target.value || 0) })}
-                       className="w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15 text-sm" />
-              </div>
-              <div className="md:col-span-2">
-                <label className="text-xs text-white/70">Delay fillers</label>
-                <textarea value={s3.latency.fillers || ''} onChange={e => set('latency', { ...s3.latency, fillers: e.target.value })}
-                          placeholder="e.g., One moment while I check that." className="w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15 text-sm min-h-[70px]" />
-              </div>
-            </div>
-          </Box>
+          </CardBox>
         </div>
 
         {/* Footer */}
         <div className="mt-8 flex items-center justify-between">
-          <button onClick={onBack} className="inline-flex items-center gap-2 rounded-[24px] border border-white/15 px-4 py-2 hover:bg-white/10"><ArrowLeft className="w-4 h-4" /> Previous</button>
+          <button onClick={onBack} className="inline-flex items-center gap-2 rounded-[10px] border border-white/10 px-4 py-2 hover:bg-white/10">
+            <ArrowLeft className="w-4 h-4" /> Previous
+          </button>
           <div className="flex items-center gap-2">
             <button onClick={() => navigator.clipboard.writeText(compiled).catch(() => {})}
-                    className="inline-flex items-center gap-2 rounded-[24px] border border-white/15 px-4 py-2 hover:bg-white/10">
+                    className="inline-flex items-center gap-2 rounded-[10px] border border-white/10 px-4 py-2 hover:bg-white/10">
               <Copy className="w-4 h-4" /> Copy compiled prompt
             </button>
             <button onClick={goNext} disabled={!valid}
-                    className="inline-flex items-center gap-2 px-8 py-2.5 rounded-[24px] font-semibold disabled:cursor-not-allowed"
-                    style={{ background: valid ? BTN_GREEN : BTN_DISABLED, color:'#fff', boxShadow: valid ? '0 1px 0 rgba(0,0,0,0.18)' : 'none' }}
-                    onMouseEnter={(e)=>{ if(!valid) return; (e.currentTarget as HTMLButtonElement).style.background=BTN_GREEN_HOVER; }}
-                    onMouseLeave={(e)=>{ if(!valid) return; (e.currentTarget as HTMLButtonElement).style.background=BTN_GREEN; }}>
+                    className="inline-flex items-center gap-2 px-7 py-2.5 rounded-[10px] font-semibold disabled:cursor-not-allowed"
+                    style={{ background: valid ? BTN_PRI : BTN_DISABLED, color:'#fff', boxShadow: valid ? '0 1px 0 rgba(0,0,0,0.18)' : 'none' }}
+                    onMouseEnter={(e)=>{ if(!valid) return; (e.currentTarget as HTMLButtonElement).style.background=BTN_PRI_HOVER; }}
+                    onMouseLeave={(e)=>{ if(!valid) return; (e.currentTarget as HTMLButtonElement).style.background=BTN_PRI; }}>
               Next →
             </button>
           </div>
@@ -450,9 +403,9 @@ export default function StepV3PromptA({ onBack, onNext }: { onBack?: () => void;
       </div>
 
       {/* Preview Modal */}
-      <ModalFrame open={previewOpen} onClose={() => setPreviewOpen(false)} title="Compiled System Prompt">
-        <div style={CARD_STYLE} className="p-5"><pre className="whitespace-pre-wrap text-sm leading-6">{compiled}</pre></div>
-      </ModalFrame>
+      <Modal open={previewOpen} onClose={() => setPreviewOpen(false)} title="Compiled System Prompt">
+        <div style={CARD} className="p-5"><pre className="whitespace-pre-wrap text-sm leading-6">{compiled}</pre></div>
+      </Modal>
     </div>
   );
 }
