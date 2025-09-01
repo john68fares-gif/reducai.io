@@ -74,14 +74,13 @@ export default function Sidebar() {
         transition: 'width 220ms cubic-bezier(.22,.61,.36,1)',
         background:
           'linear-gradient(180deg, rgba(10,12,13,0.98) 0%, rgba(9,11,12,0.98) 100%)',
-        // THIN border
         borderRight: '1px solid rgba(0,255,194,0.08)',
         boxShadow:
           'inset 0 0 18px rgba(0,0,0,0.35), 0 0 0 1px rgba(0,0,0,0.25)',
       }}
       aria-expanded={!collapsed}
     >
-      {/* subtle auras (very soft) */}
+      {/* subtle auras */}
       <div
         className="pointer-events-none absolute -top-[30%] -left-[30%] w-[68%] h-[68%] rounded-full"
         style={{
@@ -106,7 +105,7 @@ export default function Sidebar() {
             'border-b',
             collapsed ? 'px-3 pt-5 pb-4' : 'px-5 pt-6 pb-5',
           )}
-          style={{ borderColor: 'rgba(255,255,255,0.06)' }} // thin
+          style={{ borderColor: 'rgba(255,255,255,0.06)' }}
         >
           <div className={cn('flex items-center', collapsed ? 'justify-center' : 'gap-3')}>
             <div
@@ -119,7 +118,6 @@ export default function Sidebar() {
             >
               <Bot className="w-5 h-5 text-black" />
             </div>
-            {/* brand text fades/widths smoothly */}
             <div
               className={cn('overflow-hidden transition-[opacity,width] duration-200')}
               style={{
@@ -138,11 +136,7 @@ export default function Sidebar() {
         </div>
 
         {/* Workspace */}
-        <Section
-          title="Workspace"
-          showTitle={!collapsed}
-          collapsed={collapsed}
-        >
+        <Section title="Workspace" showTitle={!collapsed} collapsed={collapsed}>
           <NavList collapsed={collapsed}>
             <Item
               collapsed={collapsed}
@@ -196,25 +190,30 @@ export default function Sidebar() {
           </NavList>
         </Section>
 
-        {/* Divider (thin) */}
+        {/* Divider */}
         <div
           className="my-3"
           style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}
         />
 
         {/* Resources */}
-        <Section
-          title="Resources"
-          showTitle={!collapsed}
-          collapsed={collapsed}
-        >
+        <Section title="Resources" showTitle={!collapsed} collapsed={collapsed}>
           <NavList collapsed={collapsed}>
             <Item collapsed={collapsed} href="#" label="Marketplace" icon={<ShoppingCart className="w-[18px] h-[18px]" />} />
             <Item collapsed={collapsed} href="#" label="AI Mentor" icon={<BookOpen className="w-[18px] h-[18px]" />} />
             <Item collapsed={collapsed} href="/apikeys" label="API Key" icon={<Key className="w-[18px] h-[18px]" />} />
             <Item collapsed={collapsed} href="#" label="Bulk Tester" icon={<Package className="w-[18px] h-[18px]" />} />
             <Item collapsed={collapsed} href="#" label="Video Guides" icon={<HelpCircle className="w-[18px] h-[18px]" />} />
-            <Item collapsed={collapsed} href="#" label="Support" icon={<Users className="w-[18px] h-[18px]" />} />
+
+            {/* ✅ Support now opens the page */}
+            <Item
+              collapsed={collapsed}
+              href="/support"
+              label="Support"
+              sub="Help & FAQ"
+              icon={<HelpCircle className="w-[18px] h-[18px]" />}
+              active={pathname === '/support'}
+            />
           </NavList>
         </Section>
 
@@ -227,7 +226,7 @@ export default function Sidebar() {
             )}
             style={{
               background: 'rgba(15,18,20,0.85)',
-              border: '1px solid rgba(0,255,194,0.12)', // thin
+              border: '1px solid rgba(0,255,194,0.12)',
               boxShadow:
                 'inset 0 0 12px rgba(0,0,0,0.35), 0 0 10px rgba(0,255,194,0.04)',
             }}
@@ -274,7 +273,7 @@ export default function Sidebar() {
   );
 }
 
-/* ---------- Small building blocks, tuned for spacing & thin lines ---------- */
+/* ---------- Small building blocks ---------- */
 
 function Section({
   title,
@@ -335,7 +334,6 @@ function Item({
         !disabled && 'hover:translate-x-[1px]'
       )}
       style={{
-        // THIN border + subtle background; brighter when active
         border: `1px solid ${
           active ? 'rgba(0,255,194,0.28)' : 'rgba(255,255,255,0.06)'
         }`,
@@ -353,7 +351,6 @@ function Item({
         {icon}
       </div>
 
-      {/* label + sub with clear spacing; fades when collapsing */}
       <div
         className="overflow-hidden transition-[opacity,width] duration-200"
         style={{ opacity: collapsed ? 0 : 1, width: collapsed ? 0 : 999 }}
