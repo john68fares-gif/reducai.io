@@ -1,19 +1,27 @@
+// components/voice/steps/StepV2Telephony.tsx
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
-  KeyRound, RefreshCw, Phone, ArrowLeft, ArrowRight, Link as LinkIcon, ShieldCheck,
+  KeyRound,
+  RefreshCw,
+  Phone,
+  ArrowLeft,
+  ArrowRight,
+  Link as LinkIcon,
+  Search,
+  ChevronDown,
 } from 'lucide-react';
 
-/* ---------- shared look: same as Step 1, with extra soft drop shadow ---------- */
+/* ---------- shared style (matches your Builder) ---------- */
 const CARD_STYLE: React.CSSProperties = {
   background: 'rgba(13,15,17,0.92)',
   border: '2px solid rgba(106,247,209,0.32)',
+  borderRadius: 28,
   boxShadow:
     '0 18px 60px rgba(0,0,0,0.50), inset 0 0 22px rgba(0,0,0,0.28), 0 0 20px rgba(106,247,209,0.06)',
-  borderRadius: 28,
 };
-
 const BTN_GREEN = '#59d9b3';
 const BTN_GREEN_HOVER = '#54cfa9';
 const BTN_DISABLED = '#2e6f63';
@@ -23,61 +31,70 @@ type NumberItem = { id: string; e164?: string; label?: string; provider?: string
 
 const E164 = /^\+[1-9]\d{1,14}$/;
 
+/* =======================================================================
+   STEP 2 — TELEPHONY (Styled “From Number” dropdown; no native <select>)
+======================================================================= */
 export default function StepV2Telephony({ onBack, onNext }: Props) {
   const [sid, setSid] = useState('');
   const [token, setToken] = useState('');
   const [numbers, setNumbers] = useState<NumberItem[]>([]);
   const [fromE164, setFrom] = useState('');
-  const [loadingNums, setLoadingNums] = useState(false);
-
-  // client-side "one number → one agent" memory
   const [busyMap, setBusyMap] = useState<Record<string, string>>({}); // number -> agentId
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
+    // restore creds
     try {
       const c = JSON.parse(localStorage.getItem('telephony:twilioCreds') || 'null');
       if (c?.accountSid) setSid(c.accountSid);
       if (c?.authToken) setToken(c.authToken);
     } catch {}
-    try { setBusyMap(JSON.parse(localStorage.getItem('voice:numberBindings') || '{}')); } catch {}
+    // restore selection
     try {
       const s2 = JSON.parse(localStorage.getItem('voicebuilder:step2') || 'null');
       if (s2?.fromE164) setFrom(s2.fromE164);
     } catch {}
+    // bindings
+    try { setBusyMap(JSON.parse(localStorage.getItem('voice:numberBindings') || '{}')); } catch {}
+    // load numbers
     refreshNumbers();
   }, []);
 
   async function refreshNumbers() {
-    setLoadingNums(true);
     try {
-      // Server endpoint should return the numbers you (the platform) own,
-      // so end-users DON'T have to type creds just to pick a number.
-      const r = await fetch('/api/telephony/phone-numbers');
+      const r = await fetch('/api/telephony/phone-numbers', { cache: 'no-store' });
       const j = await r.json();
-      const list = (j?.ok ? j.data : j) as NumberItem[];
+      const list: NumberItem[] = j?.ok ? j.data : j;
       setNumbers(Array.isArray(list) ? list : []);
-      // preselect if empty
-      if (!fromE164 && Array.isArray(list) && list.length && list[0].e164) {
-        setFrom(list[0].e164 as string);
-      }
     } catch {
       setNumbers([]);
-    } finally {
-      setLoadingNums(false);
     }
   }
 
   function saveCreds() {
-    const accountSid = (sid || '').trim();
+    const accountSid = (sid || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
     const authToken = (token || '').trim();
-    if (!/^AC[a-zA-Z0-9]{32}$/.test(accountSid)) { alert('Invalid Account SID'); return; }
-    if (!authToken) { alert('Missing Auth Token'); return; }
-    try { localStorage.setItem('telephony:twilioCreds', JSON.stringify({ accountSid, authToken })); } catch {}
-    alert('Twilio creds saved to your browser.');
+    if (!/^AC[a-zA-Z0-9]{32}$/.test(accountSid)) {
+      alert('Invalid Account SID (must start with AC… and be 34 chars)');
+      return;
+    }
+    if (!authToken) {
+      alert('Missing Auth Token');
+      return;
+    }
+    try {
+      localStorage.setItem('telephony:twilioCreds', JSON.stringify({ accountSid, authToken }));
+      setSid(accountSid);
+      setToken(authToken);
+      alert('Saved to your browser.');
+    } catch {}
   }
 
   function persistAndNext() {
-    if (!fromE164 || !E164.test(fromE164)) { alert('Pick a valid phone number.'); return; }
+    if (!E164.test(fromE164)) {
+      alert('Choose a valid E.164 number, e.g. +15551234567');
+      return;
+    }
     if (busyMap[fromE164]) {
       alert(`This number is already attached to agent ${busyMap[fromE164]}. Choose another.`);
       return;
@@ -86,129 +103,101 @@ export default function StepV2Telephony({ onBack, onNext }: Props) {
     onNext?.();
   }
 
-  const alreadyBoundTo = useMemo(
-    () => (fromE164 && busyMap[fromE164]) ? busyMap[fromE164] : '',
-    [busyMap, fromE164]
+  const options = useMemo(
+    () =>
+      numbers.map((n) => ({
+        value: n.e164 || '',
+        label:
+          (n.e164 || n.id || '').trim() +
+          (n.label ? ` — ${n.label}` : '') +
+          (n.provider ? ` (${n.provider})` : ''),
+        note: n.status ? n.status : '',
+      })),
+    [numbers]
   );
 
   return (
-    <section className="relative">
-      {/* Header line (matches your Step 1 vibe) */}
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <div
-            className="inline-flex items-center gap-2 text-xs tracking-wide px-3 py-1.5 rounded-[20px] border"
-            style={{ borderColor:'rgba(106,247,209,0.32)', background:'rgba(16,19,20,0.70)' }}
-          >
-            <ShieldCheck className="w-3.5 h-3.5 text-[#6af7d1]" />
-            Step 2 · Model Settings
-          </div>
-          <h2 className="mt-3 text-3xl md:text-4xl font-semibold tracking-tight">Telephony</h2>
-          <p className="text-white/70 mt-1">Attach a phone number and (optionally) save Twilio credentials to your browser.</p>
-        </div>
+    <section>
+      {/* Header */}
+      <div className="mb-8">
+        <h1 className="text-3xl md:text-4xl font-semibold">Telephony</h1>
         <div
-          className="text-xs px-3 py-1 rounded-2xl border"
-          style={{ borderColor:'rgba(106,247,209,0.32)', background:'rgba(16,19,20,0.70)' }}
+          className="mt-2 inline-flex items-center gap-2 text-xs tracking-wide px-3 py-1.5 rounded-[20px] border"
+          style={{ borderColor: 'rgba(106,247,209,0.32)', background: 'rgba(16,19,20,0.70)' }}
         >
           Step 2 of 4
         </div>
       </div>
 
-      {/* Form Card */}
-      <div className="relative p-6 sm:p-8" style={CARD_STYLE}>
+      {/* Card */}
+      <div className="relative p-6 sm:p-8 space-y-6" style={CARD_STYLE}>
+        {/* glow */}
         <div
           aria-hidden
           className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
-          style={{ background:'radial-gradient(circle, rgba(106,247,209,0.10) 0%, transparent 70%)', filter:'blur(38px)' }}
+          style={{ background: 'radial-gradient(circle, rgba(106,247,209,0.10) 0%, transparent 70%)', filter: 'blur(38px)' }}
         />
 
-        {/* Row 1: SID / TOKEN (side by side like your Step 1 grid) */}
+        {/* creds row */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <Field label="Twilio Account SID">
-            <div className="flex items-center gap-2">
-              <KeyRound className="w-4 h-4 text-[#6af7d1]" />
-              <input
-                value={sid}
-                onChange={(e) => setSid(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,''))}
-                placeholder="ACXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
-                className="w-full bg-transparent outline-none text-[15px] text-white/95"
-              />
-            </div>
-          </Field>
-          <Field label="Twilio Auth Token">
-            <input
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              placeholder="••••••••••••••••"
-              className="w-full bg-transparent outline-none text-[15px] text-white/95"
-              type="password"
-            />
-          </Field>
+          <LabeledInput
+            label="Twilio Account SID"
+            value={sid}
+            onChange={(v) => setSid(v.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
+            placeholder="ACXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+            icon={<KeyRound className="w-4 h-4 text-[#6af7d1]" />}
+          />
+          <LabeledInput
+            label="Twilio Auth Token"
+            type="password"
+            value={token}
+            onChange={setToken}
+            placeholder="••••••••••••••••"
+          />
         </div>
 
-        <div className="mt-2">
+        <button
+          onClick={saveCreds}
+          className="text-xs rounded-2xl border px-3 py-1"
+          style={{ borderColor: 'rgba(255,255,255,0.16)' }}
+        >
+          Save Credentials (browser only)
+        </button>
+
+        {/* number row */}
+        <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 items-end">
+          <div>
+            <label className="block mb-2 text-[13px] font-medium text-white/85 tracking-wide">
+              From Number
+            </label>
+            <NumberSelect
+              id="from-number"
+              value={fromE164}
+              onChange={setFrom}
+              options={options}
+              placeholder={numbers.length ? '— Choose —' : 'No numbers imported'}
+              icon={<Phone className="w-4 h-4 text-[#6af7d1]" />}
+            />
+          </div>
+
           <button
-            onClick={saveCreds}
-            className="text-xs rounded-2xl border px-3 py-1"
-            style={{ borderColor:'rgba(255,255,255,0.16)' }}
+            onClick={refreshNumbers}
+            className="inline-flex items-center gap-2 rounded-2xl border px-4 py-3 text-sm"
+            style={{ borderColor: 'rgba(255,255,255,0.16)', background: 'rgba(0,0,0,0.25)' }}
           >
-            Save Credentials (browser only)
+            <RefreshCw className="w-4 h-4" /> Refresh
           </button>
         </div>
 
-        {/* Row 2: From Number select spans the width, refresh on the right */}
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-3 mt-6 items-end">
-          <div className="md:col-span-10">
-            <Field label="From Number">
-              <div className="flex items-center gap-2">
-                <Phone className="w-4 h-4 text-[#6af7d1]" />
-                <select
-                  value={fromE164}
-                  onChange={(e)=>setFrom(e.target.value)}
-                  className="w-full bg-transparent outline-none text-[15px] text-white/95"
-                  style={{ appearance:'none' }}
-                >
-                  <option value="">{loadingNums ? 'Loading…' : numbers.length ? '— Choose —' : 'No numbers available'}</option>
-                  {numbers.map((n) => {
-                    const e = n.e164 || '';
-                    const nicelabel = [e, n.label].filter(Boolean).join(' — ');
-                    return <option key={n.id} value={e}>{nicelabel}</option>;
-                  })}
-                </select>
-              </div>
-            </Field>
-            {alreadyBoundTo && (
-              <div className="text-xs text-amber-300 mt-2">
-                This number is already attached to agent <span className="font-semibold">{alreadyBoundTo}</span>.
-              </div>
-            )}
+        <div className="opacity-80 text-sm leading-relaxed">
+          <div className="flex items-center gap-2 mb-1">
+            <LinkIcon className="w-4 h-4" /> One number → one agent
           </div>
-          <div className="md:col-span-2">
-            <button
-              onClick={refreshNumbers}
-              className="w-full inline-flex items-center justify-center gap-2 rounded-[14px] border px-3 py-2 text-sm"
-              style={{ borderColor:'rgba(255,255,255,0.16)', background:'rgba(16,19,20,0.88)' }}
-              disabled={loadingNums}
-            >
-              <RefreshCw className={`w-4 h-4 ${loadingNums ? 'animate-spin' : ''}`} />
-              Refresh
-            </button>
-          </div>
+          Numbers are exclusive to a single agent. You can re-attach later, but only one active binding at a time.
         </div>
 
-        {/* Info strip */}
-        <div className="mt-6 rounded-2xl border p-4 text-sm"
-             style={{ borderColor:'rgba(255,255,255,0.16)', background:'#101314', boxShadow:'0 8px 34px rgba(0,0,0,0.25)' }}>
-          <div className="flex items-center gap-2 text-white font-semibold">
-            <LinkIcon className="w-4 h-4 text-[#6af7d1]" /> One number → one agent
-          </div>
-          <div className="text-white/70 mt-1">
-            Numbers are exclusive to a single agent. You can re-attach later, but only one active binding at a time.
-          </div>
-        </div>
-
-        {/* Footer buttons */}
-        <div className="mt-8 flex items-center justify-between">
+        {/* actions */}
+        <div className="flex items-center justify-between pt-2">
           <button
             onClick={onBack}
             className="inline-flex items-center gap-2 rounded-[24px] border border-white/15 bg-transparent px-4 py-2 text-white hover:bg-white/10 transition"
@@ -217,21 +206,21 @@ export default function StepV2Telephony({ onBack, onNext }: Props) {
           </button>
 
           <button
+            disabled={!fromE164 || loading}
             onClick={persistAndNext}
-            disabled={!fromE164}
             className="inline-flex items-center gap-2 px-8 py-2.5 rounded-[24px] font-semibold select-none transition-colors duration-150 disabled:cursor-not-allowed"
             style={{
-              background: fromE164 ? BTN_GREEN : BTN_DISABLED,
+              background: fromE164 && !loading ? BTN_GREEN : BTN_DISABLED,
               color: '#ffffff',
-              boxShadow: fromE164 ? '0 1px 0 rgba(0,0,0,0.18)' : 'none',
-              filter: fromE164 ? 'none' : 'saturate(85%) opacity(0.9)',
+              boxShadow: fromE164 && !loading ? '0 1px 0 rgba(0,0,0,0.18)' : 'none',
+              filter: fromE164 && !loading ? 'none' : 'saturate(85%) opacity(0.9)',
             }}
             onMouseEnter={(e) => {
-              if (!fromE164) return;
+              if (!fromE164 || loading) return;
               (e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER;
             }}
             onMouseLeave={(e) => {
-              if (!fromE164) return;
+              if (!fromE164 || loading) return;
               (e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN;
             }}
           >
@@ -243,17 +232,177 @@ export default function StepV2Telephony({ onBack, onNext }: Props) {
   );
 }
 
-/* ---------- small field shell with the same shadow/roundness everywhere ---------- */
-function Field({ label, children }: { label: React.ReactNode; children: React.ReactNode }) {
+/* ---------------------- inputs ---------------------- */
+function LabeledInput({
+  label,
+  value,
+  onChange,
+  placeholder,
+  icon,
+  type = 'text',
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  icon?: React.ReactNode;
+  type?: 'text' | 'password';
+}) {
   return (
     <div>
       <label className="block mb-2 text-[13px] font-medium text-white/85 tracking-wide">{label}</label>
       <div
-        className="rounded-2xl bg-[#101314] border px-3 py-2.5"
-        style={{ borderColor:'#13312b', boxShadow:'0 8px 34px rgba(0,0,0,0.25)' }}
+        className="flex items-center gap-2 rounded-2xl bg-[#101314] px-4 py-3.5 border outline-none"
+        style={{ borderColor: '#13312b', boxShadow: '0 8px 34px rgba(0,0,0,0.25)' }}
       >
-        {children}
+        {icon}
+        <input
+          type={type}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          className="w-full bg-transparent outline-none text-[15px] text-white/95"
+        />
       </div>
     </div>
+  );
+}
+
+/* ---------------------- styled dropdown (portal) ---------------------- */
+function NumberSelect({
+  id,
+  value,
+  onChange,
+  options,
+  placeholder,
+  icon,
+}: {
+  id?: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string; note?: string }[];
+  placeholder?: string;
+  icon?: React.ReactNode;
+}) {
+  const btnRef = useRef<HTMLButtonElement | null>(null);
+  const portalRef = useRef<HTMLDivElement | null>(null);
+  const searchRef = useRef<HTMLInputElement | null>(null);
+  const [open, setOpen] = useState(false);
+  const [rect, setRect] = useState<{ top: number; left: number; width: number; openUp: boolean } | null>(null);
+  const [query, setQuery] = useState('');
+
+  const current = options.find((o) => o.value === value) || null;
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return options;
+    return options.filter((o) => o.label.toLowerCase().includes(q));
+  }, [options, query]);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    const r = btnRef.current?.getBoundingClientRect();
+    if (!r) return;
+    const viewH = window.innerHeight;
+    const openUp = r.bottom + 320 > viewH;
+    setRect({ top: openUp ? r.top : r.bottom, left: r.left, width: r.width, openUp });
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => {
+      if (btnRef.current?.contains(e.target as Node) || portalRef.current?.contains(e.target as Node)) return;
+      setOpen(false);
+    };
+    window.addEventListener('mousedown', close);
+    return () => window.removeEventListener('mousedown', close);
+  }, [open]);
+
+  return (
+    <>
+      <button
+        id={id}
+        ref={btnRef}
+        type="button"
+        onClick={() => { setOpen((v) => !v); setTimeout(() => searchRef.current?.focus(), 0); }}
+        className="w-full flex items-center justify-between gap-3 px-3 py-3 rounded-[14px] text-sm outline-none transition"
+        style={{
+          background: 'rgba(0,0,0,0.30)',
+          border: '1px solid rgba(255,255,255,0.20)',
+          boxShadow: '0 8px 34px rgba(0,0,0,0.25)',
+        }}
+      >
+        <span className="flex items-center gap-2 truncate">
+          {icon}
+          <span className="truncate">{current ? current.label : (placeholder || '— Choose —')}</span>
+        </span>
+        <ChevronDown className="w-4 h-4 opacity-80" />
+      </button>
+
+      {open && rect
+        ? createPortal(
+            <div
+              ref={portalRef}
+              className="fixed z-[9999] p-3"
+              style={{
+                top: rect.openUp ? rect.top - 8 : rect.top + 8,
+                left: rect.left,
+                width: rect.width,
+                transform: rect.openUp ? 'translateY(-100%)' : 'none',
+                background: '#101314',
+                border: '1px solid rgba(255,255,255,0.30)',
+                borderRadius: 20,
+                boxShadow: '0 20px 60px rgba(0,0,0,0.45), 0 0 1px rgba(0,0,0,0.5)',
+              }}
+            >
+              {/* search */}
+              <div
+                className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[12px]"
+                style={{ background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.15)' }}
+              >
+                <Search className="w-4 h-4 text-white/70" />
+                <input
+                  ref={searchRef}
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search numbers…"
+                  className="w-full bg-transparent outline-none text-sm text-white placeholder:text-white/60"
+                />
+              </div>
+
+              {/* list */}
+              <div className="max-h-72 overflow-y-auto pr-1" style={{ scrollbarWidth: 'thin' }}>
+                {filtered.map((o) => (
+                  <button
+                    key={o.value || o.label}
+                    onClick={() => {
+                      onChange(o.value);
+                      setOpen(false);
+                    }}
+                    className="w-full flex items-center gap-3 px-3 py-2 rounded-[10px] text-left transition"
+                    style={{ background: 'transparent', border: '1px solid transparent' }}
+                    onMouseEnter={(e) => {
+                      (e.currentTarget as HTMLButtonElement).style.background = 'rgba(0,255,194,0.10)';
+                      (e.currentTarget as HTMLButtonElement).style.border = '1px solid rgba(0,255,194,0.35)';
+                    }}
+                    onMouseLeave={(e) => {
+                      (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
+                      (e.currentTarget as HTMLButtonElement).style.border = '1px solid transparent';
+                    }}
+                  >
+                    <Phone className="w-4 h-4 text-white/80" />
+                    <span className="flex-1 truncate">{o.label}</span>
+                    {o.note ? <span className="text-white/50 text-xs">{o.note}</span> : null}
+                  </button>
+                ))}
+                {filtered.length === 0 && (
+                  <div className="px-3 py-6 text-sm text-white/70">No numbers found.</div>
+                )}
+              </div>
+            </div>,
+            document.body
+          )
+        : null}
+    </>
   );
 }
