@@ -6,7 +6,7 @@ import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import StepProgress from '@/components/builder/StepProgress';
 import StepV1Basics from '@/components/voice/steps/StepV1Basics';
 import StepV2Telephony from '@/components/voice/steps/StepV2Telephony';
-// ⬇️ swap the single-step import for the split A/B
+// SPLIT STEP 3 (A/B)
 import StepV3PromptA from '@/components/voice/steps/StepV3PromptA';
 import StepV3PromptB from '@/components/voice/steps/StepV3PromptB';
 import StepV4Overview from '@/components/voice/steps/StepV4Overview';
@@ -31,8 +31,8 @@ export default function VoiceAgentSection() {
   const rawStep = searchParams.get('step');
   const step = rawStep && ['1', '2', '3', '4'].includes(rawStep) ? rawStep : null;
 
-  // NEW: tiny helper for the sub-screen within step 3 (A or B)
-  const part = ((): 'A' | 'B' => {
+  // NEW: sub-screen selector for Step 3 (A or B). Defaults to A.
+  const part: 'A' | 'B' = ((): 'A' | 'B' => {
     const p = (searchParams.get('part') || 'A').toUpperCase();
     return p === 'B' ? 'B' : 'A';
   })();
@@ -41,12 +41,12 @@ export default function VoiceAgentSection() {
     const usp = new URLSearchParams(Array.from(searchParams.entries()));
     if (next) usp.set('step', next);
     else usp.delete('step');
-    // when leaving step 3, also drop ?part for cleanliness
+    // when leaving step 3, drop ?part for cleanliness
     if (next !== '3') usp.delete('part');
     router.replace(`${pathname}?${usp.toString()}`, { scroll: false });
   };
 
-  // NEW: update only the sub-part while keeping step=3
+  // Toggle 3A / 3B while keeping step=3
   const setPart = (next: 'A' | 'B') => {
     const usp = new URLSearchParams(Array.from(searchParams.entries()));
     usp.set('step', '3');
@@ -56,7 +56,6 @@ export default function VoiceAgentSection() {
 
   // optional: tiny cleanup when finishing the wizard elsewhere
   useEffect(() => {
-    // nothing heavy here—kept for parity if you ever set `voicebuilder:cleanup`
     try {
       if (localStorage.getItem('voicebuilder:cleanup') === '1') {
         ['voicebuilder:step1', 'voicebuilder:step2', 'voicebuilder:step3'].forEach((k) =>
@@ -83,7 +82,7 @@ export default function VoiceAgentSection() {
 
           {step === '3' && (
             <div className="mt-8">
-              {/* NEW: split step 3 into A/B without changing your overall flow */}
+              {/* Split Step 3 into two sub-screens, both still counted as Step 3 */}
               {part === 'A' ? (
                 <StepV3PromptA
                   onBack={() => setStep('2')}
@@ -102,15 +101,13 @@ export default function VoiceAgentSection() {
             <div className="mt-8">
               <StepV4Overview
                 onBack={() => setStep('3')}
-                // when finish is handled inside StepV4 (after attach), clear the step query:
-                // if your StepV4Overview already navigates elsewhere, you can remove this.
-                // You can also trigger a cleanup here if you want to clear drafts.
+                // finishing behavior handled inside StepV4 if needed
               />
               <div className="mt-6 flex justify-end">
                 <button
                   onClick={() => {
                     try {
-                      // optional: clear step drafts after finishing
+                      // optional: clear drafts after finishing
                       // localStorage.removeItem('voicebuilder:step1');
                       // localStorage.removeItem('voicebuilder:step2');
                       // localStorage.removeItem('voicebuilder:step3');
@@ -136,9 +133,6 @@ export default function VoiceAgentSection() {
       <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 pt-10 pb-24">
         <header className="mb-8">
           <h1 className="text-2xl md:text-3xl font-semibold">Voice Agents</h1>
-          <p className="text-white/70 mt-1">
-            Create a voice agent and attach a phone number—no extra SDKs needed.
-          </p>
         </header>
 
         <section className="relative p-6 sm:p-8" style={CARD_STYLE}>
