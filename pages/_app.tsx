@@ -1,13 +1,16 @@
 // pages/_app.tsx
 import type { AppProps } from 'next/app';
 import Head from 'next/head';
+import { useRouter } from 'next/router';
 
-// ❌ was "@/components/ui/Sidebar"
+// keep relative imports to avoid alias issues
 import Sidebar from '../components/ui/Sidebar';
-// ❌ was "@/styles/globals.css"
 import '../styles/globals.css';
 
 export default function MyApp({ Component, pageProps }: AppProps) {
+  const router = useRouter();
+  const onLanding = router.pathname === '/';
+
   return (
     <>
       <Head>
@@ -15,11 +18,19 @@ export default function MyApp({ Component, pageProps }: AppProps) {
         <title>Reduc AI</title>
       </Head>
 
-      {/* No Tailwind here; use inline styles so it works in your setup */}
+      {/* Use the CSS var --sidebar-w so padding follows collapsed/expanded state */}
       <div style={{ minHeight: '100vh', background: '#0b0c10', color: '#ffffff' }}>
-        <Sidebar />
-        {/* Sidebar is 260px fixed; actually pad the main content by 260px */}
-        <main style={{ paddingLeft: 260, paddingRight: 20, paddingTop: 20, paddingBottom: 20 }}>
+        {!onLanding && <Sidebar />}
+        <main
+          // when on landing, no sidebar padding; otherwise follow --sidebar-w
+          style={{
+            paddingLeft: onLanding ? 0 : 'var(--sidebar-w, 260px)',
+            paddingRight: 20,
+            paddingTop: 20,
+            paddingBottom: 20,
+            transition: 'padding-left 220ms ease',
+          }}
+        >
           <Component {...pageProps} />
         </main>
       </div>
