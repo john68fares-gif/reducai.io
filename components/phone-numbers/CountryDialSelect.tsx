@@ -9,10 +9,7 @@ import { Search, ChevronDown } from 'lucide-react';
 
 type Option = { iso2: string; name: string; dial: string };
 
-/**
- * Minimal, no-deps list of countries with dial codes.
- * Add or edit rows as needed. Names are English; UI will localize with Intl.DisplayNames when available.
- */
+/** Minimal, no-deps list of countries with dial codes. */
 const ALL_COUNTRIES: Option[] = [
   { iso2: 'US', name: 'United States', dial: '1' },
   { iso2: 'CA', name: 'Canada', dial: '1' },
@@ -31,22 +28,17 @@ const ALL_COUNTRIES: Option[] = [
   { iso2: 'NO', name: 'Norway', dial: '47' },
   { iso2: 'DK', name: 'Denmark', dial: '45' },
   { iso2: 'FI', name: 'Finland', dial: '358' },
-  { iso2: 'IS', name: 'Iceland', dial: '354' },
   { iso2: 'CZ', name: 'Czechia', dial: '420' },
-  { iso2: 'SK', name: 'Slovakia', dial: '421' },
   { iso2: 'PL', name: 'Poland', dial: '48' },
   { iso2: 'HU', name: 'Hungary', dial: '36' },
   { iso2: 'RO', name: 'Romania', dial: '40' },
-  { iso2: 'BG', name: 'Bulgaria', dial: '359' },
   { iso2: 'GR', name: 'Greece', dial: '30' },
   { iso2: 'TR', name: 'Türkiye', dial: '90' },
-  { iso2: 'RU', name: 'Russia', dial: '7' },
   { iso2: 'UA', name: 'Ukraine', dial: '380' },
   { iso2: 'LT', name: 'Lithuania', dial: '370' },
   { iso2: 'LV', name: 'Latvia', dial: '371' },
   { iso2: 'EE', name: 'Estonia', dial: '372' },
   { iso2: 'HK', name: 'Hong Kong', dial: '852' },
-  { iso2: 'MO', name: 'Macao', dial: '853' },
   { iso2: 'CN', name: 'China', dial: '86' },
   { iso2: 'JP', name: 'Japan', dial: '81' },
   { iso2: 'KR', name: 'South Korea', dial: '82' },
@@ -58,49 +50,19 @@ const ALL_COUNTRIES: Option[] = [
   { iso2: 'PH', name: 'Philippines', dial: '63' },
   { iso2: 'ID', name: 'Indonesia', dial: '62' },
   { iso2: 'IN', name: 'India', dial: '91' },
-  { iso2: 'PK', name: 'Pakistan', dial: '92' },
-  { iso2: 'BD', name: 'Bangladesh', dial: '880' },
-  { iso2: 'LK', name: 'Sri Lanka', dial: '94' },
   { iso2: 'AE', name: 'United Arab Emirates', dial: '971' },
-  { iso2: 'SA', name: 'Saudi Arabia', dial: '966' },
-  { iso2: 'QA', name: 'Qatar', dial: '974' },
-  { iso2: 'KW', name: 'Kuwait', dial: '965' },
-  { iso2: 'BH', name: 'Bahrain', dial: '973' },
-  { iso2: 'OM', name: 'Oman', dial: '968' },
-  { iso2: 'IL', name: 'Israel', dial: '972' },
-  { iso2: 'EG', name: 'Egypt', dial: '20' },
-  { iso2: 'MA', name: 'Morocco', dial: '212' },
-  { iso2: 'TN', name: 'Tunisia', dial: '216' },
   { iso2: 'ZA', name: 'South Africa', dial: '27' },
-  { iso2: 'NG', name: 'Nigeria', dial: '234' },
-  { iso2: 'KE', name: 'Kenya', dial: '254' },
-  { iso2: 'GH', name: 'Ghana', dial: '233' },
-  { iso2: 'ET', name: 'Ethiopia', dial: '251' },
   { iso2: 'AU', name: 'Australia', dial: '61' },
   { iso2: 'NZ', name: 'New Zealand', dial: '64' },
-  { iso2: 'AR', name: 'Argentina', dial: '54' },
-  { iso2: 'CL', name: 'Chile', dial: '56' },
-  { iso2: 'CO', name: 'Colombia', dial: '57' },
-  { iso2: 'PE', name: 'Peru', dial: '51' },
-  { iso2: 'MX', name: 'Mexico', dial: '52' },
   { iso2: 'BR', name: 'Brazil', dial: '55' },
-  { iso2: 'UY', name: 'Uruguay', dial: '598' },
-  { iso2: 'PY', name: 'Paraguay', dial: '595' },
-  { iso2: 'BO', name: 'Bolivia', dial: '591' },
-  { iso2: 'EC', name: 'Ecuador', dial: '593' },
-  { iso2: 'VE', name: 'Venezuela', dial: '58' },
-  { iso2: 'CR', name: 'Costa Rica', dial: '506' },
-  { iso2: 'PA', name: 'Panama', dial: '507' },
-  { iso2: 'DO', name: 'Dominican Republic', dial: '1' },
-  { iso2: 'PR', name: 'Puerto Rico', dial: '1' },
-  { iso2: 'JM', name: 'Jamaica', dial: '1' },
-  // add more if you need them
+  { iso2: 'MX', name: 'Mexico', dial: '52' },
+  // add more if needed
 ];
 
 export default function CountryDialSelect({
   value,
   onChange,
-  label = 'Country',
+  label, // optional; if not provided, no word is shown (per request)
   id,
 }: {
   value?: string; // ISO2 like 'US'
@@ -113,7 +75,6 @@ export default function CountryDialSelect({
   useEffect(() => { try { setLocale(navigator.language || 'en'); } catch {} }, []);
 
   const options: Option[] = useMemo(() => {
-    // localize display names if possible
     let dn: Intl.DisplayNames | null = null;
     try { dn = new Intl.DisplayNames([locale], { type: 'region' }); } catch {}
     const named = ALL_COUNTRIES.map((o) => ({
@@ -137,8 +98,6 @@ export default function CountryDialSelect({
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const portalRef = useRef<HTMLDivElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
-
-  // capture the first key typed while button focused
   const seedKeyRef = useRef<string | null>(null);
 
   const [rect, setRect] = useState<{ top: number; left: number; width: number; openUp: boolean } | null>(null);
@@ -159,7 +118,6 @@ export default function CountryDialSelect({
     if (name.startsWith(q)) return 90;
     if (new RegExp(`\\b${escapeRegExp(q)}`).test(name)) return 80;
     if (name.includes(q)) return 70;
-
     if (iso.startsWith(q)) return 65;
 
     if (qDigits) {
@@ -230,10 +188,7 @@ export default function CountryDialSelect({
   useEffect(() => {
     if (!open) return;
     const onClick = (e: MouseEvent) => {
-      if (
-        buttonRef.current?.contains(e.target as Node) ||
-        portalRef.current?.contains(e.target as Node)
-      ) return;
+      if (buttonRef.current?.contains(e.target as Node) || portalRef.current?.contains(e.target as Node)) return;
       setOpen(false);
     };
     window.addEventListener('mousedown', onClick);
@@ -286,7 +241,7 @@ export default function CountryDialSelect({
     }
   }
 
-  /* ---------- styles ---------- */
+  /* ---------- dropdown surface style ---------- */
   const CARD: React.CSSProperties = {
     background: '#101314',
     border: '1px solid rgba(255,255,255,0.30)',
@@ -296,9 +251,12 @@ export default function CountryDialSelect({
 
   return (
     <div className="relative">
-      <label htmlFor={id} className="mb-1 block text-xs text-white/70">{label}</label>
+      {/* Only render a label if one was provided */}
+      {label ? (
+        <label htmlFor={id} className="mb-1 block text-xs text-white/70">{label}</label>
+      ) : null}
 
-      {/* trigger button */}
+      {/* trigger button (same size/rounding as LanguageSelect trigger) */}
       <button
         ref={buttonRef}
         id={id}
@@ -308,14 +266,12 @@ export default function CountryDialSelect({
         onClick={() => { setOpen(v => !v); setTimeout(() => searchRef.current?.focus(), 0); }}
         onKeyDown={onButtonKeyDown}
         className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-[14px] text-sm outline-none transition"
-        style={{ background: 'rgba(0,0,0,0.30)', border: '1px solid rgba(255,255,255,0.20)' }}
+        style={{ background: 'rgba(0,0,0,0.30)', border: '1px solid rgba(255,255,255,0.20)', boxShadow: '0 8px 34px rgba(0,0,0,0.25)' }}
       >
         <span className="flex items-center gap-2 truncate">
-          <span className="text-[18px]">
-            {selected.iso2.toUpperCase().replace(/./g, (c) => String.fromCodePoint(127397 + c.charCodeAt(0)))}
-          </span>
-        <span className="truncate">{selected.name}</span>
-        <span className="text-white/60 shrink-0">(+{selected.dial})</span>
+          <span className="text-[15px] opacity-90">{selected.iso2}</span>
+          <span className="truncate">{selected.name}</span>
+          <span className="text-white/60 shrink-0">(+{selected.dial})</span>
         </span>
         <ChevronDown className="w-4 h-4 opacity-80" />
       </button>
@@ -371,9 +327,7 @@ export default function CountryDialSelect({
                     border: active ? '1px solid rgba(0,255,194,0.35)' : '1px solid transparent',
                   }}
                 >
-                  <span className="text-[18px]">
-                    {o.iso2.toUpperCase().replace(/./g, (c) => String.fromCodePoint(127397 + c.charCodeAt(0)))}
-                  </span>
+                  <span className="text-[15px] opacity-90">{o.iso2}</span>
                   <span className="flex-1 truncate">{o.name}</span>
                   <span className="text-white/60 shrink-0">(+{o.dial})</span>
                 </button>
