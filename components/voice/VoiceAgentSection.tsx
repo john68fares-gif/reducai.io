@@ -1,10 +1,7 @@
-// components/voice/VoiceAgentSection.tsx
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import {
-  Plus, Bot as BotIcon, Phone, Trash2, ArrowRight, X, Edit3,
-} from 'lucide-react';
+import { Plus, Bot as BotIcon, Trash2, ArrowRight, X, Edit3 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 // Wizard steps
@@ -14,7 +11,7 @@ import StepV2Telephony from '@/components/voice/steps/StepV2Telephony';
 import StepV3PromptA from '@/components/voice/steps/StepV3PromptA';
 import StepV4Overview from '@/components/voice/steps/StepV4Overview';
 
-// Full-screen editor (make sure this file exists)
+// NEW: page-style editor (renamed)
 import VoiceAssistantEditor from '@/components/voice/VoiceAssistantEditor';
 
 type Agent = {
@@ -45,14 +42,10 @@ const accentFor = (id: string) =>
   palette[Math.abs([...id].reduce((h, c) => h + c.charCodeAt(0), 0)) % palette.length];
 
 export default function VoiceAgentSection() {
-  const [mode, setMode] = useState<'gallery' | 'wizard'>('gallery');
+  const [mode, setMode] = useState<'gallery' | 'wizard' | 'edit'>('gallery');
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
-
-  // editor state
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [editingBot, setEditingBot] = useState<Agent | null>(null);
 
-  // gallery data
   const [query, setQuery] = useState('');
   const [agents, setAgents] = useState<Agent[]>([]);
 
@@ -85,11 +78,6 @@ export default function VoiceAgentSection() {
     return () => window.removeEventListener('storage', onStorage);
   }, []);
 
-  useEffect(() => {
-    if (!editingId) { setEditingBot(null); return; }
-    setEditingBot(agents.find(a => a.id === editingId) || null);
-  }, [editingId, agents]);
-
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return agents;
@@ -116,7 +104,41 @@ export default function VoiceAgentSection() {
   const back = () => setStep((s) => Math.max(1, (s - 1) as any));
   const exitWizard = () => setMode('gallery');
 
-  // ---------- WIZARD ----------
+  // ===== EDITOR MODE =====
+  if (mode === 'edit' && editingId) {
+    return (
+      <section className="w-full">
+        <VoiceAssistantEditor
+          id={editingId}
+          onExit={() => { setEditingId(null); setMode('gallery'); }}
+          onSaved={() => {
+            try {
+              const raw = localStorage.getItem('chatbots');
+              const arr = raw ? JSON.parse(raw) : [];
+              const onlyVoice = Array.isArray(arr)
+                ? arr.filter((b: any) => (b?.type || 'voice') === 'voice')
+                : [];
+              const mapped: Agent[] = onlyVoice.map((b: any) => ({
+                id: b.id,
+                name: b.name || 'Untitled',
+                type: b.type || 'voice',
+                language: b.language,
+                fromE164: b.fromE164,
+                updatedAt: b.updatedAt || b.createdAt || nowISO(),
+                createdAt: b.createdAt || nowISO(),
+                industry: b.industry,
+                model: b.model,
+                prompt: b.prompt,
+              }));
+              setAgents(mapped.sort((a, b) => Date.parse(b.updatedAt!) - Date.parse(a.updatedAt!)));
+            } catch {}
+          }}
+        />
+      </section>
+    );
+  }
+
+  // ===== WIZARD MODE =====
   if (mode === 'wizard') {
     return (
       <section className="w-full">
@@ -146,46 +168,22 @@ export default function VoiceAgentSection() {
 
           <AnimatePresence mode="wait">
             {step === 1 && (
-              <motion.div
-                key="s1"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                transition={{ duration: 0.2 }}
-              >
+              <motion.div key="s1" initial={{ opacity:0, y:10 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:-10 }} transition={{ duration:0.20 }}>
                 <StepV1Basics onNext={next} />
               </motion.div>
             )}
             {step === 2 && (
-              <motion.div
-                key="s2"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                transition={{ duration: 0.2 }}
-              >
+              <motion.div key="s2" initial={{ opacity:0, y:10 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:-10 }} transition={{ duration:0.20 }}>
                 <StepV2Telephony onBack={back} onNext={next} />
               </motion.div>
             )}
             {step === 3 && (
-              <motion.div
-                key="s3"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                transition={{ duration: 0.2 }}
-              >
+              <motion.div key="s3" initial={{ opacity:0, y:10 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:-10 }} transition={{ duration:0.20 }}>
                 <StepV3PromptA onBack={back} onNext={next} />
               </motion.div>
             )}
             {step === 4 && (
-              <motion.div
-                key="s4"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                transition={{ duration: 0.2 }}
-              >
+              <motion.div key="s4" initial={{ opacity:0, y:10 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:-10 }} transition={{ duration:0.20 }}>
                 <StepV4Overview onBack={back} />
               </motion.div>
             )}
@@ -195,7 +193,7 @@ export default function VoiceAgentSection() {
     );
   }
 
-  // ---------- GALLERY ----------
+  // ===== GALLERY MODE =====
   return (
     <section className="w-full">
       <div className="w-full max-w-[1640px] mx-auto px-6 2xl:px-12 pt-8 pb-24">
@@ -239,7 +237,7 @@ export default function VoiceAgentSection() {
                 agent={a}
                 onDelete={() => del(a.id)}
                 onOpen={() => setMode('wizard')}
-                onEdit={() => setEditingId(a.id)}
+                onEdit={() => { setEditingId(a.id); setMode('edit'); }}
               />
             </CardShell>
           ))}
@@ -256,39 +254,6 @@ export default function VoiceAgentSection() {
           </motion.div>
         )}
       </div>
-
-      {/* Editor modal */}
-      <AnimatePresence>
-        {editingBot && (
-          <VoiceAssistantEditor
-            bot={editingBot as any}
-            onClose={() => setEditingId(null)}
-            onSaved={() => {
-              try {
-                const raw = localStorage.getItem('chatbots');
-                const arr = raw ? JSON.parse(raw) : [];
-                const onlyVoice = Array.isArray(arr)
-                  ? arr.filter((b: any) => (b?.type || 'voice') === 'voice')
-                  : [];
-                const mapped: Agent[] = onlyVoice.map((b: any) => ({
-                  id: b.id,
-                  name: b.name || 'Untitled',
-                  type: b.type || 'voice',
-                  language: b.language,
-                  fromE164: b.fromE164,
-                  updatedAt: b.updatedAt || b.createdAt || nowISO(),
-                  createdAt: b.createdAt || nowISO(),
-                  industry: b.industry,
-                  model: b.model,
-                  prompt: b.prompt,
-                }));
-                setAgents(mapped.sort((a, b) => Date.parse(b.updatedAt!) - Date.parse(a.updatedAt!)));
-              } catch {}
-              setEditingId(null);
-            }}
-          />
-        )}
-      </AnimatePresence>
     </section>
   );
 }
@@ -302,7 +267,6 @@ function CardShell({ children }: { children: React.ReactNode }) {
       transition={{ type: 'spring', stiffness: 220, damping: 18 }}
       initial={{ opacity: 0, y: 12, scale: 0.985 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
-      transition={{ duration: 0.22 }}
       className="relative rounded-[16px]"
       style={{ background: UI.cardBg, border: UI.border, boxShadow: UI.cardShadow }}
     >
@@ -327,8 +291,7 @@ function CreateCard({ onClick }: { onClick: () => void }) {
         style={{
           background: 'rgba(0,0,0,0.18)',
           border: '1px dashed rgba(106,247,209,0.35)',
-          boxShadow:
-            'inset 0 0 18px rgba(0,0,0,0.45), inset 0 0 6px rgba(106,247,209,0.06)',
+          boxShadow: 'inset 0 0 18px rgba(0,0,0,0.45), inset 0 0 6px rgba(106,247,209,0.06)',
         }}
       >
         <Plus className="w-10 h-10" style={{ color: '#6af7d1', opacity: 0.9 }} />
@@ -371,34 +334,23 @@ function AgentCard({
         </button>
       </div>
 
-      <div className="flex items-center justify-between">
-        <div className="text-[12px] text-white/50">Updated {fmt(agent.updatedAt)}</div>
-        <div className="flex items-center gap-2">
-          {agent.fromE164 && (
-            <a
-              href={`tel:${agent.fromE164}`}
-              className="inline-flex items-center gap-2 px-3 py-2 rounded-[10px] text-sm border"
-              style={{ borderColor: 'rgba(106,247,209,0.28)', background: 'rgba(0,255,194,0.06)' }}
-            >
-              <Phone className="w-4 h-4" /> Test
-            </a>
-          )}
-          <button
-            onClick={onEdit}
-            className="inline-flex items-center gap-2 px-3 py-2 rounded-[10px] text-sm border hover:translate-y-[-1px] transition"
-            style={{ borderColor: 'rgba(106,247,209,0.28)', background: 'rgba(16,19,20,0.90)' }}
-            title="Edit"
-          >
-            <Edit3 className="w-4 h-4" /> Edit
-          </button>
-          <button
-            onClick={onOpen}
-            className="inline-flex items-center gap-2 px-3 py-2 rounded-[10px] text-sm border hover:translate-y-[-1px] transition"
-            style={{ borderColor: 'rgba(106,247,209,0.28)', background: 'rgba(16,19,20,0.90)' }}
-          >
-            Open <ArrowRight className="w-4 h-4" />
-          </button>
-        </div>
+      <div className="flex items-center justify-end gap-2">
+        {/* Removed the phone “Test” button */}
+        <button
+          onClick={onEdit}
+          className="inline-flex items-center gap-2 px-3 py-2 rounded-[10px] text-sm border hover:translate-y-[-1px] transition"
+          style={{ borderColor: 'rgba(106,247,209,0.28)', background: 'rgba(16,19,20,0.90)' }}
+          title="Edit"
+        >
+          <Edit3 className="w-4 h-4" /> Edit
+        </button>
+        <button
+          onClick={onOpen}
+          className="inline-flex items-center gap-2 px-3 py-2 rounded-[10px] text-sm border hover:translate-y-[-1px] transition"
+          style={{ borderColor: 'rgba(106,247,209,0.28)', background: 'rgba(16,19,20,0.90)' }}
+        >
+          Open <ArrowRight className="w-4 h-4" />
+        </button>
       </div>
     </div>
   );
