@@ -1,42 +1,50 @@
 // components/voice/steps/StepV1Basics.tsx
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
-import { Sparkles, Building2, Languages as LangIcon, ChevronDown, Search } from 'lucide-react';
+import React, {
+  useEffect, useMemo, useRef, useState, useLayoutEffect,
+} from 'react';
+import { createPortal } from 'react-dom'; // ✅ fix: use react-dom portal
+import {
+  Sparkles, Building2, Languages as LangIcon, ChevronDown, Search, ArrowRight,
+} from 'lucide-react';
 import CountryDialSelect from '@/components/phone-numbers/CountryDialSelect';
+
+/* -------------------- shared styles (matches Builder vibe) -------------------- */
+const CARD_STYLE: React.CSSProperties = {
+  background: 'rgba(13,15,17,0.92)',
+  border: '2px solid rgba(106,247,209,0.32)',
+  // subtle separation from bg (ChatGPT-like soft glow)
+  boxShadow:
+    '0 18px 60px rgba(0,0,0,0.50), inset 0 0 22px rgba(0,0,0,0.28), 0 0 20px rgba(106,247,209,0.06)',
+  borderRadius: 28,
+};
+
+const BTN_GREEN = '#59d9b3';
+const BTN_GREEN_HOVER = '#54cfa9';
+const BTN_DISABLED = '#2e6f63';
 
 type Props = { onNext?: () => void };
 
-// ---------- shared styles ----------
-const FRAME: React.CSSProperties = {
-  background: 'rgba(13,15,17,0.92)',
-  border: '2px solid rgba(106,247,209,0.32)',
-  borderRadius: 28,
-  // subtle elevation like ChatGPT panels
-  boxShadow:
-    'inset 0 0 22px rgba(0,0,0,0.28), 0 20px 60px rgba(0,0,0,0.35), 0 1px 0 rgba(0,0,0,0.25)',
-};
-const INPUT_BORDER = '1px solid rgba(255,255,255,0.20)';
-const INPUT_BG = 'rgba(0,0,0,0.30)';
-const RADIUS = 16; // matches rounded-2xl (~16px)
-
+/* =================================================================================
+   Step V1 — Voice Basics
+   Fields: name, industry, language (dropdown), dialect/accent (country ISO2)
+   Persists to localStorage: voicebuilder:step1
+================================================================================= */
 export default function StepV1Basics({ onNext }: Props) {
   const [name, setName] = useState('');
   const [industry, setIndustry] = useState('');
   const [language, setLanguage] = useState<'English' | 'Spanish' | 'French' | 'Arabic' | 'German' | 'Portuguese' | 'Chinese' | 'Japanese'>('English');
-  const [countryISO, setCountryISO] = useState<string>('US'); // 2-letter: US, IE, GB, etc.
-  const [countryDial, setCountryDial] = useState<string>('1');
+  const [accentIso2, setAccentIso2] = useState<string>('US');
 
-  // load saved
   useEffect(() => {
     try {
-      const s = JSON.parse(localStorage.getItem('voicebuilder:step1') || 'null');
-      if (s) {
-        setName(s.name || '');
-        setIndustry(s.industry || '');
-        setLanguage((s.language || 'English'));
-        setCountryISO(s.countryISO || 'US');
-        setCountryDial(s.countryDial || '1');
+      const saved = JSON.parse(localStorage.getItem('voicebuilder:step1') || 'null');
+      if (saved && typeof saved === 'object') {
+        if (typeof saved.name === 'string') setName(saved.name);
+        if (typeof saved.industry === 'string') setIndustry(saved.industry);
+        if (typeof saved.language === 'string') setLanguage(saved.language);
+        if (typeof saved.accentIso2 === 'string') setAccentIso2(saved.accentIso2.toUpperCase());
       }
     } catch {}
   }, []);
@@ -45,42 +53,45 @@ export default function StepV1Basics({ onNext }: Props) {
     const e: Record<string, string> = {};
     if (!name.trim()) e.name = 'Please enter a name.';
     if (!industry.trim()) e.industry = 'Please enter your industry.';
+    if (!language) e.language = 'Please choose a language.';
+    if (!accentIso2) e.accent = 'Pick a country.';
     return e;
-  }, [name, industry]);
+  }, [name, industry, language, accentIso2]);
+
+  const canNext = Object.keys(errors).length === 0;
 
   function persistAndNext() {
     try {
       localStorage.setItem(
         'voicebuilder:step1',
         JSON.stringify({
-          name,
-          industry,
-          language,     // e.g., "English"
-          countryISO,   // e.g., "US" (accent/dialect by country)
-          countryDial,  // e.g., "1"
+          name: name.trim(),
+          industry: industry.trim(),
+          language,
+          accentIso2: (accentIso2 || '').toUpperCase(), // ✅ save as 2-letter ISO
         }),
       );
     } catch {}
     onNext?.();
   }
 
-  const canNext = Object.keys(errors).length === 0;
-
   return (
-    <section className="w-full max-w-7xl mx-auto px-4 sm:px-6 pt-6 pb-20">
-      {/* header crumb */}
-      <div className="inline-flex items-center gap-2 text-xs tracking-wide px-3 py-1.5 rounded-[20px] border"
-           style={{ borderColor: 'rgba(106,247,209,0.32)', background: 'rgba(16,19,20,0.70)' }}>
-        <Sparkles className="w-3.5 h-3.5 text-[#6af7d1]" />
-        Step 1 · Voice Basics
+    <section className="relative">
+      {/* Header */}
+      <div className="mb-6">
+        <div
+          className="inline-flex items-center gap-2 text-xs tracking-wide px-3 py-1.5 rounded-[20px] border"
+          style={{ borderColor: 'rgba(106,247,209,0.32)', background: 'rgba(16,19,20,0.70)' }}
+        >
+          <Sparkles className="w-3.5 h-3.5 text-[#6af7d1]" />
+          Step 1 · Voice Basics
+        </div>
+        <h2 className="mt-3 text-3xl md:text-4xl font-semibold tracking-tight">Voice Agent Setup</h2>
+        <p className="text-white/70 mt-1">Name it, set the industry, and choose how it speaks.</p>
       </div>
 
-      <h1 className="mt-3 text-3xl md:text-4xl font-semibold">Voice Agent Setup</h1>
-      <p className="text-white/70 mt-1">Name it, set the industry, and choose how it speaks.</p>
-
-      {/* form card */}
-      <div className="relative mt-6 p-6 sm:p-8" style={FRAME}>
-        {/* soft background glow */}
+      {/* Form Card */}
+      <div className="relative p-6 sm:p-8" style={CARD_STYLE}>
         <div
           aria-hidden
           className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
@@ -88,49 +99,70 @@ export default function StepV1Basics({ onNext }: Props) {
         />
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <Field
-            label="Agent Name *"
-            value={name}
-            onChange={setName}
-            placeholder="Enter agent name…"
-            icon={<Sparkles className="w-4 h-4 text-[#6af7d1]" />}
-            error={errors.name}
-          />
+          {/* Agent name */}
+          <FieldShell label="Agent Name *" error={errors.name}>
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-[#6af7d1]" />
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Enter agent name…"
+                className="w-full bg-transparent outline-none text-[15px] text-white/95"
+              />
+            </div>
+          </FieldShell>
 
-          <Field
-            label="Industry *"
-            value={industry}
-            onChange={setIndustry}
-            placeholder="Enter your industry…"
-            icon={<Building2 className="w-4 h-4 text-[#6af7d1]" />}
-            error={errors.industry}
-          />
+          {/* Industry */}
+          <FieldShell label="Industry *" error={errors.industry}>
+            <div className="flex items-center gap-2">
+              <Building2 className="w-4 h-4 text-[#6af7d1]" />
+              <input
+                value={industry}
+                onChange={(e) => setIndustry(e.target.value)}
+                placeholder="Enter your industry…"
+                className="w-full bg-transparent outline-none text-[15px] text-white/95"
+              />
+            </div>
+          </FieldShell>
 
-          {/* Language (custom dropdown styled like CountryDialSelect) */}
-          <Labeled label="Language *" className="">
+          {/* Language (styled portal dropdown) */}
+          <FieldShell label="Language *" error={errors.language}>
             <LanguageSelect value={language} onChange={setLanguage} />
-          </Labeled>
+          </FieldShell>
 
-          {/* Dialect/Accent by country (2-letter ISO like US/GB/IE/etc.) */}
-          <Labeled label="Dialect / Accent *(choose country)">
+          {/* Dialect / Accent (country ISO2) — identical height/rounding */}
+          <FieldShell label={<>Dialect / Accent <span className="text-white/50 text-xs">(choose country)</span></>} error={errors.accent}>
             <CountryDialSelect
-              value={countryISO}
-              onChange={(iso, dial) => { setCountryISO(iso); setCountryDial(dial); }}
+              value={accentIso2}
+              onChange={(iso2 /* , dial */) => setAccentIso2(iso2.toUpperCase())}
+              id="voice-accent"
               label="Country"
-              id="accent-country"
             />
-          </Labeled>
+          </FieldShell>
         </div>
 
+        {/* Actions */}
         <div className="mt-8 flex justify-end">
           <button
-            onClick={persistAndNext}
             disabled={!canNext}
-            className="inline-flex items-center gap-2 px-8 py-2.5 rounded-[24px] font-semibold select-none transition disabled:opacity-60 disabled:cursor-not-allowed"
-            style={{ background: '#59d9b3', color: '#0b0c10', boxShadow: '0 6px 28px rgba(0,255,194,0.2)' }}
+            onClick={persistAndNext}
+            className="inline-flex items-center gap-2 px-8 py-2.5 rounded-[24px] font-semibold select-none transition-colors duration-150 disabled:cursor-not-allowed"
+            style={{
+              background: canNext ? BTN_GREEN : BTN_DISABLED,
+              color: '#ffffff',
+              boxShadow: canNext ? '0 1px 0 rgba(0,0,0,0.18)' : 'none',
+              filter: canNext ? 'none' : 'saturate(85%) opacity(0.9)',
+            }}
+            onMouseEnter={(e) => {
+              if (!canNext) return;
+              (e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER;
+            }}
+            onMouseLeave={(e) => {
+              if (!canNext) return;
+              (e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN;
+            }}
           >
-            Next
-            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none"><path d="M5 12h14M13 5l7 7-7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            Next <ArrowRight className="w-4 h-4" />
           </button>
         </div>
       </div>
@@ -138,57 +170,41 @@ export default function StepV1Basics({ onNext }: Props) {
   );
 }
 
-/* --------------------------------- Field (text) --------------------------------- */
-function Field({
-  label, value, onChange, placeholder, icon, error,
+/* ------------------------------- Field wrapper ------------------------------ */
+/** Identical shell for inputs and both dropdown triggers (keeps widths aligned). */
+function FieldShell({
+  label,
+  error,
+  children,
 }: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder?: string;
-  icon?: React.ReactNode;
+  label: React.ReactNode;
   error?: string;
+  children: React.ReactNode;
 }) {
-  const [focused, setFocused] = useState(false);
+  const borderBase = error ? 'rgba(255,120,120,0.55)' : '#13312b';
   return (
     <div>
       <label className="block mb-2 text-[13px] font-medium text-white/85 tracking-wide">{label}</label>
       <div
-        className="flex items-center gap-2 px-4 py-3.5"
+        className="rounded-2xl bg-[#101314] border px-3 py-2.5"
         style={{
-          borderRadius: RADIUS,
-          background: INPUT_BG,
-          border: focused ? '1px solid #00ffc2' : INPUT_BORDER,
+          borderColor: borderBase,
+          // same external separation as you requested
           boxShadow: '0 8px 34px rgba(0,0,0,0.25)',
         }}
       >
-        {icon}
-        <input
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={placeholder}
-          className="w-full bg-transparent outline-none text-[15px] text-white/95"
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
-        />
+        {/* child should render as a full-width row */}
+        {children}
       </div>
-      {!!error && <div className="mt-1 text-xs text-[rgba(255,138,138,0.95)]">{error}</div>}
+      <div className="mt-1 text-xs">
+        {error ? <span className="text-[rgba(255,138,138,0.95)]">{error}</span> : null}
+      </div>
     </div>
   );
 }
 
-/* -------------------------------- Labeled wrapper -------------------------------- */
-function Labeled({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
-  return (
-    <div className={className || ''}>
-      <label className="block mb-2 text-[13px] font-medium text-white/85 tracking-wide">{label}</label>
-      {children}
-    </div>
-  );
-}
-
-/* ----------------------------- LanguageSelect (styled) ----------------------------- */
-/** Matches CountryDialSelect trigger: same height, radius, border, shadow. */
+/* ---------------------------- Styled LanguageSelect ---------------------------- */
+/** Portal dropdown (fixed) — EXACT same size/roundness as CountryDialSelect trigger. */
 function LanguageSelect({
   value,
   onChange,
@@ -196,14 +212,22 @@ function LanguageSelect({
   value: 'English' | 'Spanish' | 'French' | 'Arabic' | 'German' | 'Portuguese' | 'Chinese' | 'Japanese';
   onChange: (v: any) => void;
 }) {
-  const options = ['English', 'Spanish', 'French', 'Arabic', 'German', 'Portuguese', 'Chinese', 'Japanese'] as const;
+  const options = [
+    'English',
+    'Spanish',
+    'French',
+    'Arabic',
+    'German',
+    'Portuguese',
+    'Chinese',
+    'Japanese',
+  ] as const;
 
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const [rect, setRect] = useState<{ top: number; left: number; width: number; openUp: boolean } | null>(null);
   const btnRef = useRef<HTMLButtonElement | null>(null);
   const portalRef = useRef<HTMLDivElement | null>(null);
-  const listRef = useRef<HTMLDivElement | null>(null);
+  const [rect, setRect] = useState<{ top: number; left: number; width: number; openUp: boolean } | null>(null);
 
   const filtered = options.filter((o) => o.toLowerCase().includes(query.trim().toLowerCase()));
 
@@ -228,17 +252,13 @@ function LanguageSelect({
 
   return (
     <>
+      {/* trigger (same size as CountryDialSelect trigger) */}
       <button
         ref={btnRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between gap-3 px-4 py-3.5 text-left"
-        style={{
-          borderRadius: RADIUS,
-          background: INPUT_BG,
-          border: INPUT_BORDER,
-          boxShadow: '0 8px 34px rgba(0,0,0,0.25)',
-        }}
+        className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-[14px] text-sm"
+        style={{ background: 'rgba(0,0,0,0.30)', border: '1px solid rgba(255,255,255,0.20)', boxShadow: '0 8px 34px rgba(0,0,0,0.25)' }}
       >
         <span className="flex items-center gap-2">
           <LangIcon className="w-4 h-4 text-white/75" />
@@ -247,8 +267,9 @@ function LanguageSelect({
         <ChevronDown className="w-4 h-4 opacity-80" />
       </button>
 
-      {open && rect
-        ? (typeof document !== 'undefined' && React.createPortal(
+      {/* dropdown (portal) */}
+      {open && rect && typeof document !== 'undefined'
+        ? createPortal(
           <div
             ref={portalRef}
             className="fixed z-[9999] p-3"
@@ -276,7 +297,7 @@ function LanguageSelect({
               />
             </div>
 
-            <div ref={listRef} className="max-h-72 overflow-y-auto pr-1" style={{ scrollbarWidth: 'thin' }}>
+            <div className="max-h-72 overflow-y-auto pr-1" style={{ scrollbarWidth: 'thin' }}>
               {filtered.map((opt) => (
                 <button
                   key={opt}
@@ -300,7 +321,8 @@ function LanguageSelect({
             </div>
           </div>,
           document.body
-        )) : null}
+        )
+        : null}
     </>
   );
 }
