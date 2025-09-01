@@ -2,10 +2,27 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Eye, Copy, ArrowLeft, ArrowRight, X } from 'lucide-react';
+import {
+  Eye,
+  Copy,
+  ArrowLeft,
+  ArrowRight,
+  X,
+  User,
+  MessageSquare,
+  ClipboardList,
+  CheckCheck,
+  Zap,
+  Timer,
+  PhoneForwarded,
+  ShieldAlert,
+  BookOpenText,
+  Keyboard,
+  Languages,
+  Mic2,
+} from 'lucide-react';
 
 /* ------------------------------- SHARED UI ------------------------------- */
-// From your Step3PromptEditor.tsx (kept identical vibes)
 const FRAME_STYLE: React.CSSProperties = {
   background: 'rgba(13,15,17,0.95)',
   border: '2px dashed rgba(106,247,209,0.30)',
@@ -18,7 +35,6 @@ const CARD_STYLE: React.CSSProperties = {
   border: '1px solid rgba(255,255,255,0.30)',
   borderRadius: 20,
 };
-/* Same green as your Step 2/3 builder */
 const BTN_GREEN = '#59d9b3';
 const BTN_GREEN_HOVER = '#54cfa9';
 const BTN_DISABLED = '#2e6f63';
@@ -167,7 +183,7 @@ function ChipList({
                 next.splice(to, 0, moved);
                 onChange(next);
               }}
-              className="px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white/80 text-sm"
+              className="px-3 py-2 rounded-2xl bg-[#0b0e0f] text-white border border-white/15 text-sm"
             >
               <span className="opacity-70 mr-2">≡</span>
               {i + 1}. {v}
@@ -269,7 +285,6 @@ function Modal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: 'rgba(0,0,0,0.5)' }}>
       <div className="relative w-full max-w-[980px] max-h-[88vh] flex flex-col text-white font-movatif" style={FRAME_STYLE}>
-        {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 rounded-t-[30px]" style={HEADER_BORDER}>
           <div className="min-w-0">
             <h4 className="text-white text-lg font-semibold truncate">{title}</h4>
@@ -279,21 +294,14 @@ function Modal({
             <X className="w-5 h-5 text-white" />
           </button>
         </div>
-
-        {/* Body */}
         <div className="flex-1 overflow-y-auto p-6">
           <div style={CARD_STYLE} className="p-5">
             <pre className="whitespace-pre-wrap text-sm leading-6">{children}</pre>
           </div>
         </div>
-
-        {/* Footer */}
         <div className="px-6 py-4 rounded-b-[30px]" style={{ borderTop: '1px solid rgba(255,255,255,0.3)', background: '#101314' }}>
           <div className="flex justify-end">
-            <button
-              onClick={onClose}
-              className="px-6 py-2 rounded-[24px] border border-white/15 hover:bg-white/10 transition"
-            >
+            <button onClick={onClose} className="px-6 py-2 rounded-[24px] border border-white/15 hover:bg-white/10 transition">
               Close
             </button>
           </div>
@@ -417,7 +425,6 @@ ${(s3.escalate.criteria || '')
 /* ------------------------------ CONSTANTS ------------------------------- */
 const INTENT_OPTIONS = ['Scheduling', 'Reschedule', 'Cancel', 'FAQs', 'Lead Capture', 'Handover to Human'];
 const COLLECT_OPTIONS = ['Name', 'Phone', 'Email', 'Date/Time', 'Service Type', 'Account/Order #', 'Notes'];
-
 const DEFAULT_S3: Step3 = {
   personaName: 'Riley',
   style: 'professional',
@@ -496,7 +503,7 @@ export default function StepV3Prompt({ onBack, onNext }: { onBack?: () => void; 
   return (
     <div className="min-h-screen w-full bg-[#0b0c10] text-white font-movatif">
       <div className="w-full max-w-7xl mx-auto px-6 md:px-8 pt-10 pb-24">
-        {/* Header (Step 3 / 4) */}
+        {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div>
             <h2 className="text-3xl md:text-4xl font-semibold tracking-tight">Personality & Knowledge</h2>
@@ -514,17 +521,16 @@ export default function StepV3Prompt({ onBack, onNext }: { onBack?: () => void; 
           </div>
         </div>
 
-        {/* Big frame (glow/dashed like builder) */}
-        <div className="rounded-[30px] p-6 relative" style={FRAME_STYLE}>
-          {/* soft radial glow accent */}
+        {/* Big frame (wider) */}
+        <div className="rounded-[30px] p-6 md:p-8 relative" style={FRAME_STYLE}>
           <div
             aria-hidden
-            className="pointer-events-none absolute -top-[18%] -left-[22%] w-[60%] h-[60%] rounded-full"
+            className="pointer-events-none absolute -top-[16%] -left-[18%] w-[58%] h-[58%] rounded-full"
             style={{ background: 'radial-gradient(circle, rgba(106,247,209,0.10) 0%, transparent 70%)', filter: 'blur(38px)' }}
           />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Persona & Tone */}
-            <Box title="Persona & Tone" subtitle="Voice-first personality settings." saveBadge={saveBadge}>
+            <Box icon={<User className="w-4 h-4 text-[#6af7d1]" />} title="Persona & Tone" subtitle="Voice-first personality settings." saveBadge={saveBadge}>
+              {/* Persona fields */}
               <div className="grid grid-cols-2 gap-3">
                 <label className="col-span-2 text-xs text-white/70">Persona name</label>
                 <input
@@ -557,8 +563,7 @@ export default function StepV3Prompt({ onBack, onNext }: { onBack?: () => void; 
               </div>
             </Box>
 
-            {/* Greeting */}
-            <Box title="Opening / Greeting" subtitle="One-liner greeting (max 120 chars)." error={errors.greeting || errors.greetingLen}>
+            <Box icon={<MessageSquare className="w-4 h-4 text-[#6af7d1]" />} title="Opening / Greeting" subtitle="One-liner greeting (max 120 chars)." error={errors.greeting || errors.greetingLen}>
               <input
                 value={s3.greetingLine}
                 onChange={(e) => set('greetingLine', e.target.value)}
@@ -574,8 +579,7 @@ export default function StepV3Prompt({ onBack, onNext }: { onBack?: () => void; 
               <div className="text-xs text-white/50 text-right mt-1">{s3.greetingLine.length}/120</div>
             </Box>
 
-            {/* Intents */}
-            <Box title="Core Tasks / Intents" subtitle="Choose what this agent can do." error={errors.intents}>
+            <Box icon={<ClipboardList className="w-4 h-4 text-[#6af7d1]" />} title="Core Tasks / Intents" subtitle="Choose what this agent can do." error={errors.intents}>
               <ChipList options={INTENT_OPTIONS} value={s3.intents} onChange={(v) => set('intents', v)} />
               <input
                 value={s3.otherTasks || ''}
@@ -585,13 +589,11 @@ export default function StepV3Prompt({ onBack, onNext }: { onBack?: () => void; 
               />
             </Box>
 
-            {/* Collect */}
-            <Box title="Information to Collect" subtitle="Order determines ask order." error={errors.collect}>
+            <Box icon={<Mic2 className="w-4 h-4 text-[#6af7d1]" />} title="Information to Collect" subtitle="Order determines ask order." error={errors.collect}>
               <ChipList options={COLLECT_OPTIONS} value={s3.collect} onChange={(v) => set('collect', v)} reorderable />
             </Box>
 
-            {/* Confirmation */}
-            <Box title="Confirmation Rules" subtitle="How to confirm details with caller.">
+            <Box icon={<CheckCheck className="w-4 h-4 text-[#6af7d1]" />} title="Confirmation Rules" subtitle="How to confirm details with caller.">
               <div className="space-y-2">
                 <Toggle checked={s3.confirmation.confirmNames} onChange={(v) => set('confirmation', { ...s3.confirmation, confirmNames: v })} label="Confirm names" />
                 <Toggle checked={s3.confirmation.repeatDateTime} onChange={(v) => set('confirmation', { ...s3.confirmation, repeatDateTime: v })} label="Repeat date/time" />
@@ -605,8 +607,7 @@ export default function StepV3Prompt({ onBack, onNext }: { onBack?: () => void; 
               </div>
             </Box>
 
-            {/* Barge-in */}
-            <Box title="Interruptions & Barge-in" subtitle="How to handle interruptions.">
+            <Box icon={<Zap className="w-4 h-4 text-[#6af7d1]" />} title="Interruptions & Barge-in" subtitle="How to handle interruptions.">
               <Toggle checked={s3.barge.allow} onChange={(v) => set('barge', { ...s3.barge, allow: v })} label="Allow barge-in" />
               <textarea
                 value={s3.barge.phrases || ''}
@@ -616,8 +617,7 @@ export default function StepV3Prompt({ onBack, onNext }: { onBack?: () => void; 
               />
             </Box>
 
-            {/* Latency */}
-            <Box title="Latency Cover / Thinking Filler" subtitle="Short fillers while thinking.">
+            <Box icon={<Timer className="w-4 h-4 text-[#6af7d1]" />} title="Latency Cover / Thinking Filler" subtitle="Short fillers while thinking.">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-center">
                 <div>
                   <label className="text-xs text-white/70">Response delay (ms)</label>
@@ -641,8 +641,7 @@ export default function StepV3Prompt({ onBack, onNext }: { onBack?: () => void; 
               </div>
             </Box>
 
-            {/* Escalation */}
-            <Box title="Escalation / Transfer" subtitle="Configure human transfer." error={errors.handover}>
+            <Box icon={<PhoneForwarded className="w-4 h-4 text-[#6af7d1]" />} title="Escalation / Transfer" subtitle="Configure human transfer." error={errors.handover}>
               <Toggle checked={!!s3.escalate?.enable} onChange={(v) => set('escalate', { ...s3.escalate!, enable: v })} label="Enable escalation" />
               {s3.escalate?.enable && (
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-2">
@@ -668,8 +667,7 @@ export default function StepV3Prompt({ onBack, onNext }: { onBack?: () => void; 
               )}
             </Box>
 
-            {/* Out-of-scope */}
-            <Box title="Out-of-Scope & Safety" subtitle="Deflection & compliance.">
+            <Box icon={<ShieldAlert className="w-4 h-4 text-[#6af7d1]" />} title="Out-of-Scope & Safety" subtitle="Deflection & compliance.">
               <textarea
                 value={s3.deflect?.script || ''}
                 onChange={(e) => set('deflect', { ...s3.deflect!, script: e.target.value })}
@@ -681,8 +679,7 @@ export default function StepV3Prompt({ onBack, onNext }: { onBack?: () => void; 
               </div>
             </Box>
 
-            {/* Knowledge */}
-            <Box title="Knowledge Snippets" subtitle="Business facts: hours, location, policies." error={errors.knowledge}>
+            <Box icon={<BookOpenText className="w-4 h-4 text-[#6af7d1]" />} title="Knowledge Snippets" subtitle="Business facts: hours, location, policies." error={errors.knowledge}>
               <ListEditor
                 rows={s3.knowledge.map((k, i) => ({ id: String(i), title: k.title, text: k.text }))}
                 onChange={(rows) => set('knowledge', rows.map((r) => ({ title: r.title, text: r.text })))}
@@ -690,8 +687,7 @@ export default function StepV3Prompt({ onBack, onNext }: { onBack?: () => void; 
               />
             </Box>
 
-            {/* DTMF */}
-            <Box title="DTMF / Keypad Shortcuts (optional)" subtitle="Map digits to actions.">
+            <Box icon={<Keyboard className="w-4 h-4 text-[#6af7d1]" />} title="DTMF / Keypad Shortcuts (optional)" subtitle="Map digits to actions.">
               <div className="grid grid-cols-5 gap-2">
                 {[...'0123456789'].map((d) => (
                   <div key={d}>
@@ -707,8 +703,7 @@ export default function StepV3Prompt({ onBack, onNext }: { onBack?: () => void; 
               </div>
             </Box>
 
-            {/* Language helpers */}
-            <Box title="Language Helpers" subtitle="Mirrors Step 1; voice is optional.">
+            <Box icon={<Languages className="w-4 h-4 text-[#6af7d1]" />} title="Language Helpers" subtitle="Mirrors Step 1; voice is optional.">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div>
                   <label className="text-xs text-white/70">Language</label>
@@ -732,7 +727,7 @@ export default function StepV3Prompt({ onBack, onNext }: { onBack?: () => void; 
           </div>
         </div>
 
-        {/* Footer (same buttons style) */}
+        {/* Footer buttons */}
         <div className="mt-8 flex items-center justify-between">
           <button
             onClick={onBack}
@@ -774,7 +769,7 @@ export default function StepV3Prompt({ onBack, onNext }: { onBack?: () => void; 
         </div>
       </div>
 
-      {/* Preview Modal (matches your modal frame) */}
+      {/* Preview Modal */}
       <Modal open={previewOpen} onClose={() => setPreviewOpen(false)} title="Compiled System Prompt">
         {compiled}
       </Modal>
@@ -786,12 +781,14 @@ export default function StepV3Prompt({ onBack, onNext }: { onBack?: () => void; 
 function Box({
   title,
   subtitle,
+  icon,
   children,
   saveBadge,
   error,
 }: {
   title: string;
   subtitle?: string;
+  icon?: React.ReactNode;
   children: React.ReactNode;
   saveBadge?: React.ReactNode;
   error?: string;
@@ -812,7 +809,10 @@ function Box({
       />
       <div className="flex items-start justify-between mb-3">
         <div>
-          <h3 className="text-[13px] font-semibold text-white/90">{title}</h3>
+          <h3 className="text-[13px] font-semibold text-white/90 flex items-center gap-2">
+            {icon}
+            {title}
+          </h3>
           {subtitle && <p className="text-[12px] text-white/55 mt-0.5">{subtitle}</p>}
         </div>
         {saveBadge}
