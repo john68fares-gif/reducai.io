@@ -6,7 +6,6 @@ import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import StepProgress from '@/components/builder/StepProgress';
 import StepV1Basics from '@/components/voice/steps/StepV1Basics';
 import StepV2Telephony from '@/components/voice/steps/StepV2Telephony';
-// SPLIT STEP 3 (A/B)
 import StepV3PromptA from '@/components/voice/steps/StepV3PromptA';
 import StepV3PromptB from '@/components/voice/steps/StepV3PromptB';
 import StepV4Overview from '@/components/voice/steps/StepV4Overview';
@@ -31,7 +30,7 @@ export default function VoiceAgentSection() {
   const rawStep = searchParams.get('step');
   const step = rawStep && ['1', '2', '3', '4'].includes(rawStep) ? rawStep : null;
 
-  // NEW: sub-screen selector for Step 3 (A or B). Defaults to A.
+  // NEW: sub-step for Step 3 (A or B)
   const part: 'A' | 'B' = ((): 'A' | 'B' => {
     const p = (searchParams.get('part') || 'A').toUpperCase();
     return p === 'B' ? 'B' : 'A';
@@ -41,12 +40,10 @@ export default function VoiceAgentSection() {
     const usp = new URLSearchParams(Array.from(searchParams.entries()));
     if (next) usp.set('step', next);
     else usp.delete('step');
-    // when leaving step 3, drop ?part for cleanliness
-    if (next !== '3') usp.delete('part');
+    if (next !== '3') usp.delete('part'); // clear part when leaving step 3
     router.replace(`${pathname}?${usp.toString()}`, { scroll: false });
   };
 
-  // Toggle 3A / 3B while keeping step=3
   const setPart = (next: 'A' | 'B') => {
     const usp = new URLSearchParams(Array.from(searchParams.entries()));
     usp.set('step', '3');
@@ -54,7 +51,6 @@ export default function VoiceAgentSection() {
     router.replace(`${pathname}?${usp.toString()}`, { scroll: false });
   };
 
-  // optional: tiny cleanup when finishing the wizard elsewhere
   useEffect(() => {
     try {
       if (localStorage.getItem('voicebuilder:cleanup') === '1') {
@@ -82,32 +78,22 @@ export default function VoiceAgentSection() {
 
           {step === '3' && (
             <div className="mt-8">
-              {/* Split Step 3 into two sub-screens, both still counted as Step 3 */}
               {part === 'A' ? (
-                <StepV3PromptA
-                  onBack={() => setStep('2')}
-                  onNext={() => setPart('B')}
-                />
+                <StepV3PromptA onBack={() => setStep('2')} onNext={() => setPart('B')} />
               ) : (
-                <StepV3PromptB
-                  onBack={() => setPart('A')}
-                  onNext={() => setStep('4')}
-                />
+                <StepV3PromptB onBack={() => setPart('A')} onNext={() => setStep('4')} />
               )}
             </div>
           )}
 
           {step === '4' && (
             <div className="mt-8">
-              <StepV4Overview
-                onBack={() => setStep('3')}
-                // finishing behavior handled inside StepV4 if needed
-              />
+              <StepV4Overview onBack={() => setStep('3')} />
               <div className="mt-6 flex justify-end">
                 <button
                   onClick={() => {
                     try {
-                      // optional: clear drafts after finishing
+                      // optionally clear drafts after finishing
                       // localStorage.removeItem('voicebuilder:step1');
                       // localStorage.removeItem('voicebuilder:step2');
                       // localStorage.removeItem('voicebuilder:step3');
@@ -127,16 +113,18 @@ export default function VoiceAgentSection() {
     );
   }
 
-  // Default screen (no ?step): simple CTA to start a voice build
+  // Default screen when no step is selected
   return (
     <main className="min-h-screen w-full text-white font-movatif bg-[#0b0c10]">
       <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 pt-10 pb-24">
         <header className="mb-8">
           <h1 className="text-2xl md:text-3xl font-semibold">Voice Agents</h1>
+          <p className="text-white/70 mt-1">
+            Create a voice agent and attach a phone number—no extra SDKs needed.
+          </p>
         </header>
 
         <section className="relative p-6 sm:p-8" style={CARD_STYLE}>
-          {/* subtle background glow */}
           <div
             aria-hidden
             className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
@@ -155,9 +143,17 @@ export default function VoiceAgentSection() {
             <button
               onClick={() => setStep('1')}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-[14px] font-semibold transition"
-              style={{ background: BTN_GREEN, color: '#0b0c10', boxShadow: '0 0 10px rgba(106,247,209,0.28)' }}
-              onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER)}
-              onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN)}
+              style={{
+                background: BTN_GREEN,
+                color: '#0b0c10',
+                boxShadow: '0 0 10px rgba(106,247,209,0.28)',
+              }}
+              onMouseEnter={(e) =>
+                ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER)
+              }
+              onMouseLeave={(e) =>
+                ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN)
+              }
             >
               <Plus className="w-4 h-4" />
               Create a Build
