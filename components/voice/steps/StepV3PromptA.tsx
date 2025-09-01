@@ -8,8 +8,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 const UI = {
   bg: '#0b0c10',
   cardBg: 'rgba(13,15,17,0.92)',
-  border: '1px solid rgba(106,247,209,0.18)',
-  glow: 'radial-gradient(circle, rgba(106,247,209,0.10) 0%, transparent 70%)',
+  // thinner border + softer glow
+  border: '1px solid rgba(106,247,209,0.12)',
+  glow: 'radial-gradient(circle, rgba(106,247,209,0.08) 0%, transparent 70%)',
   green: '#59d9b3',
   greenHover: '#54cfa9',
   greenDisabled: '#2e6f63',
@@ -18,11 +19,11 @@ const CARD: React.CSSProperties = {
   background: UI.cardBg,
   border: UI.border,
   borderRadius: 20,
-  boxShadow: 'inset 0 0 22px rgba(0,0,0,0.28), 0 0 18px rgba(106,247,209,0.05)',
+  boxShadow: 'inset 0 0 18px rgba(0,0,0,0.28), 0 0 12px rgba(106,247,209,0.04)',
 };
 const MODAL: React.CSSProperties = {
   background: 'rgba(13,15,17,0.96)',
-  border: '2px dashed rgba(106,247,209,0.30)',
+  border: '1px solid rgba(106,247,209,0.18)',
   boxShadow: '0 0 40px rgba(0,0,0,0.7)',
   borderRadius: 30,
 };
@@ -91,8 +92,8 @@ const DEFAULT_S3: Step3 = {
   ttsVoice: '',
   compiled: '',
 };
-const INTENTS = ['Scheduling','Reschedule','Cancel','FAQs','Lead Capture','Handover to Human'];
-const COLLECT = ['Name','Phone','Email','Date/Time','Service Type','Account/Order #','Notes'];
+const INTENTS = ['Scheduling','Reschedule','Cancel','FAQs','Lead Capture','Handover to Human', 'Order (Restaurant)'];
+const COLLECT = ['Name','Phone','Email','Date/Time','Service Type','Address','Account/Order #','Notes'];
 
 /* ============ HELPERS ============ */
 const STYLE = { professional:'Professional + concise', conversational:'Natural + casual', empathetic:'Warm + patient', upbeat:'Positive + quick' } as const;
@@ -136,7 +137,7 @@ function Chips({ options, value, onChange }:{ options: string[]; value: string[]
         return (
           <button key={o} type="button" onClick={() => toggle(o)}
             className={`px-3 py-1.5 rounded-full border text-xs md:text-sm transition ${
-              active ? 'bg-emerald-500/20 border-emerald-400 text-emerald-200' : 'bg-white/5 border-white/10 text-white/75 hover:bg-white/10'
+              active ? 'bg-emerald-500/15 border-emerald-400/80 text-emerald-200' : 'bg-white/5 border-white/10 text-white/75 hover:bg-white/10'
             }`}>{o}</button>
         );
       })}
@@ -156,15 +157,15 @@ function Modal({ open, onClose, title, children }:{ open: boolean; onClose: () =
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 12, scale: 0.98 }}
             transition={{ duration: 0.22 }}
-            className="relative w-full max-w-[980px] max-h-[88vh] flex flex-col text-white font-movatif"
+            className="relative w-full max-w-[1080px] max-h-[88vh] flex flex-col text-white font-movatif"
             style={MODAL}
           >
-            <div className="flex items-center justify-between px-6 py-4 rounded-t-[30px]" style={{ borderBottom: '1px solid rgba(255,255,255,0.4)' }}>
+            <div className="flex items-center justify-between px-6 py-4 rounded-t-[30px]" style={{ borderBottom: '1px solid rgba(255,255,255,0.12)' }}>
               <h4 className="text-lg font-semibold truncate">{title}</h4>
               <button onClick={onClose} className="p-2 rounded-full hover:bg-white/10" aria-label="Close"><X className="w-5 h-5" /></button>
             </div>
             <div className="flex-1 overflow-y-auto p-6">{children}</div>
-            <div className="px-6 py-4 rounded-b-[30px]" style={{ borderTop: '1px solid rgba(255,255,255,0.3)', background: '#101314' }}>
+            <div className="px-6 py-4 rounded-b-[30px]" style={{ borderTop: '1px solid rgba(255,255,255,0.08)', background: '#101314' }}>
               <div className="flex justify-end"><button onClick={onClose} className="px-6 py-2 rounded-[24px] border border-white/15 hover:bg-white/10">Close</button></div>
             </div>
           </motion.div>
@@ -186,12 +187,12 @@ function Box({
         transition={{ duration: 0.22 }} whileHover={{ y: -2 }}
         className={`relative p-6 flex flex-col h-full ${minH}`} style={CARD}>
         <div aria-hidden className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
-             style={{ background: UI.glow, filter: 'blur(38px)' }} />
+             style={{ background: UI.glow, filter: 'blur(36px)' }} />
         <div className="flex items-start justify-between mb-3">
           <h3 className="text-[13px] font-semibold flex items-center gap-2">{icon}{title}</h3>
           <div className="flex items-center gap-2">
             {editable && (
-              <button onClick={() => setOpen(true)} className="text-xs px-3 py-1.5 rounded-2xl border border-white/20 hover:bg-white/10 inline-flex items-center gap-1.5">
+              <button onClick={() => setOpen(true)} className="text-xs px-3 py-1.5 rounded-2xl border border-white/15 hover:bg-white/10 inline-flex items-center gap-1.5">
                 <MessageSquare className="w-3.5 h-3.5" /> Edit
               </button>
             )}
@@ -208,11 +209,11 @@ function Box({
 
 function InspirationRow({ text, onImport }:{ text: string; onImport: () => void }) {
   return (
-    <div className="rounded-2xl border border-dashed border-white/15 p-3 bg-white/5">
+    <div className="rounded-2xl border border-dashed border-white/12 p-3 bg-white/5">
       <div className="flex items-center gap-2 text-white/80 text-xs mb-1"><Lightbulb className="w-3.5 h-3.5" /> Inspiration (click to use)</div>
       <div className="text-sm text-white/70">{text}</div>
       <div className="mt-2 flex justify-end">
-        <button onClick={onImport} className="px-3 py-1.5 rounded-[18px] text-sm border border-white/15 hover:bg-white/10">Import</button>
+        <button onClick={onImport} className="px-3 py-1.5 rounded-[18px] text-sm border border-white/12 hover:bg-white/10">Import</button>
       </div>
     </div>
   );
@@ -225,7 +226,7 @@ export default function StepV3PromptA({ onBack, onNext }: { onBack?: () => void;
 
   // backfill blanks with defaults so nothing feels empty
   const hydrate = (raw?: Step3 | null): Step3 => {
-    const r = raw || {};
+    const r = raw || {} as any;
     const pick = <T,>(v: any, d: T): T => (v === undefined || v === null || (typeof v === 'string' && v.trim() === '')) ? d : v;
     return {
       personaName: pick(r.personaName, DEFAULT_S3.personaName),
@@ -266,7 +267,7 @@ export default function StepV3PromptA({ onBack, onNext }: { onBack?: () => void;
   const valid = Object.keys(errors).length === 0;
 
   const set = <K extends keyof Step3>(k: K, v: Step3[K]) => setS3((cur) => ({ ...cur, [k]: v }));
-  const saveBadge = <span className="text-xs px-2 py-1 rounded-2xl border border-white/15 text-white/70">{saving ? 'Saving…' : saved ? 'Saved' : 'Auto-save'}</span>;
+  const saveBadge = <span className="text-xs px-2 py-1 rounded-2xl border border-white/12 text-white/70">{saving ? 'Saving…' : saved ? 'Saved' : 'Auto-save'}</span>;
   const [openPreview, setOpenPreview] = useState(false);
 
   const goNext = () => {
@@ -278,35 +279,58 @@ export default function StepV3PromptA({ onBack, onNext }: { onBack?: () => void;
 
   return (
     <div className="min-h-screen w-full text-white font-movatif" style={{ background: UI.bg }}>
-      <div className="w-full max-w-[1840px] mx-auto px-6 2xl:px-12 pt-10 pb-24">
+      {/* WIDER CONTAINER */}
+      <div className="w-full max-w-[1960px] mx-auto px-6 2xl:px-14 pt-10 pb-24">
         {/* Header */}
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22 }} className="flex items-center justify-between mb-8">
           <h2 className="text-3xl md:text-4xl font-semibold tracking-tight">Personality & Knowledge</h2>
           <div className="flex items-center gap-3">
-            <button onClick={() => setOpenPreview(true)} className="inline-flex items-center gap-2 rounded-[24px] border border-white/15 px-4 py-2 hover:bg-white/10">
+            <button onClick={() => setOpenPreview(true)} className="inline-flex items-center gap-2 rounded-[24px] border border-white/12 px-4 py-2 hover:bg-white/10">
               <Eye className="w-4 h-4" /> Preview
             </button>
             {saveBadge}
           </div>
         </motion.div>
 
-        {/* Grid — 3 large cards on top, compact utility at bottom */}
-        <div className="grid grid-cols-12 gap-8">
-          {/* Persona (lg) */}
-          <div className="col-span-12 md:col-span-6 xl:col-span-4">
+        {/* NEW LAYOUT:
+           Row 1: Greeting (XL wide) + Persona (smaller)
+           Row 2: Intents (full)
+           Row 3: Collect (full)
+        */}
+        <div className="grid grid-cols-12 gap-6">
+          {/* GREETING — bigger (8/12 on xl) */}
+          <div className="col-span-12 xl:col-span-8">
+            <Box title="Greeting" size="lg" icon={<MessageSquare className="w-4 h-4 text-[#6af7d1]" />} editable
+              renderEdit={() => (
+                <div style={CARD} className="p-5 space-y-3">
+                  <input value={s3.greetingLine} onChange={(e) => set('greetingLine', e.target.value)} placeholder={EX.greeting} className="w-full px-3 py-3 rounded-2xl bg-[#0b0e0f] border border-white/12" />
+                  <input value={s3.introExplain || ''} onChange={(e) => set('introExplain', e.target.value)} placeholder={EX.intro} className="w-full px-3 py-3 rounded-2xl bg-[#0b0e0f] border border-white/12" />
+                </div>
+              )}
+              saveBadge={saveBadge} error={errors.greeting || errors.greetingLen}
+            >
+              <input value={s3.greetingLine} onChange={(e) => set('greetingLine', e.target.value)} className="w-full px-3 py-3 rounded-2xl bg-[#0b0e0f] border border-white/12 text-sm" />
+              <input value={s3.introExplain || ''} onChange={(e) => set('introExplain', e.target.value)} className="mt-3 w-full px-3 py-3 rounded-2xl bg-[#0b0e0f] border border-white/12 text-sm" />
+              <div className="text-xs text-white/50 text-right mt-1">{s3.greetingLine.length}/120</div>
+              <InspirationRow text={`${EX.greeting} ${EX.intro}`} onImport={() => { set('greetingLine', EX.greeting); set('introExplain', EX.intro); }} />
+            </Box>
+          </div>
+
+          {/* PERSONA — smaller side (4/12) */}
+          <div className="col-span-12 xl:col-span-4">
             <Box title="Persona" size="lg" icon={<User className="w-4 h-4 text-[#6af7d1]" />} editable
               renderEdit={() => (
                 <div style={CARD} className="p-5 space-y-3">
                   <div className="grid grid-cols-2 gap-3">
                     <label className="col-span-2 text-xs text-white/70">Name</label>
-                    <input value={s3.personaName} onChange={(e) => set('personaName', e.target.value)} className="col-span-2 px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15" />
+                    <input value={s3.personaName} onChange={(e) => set('personaName', e.target.value)} className="col-span-2 px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/12" />
                     <label className="text-xs text-white/70">Style</label>
-                    <select value={s3.style} onChange={(e) => set('style', e.target.value as Step3['style'])} className="px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15">
+                    <select value={s3.style} onChange={(e) => set('style', e.target.value as Step3['style'])} className="px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/12">
                       <option value="professional">Professional</option><option value="conversational">Conversational</option>
                       <option value="empathetic">Empathetic</option><option value="upbeat">Upbeat</option>
                     </select>
                     <label className="text-xs text-white/70">Politeness</label>
-                    <select value={s3.politeness} onChange={(e) => set('politeness', e.target.value as Step3['politeness'])} className="px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15">
+                    <select value={s3.politeness} onChange={(e) => set('politeness', e.target.value as Step3['politeness'])} className="px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/12">
                       <option value="low">Low</option><option value="med">Medium</option><option value="high">High</option>
                     </select>
                   </div>
@@ -316,56 +340,38 @@ export default function StepV3PromptA({ onBack, onNext }: { onBack?: () => void;
             >
               <div className="grid grid-cols-2 gap-3">
                 <label className="col-span-2 text-xs text-white/70">Name</label>
-                <input value={s3.personaName} onChange={(e) => set('personaName', e.target.value)} className="col-span-2 px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15 text-sm" />
+                <input value={s3.personaName} onChange={(e) => set('personaName', e.target.value)} className="col-span-2 px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/12 text-sm" />
                 <label className="text-xs text-white/70">Style</label>
-                <select value={s3.style} onChange={(e) => set('style', e.target.value as Step3['style'])} className="px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15 text-sm">
+                <select value={s3.style} onChange={(e) => set('style', e.target.value as Step3['style'])} className="px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/12 text-sm">
                   <option value="professional">Professional</option><option value="conversational">Conversational</option>
                   <option value="empathetic">Empathetic</option><option value="upbeat">Upbeat</option>
                 </select>
                 <label className="text-xs text-white/70">Politeness</label>
-                <select value={s3.politeness} onChange={(e) => set('politeness', e.target.value as Step3['politeness'])} className="px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15 text-sm">
+                <select value={s3.politeness} onChange={(e) => set('politeness', e.target.value as Step3['politeness'])} className="px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/12 text-sm">
                   <option value="low">Low</option><option value="med">Medium</option><option value="high">High</option>
                 </select>
               </div>
             </Box>
           </div>
 
-          {/* Greeting (lg) */}
-          <div className="col-span-12 md:col-span-6 xl:col-span-4">
-            <Box title="Greeting" size="lg" icon={<MessageSquare className="w-4 h-4 text-[#6af7d1]" />} editable
-              renderEdit={() => (
-                <div style={CARD} className="p-5 space-y-3">
-                  <input value={s3.greetingLine} onChange={(e) => set('greetingLine', e.target.value)} placeholder={EX.greeting} className="w-full px-3 py-3 rounded-2xl bg-[#0b0e0f] border border-white/15" />
-                  <input value={s3.introExplain || ''} onChange={(e) => set('introExplain', e.target.value)} placeholder={EX.intro} className="w-full px-3 py-3 rounded-2xl bg-[#0b0e0f] border border-white/15" />
-                </div>
-              )}
-              saveBadge={saveBadge} error={errors.greeting || errors.greetingLen}
-            >
-              <input value={s3.greetingLine} onChange={(e) => set('greetingLine', e.target.value)} className="w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15 text-sm" />
-              <input value={s3.introExplain || ''} onChange={(e) => set('introExplain', e.target.value)} className="mt-2 w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15 text-sm" />
-              <div className="text-xs text-white/50 text-right mt-1">{s3.greetingLine.length}/120</div>
-              <InspirationRow text={`${EX.greeting} ${EX.intro}`} onImport={() => { set('greetingLine', EX.greeting); set('introExplain', EX.intro); }} />
-            </Box>
-          </div>
-
-          {/* Intents (lg) */}
-          <div className="col-span-12 md:col-span-6 xl:col-span-4">
+          {/* INTENTS — full width */}
+          <div className="col-span-12">
             <Box title="Intents" size="lg" icon={<ClipboardList className="w-4 h-4 text-[#6af7d1]" />} editable
               renderEdit={() => (
                 <div style={CARD} className="p-5 space-y-3">
                   <Chips options={INTENTS} value={s3.intents} onChange={(v) => set('intents', v)} />
-                  <input value={s3.otherTasks || ''} onChange={(e) => set('otherTasks', e.target.value)} placeholder="Other (optional)" className="w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15" />
+                  <input value={s3.otherTasks || ''} onChange={(e) => set('otherTasks', e.target.value)} placeholder="Other (optional)" className="w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/12" />
                 </div>
               )}
               saveBadge={saveBadge} error={errors.intents}
             >
               <Chips options={INTENTS} value={s3.intents} onChange={(v) => set('intents', v)} />
-              <input value={s3.otherTasks || ''} onChange={(e) => set('otherTasks', e.target.value)} placeholder="Other (optional)" className="mt-3 w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15 text-sm" />
+              <input value={s3.otherTasks || ''} onChange={(e) => set('otherTasks', e.target.value)} placeholder="Other (optional)" className="mt-3 w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/12 text-sm" />
               <div className="text-xs text-white/60">{EX.intentsNote}</div>
             </Box>
           </div>
 
-          {/* Collect (sm) — not oversized anymore */}
+          {/* COLLECT — full width, compact */}
           <div className="col-span-12">
             <Box title="Collect" size="sm" icon={<ClipboardList className="w-4 h-4 text-[#6af7d1]" />} editable
               renderEdit={() => (<div style={CARD} className="p-5"><Chips options={COLLECT} value={s3.collect} onChange={(v) => set('collect', v)} /></div>)}
@@ -378,12 +384,12 @@ export default function StepV3PromptA({ onBack, onNext }: { onBack?: () => void;
 
         {/* Footer */}
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22 }} className="mt-10 flex items-center justify-between">
-          <button onClick={onBack} className="inline-flex items-center gap-2 rounded-[24px] border border-white/15 px-4 py-2 hover:bg-white/10">
+          <button onClick={onBack} className="inline-flex items-center gap-2 rounded-[24px] border border-white/12 px-4 py-2 hover:bg-white/10">
             <ArrowLeft className="w-4 h-4" /> Previous
           </button>
             <div className="flex items-center gap-2">
               <button onClick={() => navigator.clipboard.writeText(compiled).catch(() => {})}
-                className="inline-flex items-center gap-2 rounded-[24px] border border-white/15 px-4 py-2 hover:bg-white/10">
+                className="inline-flex items-center gap-2 rounded-[24px] border border-white/12 px-4 py-2 hover:bg-white/10">
                 <Copy className="w-4 h-4" /> Copy
               </button>
               <button
