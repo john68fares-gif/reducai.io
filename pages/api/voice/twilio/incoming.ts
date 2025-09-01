@@ -1,127 +1,74 @@
 // pages/api/voice/twilio/incoming.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
+/** Next's JSON bodyParser doesn't parse Twilio form posts; read raw body if needed */
+export const config = { api: { bodyParser: false } };
 
-function twiml(xml: string) {
-  return `<?xml version="1.0" encoding="UTF-8"?><Response>${xml}</Response>`;
-}
-function sayBlock(voice: string, ssml: string) {
-  // Twilio <Say> supports Amazon Polly names if using Twilio's Polly voices (voice="Polly.Joanna"), or "alice"
-  return `<Say voice="${voice}">${ssml}</Say>`;
-}
-
-function ssmlify(opts: {
-  text: string;
-  delayMs?: number;
-  ratePct?: number;
-  semitones?: number;
-  style?: ''|'conversational'|'professional'|'newscaster';
-}) {
-  const delay = Math.max(0, Math.min(5000, opts.delayMs || 0));
-  const rate  = Math.max(60, Math.min(140, opts.ratePct || 100));
-  const pitch = Math.max(-6, Math.min(6, opts.semitones || 0));
-  // Twilio/Polly SSML supports <break> and <prosody rate="" pitch="">
-  const pre = delay ? `<break time="${delay}ms"/>` : '';
-  const prosody = `<prosody rate="${rate}%" pitch="${pitch}st">${escapeXml(opts.text)}</prosody>`;
-  // "style" is not standard SSML for Twilio; we simulate by minor phrasing only (already covered by rate/pitch).
-  return `<speak>${pre}${prosody}</speak>`;
+function xmlEscape(s: string) {
+  return s
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 }
 
-function escapeXml(s: string) {
-  return (s || '').replace(/[<>&'"]/g, (c) => ({'<':'&lt;','>':'&gt;','&':'&amp;',"'":'&apos;','"':'&quot;'}[c]!));
-}
-
-async function openaiReply(prompt: string, lastUser: string) {
-  if (!OPENAI_API_KEY) return `You said: ${lastUser}. (Live AI not configured yet.)`;
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
-    method:'POST',
-    headers:{ 'Authorization': `Bearer ${OPENAI_API_KEY}`, 'Content-Type':'application/json' },
-    body: JSON.stringify({
-      model: 'gpt-4o-mini',
-      messages: [
-        { role: 'system', content: prompt || 'You are a friendly receptionist.' },
-        { role: 'user', content: lastUser || 'Hello' }
-      ],
-      temperature: 0.3,
-      max_tokens: 180,
-    }),
-  });
-  if (!res.ok) return `Thanks! One moment while I note that.`;
-  const j = await res.json();
-  return j?.choices?.[0]?.message?.content || 'Okay.';
+function baseUrl(req: NextApiRequest) {
+  const proto =
+    (req.headers['x-forwarded-proto'] as string) ||
+    (req.headers['x-forwarded-protocol'] as string) ||
+    'https';
+  const host = (req.headers['x-forwarded-host'] as string) || (req.headers['host'] as string) || '';
+  const envBase = (process.env.PUBLIC_BASE_URL || '').replace(/\/+$/, '');
+  return envBase || (host ? `${proto}://${host}` : '');
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  // Twilio hits with POST form-encoded
-  if (req.method !== 'POST') {
-    res.setHeader('Allow', 'POST');
-    return res.status(405).send('Method Not Allowed');
+  // Pull config from query (set by attach-number.ts)
+  const url = new URL(req.url || '', 'http://local');
+  const q = url.searchParams;
+
+  const agent   = q.get('agent') || '';
+  const greet   = q.get('greet') || 'Hello! Your AI agent is connected.';
+  const voice   = q.get('voice') || 'Polly.Joanna';
+  const lang    = q.get('lang')  || 'en-US';
+  const rate    = q.get('rate')  || '100';
+  const pitch   = q.get('pitch') || '0';
+  const delay   = q.get('delay') || '600';
+  const barge   = q.get('barge') || '1';
+
+  const base = baseUrl(req);
+  if (!base) {
+    res.status(500).json({ error: 'No PUBLIC_BASE_URL and no Host header; cannot build absolute URLs.' } as any);
+    return;
   }
 
-  // Config from attach-number URL
-  const q = req.query || {};
-  const voice  = (q.voice as string)  || 'Polly.Joanna';
-  const lang   = (q.lang as string)   || 'en-US';
-  const greet  = (q.greet as string)  || 'Thank you for calling. How can I help today?';
-  const style  = (q.style as string)  || 'professional';
-  const delay  = Number(q.delay || 0);
-  const rate   = Number(q.rate || 100);
-  const pitch  = Number(q.pitch || 0);
-  const barge  = String(q.barge || '1') === '1';
+  // Keep params when we POST to the next step
+  const nextUrl = new URL('/api/voice/twilio/next', base);
+  if (agent) nextUrl.searchParams.set('agent', agent);
+  nextUrl.searchParams.set('voice', voice);
+  nextUrl.searchParams.set('lang', lang);
+  nextUrl.searchParams.set('rate', rate);
+  nextUrl.searchParams.set('pitch', pitch);
+  nextUrl.searchParams.set('delay', delay);
+  nextUrl.searchParams.set('barge', barge);
 
-  // Basic call state
-  const callSid = (req.body?.CallSid || '').toString();
-  const step    = Number((req.query?.step as string) || '0');
+  const sayAttrs = `voice="${xmlEscape(voice)}" language="${xmlEscape(lang)}"`;
 
-  // Prompt (if you saved one server-side under this call — optional)
-  // For now, try to use what the page saved in Settings via PUT /api/voice-agent
-  // (If you implemented that route server-side, read it; else fallback.)
-  const prompt = (process.env.VOICE_AGENT_PROMPT || '').toString();
+  const twiml =
+    `<?xml version="1.0" encoding="UTF-8"?>` +
+    `<Response>` +
+      // Optional prosody controls; TwiML doesn't support rate/pitch attributes directly across all voices,
+      // so keep it simple and just <Say>. You can move to <Play> with generated audio later.
+      `<Say ${sayAttrs}>${xmlEscape(greet)}</Say>` +
 
-  // Gather recognizes speech on Twilio side; we do a simple turn-by-turn loop
-  if (step === 0) {
-    const greetSSML = ssmlify({ text: greet, delayMs: delay, ratePct: rate, semitones: pitch, style: style as any });
-    const action = new URL(req.url || '', `https://${req.headers.host}`).pathname + `?step=1&voice=${encodeURIComponent(voice)}&lang=${encodeURIComponent(lang)}&style=${encodeURIComponent(style)}&delay=${delay}&rate=${rate}&pitch=${pitch}&barge=${barge?'1':'0'}`;
-    const xml = `
-      ${sayBlock(voice, greetSSML)}
-      <Gather input="speech" language="${lang}" action="${action}" method="POST" speechTimeout="auto" hints="">
-        ${sayBlock(voice, ssmlify({ text: 'I\'m listening.', delayMs: 0, ratePct: rate, semitones: pitch }))}
-      </Gather>
-      <Pause length="1"/>
-      <Redirect method="POST">${action}</Redirect>
-    `.trim();
-    return res.status(200).setHeader('Content-Type','text/xml').send(twiml(xml));
-  }
+      // Prompt the caller so you can verify speech → webhook is working
+      `<Gather input="speech" action="${xmlEscape(nextUrl.toString())}" method="POST" speechTimeout="auto">` +
+        `<Say ${sayAttrs}>How can I help you today?</Say>` +
+      `</Gather>` +
 
-  // step >= 1: Twilio posts back with SpeechResult
-  const userSaid = (req.body?.SpeechResult || '').toString().trim();
+      `<Pause length="1"/>` +
+      `<Say ${sayAttrs}>Goodbye.</Say>` +
+      `<Hangup/>` +
+    `</Response>`;
 
-  let reply = 'Got it.';
-  try {
-    reply = await openaiReply(prompt, userSaid || 'Hello');
-  } catch {
-    reply = 'Thanks for calling.';
-  }
-
-  const replySSML = ssmlify({ text: reply, delayMs: delay, ratePct: rate, semitones: pitch, style: style as any });
-
-  // Continue one more turn (keep it short; you can increase steps if you like)
-  const nextStep = step + 1;
-  if (nextStep <= 3) {
-    const action = new URL(req.url || '', `https://${req.headers.host}`).pathname + `?step=${nextStep}&voice=${encodeURIComponent(voice)}&lang=${encodeURIComponent(lang)}&style=${encodeURIComponent(style)}&delay=${delay}&rate=${rate}&pitch=${pitch}&barge=${barge?'1':'0'}`;
-    const xml = `
-      ${sayBlock(voice, replySSML)}
-      <Gather input="speech" language="${lang}" action="${action}" method="POST" speechTimeout="auto"${barge ? ' bargeIn="true"' : ''}>
-        ${sayBlock(voice, ssmlify({ text: 'Anything else?', delayMs: 250, ratePct: rate, semitones: pitch }))}
-      </Gather>
-      <Pause length="1"/>
-      <Redirect method="POST">${action}</Redirect>
-    `.trim();
-    return res.status(200).setHeader('Content-Type','text/xml').send(twiml(xml));
-  }
-
-  // End the call politely
-  const endSSML = ssmlify({ text: 'Thanks for calling. Have a great day!', delayMs: 200, ratePct: rate, semitones: pitch });
-  return res.status(200).setHeader('Content-Type','text/xml').send(twiml(`${sayBlock(voice, endSSML)}<Hangup/>`));
+  res.setHeader('Content-Type', 'text/xml');
+  res.status(200).send(twiml);
 }
