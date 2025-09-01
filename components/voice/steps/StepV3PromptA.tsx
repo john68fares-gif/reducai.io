@@ -4,26 +4,21 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Eye, Copy, ArrowLeft, X, User, MessageSquare, ClipboardList, Lightbulb,
 } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 
-/* =========================================================================
-   THEME — same look as your other Step 3 (glow + subtle border + shadow)
-   ========================================================================= */
+/* ============================ THEME (matches Step 3) ============================ */
 const COLORS = {
   bg: '#0b0c10',
   cardBg: 'rgba(13,15,17,0.92)',
   border: '1px solid rgba(106,247,209,0.18)',
   glow: 'radial-gradient(circle, rgba(106,247,209,0.10) 0%, transparent 70%)',
-  textSoft: 'rgba(255,255,255,0.70)',
-  textDim: 'rgba(255,255,255,0.55)',
-  white10: 'rgba(255,255,255,0.10)',
   white15: 'rgba(255,255,255,0.15)',
   green: '#59d9b3',
   greenHover: '#54cfa9',
   greenDisabled: '#2e6f63',
 };
 
-const CARD_STYLE: React.CSSProperties = {
+const CARD: React.CSSProperties = {
   background: COLORS.cardBg,
   border: COLORS.border,
   borderRadius: 20,
@@ -31,16 +26,16 @@ const CARD_STYLE: React.CSSProperties = {
 };
 
 const MODAL_FRAME: React.CSSProperties = {
-  background: 'rgba(13,15,17,0.95)',
+  background: 'rgba(13,15,17,0.96)',
   border: '2px dashed rgba(106,247,209,0.30)',
   boxShadow: '0 0 40px rgba(0,0,0,0.7)',
   borderRadius: 30,
 };
 const MODAL_HEADER = { borderBottom: '1px solid rgba(255,255,255,0.4)' };
 
-/* =========================================================================
-   TYPES / STORAGE
-   ========================================================================= */
+const BTN = { on: COLORS.green, hover: COLORS.greenHover, off: COLORS.greenDisabled };
+
+/* =============================== TYPES / STORAGE =============================== */
 type Step1Lite = { language: string; accentIso2?: string; responseDelayMs?: number; allowBargeIn?: boolean; };
 type Step3 = {
   personaName: string;
@@ -65,29 +60,18 @@ const LS_STEP1 = 'voicebuilder:step1';
 const LS_STEP3 = 'voicebuilder:step3';
 const LS_BACKUP = 'voice:settings:backup';
 
-function readLS<T>(k: string): T | null {
-  try { const raw = typeof window !== 'undefined' ? localStorage.getItem(k) : null; return raw ? JSON.parse(raw) as T : null; } catch { return null; }
-}
+function readLS<T>(k: string): T | null { try { const raw = typeof window !== 'undefined' ? localStorage.getItem(k) : null; return raw ? JSON.parse(raw) as T : null; } catch { return null; } }
 function writeLS<T>(k: string, v: T) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
 function useDebouncedSaver<T>(value: T, delay = 400, onSave: (v: T) => void) {
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const t = useRef<number | null>(null);
-  useEffect(() => {
-    setSaving(true); setSaved(false);
-    if (t.current) window.clearTimeout(t.current);
-    t.current = window.setTimeout(() => {
-      onSave(value); setSaving(false); setSaved(true);
-      window.setTimeout(() => setSaved(false), 900);
-    }, delay);
+  const [saving, setSaving] = useState(false); const [saved, setSaved] = useState(false); const t = useRef<number | null>(null);
+  useEffect(() => { setSaving(true); setSaved(false); if (t.current) window.clearTimeout(t.current);
+    t.current = window.setTimeout(() => { onSave(value); setSaving(false); setSaved(true); window.setTimeout(() => setSaved(false), 900); }, delay);
     return () => t.current && window.clearTimeout(t.current);
   }, [value, delay, onSave]);
   return { saving, saved };
 }
 
-/* =========================================================================
-   SMALL UI
-   ========================================================================= */
+/* ================================== ATOMS ================================== */
 function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
   return (
     <label className="flex items-center gap-3 cursor-pointer select-none">
@@ -97,7 +81,7 @@ function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: 
         className={`w-12 h-7 rounded-full relative transition ${checked ? 'bg-emerald-400/80' : 'bg-white/10'}`}
         aria-pressed={checked}
       >
-        {/* white knob per your request */}
+        {/* white knob */}
         <span className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white transition-transform ${checked ? 'translate-x-5' : ''}`} />
       </button>
       <span className="text-sm text-white/90">{label}</span>
@@ -105,55 +89,35 @@ function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: 
   );
 }
 
-function ChipList({
-  options, value, onChange, reorderable,
-}: { options: string[]; value: string[]; onChange: (next: string[]) => void; reorderable?: boolean; }) {
-  const [dragIndex, setDragIndex] = useState<number | null>(null);
-  const over = useRef<number | null>(null);
-  function toggle(opt: string) {
-    onChange(value.includes(opt) ? value.filter(v => v !== opt) : [...value, opt]);
-  }
+function ChipList({ options, value, onChange, reorderable }:{
+  options: string[]; value: string[]; onChange: (next: string[]) => void; reorderable?: boolean;
+}) {
+  const [dragIndex, setDragIndex] = useState<number | null>(null); const over = useRef<number | null>(null);
+  function toggle(opt: string) { onChange(value.includes(opt) ? value.filter(v => v !== opt) : [...value, opt]); }
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap gap-2">
         {options.map(opt => {
           const active = value.includes(opt);
           return (
-            <button
-              key={opt}
-              type="button"
-              onClick={() => toggle(opt)}
+            <button key={opt} type="button" onClick={() => toggle(opt)}
               className={`px-3 py-1.5 rounded-full border text-xs md:text-sm transition ${
-                active
-                  ? 'bg-emerald-500/20 border-emerald-400 text-emerald-200'
-                  : 'bg-white/5 border-white/10 text-white/75 hover:bg-white/10'
-              }`}
-            >
+                active ? 'bg-emerald-500/20 border-emerald-400 text-emerald-200' : 'bg-white/5 border-white/10 text-white/75 hover:bg-white/10'
+              }`}>
               {opt}
             </button>
           );
         })}
       </div>
-
       {reorderable && value.length > 1 && (
         <div className="grid gap-2">
           {value.map((v, i) => (
-            <div
-              key={v}
-              draggable
-              onDragStart={() => setDragIndex(i)}
-              onDragEnter={() => (over.current = i)}
-              onDragEnd={() => {
-                const from = dragIndex, to = over.current;
-                setDragIndex(null); over.current = null;
-                if (from == null || to == null || from === to) return;
-                const next = [...value]; const [moved] = next.splice(from, 1); next.splice(to, 0, moved);
-                onChange(next);
-              }}
-              className="px-3 py-2 rounded-2xl bg-[#0b0e0f] text-white border border-white/15 text-sm"
-            >
-              <span className="opacity-70 mr-2">≡</span>
-              {i + 1}. {v}
+            <div key={v} draggable onDragStart={() => setDragIndex(i)} onDragEnter={() => (over.current = i)} onDragEnd={() => {
+              const from = dragIndex, to = over.current; setDragIndex(null); over.current = null;
+              if (from == null || to == null || from === to) return;
+              const next = [...value]; const [moved] = next.splice(from, 1); next.splice(to, 0, moved); onChange(next);
+            }} className="px-3 py-2 rounded-2xl bg-[#0b0e0f] text-white border border-white/15 text-sm">
+              <span className="opacity-70 mr-2">≡</span>{i + 1}. {v}
             </div>
           ))}
         </div>
@@ -162,31 +126,49 @@ function ChipList({
   );
 }
 
-function ModalFrame({ open, onClose, title, children }: { open: boolean; onClose: () => void; title: string; children: React.ReactNode; }) {
-  if (!open) return null;
+/* ---------------------------- Modal (overlay) ---------------------------- */
+function ModalFrame({
+  open, onClose, title, children,
+}:{ open: boolean; onClose: () => void; title: string; children: React.ReactNode }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: 'rgba(0,0,0,0.5)' }}>
-      <div className="relative w-full max-w-[980px] max-h-[88vh] flex flex-col text-white font-movatif" style={MODAL_FRAME}>
-        <div className="flex items-center justify-between px-6 py-4 rounded-t-[30px]" style={MODAL_HEADER}>
-          <div className="min-w-0">
-            <h4 className="text-white text-lg font-semibold truncate">{title}</h4>
-            <div className="text-white/80 text-xs">Edit section</div>
-          </div>
-          <button onClick={onClose} className="p-2 rounded-full hover:bg-white/10" aria-label="Close">
-            <X className="w-5 h-5 text-white" />
-          </button>
-        </div>
-        <div className="flex-1 overflow-y-auto p-6">{children}</div>
-        <div className="px-6 py-4 rounded-b-[30px]" style={{ borderTop: '1px solid rgba(255,255,255,0.3)', background: '#101314' }}>
-          <div className="flex justify-end">
-            <button onClick={onClose} className="px-6 py-2 rounded-[24px] border border-white/15 hover:bg-white/10">Close</button>
-          </div>
-        </div>
-      </div>
-    </div>
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          className="fixed inset-0 z-50 flex items-center justify-center px-4"
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          style={{ backdropFilter: 'blur(4px)', background: 'rgba(0,0,0,0.60)' }}
+        >
+          <motion.div
+            initial={{ opacity: 0, y: 16, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 12, scale: 0.98 }}
+            transition={{ duration: 0.22 }}
+            className="relative w-full max-w-[980px] max-h-[88vh] flex flex-col text-white font-movatif"
+            style={MODAL_FRAME}
+          >
+            <div className="flex items-center justify-between px-6 py-4 rounded-t-[30px]" style={MODAL_HEADER}>
+              <div className="min-w-0">
+                <h4 className="text-white text-lg font-semibold truncate">{title}</h4>
+                <div className="text-white/80 text-xs">Edit section</div>
+              </div>
+              <button onClick={onClose} className="p-2 rounded-full hover:bg-white/10" aria-label="Close">
+                <X className="w-5 h-5 text-white" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-6">{children}</div>
+            <div className="px-6 py-4 rounded-b-[30px]" style={{ borderTop: '1px solid rgba(255,255,255,0.3)', background: '#101314' }}>
+              <div className="flex justify-end">
+                <button onClick={onClose} className="px-6 py-2 rounded-[24px] border border-white/15 hover:bg-white/10">Close</button>
+              </div>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }
 
+/* ----------------------------- Equal-height Box ----------------------------- */
 function Box({
   title, subtitle, icon, children, editable, renderEdit, error, saveBadge,
 }:{
@@ -195,43 +177,47 @@ function Box({
 }) {
   const [open, setOpen] = useState(false);
   return (
-    <motion.div
-      layout
-      initial={{ opacity: 0, y: 10, scale: 0.985 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      transition={{ duration: 0.25, ease: 'easeOut' }}
-      className="relative rounded-3xl p-6"
-      style={CARD_STYLE}
-      whileHover={{ y: -2 }}
-    >
-      <div
-        aria-hidden
-        className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
-        style={{ background: COLORS.glow, filter: 'blur(38px)' }}
-      />
-      <div className="flex items-start justify-between mb-3">
-        <div>
-          <h3 className="text-[13px] font-semibold text-white/90 flex items-center gap-2">{icon}{title}</h3>
-          {subtitle && <p className="text-[12px] text-white/55 mt-0.5">{subtitle}</p>}
+    <>
+      <motion.div
+        layout
+        initial={{ opacity: 0, y: 10, scale: 0.985 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ duration: 0.25, ease: 'easeOut' }}
+        className="relative p-6 flex flex-col h-full min-h-[330px]" /* uniform height */
+        style={CARD}
+        whileHover={{ y: -2 }}
+      >
+        <div aria-hidden className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
+             style={{ background: COLORS.glow, filter: 'blur(38px)' }} />
+        <div className="flex items-start justify-between mb-3">
+          <div>
+            <h3 className="text-[13px] font-semibold text-white/90 flex items-center gap-2">{icon}{title}</h3>
+            {subtitle && <p className="text-[12px] text-white/55 mt-0.5">{subtitle}</p>}
+          </div>
+          <div className="flex items-center gap-2">
+            {editable && (
+              <button onClick={() => setOpen(true)} className="text-xs px-3 py-1.5 rounded-2xl border inline-flex items-center gap-1.5 hover:bg-white/10"
+                      style={{ border: '1px solid rgba(255,255,255,0.16)' }}>
+                <MessageSquare className="w-3.5 h-3.5 text-white/80" />
+                <span className="text-white/90">Edit</span>
+              </button>
+            )}
+            {saveBadge}
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          {editable && (
-            <button
-              onClick={() => setOpen(true)}
-              className="text-xs px-3 py-1.5 rounded-2xl border inline-flex items-center gap-1.5 hover:bg-white/10"
-              style={{ border: '1px solid rgba(255,255,255,0.16)' }}
-            >
-              <MessageSquare className="w-3.5 h-3.5 text-white/80" />
-              <span className="text-white/90">Edit</span>
-            </button>
-          )}
-          {saveBadge}
-        </div>
-      </div>
-      <div className="space-y-3">{children}</div>
-      {error && <p className="mt-3 text-xs text-red-400">{error}</p>}
-      {editable && renderEdit && <ModalFrame open={open} onClose={() => setOpen(false)} title={title}>{renderEdit()}</ModalFrame>}
-    </motion.div>
+
+        {/* Content grows so all boxes end with same bottom padding */}
+        <div className="space-y-3 flex-1">{children}</div>
+
+        {error && <p className="mt-3 text-xs text-red-400">{error}</p>}
+      </motion.div>
+
+      {editable && renderEdit && (
+        <ModalFrame open={open} onClose={() => setOpen(false)} title={title}>
+          {renderEdit()}
+        </ModalFrame>
+      )}
+    </>
   );
 }
 
@@ -247,54 +233,28 @@ function Inspiration({ text, onImport, label='Import inspiration text' }:{ text:
   );
 }
 
-/* =========================================================================
-   COMPILER
-   ========================================================================= */
-const STYLE_LABEL = {
-  professional:'Professional and concise', conversational:'Natural and conversational',
-  empathetic:'Warm and empathetic',        upbeat:'Upbeat and positive'
-} as const;
-
-function politenessText(p: Step3['politeness']) {
-  if (p==='low') return 'Use direct language; no excessive formalities.';
-  if (p==='high') return 'Be very polite and considerate; add courteous phrases.';
-  return 'Maintain balanced politeness; friendly but efficient.';
-}
+/* ================================= Compiler ================================ */
+const STYLE_LABEL = { professional:'Professional and concise', conversational:'Natural and conversational', empathetic:'Warm and empathetic', upbeat:'Upbeat and positive' } as const;
+function politenessText(p: Step3['politeness']) { if (p==='low') return 'Use direct language; no excessive formalities.'; if (p==='high') return 'Be very polite and considerate; add courteous phrases.'; return 'Maintain balanced politeness; friendly but efficient.'; }
 function bullets(lines: string[]) { return lines.filter(Boolean).map(l => `- ${l}`).join('\n'); }
-
 function compileVoicePrompt(step1: Partial<Step1Lite>, s3: Step3): string {
-  const name = s3.personaName?.trim() || 'Agent';
-  const greet = s3.greetingLine?.trim();
-  const intro = (s3.introExplain || '').trim();
-
-  const voicePersona = bullets([
-    `${STYLE_LABEL[s3.style]}.`,
-    politenessText(s3.politeness),
-    s3.barge.allow ? 'Allow barge-in: pause, acknowledge, adapt.' : 'Do NOT allow barge-in; finish sentence first.',
-  ]);
-
+  const name = s3.personaName?.trim() || 'Agent'; const greet = s3.greetingLine?.trim(); const intro = (s3.introExplain || '').trim();
+  const voicePersona = bullets([`${STYLE_LABEL[s3.style]}.`, politenessText(s3.politeness), s3.barge.allow ? 'Allow barge-in: pause, acknowledge, adapt.' : 'Do NOT allow barge-in; finish sentence first.']);
   const flow = s3.collect?.length ? s3.collect.map((c, i) => `${i + 1}. Ask for ${c}.`).join('\n') : '';
   const intents = s3.intents?.length ? `Primary intents: ${s3.intents.join(', ')}${s3.otherTasks ? `; Other: ${s3.otherTasks}` : ''}.` : '';
-
   const confirm = bullets([
     s3.confirmation.confirmNames ? 'Confirm correct spelling/pronunciation of names.' : '',
     s3.confirmation.repeatDateTime ? 'Repeat date/time details back to caller to confirm.' : '',
     s3.confirmation.spellBackUnusual ? 'Spell back unusual terms (emails, IDs) to verify.' : '',
     s3.confirmation.template ? `Use confirmation template: "${s3.confirmation.template.trim()}"` : '',
   ]);
-
-  const latency = bullets([
-    `Target response latency: ~${s3.latency.delayMs ?? step1.responseDelayMs ?? 600}ms.`,
-    s3.latency.fillers ? `If thinking, use short fillers: ${s3.latency.fillers.trim()}` : '',
-  ]);
-
+  const latency = bullets([`Target response latency: ~${s3.latency.delayMs ?? step1.responseDelayMs ?? 600}ms.`, s3.latency.fillers ? `If thinking, use short fillers: ${s3.latency.fillers.trim()}` : '']);
   const langVoice = bullets([
     `Language: ${s3.language || step1.language || 'en'}.`,
     s3.accentIso2 ? `Accent hint: ${s3.accentIso2}.` : '',
     s3.ttsVoice ? `Preferred TTS voice label: ${s3.ttsVoice}.` : '',
     'Vendor-agnostic: do not reference specific TTS/ASR vendors.',
   ]);
-
   return [
     `# Voice Agent System Prompt — ${name}`, '',
     '## Identity & Purpose', intro ? `${greet} ${intro}`.trim() : greet, intents, '',
@@ -306,9 +266,7 @@ function compileVoicePrompt(step1: Partial<Step1Lite>, s3: Step3): string {
   ].filter(Boolean).join('\n');
 }
 
-/* =========================================================================
-   DEFAULTS
-   ========================================================================= */
+/* ================================= Defaults ================================ */
 const INTENT_OPTIONS = ['Scheduling','Reschedule','Cancel','FAQs','Lead Capture','Handover to Human'];
 const COLLECT_OPTIONS = ['Name','Phone','Email','Date/Time','Service Type','Account/Order #','Notes'];
 const INSPIRATION = {
@@ -338,21 +296,13 @@ const DEFAULT_S3: Step3 = {
   compiled: '',
 };
 
-/* =========================================================================
-   STEP 3 — PART A (4 boxes; symmetrical; wide)
-   ========================================================================= */
+/* ============================== Step 3 — Part A ============================== */
 export default function StepV3PromptA({ onBack, onNext }: { onBack?: () => void; onNext?: () => void }) {
   const step1 = (readLS<Step1Lite>(LS_STEP1)) || { language: 'en', accentIso2: 'us', responseDelayMs: 600, allowBargeIn: true };
   const restored = readLS<Step3>(LS_STEP3);
-
   const [s3, setS3] = useState<Step3>(() => {
     const base = restored || DEFAULT_S3;
-    return {
-      ...DEFAULT_S3,
-      ...base,
-      language: base.language || step1.language || 'en',
-      accentIso2: base.accentIso2 || step1.accentIso2 || 'us',
-    };
+    return { ...DEFAULT_S3, ...base, language: base.language || step1.language || 'en', accentIso2: base.accentIso2 || step1.accentIso2 || 'us' };
   });
 
   const compiled = useMemo(() => compileVoicePrompt(step1, s3), [step1, s3]);
@@ -367,52 +317,38 @@ export default function StepV3PromptA({ onBack, onNext }: { onBack?: () => void;
     if (!s3.collect.length) e.collect = 'Choose at least one item to collect';
     return e;
   }, [s3]);
-
   const valid = Object.keys(errors).length === 0;
 
   function set<K extends keyof Step3>(k: K, v: Step3[K]) { setS3(cur => ({ ...cur, [k]: v })); }
   function goNext() {
-    const final = { ...s3, compiled };
-    writeLS(LS_STEP3, final);
-    const backup = readLS<any>(LS_BACKUP) || {};
-    writeLS(LS_BACKUP, { ...backup, step3: final });
+    const final = { ...s3, compiled }; writeLS(LS_STEP3, final);
+    const backup = readLS<any>(LS_BACKUP) || {}; writeLS(LS_BACKUP, { ...backup, step3: final });
     onNext?.();
   }
-  const saveBadge = (
-    <span className="text-xs px-2 py-1 rounded-2xl border border-white/15 text-white/70">
-      {saving ? 'Saving…' : saved ? 'Saved' : 'Auto-save'}
-    </span>
-  );
+  const saveBadge = <span className="text-xs px-2 py-1 rounded-2xl border border-white/15 text-white/70">{saving ? 'Saving…' : saved ? 'Saved' : 'Auto-save'}</span>;
   const [previewOpen, setPreviewOpen] = useState(false);
 
   return (
     <div className="min-h-screen w-full text-white font-movatif" style={{ background: COLORS.bg }}>
-      <div className="w-full max-w-[1600px] mx-auto px-6 xl:px-10 pt-10 pb-24">
+      {/* Wider container */}
+      <div className="w-full max-w-[1680px] mx-auto px-6 xl:px-10 pt-10 pb-24">
         {/* Header */}
-        <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.25 }}
-          className="flex items-center justify-between mb-8"
-        >
+        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }} className="flex items-center justify-between mb-8">
           <div>
             <h2 className="text-3xl md:text-4xl font-semibold tracking-tight">Personality & Knowledge</h2>
             <div className="text-white/70 mt-1 text-sm">Step 3 — Part A (core behavior)</div>
           </div>
           <div className="flex items-center gap-3">
-            <button
-              onClick={() => setPreviewOpen(true)}
-              className="inline-flex items-center gap-2 rounded-[24px] border border-white/15 px-4 py-2 hover:bg-white/10"
-            >
+            <button onClick={() => setPreviewOpen(true)} className="inline-flex items-center gap-2 rounded-[24px] border border-white/15 px-4 py-2 hover:bg-white/10">
               <Eye className="w-4 h-4" /> Preview compiled prompt
             </button>
             {saveBadge}
           </div>
         </motion.div>
 
-        {/* Wider grid — perfect symmetry */}
+        {/* Perfectly symmetrical grid: 3 wide cards, same height; last row full width box */}
         <div className="grid grid-cols-12 gap-6">
-          {/* Persona & Tone (span 4) */}
+          {/* Persona */}
           <div className="col-span-12 md:col-span-6 xl:col-span-4">
             <Box
               title="Persona & Tone"
@@ -420,34 +356,23 @@ export default function StepV3PromptA({ onBack, onNext }: { onBack?: () => void;
               icon={<User className="w-4 h-4 text-[#6af7d1]" />}
               editable
               renderEdit={() => (
-                <div style={CARD_STYLE} className="p-5 space-y-3">
+                <div style={CARD} className="p-5 space-y-3">
                   <div className="grid grid-cols-2 gap-3">
                     <label className="col-span-2 text-xs text-white/70">Persona name</label>
-                    <input
-                      value={s3.personaName}
-                      onChange={e => set('personaName', e.target.value)}
-                      className="col-span-2 px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15"
-                    />
+                    <input value={s3.personaName} onChange={e => set('personaName', e.target.value)}
+                      className="col-span-2 px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15" />
                     <label className="text-xs text-white/70">Style</label>
-                    <select
-                      value={s3.style}
-                      onChange={e => set('style', e.target.value as Step3['style'])}
-                      className="px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15"
-                    >
+                    <select value={s3.style} onChange={e => set('style', e.target.value as Step3['style'])}
+                      className="px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15">
                       <option value="professional">Professional</option>
                       <option value="conversational">Conversational</option>
                       <option value="empathetic">Empathetic</option>
                       <option value="upbeat">Upbeat</option>
                     </select>
                     <label className="text-xs text-white/70">Politeness</label>
-                    <select
-                      value={s3.politeness}
-                      onChange={e => set('politeness', e.target.value as Step3['politeness'])}
-                      className="px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15"
-                    >
-                      <option value="low">Low</option>
-                      <option value="med">Medium</option>
-                      <option value="high">High</option>
+                    <select value={s3.politeness} onChange={e => set('politeness', e.target.value as Step3['politeness'])}
+                      className="px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15">
+                      <option value="low">Low</option><option value="med">Medium</option><option value="high">High</option>
                     </select>
                   </div>
                 </div>
@@ -456,37 +381,26 @@ export default function StepV3PromptA({ onBack, onNext }: { onBack?: () => void;
             >
               <div className="grid grid-cols-2 gap-3">
                 <label className="col-span-2 text-xs text-white/70">Persona name</label>
-                <input
-                  value={s3.personaName}
-                  onChange={e => set('personaName', e.target.value)}
-                  className="col-span-2 px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15 text-sm"
-                />
+                <input value={s3.personaName} onChange={e => set('personaName', e.target.value)}
+                  className="col-span-2 px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15 text-sm" />
                 <label className="text-xs text-white/70">Style</label>
-                <select
-                  value={s3.style}
-                  onChange={e => set('style', e.target.value as Step3['style'])}
-                  className="px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15 text-sm"
-                >
+                <select value={s3.style} onChange={e => set('style', e.target.value as Step3['style'])}
+                  className="px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15 text-sm">
                   <option value="professional">Professional</option>
                   <option value="conversational">Conversational</option>
                   <option value="empathetic">Empathetic</option>
                   <option value="upbeat">Upbeat</option>
                 </select>
                 <label className="text-xs text-white/70">Politeness</label>
-                <select
-                  value={s3.politeness}
-                  onChange={e => set('politeness', e.target.value as Step3['politeness'])}
-                  className="px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15 text-sm"
-                >
-                  <option value="low">Low</option>
-                  <option value="med">Medium</option>
-                  <option value="high">High</option>
+                <select value={s3.politeness} onChange={e => set('politeness', e.target.value as Step3['politeness'])}
+                  className="px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15 text-sm">
+                  <option value="low">Low</option><option value="med">Medium</option><option value="high">High</option>
                 </select>
               </div>
             </Box>
           </div>
 
-          {/* Greeting (span 4) */}
+          {/* Greeting */}
           <div className="col-span-12 md:col-span-6 xl:col-span-4">
             <Box
               title="Opening / Greeting"
@@ -495,44 +409,28 @@ export default function StepV3PromptA({ onBack, onNext }: { onBack?: () => void;
               error={errors.greeting || errors.greetingLen}
               editable
               renderEdit={() => (
-                <div style={CARD_STYLE} className="p-5 space-y-4">
-                  <input
-                    value={s3.greetingLine}
-                    onChange={e => set('greetingLine', e.target.value)}
-                    placeholder="Hi, you're speaking with Riley."
-                    className="w-full px-3 py-3 rounded-2xl bg-[#0b0e0f] border border-white/15"
-                  />
-                  <input
-                    value={s3.introExplain || ''}
-                    onChange={e => set('introExplain', e.target.value)}
-                    placeholder="I can help with bookings, questions, and updates."
-                    className="w-full px-3 py-3 rounded-2xl bg-[#0b0e0f] border border-white/15"
-                  />
-                  <Inspiration
-                    text={`${INSPIRATION.greeting}\n\n${INSPIRATION.intro}`}
-                    onImport={() => { set('greetingLine', INSPIRATION.greeting); set('introExplain', INSPIRATION.intro); }}
-                  />
+                <div style={CARD} className="p-5 space-y-4">
+                  <input value={s3.greetingLine} onChange={e => set('greetingLine', e.target.value)}
+                    placeholder="Hi, you're speaking with Riley." className="w-full px-3 py-3 rounded-2xl bg-[#0b0e0f] border border-white/15" />
+                  <input value={s3.introExplain || ''} onChange={e => set('introExplain', e.target.value)}
+                    placeholder="I can help with bookings, questions, and updates." className="w-full px-3 py-3 rounded-2xl bg-[#0b0e0f] border border-white/15" />
+                  <Inspiration text={`${INSPIRATION.greeting}\n\n${INSPIRATION.intro}`}
+                    onImport={() => { set('greetingLine', INSPIRATION.greeting); set('introExplain', INSPIRATION.intro); }} />
                 </div>
               )}
               saveBadge={saveBadge}
             >
-              <input
-                value={s3.greetingLine}
-                onChange={e => set('greetingLine', e.target.value)}
+              <input value={s3.greetingLine} onChange={e => set('greetingLine', e.target.value)}
                 placeholder="Hi, you're speaking with Riley."
-                className="w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15 text-sm"
-              />
-              <input
-                value={s3.introExplain || ''}
-                onChange={e => set('introExplain', e.target.value)}
+                className="w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15 text-sm" />
+              <input value={s3.introExplain || ''} onChange={e => set('introExplain', e.target.value)}
                 placeholder="(Optional) short role line"
-                className="mt-2 w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15 text-sm"
-              />
+                className="mt-2 w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15 text-sm" />
               <div className="text-xs text-white/50 text-right mt-1">{s3.greetingLine.length}/120</div>
             </Box>
           </div>
 
-          {/* Intents (span 4) */}
+          {/* Intents */}
           <div className="col-span-12 md:col-span-6 xl:col-span-4">
             <Box
               title="Core Tasks / Intents"
@@ -541,29 +439,21 @@ export default function StepV3PromptA({ onBack, onNext }: { onBack?: () => void;
               error={errors.intents}
               editable
               renderEdit={() => (
-                <div style={CARD_STYLE} className="p-5 space-y-3">
+                <div style={CARD} className="p-5 space-y-3">
                   <ChipList options={INTENT_OPTIONS} value={s3.intents} onChange={v => set('intents', v)} />
-                  <input
-                    value={s3.otherTasks || ''}
-                    onChange={e => set('otherTasks', e.target.value)}
-                    placeholder="Other tasks (optional)"
-                    className="w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15"
-                  />
+                  <input value={s3.otherTasks || ''} onChange={e => set('otherTasks', e.target.value)} placeholder="Other tasks (optional)"
+                    className="w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15" />
                 </div>
               )}
               saveBadge={saveBadge}
             >
               <ChipList options={INTENT_OPTIONS} value={s3.intents} onChange={v => set('intents', v)} />
-              <input
-                value={s3.otherTasks || ''}
-                onChange={e => set('otherTasks', e.target.value)}
-                placeholder="Other tasks (optional)"
-                className="mt-3 w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15 text-sm"
-              />
+              <input value={s3.otherTasks || ''} onChange={e => set('otherTasks', e.target.value)} placeholder="Other tasks (optional)"
+                className="mt-3 w-full px-3 py-2 rounded-2xl bg-[#0b0e0f] border border-white/15 text-sm" />
             </Box>
           </div>
 
-          {/* Collect (span 12 symmetrical row) */}
+          {/* Collect (full width row) */}
           <div className="col-span-12">
             <Box
               title="Information to Collect"
@@ -571,11 +461,7 @@ export default function StepV3PromptA({ onBack, onNext }: { onBack?: () => void;
               icon={<ClipboardList className="w-4 h-4 text-[#6af7d1]" />}
               error={errors.collect}
               editable
-              renderEdit={() => (
-                <div style={CARD_STYLE} className="p-5">
-                  <ChipList options={COLLECT_OPTIONS} value={s3.collect} onChange={v => set('collect', v)} reorderable />
-                </div>
-              )}
+              renderEdit={() => (<div style={CARD} className="p-5"><ChipList options={COLLECT_OPTIONS} value={s3.collect} onChange={v => set('collect', v)} reorderable /></div>)}
               saveBadge={saveBadge}
             >
               <ChipList options={COLLECT_OPTIONS} value={s3.collect} onChange={v => set('collect', v)} reorderable />
@@ -584,36 +470,22 @@ export default function StepV3PromptA({ onBack, onNext }: { onBack?: () => void;
         </div>
 
         {/* Footer */}
-        <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.25, delay: 0.05 }}
-          className="mt-9 flex items-center justify-between"
-        >
-          <button
-            onClick={onBack}
-            className="inline-flex items-center gap-2 rounded-[24px] border border-white/15 px-4 py-2 hover:bg-white/10"
-          >
+        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25, delay: 0.05 }} className="mt-9 flex items-center justify-between">
+          <button onClick={onBack} className="inline-flex items-center gap-2 rounded-[24px] border border-white/15 px-4 py-2 hover:bg-white/10">
             <ArrowLeft className="w-4 h-4" /> Previous
           </button>
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => navigator.clipboard.writeText(compiled).catch(() => {})}
-              className="inline-flex items-center gap-2 rounded-[24px] border border-white/15 px-4 py-2 hover:bg-white/10"
-            >
+            <button onClick={() => navigator.clipboard.writeText(compiled).catch(() => {})}
+              className="inline-flex items-center gap-2 rounded-[24px] border border-white/15 px-4 py-2 hover:bg-white/10">
               <Copy className="w-4 h-4" /> Copy compiled prompt
             </button>
             <button
               onClick={goNext}
               disabled={!valid}
               className="inline-flex items-center gap-2 px-8 py-2.5 rounded-[24px] font-semibold disabled:cursor-not-allowed"
-              style={{
-                background: valid ? COLORS.green : COLORS.greenDisabled,
-                color:'#fff',
-                boxShadow: valid ? '0 1px 0 rgba(0,0,0,0.18)' : 'none',
-              }}
-              onMouseEnter={(e)=>{ if(!valid) return; (e.currentTarget as HTMLButtonElement).style.background=COLORS.greenHover; }}
-              onMouseLeave={(e)=>{ if(!valid) return; (e.currentTarget as HTMLButtonElement).style.background=COLORS.green; }}
+              style={{ background: valid ? BTN.on : BTN.off, color:'#fff', boxShadow: valid ? '0 1px 0 rgba(0,0,0,0.18)' : 'none' }}
+              onMouseEnter={(e)=>{ if(!valid) return; (e.currentTarget as HTMLButtonElement).style.background=BTN.hover; }}
+              onMouseLeave={(e)=>{ if(!valid) return; (e.currentTarget as HTMLButtonElement).style.background=BTN.on; }}
             >
               Next →
             </button>
@@ -623,9 +495,7 @@ export default function StepV3PromptA({ onBack, onNext }: { onBack?: () => void;
 
       {/* Preview Modal */}
       <ModalFrame open={previewOpen} onClose={() => setPreviewOpen(false)} title="Compiled System Prompt">
-        <div style={CARD_STYLE} className="p-5">
-          <pre className="whitespace-pre-wrap text-sm leading-6">{compiled}</pre>
-        </div>
+        <div style={CARD} className="p-5"><pre className="whitespace-pre-wrap text-sm leading-6">{compiled}</pre></div>
       </ModalFrame>
     </div>
   );
