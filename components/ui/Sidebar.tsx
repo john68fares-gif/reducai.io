@@ -1,14 +1,14 @@
 // components/ui/Sidebar.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import {
   Home, Hammer, Monitor, Rocket, Key,
   Package, BookOpen, HelpCircle, Users,
   ShoppingCart, Bot, User, Mic, Phone,
-  ChevronLeft, ChevronRight
+  ChevronLeft, ChevronRight,
 } from 'lucide-react';
 
 // Prevent duplicate sidebars if _app renders twice on client
@@ -22,7 +22,7 @@ function cn(...a: Array<string | false | null | undefined>) {
 const LS_COLLAPSED = 'ui:sidebarCollapsed';
 
 export default function Sidebar() {
-  // 1) Hooks first (no early return before hooks)
+  // 1) Hooks first
   const [allowed, setAllowed] = useState<boolean>(() => !SIDEBAR_MOUNTED);
   useEffect(() => {
     if (SIDEBAR_MOUNTED) {
@@ -62,6 +62,11 @@ export default function Sidebar() {
   }, []);
 
   const widthPx = collapsed ? 72 : 260;
+
+  // Drive main content padding via CSS variable
+  useEffect(() => {
+    document.documentElement.style.setProperty('--sidebar-w', `${widthPx}px`);
+  }, [widthPx]);
 
   // 2) Safe to short-circuit render after hooks
   if (!allowed) return null;
@@ -184,10 +189,7 @@ export default function Sidebar() {
         {/* Account card */}
         <div className={cn('mt-auto px-4 pb-5 pt-4', collapsed && 'px-2')}>
           <div
-            className={cn(
-              'rounded-2xl flex items-center justify-between',
-              collapsed ? 'px-2 py-2' : 'px-4 py-3'
-            )}
+            className={cn('rounded-2xl flex items-center justify-between', collapsed ? 'px-2 py-2' : 'px-4 py-3')}
             style={{
               background: 'rgba(16,19,20,0.90)',
               border: '1px solid rgba(0,255,194,0.18)',
@@ -261,7 +263,10 @@ function SidebarItem({
       }}
       title={collapsed ? label : undefined}
     >
-      <div className={cn('mt-[2px] shrink-0', !collapsed && 'mr-3')} style={{ color: active ? '#00ffc2' : 'rgba(255,255,255,0.85)' }}>
+      <div
+        className={cn('mt-[2px] shrink-0', !collapsed && 'mr-3')}
+        style={{ color: active ? '#00ffc2' : 'rgba(255,255,255,0.85)' }}
+      >
         {icon}
       </div>
       {!collapsed && (
