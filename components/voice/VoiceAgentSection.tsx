@@ -6,7 +6,9 @@ import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import StepProgress from '@/components/builder/StepProgress';
 import StepV1Basics from '@/components/voice/steps/StepV1Basics';
 import StepV2Telephony from '@/components/voice/steps/StepV2Telephony';
-import StepV3Prompt from '@/components/voice/steps/StepV3Prompt';
+// ⬇️ swap the single-step import for the split A/B
+import StepV3PromptA from '@/components/voice/steps/StepV3PromptA';
+import StepV3PromptB from '@/components/voice/steps/StepV3PromptB';
 import StepV4Overview from '@/components/voice/steps/StepV4Overview';
 import { Plus } from 'lucide-react';
 
@@ -29,10 +31,26 @@ export default function VoiceAgentSection() {
   const rawStep = searchParams.get('step');
   const step = rawStep && ['1', '2', '3', '4'].includes(rawStep) ? rawStep : null;
 
+  // NEW: tiny helper for the sub-screen within step 3 (A or B)
+  const part = ((): 'A' | 'B' => {
+    const p = (searchParams.get('part') || 'A').toUpperCase();
+    return p === 'B' ? 'B' : 'A';
+  })();
+
   const setStep = (next: string | null) => {
     const usp = new URLSearchParams(Array.from(searchParams.entries()));
     if (next) usp.set('step', next);
     else usp.delete('step');
+    // when leaving step 3, also drop ?part for cleanliness
+    if (next !== '3') usp.delete('part');
+    router.replace(`${pathname}?${usp.toString()}`, { scroll: false });
+  };
+
+  // NEW: update only the sub-part while keeping step=3
+  const setPart = (next: 'A' | 'B') => {
+    const usp = new URLSearchParams(Array.from(searchParams.entries()));
+    usp.set('step', '3');
+    usp.set('part', next);
     router.replace(`${pathname}?${usp.toString()}`, { scroll: false });
   };
 
@@ -65,7 +83,18 @@ export default function VoiceAgentSection() {
 
           {step === '3' && (
             <div className="mt-8">
-              <StepV3Prompt onBack={() => setStep('2')} onNext={() => setStep('4')} />
+              {/* NEW: split step 3 into A/B without changing your overall flow */}
+              {part === 'A' ? (
+                <StepV3PromptA
+                  onBack={() => setStep('2')}
+                  onNext={() => setPart('B')}
+                />
+              ) : (
+                <StepV3PromptB
+                  onBack={() => setPart('A')}
+                  onNext={() => setStep('4')}
+                />
+              )}
             </div>
           )}
 
