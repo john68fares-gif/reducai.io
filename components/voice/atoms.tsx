@@ -6,10 +6,12 @@ export const BTN_GREEN = '#59d9b3';
 export const BTN_GREEN_HOVER = '#54cfa9';
 export const BTN_DISABLED = '#2e6f63';
 
+// ⬇️ Added outer shadow (second part) to separate from bg
 export const CARD_STYLE: React.CSSProperties = {
   background: 'rgba(13,15,17,0.92)',
   border: '2px solid rgba(106,247,209,0.32)',
-  boxShadow: 'inset 0 0 22px rgba(0,0,0,0.28), 0 0 20px rgba(106,247,209,0.06)',
+  // inner glow + subtle outer drop shadow
+  boxShadow: 'inset 0 0 22px rgba(0,0,0,0.28), 0 10px 40px rgba(0,0,0,0.35)',
   borderRadius: 28,
 };
 
