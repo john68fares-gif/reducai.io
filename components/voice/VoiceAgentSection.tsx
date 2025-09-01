@@ -30,7 +30,7 @@ export default function VoiceAgentSection() {
   const rawStep = searchParams.get('step');
   const step = rawStep && ['1', '2', '3', '4'].includes(rawStep) ? rawStep : null;
 
-  // NEW: sub-step for Step 3 (A or B)
+  // sub-step for step 3
   const part: 'A' | 'B' = ((): 'A' | 'B' => {
     const p = (searchParams.get('part') || 'A').toUpperCase();
     return p === 'B' ? 'B' : 'A';
@@ -51,6 +51,7 @@ export default function VoiceAgentSection() {
     router.replace(`${pathname}?${usp.toString()}`, { scroll: false });
   };
 
+  // optional cleanup
   useEffect(() => {
     try {
       if (localStorage.getItem('voicebuilder:cleanup') === '1') {
@@ -93,7 +94,7 @@ export default function VoiceAgentSection() {
                 <button
                   onClick={() => {
                     try {
-                      // optionally clear drafts after finishing
+                      // optional: clear drafts after finishing
                       // localStorage.removeItem('voicebuilder:step1');
                       // localStorage.removeItem('voicebuilder:step2');
                       // localStorage.removeItem('voicebuilder:step3');
@@ -113,7 +114,7 @@ export default function VoiceAgentSection() {
     );
   }
 
-  // Default screen when no step is selected
+  // Default landing (no ?step)
   return (
     <main className="min-h-screen w-full text-white font-movatif bg-[#0b0c10]">
       <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 pt-10 pb-24">
