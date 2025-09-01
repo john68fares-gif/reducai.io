@@ -1,252 +1,328 @@
+// components/voice/steps/StepV1Basics.tsx
 'use client';
 
 import React, {
   useEffect, useMemo, useRef, useState, useLayoutEffect,
 } from 'react';
-import { createPortal } from 'react-dom';
-import { getCountries, getCountryCallingCode } from 'libphonenumber-js';
-import metadata from 'libphonenumber-js/metadata.min.json';
-import { Search, ChevronDown } from 'lucide-react';
+import { createPortal } from 'react-dom'; // ✅ fix: use react-dom portal
+import {
+  Sparkles, Building2, Languages as LangIcon, ChevronDown, Search, ArrowRight,
+} from 'lucide-react';
+import CountryDialSelect from '@/components/phone-numbers/CountryDialSelect';
 
-type Option = { iso2: string; name: string; dial: string };
+/* -------------------- shared styles (matches Builder vibe) -------------------- */
+const CARD_STYLE: React.CSSProperties = {
+  background: 'rgba(13,15,17,0.92)',
+  border: '2px solid rgba(106,247,209,0.32)',
+  // subtle separation from bg (ChatGPT-like soft glow)
+  boxShadow:
+    '0 18px 60px rgba(0,0,0,0.50), inset 0 0 22px rgba(0,0,0,0.28), 0 0 20px rgba(106,247,209,0.06)',
+  borderRadius: 28,
+};
 
-export default function CountryDialSelect({
+const BTN_GREEN = '#59d9b3';
+const BTN_GREEN_HOVER = '#54cfa9';
+const BTN_DISABLED = '#2e6f63';
+
+type Props = { onNext?: () => void };
+
+/* =================================================================================
+   Step V1 — Voice Basics
+   Fields: name, industry, language (dropdown), dialect/accent (country ISO2)
+   Persists to localStorage: voicebuilder:step1
+================================================================================= */
+export default function StepV1Basics({ onNext }: Props) {
+  const [name, setName] = useState('');
+  const [industry, setIndustry] = useState('');
+  const [language, setLanguage] = useState<'English' | 'Spanish' | 'French' | 'Arabic' | 'German' | 'Portuguese' | 'Chinese' | 'Japanese'>('English');
+  const [accentIso2, setAccentIso2] = useState<string>('US');
+
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('voicebuilder:step1') || 'null');
+      if (saved && typeof saved === 'object') {
+        if (typeof saved.name === 'string') setName(saved.name);
+        if (typeof saved.industry === 'string') setIndustry(saved.industry);
+        if (typeof saved.language === 'string') setLanguage(saved.language);
+        if (typeof saved.accentIso2 === 'string') setAccentIso2(saved.accentIso2.toUpperCase());
+      }
+    } catch {}
+  }, []);
+
+  const errors = useMemo(() => {
+    const e: Record<string, string> = {};
+    if (!name.trim()) e.name = 'Please enter a name.';
+    if (!industry.trim()) e.industry = 'Please enter your industry.';
+    if (!language) e.language = 'Please choose a language.';
+    if (!accentIso2) e.accent = 'Pick a country.';
+    return e;
+  }, [name, industry, language, accentIso2]);
+
+  const canNext = Object.keys(errors).length === 0;
+
+  function persistAndNext() {
+    try {
+      localStorage.setItem(
+        'voicebuilder:step1',
+        JSON.stringify({
+          name: name.trim(),
+          industry: industry.trim(),
+          language,
+          accentIso2: (accentIso2 || '').toUpperCase(), // ✅ save as 2-letter ISO
+        }),
+      );
+    } catch {}
+    onNext?.();
+  }
+
+  return (
+    <section className="relative">
+      {/* Header */}
+      <div className="mb-6">
+        <div
+          className="inline-flex items-center gap-2 text-xs tracking-wide px-3 py-1.5 rounded-[20px] border"
+          style={{ borderColor: 'rgba(106,247,209,0.32)', background: 'rgba(16,19,20,0.70)' }}
+        >
+          <Sparkles className="w-3.5 h-3.5 text-[#6af7d1]" />
+          Step 1 · Voice Basics
+        </div>
+        <h2 className="mt-3 text-3xl md:text-4xl font-semibold tracking-tight">Voice Agent Setup</h2>
+        <p className="text-white/70 mt-1">Name it, set the industry, and choose how it speaks.</p>
+      </div>
+
+      {/* Form Card */}
+      <div className="relative p-6 sm:p-8" style={CARD_STYLE}>
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
+          style={{ background: 'radial-gradient(circle, rgba(106,247,209,0.10) 0%, transparent 70%)', filter: 'blur(38px)' }}
+        />
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Agent name */}
+          <FieldShell label="Agent Name *" error={errors.name}>
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-[#6af7d1]" />
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Enter agent name…"
+                className="w-full bg-transparent outline-none text-[15px] text-white/95"
+              />
+            </div>
+          </FieldShell>
+
+          {/* Industry */}
+          <FieldShell label="Industry *" error={errors.industry}>
+            <div className="flex items-center gap-2">
+              <Building2 className="w-4 h-4 text-[#6af7d1]" />
+              <input
+                value={industry}
+                onChange={(e) => setIndustry(e.target.value)}
+                placeholder="Enter your industry…"
+                className="w-full bg-transparent outline-none text-[15px] text-white/95"
+              />
+            </div>
+          </FieldShell>
+
+          {/* Language (styled portal dropdown) */}
+          <FieldShell label="Language *" error={errors.language}>
+            <LanguageSelect value={language} onChange={setLanguage} />
+          </FieldShell>
+
+          {/* Dialect / Accent (country ISO2) — identical height/rounding */}
+          <FieldShell label={<>Dialect / Accent <span className="text-white/50 text-xs">(choose country)</span></>} error={errors.accent}>
+            <CountryDialSelect
+              value={accentIso2}
+              onChange={(iso2 /* , dial */) => setAccentIso2(iso2.toUpperCase())}
+              id="voice-accent"
+              label="Country"
+            />
+          </FieldShell>
+        </div>
+
+        {/* Actions */}
+        <div className="mt-8 flex justify-end">
+          <button
+            disabled={!canNext}
+            onClick={persistAndNext}
+            className="inline-flex items-center gap-2 px-8 py-2.5 rounded-[24px] font-semibold select-none transition-colors duration-150 disabled:cursor-not-allowed"
+            style={{
+              background: canNext ? BTN_GREEN : BTN_DISABLED,
+              color: '#ffffff',
+              boxShadow: canNext ? '0 1px 0 rgba(0,0,0,0.18)' : 'none',
+              filter: canNext ? 'none' : 'saturate(85%) opacity(0.9)',
+            }}
+            onMouseEnter={(e) => {
+              if (!canNext) return;
+              (e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER;
+            }}
+            onMouseLeave={(e) => {
+              if (!canNext) return;
+              (e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN;
+            }}
+          >
+            Next <ArrowRight className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ------------------------------- Field wrapper ------------------------------ */
+/** Identical shell for inputs and both dropdown triggers (keeps widths aligned). */
+function FieldShell({
+  label,
+  error,
+  children,
+}: {
+  label: React.ReactNode;
+  error?: string;
+  children: React.ReactNode;
+}) {
+  const borderBase = error ? 'rgba(255,120,120,0.55)' : '#13312b';
+  return (
+    <div>
+      <label className="block mb-2 text-[13px] font-medium text-white/85 tracking-wide">{label}</label>
+      <div
+        className="rounded-2xl bg-[#101314] border px-3 py-2.5"
+        style={{
+          borderColor: borderBase,
+          // same external separation as you requested
+          boxShadow: '0 8px 34px rgba(0,0,0,0.25)',
+        }}
+      >
+        {/* child should render as a full-width row */}
+        {children}
+      </div>
+      <div className="mt-1 text-xs">
+        {error ? <span className="text-[rgba(255,138,138,0.95)]">{error}</span> : null}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------- Styled LanguageSelect ---------------------------- */
+/** Portal dropdown (fixed) — EXACT same size/roundness as CountryDialSelect trigger. */
+function LanguageSelect({
   value,
   onChange,
-  label = 'Country',
-  id,
-  hideLabel = false,            // <-- NEW
 }: {
-  value?: string; // ISO2 like 'US'
-  onChange: (iso2: string, dial: string) => void;
-  label?: string;
-  id?: string;
-  hideLabel?: boolean;          // <-- NEW
+  value: 'English' | 'Spanish' | 'French' | 'Arabic' | 'German' | 'Portuguese' | 'Chinese' | 'Japanese';
+  onChange: (v: any) => void;
 }) {
-  /* ---------- data ---------- */
-  const [locale, setLocale] = useState('en');
-  useEffect(() => { try { setLocale(navigator.language || 'en'); } catch {} }, []);
+  const options = [
+    'English',
+    'Spanish',
+    'French',
+    'Arabic',
+    'German',
+    'Portuguese',
+    'Chinese',
+    'Japanese',
+  ] as const;
 
-  const options: Option[] = useMemo(() => {
-    const regions = getCountries(metadata as any) as string[];
-    const dn = new Intl.DisplayNames([locale], { type: 'region' });
-    return regions
-      .map((iso2) => ({
-        iso2,
-        name: dn.of(iso2) || iso2,
-        dial: getCountryCallingCode(iso2 as any, metadata as any),
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [locale]);
-
-  const selectedIso = value && options.find((o) => o.iso2 === value) ? value : 'US';
-  const selected = options.find((o) => o.iso2 === selectedIso)!;
-
-  /* ---------- combobox state ---------- */
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const [activeIdx, setActiveIdx] = useState<number>(() =>
-    Math.max(0, options.findIndex((o) => o.iso2 === selectedIso)),
-  );
-
-  const listRef = useRef<HTMLDivElement | null>(null);
-  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const btnRef = useRef<HTMLButtonElement | null>(null);
   const portalRef = useRef<HTMLDivElement | null>(null);
-  const searchRef = useRef<HTMLInputElement | null>(null);
-
-  const seedKeyRef = useRef<string | null>(null);
   const [rect, setRect] = useState<{ top: number; left: number; width: number; openUp: boolean } | null>(null);
-  const typeAhead = useRef<{ buf: string; t: number }>({ buf: '', t: 0 });
 
-  /* ---------- ranking & filtering ---------- */
-  function escapeRegExp(s: string) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
-  function scoreOption(o: Option, qRaw: string): number {
-    if (!qRaw) return 1;
-    const q = qRaw.trim().toLowerCase();
-    const qDigits = q.replace(/\D/g, '');
-    const name = o.name.toLowerCase();
-    const iso = o.iso2.toLowerCase();
-    const dialDigits = o.dial;
+  const filtered = options.filter((o) => o.toLowerCase().includes(query.trim().toLowerCase()));
 
-    if (name === q) return 100;
-    if (name.startsWith(q)) return 90;
-    if (new RegExp(`\\b${escapeRegExp(q)}`).test(name)) return 80;
-    if (name.includes(q)) return 70;
-    if (iso.startsWith(q)) return 65;
-    if (qDigits) {
-      if (dialDigits.startsWith(qDigits)) return 60;
-      if (dialDigits.includes(qDigits)) return 50;
-      if (`+${dialDigits}`.startsWith(qRaw.replace(/\s+/g, ''))) return 60;
-    }
-    return 0;
-  }
-  const filtered: Option[] = useMemo(() => {
-    const rows = options.map((o) => ({ o, s: scoreOption(o, query) }))
-      .filter((r) => r.s > 0 || !query);
-    rows.sort((a, b) => (b.s - a.s) || a.o.name.localeCompare(b.o.name));
-    return rows.map((r) => r.o);
-  }, [options, query]);
-
-  useEffect(() => { if (open) { setActiveIdx(0); setTimeout(() => scrollActiveIntoView(0), 0); } }, [open, query]);
-
-  /* ---------- helpers ---------- */
-  function selectAt(i: number) {
-    const o = filtered[i];
-    if (!o) return;
-    onChange(o.iso2, o.dial);
-    setQuery('');
-    setOpen(false);
-    buttonRef.current?.focus();
-  }
-  function scrollActiveIntoView(i: number) {
-    const container = listRef.current;
-    const item = container?.querySelector<HTMLButtonElement>(`[data-idx="${i}"]`);
-    if (container && item) {
-      const cTop = container.scrollTop;
-      const cBot = cTop + container.clientHeight;
-      const iTop = item.offsetTop;
-      const iBot = iTop + item.offsetHeight;
-      if (iTop < cTop) container.scrollTop = iTop - 8;
-      else if (iBot > cBot) container.scrollTop = iBot - container.clientHeight + 8;
-    }
-  }
-
-  /* ---------- placement (portal above content) ---------- */
   useLayoutEffect(() => {
     if (!open) return;
-    const update = () => {
-      const r = buttonRef.current?.getBoundingClientRect();
-      if (!r) return;
-      const viewH = window.innerHeight;
-      const openUp = r.bottom + 320 > viewH;
-      setRect({ top: openUp ? r.top : r.bottom, left: r.left, width: r.width, openUp });
-    };
-    update();
-    const handle = () => update();
-    window.addEventListener('resize', handle);
-    window.addEventListener('scroll', handle, true);
-    return () => {
-      window.removeEventListener('resize', handle);
-      window.removeEventListener('scroll', handle, true);
-    };
+    const r = btnRef.current?.getBoundingClientRect();
+    if (!r) return;
+    const viewH = window.innerHeight;
+    const openUp = r.bottom + 320 > viewH;
+    setRect({ top: openUp ? r.top : r.bottom, left: r.left, width: r.width, openUp });
   }, [open]);
 
-  // close on outside click
   useEffect(() => {
     if (!open) return;
     const onClick = (e: MouseEvent) => {
-      if (buttonRef.current?.contains(e.target as Node) || portalRef.current?.contains(e.target as Node)) return;
+      if (btnRef.current?.contains(e.target as Node) || portalRef.current?.contains(e.target as Node)) return;
       setOpen(false);
     };
     window.addEventListener('mousedown', onClick);
     return () => window.removeEventListener('mousedown', onClick);
   }, [open]);
 
-  /* ---------- styles ---------- */
-  const CARD: React.CSSProperties = {
-    background: '#101314',
-    border: '1px solid rgba(255,255,255,0.30)',
-    borderRadius: 20,
-    boxShadow: '0 20px 60px rgba(0,0,0,0.45), 0 0 1px rgba(0,0,0,0.5)',
-  };
-
   return (
-    <div className="relative">
-      {!hideLabel && (
-        <label htmlFor={id} className="mb-1 block text-xs text-white/70">{label}</label>
-      )}
-
-      {/* trigger button */}
+    <>
+      {/* trigger (same size as CountryDialSelect trigger) */}
       <button
-        ref={buttonRef}
-        id={id}
+        ref={btnRef}
         type="button"
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        onClick={() => { setOpen(v => !v); setTimeout(() => searchRef.current?.focus(), 0); }}
-        className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-[14px] text-sm outline-none transition"
-        style={{ background: 'rgba(0,0,0,0.30)', border: '1px solid rgba(255,255,255,0.20)' }}
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-[14px] text-sm"
+        style={{ background: 'rgba(0,0,0,0.30)', border: '1px solid rgba(255,255,255,0.20)', boxShadow: '0 8px 34px rgba(0,0,0,0.25)' }}
       >
-        <span className="flex items-center gap-2 truncate">
-          <span className="text-[18px]">
-            {selected.iso2.toUpperCase().replace(/./g, (c) => String.fromCodePoint(127397 + c.charCodeAt(0)))}
-          </span>
-          <span className="truncate">{selected.name}</span>
-          <span className="text-white/60 shrink-0">(+{selected.dial})</span>
+        <span className="flex items-center gap-2">
+          <LangIcon className="w-4 h-4 text-white/75" />
+          <span>{value}</span>
         </span>
         <ChevronDown className="w-4 h-4 opacity-80" />
       </button>
 
-      {/* portal dropdown */}
-      {open && rect && createPortal(
-        <div
-          ref={portalRef}
-          role="listbox"
-          tabIndex={-1}
-          onKeyDown={(e) => {
-            if (!open) return;
-            if (e.key === 'ArrowDown') { e.preventDefault(); const i = Math.min(filtered.length - 1, activeIdx + 1); setActiveIdx(i); scrollActiveIntoView(i); }
-            else if (e.key === 'ArrowUp') { e.preventDefault(); const i = Math.max(0, activeIdx - 1); setActiveIdx(i); scrollActiveIntoView(i); }
-            else if (e.key === 'Enter') { e.preventDefault(); selectAt(activeIdx); }
-            else if (e.key === 'Escape') { e.preventDefault(); setOpen(false); buttonRef.current?.focus(); }
-          }}
-          className="fixed z-[9999] p-3"
-          style={{
-            ...CARD,
-            top: rect.openUp ? rect.top - 8 : rect.top + 8,
-            left: rect.left,
-            width: rect.width,
-            transform: rect.openUp ? 'translateY(-100%)' : 'none',
-          }}
-        >
-          {/* search */}
+      {/* dropdown (portal) */}
+      {open && rect && typeof document !== 'undefined'
+        ? createPortal(
           <div
-            className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[12px]"
-            style={{ background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.15)' }}
+            ref={portalRef}
+            className="fixed z-[9999] p-3"
+            style={{
+              top: rect.openUp ? rect.top - 8 : rect.top + 8,
+              left: rect.left,
+              width: rect.width,
+              transform: rect.openUp ? 'translateY(-100%)' : 'none',
+              background: '#101314',
+              border: '1px solid rgba(255,255,255,0.30)',
+              borderRadius: 20,
+              boxShadow: '0 20px 60px rgba(0,0,0,0.45), 0 0 1px rgba(0,0,0,0.5)',
+            }}
           >
-            <Search className="w-4 h-4 text-white/70" />
-            <input
-              ref={searchRef}
-              id={`${id || 'country'}-search`}
-              value={query}
-              onChange={(e) => { setQuery(e.target.value); setActiveIdx(0); }}
-              placeholder="Type country or +code…"
-              className="w-full bg-transparent outline-none text-sm text-white placeholder:text-white/60"
-            />
-          </div>
+            <div
+              className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[12px]"
+              style={{ background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.15)' }}
+            >
+              <Search className="w-4 h-4 text-white/70" />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Type to filter…"
+                className="w-full bg-transparent outline-none text-sm text-white placeholder:text-white/60"
+              />
+            </div>
 
-          {/* list */}
-          <div ref={listRef} className="max-h-72 overflow-y-auto pr-1" style={{ scrollbarWidth: 'thin' }}>
-            {filtered.map((o, i) => {
-              const active = i === activeIdx;
-              return (
+            <div className="max-h-72 overflow-y-auto pr-1" style={{ scrollbarWidth: 'thin' }}>
+              {filtered.map((opt) => (
                 <button
-                  key={o.iso2}
-                  data-idx={i}
-                  role="option"
-                  onMouseEnter={() => setActiveIdx(i)}
-                  onClick={() => { onChange(o.iso2, o.dial); setOpen(false); }}
+                  key={opt}
+                  onClick={() => { onChange(opt); setOpen(false); }}
                   className="w-full flex items-center gap-3 px-3 py-2 rounded-[10px] text-left transition"
-                  style={{
-                    background: active ? 'rgba(0,255,194,0.10)' : 'transparent',
-                    border: active ? '1px solid rgba(0,255,194,0.35)' : '1px solid transparent',
+                  style={{ background: 'transparent', border: '1px solid transparent' }}
+                  onMouseEnter={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.background = 'rgba(0,255,194,0.10)';
+                    (e.currentTarget as HTMLButtonElement).style.border = '1px solid rgba(0,255,194,0.35)';
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
+                    (e.currentTarget as HTMLButtonElement).style.border = '1px solid transparent';
                   }}
                 >
-                  <span className="text-[18px]">
-                    {o.iso2.toUpperCase().replace(/./g, (c) => String.fromCodePoint(127397 + c.charCodeAt(0)))}
-                  </span>
-                  <span className="flex-1 truncate">{o.name}</span>
-                  <span className="text-white/60 shrink-0">(+{o.dial})</span>
+                  <LangIcon className="w-4 h-4 text-white/80" />
+                  <span className="flex-1">{opt}</span>
                 </button>
-              );
-            })}
-            {filtered.length === 0 && (
-              <div className="px-3 py-6 text-sm text-white/70">No matches.</div>
-            )}
-          </div>
-        </div>,
-        document.body
-      )}
-    </div>
+              ))}
+              {filtered.length === 0 && <div className="px-3 py-6 text-sm text-white/70">No matches.</div>}
+            </div>
+          </div>,
+          document.body
+        )
+        : null}
+    </>
   );
 }
