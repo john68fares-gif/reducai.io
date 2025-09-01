@@ -1,10 +1,8 @@
 // components/voice/steps/StepV1Basics.tsx
 'use client';
 
-import React, {
-  useEffect, useMemo, useRef, useState, useLayoutEffect,
-} from 'react';
-import { createPortal } from 'react-dom'; // ✅ fix: use react-dom portal
+import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Sparkles, Building2, Languages as LangIcon, ChevronDown, Search, ArrowRight,
 } from 'lucide-react';
@@ -14,9 +12,8 @@ import CountryDialSelect from '@/components/phone-numbers/CountryDialSelect';
 const CARD_STYLE: React.CSSProperties = {
   background: 'rgba(13,15,17,0.92)',
   border: '2px solid rgba(106,247,209,0.32)',
-  // subtle separation from bg (ChatGPT-like soft glow)
-  boxShadow:
-    '0 18px 60px rgba(0,0,0,0.50), inset 0 0 22px rgba(0,0,0,0.28), 0 0 20px rgba(106,247,209,0.06)',
+  // subtle separation from bg (soft glow)
+  boxShadow: '0 18px 60px rgba(0,0,0,0.50), inset 0 0 22px rgba(0,0,0,0.28), 0 0 20px rgba(106,247,209,0.06)',
   borderRadius: 28,
 };
 
@@ -28,13 +25,15 @@ type Props = { onNext?: () => void };
 
 /* =================================================================================
    Step V1 — Voice Basics
-   Fields: name, industry, language (dropdown), dialect/accent (country ISO2)
+   Fields: name, industry, language (dropdown), dialect/accent (country ISO-2)
    Persists to localStorage: voicebuilder:step1
 ================================================================================= */
 export default function StepV1Basics({ onNext }: Props) {
   const [name, setName] = useState('');
   const [industry, setIndustry] = useState('');
-  const [language, setLanguage] = useState<'English' | 'Spanish' | 'French' | 'Arabic' | 'German' | 'Portuguese' | 'Chinese' | 'Japanese'>('English');
+  const [language, setLanguage] = useState<
+    'English' | 'Spanish' | 'French' | 'Arabic' | 'German' | 'Portuguese' | 'Chinese' | 'Japanese'
+  >('English');
   const [accentIso2, setAccentIso2] = useState<string>('US');
 
   useEffect(() => {
@@ -68,7 +67,7 @@ export default function StepV1Basics({ onNext }: Props) {
           name: name.trim(),
           industry: industry.trim(),
           language,
-          accentIso2: (accentIso2 || '').toUpperCase(), // ✅ save as 2-letter ISO
+          accentIso2: (accentIso2 || '').toUpperCase(), // save as 2-letter ISO
         }),
       );
     } catch {}
@@ -130,13 +129,20 @@ export default function StepV1Basics({ onNext }: Props) {
             <LanguageSelect value={language} onChange={setLanguage} />
           </FieldShell>
 
-          {/* Dialect / Accent (country ISO2) — identical height/rounding */}
-          <FieldShell label={<>Dialect / Accent <span className="text-white/50 text-xs">(choose country)</span></>} error={errors.accent}>
+          {/* Dialect / Accent (country ISO2) — identical height/rounding, NO inner label */}
+          <FieldShell
+            label={
+              <>
+                Dialect / Accent <span className="text-white/50 text-xs">(choose country)</span>
+              </>
+            }
+            error={errors.accent}
+          >
+            {/* No label prop passed => no “Country” text inside the component */}
             <CountryDialSelect
               value={accentIso2}
               onChange={(iso2 /* , dial */) => setAccentIso2(iso2.toUpperCase())}
               id="voice-accent"
-              label="Country"
             />
           </FieldShell>
         </div>
@@ -171,7 +177,6 @@ export default function StepV1Basics({ onNext }: Props) {
 }
 
 /* ------------------------------- Field wrapper ------------------------------ */
-/** Identical shell for inputs and both dropdown triggers (keeps widths aligned). */
 function FieldShell({
   label,
   error,
@@ -189,11 +194,9 @@ function FieldShell({
         className="rounded-2xl bg-[#101314] border px-3 py-2.5"
         style={{
           borderColor: borderBase,
-          // same external separation as you requested
-          boxShadow: '0 8px 34px rgba(0,0,0,0.25)',
+          boxShadow: '0 8px 34px rgba(0,0,0,0.25)', // subtle shadow on the input shell
         }}
       >
-        {/* child should render as a full-width row */}
         {children}
       </div>
       <div className="mt-1 text-xs">
@@ -204,7 +207,6 @@ function FieldShell({
 }
 
 /* ---------------------------- Styled LanguageSelect ---------------------------- */
-/** Portal dropdown (fixed) — EXACT same size/roundness as CountryDialSelect trigger. */
 function LanguageSelect({
   value,
   onChange,
@@ -252,13 +254,17 @@ function LanguageSelect({
 
   return (
     <>
-      {/* trigger (same size as CountryDialSelect trigger) */}
+      {/* trigger — same size/roundness as accent trigger */}
       <button
         ref={btnRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
         className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-[14px] text-sm"
-        style={{ background: 'rgba(0,0,0,0.30)', border: '1px solid rgba(255,255,255,0.20)', boxShadow: '0 8px 34px rgba(0,0,0,0.25)' }}
+        style={{
+          background: 'rgba(0,0,0,0.30)',
+          border: '1px solid rgba(255,255,255,0.20)',
+          boxShadow: '0 8px 34px rgba(0,0,0,0.25)',
+        }}
       >
         <span className="flex items-center gap-2">
           <LangIcon className="w-4 h-4 text-white/75" />
@@ -267,61 +273,64 @@ function LanguageSelect({
         <ChevronDown className="w-4 h-4 opacity-80" />
       </button>
 
-      {/* dropdown (portal) */}
+      {/* dropdown portal */}
       {open && rect && typeof document !== 'undefined'
         ? createPortal(
-          <div
-            ref={portalRef}
-            className="fixed z-[9999] p-3"
-            style={{
-              top: rect.openUp ? rect.top - 8 : rect.top + 8,
-              left: rect.left,
-              width: rect.width,
-              transform: rect.openUp ? 'translateY(-100%)' : 'none',
-              background: '#101314',
-              border: '1px solid rgba(255,255,255,0.30)',
-              borderRadius: 20,
-              boxShadow: '0 20px 60px rgba(0,0,0,0.45), 0 0 1px rgba(0,0,0,0.5)',
-            }}
-          >
             <div
-              className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[12px]"
-              style={{ background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.15)' }}
+              ref={portalRef}
+              className="fixed z-[9999] p-3"
+              style={{
+                top: rect.openUp ? rect.top - 8 : rect.top + 8,
+                left: rect.left,
+                width: rect.width,
+                transform: rect.openUp ? 'translateY(-100%)' : 'none',
+                background: '#101314',
+                border: '1px solid rgba(255,255,255,0.30)',
+                borderRadius: 20,
+                boxShadow: '0 20px 60px rgba(0,0,0,0.45), 0 0 1px rgba(0,0,0,0.5)',
+              }}
             >
-              <Search className="w-4 h-4 text-white/70" />
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Type to filter…"
-                className="w-full bg-transparent outline-none text-sm text-white placeholder:text-white/60"
-              />
-            </div>
+              <div
+                className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[12px]"
+                style={{ background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.15)' }}
+              >
+                <Search className="w-4 h-4 text-white/70" />
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Type to filter…"
+                  className="w-full bg-transparent outline-none text-sm text-white placeholder:text-white/60"
+                />
+              </div>
 
-            <div className="max-h-72 overflow-y-auto pr-1" style={{ scrollbarWidth: 'thin' }}>
-              {filtered.map((opt) => (
-                <button
-                  key={opt}
-                  onClick={() => { onChange(opt); setOpen(false); }}
-                  className="w-full flex items-center gap-3 px-3 py-2 rounded-[10px] text-left transition"
-                  style={{ background: 'transparent', border: '1px solid transparent' }}
-                  onMouseEnter={(e) => {
-                    (e.currentTarget as HTMLButtonElement).style.background = 'rgba(0,255,194,0.10)';
-                    (e.currentTarget as HTMLButtonElement).style.border = '1px solid rgba(0,255,194,0.35)';
-                  }}
-                  onMouseLeave={(e) => {
-                    (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
-                    (e.currentTarget as HTMLButtonElement).style.border = '1px solid transparent';
-                  }}
-                >
-                  <LangIcon className="w-4 h-4 text-white/80" />
-                  <span className="flex-1">{opt}</span>
-                </button>
-              ))}
-              {filtered.length === 0 && <div className="px-3 py-6 text-sm text-white/70">No matches.</div>}
-            </div>
-          </div>,
-          document.body
-        )
+              <div className="max-h-72 overflow-y-auto pr-1" style={{ scrollbarWidth: 'thin' }}>
+                {filtered.map((opt) => (
+                  <button
+                    key={opt}
+                    onClick={() => {
+                      onChange(opt);
+                      setOpen(false);
+                    }}
+                    className="w-full flex items-center gap-3 px-3 py-2 rounded-[10px] text-left transition"
+                    style={{ background: 'transparent', border: '1px solid transparent' }}
+                    onMouseEnter={(e) => {
+                      (e.currentTarget as HTMLButtonElement).style.background = 'rgba(0,255,194,0.10)';
+                      (e.currentTarget as HTMLButtonElement).style.border = '1px solid rgba(0,255,194,0.35)';
+                    }}
+                    onMouseLeave={(e) => {
+                      (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
+                      (e.currentTarget as HTMLButtonElement).style.border = '1px solid transparent';
+                    }}
+                  >
+                    <LangIcon className="w-4 h-4 text-white/80" />
+                    <span className="flex-1">{opt}</span>
+                  </button>
+                ))}
+                {filtered.length === 0 && <div className="px-3 py-6 text-sm text-white/70">No matches.</div>}
+              </div>
+            </div>,
+            document.body
+          )
         : null}
     </>
   );
