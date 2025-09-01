@@ -99,7 +99,7 @@ export default function StepV1Basics({ onNext }: Props) {
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* Agent name */}
-          <FieldShell label="Agent Name *" error={errors.name}>
+          <FieldShell label="Agent Name " error={errors.name}>
             <div className="flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-[#6af7d1]" />
               <input
@@ -112,7 +112,7 @@ export default function StepV1Basics({ onNext }: Props) {
           </FieldShell>
 
           {/* Industry */}
-          <FieldShell label="Industry *" error={errors.industry}>
+          <FieldShell label="Industry " error={errors.industry}>
             <div className="flex items-center gap-2">
               <Building2 className="w-4 h-4 text-[#6af7d1]" />
               <input
@@ -125,7 +125,7 @@ export default function StepV1Basics({ onNext }: Props) {
           </FieldShell>
 
           {/* Language (styled portal dropdown) */}
-          <FieldShell label="Language *" error={errors.language}>
+          <FieldShell label="Language " error={errors.language}>
             <LanguageSelect value={language} onChange={setLanguage} />
           </FieldShell>
 
