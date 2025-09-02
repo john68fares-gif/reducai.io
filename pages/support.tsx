@@ -1,11 +1,16 @@
 // pages/support.tsx
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
+import dynamic from 'next/dynamic';
 import Head from 'next/head';
 import {
-  HelpCircle, BookOpen, MessageSquare, ChevronDown, FileText, Video, Shield, Send, CornerDownLeft
+  HelpCircle, BookOpen, MessageSquare, ChevronDown, FileText, Video, Shield, Send, CornerDownLeft,
 } from 'lucide-react';
+
+/* ---------- utils ---------- */
+const isBrowser = typeof window !== 'undefined';
+const cn = (...a: Array<string | false | null | undefined>) => a.filter(Boolean).join(' ');
 
 /* ---------- Simple styles to fit your dark / glow UI ---------- */
 const FRAME: React.CSSProperties = {
@@ -23,10 +28,7 @@ const CARD: React.CSSProperties = {
 
 /* ---------- Tiny Accordion ---------- */
 function AccordionItem({
-  title,
-  icon,
-  children,
-  defaultOpen = false,
+  title, icon, children, defaultOpen = false,
 }: {
   title: string;
   icon?: React.ReactNode;
@@ -39,14 +41,14 @@ function AccordionItem({
   return (
     <div style={CARD} className="overflow-hidden">
       <button
-        onClick={() => setOpen(v => !v)}
+        onClick={() => setOpen((v) => !v)}
         className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-white/5 transition"
       >
         <div className="flex items-center gap-2 text-white font-semibold">
           {icon} <span>{title}</span>
         </div>
         <ChevronDown
-          className={`w-5 h-5 text-white/80 transition-transform ${open ? 'rotate-180' : ''}`}
+          className={cn('w-5 h-5 text-white/80 transition-transform', open && 'rotate-180')}
         />
       </button>
       <div
@@ -66,7 +68,7 @@ function AccordionItem({
 }
 
 /* ===========================
-   Use YOUR agents + YOUR API keys from localStorage
+   Local storage readers (safe)
    =========================== */
 
 type StoredKey = { id: string; name: string; key: string; createdAt: number };
@@ -76,13 +78,14 @@ type Chatbot = {
   description?: string;
   provider?: 'openai'|'anthropic'|'google'|string;
   model?: string;
-  // any other fields your Builder stores…
 };
 
 function loadApiKeys(): StoredKey[] {
+  if (!isBrowser) return [];
   try { return JSON.parse(localStorage.getItem('apiKeys.v1') || '[]') || []; } catch { return []; }
 }
 function getSelectedKeyId(): string | null {
+  if (!isBrowser) return null;
   try { return localStorage.getItem('apiKeys.selectedId'); } catch { return null; }
 }
 function resolveApiKey(): StoredKey | null {
@@ -93,34 +96,55 @@ function resolveApiKey(): StoredKey | null {
     const found = list.find(k => k.id === sel);
     if (found) return found;
   }
-  // fallback to most recent by createdAt
-  return [...list].sort((a,b) => b.createdAt - a.createdAt)[0];
+  return [...list].sort((a,b) => b.createdAt - a.createdAt)[0] ?? null;
 }
-
 function readAllChatbots(): Chatbot[] {
+  if (!isBrowser) return [];
   try {
     const bots = JSON.parse(localStorage.getItem('chatbots') || '[]');
     return Array.isArray(bots) ? bots : [];
   } catch { return []; }
 }
 function readPublishedIds(): string[] {
-  const raw = localStorage.getItem('support:publishedAgentIds') || '';
-  return raw.split(',').map(s=>s.trim()).filter(Boolean);
+  if (!isBrowser) return [];
+  try {
+    const raw = localStorage.getItem('support:publishedAgentIds') || '';
+    return raw.split(',').map(s => s.trim()).filter(Boolean);
+  } catch { return []; }
 }
+
+/* ===========================
+   Helpdesk assistants block
+   =========================== */
 
 function useSupportAgents() {
   const [agents, setAgents] = useState<Chatbot[]>([]);
-  useEffect(()=>{ setAgents(readAllChatbots()); },[]);
-  const publishedIds = useMemo(() => readPublishedIds(), []);
+  const [published, setPublished] = useState<string[]>([]);
+
+  useEffect(() => {
+    // load once on client
+    setAgents(readAllChatbots());
+    setPublished(readPublishedIds());
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === 'chatbots') setAgents(readAllChatbots());
+      if (e.key === 'support:publishedAgentIds') setPublished(readPublishedIds());
+    };
+    if (isBrowser) {
+      window.addEventListener('storage', onStorage);
+      return () => window.removeEventListener('storage', onStorage);
+    }
+  }, []);
+
   const list = useMemo(() => {
-    if (!publishedIds.length) return agents; // show all until curated
-    const allow = new Set(publishedIds);
+    if (!published.length) return agents; // show all until curated
+    const allow = new Set(published);
     return agents.filter(a => a.id && allow.has(a.id));
-  }, [agents, publishedIds]);
+  }, [agents, published]);
+
   return list;
 }
 
-/** Minimal chat UI that calls YOUR backend. Backend should read server-side key. */
+/** Minimal chat UI that calls YOUR backend. Backend should read server-side key or use the selected local key if you choose to pass it. */
 function LocalAgentChat({ agent }: { agent: Chatbot }) {
   type Msg = { role: 'user' | 'assistant' | 'system'; content: string };
   const [messages, setMessages] = useState<Msg[]>([
@@ -132,9 +156,10 @@ function LocalAgentChat({ agent }: { agent: Chatbot }) {
   const boxRef = useRef<HTMLDivElement | null>(null);
 
   const provider = agent.provider || 'openai';
-  const model = agent.model || 'gpt-4o-mini'; // safe default
+  const model = agent.model || 'gpt-4o-mini';
 
   useEffect(() => {
+    // safe on client
     setKeyInfo(resolveApiKey());
   }, []);
 
@@ -150,33 +175,31 @@ function LocalAgentChat({ agent }: { agent: Chatbot }) {
     setMessages(next);
     setBusy(true);
 
-    // Request payload; server should fetch the key based on session/config.
-    const payload = {
+    const payload: any = {
       agentId: agent.id,
       provider,
       model,
       messages: next,
     };
 
-    const headers: Record<string,string> = { 'Content-Type': 'application/json' };
-    // If your current server expects the key from client, TEMPORARILY uncomment:
-    // if (keyInfo?.key) headers['x-api-key'] = keyInfo.key;
+    // If you want to test with the locally stored key (client-side only), uncomment:
+    // if (keyInfo?.key) payload._clientKey = keyInfo.key;
 
     let reply: string | null = null;
 
-    // 1) Try /api/agents/chat
+    // Try /api/agents/chat
     try {
-      const r1 = await fetch('/api/agents/chat', { method:'POST', headers, body: JSON.stringify(payload) });
+      const r1 = await fetch('/api/agents/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       if (r1.ok) {
         const j = await r1.json();
         reply = j?.reply || j?.message || j?.text || null;
       }
     } catch {}
 
-    // 2) Fallback /api/agents
+    // Fallback /api/agents
     try {
       if (!reply) {
-        const r2 = await fetch('/api/agents', { method:'POST', headers, body: JSON.stringify(payload) });
+        const r2 = await fetch('/api/agents', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
         if (r2.ok) {
           const j = await r2.json();
           reply = j?.reply || j?.message || j?.text || null;
@@ -184,10 +207,9 @@ function LocalAgentChat({ agent }: { agent: Chatbot }) {
       }
     } catch {}
 
-    // 3) Nothing wired yet
     if (!reply) {
       reply = keyInfo
-        ? 'Backend not wired yet. Point this to /api/agents/chat (server should read your stored key).'
+        ? 'Backend not wired yet. Point this UI to /api/agents/chat and read the key server-side.'
         : 'No API key found. Add one on the API Keys page.';
     }
 
@@ -217,11 +239,12 @@ function LocalAgentChat({ agent }: { agent: Chatbot }) {
         {messages.map((m, i) => (
           <div key={i} className="flex">
             <div
-              className={`max-w-[86%] text-sm px-3 py-2 rounded-lg ${
+              className={cn(
+                'max-w-[86%] text-sm px-3 py-2 rounded-lg',
                 m.role === 'user'
                   ? 'bg-[#0f4136] text-[#d9fff5]'
                   : 'bg-[#0f1314] text-white/90 border border-white/10'
-              }`}
+              )}
             >
               {m.content}
             </div>
@@ -252,14 +275,12 @@ function LocalAgentChat({ agent }: { agent: Chatbot }) {
   );
 }
 
-/** Selector + chat wrapper */
 function HelpdeskAssistantsBlock() {
   const agents = useSupportAgents();
   const [selectedId, setSelectedId] = useState<string>('');
 
   useEffect(() => {
     if (!agents.length) return;
-    // default to last created
     setSelectedId(prev => prev || agents[agents.length - 1].id);
   }, [agents.length]);
 
@@ -270,7 +291,6 @@ function HelpdeskAssistantsBlock() {
 
   return (
     <div className="space-y-3">
-      {/* Selector */}
       <div className="grid gap-2">
         <label className="text-white/80 text-sm">Choose an Assistant</label>
         <select
@@ -297,7 +317,6 @@ function HelpdeskAssistantsBlock() {
         </div>
       </div>
 
-      {/* Chat */}
       {current ? (
         <LocalAgentChat agent={current} />
       ) : (
@@ -306,7 +325,6 @@ function HelpdeskAssistantsBlock() {
         </div>
       )}
 
-      {/* “Still stuck?” line */}
       <div className="mt-3 text-white/70 text-sm">
         Still stuck? Email: <span className="italic">add this later</span>
       </div>
@@ -314,15 +332,15 @@ function HelpdeskAssistantsBlock() {
   );
 }
 
-/* ---------- Support Page ---------- */
-export default function SupportPage() {
-  /* Help Form (local only for now) */
+/* ---------- Support Page (client-only) ---------- */
+function SupportPageInner() {
   const [hfEmail, setHfEmail] = useState('');
   const [hfSubject, setHfSubject] = useState('');
   const [hfMsg, setHfMsg] = useState('');
   const [hfSaved, setHfSaved] = useState('');
 
   function saveHelpForm() {
+    if (!isBrowser) return;
     const rec = {
       at: new Date().toISOString(),
       email: hfEmail.trim(),
@@ -349,7 +367,6 @@ export default function SupportPage() {
         </h1>
 
         <div style={FRAME} className="p-5 space-y-4">
-
           {/* GUIDE */}
           <AccordionItem
             title="Guide (how the site works)"
@@ -366,7 +383,7 @@ export default function SupportPage() {
             <div className="mt-3 text-white/70 text-sm italic">add this later</div>
           </AccordionItem>
 
-          {/* HELP DESK ASSISTANTS (your own agents) */}
+          {/* HELP DESK ASSISTANTS */}
           <AccordionItem
             title="AI Helpline (chat with our site assistant)"
             icon={<MessageSquare className="w-5 h-5 text-[#6af7d1]" />}
@@ -425,7 +442,7 @@ export default function SupportPage() {
             </div>
           </AccordionItem>
 
-          {/* VIDEO TUTORIAL */}
+          {/* VIDEO */}
           <AccordionItem
             title="Video tutorial"
             icon={<Video className="w-5 h-5 text-[#6af7d1]" />}
@@ -433,7 +450,6 @@ export default function SupportPage() {
             <div className="text-sm text-white/80">
               <div className="rounded-xl border border-white/15 bg-black/20 p-4">
                 <div className="text-white/70 italic">add this later</div>
-                {/* Later: drop in an iframe or video player. */}
               </div>
             </div>
           </AccordionItem>
@@ -447,7 +463,6 @@ export default function SupportPage() {
               <p className="text-white/70 italic">add this later</p>
             </div>
           </AccordionItem>
-
         </div>
       </main>
 
@@ -457,3 +472,6 @@ export default function SupportPage() {
     </>
   );
 }
+
+/* Export the page with SSR disabled so localStorage is safe at build time */
+export default dynamic(() => Promise.resolve(SupportPageInner), { ssr: false });
