@@ -150,7 +150,6 @@ const ICONS: Record<PromptSectionKey, JSX.Element> = {
   'COMPANY FAQ': <Landmark className="w-4 h-4 text-[#6af7d1]" />,
 };
 
-// tolerant heading match (**, ###, numbered, etc.)
 const HEADING_REGEX =
   /^(?:\s*(?:[#>*-]|\d+\.)\s*)?(?:\*\*)?\s*(DESCRIPTION|AI\s*DESCRIPTION|RULES\s*(?:AND|&)\s*GUIDELINES|AI\s*RULES|QUESTION\s*FLOW|COMPANY\s*FAQ)\s*(?:\*\*)?\s*:?\s*$/gmi;
 
@@ -192,9 +191,21 @@ export default function BuilderDashboard() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  // --- Welcome overlay (only on SIGN-UP) ---
+  // --- Welcome overlay (SIGN-UP ONLY) ---
   const { data: session, status } = useSession();
-  const userId = useMemo(() => (session?.user as any)?.id || '', [session]);
+
+  // NextAuth default sessions often lack user.id; fall back to email/sub
+  const userId = useMemo(() => {
+    const u = (session?.user as any) || {};
+    return u.id || u.email || u.sub || '';
+  }, [session]);
+
+  // expose email for overlay -> /api/track/signup
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      (window as any).__USER_EMAIL__ = (session?.user?.email as string) || '';
+    }
+  }, [session]);
 
   const modeParam = searchParams.get('mode');
   const mode = (modeParam === 'signin' ? 'signin' : 'signup') as 'signup' | 'signin';
@@ -203,14 +214,15 @@ export default function BuilderDashboard() {
 
   const [welcomeOpen, setWelcomeOpen] = useState(false);
 
+  // Open ONLY on sign-up (or when forced), after auth
   useEffect(() => {
-    if (status !== 'authenticated' || !userId) return;
+    if (status !== 'authenticated') return;
     if (forceOverlay || (onboard && mode === 'signup')) setWelcomeOpen(true);
-  }, [status, userId, forceOverlay, onboard, mode]);
+  }, [status, forceOverlay, onboard, mode]);
 
   const closeWelcome = () => {
     setWelcomeOpen(false);
-    try { localStorage.setItem(`user:${userId}:profile:completed`, '1'); } catch {}
+    try { if (userId) localStorage.setItem(`user:${userId}:profile:completed`, '1'); } catch {}
     const usp = new URLSearchParams(Array.from(searchParams.entries()));
     usp.delete('onboard'); usp.delete('mode'); usp.delete('forceOverlay');
     router.replace(`${pathname}?${usp.toString()}`, { scroll: false });
@@ -409,7 +421,8 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${(bot.name || 'prompt').replace(/[^\w\-]+/g, '_')}.txt`;
+    const safe = (bot.name || 'prompt').replace(/[^\w\-]+/g, '_');
+    a.download = `${safe}.txt`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -454,8 +467,7 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
               style={{ background: '#0d0f11', borderColor: 'rgba(255,255,255,0.3)', color: 'white' }}
               title="Download"
             >
-              <DownloadIcon className="w-3.5 h-3.5" />
-              Download
+              <Download as={DownloadIcon} className="w-3.5 h-3.5" />
             </button>
             <button
               onClick={onClose}
@@ -505,155 +517,6 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
               Close
             </button>
           </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* --------------------------------- Cards --------------------------------- */
-
-function CreateCard({ onClick }: { onClick: () => void }) {
-  const [hover, setHover] = useState(false);
-  return (
-    <button
-      onClick={onClick}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      className="group relative h-[380px] rounded-[16px] p-7 flex flex-col items-center justify-center transition-all active:scale-[0.995]"
-      style={{
-        background: 'rgba(13,15,17,0.92)',
-        border: '2px solid rgba(106,247,209,0.32)',
-        boxShadow: 'inset 0 0 22px rgba(0,0,0,0.28), 0 0 20px rgba(106,247,209,0.06)',
-      }}
-    >
-      <div
-        className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
-        style={{ background: 'radial-gradient(circle, rgba(106,247,209,0.12) 0%, transparent 70%)', filter: 'blur(38px)' }}
-      />
-      {hover && (
-        <div
-          className="pointer-events-none absolute inset-0 rounded-[16px] animate-pulse"
-          style={{ boxShadow: '0 0 34px 10px rgba(106,247,209,0.25), inset 0 0 14px rgba(106,247,209,0.20)' }}
-        />
-      )}
-      <div
-        className="pointer-events-none absolute top-0 bottom-0 w-[55%] rounded-[16px]"
-        style={{
-          left: hover ? '120%' : '-120%',
-          background:
-            'linear-gradient(110deg, transparent 0%, rgba(255,255,255,0.08) 40%, rgba(255,255,255,0.18) 50%, rgba(255,255,255,0.08) 60%, transparent 100%)',
-          filter: 'blur(1px)',
-          transition: 'left 420ms cubic-bezier(.22,.61,.36,1)',
-        }}
-      />
-      <div
-        className="w-20 h-20 rounded-full flex items-center justify-center mb-5"
-        style={{
-          background: 'rgba(0,0,0,0.18)',
-          border: '2px dashed rgba(106,247,209,0.35)',
-          boxShadow: 'inset 0 0 18px rgba(0,0,0,0.45), inset 0 0 6px rgba(106,247,209,0.06)',
-        }}
-      >
-        <Plus className="w-10 h-10" style={{ color: '#6af7d1', opacity: 0.9 }} />
-      </div>
-      <div className="text-[20px]">Create a Build</div>
-      <div className="text-[13px] text-white/65 mt-2">Start building your AI assistant</div>
-    </button>
-  );
-}
-
-const palette = ['#6af7d1', '#7cc3ff', '#b28bff', '#ffd68a', '#ff9db1'];
-const accentFor = (id: string) =>
-  palette[Math.abs([...id].reduce((h, c) => h + c.charCodeAt(0), 0)) % palette.length];
-
-function BuildCard({
-  bot,
-  accent,
-  onOpen,
-  onDelete,
-  onCustomize,
-}: {
-  bot: Bot;
-  accent: string;
-  onOpen: () => void;
-  onDelete: () => void;
-  onCustomize: () => void;
-}) {
-  const [hover, setHover] = useState(false);
-  const ap = bot.appearance || {};
-  return (
-    <div
-      className="relative h-[380px] rounded-[16px] p-0 flex flex-col justify-between group transition-all"
-      style={{
-        background: 'rgba(13,15,17,0.92)',
-        border: '2px solid rgba(106,247,209,0.32)',
-        boxShadow: 'inset 0 0 22px rgba(0,0,0,0.28), 0 0 20px rgba(106,247,209,0.06)',
-      }}
-    >
-      <div
-        className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
-        style={{ background: 'radial-gradient(circle, rgba(106,247,209,0.10) 0%, transparent 70%)', filter: 'blur(38px)' }}
-      />
-      <div
-        className="h-48 border-b border-white/10 overflow-hidden relative"
-        onMouseEnter={() => setHover(true)}
-        onMouseLeave={() => setHover(false)}
-      >
-        <button
-          onClick={onCustomize}
-          className="absolute right-3 top-3 z-10 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-[10px] text-xs border transition"
-          style={{ background: 'rgba(16,19,20,0.88)', border: '2px solid rgba(106,247,209,0.4)', boxShadow: '0 0 14px rgba(106,247,209,0.12)' }}
-        >
-          <SlidersHorizontal className="w-3.5 h-3.5" />
-          Customize
-        </button>
-        {/* @ts-ignore */}
-        <Bot3D
-          className="h-full"
-          accent={ap.accent || accent}
-          shellColor={ap.shellColor}
-          bodyColor={ap.bodyColor}
-          trimColor={ap.trimColor}
-          faceColor={ap.faceColor}
-          variant={ap.variant || 'silver'}
-          eyes={ap.eyes || 'ovals'}
-          head={ap.head || 'rounded'}
-          torso={ap.torso || 'box'}
-          arms={ap.arms ?? 'capsule'}
-          legs={ap.legs ?? 'capsule'}
-          antenna={ap.hasOwnProperty('antenna') ? Boolean((ap as any).antenna) : true}
-          withBody={ap.hasOwnProperty('withBody') ? Boolean(ap.withBody) : true}
-          idle={ap.hasOwnProperty('idle') ? Boolean(ap.idle) : hover}
-        />
-      </div>
-      <div className="p-6 flex-1 flex flex-col justify-between">
-        <div className="flex items-center gap-3">
-          <div
-            className="w-11 h-11 rounded-[10px] flex items-center justify-center"
-            style={{ background: 'rgba(0,0,0,0.15)', border: '2px solid rgba(106,247,209,0.32)' }}
-          >
-            <BotIcon className="w-5 h-5" style={{ color: accent }} />
-          </div>
-        <div className="min-w-0">
-            <div className="font-semibold truncate">{bot.name}</div>
-            <div className="text-[12px] text-white/60 truncate">
-              {(bot.industry || '—') + (bot.language ? ` · ${bot.language}` : '')}
-            </div>
-          </div>
-          <button onClick={onDelete} className="ml-auto p-1.5 rounded-md hover:bg-[#ff4d4d14] transition" title="Delete build">
-            <Trash2 className="w-4 h-4 text-white/70 hover:text-[#ff7a7a]" />
-          </button>
-        </div>
-        <div className="mt-4 flex items-end justify-between">
-          <div className="text-[12px] text-white/50">Updated {fmtDate(bot.updatedAt || bot.createdAt)}</div>
-          <button
-            onClick={onOpen}
-            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-[10px] text-sm border transition hover:translate-y-[-1px]"
-            style={{ background: 'rgba(16,19,20,0.88)', border: '2px solid rgba(106,247,209,0.4)', boxShadow: '0 0 14px rgba(106,247,209,0.12)' }}
-          >
-            Open <ArrowRight className="w-4 h-4" />
-          </button>
         </div>
       </div>
     </div>
