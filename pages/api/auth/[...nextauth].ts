@@ -1,6 +1,13 @@
+// pages/api/auth/[...nextauth].ts
 import type { NextApiRequest, NextApiResponse } from 'next'
 import NextAuth, { NextAuthOptions } from 'next-auth'
 import GoogleProvider from 'next-auth/providers/google'
+import crypto from 'crypto' // Node stdlib
+
+function hashEmail(email?: string | null) {
+  if (!email) return '';
+  return crypto.createHash('sha256').update(email.toLowerCase()).digest('hex').slice(0, 24);
+}
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -13,25 +20,33 @@ export const authOptions: NextAuthOptions = {
   pages: { signIn: '/login' },
   callbacks: {
     async jwt({ token, account, user }) {
-      if (account) token.provider = account.provider
-      if (user) {
-        token.name = user.name ?? token.name
-        token.email = user.email ?? token.email
-        // @ts-ignore
-        token.picture = (user as any).image ?? (token as any).picture
+      // first time
+      if (user?.email && !token.sub) {
+        token.sub = hashEmail(user.email); // stable id in token.sub
       }
-      return token
+      if (account) token.provider = account.provider;
+      // copy basic profile once (kept minimal)
+      if (user) {
+        token.name = user.name ?? token.name;
+        token.email = user.email ?? token.email;
+        // @ts-ignore
+        token.picture = (user as any).image ?? (token as any).picture;
+      }
+      return token;
     },
     async session({ session, token }) {
       if (session?.user) {
-        session.user.name = token.name as string | null
-        session.user.email = token.email as string | null
+        // expose id to client
         // @ts-ignore
-        session.user.image = (token as any).picture as string | null
+        session.user.id = (token.sub as string) || '';
+        session.user.name = (token.name as string) ?? null;
+        session.user.email = (token.email as string) ?? null;
         // @ts-ignore
-        session.user.provider = token.provider as string | undefined
+        session.user.image = (token as any).picture as string | null;
+        // @ts-ignore
+        session.user.provider = token.provider as string | undefined;
       }
-      return session
+      return session;
     },
   },
 }
