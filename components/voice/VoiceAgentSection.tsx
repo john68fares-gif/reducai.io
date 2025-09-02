@@ -1,26 +1,23 @@
-// components/voice/VoiceAgentSection.tsx
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import {
-  Plus, Bot as BotIcon, Phone, Trash2, ArrowRight, X, Pencil
-} from 'lucide-react';
+import { Plus, Bot as BotIcon, Phone, Trash2, ArrowRight, X, Search } from 'lucide-react';
 
-// ---------- Wizard pieces (LOCAL RELATIVE IMPORTS) ----------
-import StepProgress from '../builder/StepProgress';
-import StepV1Basics from './steps/StepV1Basics';
-import StepV2Telephony from './steps/StepV2Telephony';
-import StepV3PromptA from './steps/StepV3PromptA';
-import StepV4Overview from './steps/StepV4Overview';
+// Wizard steps you already have
+import StepProgress from '@/components/builder/StepProgress';
+import StepV1Basics from '@/components/voice/steps/StepV1Basics';
+import StepV2Telephony from '@/components/voice/steps/StepV2Telephony';
+import StepV3PromptA from '@/components/voice/steps/StepV3PromptA';
+import StepV4Overview from '@/components/voice/steps/StepV4Overview';
 
-// ---------- Editor (client) ----------
-import VoiceAssistantEditor from './VoiceAssistantEditor';
+// NEW: the full-page editor step
+import VoiceAssistantEditor from '@/components/voice/VoiceAssistantEditor';
 
 type Agent = {
   id: string;
   name: string;
-  type?: string;          // 'voice' | 'text'
+  type?: string;           // "voice" is what we want here
   language?: string;
   fromE164?: string;
   updatedAt?: string;
@@ -30,25 +27,24 @@ type Agent = {
 const UI = {
   cardBg: 'rgba(13,15,17,0.92)',
   border: '1px solid rgba(106,247,209,0.18)',
-  cardShadow: 'inset 0 0 18px rgba(0,0,0,0.28), 0 0 12px rgba(106,247,209,0.04)',
+  cardShadow: 'inset 0 0 18px rgba(0,0,0,0.28), 0 0 12px rgba(106,247,209,0.06)',
 };
 
 const nowISO = () => new Date().toISOString();
 const fmt = (iso?: string) => (iso ? new Date(iso).toLocaleDateString() : '');
 
-// simple fade
 const fadeUp = {
-  initial: { opacity: 0, y: 10 },
+  initial: { opacity: 0, y: 12 },
   animate: { opacity: 1, y: 0 },
-  transition: { duration: 0.20 },
+  transition: { duration: 0.22 },
 };
 
 export default function VoiceAgentSection() {
   const [mode, setMode] = useState<'gallery' | 'wizard' | 'editor'>('gallery');
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string>('');
 
-  // ====== GALLERY DATA (from localStorage.chatbots) ======
+  // ====== GALLERY DATA (localStorage.chatbots → only voice) ======
   const [query, setQuery] = useState('');
   const [agents, setAgents] = useState<Agent[]>([]);
 
@@ -57,7 +53,6 @@ export default function VoiceAgentSection() {
       try {
         const raw = localStorage.getItem('chatbots');
         const arr = raw ? JSON.parse(raw) : [];
-        // only VOICE entries
         const onlyVoice = Array.isArray(arr)
           ? arr.filter((b: any) => (b?.type || 'voice') === 'voice')
           : [];
@@ -99,24 +94,52 @@ export default function VoiceAgentSection() {
       const next = arr.filter((b: any) => b.id !== id);
       localStorage.setItem('chatbots', JSON.stringify(next));
       setAgents((p) => p.filter((a) => a.id !== id));
-      if (editingId === id) {
-        setEditingId(null);
-        setMode('gallery');
-      }
     } catch {}
   };
 
-  // ====== WIZARD NAV ======
+  // ====== NAV ======
   const startWizard = () => { setMode('wizard'); setStep(1); };
   const next = () => setStep((s) => Math.min(4, (s + 1) as any));
   const back = () => setStep((s) => Math.max(1, (s - 1) as any));
   const exitWizard = () => setMode('gallery');
 
-  // When user clicks "Edit" on a card
   const openEditor = (id: string) => { setEditingId(id); setMode('editor'); };
-  const closeEditor = () => { setEditingId(null); setMode('gallery'); };
+  const exitEditor  = () => { setEditingId(''); setMode('gallery'); };
 
-  // ====== RENDER: WIZARD ======
+  // ====== EDITOR ======
+  if (mode === 'editor' && editingId) {
+    return (
+      <VoiceAssistantEditor
+        id={editingId}
+        onExit={exitEditor}
+        onSaved={() => {
+          // refresh gallery timestamps/names etc.
+          try {
+            const raw = localStorage.getItem('chatbots');
+            const arr = raw ? JSON.parse(raw) : [];
+            const onlyVoice = Array.isArray(arr)
+              ? arr.filter((b: any) => (b?.type || 'voice') === 'voice')
+              : [];
+            setAgents(
+              onlyVoice
+                .map((b: any) => ({
+                  id: b.id,
+                  name: b.name || 'Untitled',
+                  type: b.type || 'voice',
+                  language: b.language,
+                  fromE164: b.fromE164,
+                  updatedAt: b.updatedAt || b.createdAt || nowISO(),
+                  createdAt: b.createdAt || nowISO(),
+                }))
+                .sort((a, b) => Date.parse(b.updatedAt!) - Date.parse(a.updatedAt!))
+            );
+          } catch {}
+        }}
+      />
+    );
+  }
+
+  // ====== WIZARD ======
   if (mode === 'wizard') {
     return (
       <section className="w-full">
@@ -160,44 +183,10 @@ export default function VoiceAgentSection() {
     );
   }
 
-  // ====== RENDER: EDITOR ======
-  if (mode === 'editor' && editingId) {
-    return (
-      <VoiceAssistantEditor
-        id={editingId}
-        onExit={closeEditor}
-        onSaved={() => {
-          // refresh gallery data after saving in editor
-          try {
-            const raw = localStorage.getItem('chatbots');
-            const arr = raw ? JSON.parse(raw) : [];
-            const onlyVoice = Array.isArray(arr)
-              ? arr.filter((b: any) => (b?.type || 'voice') === 'voice')
-              : [];
-            setAgents(
-              onlyVoice
-                .map((b: any) => ({
-                  id: b.id,
-                  name: b.name || 'Untitled',
-                  type: b.type || 'voice',
-                  language: b.language,
-                  fromE164: b.fromE164,
-                  updatedAt: b.updatedAt || b.createdAt || nowISO(),
-                  createdAt: b.createdAt || nowISO(),
-                }))
-                .sort((a, b) => Date.parse(b.updatedAt!) - Date.parse(a.updatedAt!))
-            );
-          } catch {}
-        }}
-      />
-    );
-  }
-
-  // ====== RENDER: GALLERY ======
+  // ====== GALLERY ======
   return (
     <section className="w-full">
-      {/* centered wrapper — stays centered even with a fixed sidebar */}
-      <div className="w-full max-w-[1600px] mx-auto px-6 2xl:px-12 pt-8 pb-24">
+      <div className="w-full max-w-[1640px] mx-auto px-6 2xl:px-12 pt-8 pb-24">
         <motion.div {...fadeUp} className="flex items-center justify-between mb-7">
           <h1 className="text-2xl md:text-3xl font-semibold">Voice Agents</h1>
           <button
@@ -208,20 +197,21 @@ export default function VoiceAgentSection() {
           </button>
         </motion.div>
 
-        <div className="mb-8">
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search voice agents…"
-            className="w-full rounded-[10px] bg-[#101314] text-white/95 border border-[#13312b] px-5 py-4 text-[15px] outline-none focus:border-[#00ffc2]"
-          />
-        </div>
+        <motion.div {...fadeUp} className="mb-8">
+          <div className="relative">
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search voice agents…"
+              className="w-full rounded-[10px] bg-[#101314] text-white/95 border border-[#13312b] px-5 py-4 text-[15px] outline-none focus:border-[#00ffc2]"
+            />
+            <Search className="w-4 h-4 absolute right-4 top-1/2 -translate-y-1/2 text-white/60" />
+          </div>
+        </motion.div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-7">
-          {/* Create card */}
+        <motion.div {...fadeUp} className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-7">
           <CreateCard onClick={startWizard} />
 
-          {/* Saved voice agents */}
           {filtered.map((a) => (
             <AgentCard
               key={a.id}
@@ -230,12 +220,12 @@ export default function VoiceAgentSection() {
               onOpen={() => openEditor(a.id)}
             />
           ))}
-        </div>
+        </motion.div>
 
         {filtered.length === 0 && (
-          <div className="mt-12 text-center text-white/60">
+          <motion.div {...fadeUp} className="mt-12 text-center text-white/60">
             No voice agents yet. Click <span className="text-[#00ffc2]">Create Voice Agent</span> to get started.
-          </div>
+          </motion.div>
         )}
       </div>
     </section>
@@ -308,11 +298,7 @@ function AgentCard({
             {[agent.language, agent.fromE164].filter(Boolean).join(' · ') || '—'}
           </div>
         </div>
-        <button
-          onClick={onDelete}
-          className="ml-auto p-1.5 rounded-md hover:bg-[#ff4d4d14]"
-          title="Delete"
-        >
+        <button onClick={onDelete} className="ml-auto p-1.5 rounded-md hover:bg-[#ff4d4d14]" title="Delete">
           <Trash2 className="w-4 h-4 text-white/70 hover:text-[#ff7a7a]" />
         </button>
       </div>
@@ -326,17 +312,15 @@ function AgentCard({
               className="inline-flex items-center gap-2 px-3 py-2 rounded-[10px] text-sm border"
               style={{ borderColor: 'rgba(106,247,209,0.28)', background: 'rgba(0,255,194,0.06)' }}
             >
-              <Phone className="w-4 h-4" /> Call
+              <Phone className="w-4 h-4" /> Test
             </a>
           )}
           <button
             onClick={onOpen}
             className="inline-flex items-center gap-2 px-3 py-2 rounded-[10px] text-sm border hover:translate-y-[-1px] transition"
             style={{ borderColor: 'rgba(106,247,209,0.28)', background: 'rgba(16,19,20,0.90)' }}
-            title="Edit"
           >
-            <Pencil className="w-4 h-4" />
-            Open
+            Open <ArrowRight className="w-4 h-4" />
           </button>
         </div>
       </div>
