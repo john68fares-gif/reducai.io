@@ -13,7 +13,7 @@ import StepV3PromptA from '@/components/voice/steps/StepV3PromptA';
 import StepV4Overview from '@/components/voice/steps/StepV4Overview';
 
 // New
-import VoiceAssistantEditor from '@/components/voice/edit/VoiceAssistantEditor';
+import VoiceAssistantEditor from './VoiceAssistantEditor';
 
 type Agent = {
   id: string;
