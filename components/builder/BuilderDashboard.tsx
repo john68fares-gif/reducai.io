@@ -192,11 +192,10 @@ export default function BuilderDashboard() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  // --- Welcome overlay (per-user) ---
+  // --- Welcome overlay (only on SIGN-UP) ---
   const { data: session, status } = useSession();
   const userId = useMemo(() => (session?.user as any)?.id || '', [session]);
 
-  // flags from URL (after Google sign-up)
   const modeParam = searchParams.get('mode');
   const mode = (modeParam === 'signin' ? 'signin' : 'signup') as 'signup' | 'signin';
   const onboard = searchParams.get('onboard') === '1';
@@ -204,20 +203,14 @@ export default function BuilderDashboard() {
 
   const [welcomeOpen, setWelcomeOpen] = useState(false);
 
-  // client guard (optional: middleware should also protect)
-  useEffect(() => {
-    if (status === 'unauthenticated') router.replace('/login');
-  }, [status, router]);
-
-  // decide if overlay should open over the dashboard
   useEffect(() => {
     if (status !== 'authenticated' || !userId) return;
-    const completed = localStorage.getItem(`user:${userId}:profile:completed`) === '1';
-    if (forceOverlay || onboard || (!completed && mode === 'signup')) setWelcomeOpen(true);
+    if (forceOverlay || (onboard && mode === 'signup')) setWelcomeOpen(true);
   }, [status, userId, forceOverlay, onboard, mode]);
 
   const closeWelcome = () => {
     setWelcomeOpen(false);
+    try { localStorage.setItem(`user:${userId}:profile:completed`, '1'); } catch {}
     const usp = new URLSearchParams(Array.from(searchParams.entries()));
     usp.delete('onboard'); usp.delete('mode'); usp.delete('forceOverlay');
     router.replace(`${pathname}?${usp.toString()}`, { scroll: false });
@@ -386,15 +379,13 @@ export default function BuilderDashboard() {
 
       {viewedBot && <PromptOverlay bot={viewedBot} onClose={() => setViewId(null)} />}
 
-      {/* Welcome overlay floats above the dashboard / Create-a-Build panel */}
+      {/* Welcome overlay over the dashboard (sign-up only) */}
       <OnboardingOverlay open={welcomeOpen} mode={mode} userId={userId} onDone={closeWelcome} />
     </div>
   );
 }
 
 /* --------------------------- Prompt Overlay --------------------------- */
-/* Style matches your ChatWidget: rounded-[30px], dashed green border,
-   white headers. Content uses ONLY Step 1 (header line) + Step 3 (body). */
 
 function buildRawStep1PlusStep3(bot: Bot): string {
   const head = [bot.name, bot.industry, bot.language].filter(Boolean).join('\n');
@@ -423,7 +414,6 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
     URL.revokeObjectURL(url);
   };
 
-  // ChatWidget-like frame
   const FRAME_STYLE: React.CSSProperties = {
     background: 'rgba(13,15,17,0.95)',
     border: '2px dashed rgba(106,247,209,0.3)',
@@ -440,7 +430,6 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: 'rgba(0,0,0,0.5)' }}>
       <div className="relative w-full max-w-[1280px] max-h-[88vh] flex flex-col" style={FRAME_STYLE}>
-        {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 rounded-t-[30px]" style={HEADER_BORDER}>
           <div className="min-w-0">
             <h2 className="text-white text-xl font-semibold truncate">Prompt</h2>
@@ -479,7 +468,6 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
           </div>
         </div>
 
-        {/* Body */}
         <div className="flex-1 overflow-y-auto p-6">
           {!bot.prompt ? (
             <div className="p-5 text-white/80" style={CARD_STYLE}>
@@ -507,7 +495,6 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
           )}
         </div>
 
-        {/* Footer */}
         <div className="px-6 py-4 rounded-b-[30px]" style={{ borderTop: '1px solid rgba(255,255,255,0.3)', background: '#101314' }}>
           <div className="flex justify-end">
             <button
