@@ -1,323 +1,498 @@
+// components/voice/VoiceAssistantEditor.tsx
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import {
-  ArrowLeft, Save, MessageSquare, Mic, Sliders, Wrench, BarChart3, Settings, Code2,
-  Phone, Zap
+  ArrowLeft, Save, Phone, KeyRound, PlugZap, Settings2, Wand2,
+  ChevronDown, Loader2, Check, AlertTriangle, ShieldCheck
 } from 'lucide-react';
 
-/* ---------- Shared look to match your app ---------- */
-const UI = {
-  frame: {
-    background: 'rgba(13,15,17,0.92)',
-    border: '1px solid rgba(106,247,209,0.18)',
-    boxShadow: 'inset 0 0 18px rgba(0,0,0,0.28), 0 0 24px rgba(6,180,140,0.10)',
-    borderRadius: 22,
-  } as React.CSSProperties,
-  card: {
-    background: '#101314',
-    border: '1px solid rgba(255,255,255,0.18)',
-    borderRadius: 18,
-    boxShadow: 'inset 0 0 22px rgba(0,0,0,0.28), 0 10px 40px rgba(0,0,0,0.35)',
-  } as React.CSSProperties,
-  thinBorder: '1px solid rgba(255,255,255,0.14)',
+/* =========================
+   Shared look & helpers
+   ========================= */
+const OUTER: React.CSSProperties = {
+  background: '#0d0f11',
+  border: '1px solid rgba(106,247,209,0.18)',
+  borderRadius: 18, // less rounded (per your request)
+  boxShadow: '0 28px 90px rgba(0,0,0,0.55), 0 0 24px rgba(0,255,194,0.08)', // outside shadow only
 };
 
-type VoiceBuild = {
+const CARD: React.CSSProperties = {
+  background: '#101314',            // solid
+  border: '1px solid rgba(255,255,255,0.16)', // thinner
+  borderRadius: 16,
+  boxShadow: '0 16px 36px rgba(0,0,0,0.38)',  // outside soft shadow
+};
+
+const BTN_OK = '#00ffc2';
+const BTN_OK_HOVER = '#00eab3';
+
+type VoiceAgent = {
   id: string;
-  type: 'voice';
-  name: string;
+  type?: 'voice' | string;
+  name?: string;
+  language?: string;
   model?: string;
-  provider?: 'openai' | string;
-  firstMessage?: string;
-  systemPrompt?: string;
-  temperature?: number;
-  // Voice bits
-  voiceProvider?: 'vapi' | 'elevenlabs' | 'openai';
-  voiceName?: string;
-  // Telephony bits (optional placeholders)
-  twilioSid?: string;
-  twilioAuth?: string;
-  forwardingNumber?: string;
-  // Timestamps
+  fromE164?: string;
+  vcfg?: {
+    provider?: string;
+    voice?: string;
+    greeting?: string;
+    style?: string;
+    rate?: number;
+    pitch?: number;
+    bargeIn?: boolean;
+  };
+  tcfg?: {
+    accountSid?: string;
+    authToken?: string;
+  };
+  prompt?: string;
   createdAt?: string;
   updatedAt?: string;
 };
 
-function nowISO() { return new Date().toISOString(); }
-
-function loadVoiceBuild(id?: string): VoiceBuild {
-  // Everything stays client-only; safe for SSR because this is a client component.
+function readAgent(id: string): VoiceAgent | null {
   try {
     const raw = localStorage.getItem('chatbots');
     const arr = raw ? JSON.parse(raw) : [];
-    const hit = Array.isArray(arr) ? arr.find((b: any) => b.id === id) : null;
-    if (hit) return hit as VoiceBuild;
-  } catch {}
-  // defaults for a new voice build
-  return {
-    id: id || String(Date.now()),
-    type: 'voice',
-    name: 'New Voice Assistant',
-    provider: 'openai',
-    model: 'gpt-4o-mini',
-    firstMessage: 'Hello.',
-    systemPrompt:
-      'You are a polite, concise voice assistant. Keep replies short and ask one question at a time.',
-    temperature: 0.4,
-    voiceProvider: 'vapi',
-    voiceName: 'Elliot',
-    createdAt: nowISO(),
-    updatedAt: nowISO(),
-  };
+    const got = Array.isArray(arr) ? arr.find((b: any) => b.id === id) : null;
+    return got || null;
+  } catch {
+    return null;
+  }
 }
 
-function saveVoiceBuild(v: VoiceBuild) {
+function writeAgent(upd: VoiceAgent) {
   try {
     const raw = localStorage.getItem('chatbots');
     const arr: any[] = raw ? JSON.parse(raw) : [];
-    const i = Array.isArray(arr) ? arr.findIndex((b) => b.id === v.id) : -1;
-    const withStamped: VoiceBuild = { ...v, type: 'voice', updatedAt: nowISO(), createdAt: v.createdAt || nowISO() };
-    if (i >= 0) arr[i] = withStamped; else arr.unshift(withStamped);
+    const i = arr.findIndex((b) => b.id === upd.id);
+    const stamped = { ...upd, updatedAt: new Date().toISOString() };
+    if (i >= 0) arr[i] = { ...arr[i], ...stamped };
+    else arr.unshift(stamped);
     localStorage.setItem('chatbots', JSON.stringify(arr));
   } catch {}
 }
 
-/* Tabs for editor sections (visual only; keep it simple & fast) */
-const TABS = [
-  { key: 'model', label: 'Model', icon: Sliders },
-  { key: 'voice', label: 'Voice', icon: Mic },
-  { key: 'transcriber', label: 'Transcriber', icon: MessageSquare },
-  { key: 'tools', label: 'Tools', icon: Wrench },
-  { key: 'analysis', label: 'Analysis', icon: BarChart3 },
-  { key: 'advanced', label: 'Advanced', icon: Settings },
-  { key: 'widget', label: 'Widget', icon: Code2 },
-] as const;
-type TabKey = typeof TABS[number]['key'];
+function FieldLabel({ children }: { children: React.ReactNode }) {
+  return <div className="text-xs text-white/70 mb-1">{children}</div>;
+}
 
-export default function VoiceAssistantEditor(props: {
-  agentId?: string;                 // optional: if you pass it, we preload
-  onBack?: () => void;              // optional back to gallery
-  onSaved?: (agent: VoiceBuild) => void; // optional callback
+function Line() {
+  return <div className="h-px w-full bg-white/10 my-3" />;
+}
+
+/* --------- Collapsible section ---------- */
+function Section({
+  title,
+  icon,
+  defaultOpen = true,
+  children,
+}: {
+  title: string;
+  icon?: React.ReactNode;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
 }) {
-  const [tab, setTab] = useState<TabKey>('model');
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div style={CARD} className="overflow-hidden">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between px-6 py-4 text-left hover:bg-white/5 transition"
+      >
+        <div className="flex items-center gap-2 text-white font-semibold">
+          {icon} <span>{title}</span>
+        </div>
+        <ChevronDown
+          className={`w-5 h-5 text-white/80 transition-transform ${open ? 'rotate-180' : ''}`}
+        />
+      </button>
+
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.18 }}
+          >
+            <div className="px-6 pb-5 pt-2">{children}</div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+/* --------- Toast ---------- */
+function Toast({ text, tone='ok', onClose }:{ text:string; tone?:'ok'|'warn'|'err'; onClose:()=>void }) {
+  useEffect(()=>{ const t = setTimeout(onClose, 2000); return ()=>clearTimeout(t); },[onClose]);
+  const border = tone==='ok' ? 'rgba(106,247,209,0.40)' : tone==='warn' ? 'rgba(255,220,120,0.40)' : 'rgba(255,120,120,0.40)';
+  return (
+    <div className="fixed bottom-6 right-6 z-[9999]">
+      <div
+        className="px-4 py-3 rounded-[14px] text-sm text-white/95 flex items-center gap-2"
+        style={{ background:'rgba(16,19,20,0.95)', border:`1px solid ${border}`, boxShadow:'0 10px 30px rgba(0,0,0,0.45)'}}
+      >
+        {tone==='ok' ? <Check className="w-4 h-4 text-[#6af7d1]" /> : <AlertTriangle className="w-4 h-4 text-amber-300" />}
+        <span>{text}</span>
+      </div>
+    </div>
+  );
+}
+
+/* =========================
+   Editor
+   ========================= */
+export default function VoiceAssistantEditor({
+  agentId,
+  onBack,
+}: {
+  agentId: string;
+  onBack: () => void;
+}) {
+  const [agent, setAgent] = useState<VoiceAgent | null>(null);
   const [saving, setSaving] = useState(false);
-  const [savedToast, setSavedToast] = useState('');
-  const [v, setV] = useState<VoiceBuild>(() => loadVoiceBuild(props.agentId));
+  const [toast, setToast] = useState<{ text: string; tone?: 'ok' | 'warn' | 'err' } | null>(null);
+  const [attaching, setAttaching] = useState(false);
+
+  /* form state */
+  const [name, setName] = useState('');
+  const [language, setLanguage] = useState('English');
+  const [model, setModel] = useState('gpt-4o-mini');
+  const [voice, setVoice] = useState('Elliot');
+  const [greeting, setGreeting] = useState('Hello! How can I help today?');
+  const [style, setStyle] = useState('friendly, concise');
+  const [rate, setRate] = useState(100);
+  const [pitch, setPitch] = useState(0);
+  const [bargeIn, setBarge] = useState(true);
+
+  const [sid, setSid] = useState('');
+  const [token, setToken] = useState('');
+  const [phone, setPhone] = useState('');
+  const [fromE164, setFrom] = useState('');
 
   useEffect(() => {
-    // Preload if agentId changes
-    if (props.agentId) setV(loadVoiceBuild(props.agentId));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.agentId]);
+    const a = readAgent(agentId);
+    setAgent(a);
+    const v = a?.vcfg || {};
+    setName(a?.name || '');
+    setLanguage(a?.language || 'English');
+    setModel(a?.model || 'gpt-4o-mini');
+    setVoice(v.voice || 'Elliot');
+    setGreeting(v.greeting || 'Hello! How can I help today?');
+    setStyle(v.style || 'friendly, concise');
+    setRate(v.rate ?? 100);
+    setPitch(v.pitch ?? 0);
+    setBarge(v.bargeIn ?? true);
+    setFrom(a?.fromE164 || '');
+    const t = a?.tcfg || {};
+    setSid(t.accountSid || '');
+    setToken(t.authToken || '');
+  }, [agentId]);
 
-  function onSave() {
+  function saveAll() {
+    if (!agent) return;
     setSaving(true);
-    saveVoiceBuild(v);
+    const next: VoiceAgent = {
+      ...agent,
+      type: 'voice',
+      name,
+      language,
+      model,
+      fromE164,
+      vcfg: { provider: 'vapi', voice, greeting, style, rate, pitch, bargeIn },
+      tcfg: { accountSid: sid, authToken: token },
+    };
+    writeAgent(next);
+    setAgent(next);
     setSaving(false);
-    setSavedToast('Saved!');
-    setTimeout(() => setSavedToast(''), 1400);
-    props.onSaved?.(v);
+    setToast({ text: 'Changes saved.', tone: 'ok' });
   }
 
-  /* ---------- Simple cards per tab (practical subset) ---------- */
-  const ModelTab = (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      <div style={UI.card} className="p-4 space-y-3">
-        <div className="text-white/80 text-sm">Provider</div>
-        <select
-          value={v.provider || 'openai'}
-          onChange={(e) => setV({ ...v, provider: e.target.value as any })}
-          className="h-[42px] rounded-[12px] bg-black/30 border border-white/20 px-3 text-white outline-none focus:border-[#6af7d1]"
-        >
-          <option value="openai">OpenAI</option>
-        </select>
-
-        <div className="text-white/80 text-sm pt-2">Model</div>
-        <select
-          value={v.model || 'gpt-4o-mini'}
-          onChange={(e) => setV({ ...v, model: e.target.value })}
-          className="h-[42px] rounded-[12px] bg-black/30 border border-white/20 px-3 text-white outline-none focus:border-[#6af7d1]"
-        >
-          <option value="gpt-4o-mini">gpt-4o-mini</option>
-          <option value="gpt-4o">gpt-4o</option>
-          <option value="gpt-4.1">gpt-4.1</option>
-        </select>
-
-        <div className="text-white/80 text-sm pt-2">First Message</div>
-        <input
-          value={v.firstMessage || ''}
-          onChange={(e) => setV({ ...v, firstMessage: e.target.value })}
-          className="w-full h-[42px] rounded-[12px] bg-black/30 border border-white/20 px-3 text-white outline-none focus:border-[#6af7d1]"
-        />
-
-        <div className="text-white/80 text-sm pt-2">System Prompt</div>
-        <textarea
-          rows={8}
-          value={v.systemPrompt || ''}
-          onChange={(e) => setV({ ...v, systemPrompt: e.target.value })}
-          className="w-full rounded-[12px] bg-black/30 border border-white/20 px-3 py-2 text-white outline-none focus:border-[#6af7d1]"
-        />
-
-        <div className="text-white/80 text-sm pt-2">Temperature</div>
-        <input
-          type="range" min={0} max={1} step={0.1}
-          value={v.temperature ?? 0.4}
-          onChange={(e) => setV({ ...v, temperature: Number(e.target.value) })}
-          className="w-full"
-        />
-        <div className="text-xs text-white/60">Current: {v.temperature?.toFixed(1)}</div>
-      </div>
-
-      <div style={UI.card} className="p-4 space-y-3">
-        <div className="text-white/80 text-sm">Assistant Name</div>
-        <input
-          value={v.name}
-          onChange={(e) => setV({ ...v, name: e.target.value })}
-          className="w-full h-[42px] rounded-[12px] bg-black/30 border border-white/20 px-3 text-white outline-none focus:border-[#6af7d1]"
-        />
-
-        <div className="text-white/70 text-xs pt-2">
-          Saved locally. When you click <span className="text-[#6af7d1] font-semibold">Save</span>, this build
-          appears in your Voice Agents gallery.
-        </div>
-      </div>
-    </div>
-  );
-
-  const VoiceTab = (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      <div style={UI.card} className="p-4 space-y-3">
-        <div className="text-white/80 text-sm">Voice Provider</div>
-        <select
-          value={v.voiceProvider}
-          onChange={(e) => setV({ ...v, voiceProvider: e.target.value as any })}
-          className="h-[42px] rounded-[12px] bg-black/30 border border-white/20 px-3 text-white outline-none focus:border-[#6af7d1]"
-        >
-          <option value="vapi">Vapi</option>
-          <option value="elevenlabs">ElevenLabs</option>
-          <option value="openai">OpenAI</option>
-        </select>
-
-        <div className="text-white/80 text-sm pt-2">Voice</div>
-        <input
-          value={v.voiceName || ''}
-          onChange={(e) => setV({ ...v, voiceName: e.target.value })}
-          placeholder="Elliot"
-          className="w-full h-[42px] rounded-[12px] bg-black/30 border border-white/20 px-3 text-white outline-none focus:border-[#6af7d1]"
-        />
-      </div>
-
-      <div style={UI.card} className="p-4 space-y-3">
-        <div className="text-white/80 text-sm">Telephony (optional)</div>
-        <input
-          placeholder="Twilio Account SID"
-          value={v.twilioSid || ''}
-          onChange={(e) => setV({ ...v, twilioSid: e.target.value })}
-          className="w-full h-[42px] rounded-[12px] bg-black/30 border border-white/20 px-3 text-white outline-none focus:border-[#6af7d1]"
-        />
-        <input
-          placeholder="Twilio Auth Token"
-          value={v.twilioAuth || ''}
-          onChange={(e) => setV({ ...v, twilioAuth: e.target.value })}
-          className="w-full h-[42px] rounded-[12px] bg-black/30 border border-white/20 px-3 text-white outline-none focus:border-[#6af7d1]"
-        />
-        <input
-          placeholder="Forwarding Number (optional, E.164)"
-          value={v.forwardingNumber || ''}
-          onChange={(e) => setV({ ...v, forwardingNumber: e.target.value })}
-          className="w-full h-[42px] rounded-[12px] bg-black/30 border border-white/20 px-3 text-white outline-none focus:border-[#6af7d1]"
-        />
-      </div>
-    </div>
-  );
-
-  const Placeholder = (title: string, body = 'Coming soon — keep editing Model & Voice and click Save.') => (
-    <div style={UI.card} className="p-5">
-      <div className="text-white font-medium mb-1">{title}</div>
-      <div className="text-white/70 text-sm">{body}</div>
-    </div>
-  );
-
-  const tabContent = useMemo(() => {
-    switch (tab) {
-      case 'model': return ModelTab;
-      case 'voice': return VoiceTab;
-      case 'transcriber': return Placeholder('Transcriber');
-      case 'tools': return Placeholder('Tools');
-      case 'analysis': return Placeholder('Analysis / Summary / Structured Data');
-      case 'advanced': return Placeholder('Advanced settings');
-      case 'widget': return Placeholder('Widget');
-      default: return null;
+  async function attachNumber() {
+    if (!sid || !token || !phone) {
+      setToast({ text: 'Enter Twilio SID, Auth Token and Phone number first.', tone: 'warn' });
+      return;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, v]);
+    setAttaching(true);
+    try {
+      const body = {
+        accountSid: sid,
+        authToken: token,
+        phoneNumber: phone,
+        agentId,
+        language,
+        voice,
+        greeting,
+        style,
+        rate,
+        pitch,
+        bargeIn,
+      };
+      const r = await fetch('/api/telephony/attach-number', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const j = await r.json();
+      if (!j?.ok) throw new Error(j?.error || 'Attach failed');
+      setFrom(phone);
+      if (agent) writeAgent({ ...agent, fromE164: phone });
+      setToast({ text: 'Number attached to webhook successfully.', tone: 'ok' });
+    } catch (e: any) {
+      setToast({ text: e?.message || 'Attach failed', tone: 'err' });
+    } finally {
+      setAttaching(false);
+    }
+  }
 
   return (
-    <section className="w-full">
-      <div className="w-full max-w-[1400px] mx-auto px-6 2xl:px-12 pt-6 pb-16">
-        {/* Page Title (like your other screens) */}
-        <div className="mb-6">
-          <div className="text-[12px] text-white/55 mb-1">Edit Assistant</div>
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl flex items-center justify-center"
-                 style={{ background:'rgba(0,255,194,0.10)', border:'1px solid rgba(0,255,194,0.22)' }}>
-              <Mic className="w-5 h-5 text-[#6af7d1]" />
-            </div>
-            <h1 className="text-2xl md:text-[28px] leading-tight">
-              <span className="text-white font-semibold">{v.name || 'Voice Assistant'}</span>
-              <span className="text-white/50"> — Voice</span>
+    <section className="w-full font-movatif text-white">
+      {/* Page title (matches other pages) */}
+      <div className="w-full max-w-[1680px] mx-auto px-6 2xl:px-12 pt-8 pb-6">
+        <div className="flex items-center justify-between mb-5">
+          <div>
+            <div className="text-sm text-white/60">Edit Assistant</div>
+            <h1 className="mt-1 text-[32px] md:text-[36px] tracking-tight font-semibold">
+              Voice Assistant Editor
             </h1>
-          </div>
-        </div>
-
-        {/* Top bar actions */}
-        <div className="flex items-center gap-3 mb-4">
-          <button
-            onClick={props.onBack}
-            className="inline-flex items-center gap-2 px-3 h-[40px] rounded-[12px] text-white/90 hover:bg-white/10"
-            style={{ border: UI.thinBorder }}
-          >
-            <ArrowLeft className="w-4 h-4" />
-            Back
-          </button>
-          <button
-            onClick={onSave}
-            disabled={saving}
-            className="inline-flex items-center gap-2 px-4 h-[40px] rounded-[15px] font-semibold transition"
-            style={{ background:'#00ffc2', color:'#081011', boxShadow:'0 0 10px rgba(106,247,209,0.35)' }}
-          >
-            <Save className="w-4 h-4" />
-            Save
-          </button>
-          {savedToast && (
-            <span className="text-sm text-[#6af7d1] ml-2">{savedToast}</span>
-          )}
-        </div>
-
-        {/* Editor frame */}
-        <div style={UI.frame} className="p-4 md:p-5">
-          {/* Tabs */}
-          <div className="flex flex-wrap gap-2 mb-4">
-            {TABS.map(({ key, label, icon: Icon }) => (
-              <button
-                key={key}
-                onClick={() => setTab(key)}
-                className={`inline-flex items-center gap-2 px-3 h-[36px] rounded-[12px] text-sm ${
-                  tab === key ? 'bg-[#0e3e35] text-white' : 'text-white/80 hover:bg-white/5'
-                }`}
-                style={{ border: UI.thinBorder }}
-              >
-                <Icon className="w-4 h-4 text-[#6af7d1]" />
-                {label}
-              </button>
-            ))}
+            <div className="text-white/65 text-sm mt-1">
+              Configure model, voice, telephony, and behavior. Click <span className="text-white/90">Save</span> to persist changes.
+            </div>
           </div>
 
-          {/* Content */}
-          <div className="mt-3">{tabContent}</div>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={onBack}
+              className="inline-flex items-center gap-2 rounded-[12px] border border-white/15 px-4 py-2 hover:bg-white/10 transition"
+            >
+              <ArrowLeft className="w-4 h-4" /> Back
+            </button>
+            <button
+              onClick={saveAll}
+              disabled={saving}
+              className="inline-flex items-center gap-2 px-5 py-2 rounded-[14px] font-semibold"
+              style={{ background: BTN_OK, color: '#0b0c10', opacity: saving ? 0.7 : 1 }}
+              onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_OK_HOVER)}
+              onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_OK)}
+            >
+              <Save className="w-4 h-4" />
+              Save
+            </button>
+          </div>
         </div>
       </div>
+
+      {/* Editor body */}
+      <div className="w-full max-w-[1680px] mx-auto px-6 2xl:px-12 pb-20">
+        {/* Main frame */}
+        <div className="p-7" style={OUTER}>
+          {/* Box title (agent name stays at the top of the box, like your pattern) */}
+          <div className="flex items-center justify-between mb-6">
+            <div className="min-w-0">
+              <div className="text-[13px] text-white/60">Assistant</div>
+              <div className="text-[22px] md:text-[24px] font-semibold truncate">
+                {name || 'Untitled'} <span className="text-white/50">• Voice</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-7">
+            {/* Left column */}
+            <div className="lg:col-span-2 space-y-7">
+              <Section title="Model & Basics" icon={<Settings2 className="w-4 h-4 text-[#6af7d1]" />}>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <FieldLabel>Assistant Name</FieldLabel>
+                    <input
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder="e.g., Riley (Voice)"
+                      className="w-full h-[44px] rounded-[14px] bg-[#101314] text-white px-3 border border-white/15 outline-none focus:border-[#00ffc2]"
+                    />
+                  </div>
+                  <div>
+                    <FieldLabel>Language</FieldLabel>
+                    <input
+                      value={language}
+                      onChange={(e) => setLanguage(e.target.value)}
+                      placeholder="English"
+                      className="w-full h-[44px] rounded-[14px] bg-[#101314] text-white px-3 border border-white/15 outline-none focus:border-[#00ffc2]"
+                    />
+                  </div>
+                  <div>
+                    <FieldLabel>Model</FieldLabel>
+                    <select
+                      value={model}
+                      onChange={(e) => setModel(e.target.value)}
+                      className="w-full h-[44px] rounded-[14px] bg-[#101314] text-white px-3 border border-white/15 outline-none focus:border-[#00ffc2]"
+                    >
+                      <option value="gpt-4o-mini">gpt-4o-mini (recommended)</option>
+                      <option value="gpt-4o">gpt-4o</option>
+                      <option value="gpt-4.1">gpt-4.1</option>
+                    </select>
+                  </div>
+                </div>
+              </Section>
+
+              <Section title="Voice" icon={<Wand2 className="w-4 h-4 text-[#6af7d1]" />}>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <FieldLabel>Voice</FieldLabel>
+                    <input
+                      value={voice}
+                      onChange={(e) => setVoice(e.target.value)}
+                      placeholder="Elliot / Polly.Joanna / etc."
+                      className="w-full h-[44px] rounded-[14px] bg-[#101314] text-white px-3 border border-white/15 outline-none focus:border-[#00ffc2]"
+                    />
+                  </div>
+                  <div>
+                    <FieldLabel>Greeting</FieldLabel>
+                    <input
+                      value={greeting}
+                      onChange={(e) => setGreeting(e.target.value)}
+                      placeholder="Hello! How can I help today?"
+                      className="w-full h-[44px] rounded-[14px] bg-[#101314] text-white px-3 border border-white/15 outline-none focus:border-[#00ffc2]"
+                    />
+                  </div>
+                  <div>
+                    <FieldLabel>Style</FieldLabel>
+                    <input
+                      value={style}
+                      onChange={(e) => setStyle(e.target.value)}
+                      placeholder="friendly, concise"
+                      className="w-full h-[44px] rounded-[14px] bg-[#101314] text-white px-3 border border-white/15 outline-none focus:border-[#00ffc2]"
+                    />
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <FieldLabel>Rate</FieldLabel>
+                      <input
+                        type="number"
+                        value={rate}
+                        onChange={(e) => setRate(Number(e.target.value))}
+                        className="w-full h-[44px] rounded-[14px] bg-[#101314] text-white px-3 border border-white/15 outline-none focus:border-[#00ffc2]"
+                      />
+                    </div>
+                    <div>
+                      <FieldLabel>Pitch</FieldLabel>
+                      <input
+                        type="number"
+                        value={pitch}
+                        onChange={(e) => setPitch(Number(e.target.value))}
+                        className="w-full h-[44px] rounded-[14px] bg-[#101314] text-white px-3 border border-white/15 outline-none focus:border-[#00ffc2]"
+                      />
+                    </div>
+                    <div className="flex items-end">
+                      <label className="inline-flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={bargeIn}
+                          onChange={(e) => setBarge(e.target.checked)}
+                          className="accent-[#00ffc2]"
+                        />
+                        <span className="text-white/85 text-sm">Barge-in</span>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              </Section>
+
+              <Section title="Call Behavior (summary)" icon={<ShieldCheck className="w-4 h-4 text-[#6af7d1]" />}>
+                <div className="text-sm text-white/85 leading-relaxed">
+                  Keep replies short and ask one question at a time. If the caller drops mid-flow, ask for a callback number.
+                  You can extend this later from your prompt/behavior blocks.
+                </div>
+              </Section>
+            </div>
+
+            {/* Right column */}
+            <div className="space-y-7">
+              <Section title="Telephony (Twilio)" icon={<PlugZap className="w-4 h-4 text-[#6af7d1]" />} defaultOpen>
+                <div className="grid gap-3">
+                  <div>
+                    <FieldLabel>Account SID</FieldLabel>
+                    <input
+                      value={sid}
+                      onChange={(e) => setSid(e.target.value)}
+                      placeholder="ACxxxxxxxx…"
+                      className="w-full h-[44px] rounded-[14px] bg-[#101314] text-white px-3 border border-white/15 outline-none focus:border-[#00ffc2]"
+                    />
+                  </div>
+                  <div>
+                    <FieldLabel>Auth Token</FieldLabel>
+                    <input
+                      type="password"
+                      value={token}
+                      onChange={(e) => setToken(e.target.value)}
+                      className="w-full h-[44px] rounded-[14px] bg-[#101314] text-white px-3 border border-white/15 outline-none focus:border-[#00ffc2]"
+                    />
+                  </div>
+                  <Line />
+                  <div>
+                    <FieldLabel>Phone Number (E.164)</FieldLabel>
+                    <input
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      placeholder="+15551234567"
+                      className="w-full h-[44px] rounded-[14px] bg-[#101314] text-white px-3 border border-white/15 outline-none focus:border-[#00ffc2]"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={attachNumber}
+                      disabled={attaching}
+                      className="inline-flex items-center gap-2 px-4 py-2 rounded-[14px] font-semibold"
+                      style={{ background: BTN_OK, color: '#0b0c10', opacity: attaching ? 0.7 : 1 }}
+                      onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_OK_HOVER)}
+                      onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_OK)}
+                    >
+                      {attaching ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
+                      Attach Number
+                    </button>
+
+                    {fromE164 && (
+                      <a
+                        href={`tel:${fromE164}`}
+                        className="inline-flex items-center gap-2 px-3 py-2 rounded-[14px] text-sm border border-white/15 hover:bg-white/10"
+                      >
+                        <Phone className="w-4 h-4" /> Test
+                      </a>
+                    )}
+                  </div>
+
+                  {fromE164 && (
+                    <div className="text-xs text-white/65">
+                      Attached number: <span className="text-white/85">{fromE164}</span>
+                    </div>
+                  )}
+                </div>
+              </Section>
+
+              <Section title="Save" icon={<Save className="w-4 h-4 text-[#6af7d1]" />} defaultOpen={false}>
+                <div className="text-sm text-white/85 mb-3">
+                  Save your changes to update the local build record and timestamp it.
+                </div>
+                <button
+                  onClick={saveAll}
+                  disabled={saving}
+                  className="inline-flex items-center gap-2 px-5 py-2 rounded-[14px] font-semibold"
+                  style={{ background: BTN_OK, color: '#0b0c10', opacity: saving ? 0.7 : 1 }}
+                >
+                  <Save className="w-4 h-4" /> Save Changes
+                </button>
+              </Section>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {toast && <Toast text={toast.text} tone={toast.tone} onClose={() => setToast(null)} />}
     </section>
   );
 }
