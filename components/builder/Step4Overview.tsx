@@ -1,44 +1,36 @@
 // components/builder/Step4Overview.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Check, AlertCircle, Loader2, Sparkles, ArrowLeft,
-  Cpu, BookText, FileText, KeyRound, Library, Settings2
+  Cpu, BookText, FileText, KeyRound, Library, Settings2, Bot, Play, Terminal
 } from 'lucide-react';
 import StepProgress from './StepProgress';
 import { s, st } from '@/utils/safe';
 
-type Props = { onBack?: () => void; onFinish?: () => void };
-
-/* === Outer card style: matches Step 3 tiles === */
+/* =================== Styles (match Step 3 vibe) =================== */
 const CARD_OUTER: React.CSSProperties = {
   background: 'rgba(13,15,17,0.92)',
   border: '1px solid rgba(106,247,209,0.18)',
-  boxShadow:
-    'inset 0 0 22px rgba(0,0,0,0.28), 0 0 18px rgba(106,247,209,0.05), 0 0 22px rgba(0,255,194,0.05)',
+  boxShadow: 'inset 0 0 22px rgba(0,0,0,0.28), 0 0 18px rgba(106,247,209,0.05), 0 0 22px rgba(0,255,194,0.05)',
   borderRadius: 28,
 };
-
-/* === Inner card style (same as Step 3 preview/modal cards) === */
 const CARD_INNER: React.CSSProperties = {
   background: '#101314',
   border: '1px solid rgba(255,255,255,0.30)',
   borderRadius: 20,
   boxShadow: 'inset 0 0 12px rgba(0,0,0,0.38)',
 };
-
-/* === Radial glow orb (Step 3 vibe) === */
 const ORB_STYLE: React.CSSProperties = {
   background: 'radial-gradient(circle, rgba(106,247,209,0.10) 0%, transparent 70%)',
   filter: 'blur(38px)',
 };
-
-/* === Buttons: same palette/hover as Step 3 === */
 const BTN_GREEN = '#59d9b3';
 const BTN_GREEN_HOVER = '#54cfa9';
 const BTN_DISABLED = '#2e6f63';
 
+/* =================== Read builder steps =================== */
 function getStep1() {
   try { return JSON.parse(localStorage.getItem('builder:step1') || 'null') || {}; } catch { return {}; }
 }
@@ -49,30 +41,24 @@ function getStep3() {
   try { return JSON.parse(localStorage.getItem('builder:step3') || 'null') || {}; } catch { return {}; }
 }
 
-/* === Updated to include header (name / industry / language) and always keep COMPANY FAQ === */
+/* =================== Compile final prompt =================== */
+/** 3-line header then sections. You can tweak labels freely. */
 function mergePrompt(): string {
   const s1 = getStep1();
   const s3 = getStep3();
 
-  // 3-line header exactly like requested
-  const header = [st(s1?.name), st(s1?.industry), st(s1?.language)]
-    .filter(Boolean)
-    .join('\n');
-
+  const header = [st(s1?.name), st(s1?.industry), st(s1?.language)].filter(Boolean).join('\n');
   const industry = st(s1?.industry, 'your industry');
   const language = st(s1?.language, 'English');
-
-  // Always include the FAQ header—even if empty
-  const faqBody = (s(s3?.company) || '').trim();
 
   const sections = [
     header,
 `**DESCRIPTION:**
 
 - **Language of prompt:** ${language}
-- **Communication Level:** Informal and friendly tone, like two friends texting. Grade 3 according to the Hemingway app.
-- **Core identity and personality of the AI:** Friendly and engaging virtual receptionist.
-- **Primary purpose and expertise:** To assist clients in their ${industry} journey, provide expert advice, and facilitate the process.`,
+- **Communication level:** Friendly, concise, grade ~3.
+- **Core identity/persona:** Helpful website assistant.
+- **Primary purpose:** Support users in their ${industry} journey.`,
 `**AI Description:**
 ${s(s3?.description)}`,
 `**RULES AND GUIDELINES:**
@@ -80,11 +66,28 @@ ${s(s3?.rules)}`,
 `**QUESTION FLOW:**
 ${s(s3?.flow)}`,
 `**COMPANY FAQ:**
-${faqBody}`,
+${(s(s3?.company) || '').trim()}`,
   ];
 
   return sections.filter(Boolean).join('\n\n').trim();
 }
+
+/* =================== Key resolution (user-owned) =================== */
+function resolveUserOpenAIKey(): string {
+  try {
+    const s2 = JSON.parse(localStorage.getItem('builder:step2') || 'null') || {};
+    if (typeof s2?.openaiKey === 'string' && s2.openaiKey.trim()) return s2.openaiKey.trim();
+    // fallback legacy stores
+    const v1 = JSON.parse(localStorage.getItem('apiKeys.v1') || '[]');
+    if (Array.isArray(v1) && v1.length) return v1.sort((a, b) => (b?.createdAt ?? 0) - (a?.createdAt ?? 0))[0]?.key || '';
+    const generic = JSON.parse(localStorage.getItem('apiKeys') || '[]');
+    if (Array.isArray(generic) && generic.length) return generic[0]?.key || '';
+  } catch {}
+  return '';
+}
+
+/* =================== Component =================== */
+type Props = { onBack?: () => void; onFinish?: () => void };
 
 export default function Step4Overview({ onBack, onFinish }: Props) {
   const s1 = useMemo(getStep1, []);
@@ -93,29 +96,36 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
   const finalPrompt = useMemo(mergePrompt, []);
   const chars = finalPrompt.length;
   const maxChars = 32000;
-
   const estTokens = Math.max(1, Math.round(chars / 4));
+
+  // **Pricing purely informational**; adjust to your plan
   const inputCostPerMTok = 2.5;
   const outputCostPerMTok = 10.0;
 
+  // UI state
   const [loading, setLoading] = useState(false);
   const [loadingMsg, setLoadingMsg] = useState('Generating AI…');
   const [done, setDone] = useState(false);
+  const [assistantId, setAssistantId] = useState<string | null>(null);
+  const [testBusy, setTestBusy] = useState(false);
+  const [testReply, setTestReply] = useState<string>('');
 
+  // Requirement checks
   const checks = {
     name: !!st(s1?.name),
     industry: !!st(s1?.industry),
     language: !!st(s1?.language),
     template: !!(s1?.type || s1?.botType || s1?.aiType),
     model: !!s2?.model,
-    apiKey: !!s2?.apiKeyId || !!s2?.openaiKey,
+    apiKey: !!resolveUserOpenAIKey(),
     description: !!st(s3?.description),
     flow: !!st(s3?.flow),
     rules: !!st(s3?.rules),
-    company: true,
+    company: true, // optional
   };
   const ready = Object.values(checks).every(Boolean);
 
+  // gentle status cycling while "loading"
   useEffect(() => {
     if (!loading) return;
     const msgs = [
@@ -131,47 +141,77 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
     return () => clearInterval(id);
   }, [loading]);
 
-  const validate = () => {
+  function validate(): string | null {
     if (!checks.name) return 'Please set an AI Name in Step 1.';
     if (!checks.industry) return 'Please set an industry in Step 1.';
     if (!checks.language) return 'Please choose a language in Step 1.';
+    if (!checks.template) return 'Please choose a template in Step 1.';
     if (!checks.model) return 'Please pick a model in Step 2.';
-    if (!checks.apiKey) return 'Please add an API key in Step 2.';
+    if (!checks.apiKey) return 'Please add an OpenAI API key in Step 2.';
     if (!checks.description || !checks.rules || !checks.flow)
       return 'Please complete Description, Rules, and Conversation Flow in Step 3.';
     return null;
-  };
+  }
 
   async function handleGenerate() {
     const err = validate();
     if (err) { alert(err); return; }
 
-    const minMs = 15000, maxMs = 30000;
+    const minMs = 11000, maxMs = 22000;
     const uiDelay = Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
 
     setLoading(true);
     setDone(false);
+    setTestReply('');
 
     try {
-      const bots = JSON.parse(localStorage.getItem('chatbots') || '[]') as any[];
-
-      const build = {
+      // 1) Save build locally
+      const build: any = {
         id: crypto?.randomUUID?.() || String(Date.now()),
         name: st(s1?.name, 'Untitled Bot'),
-        type: st(s1?.type || s1?.botType || s1?.aiType, 'ai automation'),
+        type: st(s1?.type || s1?.botType || s1?.aiType, 'text'),
         industry: st(s1?.industry),
         language: st(s1?.language, 'English'),
         model: st(s2?.model, 'gpt-4o-mini'),
-        prompt: finalPrompt,
-        thumbnail: '',
+        prompt: finalPrompt, // exact compiled prompt
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
 
-      bots.unshift(build);
-      localStorage.setItem('chatbots', JSON.stringify(bots));
+      const arr = JSON.parse(localStorage.getItem('chatbots') || '[]');
+      arr.unshift(build);
+      localStorage.setItem('chatbots', JSON.stringify(arr));
       localStorage.setItem('builder:cleanup', '1');
 
+      // 2) Sync to OpenAI Assistants (user-owned key)
+      const userKey = resolveUserOpenAIKey();
+      if (userKey) {
+        const syncRes = await fetch('/api/assistants/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-api-key': userKey },
+          body: JSON.stringify({
+            assistantId: build.assistantId || undefined,
+            name: build.name,
+            model: build.model,           // e.g., 'gpt-4o' or 'gpt-4.1' — exact Step 2 value
+            instructions: finalPrompt,
+            metadata: { buildId: build.id },
+          }),
+        });
+        const sync = await syncRes.json();
+        if (sync?.ok && sync?.assistantId) {
+          build.assistantId = sync.assistantId;
+          setAssistantId(sync.assistantId);
+
+          // Update last-saved build with assistantId
+          const cur = JSON.parse(localStorage.getItem('chatbots') || '[]');
+          if (Array.isArray(cur) && cur[0]?.id === build.id) {
+            cur[0] = { ...cur[0], assistantId: sync.assistantId };
+            localStorage.setItem('chatbots', JSON.stringify(cur));
+          }
+        }
+      }
+
+      // 3) keep the loader on for a short, pleasant delay
       await new Promise(r => setTimeout(r, uiDelay));
 
       setLoading(false);
@@ -183,16 +223,46 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
     }
   }
 
+  async function handleTestInAssistants() {
+    const key = resolveUserOpenAIKey();
+    const id = assistantId || (() => {
+      // try to pull the latest build’s assistantId as fallback
+      try {
+        const cur = JSON.parse(localStorage.getItem('chatbots') || '[]');
+        return cur[0]?.assistantId || null;
+      } catch { return null; }
+    })();
+
+    if (!key) { alert('Add an OpenAI API key in Step 2 first.'); return; }
+    if (!id) { alert('No assistantId yet. Click Generate AI first.'); return; }
+
+    setTestBusy(true);
+    setTestReply('');
+    try {
+      const r = await fetch('/api/assistants/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': key },
+        body: JSON.stringify({ assistantId: id, message: 'Say hello and summarize your purpose in one short line.' }),
+      });
+      const j = await r.json();
+      if (j?.ok) setTestReply(j.reply);
+      else setTestReply(j?.error || 'Assistants test failed.');
+    } catch {
+      setTestReply('Assistants test failed.');
+    } finally {
+      setTestBusy(false);
+    }
+  }
+
   return (
     <div className="min-h-screen bg-[#0b0c10] text-white font-movatif">
       <div className="max-w-6xl mx-auto px-6 md:px-8 pt-10 pb-24">
-        {/* Step header matches Step 3 */}
         <StepProgress current={4} />
 
         <div className="flex items-center justify-between mb-8">
           <div>
             <h1 className="text-3xl md:text-4xl font-semibold tracking-tight">Final Review</h1>
-            <div className="text-white/70 mt-1 text-sm">Review your AI configuration and generate your assistant</div>
+            <div className="text-white/70 mt-1 text-sm">Review your configuration and generate your assistant</div>
           </div>
           <div className="text-sm text-white/60 hidden md:block">Step 4 of 4</div>
         </div>
@@ -209,7 +279,7 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                 <Info label="AI Name" value={s1?.name || '—'} icon={<FileText className="w-3.5 h-3.5" />} />
                 <Info label="Industry" value={s1?.industry || '—'} icon={<Library className="w-3.5 h-3.5" />} />
-                <Info label="Template" value={s1?.type ? cap(s1.type) : '—'} icon={<BookText className="w-3.5 h-3.5" />} />
+                <Info label="Template" value={cap(s1?.type || s1?.botType || s1?.aiType)} icon={<BookText className="w-3.5 h-3.5" />} />
                 <Info label="Model" value={s2?.model || '—'} icon={<Cpu className="w-3.5 h-3.5" />} />
               </div>
             </div>
@@ -229,7 +299,7 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
               </div>
             </div>
 
-            {/* API Configuration */}
+            {/* API Configuration (informational) */}
             <div style={CARD_OUTER} className="p-6 rounded-[28px] relative">
               <div aria-hidden className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full" style={ORB_STYLE} />
               <div className="flex items-center gap-2 mb-4 text-white/90 font-semibold">
@@ -267,7 +337,7 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
                 <Req ok={checks.language} label="Language" />
                 <Req ok={checks.template} label="Template" />
                 <Req ok={checks.model} label="Model" />
-                <Req ok={checks.apiKey} label="API Key" />
+                <Req ok={checks.apiKey} label="OpenAI API Key" />
                 <Req ok={checks.description} label="Description" />
                 <Req ok={checks.flow} label="Conversation Flow" />
                 <Req ok={checks.rules} label="Rules" />
@@ -281,19 +351,47 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
                 </div>
                 <div className="text-xs text-white/70 mt-1">
                   {ready
-                    ? 'Your AI assistant will be created in about a minute.'
+                    ? 'Your assistant will be created and synced to OpenAI (under your key).'
                     : 'Please complete the missing items above.'}
                 </div>
                 <div className="text-xs text-amber-300/80 mt-3 flex items-center gap-2">
                   <AlertCircle className="w-3.5 h-3.5" />
-                  You’re using your own API key.
+                  Uses your own API key (from Step 2).
                 </div>
+              </div>
+
+              {/* Assistants quick test (appears after sync) */}
+              <div className="mt-4 space-y-2">
+                <button
+                  onClick={handleTestInAssistants}
+                  disabled={testBusy}
+                  className="inline-flex items-center gap-2 px-3 py-2 rounded-[12px] text-sm border"
+                  style={{ borderColor:'rgba(106,247,209,0.35)', background:'rgba(0,255,194,0.06)', opacity: testBusy ? 0.7 : 1 }}
+                  title="Create a thread and run once"
+                >
+                  {testBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+                  Test in Assistants
+                </button>
+                {assistantId && (
+                  <div className="text-xs text-white/60">
+                    <Bot className="w-3.5 h-3.5 inline -mt-0.5 mr-1" />
+                    Assistant ID: <span className="text-white/80">{assistantId}</span>
+                  </div>
+                )}
+                {testReply && (
+                  <div style={CARD_INNER} className="p-3 rounded-2xl text-sm">
+                    <div className="flex items-center gap-2 mb-1 text-white/85">
+                      <Terminal className="w-4 h-4 text-[#6af7d1]" /> Assistant reply
+                    </div>
+                    <div className="text-white/90 whitespace-pre-wrap">{testReply}</div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
         </div>
 
-        {/* ⬇️ Footer controls BELOW the grid, like Step 3 */}
+        {/* Footer controls */}
         <div className="flex justify-between mt-10">
           <button
             onClick={onBack}
@@ -302,7 +400,6 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
             <ArrowLeft className="w-4 h-4" /> Previous
           </button>
 
-          {/* SAME HEIGHT as Previous (py-2) */}
           <button
             onClick={handleGenerate}
             disabled={!ready}
@@ -326,7 +423,7 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
         </div>
       </div>
 
-      {/* Loading overlay – improved visuals (glow + pulsing progress bar) */}
+      {/* Loading overlay */}
       {loading && (
         <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center px-4">
           <div
@@ -337,7 +434,6 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
               boxShadow:'0 0 24px rgba(0,255,194,0.12), inset 0 0 18px rgba(0,0,0,0.40)'
             }}
           >
-            {/* soft radial glow inside modal */}
             <div
               aria-hidden
               className="pointer-events-none absolute -top-[35%] -left-[35%] w-[90%] h-[90%] rounded-full"
@@ -346,16 +442,12 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
             <Loader2 className="w-7 h-7 mx-auto animate-spin mb-3 text-[#6af7d1]" />
             <div className="text-lg font-semibold">Generating AI…</div>
             <div className="text-sm text-white/70 mt-1">{loadingMsg}</div>
-
-            {/* pulsing progress bar */}
             <div className="mt-4 w-full h-2 rounded-full bg-white/10 overflow-hidden">
               <div
                 className="h-full w-1/2 animate-pulse rounded-full"
                 style={{ background:'linear-gradient(90deg, transparent, rgba(106,247,209,0.85), transparent)' }}
               />
             </div>
-
-            {/* subtle top accent line */}
             <div
               aria-hidden
               className="absolute left-0 right-0 top-0 h-[1px]"
@@ -373,7 +465,7 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
         >
           <div className="flex items-center gap-2">
             <Check className="w-4 h-4 text-[#6af7d1]" />
-            <div className="text-sm">AI generated and saved to your Builds.</div>
+            <div className="text-sm">AI generated and saved. Assistant synced if key was present.</div>
           </div>
         </div>
       )}
@@ -381,6 +473,7 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
   );
 }
 
+/* =================== Small atoms =================== */
 function Info({ label, value, icon }: { label: string; value: string; icon?: React.ReactNode }) {
   return (
     <div style={CARD_INNER} className="p-3 rounded-2xl">
@@ -389,7 +482,6 @@ function Info({ label, value, icon }: { label: string; value: string; icon?: Rea
     </div>
   );
 }
-
 function Req({ ok, label }: { ok: boolean; label: string }) {
   return (
     <div className="flex items-center gap-2 py-1.5 text-sm">
@@ -404,4 +496,4 @@ function Req({ ok, label }: { ok: boolean; label: string }) {
   );
 }
 function ChecklistIcon() { return <div className="w-4 h-4 rounded-[6px] border border-[#6af7d1] text-[#6af7d1] flex items-center justify-center">✓</div>; }
-function cap(sv: string) { return sv ? sv[0].toUpperCase() + sv.slice(1) : sv; }
+function cap(sv?: string) { return sv ? sv[0].toUpperCase() + sv.slice(1) : '—'; }
