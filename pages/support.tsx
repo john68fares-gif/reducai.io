@@ -5,25 +5,22 @@ import React, { useEffect, useRef, useState } from 'react';
 import Head from 'next/head';
 import { MessageSquare, Trash2, Send as SendIcon, Image as ImageIcon } from 'lucide-react';
 
-type Msg = {
-  id: string;
-  role: 'assistant' | 'user';
-  text?: string;
-  // optional image preview url (data url) for UI
-  imageDataUrl?: string;
-};
+type Msg = { id: string; role: 'assistant' | 'user'; text?: string; imageDataUrl?: string | null };
 
 const UI = {
+  // card + shadows
   cardBg: 'rgba(13,15,17,0.92)',
   cardBorder: '1px solid rgba(106,247,209,0.18)',
   outerGlow:
-    'inset 0 0 16px rgba(0,0,0,0.35), 0 0 22px rgba(106,247,209,0.10), 0 10px 40px rgba(0,0,0,0.40)',
+    '0 20px 70px rgba(0,0,0,0.55), 0 0 34px rgba(106,247,209,0.12)',
+
   // bubbles
   aBg: '#0f1314',
-  aBorder: '1px solid rgba(255,255,255,0.18)',
+  aBorder: '1px solid rgba(255,255,255,0.16)',
   uBg: '#0f3f36',
   uBorder: '1px solid rgba(0,255,194,0.20)',
-  // controls
+
+  // primary accent
   primary: '#00ffc2',
   primaryHover: '#00eab3',
 };
@@ -32,11 +29,10 @@ export default function SupportPage() {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
-  const [attachedImg, setAttachedImg] = useState<string | null>(null); // data URL
+  const [attachedImg, setAttachedImg] = useState<string | null>(null);
   const viewRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
-  // One friendly first message (support + setup)
   useEffect(() => {
     setMessages([
       {
@@ -53,9 +49,9 @@ export default function SupportPage() {
   }, [messages.length, busy]);
 
   function clearChat() {
-    setMessages((m) => m.slice(0, 1)); // keep the greeting
-    setAttachedImg(null);
+    setMessages((m) => m.slice(0, 1));
     setText('');
+    setAttachedImg(null);
   }
 
   async function send() {
@@ -79,7 +75,6 @@ export default function SupportPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          // send entire history so the server can keep context
           history: messages.concat(userMsg).map((m) => ({
             role: m.role,
             text: m.text || '',
@@ -87,16 +82,12 @@ export default function SupportPage() {
           })),
         }),
       });
-
-      let reply = 'Hmm, I could not reach the server. Try again.';
+      let reply = 'Could not reach the server. Try again.';
       if (res.ok) {
         const j = await res.json();
-        if (j?.reply) reply = j.reply as string;
+        reply = j?.reply || reply;
       }
-      setMessages((m) => [
-        ...m,
-        { id: crypto.randomUUID(), role: 'assistant', text: reply },
-      ]);
+      setMessages((m) => [...m, { id: crypto.randomUUID(), role: 'assistant', text: reply }]);
     } catch {
       setMessages((m) => [
         ...m,
@@ -114,27 +105,24 @@ export default function SupportPage() {
     }
   }
 
-  function handlePickFile() {
+  function pickFile() {
     fileRef.current?.click();
   }
-  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+  function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    const ok = ['image/png', 'image/jpeg', 'image/webp'].includes(file.type);
-    if (!ok) return;
-    const reader = new FileReader();
-    reader.onload = () => setAttachedImg(String(reader.result));
-    reader.readAsDataURL(file);
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) return;
+    const r = new FileReader();
+    r.onload = () => setAttachedImg(String(r.result));
+    r.readAsDataURL(file);
   }
 
   return (
     <>
-      <Head>
-        <title>Support • reduc.ai</title>
-      </Head>
+      <Head><title>Support • reduc.ai</title></Head>
 
       <main className="px-6 py-8 font-movatif">
-        {/* Page title (like your other screens) */}
+        {/* Page title */}
         <div className="max-w-[1320px] mx-auto mb-6">
           <h1 className="text-[28px] md:text-[32px] tracking-tight text-white/90">
             Support Center
@@ -146,10 +134,10 @@ export default function SupportPage() {
 
         {/* Chat card */}
         <div
-          className="w-full max-w-[1320px] mx-auto rounded-[20px] overflow-hidden"
+          className="w-full max-w-[1320px] mx-auto rounded-[18px] overflow-hidden"
           style={{ background: UI.cardBg, border: UI.cardBorder, boxShadow: UI.outerGlow }}
         >
-          {/* Header row inside card */}
+          {/* Card header */}
           <div
             className="flex items-center justify-between px-5 py-4"
             style={{ borderBottom: '1px solid rgba(255,255,255,0.10)' }}
@@ -157,16 +145,12 @@ export default function SupportPage() {
             <div className="flex items-center gap-3">
               <div
                 className="w-9 h-9 rounded-xl flex items-center justify-center"
-                style={{
-                  background: 'rgba(0,255,194,0.08)',
-                  border: '1px solid rgba(0,255,194,0.24)',
-                }}
-                title="Riley"
+                style={{ background:'rgba(0,255,194,0.08)', border:'1px solid rgba(0,255,194,0.24)' }}
               >
                 <MessageSquare className="w-4.5 h-4.5 text-[#6af7d1]" />
               </div>
               <div className="leading-tight">
-                <div className="text-[18px] md:text-[20px] text-white">
+                <div className="text-[19px] md:text-[21px] text-white">
                   Riley <span className="text-white/60">— Support</span>
                 </div>
               </div>
@@ -178,12 +162,11 @@ export default function SupportPage() {
               title="Clear conversation"
               style={{ border: '1px solid rgba(255,255,255,0.10)' }}
             >
-              <Trash2 className="w-4 h-4" />
-              Clear
+              <Trash2 className="w-4 h-4" /> Clear
             </button>
           </div>
 
-          {/* Messages viewport */}
+          {/* Messages */}
           <div
             ref={viewRef}
             className="h-[62vh] min-h-[440px] overflow-y-auto px-5 py-5"
@@ -193,60 +176,43 @@ export default function SupportPage() {
               {messages.map((m) => (
                 <Bubble key={m.id} role={m.role} text={m.text} imageDataUrl={m.imageDataUrl} />
               ))}
-              {busy && (
-                <Bubble
-                  role="assistant"
-                  text="Thinking…"
-                />
-              )}
+              {busy && <Bubble role="assistant" text="Thinking…" />}
             </div>
           </div>
 
           {/* Composer */}
-          <div
-            className="px-4 py-4"
-            style={{ borderTop: '1px solid rgba(255,255,255,0.10)' }}
-          >
-            <div
-              className="flex items-center gap-3 px-3 py-2 rounded-[22px]"
-              style={{
-                background: 'rgba(0,0,0,0.35)',
-                border: '1px solid rgba(255,255,255,0.16)',
-              }}
-            >
+          <div className="px-4 py-4" style={{ borderTop: '1px solid rgba(255,255,255,0.10)' }}>
+            {/* one ring only (no double boxes) */}
+            <div className="flex items-center gap-3">
               <button
-                onClick={handlePickFile}
+                onClick={pickFile}
                 title="Attach screenshot"
-                className="shrink-0 w-[40px] h-[40px] rounded-full flex items-center justify-center hover:bg-white/10 transition"
+                className="shrink-0 w-[44px] h-[44px] rounded-full flex items-center justify-center hover:bg-white/10 transition"
                 style={{ border: '1px solid rgba(255,255,255,0.12)' }}
               >
                 <ImageIcon className="w-4.5 h-4.5 text-white/85" />
               </button>
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                className="hidden"
-                onChange={handleFile}
-              />
+              <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} />
 
               <input
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 onKeyDown={onKeyDown}
                 placeholder="Type your message…"
-                className="flex-1 h-[44px] rounded-[18px] bg-[#0d1011] text-white px-4 outline-none"
-                style={{ border: '1px solid rgba(255,255,255,0.12)' }}
+                className="flex-1 h-[48px] rounded-[24px] bg-[#0e1011] text-white px-4 outline-none"
+                style={{ border: '1px solid rgba(255,255,255,0.13)' }}
               />
 
+              {/* ICON-ONLY SEND (no text) */}
               <button
+                aria-label="Send"
                 onClick={send}
                 disabled={busy || (!text.trim() && !attachedImg)}
-                className="shrink-0 inline-flex items-center gap-2 h-[44px] px-5 rounded-[22px] font-semibold disabled:opacity-50"
+                className="shrink-0 w-[48px] h-[48px] rounded-full flex items-center justify-center transition-transform active:scale-95 disabled:opacity-50"
                 style={{
                   background: UI.primary,
-                  color: '#0b0c10',
-                  boxShadow: '0 0 10px rgba(106,247,209,0.30)',
+                  boxShadow:
+                    '0 18px 40px rgba(0,255,194,0.28), 0 0 0 1px rgba(0,255,194,0.28)',
                 }}
                 onMouseEnter={(e) =>
                   ((e.currentTarget as HTMLButtonElement).style.background = UI.primaryHover)
@@ -255,12 +221,10 @@ export default function SupportPage() {
                   ((e.currentTarget as HTMLButtonElement).style.background = UI.primary)
                 }
               >
-                <SendIcon className="w-4.5 h-4.5 text-white" />
-                Send
+                <SendIcon className="w-5 h-5 text-white" />
               </button>
             </div>
 
-            {/* small preview chip for an attached image */}
             {attachedImg && (
               <div className="mt-2 flex items-center gap-3">
                 <img
@@ -275,9 +239,7 @@ export default function SupportPage() {
         </div>
       </main>
 
-      <style jsx global>{`
-        body { background: #0b0c10; }
-      `}</style>
+      <style jsx global>{` body { background:#0b0c10; } `}</style>
     </>
   );
 }
@@ -293,22 +255,19 @@ function Bubble({
 }) {
   const isUser = role === 'user';
   return (
-    <div className={`w-full flex ${isUser ? 'justify-start' : 'justify-start'} mb-3`}>
+    <div className="w-full flex justify-start mb-3">
       <div
         className="px-4 py-2 rounded-[16px] max-w-[880px] text-[14px] leading-relaxed"
         style={{
           background: isUser ? UI.uBg : UI.aBg,
           border: isUser ? UI.uBorder : UI.aBorder,
           color: 'rgba(255,255,255,0.92)',
+          boxShadow: '0 6px 18px rgba(0,0,0,0.30)',
         }}
       >
         {imageDataUrl && (
           <div className="mb-2">
-            <img
-              src={imageDataUrl}
-              alt="attached"
-              className="max-h-[220px] rounded-md border border-white/10"
-            />
+            <img src={imageDataUrl} alt="attached" className="max-h-[220px] rounded-md border border-white/10" />
           </div>
         )}
         {text}
