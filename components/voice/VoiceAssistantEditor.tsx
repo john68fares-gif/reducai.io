@@ -4,21 +4,23 @@
 import React, { useEffect, useState } from 'react';
 import { ArrowLeft, Save, KeyRound, Phone, Loader2 } from 'lucide-react';
 
-/* ——— Shared look (matches your other screens) ——— */
-const FRAME: React.CSSProperties = {
-  background: 'rgba(13,15,17,0.95)',
+/** ===== Theme (matches your other steps) ===== */
+const OUTER: React.CSSProperties = {
+  background: 'rgba(13,15,17,0.96)',
   border: '2px dashed rgba(106,247,209,0.30)',
   borderRadius: 26,
   boxShadow:
     '0 28px 80px rgba(0,0,0,0.75), 0 0 26px rgba(0,255,194,0.06)',
 };
 
-const FIELD_BG = '#101314';
-const FIELD_BORDER = '1px solid rgba(19,49,43,0.9)';
+const FIELD_BG = '#101314'; // solid
+const FIELD_BORDER = '1px solid rgba(19,49,43,0.9)'; // thin
 const FIELD_FOCUS = '#00ffc2';
+const DIVIDER = 'rgba(255,255,255,0.10)';
 const PRIMARY = '#00ffc2';
 const PRIMARY_HOVER = '#00eab3';
 
+/** ===== Types & storage helpers ===== */
 type VoiceAgent = {
   id: string;
   type?: 'voice' | string;
@@ -42,29 +44,27 @@ type VoiceAgent = {
   updatedAt?: string;
 };
 
-/* ——— storage helpers ——— */
 function readAgent(id: string): VoiceAgent | null {
   try {
-    const raw = localStorage.getItem('chatbots') || '[]';
-    const arr: any[] = JSON.parse(raw);
-    const got = arr.find((b) => b.id === id);
-    return got || null;
+    const arr = JSON.parse(localStorage.getItem('chatbots') || '[]') as any[];
+    return Array.isArray(arr) ? (arr.find((b) => b.id === id) || null) : null;
   } catch {
     return null;
   }
 }
+
 function writeAgent(upd: VoiceAgent) {
   try {
-    const raw = localStorage.getItem('chatbots') || '[]';
-    const arr: any[] = JSON.parse(raw);
-    const i = arr.findIndex((b) => b.id === upd.id);
-    const next = { ...arr[i], ...upd, updatedAt: new Date().toISOString() };
+    const arr = JSON.parse(localStorage.getItem('chatbots') || '[]') as any[];
+    const i = arr.findIndex((b: any) => b.id === upd.id);
+    const next = { ...(i >= 0 ? arr[i] : {}), ...upd, updatedAt: new Date().toISOString() };
     if (i >= 0) arr[i] = next;
     else arr.unshift(next);
     localStorage.setItem('chatbots', JSON.stringify(arr));
   } catch {}
 }
 
+/** ===== Editor ===== */
 export default function VoiceAssistantEditor({
   agentId,
   onBack,
@@ -77,7 +77,7 @@ export default function VoiceAssistantEditor({
   const [attaching, setAttaching] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
-  /* form state */
+  // form state
   const [name, setName] = useState('');
   const [language, setLanguage] = useState('English');
   const [model, setModel] = useState('gpt-4o-mini');
@@ -115,7 +115,7 @@ export default function VoiceAssistantEditor({
   function saveAll() {
     if (!agent) return;
     setSaving(true);
-    const next: VoiceAgent = {
+    writeAgent({
       ...agent,
       type: 'voice',
       name,
@@ -124,18 +124,16 @@ export default function VoiceAssistantEditor({
       fromE164,
       vcfg: { voice, greeting, style, rate, pitch, bargeIn },
       tcfg: { accountSid: sid, authToken: token },
-    };
-    writeAgent(next);
-    setAgent(next);
+    });
     setSaving(false);
     setToast('Changes saved.');
-    setTimeout(() => setToast(null), 1800);
+    setTimeout(() => setToast(null), 1600);
   }
 
   async function attachNumber() {
     if (!sid || !token || !phone) {
       setToast('Enter Twilio SID, Auth Token and Phone first.');
-      setTimeout(() => setToast(null), 2000);
+      setTimeout(() => setToast(null), 1800);
       return;
     }
     setAttaching(true);
@@ -148,31 +146,26 @@ export default function VoiceAssistantEditor({
           authToken: token,
           phoneNumber: phone,
           agentId,
-          language,
-          voice,
-          greeting,
-          style,
-          rate,
-          pitch,
-          bargeIn,
+          language, voice, greeting, style, rate, pitch, bargeIn,
         }),
       });
       const j = await r.json();
       if (!j?.ok) throw new Error(j?.error || 'Attach failed');
       setFromE164(phone);
       if (agent) writeAgent({ ...agent, fromE164: phone });
-      setToast('Number attached successfully.');
+      setToast('Number attached.');
     } catch (e: any) {
       setToast(e?.message || 'Attach failed');
     } finally {
       setAttaching(false);
-      setTimeout(() => setToast(null), 2200);
+      setTimeout(() => setToast(null), 2000);
     }
   }
 
+  /** ===== UI ===== */
   return (
-    <div className="w-full px-6 2xl:px-12 pb-16">
-      {/* Page title (same as other steps) */}
+    <div className="w-full px-6 2xl:px-12 pb-14 font-movatif">
+      {/* Page title like your other pages */}
       <div className="pt-8 pb-6">
         <div className="text-white/60 text-sm">Edit Assistant</div>
         <h1 className="mt-1 text-[34px] font-semibold tracking-tight">
@@ -180,11 +173,11 @@ export default function VoiceAssistantEditor({
         </h1>
       </div>
 
-      {/* One big panel */}
-      <div className="max-w-[1640px] mx-auto" style={FRAME}>
-        {/* Header bar inside the frame */}
+      {/* One big section */}
+      <div className="max-w-[1640px] mx-auto" style={OUTER}>
+        {/* top bar inside the frame */}
         <div className="flex items-center justify-between px-6 py-4"
-             style={{ borderBottom: '1px solid rgba(255,255,255,0.10)' }}>
+             style={{ borderBottom: `1px solid ${DIVIDER}` }}>
           <button
             onClick={onBack}
             className="inline-flex items-center gap-2 rounded-[12px] px-4 py-2 text-white hover:bg-white/10 border"
@@ -203,108 +196,49 @@ export default function VoiceAssistantEditor({
               boxShadow: '0 0 12px rgba(106,247,209,0.30)',
               opacity: saving ? 0.7 : 1,
             }}
-            onMouseEnter={(e) =>
-              ((e.currentTarget as HTMLButtonElement).style.background = PRIMARY_HOVER)
-            }
-            onMouseLeave={(e) =>
-              ((e.currentTarget as HTMLButtonElement).style.background = PRIMARY)
-            }
+            onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = PRIMARY_HOVER)}
+            onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = PRIMARY)}
           >
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
             Save
           </button>
         </div>
 
-        {/* Body */}
+        {/* body */}
         <div className="px-6 py-6">
-          {/* Basics */}
-          <h3 className="text-white/90 font-semibold mb-3">Model & Basics</h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Assistant name"
-              className="h-[44px] rounded-[14px] px-3 text-white outline-none"
-              style={{ background: FIELD_BG, border: FIELD_BORDER }}
-              onFocus={(e)=>((e.currentTarget).style.border=`1px solid ${FIELD_FOCUS}`)}
-              onBlur={(e)=>((e.currentTarget).style.border=FIELD_BORDER)}
-            />
-            <input
-              value={language}
-              onChange={(e) => setLanguage(e.target.value)}
-              placeholder="Language"
-              className="h-[44px] rounded-[14px] px-3 text-white outline-none"
-              style={{ background: FIELD_BG, border: FIELD_BORDER }}
-              onFocus={(e)=>((e.currentTarget).style.border=`1px solid ${FIELD_FOCUS}`)}
-              onBlur={(e)=>((e.currentTarget).style.border=FIELD_BORDER)}
-            />
-            <select
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              className="h-[44px] rounded-[14px] px-3 text-white outline-none"
-              style={{ background: FIELD_BG, border: FIELD_BORDER }}
-              onFocus={(e)=>((e.currentTarget).style.border=`1px solid ${FIELD_FOCUS}`)}
-              onBlur={(e)=>((e.currentTarget).style.border=FIELD_BORDER)}
-            >
-              <option value="gpt-4o-mini">gpt-4o-mini (recommended)</option>
-              <option value="gpt-4o">gpt-4o</option>
-              <option value="gpt-4.1">gpt-4.1</option>
-            </select>
+          {/* sub-title row (optional visual like your screenshots) */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+            <div className="w-full h-[8px] rounded-full"
+                 style={{ background: 'linear-gradient(90deg,#0f3, #0cc 45%, #08a 65%, #607)', opacity: 0.22 }} />
+            <div className="w-full h-[8px] rounded-full"
+                 style={{ background: 'linear-gradient(90deg,#f90, #ffd84a 55%, #80a9ff 80%)', opacity: 0.22 }} />
           </div>
 
-          <div className="h-px my-6" style={{ background: 'rgba(255,255,255,0.10)' }} />
+          {/* BASICS */}
+          <h3 className="text-white/90 font-semibold mb-3">Model & Basics</h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <Input value={name} onChange={setName} placeholder="Assistant name" />
+            <Input value={language} onChange={setLanguage} placeholder="Language" />
+            <Select value={model} onChange={setModel}
+              options={[
+                ['gpt-4o-mini', 'gpt-4o-mini (recommended)'],
+                ['gpt-4o', 'gpt-4o'],
+                ['gpt-4.1', 'gpt-4.1'],
+              ]}
+            />
+          </div>
 
-          {/* Voice */}
+          <Divider />
+
+          {/* VOICE */}
           <h3 className="text-white/90 font-semibold mb-3">Voice</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <input
-              value={voice}
-              onChange={(e) => setVoice(e.target.value)}
-              placeholder="Voice (e.g., Elliot)"
-              className="h-[44px] rounded-[14px] px-3 text-white outline-none"
-              style={{ background: FIELD_BG, border: FIELD_BORDER }}
-              onFocus={(e)=>((e.currentTarget).style.border=`1px solid ${FIELD_FOCUS}`)}
-              onBlur={(e)=>((e.currentTarget).style.border=FIELD_BORDER)}
-            />
-            <input
-              value={greeting}
-              onChange={(e) => setGreeting(e.target.value)}
-              placeholder="Greeting"
-              className="h-[44px] rounded-[14px] px-3 text-white outline-none"
-              style={{ background: FIELD_BG, border: FIELD_BORDER }}
-              onFocus={(e)=>((e.currentTarget).style.border=`1px solid ${FIELD_FOCUS}`)}
-              onBlur={(e)=>((e.currentTarget).style.border=FIELD_BORDER)}
-            />
-            <input
-              value={style}
-              onChange={(e) => setStyle(e.target.value)}
-              placeholder="Style (e.g., friendly, concise)"
-              className="h-[44px] rounded-[14px] px-3 text-white outline-none"
-              style={{ background: FIELD_BG, border: FIELD_BORDER }}
-              onFocus={(e)=>((e.currentTarget).style.border=`1px solid ${FIELD_FOCUS}`)}
-              onBlur={(e)=>((e.currentTarget).style.border=FIELD_BORDER)}
-            />
+            <Input value={voice} onChange={setVoice} placeholder="Voice (e.g., Elliot)" />
+            <Input value={greeting} onChange={setGreeting} placeholder="Greeting" />
+            <Input value={style} onChange={setStyle} placeholder="Style (e.g., friendly, concise)" />
             <div className="grid grid-cols-3 gap-3">
-              <input
-                type="number"
-                value={rate}
-                onChange={(e) => setRate(Number(e.target.value))}
-                placeholder="Rate"
-                className="h-[44px] rounded-[14px] px-3 text-white outline-none"
-                style={{ background: FIELD_BG, border: FIELD_BORDER }}
-                onFocus={(e)=>((e.currentTarget).style.border=`1px solid ${FIELD_FOCUS}`)}
-                onBlur={(e)=>((e.currentTarget).style.border=FIELD_BORDER)}
-              />
-              <input
-                type="number"
-                value={pitch}
-                onChange={(e) => setPitch(Number(e.target.value))}
-                placeholder="Pitch"
-                className="h-[44px] rounded-[14px] px-3 text-white outline-none"
-                style={{ background: FIELD_BG, border: FIELD_BORDER }}
-                onFocus={(e)=>((e.currentTarget).style.border=`1px solid ${FIELD_FOCUS}`)}
-                onBlur={(e)=>((e.currentTarget).style.border=FIELD_BORDER)}
-              />
+              <Number value={rate} onChange={setRate} placeholder="Rate" />
+              <Number value={pitch} onChange={setPitch} placeholder="Pitch" />
               <label className="inline-flex items-center gap-2 text-white/80">
                 <input
                   type="checkbox"
@@ -317,39 +251,14 @@ export default function VoiceAssistantEditor({
             </div>
           </div>
 
-          <div className="h-px my-6" style={{ background: 'rgba(255,255,255,0.10)' }} />
+          <Divider />
 
-          {/* Telephony */}
+          {/* TELEPHONY */}
           <h3 className="text-white/90 font-semibold mb-3">Telephony (Twilio)</h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <input
-              value={sid}
-              onChange={(e) => setSid(e.target.value)}
-              placeholder="Account SID (AC…)"
-              className="h-[44px] rounded-[14px] px-3 text-white outline-none"
-              style={{ background: FIELD_BG, border: FIELD_BORDER }}
-              onFocus={(e)=>((e.currentTarget).style.border=`1px solid ${FIELD_FOCUS}`)}
-              onBlur={(e)=>((e.currentTarget).style.border=FIELD_BORDER)}
-            />
-            <input
-              type="password"
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              placeholder="Auth Token"
-              className="h-[44px] rounded-[14px] px-3 text-white outline-none"
-              style={{ background: FIELD_BG, border: FIELD_BORDER }}
-              onFocus={(e)=>((e.currentTarget).style.border=`1px solid ${FIELD_FOCUS}`)}
-              onBlur={(e)=>((e.currentTarget).style.border=FIELD_BORDER)}
-            />
-            <input
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              placeholder="Phone (E.164, e.g., +15551234567)"
-              className="h-[44px] rounded-[14px] px-3 text-white outline-none"
-              style={{ background: FIELD_BG, border: FIELD_BORDER }}
-              onFocus={(e)=>((e.currentTarget).style.border=`1px solid ${FIELD_FOCUS}`)}
-              onBlur={(e)=>((e.currentTarget).style.border=FIELD_BORDER)}
-            />
+            <Input value={sid} onChange={setSid} placeholder="Account SID (AC…)" />
+            <Password value={token} onChange={setToken} placeholder="Auth Token" />
+            <Input value={phone} onChange={setPhone} placeholder="Phone (E.164 e.g. +15551234567)" />
           </div>
 
           <div className="flex items-center gap-3 mt-4">
@@ -358,12 +267,8 @@ export default function VoiceAssistantEditor({
               disabled={attaching}
               className="inline-flex items-center gap-2 px-5 h-[44px] rounded-[18px] font-semibold"
               style={{ background: PRIMARY, color: '#0b0c10', boxShadow: '0 0 12px rgba(106,247,209,0.30)', opacity: attaching ? 0.7 : 1 }}
-              onMouseEnter={(e) =>
-                ((e.currentTarget as HTMLButtonElement).style.background = PRIMARY_HOVER)
-              }
-              onMouseLeave={(e) =>
-                ((e.currentTarget as HTMLButtonElement).style.background = PRIMARY)
-              }
+              onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = PRIMARY_HOVER)}
+              onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = PRIMARY)}
             >
               {attaching ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
               Attach Number
@@ -388,13 +293,85 @@ export default function VoiceAssistantEditor({
         </div>
       </div>
 
-      {/* Tiny toast */}
+      {/* Toast */}
       {toast && (
-        <div className="fixed bottom-6 right-6 px-4 py-3 rounded-[14px] text-sm text-white"
-             style={{ background: 'rgba(16,19,20,0.95)', border: '1px solid rgba(0,255,194,0.35)', boxShadow: '0 18px 50px rgba(0,0,0,0.55)' }}>
+        <div
+          className="fixed bottom-6 right-6 px-4 py-3 rounded-[14px] text-sm text-white"
+          style={{ background: 'rgba(16,19,20,0.95)', border: '1px solid rgba(0,255,194,0.35)', boxShadow: '0 18px 50px rgba(0,0,0,0.55)' }}
+        >
           {toast}
         </div>
       )}
     </div>
   );
+
+  /** ===== Small inner UI pieces ===== */
+  function Divider() {
+    return <div className="h-px my-6" style={{ background: DIVIDER }} />;
+  }
+  function Input({
+    value, onChange, placeholder,
+  }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
+    return (
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="h-[44px] rounded-[14px] px-3 text-white outline-none"
+        style={{ background: FIELD_BG, border: FIELD_BORDER }}
+        onFocus={(e)=>((e.currentTarget).style.border=`1px solid ${FIELD_FOCUS}`)}
+        onBlur={(e)=>((e.currentTarget).style.border=FIELD_BORDER)}
+      />
+    );
+  }
+  function Password({
+    value, onChange, placeholder,
+  }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
+    return (
+      <input
+        type="password"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="h-[44px] rounded-[14px] px-3 text-white outline-none"
+        style={{ background: FIELD_BG, border: FIELD_BORDER }}
+        onFocus={(e)=>((e.currentTarget).style.border=`1px solid ${FIELD_FOCUS}`)}
+        onBlur={(e)=>((e.currentTarget).style.border=FIELD_BORDER)}
+      />
+    );
+  }
+  function Number({
+    value, onChange, placeholder,
+  }: { value: number; onChange: (v: number) => void; placeholder?: string }) {
+    return (
+      <input
+        type="number"
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        placeholder={placeholder}
+        className="h-[44px] rounded-[14px] px-3 text-white outline-none"
+        style={{ background: FIELD_BG, border: FIELD_BORDER }}
+        onFocus={(e)=>((e.currentTarget).style.border=`1px solid ${FIELD_FOCUS}`)}
+        onBlur={(e)=>((e.currentTarget).style.border=FIELD_BORDER)}
+      />
+    );
+  }
+  function Select({
+    value, onChange, options,
+  }: { value: string; onChange: (v: string) => void; options: [string, string][] }) {
+    return (
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-[44px] rounded-[14px] px-3 text-white outline-none"
+        style={{ background: FIELD_BG, border: FIELD_BORDER }}
+        onFocus={(e)=>((e.currentTarget).style.border=`1px solid ${FIELD_FOCUS}`)}
+        onBlur={(e)=>((e.currentTarget).style.border=FIELD_BORDER)}
+      >
+        {options.map(([val, label]) => (
+          <option key={val} value={val}>{label}</option>
+        ))}
+      </select>
+    );
+  }
 }
