@@ -1,43 +1,38 @@
-import { useRouter } from 'next/router'
-import { useSession } from 'next-auth/react'
-import { useEffect, useState } from 'react'
-import OnboardingOverlay from '../../components/ui/OnboardingOverlay'
+import { useRouter } from 'next/router';
+import { useSession } from 'next-auth/react';
+import { useEffect, useState } from 'react';
+import OnboardingOverlay from '../../components/ui/OnboardingOverlay';
 
 export default function BuilderPage() {
-  const router = useRouter()
-  const { data: session, status } = useSession()
-  const [open, setOpen] = useState(false)
+  const router = useRouter();
+  const { data: session, status } = useSession();
+  const userId = (session?.user as any)?.id || '';
+  const mode = (router.query.mode as 'signup'|'signin') || 'signup';
+  const onboard = router.query.onboard === '1';
+  const [open, setOpen] = useState(false);
 
-  // read query flags sent from Google callback
-  const mode = (router.query.mode as 'signup'|'signin') || 'signup'
-  const onboard = router.query.onboard === '1'
+  // Require auth
+  useEffect(() => { if (status === 'unauthenticated') router.replace('/login'); }, [status]);
 
-  // gate
+  // Open overlay only for first-time signup (per-user) or when ?onboard=1
   useEffect(() => {
-    if (status === 'unauthenticated') router.replace('/login')
-  }, [status])
+    if (status !== 'authenticated' || !userId) return;
+    const done = localStorage.getItem(`user:${userId}:profile:completed`) === '1';
+    if (onboard || (!done && mode === 'signup')) setOpen(true);
+  }, [status, userId, onboard, mode]);
 
-  // show overlay on first signup or when ?onboard=1
-  useEffect(() => {
-    const completed = typeof window !== 'undefined' && localStorage.getItem('profile:completed') === '1'
-    if (status === 'authenticated') {
-      if (onboard || (!completed && mode === 'signup')) setOpen(true)
-    }
-  }, [status, onboard, mode])
-
-  function done() {
-    setOpen(false)
-    // clean query so refresh doesn’t reopen
-    const q = { ...router.query }
-    delete q.onboard; delete q.mode
-    router.replace({ pathname: router.pathname, query: q }, undefined, { shallow: true })
+  function handleDone() {
+    setOpen(false);
+    // Clean URL so refresh doesn’t reopen overlay
+    const q = { ...router.query }; delete q.onboard; delete q.mode;
+    router.replace({ pathname: router.pathname, query: q }, undefined, { shallow: true });
   }
 
   return (
     <>
-      {/* YOUR existing Builder UI here */}
+      {/* === Your existing Builder UI goes here === */}
 
-      <OnboardingOverlay open={open} mode={mode} onDone={done} />
+      <OnboardingOverlay open={open} mode={mode} userId={userId} onDone={handleDone} />
     </>
-  )
+  );
 }
