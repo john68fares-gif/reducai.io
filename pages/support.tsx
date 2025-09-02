@@ -1,228 +1,316 @@
 // pages/support.tsx
 'use client';
 
+import React, { useEffect, useRef, useState } from 'react';
 import Head from 'next/head';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { MessageSquare, Trash2, Share2, Copy, Send as SendIcon } from 'lucide-react';
+import { MessageSquare, Trash2, Send as SendIcon, Image as ImageIcon } from 'lucide-react';
 
-/** ------- Palette + shared boxes (matches your builder style) ------- */
-const CARD_OUTER: React.CSSProperties = {
-  background: 'rgba(13,15,17,0.96)',
-  border: '1px solid rgba(106,247,209,0.16)',
-  borderRadius: 18,                  // less rounded (you asked)
-  boxShadow:
-    '0 18px 60px rgba(0,0,0,0.55), 0 0 34px rgba(0,255,194,0.08)', // OUTSIDE shadow only
+type Msg = {
+  id: string;
+  role: 'assistant' | 'user';
+  text?: string;
+  // optional image preview url (data url) for UI
+  imageDataUrl?: string;
 };
 
-const HEADER_STRIP: React.CSSProperties = {
-  background:
-    'linear-gradient(180deg, rgba(0,255,194,0.10) 0%, rgba(0,255,194,0.06) 100%)',
-  borderBottom: '1px solid rgba(106,247,209,0.18)',
-  borderTopLeftRadius: 18,
-  borderTopRightRadius: 18,
+const UI = {
+  cardBg: 'rgba(13,15,17,0.92)',
+  cardBorder: '1px solid rgba(106,247,209,0.18)',
+  outerGlow:
+    'inset 0 0 16px rgba(0,0,0,0.35), 0 0 22px rgba(106,247,209,0.10), 0 10px 40px rgba(0,0,0,0.40)',
+  // bubbles
+  aBg: '#0f1314',
+  aBorder: '1px solid rgba(255,255,255,0.18)',
+  uBg: '#0f3f36',
+  uBorder: '1px solid rgba(0,255,194,0.20)',
+  // controls
+  primary: '#00ffc2',
+  primaryHover: '#00eab3',
 };
-
-const BTN_GREEN = '#00b894';       // same vibe as your “Next” buttons
-const BTN_GREEN_HOVER = '#00a183';
-
-/** ------- Minimal message shape ------- */
-type Msg = { role: 'user' | 'assistant'; content: string };
 
 export default function SupportPage() {
-  const [messages, setMessages] = useState<Msg[]>([
-    {
-      role: 'assistant',
-      content:
-        'Hi — I’m Riley. I can help you create a chatbot build, connect your API key, test it, or fix errors. What would you like to do?',
-    },
-  ]);
+  const [messages, setMessages] = useState<Msg[]>([]);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
-  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [attachedImg, setAttachedImg] = useState<string | null>(null); // data URL
+  const viewRef = useRef<HTMLDivElement | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
 
-  // Auto-scroll to newest
+  // One friendly first message (support + setup)
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-  }, [messages.length]);
+    setMessages([
+      {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        text:
+          "Hi — I’m Riley. I can help you create a chatbot build, connect your API key, test it, or fix errors. What would you like to do?",
+      },
+    ]);
+  }, []);
 
-  async function sendMessage() {
-    const content = text.trim();
-    if (!content || busy) return;
+  useEffect(() => {
+    viewRef.current?.scrollTo({ top: viewRef.current.scrollHeight, behavior: 'smooth' });
+  }, [messages.length, busy]);
+
+  function clearChat() {
+    setMessages((m) => m.slice(0, 1)); // keep the greeting
+    setAttachedImg(null);
     setText('');
-    const next = [...messages, { role: 'user', content } as Msg];
-    setMessages(next);
+  }
+
+  async function send() {
+    const content = text.trim();
+    if (!content && !attachedImg) return;
+    if (busy) return;
+
+    const userMsg: Msg = {
+      id: crypto.randomUUID(),
+      role: 'user',
+      text: content || undefined,
+      imageDataUrl: attachedImg || undefined,
+    };
+    setMessages((m) => [...m, userMsg]);
+    setText('');
+    setAttachedImg(null);
     setBusy(true);
 
     try {
-      const r = await fetch('/api/support/chat', {
+      const res = await fetch('/api/support/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: next }),
+        body: JSON.stringify({
+          // send entire history so the server can keep context
+          history: messages.concat(userMsg).map((m) => ({
+            role: m.role,
+            text: m.text || '',
+            imageDataUrl: m.imageDataUrl || null,
+          })),
+        }),
       });
-      const j = await r.json();
-      const reply: string =
-        j?.reply || j?.message || j?.text || 'Hmm, I could not reach the server.';
-      setMessages((m) => [...m, { role: 'assistant', content: reply }]);
+
+      let reply = 'Hmm, I could not reach the server. Try again.';
+      if (res.ok) {
+        const j = await res.json();
+        if (j?.reply) reply = j.reply as string;
+      }
+      setMessages((m) => [
+        ...m,
+        { id: crypto.randomUUID(), role: 'assistant', text: reply },
+      ]);
     } catch {
       setMessages((m) => [
         ...m,
-        { role: 'assistant', content: 'Network error. Please try again in a moment.' },
+        { id: crypto.randomUUID(), role: 'assistant', text: 'Request failed. Please try again.' },
       ]);
     } finally {
       setBusy(false);
     }
   }
 
-  function onInputKey(e: React.KeyboardEvent<HTMLInputElement>) {
+  function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      sendMessage();
+      send();
     }
   }
 
-  function clearChat() {
-    setMessages([
-      {
-        role: 'assistant',
-        content:
-          'Hi — I’m Riley. I can help you create a chatbot build, connect your API key, test it, or fix errors. What would you like to do?',
-      },
-    ]);
+  function handlePickFile() {
+    fileRef.current?.click();
+  }
+  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const ok = ['image/png', 'image/jpeg', 'image/webp'].includes(file.type);
+    if (!ok) return;
+    const reader = new FileReader();
+    reader.onload = () => setAttachedImg(String(reader.result));
+    reader.readAsDataURL(file);
   }
 
   return (
     <>
       <Head>
-        <title>Support Center • reduc.ai</title>
+        <title>Support • reduc.ai</title>
       </Head>
 
-      <main className="min-h-screen bg-[#0b0c10] px-6 py-8">
-        {/* Page title (like your other pages) */}
-        <div className="max-w-[1160px] mx-auto mb-6">
-          <div className="flex items-end gap-2">
-            <div className="text-[22px] md:text-[26px] font-movatif text-white/90 tracking-tight">
-              Support Center
-            </div>
-            <span className="text-white/40 text-sm md:text-base">Help & FAQ</span>
-          </div>
+      <main className="px-6 py-8 font-movatif">
+        {/* Page title (like your other screens) */}
+        <div className="max-w-[1320px] mx-auto mb-6">
+          <h1 className="text-[28px] md:text-[32px] tracking-tight text-white/90">
+            Support Center
+          </h1>
+          <p className="text-white/60 text-sm mt-1">
+            Ask questions, share screenshots of issues, or get step-by-step setup help.
+          </p>
         </div>
 
         {/* Chat card */}
-        <section className="max-w-[1160px] mx-auto" style={CARD_OUTER}>
-          {/* Card header strip with “Riley — Support” and icon */}
-          <div className="flex items-center justify-between px-4 md:px-5 py-3" style={HEADER_STRIP}>
+        <div
+          className="w-full max-w-[1320px] mx-auto rounded-[20px] overflow-hidden"
+          style={{ background: UI.cardBg, border: UI.cardBorder, boxShadow: UI.outerGlow }}
+        >
+          {/* Header row inside card */}
+          <div
+            className="flex items-center justify-between px-5 py-4"
+            style={{ borderBottom: '1px solid rgba(255,255,255,0.10)' }}
+          >
             <div className="flex items-center gap-3">
-              {/* Squircle badge like your app icon */}
               <div
-                className="w-8 h-8 md:w-9 md:h-9 rounded-[14px] flex items-center justify-center"
+                className="w-9 h-9 rounded-xl flex items-center justify-center"
                 style={{
                   background: 'rgba(0,255,194,0.08)',
-                  border: '1px solid rgba(0,255,194,0.22)',
-                  boxShadow: 'inset 0 0 14px rgba(0,0,0,0.35)',
+                  border: '1px solid rgba(0,255,194,0.24)',
                 }}
-                aria-hidden
+                title="Riley"
               >
-                <MessageSquare className="w-4 h-4 text-[#6af7d1]" />
+                <MessageSquare className="w-4.5 h-4.5 text-[#6af7d1]" />
               </div>
-
-              {/* Not bold; bigger; site font */}
-              <div className="font-movatif">
-                <div className="text-white/95 text-[18px] md:text-[20px] leading-none">
-                  Riley <span className="text-white/50">— Support</span>
+              <div className="leading-tight">
+                <div className="text-[18px] md:text-[20px] text-white">
+                  Riley <span className="text-white/60">— Support</span>
                 </div>
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <button
-                onClick={clearChat}
-                className="px-2.5 h-[32px] rounded-[10px] text-xs text-white/85 border border-white/10 hover:bg-white/5"
-                title="Clear"
-              >
-                <span className="inline-flex items-center gap-1.5">
-                  <Trash2 className="w-3.5 h-3.5" /> Clear
-                </span>
-              </button>
-              <button
-                className="px-2.5 h-[32px] rounded-[10px] text-xs text-white/85 border border-white/10 hover:bg-white/5"
-                title="Share (coming soon)"
-              >
-                <span className="inline-flex items-center gap-1.5">
-                  <Share2 className="w-3.5 h-3.5" /> Share
-                </span>
-              </button>
-            </div>
+            <button
+              onClick={clearChat}
+              className="inline-flex items-center gap-2 h-[34px] px-3 rounded-[12px] text-sm text-white/85 hover:bg-white/5 transition"
+              title="Clear conversation"
+              style={{ border: '1px solid rgba(255,255,255,0.10)' }}
+            >
+              <Trash2 className="w-4 h-4" />
+              Clear
+            </button>
           </div>
 
-          {/* Messages area */}
+          {/* Messages viewport */}
           <div
-            ref={scrollRef}
-            className="px-4 md:px-6 py-5 h-[64vh] md:h-[66vh] overflow-y-auto"
+            ref={viewRef}
+            className="h-[62vh] min-h-[440px] overflow-y-auto px-5 py-5"
             style={{ scrollbarWidth: 'thin' }}
           >
-            <div className="space-y-4">
-              {messages.map((m, i) => (
-                <Bubble key={i} role={m.role} text={m.content} />
+            <div className="max-w-[980px]">
+              {messages.map((m) => (
+                <Bubble key={m.id} role={m.role} text={m.text} imageDataUrl={m.imageDataUrl} />
               ))}
+              {busy && (
+                <Bubble
+                  role="assistant"
+                  text="Thinking…"
+                />
+              )}
             </div>
           </div>
 
-          {/* Composer: single row, rounded input, Send pill on the right */}
-          <div className="px-4 md:px-5 pb-4">
+          {/* Composer */}
+          <div
+            className="px-4 py-4"
+            style={{ borderTop: '1px solid rgba(255,255,255,0.10)' }}
+          >
             <div
-              className="w-full flex items-center gap-3 p-1.5 rounded-[16px]"
+              className="flex items-center gap-3 px-3 py-2 rounded-[22px]"
               style={{
-                border: '1px solid rgba(255,255,255,0.10)',
-                background: '#0e1113', // solid, not transparent
+                background: 'rgba(0,0,0,0.35)',
+                border: '1px solid rgba(255,255,255,0.16)',
               }}
             >
+              <button
+                onClick={handlePickFile}
+                title="Attach screenshot"
+                className="shrink-0 w-[40px] h-[40px] rounded-full flex items-center justify-center hover:bg-white/10 transition"
+                style={{ border: '1px solid rgba(255,255,255,0.12)' }}
+              >
+                <ImageIcon className="w-4.5 h-4.5 text-white/85" />
+              </button>
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                className="hidden"
+                onChange={handleFile}
+              />
+
               <input
                 value={text}
                 onChange={(e) => setText(e.target.value)}
-                onKeyDown={onInputKey}
-                placeholder="Type your message..."
-                className="flex-1 h-[44px] px-4 rounded-[14px] bg-[#0c0f10] text-white outline-none border border-white/10 focus:border-[#6af7d1]"
+                onKeyDown={onKeyDown}
+                placeholder="Type your message…"
+                className="flex-1 h-[44px] rounded-[18px] bg-[#0d1011] text-white px-4 outline-none"
+                style={{ border: '1px solid rgba(255,255,255,0.12)' }}
               />
+
               <button
-                onClick={sendMessage}
-                disabled={busy || !text.trim()}
-                className="inline-flex items-center gap-2 h-[44px] px-5 rounded-[22px] font-semibold select-none disabled:opacity-40 disabled:cursor-not-allowed"
-                style={{ background: BTN_GREEN, color: '#07120f', boxShadow: '0 4px 14px rgba(0,255,194,0.22)' }}
-                onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER)}
-                onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN)}
+                onClick={send}
+                disabled={busy || (!text.trim() && !attachedImg)}
+                className="shrink-0 inline-flex items-center gap-2 h-[44px] px-5 rounded-[22px] font-semibold disabled:opacity-50"
+                style={{
+                  background: UI.primary,
+                  color: '#0b0c10',
+                  boxShadow: '0 0 10px rgba(106,247,209,0.30)',
+                }}
+                onMouseEnter={(e) =>
+                  ((e.currentTarget as HTMLButtonElement).style.background = UI.primaryHover)
+                }
+                onMouseLeave={(e) =>
+                  ((e.currentTarget as HTMLButtonElement).style.background = UI.primary)
+                }
               >
-                <SendIcon className="w-4 h-4 text-white" />
+                <SendIcon className="w-4.5 h-4.5 text-white" />
                 Send
               </button>
             </div>
+
+            {/* small preview chip for an attached image */}
+            {attachedImg && (
+              <div className="mt-2 flex items-center gap-3">
+                <img
+                  src={attachedImg}
+                  alt="attachment"
+                  className="w-10 h-10 rounded-md object-cover border border-white/10"
+                />
+                <div className="text-xs text-white/70">Image attached — will be analyzed.</div>
+              </div>
+            )}
           </div>
-        </section>
+        </div>
       </main>
+
+      <style jsx global>{`
+        body { background: #0b0c10; }
+      `}</style>
     </>
   );
 }
 
-/** --------- Solid bubbles with thin borders (assistant vs user) --------- */
-function Bubble({ role, text }: { role: 'user' | 'assistant'; text: string }) {
+function Bubble({
+  role,
+  text,
+  imageDataUrl,
+}: {
+  role: 'assistant' | 'user';
+  text?: string;
+  imageDataUrl?: string | null;
+}) {
   const isUser = role === 'user';
-  const wrapStyle: React.CSSProperties = {
-    maxWidth: 'min(980px, 92%)',
-    borderRadius: 14,
-    border: '1px solid rgba(255,255,255,0.12)', // thin lines
-  };
-
   return (
-    <div className={`flex ${isUser ? 'justify-start' : 'justify-start'}`}>
+    <div className={`w-full flex ${isUser ? 'justify-start' : 'justify-start'} mb-3`}>
       <div
-        className={`px-4 py-2 text-[14px] leading-relaxed ${
-          isUser ? 'text-[#d9fff5]' : 'text-white/92'
-        }`}
+        className="px-4 py-2 rounded-[16px] max-w-[880px] text-[14px] leading-relaxed"
         style={{
-          ...wrapStyle,
-          background: isUser ? '#0e3e35' : '#0f1416', // SOLID, not transparent
-          boxShadow: '0 8px 20px rgba(0,0,0,0.35)',
+          background: isUser ? UI.uBg : UI.aBg,
+          border: isUser ? UI.uBorder : UI.aBorder,
+          color: 'rgba(255,255,255,0.92)',
         }}
       >
+        {imageDataUrl && (
+          <div className="mb-2">
+            <img
+              src={imageDataUrl}
+              alt="attached"
+              className="max-h-[220px] rounded-md border border-white/10"
+            />
+          </div>
+        )}
         {text}
       </div>
     </div>
