@@ -3,64 +3,62 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Head from 'next/head';
-import { Send, Trash2, Share2, MessageSquare } from 'lucide-react';
+import { MessageSquare, Send } from 'lucide-react';
 
-/* ——— Shared style tokens (kept close to the rest of your app) ——— */
-const FRAME: React.CSSProperties = {
-  background: 'rgba(13,15,17,0.95)',
-  border: '1px solid rgba(106,247,209,0.18)', // thinner line
-  boxShadow: '0 0 24px rgba(0,0,0,0.55), inset 0 0 16px rgba(0,0,0,0.35)',
-  borderRadius: 16, // less rounded per request
-};
-
-const BTN_PRIMARY = '#59d9b3';
-const BTN_PRIMARY_HOVER = '#54cfa9';
+/** —— Shared palette (same vibe as your builder) —— */
+const MINT = '#00ffc2';
+const CARD_BG = 'rgba(13,15,17,0.95)';
+const THIN_BORDER = '1px solid rgba(255,255,255,0.10)';
+const SHADOW =
+  '0 20px 60px rgba(0,0,0,0.55), 0 0 24px rgba(0,255,194,0.04), inset 0 0 20px rgba(0,0,0,0.35)';
 
 type Msg = { role: 'user' | 'assistant'; content: string };
 
-const GREETING =
-  'Hi — I’m Riley. I can help you create a chatbot build, connect your API key, test it, or fix errors. What would you like to do?';
-
 export default function SupportPage() {
-  const [messages, setMessages] = useState<Msg[]>([{ role: 'assistant', content: GREETING }]);
-  const [input, setInput] = useState('');
+  const [messages, setMessages] = useState<Msg[]>([
+    {
+      role: 'assistant',
+      content:
+        "Hi — I’m Riley. I can help you create a chatbot build, connect your API key, test it, or fix errors. What would you like to do?",
+    },
+  ]);
+  const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
-  const scrollerRef = useRef<HTMLDivElement | null>(null);
+  const boxRef = useRef<HTMLDivElement | null>(null);
 
-  // keep the panel scrolled to bottom
   useEffect(() => {
-    scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight, behavior: 'smooth' });
+    boxRef.current?.scrollTo({ top: boxRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages.length]);
 
   async function send() {
-    const text = input.trim();
-    if (!text || busy) return;
-    setInput('');
-    setMessages((m) => [...m, { role: 'user', content: text }]);
+    const content = text.trim();
+    if (!content || busy) return;
+    setText('');
+    const next = [...messages, { role: 'user', content } as Msg];
+    setMessages(next);
     setBusy(true);
 
     try {
       const r = await fetch('/api/support/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: [...messages, { role: 'user', content: text }] }),
+        body: JSON.stringify({ messages: next }),
       });
-      const j = await r.json().catch(() => ({} as any));
+      const j = await r.json();
       const reply: string =
         j?.reply ||
         j?.message ||
-        'Hmm, I couldn’t reach the model. Check your API key on the **API Keys** page and try again.';
+        'Something went wrong. Please try again or check your API key on the API Keys page.';
       setMessages((m) => [...m, { role: 'assistant', content: reply }]);
     } catch {
       setMessages((m) => [
         ...m,
-        { role: 'assistant', content: 'Request failed. Please try again in a moment.' },
+        { role: 'assistant', content: 'Network error. Please try again in a moment.' },
       ]);
     } finally {
       setBusy(false);
     }
   }
-
   function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -68,162 +66,117 @@ export default function SupportPage() {
     }
   }
 
-  function clearChat() {
-    setMessages([{ role: 'assistant', content: GREETING }]);
-  }
-
-  function shareChat() {
-    try {
-      const text = messages.map((m) => (m.role === 'user' ? `You: ${m.content}` : `Riley: ${m.content}`)).join('\n\n');
-      navigator.clipboard.writeText(text);
-    } catch {}
-  }
-
   return (
     <>
-      <Head><title>Riley — Support • reduc.ai</title></Head>
+      <Head>
+        <title>Riley — Support • reduc.ai</title>
+      </Head>
 
-      <main className="px-6 py-8">
-        {/* page title bar (same family as your other pages, not bold) */}
-        <div className="mx-auto w-full max-w-[1240px] mb-5">
-          <div className="flex items-center justify-center">
+      <main className="min-h-screen px-6 2xl:px-12 py-8 font-movatif" style={{ background: '#0b0c10' }}>
+        {/* Page title */}
+        <div className="max-w-[1240px] mx-auto mb-6 flex items-center gap-4">
+          {/* Title icon (rounded square with chat bubble) */}
+          <div
+            className="w-12 h-12 rounded-2xl flex items-center justify-center"
+            style={{
+              background: 'linear-gradient(180deg, rgba(0,255,194,0.08), rgba(0,0,0,0.12))',
+              border: THIN_BORDER,
+              boxShadow: 'inset 0 0 18px rgba(0,0,0,0.4), 0 10px 30px rgba(0,0,0,0.35)',
+            }}
+          >
+            <MessageSquare className="w-6 h-6" style={{ color: '#2dbb9c' }} />
+          </div>
+
+          <div className="min-w-0">
+            <h1 className="text-white/95 tracking-tight" style={{ fontSize: 34, fontWeight: 500 }}>
+              <span>Riley</span>
+              <span className="text-white/55"> — Support</span>
+            </h1>
+            <p className="text-white/60 text-sm">
+              Ask our Support AI, or email
+              {' '}
+              <a className="text-[#59d9b3] hover:underline" href="mailto:support@reduc.ai">
+                support@reduc.ai
+              </a>
+              .
+            </p>
+          </div>
+        </div>
+
+        {/* Chat card */}
+        <section className="max-w-[1240px] mx-auto">
+          <div
+            className="rounded-[20px] overflow-hidden"
+            style={{ background: CARD_BG, border: THIN_BORDER, boxShadow: SHADOW }}
+          >
+            {/* Messages area (solid bubbles, thin borders) */}
             <div
-              className="w-full rounded-[14px] px-5 py-3 text-center font-movatif"
+              ref={boxRef}
+              className="h-[66vh] min-h-[440px] max-h-[76vh] overflow-y-auto p-6 md:p-8"
               style={{
-                border: '1px solid rgba(106,247,209,0.22)',
-                boxShadow: '0 0 10px rgba(106,247,209,0.08)',
-                background: 'rgba(8,10,11,0.75)',
-                color: 'rgba(255,255,255,0.9)',
+                background:
+                  'radial-gradient(1200px 600px at 20% 10%, rgba(0,255,194,0.06), transparent 60%)',
               }}
             >
-              Ask our Support AI or email <span className="text-[#6af7d1]">support@reduc.ai</span>
-            </div>
-          </div>
-        </div>
-
-        {/* chat card */}
-        <div className="mx-auto w-full max-w-[1240px]" style={FRAME}>
-          {/* header */}
-          <div
-            className="flex items-center justify-between px-5 py-3"
-            style={{ borderBottom: '1px solid rgba(255,255,255,0.10)' }}
-          >
-            <div className="flex items-center gap-2 font-movatif">
-              <MessageSquare className="w-4 h-4 text-[#6af7d1]" />
-              <div className="text-[20px] md:text-[22px] text-white/95">Riley — <span className="text-white/80">Support</span></div>
+              <div className="space-y-4">
+                {messages.map((m, i) => (
+                  <Bubble key={i} role={m.role} text={m.content} />
+                ))}
+              </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            {/* Composer — single pill button (no extra icon button) */}
+            <div
+              className="p-3 md:p-4 flex items-center gap-3"
+              style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}
+            >
+              <input
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                onKeyDown={onKeyDown}
+                placeholder="Type your message..."
+                className="flex-1 h-[48px] md:h-[52px] px-4 md:px-5 text-white outline-none"
+                style={{
+                  background: '#0f1314',            // solid
+                  border: '1px solid rgba(255,255,255,0.12)', // thin
+                  borderRadius: 22,                 // much more rounded
+                }}
+              />
               <button
-                onClick={clearChat}
-                className="inline-flex items-center gap-1.5 h-[34px] px-3 rounded-[10px] text-sm text-white/85 hover:bg-white/5"
-                style={{ border: '1px solid rgba(255,255,255,0.12)' }}
-                title="Clear"
+                onClick={send}
+                disabled={busy || !text.trim()}
+                className="inline-flex items-center gap-2 px-5 md:px-6 h-[48px] md:h-[52px] rounded-full font-semibold transition-transform active:scale-[0.99] disabled:opacity-60"
+                style={{
+                  background: MINT,
+                  color: '#07110f',
+                  boxShadow: '0 6px 18px rgba(0,255,194,0.28)',
+                }}
               >
-                <Trash2 className="w-4 h-4" /> Clear
-              </button>
-              <button
-                onClick={shareChat}
-                className="inline-flex items-center gap-1.5 h-[34px] px-3 rounded-[10px] text-sm text-white/85 hover:bg-white/5"
-                style={{ border: '1px solid rgba(255,255,255,0.12)' }}
-                title="Copy conversation"
-              >
-                <Share2 className="w-4 h-4" /> Share
+                <Send className="w-4 h-4" style={{ color: '#ffffff' }} />
+                Send
               </button>
             </div>
           </div>
-
-          {/* messages */}
-          <div
-            ref={scrollerRef}
-            className="px-5 py-5 overflow-y-auto"
-            style={{ height: '68vh', scrollbarWidth: 'thin' }}
-          >
-            <div className="space-y-3">
-              {messages.map((m, i) => (
-                <Bubble key={i} role={m.role} text={m.content} />
-              ))}
-            </div>
-          </div>
-
-          {/* input */}
-          <div
-            className="flex items-center gap-3 px-4 py-4"
-            style={{ borderTop: '1px solid rgba(255,255,255,0.10)' }}
-          >
-            <input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={onKeyDown}
-              placeholder="Type your message..."
-              className="flex-1 h-[48px] px-4 rounded-[24px] text-white outline-none"
-              style={{
-                background: '#0f1314', // solid
-                border: '1px solid rgba(255,255,255,0.20)', // thinner
-              }}
-            />
-
-            {/* Primary "Next"-style button */}
-            <button
-              onClick={send}
-              disabled={busy || !input.trim()}
-              className="h-[48px] px-5 rounded-[24px] font-semibold disabled:opacity-50"
-              style={{
-                background: BTN_PRIMARY,
-                color: '#0b0c10',
-                boxShadow: '0 0 10px rgba(106,247,209,0.30)',
-              }}
-              onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_PRIMARY_HOVER)}
-              onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_PRIMARY)}
-            >
-              Send
-            </button>
-
-            {/* Optional plane icon (matches your screenshots) */}
-            <button
-              onClick={send}
-              disabled={busy || !input.trim()}
-              className="w-[44px] h-[44px] rounded-full grid place-items-center disabled:opacity-50"
-              title="Send"
-              style={{ background: 'rgba(26,64,57,0.85)', border: '1px solid rgba(106,247,209,0.25)' }}
-            >
-              <Send className="w-4 h-4 text-[#6af7d1]" />
-            </button>
-          </div>
-        </div>
+        </section>
       </main>
-
-      <style jsx global>{`
-        body { background: #0b0c10; }
-        .fadeIn {
-          animation: fadeInUp 220ms ease forwards;
-          opacity: 0;
-          transform: translateY(4px);
-        }
-        @keyframes fadeInUp {
-          to { opacity: 1; transform: translateY(0); }
-        }
-      `}</style>
     </>
   );
 }
 
-/* ——— Message bubble (solid backgrounds) ——— */
+/** —— Message bubble (solid backgrounds) —— */
 function Bubble({ role, text }: { role: 'user' | 'assistant'; text: string }) {
   const isUser = role === 'user';
-  const bg = isUser ? '#0f4136' : '#101314'; // solid
-  const border = isUser ? '1px solid rgba(0,255,194,0.22)' : '1px solid rgba(255,255,255,0.10)';
-  const color = isUser ? '#d9fff5' : 'rgba(255,255,255,0.92)';
-
+  const bg = isUser ? '#0f4136' : '#0f1314'; // solid, not transparent
+  const border = isUser ? '1px solid rgba(0,255,194,0.22)' : '1px solid rgba(255,255,255,0.12)';
   return (
-    <div className={isUser ? 'text-right' : 'text-left'}>
+    <div className={isUser ? 'flex justify-start' : 'flex justify-start'}>
       <div
-        className="inline-block max-w-[1000px] px-4 py-2 fadeIn"
+        className="max-w-[880px] text-[14px] leading-relaxed text-white/92 px-4 py-3"
         style={{
           background: bg,
           border,
-          borderRadius: 16, // more rounded for bubbles
-          color,
+          borderRadius: 18, // rounded bubbles
+          boxShadow: '0 6px 16px rgba(0,0,0,0.35)',
         }}
       >
         {text}
