@@ -14,6 +14,4 @@ export default withAuth({
   }
 })
 
-export const config = {
-  matcher: ['/builder/:path*', '/improve/:path*', '/voice-agent', '/dashboard', '/admin/:path*'],
-}
+export const config = { matcher: ['/builder/:path*','/improve/:path*','/voice-agent','/admin/:path*'] }
