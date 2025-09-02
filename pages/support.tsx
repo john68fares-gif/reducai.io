@@ -3,16 +3,16 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Head from 'next/head';
-import {
-  HelpCircle, ChevronDown, MessageSquareText, BookOpen, FileText, Sparkles
-} from 'lucide-react';
+import { HelpCircle, Copy, Check, Share2, Trash2, MessageSquareText } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-/* ====== Theme bits to match your other screens ====== */
+const SUPPORT_EMAIL = 'support@reduc.ai'; // change if needed
+
+/* ===== Theme bits (same vibe as your app) ===== */
 const UI = {
   frameBg: 'rgba(13,15,17,0.95)',
   cardBg: '#101314',
-  thinBorder: '1px solid rgba(255,255,255,0.30)',
+  borderThin: '1px solid rgba(255,255,255,0.30)',
   dashed: '2px dashed rgba(106,247,209,0.30)',
   glow: 'radial-gradient(circle, rgba(106,247,209,0.12) 0%, transparent 70%)',
   green: '#59d9b3',
@@ -26,69 +26,25 @@ const FRAME: React.CSSProperties = {
 };
 const CARD: React.CSSProperties = {
   background: UI.cardBg,
-  border: UI.thinBorder,
+  border: UI.borderThin,
   borderRadius: 20,
-  boxShadow: 'inset 0 0 18px rgba(0,0,0,0.28), 0 10px 36px rgba(0,0,0,0.35)',
+  boxShadow: 'inset 0 0 18px rgba(0,0,0,0.28), 0 14px 44px rgba(0,0,0,0.45)',
 };
 const fadeUp = {
-  initial: { opacity: 0, y: 12, scale: 0.98 },
+  initial: { opacity: 0, y: 12, scale: 0.985 },
   animate: { opacity: 1, y: 0, scale: 1 },
   transition: { duration: 0.22 },
 };
 
-/* ====== Accordion (collapsible sections) ====== */
-function AccordionItem({
-  title,
-  icon,
-  children,
-  defaultOpen = false,
-}: {
-  title: string;
-  icon?: React.ReactNode;
-  children: React.ReactNode;
-  defaultOpen?: boolean;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-
-  return (
-    <motion.div {...fadeUp} style={CARD} className="overflow-hidden">
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-white/5 transition"
-      >
-        <div className="flex items-center gap-2 text-white font-semibold">
-          {icon} <span>{title}</span>
-        </div>
-        <ChevronDown
-          className={`w-5 h-5 text-white/80 transition-transform ${open ? 'rotate-180' : ''}`}
-        />
-      </button>
-
-      <AnimatePresence initial={false}>
-        {open && (
-          <motion.div
-            key="content"
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.20 }}
-          >
-            <div className="px-5 pb-5 pt-1 text-white/85 text-sm">
-              {children}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </motion.div>
-  );
-}
-
-/* ====== Support Chat (uses newest text build prompt after mount) ====== */
+/* ===== Chat component ===== */
 function SupportChat() {
   type Msg = { role: 'user' | 'assistant'; content: string };
-  const [messages, setMessages] = useState<Msg[]>([
-    { role: 'assistant', content: 'Hi — ask me anything about the platform. I answer short and clearly.' },
-  ]);
+  const initialGreeting: Msg = {
+    role: 'assistant',
+    content: 'Hi, please provide a detailed description of your issue.',
+  };
+
+  const [messages, setMessages] = useState<Msg[]>([initialGreeting]);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -96,9 +52,10 @@ function SupportChat() {
   const [system, setSystem] = useState(
     'You are a helpful website assistant for reduc.ai. Keep answers under 80 words; use bullets for steps.'
   );
+
   const boxRef = useRef<HTMLDivElement | null>(null);
 
-  // Load newest text build (no SSR access)
+  // Load the newest *text* build from localStorage (safe: after mount only)
   useEffect(() => {
     try {
       const raw = localStorage.getItem('chatbots');
@@ -126,14 +83,14 @@ function SupportChat() {
     const content = text.trim();
     if (!content || busy) return;
     setText('');
-    setMessages((m) => [...m, { role: 'user', content }]);
+    setMessages(m => [...m, { role: 'user', content }]);
     setBusy(true);
 
     try {
       const payload = {
         model,
         system,
-        messages: messages.concat({ role: 'user', content }).map((m) => ({ role: m.role, content: m.content })),
+        messages: messages.concat({ role: 'user', content }).map(m => ({ role: m.role, content: m.content })),
         temperature: 0.3,
         maxTokens: 400,
       };
@@ -144,10 +101,10 @@ function SupportChat() {
         body: JSON.stringify(payload),
       });
       const j = await r.json();
-      const reply = j?.reply || j?.message || j?.text || '(no response)';
-      setMessages((m) => [...m, { role: 'assistant', content: reply }]);
+      const reply = j?.reply || j?.message || j?.text || 'Sorry—no response.';
+      setMessages(m => [...m, { role: 'assistant', content: reply }]);
     } catch {
-      setMessages((m) => [...m, { role: 'assistant', content: 'Temporary error. Please try again.' }]);
+      setMessages(m => [...m, { role: 'assistant', content: 'Temporary error. Please try again.' }]);
     } finally {
       setBusy(false);
     }
@@ -160,22 +117,61 @@ function SupportChat() {
     }
   }
 
+  function clearChat() {
+    setMessages([initialGreeting]);
+    setText('');
+  }
+
+  function copyShare() {
+    try {
+      navigator.clipboard.writeText(window.location.href);
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 1500);
+    } catch {}
+  }
+
+  const [shareCopied, setShareCopied] = useState(false);
+
   return (
-    <motion.div {...fadeUp} style={CARD} className="rounded-xl overflow-hidden p-0 relative">
-      {/* Soft glow */}
+    <motion.div {...fadeUp} style={CARD} className="relative p-0 overflow-hidden">
+      {/* subtle glow */}
       <div
         aria-hidden
         className="pointer-events-none absolute -top-[30%] -left-[30%] w-[70%] h-[70%] rounded-full"
-        style={{ background: UI.glow, filter: 'blur(38px)' }}
+        style={{ background: UI.glow, filter: 'blur(40px)' }}
       />
-      <div className="px-3 py-2 text-xs text-white/70 border-b border-white/10 flex items-center gap-2">
-        <MessageSquareText className="w-4 h-4 text-[#6af7d1]" />
-        Support chatbot · model <span className="text-white/90">{model}</span>
+
+      {/* Header row inside the card */}
+      <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
+        <div className="flex items-center gap-2 text-white/90 font-semibold">
+          <MessageSquareText className="w-4 h-4 text-[#6af7d1]" />
+          Demo
+          <span className="text-white/50 text-xs ml-2">model: {model}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={clearChat}
+            className="inline-flex items-center gap-2 px-3 h-8 rounded-[10px] text-sm hover:bg-white/10 transition"
+            title="Clear"
+          >
+            <Trash2 className="w-4 h-4" />
+            Clear
+          </button>
+          <button
+            onClick={copyShare}
+            className="inline-flex items-center gap-2 px-3 h-8 rounded-[10px] text-sm hover:bg-white/10 transition"
+            title="Share"
+          >
+            {shareCopied ? <Check className="w-4 h-4 text-[#6af7d1]" /> : <Share2 className="w-4 h-4" />}
+            {shareCopied ? 'Copied' : 'Share'}
+          </button>
+        </div>
       </div>
 
+      {/* Messages */}
       <div
         ref={boxRef}
-        className="h-[380px] overflow-y-auto px-3 py-3 space-y-2"
+        className="h-[560px] overflow-y-auto px-4 py-4 space-y-2"
         style={{ scrollbarWidth: 'thin' }}
       >
         <AnimatePresence initial={false}>
@@ -202,22 +198,22 @@ function SupportChat() {
         </AnimatePresence>
       </div>
 
-      <div className="p-2 flex gap-2 border-t border-white/10 bg-black/20">
+      {/* Composer */}
+      <div className="p-3 border-t border-white/10 bg-black/20 flex gap-2">
         <input
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
-          placeholder="Type your message…"
-          className="flex-1 h-[42px] rounded-[12px] border border-white/20 bg-black/40 px-3 text-white outline-none focus:border-[#6af7d1]"
+          placeholder="Type your message..."
+          className="flex-1 h-[44px] rounded-[12px] border border-white/20 bg-black/40 px-3 text-white outline-none focus:border-[#6af7d1]"
         />
         <button
           onClick={send}
           disabled={busy}
-          className="inline-flex items-center gap-2 h-[42px] px-4 rounded-[12px] font-semibold transition"
+          className="inline-flex items-center gap-2 h-[44px] px-5 rounded-[12px] font-semibold shadow-sm transition"
           style={{ background: UI.green, color: '#0b0c10', opacity: busy ? 0.7 : 1 }}
           onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = UI.greenHover)}
           onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = UI.green)}
-          title="Send"
         >
           Send
         </button>
@@ -226,81 +222,46 @@ function SupportChat() {
   );
 }
 
-/* ====== Page ====== */
+/* ===== Page ===== */
 export default function SupportPage() {
+  const [copied, setCopied] = useState(false);
+  function copyEmail() {
+    navigator.clipboard.writeText(SUPPORT_EMAIL).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    });
+  }
+
   return (
     <>
-      <Head><title>Support & Help • reduc.ai</title></Head>
+      <Head><title>Support Center • reduc.ai</title></Head>
 
-      <main className="px-6 py-12" style={{ maxWidth: 1080, margin: '0 auto' }}>
-        {/* Page Title */}
-        <motion.div {...fadeUp} className="flex items-center justify-between mb-8">
-          <div className="flex items-center gap-3">
-            <div
-              className="w-11 h-11 rounded-2xl flex items-center justify-center"
-              style={{ background: 'rgba(0,255,194,0.12)', border: '1px solid rgba(0,255,194,0.22)' }}
+      <main className="px-6 py-10" style={{ maxWidth: 1280, margin: '0 auto' }}>
+        {/* Top bar (email + copy) */}
+        <motion.div {...fadeUp} className="mb-6 flex items-center justify-center">
+          <div
+            className="w-full rounded-[16px] px-4 py-3 text-sm flex items-center justify-center gap-2"
+            style={{ ...FRAME, borderStyle: 'solid', borderWidth: 1 }}
+          >
+            <HelpCircle className="w-4 h-4 text-[#6af7d1]" />
+            <span className="text-white/80">
+              Ask our Support AI, or send us an email on:&nbsp;
+              <span className="text-white">{SUPPORT_EMAIL}</span>
+            </span>
+            <button
+              onClick={copyEmail}
+              className="ml-2 inline-flex items-center gap-1 px-2 h-7 rounded-[10px] border border-white/15 hover:bg-white/10 transition"
+              title="Copy email"
             >
-              <HelpCircle className="w-5 h-5 text-[#6af7d1]" />
-            </div>
-            <div>
-              <h1 className="text-3xl md:text-4xl font-semibold tracking-tight text-white">
-                Support & Help
-              </h1>
-              <div className="text-white/70 text-sm mt-1">
-                Chat with the assistant, read the guide, or check FAQs.
-              </div>
-            </div>
-          </div>
-          <div className="hidden sm:flex items-center gap-2 text-white/70 text-sm">
-            <Sparkles className="w-4 h-4 text-[#6af7d1]" />
-            <span>Powered by your latest Build</span>
+              {copied ? <Check className="w-3.5 h-3.5 text-[#6af7d1]" /> : <Copy className="w-3.5 h-3.5" />}
+              <span className="text-xs">{copied ? 'Copied' : 'Copy'}</span>
+            </button>
           </div>
         </motion.div>
 
-        {/* Frame wrapper with glow */}
-        <motion.div {...fadeUp} style={FRAME} className="p-5 space-y-4 relative">
-          <div
-            aria-hidden
-            className="pointer-events-none absolute -top-[20%] -right-[28%] w-[55%] h-[55%] rounded-full"
-            style={{ background: UI.glow, filter: 'blur(42px)' }}
-          />
-
-          {/* Chat */}
-          <AccordionItem
-            title="AI Helpline (chat with our site assistant)"
-            icon={<MessageSquareText className="w-5 h-5 text-[#6af7d1]" />}
-            defaultOpen
-          >
-            <SupportChat />
-            <div className="text-xs text-white/60 mt-2">
-              Tip: The bot uses your newest text build’s prompt. Generate a new build to update behavior.
-            </div>
-          </AccordionItem>
-
-          {/* Guide */}
-          <AccordionItem
-            title="Quick Guide (how it works)"
-            icon={<BookOpen className="w-5 h-5 text-[#6af7d1]" />}
-          >
-            <div style={CARD} className="p-4 rounded-xl text-sm text-white/85">
-              <ol className="list-decimal list-inside space-y-2">
-                <li>Builder → create a <b>Text Build</b> with Description, Rules, Flow, Company Info.</li>
-                <li>Step 2: choose a model (e.g., <code>gpt-4o-mini</code>), temperature ~0.3.</li>
-                <li>Step 4: click <b>Generate</b> to save it (the Support bot will use it).</li>
-                <li>Return here to test. Keep replies short and clear.</li>
-              </ol>
-            </div>
-          </AccordionItem>
-
-          {/* FAQ placeholder */}
-          <AccordionItem
-            title="FAQ"
-            icon={<FileText className="w-5 h-5 text-[#6af7d1]" />}
-          >
-            <div style={CARD} className="p-4 rounded-xl text-sm text-white/80">
-              Add real FAQs later; your build’s Company Info already gives the bot reusable facts.
-            </div>
-          </AccordionItem>
+        {/* Centered wide chat panel (single card, no nested boxes) */}
+        <motion.div {...fadeUp} className="mx-auto" style={{ maxWidth: 980 }}>
+          <SupportChat />
         </motion.div>
       </main>
 
