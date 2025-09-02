@@ -1,6 +1,8 @@
+// components/ui/OnboardingOverlay.tsx
+'use client';
+
 import { AnimatePresence, motion } from 'framer-motion';
 import { useEffect, useMemo, useState } from 'react';
-import { writeJSON, writeText } from '../../lib/userStorage';
 
 const CARD: React.CSSProperties = {
   width: '100%', maxWidth: 640, borderRadius: 20,
@@ -8,10 +10,7 @@ const CARD: React.CSSProperties = {
   boxShadow: '0 0 28px rgba(106,247,209,.10), inset 0 0 22px rgba(0,0,0,.28)',
 };
 
-const OPTIONS = [
-  'YouTube', 'TikTok', 'Instagram', 'Twitter/X', 'Reddit',
-  'Google Search', 'Friend/Referral', 'BuildMyAgent community', 'Other',
-];
+const OPTIONS = ['YouTube','TikTok','Instagram','Twitter/X','Reddit','Google Search','Friend/Referral','BuildMyAgent community','Other'];
 
 export default function OnboardingOverlay({
   open, mode, userId, onDone,
@@ -27,16 +26,22 @@ export default function OnboardingOverlay({
   async function submit() {
     try {
       if (userId) {
-        writeText(userId, 'profile:completed', '1');
-        writeJSON(userId, 'profile:data', { fullName, heardFrom });
+        localStorage.setItem(`user:${userId}:profile:completed`, '1');
+        localStorage.setItem(`user:${userId}:profile:data`, JSON.stringify({ fullName, heardFrom }));
       }
     } catch {}
+
+    // OPTIONAL: send to your Google Sheet via /api/track/signup
     try {
-      await fetch('/api/track/signup', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fullName, heardFrom }),
-      });
+      const email = (typeof window !== 'undefined' && (window as any).__USER_EMAIL__) || '';
+      if (email) {
+        await fetch('/api/track/signup', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fullName, heardFrom, email }),
+        });
+      }
     } catch {}
+
     onDone();
   }
 
@@ -47,7 +52,7 @@ export default function OnboardingOverlay({
           style={{ position:'fixed', inset:0, zIndex:1000, background:'rgba(0,0,0,.55)', backdropFilter:'blur(2px)' }}>
           <div className="min-h-screen grid place-items-center p-6">
             <motion.div initial={{opacity:0,y:16}} animate={{opacity:1,y:0}} exit={{opacity:0,y:12}} transition={{duration:.28}}
-              style={CARD} className="p-6">
+              style={CARD} className="p-6 text-white">
               <div className="flex items-center justify-between">
                 <div className="font-extrabold text-lg flex items-center gap-2">
                   <span style={{ width:10, height:10, borderRadius:999, background:'#6af7d1', boxShadow:'0 0 16px #6af7d1' }} />
@@ -66,8 +71,9 @@ export default function OnboardingOverlay({
                   <h2 className="text-2xl font-bold">Welcome back</h2>
                   <p className="text-white/70 mt-1">Continue where you left off.</p>
                   <div className="mt-5">
-                    <button onClick={onDone} className="h-11 px-5 rounded-xl font-semibold"
-                      style={{ background:'#00ffc2', color:'#001018' }}>Continue</button>
+                    <button onClick={onDone} className="h-11 px-5 rounded-xl font-semibold" style={{ background:'#00ffc2', color:'#001018' }}>
+                      Continue
+                    </button>
                   </div>
                 </div>
               ) : (
@@ -81,8 +87,9 @@ export default function OnboardingOverlay({
                         className="mt-4 w-full h-11 rounded-xl bg-black/30 border border-white/20 px-3 outline-none focus:border-[#6af7d1]" />
                       <div className="mt-5 flex justify-end">
                         <button disabled={!fullName.trim()} onClick={()=>setStep(1)}
-                          className="h-11 px-5 rounded-xl font-semibold disabled:opacity-50"
-                          style={{ background:'#00ffc2', color:'#001018' }}>Next →</button>
+                          className="h-11 px-5 rounded-xl font-semibold disabled:opacity-50" style={{ background:'#00ffc2', color:'#001018' }}>
+                          Next →
+                        </button>
                       </div>
                     </>
                   )}
@@ -102,8 +109,9 @@ export default function OnboardingOverlay({
                       </div>
                       <div className="mt-5 flex justify-between">
                         <button onClick={()=>setStep(0)} className="h-11 px-4 rounded-xl border border-white/20 bg-black/20">← Back</button>
-                        <button onClick={submit} className="h-11 px-5 rounded-xl font-semibold"
-                          style={{ background:'#00ffc2', color:'#001018' }}>Finish</button>
+                        <button onClick={submit} className="h-11 px-5 rounded-xl font-semibold" style={{ background:'#00ffc2', color:'#001018' }}>
+                          Finish
+                        </button>
                       </div>
                     </>
                   )}
