@@ -1,151 +1,57 @@
-// components/voice/VoiceAssistantEditor.tsx
+// components/voice/edit/VoiceAssistantEditor.tsx
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import {
-  ArrowLeft, Save, Phone, KeyRound, PlugZap, Settings2, Wand2,
-  ChevronDown, Loader2, Check, AlertTriangle, ShieldCheck
-} from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { ChevronRight, Save, Phone, Settings, Gauge, MessageSquare, Wand2 } from 'lucide-react';
+import { AnimatePresence, motion } from 'framer-motion';
 
-/* ===========================
-   Shared look & helpers
-   =========================== */
-const OUTER: React.CSSProperties = {
-  background: 'rgba(13,15,17,0.92)',
-  border: '1px solid rgba(106,247,209,0.18)',
-  borderRadius: 22,
-  boxShadow:
-    '0 14px 40px rgba(0,0,0,0.55), 0 0 12px rgba(0,255,194,0.06), inset 0 0 14px rgba(0,0,0,0.25)',
-};
-
-const CARD: React.CSSProperties = {
-  background: '#101314',
-  border: '1px solid rgba(255,255,255,0.20)',
-  borderRadius: 16,
-  boxShadow: '0 6px 20px rgba(0,0,0,0.35), inset 0 0 10px rgba(0,0,0,0.25)',
-};
-
-const BTN_OK = '#00ffc2';
-const BTN_OK_HOVER = '#00eab3';
-
-type VoiceAgent = {
+type VoiceBot = {
   id: string;
-  type?: 'voice' | string;
-  name?: string;
-  language?: string;
+  name: string;
+  type: 'voice';
+  // model
+  provider?: 'openai';
   model?: string;
+  temperature?: number;
+  maxTokens?: number;
+  firstMessage?: string;
+  systemPrompt?: string;
+  files?: string[];
+  // voice
+  voiceProvider?: 'vapi' | string;
+  voiceName?: string;
+  backgroundSound?: string;
+  // telephony
   fromE164?: string;
-  vcfg?: {
-    provider?: string;
-    voice?: string;
-    greeting?: string;
-    style?: string;
-    rate?: number;
-    pitch?: number;
-    bargeIn?: boolean;
-  };
-  tcfg?: {
-    accountSid?: string;
-    authToken?: string;
-  };
-  prompt?: string;
-  createdAt?: string;
+  // transcriber
+  sttProvider?: 'deepgram' | string;
+  sttModel?: string;
+  sttLang?: string;
+  // misc
   updatedAt?: string;
+  createdAt?: string;
 };
 
-function readAgent(id: string): VoiceAgent | null {
-  try {
-    const raw = localStorage.getItem('chatbots');
-    const arr = raw ? JSON.parse(raw) : [];
-    const got = Array.isArray(arr) ? arr.find((b: any) => b.id === id) : null;
-    return got || null;
-  } catch {
-    return null;
-  }
+const wrap = 'w-full max-w-[1640px] mx-auto px-6 2xl:px-12 pt-8 pb-24';
+const panel =
+  'rounded-[16px] border border-white/10 bg-[rgba(11,12,14,0.82)] shadow-[0_10px_35px_rgba(0,0,0,0.35),_0_0_80px_rgba(0,255,194,0.05)]';
+
+const TabBtn = ({ active, children, onClick }: any) => (
+  <button
+    onClick={onClick}
+    className={`px-3 py-2 rounded-[10px] text-sm ${active ? 'bg-white/10 text-white' : 'text-white/70 hover:text-white'}`}
+  >
+    {children}
+  </button>
+);
+
+function loadAll(): any[] {
+  try { return JSON.parse(localStorage.getItem('chatbots') || '[]') || []; } catch { return []; }
+}
+function saveAll(next: any[]) {
+  try { localStorage.setItem('chatbots', JSON.stringify(next)); } catch {}
 }
 
-function writeAgent(upd: VoiceAgent) {
-  try {
-    const raw = localStorage.getItem('chatbots');
-    const arr: any[] = raw ? JSON.parse(raw) : [];
-    const i = arr.findIndex((b) => b.id === upd.id);
-    if (i >= 0) arr[i] = { ...arr[i], ...upd, updatedAt: new Date().toISOString() };
-    else arr.unshift({ ...upd, updatedAt: new Date().toISOString() });
-    localStorage.setItem('chatbots', JSON.stringify(arr));
-  } catch {}
-}
-
-function FieldLabel({ children }: { children: React.ReactNode }) {
-  return <div className="text-xs text-white/70 mb-1">{children}</div>;
-}
-
-function Line() {
-  return <div className="h-px w-full bg-white/10 my-3" />;
-}
-
-/* ---------- tiny accordion ---------- */
-function Section({
-  title,
-  icon,
-  defaultOpen = true,
-  children,
-}: {
-  title: string;
-  icon?: React.ReactNode;
-  defaultOpen?: boolean;
-  children: React.ReactNode;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <div style={CARD} className="overflow-hidden">
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-white/5 transition"
-      >
-        <div className="flex items-center gap-2 text-white font-semibold">
-          {icon} <span>{title}</span>
-        </div>
-        <ChevronDown
-          className={`w-5 h-5 text-white/80 transition-transform ${open ? 'rotate-180' : ''}`}
-        />
-      </button>
-      <AnimatePresence initial={false}>
-        {open && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.18 }}
-          >
-            <div className="px-5 pb-5 pt-2">{children}</div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
-
-/* ---------- toast ---------- */
-function Toast({ text, tone='ok', onClose }:{ text:string; tone?:'ok'|'warn'|'err'; onClose:()=>void }) {
-  useEffect(()=>{ const t = setTimeout(onClose, 2000); return ()=>clearTimeout(t); },[onClose]);
-  const border = tone==='ok' ? 'rgba(106,247,209,0.40)' : tone==='warn' ? 'rgba(255,220,120,0.40)' : 'rgba(255,120,120,0.40)';
-  return (
-    <div className="fixed bottom-6 right-6 z-[9999]">
-      <div
-        className="px-4 py-3 rounded-[14px] text-sm text-white/95 flex items-center gap-2"
-        style={{ background:'rgba(16,19,20,0.95)', border:`1px solid ${border}`, boxShadow:'0 10px 30px rgba(0,0,0,0.45)'}}
-      >
-        {tone==='ok' ? <Check className="w-4 h-4 text-[#6af7d1]" /> : <AlertTriangle className="w-4 h-4 text-amber-300" />}
-        <span>{text}</span>
-      </div>
-    </div>
-  );
-}
-
-/* ===========================
-   Editor
-   =========================== */
 export default function VoiceAssistantEditor({
   agentId,
   onBack,
@@ -153,339 +59,294 @@ export default function VoiceAssistantEditor({
   agentId: string;
   onBack: () => void;
 }) {
-  const [agent, setAgent] = useState<VoiceAgent | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [toast, setToast] = useState<{ text: string; tone?: 'ok' | 'warn' | 'err' } | null>(null);
-  const [attaching, setAttaching] = useState(false);
+  const [bot, setBot] = useState<VoiceBot | null>(null);
+  const [tab, setTab] = useState<'model' | 'voice' | 'transcriber' | 'tools' | 'analysis' | 'advanced' | 'widget'>('model');
+  const [saved, setSaved] = useState<string>('');
 
-  /* form state */
-  const [name, setName] = useState('');
-  const [language, setLanguage] = useState('English');
-  const [model, setModel] = useState('gpt-4o-mini');
-  const [voice, setVoice] = useState('Elliot');
-  const [greeting, setGreeting] = useState('Hello! How can I help today?');
-  const [style, setStyle] = useState('friendly, concise');
-  const [rate, setRate] = useState(100);
-  const [pitch, setPitch] = useState(0);
-  const [bargeIn, setBarge] = useState(true);
-
-  const [sid, setSid] = useState('');
-  const [token, setToken] = useState('');
-  const [phone, setPhone] = useState('');
-  const [fromE164, setFrom] = useState('');
-
+  // hydrate
   useEffect(() => {
-    const a = readAgent(agentId);
-    setAgent(a);
-    const v = a?.vcfg || {};
-    setName(a?.name || '');
-    setLanguage(a?.language || 'English');
-    setModel(a?.model || 'gpt-4o-mini');
-    setVoice(v.voice || 'Elliot');
-    setGreeting(v.greeting || 'Hello! How can I help today?');
-    setStyle(v.style || 'friendly, concise');
-    setRate(v.rate ?? 100);
-    setPitch(v.pitch ?? 0);
-    setBarge(v.bargeIn ?? true);
-    setFrom(a?.fromE164 || '');
-    const t = a?.tcfg || {};
-    setSid(t.accountSid || '');
-    setToken(t.authToken || '');
+    const arr = loadAll();
+    const found = arr.find((b: any) => b.id === agentId);
+    if (found) {
+      if (found.type !== 'voice') found.type = 'voice';
+      setBot(found as VoiceBot);
+    }
   }, [agentId]);
 
-  function saveAll() {
-    if (!agent) return;
-    setSaving(true);
-    const next: VoiceAgent = {
-      ...agent,
-      type: 'voice',
-      name,
-      language,
-      model,
-      fromE164,
-      vcfg: { provider: 'vapi', voice, greeting, style, rate, pitch, bargeIn },
-      tcfg: { accountSid: sid, authToken: token },
-    };
-    writeAgent(next);
-    setAgent(next);
-    setSaving(false);
-    setToast({ text: 'Changes saved.', tone: 'ok' });
-  }
+  const save = () => {
+    if (!bot) return;
+    const arr = loadAll();
+    const idx = arr.findIndex((b: any) => b.id === bot.id);
+    const next = { ...bot, type: 'voice', updatedAt: new Date().toISOString() };
+    if (idx >= 0) arr[idx] = next; else arr.unshift(next);
+    saveAll(arr);
+    setSaved('Saved');
+    setTimeout(() => setSaved(''), 1200);
+  };
 
-  async function attachNumber() {
-    if (!sid || !token || !phone) {
-      setToast({ text: 'Enter Twilio SID, Auth Token and Phone number first.', tone: 'warn' });
-      return;
-    }
-    setAttaching(true);
-    try {
-      const body = {
-        accountSid: sid,
-        authToken: token,
-        phoneNumber: phone,
-        agentId: agentId,
-        language,
-        voice,
-        greeting,
-        style,
-        rate,
-        pitch,
-        bargeIn,
-      };
-      const r = await fetch('/api/telephony/attach-number', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const j = await r.json();
-      if (!j?.ok) throw new Error(j?.error || 'Attach failed');
-      setFrom(phone);
-      // persist
-      if (agent) writeAgent({ ...agent, fromE164: phone });
-      setToast({ text: 'Number attached to webhook successfully.', tone: 'ok' });
-    } catch (e: any) {
-      setToast({ text: e?.message || 'Attach failed', tone: 'err' });
-    } finally {
-      setAttaching(false);
-    }
+  if (!bot) {
+    return (
+      <section className={wrap}>
+        <div className="text-white/70">Voice agent not found.</div>
+      </section>
+    );
   }
 
   return (
     <section className="w-full">
-      {/* page header */}
-      <div className="w-full max-w-[1640px] mx-auto px-6 2xl:px-12 pt-8 pb-6">
-        <div className="flex items-center justify-between mb-4">
-          <button
-            onClick={onBack}
-            className="inline-flex items-center gap-2 rounded-[12px] border border-white/15 px-4 py-2 hover:bg-white/10 transition"
-          >
-            <ArrowLeft className="w-4 h-4" /> Back
-          </button>
-
-          <div className="flex items-center gap-3">
+      <div className={wrap}>
+        {/* Header */}
+        <div className="mb-6 flex items-start justify-between">
+          <div>
+            <div className="text-xs text-white/60 mb-1">Edit Assistant</div>
+            <div className="flex items-baseline gap-3">
+              <h1 className="text-[28px] md:text-[34px] font-semibold leading-none">
+                {bot.name || 'Untitled'} <span className="text-white/50 ml-2">— Voice</span>
+              </h1>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
             <button
-              onClick={saveAll}
-              disabled={saving}
-              className="inline-flex items-center gap-2 px-5 py-2 rounded-[14px] font-semibold"
-              style={{ background: BTN_OK, color: '#0b0c10', opacity: saving ? 0.7 : 1 }}
-              onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_OK_HOVER)}
-              onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_OK)}
+              onClick={onBack}
+              className="rounded-[10px] px-3 py-2 border border-white/15 text-white/85 hover:bg-white/10"
+              title="Back to Voice Agents"
             >
-              <Save className="w-4 h-4" />
+              Back
+            </button>
+            <button
+              onClick={save}
+              className="rounded-[10px] px-3 py-2 bg-[#00ffc2] text-black font-semibold shadow-[0_0_12px_rgba(106,247,209,0.35)] hover:brightness-110"
+            >
               Save
+            </button>
+            <button
+              className="rounded-[10px] px-3 py-2 bg-white/10 border border-white/15 text-white/85"
+              title="Publish (stub)"
+            >
+              Publish
             </button>
           </div>
         </div>
 
-        {/* Title like other pages */}
-        <div className="mb-6">
-          <div className="text-sm text-white/60">Edit Assistant</div>
-          <h1 className="mt-1 text-3xl md:text-[34px] font-semibold tracking-tight">
-            {name || 'Untitled'} <span className="text-white/50">— Voice</span>
-          </h1>
-          <div className="text-white/60 text-sm mt-1">
-            Configure model, voice, telephony, and behavior. Changes are saved locally until you click <span className="text-white/80">Save</span>.
-          </div>
+        {/* Tabs */}
+        <div className="flex items-center gap-2 mb-6">
+          <TabBtn active={tab === 'model'} onClick={() => setTab('model')}>Model</TabBtn>
+          <TabBtn active={tab === 'voice'} onClick={() => setTab('voice')}>Voice</TabBtn>
+          <TabBtn active={tab === 'transcriber'} onClick={() => setTab('transcriber')}>Transcriber</TabBtn>
+          <TabBtn active={tab === 'tools'} onClick={() => setTab('tools')}>Tools</TabBtn>
+          <TabBtn active={tab === 'analysis'} onClick={() => setTab('analysis')}>Analysis</TabBtn>
+          <TabBtn active={tab === 'advanced'} onClick={() => setTab('advanced')}>Advanced</TabBtn>
+          <TabBtn active={tab === 'widget'} onClick={() => setTab('widget')}>Widget</TabBtn>
+          {!!saved && <span className="ml-auto text-xs text-[#6af7d1]">{saved}</span>}
         </div>
-      </div>
 
-      {/* editor body */}
-      <div className="w-full max-w-[1640px] mx-auto px-6 2xl:px-12 pb-20">
-        <div
-          className="p-6 md:p-7"
-          style={{
-            ...OUTER,
-            borderRadius: 26,
-            boxShadow: '0 18px 60px rgba(0,0,0,0.55), 0 0 18px rgba(0,255,194,0.06)',
-          }}
-        >
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* left (wide) */}
-            <div className="lg:col-span-2 space-y-6">
-              <Section title="Model & Basics" icon={<Settings2 className="w-4 h-4 text-[#6af7d1]" />}>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <FieldLabel>Assistant Name</FieldLabel>
-                    <input
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      className="w-full h-[42px] rounded-[12px] bg-black/30 text-white px-3 border border-white/15 outline-none focus:border-[#00ffc2]"
-                    />
-                  </div>
-                  <div>
-                    <FieldLabel>Language</FieldLabel>
-                    <input
-                      value={language}
-                      onChange={(e) => setLanguage(e.target.value)}
-                      className="w-full h-[42px] rounded-[12px] bg-black/30 text-white px-3 border border-white/15 outline-none focus:border-[#00ffc2]"
-                    />
-                  </div>
-                  <div>
-                    <FieldLabel>Model</FieldLabel>
-                    <select
-                      value={model}
-                      onChange={(e) => setModel(e.target.value)}
-                      className="w-full h-[42px] rounded-[12px] bg-black/30 text-white px-3 border border-white/15 outline-none focus:border-[#00ffc2]"
-                    >
-                      <option value="gpt-4o-mini">gpt-4o-mini (recommended)</option>
-                      <option value="gpt-4o">gpt-4o</option>
-                      <option value="gpt-4.1">gpt-4.1</option>
-                    </select>
-                  </div>
-                </div>
-              </Section>
-
-              <Section title="Voice" icon={<Wand2 className="w-4 h-4 text-[#6af7d1]" />}>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <FieldLabel>Voice</FieldLabel>
-                    <input
-                      value={voice}
-                      onChange={(e) => setVoice(e.target.value)}
-                      className="w-full h-[42px] rounded-[12px] bg-black/30 text-white px-3 border border-white/15 outline-none focus:border-[#00ffc2]"
-                    />
-                  </div>
-                  <div>
-                    <FieldLabel>Greeting</FieldLabel>
-                    <input
-                      value={greeting}
-                      onChange={(e) => setGreeting(e.target.value)}
-                      className="w-full h-[42px] rounded-[12px] bg-black/30 text-white px-3 border border-white/15 outline-none focus:border-[#00ffc2]"
-                    />
-                  </div>
-                  <div>
-                    <FieldLabel>Style</FieldLabel>
-                    <input
-                      value={style}
-                      onChange={(e) => setStyle(e.target.value)}
-                      className="w-full h-[42px] rounded-[12px] bg-black/30 text-white px-3 border border-white/15 outline-none focus:border-[#00ffc2]"
-                    />
-                  </div>
-                  <div className="grid grid-cols-3 gap-3">
+        {/* Panels */}
+        <AnimatePresence mode="wait">
+          {tab === 'model' && (
+            <motion.div key="model" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.18 }}>
+              <div className={`${panel} p-6 space-y-6`}>
+                <Section title="Model">
+                  <div className="grid sm:grid-cols-2 gap-3">
                     <div>
-                      <FieldLabel>Rate</FieldLabel>
-                      <input
-                        type="number"
-                        value={rate}
-                        onChange={(e) => setRate(Number(e.target.value))}
-                        className="w-full h-[42px] rounded-[12px] bg-black/30 text-white px-3 border border-white/15 outline-none focus:border-[#00ffc2]"
-                      />
-                    </div>
-                    <div>
-                      <FieldLabel>Pitch</FieldLabel>
-                      <input
-                        type="number"
-                        value={pitch}
-                        onChange={(e) => setPitch(Number(e.target.value))}
-                        className="w-full h-[42px] rounded-[12px] bg-black/30 text-white px-3 border border-white/15 outline-none focus:border-[#00ffc2]"
-                      />
-                    </div>
-                    <div className="flex items-end">
-                      <label className="inline-flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={bargeIn}
-                          onChange={(e) => setBarge(e.target.checked)}
-                          className="accent-[#00ffc2]"
-                        />
-                        <span className="text-white/80 text-sm">Barge-in</span>
-                      </label>
-                    </div>
-                  </div>
-                </div>
-              </Section>
-
-              <Section title="Call Behavior (summary)" icon={<ShieldCheck className="w-4 h-4 text-[#6af7d1]" />}>
-                <div className="text-sm text-white/80">
-                  Keep replies short, one question at a time. Ask for a callback number if the user hangs up mid-flow.
-                  You can extend this later in a Prompt tab.
-                </div>
-              </Section>
-            </div>
-
-            {/* right column */}
-            <div className="space-y-6">
-              <Section title="Telephony (Twilio)" icon={<PlugZap className="w-4 h-4 text-[#6af7d1]" />} defaultOpen>
-                <div className="grid gap-3">
-                  <div>
-                    <FieldLabel>Account SID</FieldLabel>
-                    <input
-                      value={sid}
-                      onChange={(e) => setSid(e.target.value)}
-                      placeholder="ACxxxxxxxx…"
-                      className="w-full h-[42px] rounded-[12px] bg-black/30 text-white px-3 border border-white/15 outline-none focus:border-[#00ffc2]"
-                    />
-                  </div>
-                  <div>
-                    <FieldLabel>Auth Token</FieldLabel>
-                    <input
-                      type="password"
-                      value={token}
-                      onChange={(e) => setToken(e.target.value)}
-                      className="w-full h-[42px] rounded-[12px] bg-black/30 text-white px-3 border border-white/15 outline-none focus:border-[#00ffc2]"
-                    />
-                  </div>
-                  <Line />
-                  <div>
-                    <FieldLabel>Phone Number (E.164)</FieldLabel>
-                    <input
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      placeholder="+15551234567"
-                      className="w-full h-[42px] rounded-[12px] bg-black/30 text-white px-3 border border-white/15 outline-none focus:border-[#00ffc2]"
-                    />
-                  </div>
-
-                  <div className="flex items-center gap-3">
-                    <button
-                      onClick={attachNumber}
-                      disabled={attaching}
-                      className="inline-flex items-center gap-2 px-4 py-2 rounded-[12px] font-semibold"
-                      style={{ background: BTN_OK, color: '#0b0c10', opacity: attaching ? 0.7 : 1 }}
-                      onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_OK_HOVER)}
-                      onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_OK)}
-                    >
-                      {attaching ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
-                      Attach Number
-                    </button>
-
-                    {fromE164 && (
-                      <a
-                        href={`tel:${fromE164}`}
-                        className="inline-flex items-center gap-2 px-3 py-2 rounded-[12px] text-sm border border-white/15 hover:bg-white/10"
+                      <label className="text-xs text-white/70">Provider</label>
+                      <select
+                        value={bot.provider || 'openai'}
+                        onChange={(e) => setBot({ ...bot, provider: e.target.value as any })}
+                        className="w-full h-[42px] rounded-[12px] bg-[#101314] border border-white/15 text-white px-3"
                       >
-                        <Phone className="w-4 h-4" /> Test
-                      </a>
-                    )}
-                  </div>
-
-                  {fromE164 && (
-                    <div className="text-xs text-white/60">
-                      Current attached number: <span className="text-white/80">{fromE164}</span>
+                        <option value="openai">OpenAI</option>
+                      </select>
                     </div>
-                  )}
-                </div>
-              </Section>
+                    <div>
+                      <label className="text-xs text-white/70">Model</label>
+                      <select
+                        value={bot.model || 'gpt-4o-mini'}
+                        onChange={(e) => setBot({ ...bot, model: e.target.value })}
+                        className="w-full h-[42px] rounded-[12px] bg-[#101314] border border-white/15 text-white px-3"
+                      >
+                        <option value="gpt-4o-mini">gpt-4o-mini</option>
+                        <option value="gpt-4o">gpt-4o</option>
+                        <option value="gpt-4.1">gpt-4.1</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-xs text-white/70">Temperature (0–1)</label>
+                      <input
+                        type="number" step="0.1" min={0} max={1}
+                        value={bot.temperature ?? 0.5}
+                        onChange={(e) => setBot({ ...bot, temperature: Number(e.target.value) })}
+                        className="w-full h-[42px] rounded-[12px] bg-[#101314] border border-white/15 text-white px-3"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-white/70">Max Tokens</label>
+                      <input
+                        type="number"
+                        value={bot.maxTokens ?? 400}
+                        onChange={(e) => setBot({ ...bot, maxTokens: Number(e.target.value) })}
+                        className="w-full h-[42px] rounded-[12px] bg-[#101314] border border-white/15 text-white px-3"
+                      />
+                    </div>
+                  </div>
+                </Section>
 
-              <Section title="Save" icon={<Save className="w-4 h-4 text-[#6af7d1]" />} defaultOpen={false}>
-                <div className="text-sm text-white/80 mb-3">
-                  Save your changes. This updates the local build and timestamps the change.
-                </div>
-                <button
-                  onClick={saveAll}
-                  disabled={saving}
-                  className="inline-flex items-center gap-2 px-5 py-2 rounded-[14px] font-semibold"
-                  style={{ background: BTN_OK, color: '#0b0c10', opacity: saving ? 0.7 : 1 }}
-                >
-                  <Save className="w-4 h-4" /> Save Changes
-                </button>
-              </Section>
-            </div>
-          </div>
-        </div>
+                <Section title="Messages">
+                  <div className="grid gap-3">
+                    <div>
+                      <label className="text-xs text-white/70">First Message</label>
+                      <input
+                        value={bot.firstMessage ?? ''}
+                        onChange={(e) => setBot({ ...bot, firstMessage: e.target.value })}
+                        placeholder="Hello — thanks for calling…"
+                        className="w-full h-[42px] rounded-[12px] bg-[#101314] border border-white/15 text-white px-3"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-white/70">System Prompt</label>
+                      <textarea
+                        rows={6}
+                        value={bot.systemPrompt ?? ''}
+                        onChange={(e) => setBot({ ...bot, systemPrompt: e.target.value })}
+                        className="w-full rounded-[12px] bg-[#101314] border border-white/15 text-white px-3 py-2"
+                        placeholder="Core behavior, rules, style…"
+                      />
+                    </div>
+                  </div>
+                </Section>
+              </div>
+            </motion.div>
+          )}
+
+          {tab === 'voice' && (
+            <motion.div key="voice" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.18 }}>
+              <div className={`${panel} p-6 space-y-6`}>
+                <Section title="Voice Configuration" icon={<Phone className="w-4 h-4" />}>
+                  <div className="grid sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs text-white/70">Provider</label>
+                      <select
+                        value={bot.voiceProvider || 'vapi'}
+                        onChange={(e) => setBot({ ...bot, voiceProvider: e.target.value as any })}
+                        className="w-full h-[42px] rounded-[12px] bg-[#101314] border border-white/15 text-white px-3"
+                      >
+                        <option value="vapi">Vapi</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-xs text-white/70">Voice</label>
+                      <input
+                        value={bot.voiceName || 'Elliot'}
+                        onChange={(e) => setBot({ ...bot, voiceName: e.target.value })}
+                        className="w-full h-[42px] rounded-[12px] bg-[#101314] border border-white/15 text-white px-3"
+                      />
+                    </div>
+                  </div>
+                </Section>
+              </div>
+            </motion.div>
+          )}
+
+          {tab === 'transcriber' && (
+            <motion.div key="stt" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.18 }}>
+              <div className={`${panel} p-6 space-y-6`}>
+                <Section title="Transcriber">
+                  <div className="grid sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="text-xs text-white/70">Provider</label>
+                      <select
+                        value={bot.sttProvider || 'deepgram'}
+                        onChange={(e) => setBot({ ...bot, sttProvider: e.target.value as any })}
+                        className="w-full h-[42px] rounded-[12px] bg-[#101314] border border-white/15 text-white px-3"
+                      >
+                        <option value="deepgram">Deepgram</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-xs text-white/70">Model</label>
+                      <input
+                        value={bot.sttModel || 'Nova-2'}
+                        onChange={(e) => setBot({ ...bot, sttModel: e.target.value })}
+                        className="w-full h-[42px] rounded-[12px] bg-[#101314] border border-white/15 text-white px-3"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-white/70">Language</label>
+                      <input
+                        value={bot.sttLang || 'en'}
+                        onChange={(e) => setBot({ ...bot, sttLang: e.target.value })}
+                        className="w-full h-[42px] rounded-[12px] bg-[#101314] border border-white/15 text-white px-3"
+                      />
+                    </div>
+                  </div>
+                </Section>
+              </div>
+            </motion.div>
+          )}
+
+          {tab === 'tools' && (
+            <motion.div key="tools" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.18 }}>
+              <div className={`${panel} p-6`}>
+                <Section title="Tools">
+                  <div className="text-white/70 text-sm">You can wire custom tools/functions here later.</div>
+                </Section>
+              </div>
+            </motion.div>
+          )}
+
+          {tab === 'analysis' && (
+            <motion.div key="analysis" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.18 }}>
+              <div className={`${panel} p-6`}>
+                <Section title="Analysis">
+                  <div className="text-white/70 text-sm">Summary / success rubric settings placeholder.</div>
+                </Section>
+              </div>
+            </motion.div>
+          )}
+
+          {tab === 'advanced' && (
+            <motion.div key="adv" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.18 }}>
+              <div className={`${panel} p-6`}>
+                <Section title="Advanced">
+                  <div className="text-white/70 text-sm">Privacy, start speaking plan, voicemail detection…</div>
+                </Section>
+              </div>
+            </motion.div>
+          )}
+
+          {tab === 'widget' && (
+            <motion.div key="widget" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.18 }}>
+              <div className={`${panel} p-6`}>
+                <Section title="Widget / Embed">
+                  <code className="block text-xs text-white/80 bg-black/30 rounded-[12px] border border-white/10 p-3 overflow-x-auto">
+{`<vapi-widget assistant-id="${bot.id}" public-key="YOUR_PUBLIC_KEY"></vapi-widget>
+<script src="https://unpkg.com/@vapi-ai/client-sdk-react/dist/embed/widget.umd.js" async></script>`}
+                  </code>
+                </Section>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
-
-      {toast && <Toast text={toast.text} tone={toast.tone} onClose={() => setToast(null)} />}
     </section>
+  );
+}
+
+function Section({
+  title,
+  icon,
+  children,
+}: {
+  title: string;
+  icon?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-[14px] border border-white/10 bg-black/20">
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-white/10">
+        {icon || <Settings className="w-4 h-4 text-white/70" />}
+        <div className="text-white font-medium">{title}</div>
+      </div>
+      <div className="p-4">{children}</div>
+    </div>
   );
 }
