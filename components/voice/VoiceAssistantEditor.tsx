@@ -1,35 +1,37 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import {
-  ArrowLeft, Save, Rocket, Cpu, FileText, KeyRound, Waves, Music, Mic, Settings2,
-  Landmark, ListChecks, MessageSquareText, Shield, Timer, Gauge, ChevronDown, ChevronRight,
-  Wand2, Copy
-} from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import {
+  ArrowLeft, Save, Rocket,
+  Cpu, FileText, KeyRound, Waves, Music, Mic, Settings2,
+  Landmark, ListChecks, MessageSquareText, Shield, Timer, Gauge,
+  ChevronDown, ChevronRight, Wand2, Copy
+} from 'lucide-react';
 
 /* =========================== STYLE =========================== */
 const WRAP = 'w-full max-w-[1720px] mx-auto px-6 2xl:px-12 pt-10 pb-28';
 
-/* Solid, high-contrast surfaces */
 const CARD: React.CSSProperties = {
-  background: '#0f1214',                       // solid, not transparent
+  background: '#0f1214', // solid surface
   border: '1px solid rgba(106,247,209,0.18)',
   borderRadius: 28,
-  boxShadow: '0 6px 24px rgba(0,0,0,0.35), inset 0 0 22px rgba(0,0,0,0.25)',
+  boxShadow: '0 18px 60px rgba(0,0,0,0.55), 0 0 18px rgba(0,255,194,0.06)', // outer glow
 };
 const INNER: React.CSSProperties = {
   background: '#101314',
   border: '1px solid rgba(255,255,255,0.22)',
   borderRadius: 16,
-  boxShadow: 'inset 0 0 10px rgba(0,0,0,0.35)',
+  boxShadow: 'inset 0 0 12px rgba(0,0,0,0.35)',
 };
 const HEADER_GLOW: React.CSSProperties = {
   background: 'radial-gradient(circle, rgba(106,247,209,0.10) 0%, transparent 70%)',
   filter: 'blur(34px)',
 };
 
-/* ======================== TYPES ======================== */
+const BTN_ACCENT = '#59d9b3';
+const BTN_ACCENT_HOVER = '#54cfa9';
+
 type Props = { id: string; onExit: () => void; onSaved?: () => void };
 type Bot = {
   id: string;
@@ -61,20 +63,15 @@ function assignPath(obj: any, path: string, value: any) {
 }
 const clamp = (n: number, a: number, b: number) => Math.max(a, Math.min(b, n));
 const num = (v: any, d: number) => (Number.isFinite(Number(v)) ? Number(v) : d);
-
-function copyToClipboard(text: string) {
-  try { navigator.clipboard.writeText(text); } catch {}
-}
+function copyToClipboard(text: string) { try { navigator.clipboard.writeText(text); } catch {} }
 
 /* ======================== ATOMS ======================== */
 const Input = (p: React.InputHTMLAttributes<HTMLInputElement>) =>
-  <input {...p} className={`w-full px-3 py-2 rounded-[10px] bg-[#0b0e0f] border border-white/14 outline-none focus:border-[#00ffc2] ${p.className||''}`} />;
-
+  <input {...p} className={`w-full px-3 py-2 rounded-[12px] bg-[#0b0e0f] border border-white/14 outline-none focus:border-[#00ffc2] ${p.className||''}`} />;
 const Text = (p: React.TextareaHTMLAttributes<HTMLTextAreaElement>) =>
-  <textarea {...p} className={`w-full px-3 py-3 rounded-[10px] bg-[#0b0e0f] border border-white/14 outline-none focus:border-[#00ffc2] ${p.className||''}`} />;
-
+  <textarea {...p} className={`w-full px-3 py-3 rounded-[12px] bg-[#0b0e0f] border border-white/14 outline-none focus:border-[#00ffc2] ${p.className||''}`} />;
 const Select = (p: React.SelectHTMLAttributes<HTMLSelectElement>) =>
-  <select {...p} className={`w-full px-3 py-2 rounded-[10px] bg-[#0b0e0f] border border-white/14 outline-none focus:border-[#00ffc2] ${p.className||''}`} />;
+  <select {...p} className={`w-full px-3 py-2 rounded-[12px] bg-[#0b0e0f] border border-white/14 outline-none focus:border-[#00ffc2] ${p.className||''}`} />;
 
 function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -91,10 +88,8 @@ function Toggle({ label, checked, onChange }: { label: string; checked: boolean;
   );
 }
 
-/* Inspiration block with “Use preset” + Copy */
-function Inspo({
-  title, text, onUse,
-}: { title: string; text: string; onUse: () => void }) {
+/* Inspiration block */
+function Inspo({ title, text, onUse }:{ title: string; text: string; onUse: () => void }) {
   return (
     <div className="mt-3 rounded-[12px] border border-dashed border-white/18 p-3 bg-white/4">
       <div className="flex items-center justify-between">
@@ -127,8 +122,13 @@ function Section({
 }) {
   const open = openMap[id] ?? defaultOpen;
   const toggle = () => setOpenMap((m) => ({ ...m, [id]: !open }));
+
   return (
-    <div style={CARD} className="rounded-[28px] p-0 overflow-hidden">
+    <motion.div
+      initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.18 }}
+      style={CARD}
+      className="rounded-[28px] p-0 overflow-hidden"
+    >
       <button
         onClick={toggle}
         className="w-full text-left px-6 md:px-7 py-4 flex items-center justify-between hover:bg-white/4"
@@ -151,7 +151,7 @@ function Section({
           </motion.div>
         )}
       </AnimatePresence>
-    </div>
+    </motion.div>
   );
 }
 
@@ -164,7 +164,7 @@ function Row({ label, children, icon }: { label: string; children: React.ReactNo
   );
 }
 
-/* ===================== PRESETS (lazy-friendly) ===================== */
+/* ===================== PRESETS ===================== */
 const PRESETS = {
   firstMessage: 'Hello! Thanks for calling — how can I help today?',
   systemPrompt:
@@ -172,12 +172,12 @@ const PRESETS = {
 - Ask one question at a time.
 - Keep responses under 2–3 short sentences.
 - After greeting, immediately ask the first qualifying question.
-- If policy/compliance topics appear, recommend checking local regulations.
-- If stuck, gracefully offer to connect to a teammate.`,
+- If the caller repeats or is silent, politely re-ask once, then move on.
+- If stuck, offer to connect to a teammate.`,
   summary:
 `You are an expert note-taker. Summarize the call in 2–3 sentences, listing any decisions or next steps.`,
   success:
-`You are an expert evaluator. Based on the system prompt + transcript, decide if the goal was achieved. Return "success" or "fail" with one sentence explaining why.`,
+`You are an expert evaluator. Using the system prompt + transcript, decide if the goal was achieved. Return "success" or "fail" with one sentence why.`,
   structured:
 `Extract:
 - caller_name
@@ -195,7 +195,7 @@ export default function VoiceAssistantEditor({ id, onExit, onSaved }: Props) {
   const [bot, setBot] = useState<Bot | null>(null);
   const [saving, setSaving] = useState(false);
 
-  // collapsible state (and controls)
+  // collapsible state
   const [openMap, setOpenMap] = useState<Record<string, boolean>>({
     model: true, voice: true, transcriber: true, tools: true,
     analysis: true, advanced: true, widget: false,
@@ -234,10 +234,10 @@ export default function VoiceAssistantEditor({ id, onExit, onSaved }: Props) {
   };
 
   const quickFill = () => {
-    // sensible defaults everywhere
+    // defaults
     setCfg('model.provider', 'openai');
     setCfg('model.name', 'gpt-4o-cluster');
-    setCfg('model.firstMode', 'assistant_first');
+    setCfg('model.firstMode', 'assistant_first');     // assistant greets once
     setCfg('model.firstMessage', PRESETS.firstMessage);
     setCfg('model.systemPrompt', PRESETS.systemPrompt);
     setCfg('model.maxTokens', 250);
@@ -364,10 +364,20 @@ export default function VoiceAssistantEditor({ id, onExit, onSaved }: Props) {
             <button onClick={onExit} className="inline-flex items-center gap-2 rounded-[12px] border border-white/15 px-4 py-2 hover:bg-white/10">
               <ArrowLeft className="w-4 h-4" /> Back
             </button>
-            <button onClick={save} className="inline-flex items-center gap-2 rounded-[12px] px-4 py-2 font-semibold" style={{ background:'#59d9b3', color:'#0b0c10' }}>
+            <button
+              onClick={save}
+              className="inline-flex items-center gap-2 rounded-[12px] px-4 py-2 font-semibold"
+              style={{ background: BTN_ACCENT, color: 'white' }}
+              onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = BTN_ACCENT_HOVER)}
+              onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = BTN_ACCENT)}
+            >
               <Save className="w-4 h-4" /> {saving ? 'Saving…' : 'Save'}
             </button>
-            <button onClick={() => {}} className="inline-flex items-center gap-2 rounded-[12px] px-4 py-2 font-semibold border border-[#2b6] hover:bg-white/10">
+            <button
+              onClick={() => {/* wire publish later */}}
+              className="inline-flex items-center gap-2 rounded-[12px] px-4 py-2 font-semibold border border-[#2b6] hover:bg-white/10"
+              style={{ color: 'white' }}
+            >
               <Rocket className="w-4 h-4" /> Publish
             </button>
           </div>
@@ -391,7 +401,7 @@ export default function VoiceAssistantEditor({ id, onExit, onSaved }: Props) {
           </div>
         </div>
 
-        {/* === MODEL === */}
+        {/* Sections */}
         <Section id="model" title="Model" icon={<Cpu className="w-4 h-4 text-[#6af7d1]" />} openMap={openMap} setOpenMap={setOpenMap}>
           <Row label="Provider & Model" icon={<Cpu className="w-4 h-4 text-[#6af7d1]" />}>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -447,7 +457,6 @@ export default function VoiceAssistantEditor({ id, onExit, onSaved }: Props) {
 
         <div className="h-6" />
 
-        {/* === VOICE === */}
         <Section id="voice" title="Voice" icon={<Waves className="w-4 h-4 text-[#6af7d1]" />} openMap={openMap} setOpenMap={setOpenMap}>
           <Row label="Voice Configuration" icon={<Waves className="w-4 h-4 text-[#6af7d1]" />}>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -484,7 +493,7 @@ export default function VoiceAssistantEditor({ id, onExit, onSaved }: Props) {
                 </Select>
               </div>
               <div>
-                <div className="text-xs text-white/60 mb-1">Background Sound URL</div>
+                <div className="text-xs text-white/60 mb-1">Background URL</div>
                 <Input placeholder="https://…" value={String(cfg.voice?.bgUrl ?? '')} onChange={e=>setCfg('voice.bgUrl', e.target.value)} />
                 <Inspo title="Preset URL" text={PRESETS.bgUrl} onUse={()=>setCfg('voice.bgUrl', PRESETS.bgUrl)} />
               </div>
@@ -498,7 +507,6 @@ export default function VoiceAssistantEditor({ id, onExit, onSaved }: Props) {
 
         <div className="h-6" />
 
-        {/* === TRANSCRIBER === */}
         <Section id="transcriber" title="Transcriber" icon={<Mic className="w-4 h-4 text-[#6af7d1]" />} openMap={openMap} setOpenMap={setOpenMap}>
           <Row label="Provider & Model" icon={<Mic className="w-4 h-4 text-[#6af7d1]" />}>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -538,7 +546,6 @@ export default function VoiceAssistantEditor({ id, onExit, onSaved }: Props) {
 
         <div className="h-6" />
 
-        {/* === TOOLS === */}
         <Section id="tools" title="Tools" icon={<ListChecks className="w-4 h-4 text-[#6af7d1]" />} openMap={openMap} setOpenMap={setOpenMap}>
           <Row label="Predefined Functions" icon={<ListChecks className="w-4 h-4 text-[#6af7d1]" />}>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -554,7 +561,6 @@ export default function VoiceAssistantEditor({ id, onExit, onSaved }: Props) {
 
         <div className="h-6" />
 
-        {/* === ANALYSIS === */}
         <Section id="analysis" title="Analysis" icon={<Landmark className="w-4 h-4 text-[#6af7d1]" />} openMap={openMap} setOpenMap={setOpenMap}>
           <Row label="Summary" icon={<FileText className="w-4 h-4 text-[#6af7d1]" />}>
             <Text rows={6} placeholder="Prompt used to summarize the call…" value={String(cfg.analysis?.summary ?? '')} onChange={e=>setCfg('analysis.summary', e.target.value)} />
@@ -604,7 +610,6 @@ export default function VoiceAssistantEditor({ id, onExit, onSaved }: Props) {
 
         <div className="h-6" />
 
-        {/* === ADVANCED === */}
         <Section id="advanced" title="Advanced" icon={<Shield className="w-4 h-4 text-[#6af7d1]" />} openMap={openMap} setOpenMap={setOpenMap}>
           <Row label="Privacy" icon={<Shield className="w-4 h-4 text-[#6af7d1]" />}>
             <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
@@ -748,7 +753,6 @@ export default function VoiceAssistantEditor({ id, onExit, onSaved }: Props) {
 
         <div className="h-6" />
 
-        {/* === WIDGET === */}
         <Section id="widget" title="Widget" icon={<Settings2 className="w-4 h-4 text-[#6af7d1]" />} openMap={openMap} setOpenMap={setOpenMap}>
           <Row label="Embed Code" icon={<FileText className="w-4 h-4 text-[#6af7d1]" />}>
             <pre className="text-xs whitespace-pre-wrap p-4 rounded-[12px] bg-black/40 border border-white/12">{`<vapi-widget assistant-id="${bot.id}" public-key="YOUR_PUBLIC_KEY"></vapi-widget>
