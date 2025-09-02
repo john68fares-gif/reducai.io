@@ -2,45 +2,45 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Plus, Bot as BotIcon, Phone, Trash2, ArrowRight, X } from 'lucide-react';
-import { AnimatePresence, motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  Plus, Bot as BotIcon, Phone, Trash2, ArrowRight, X, Pencil
+} from 'lucide-react';
 
-// Wizard pieces you already have
-import StepProgress from '@/components/builder/StepProgress';
-import StepV1Basics from '@/components/voice/steps/StepV1Basics';
-import StepV2Telephony from '@/components/voice/steps/StepV2Telephony';
-import StepV3PromptA from '@/components/voice/steps/StepV3PromptA';
-import StepV4Overview from '@/components/voice/steps/StepV4Overview';
+// ---------- Wizard pieces (LOCAL RELATIVE IMPORTS) ----------
+import StepProgress from '../builder/StepProgress';
+import StepV1Basics from './steps/StepV1Basics';
+import StepV2Telephony from './steps/StepV2Telephony';
+import StepV3PromptA from './steps/StepV3PromptA';
+import StepV4Overview from './steps/StepV4Overview';
 
-// New
+// ---------- Editor (client) ----------
 import VoiceAssistantEditor from './VoiceAssistantEditor';
 
 type Agent = {
   id: string;
   name: string;
-  type?: 'voice' | 'text' | string;
+  type?: string;          // 'voice' | 'text'
   language?: string;
-  fromE164?: string;       // phone number if attached
+  fromE164?: string;
   updatedAt?: string;
   createdAt?: string;
-  // any extras you keep
-  twilioAccountSid?: string;
-  twilioAuthToken?: string;
 };
 
 const UI = {
   cardBg: 'rgba(13,15,17,0.92)',
+  border: '1px solid rgba(106,247,209,0.18)',
   cardShadow: 'inset 0 0 18px rgba(0,0,0,0.28), 0 0 12px rgba(106,247,209,0.04)',
-  borderThin: '1px solid rgba(106,247,209,0.18)',
 };
 
 const nowISO = () => new Date().toISOString();
 const fmt = (iso?: string) => (iso ? new Date(iso).toLocaleDateString() : '');
 
+// simple fade
 const fadeUp = {
   initial: { opacity: 0, y: 10 },
   animate: { opacity: 1, y: 0 },
-  transition: { duration: 0.18 },
+  transition: { duration: 0.20 },
 };
 
 export default function VoiceAgentSection() {
@@ -48,54 +48,34 @@ export default function VoiceAgentSection() {
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [editingId, setEditingId] = useState<string | null>(null);
 
+  // ====== GALLERY DATA (from localStorage.chatbots) ======
   const [query, setQuery] = useState('');
   const [agents, setAgents] = useState<Agent[]>([]);
 
-  // --- storage helpers
-  function readAll(): any[] {
-    try { return JSON.parse(localStorage.getItem('chatbots') || '[]') || []; }
-    catch { return []; }
-  }
-  function writeAll(next: any[]) {
-    try { localStorage.setItem('chatbots', JSON.stringify(next)); } catch {}
-  }
-  function guessVoice(b: any) {
-    // legacy records: treat as voice if any voice/telephony hint is present
-    return !!(b?.fromE164 || b?.twilioNumber || b?.voice || b?.voiceModel || b?.twilioAccountSid);
-  }
-
   useEffect(() => {
     const read = () => {
-      const arr = readAll();
-      // normalize: ensure voice builds have type:"voice"
-      const migrated = Array.isArray(arr) ? arr.map((b: any) => {
-        if (!b?.type && guessVoice(b)) return { ...b, type: 'voice' };
-        return b;
-      }) : [];
-
-      if (migrated.length !== arr.length || JSON.stringify(migrated) !== JSON.stringify(arr)) {
-        writeAll(migrated);
-      }
-
-      const onlyVoice = migrated.filter((b: any) => (b?.type || 'voice') === 'voice');
-
-      setAgents(
-        onlyVoice
-          .map((b: any) => ({
-            id: b.id,
-            name: b.name || 'Untitled Voice Agent',
-            type: 'voice',
-            language: b.language,
-            fromE164: b.fromE164,
-            updatedAt: b.updatedAt || b.createdAt || nowISO(),
-            createdAt: b.createdAt || nowISO(),
-            twilioAccountSid: b.twilioAccountSid,
-            twilioAuthToken: b.twilioAuthToken,
-          }))
-          .sort((a, b) => Date.parse(b.updatedAt!) - Date.parse(a.updatedAt!))
-      );
+      try {
+        const raw = localStorage.getItem('chatbots');
+        const arr = raw ? JSON.parse(raw) : [];
+        // only VOICE entries
+        const onlyVoice = Array.isArray(arr)
+          ? arr.filter((b: any) => (b?.type || 'voice') === 'voice')
+          : [];
+        setAgents(
+          onlyVoice
+            .map((b: any) => ({
+              id: b.id,
+              name: b.name || 'Untitled',
+              type: b.type || 'voice',
+              language: b.language,
+              fromE164: b.fromE164,
+              updatedAt: b.updatedAt || b.createdAt || nowISO(),
+              createdAt: b.createdAt || nowISO(),
+            }))
+            .sort((a, b) => Date.parse(b.updatedAt!) - Date.parse(a.updatedAt!))
+        );
+      } catch {}
     };
-
     read();
     const onStorage = (e: StorageEvent) => e.key === 'chatbots' && read();
     window.addEventListener('storage', onStorage);
@@ -114,29 +94,29 @@ export default function VoiceAgentSection() {
 
   const del = (id: string) => {
     try {
-      const arr = readAll();
+      const raw = localStorage.getItem('chatbots');
+      const arr = raw ? JSON.parse(raw) : [];
       const next = arr.filter((b: any) => b.id !== id);
-      writeAll(next);
+      localStorage.setItem('chatbots', JSON.stringify(next));
       setAgents((p) => p.filter((a) => a.id !== id));
+      if (editingId === id) {
+        setEditingId(null);
+        setMode('gallery');
+      }
     } catch {}
   };
 
-  // Wizard nav
+  // ====== WIZARD NAV ======
   const startWizard = () => { setMode('wizard'); setStep(1); };
   const next = () => setStep((s) => Math.min(4, (s + 1) as any));
   const back = () => setStep((s) => Math.max(1, (s - 1) as any));
   const exitWizard = () => setMode('gallery');
 
-  // Editor nav
+  // When user clicks "Edit" on a card
   const openEditor = (id: string) => { setEditingId(id); setMode('editor'); };
   const closeEditor = () => { setEditingId(null); setMode('gallery'); };
 
-  // ====== EDITOR MODE ======
-  if (mode === 'editor' && editingId) {
-    return <VoiceAssistantEditor agentId={editingId} onBack={closeEditor} />;
-  }
-
-  // ====== WIZARD MODE ======
+  // ====== RENDER: WIZARD ======
   if (mode === 'wizard') {
     return (
       <section className="w-full">
@@ -155,22 +135,22 @@ export default function VoiceAgentSection() {
 
           <AnimatePresence mode="wait">
             {step === 1 && (
-              <motion.div key="s1" {...fadeUp}>
+              <motion.div key="s1" initial={{ opacity:0, y:10 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:-10 }} transition={{ duration:0.20 }}>
                 <StepV1Basics onNext={next} />
               </motion.div>
             )}
             {step === 2 && (
-              <motion.div key="s2" {...fadeUp}>
+              <motion.div key="s2" initial={{ opacity:0, y:10 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:-10 }} transition={{ duration:0.20 }}>
                 <StepV2Telephony onBack={back} onNext={next} />
               </motion.div>
             )}
             {step === 3 && (
-              <motion.div key="s3" {...fadeUp}>
+              <motion.div key="s3" initial={{ opacity:0, y:10 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:-10 }} transition={{ duration:0.20 }}>
                 <StepV3PromptA onBack={back} onNext={next} />
               </motion.div>
             )}
             {step === 4 && (
-              <motion.div key="s4" {...fadeUp}>
+              <motion.div key="s4" initial={{ opacity:0, y:10 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:-10 }} transition={{ duration:0.20 }}>
                 <StepV4Overview onBack={back} />
               </motion.div>
             )}
@@ -180,9 +160,43 @@ export default function VoiceAgentSection() {
     );
   }
 
-  // ====== GALLERY MODE ======
+  // ====== RENDER: EDITOR ======
+  if (mode === 'editor' && editingId) {
+    return (
+      <VoiceAssistantEditor
+        id={editingId}
+        onExit={closeEditor}
+        onSaved={() => {
+          // refresh gallery data after saving in editor
+          try {
+            const raw = localStorage.getItem('chatbots');
+            const arr = raw ? JSON.parse(raw) : [];
+            const onlyVoice = Array.isArray(arr)
+              ? arr.filter((b: any) => (b?.type || 'voice') === 'voice')
+              : [];
+            setAgents(
+              onlyVoice
+                .map((b: any) => ({
+                  id: b.id,
+                  name: b.name || 'Untitled',
+                  type: b.type || 'voice',
+                  language: b.language,
+                  fromE164: b.fromE164,
+                  updatedAt: b.updatedAt || b.createdAt || nowISO(),
+                  createdAt: b.createdAt || nowISO(),
+                }))
+                .sort((a, b) => Date.parse(b.updatedAt!) - Date.parse(a.updatedAt!))
+            );
+          } catch {}
+        }}
+      />
+    );
+  }
+
+  // ====== RENDER: GALLERY ======
   return (
     <section className="w-full">
+      {/* centered wrapper — stays centered even with a fixed sidebar */}
       <div className="w-full max-w-[1600px] mx-auto px-6 2xl:px-12 pt-8 pb-24">
         <motion.div {...fadeUp} className="flex items-center justify-between mb-7">
           <h1 className="text-2xl md:text-3xl font-semibold">Voice Agents</h1>
@@ -204,8 +218,10 @@ export default function VoiceAgentSection() {
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-7">
+          {/* Create card */}
           <CreateCard onClick={startWizard} />
 
+          {/* Saved voice agents */}
           {filtered.map((a) => (
             <AgentCard
               key={a.id}
@@ -233,12 +249,13 @@ function CreateCard({ onClick }: { onClick: () => void }) {
     <button
       onClick={onClick}
       className="group relative h-[320px] rounded-[16px] p-7 flex flex-col items-center justify-center transition-all active:scale-[0.995]"
-      style={{ background: UI.cardBg, border: UI.borderThin, boxShadow: UI.cardShadow }}
+      style={{ background: UI.cardBg, border: UI.border, boxShadow: UI.cardShadow }}
     >
       <div
         className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
         style={{
-          background: 'radial-gradient(circle, rgba(106,247,209,0.12) 0%, transparent 70%)',
+          background:
+            'radial-gradient(circle, rgba(106,247,209,0.12) 0%, transparent 70%)',
           filter: 'blur(36px)',
         }}
       />
@@ -247,7 +264,8 @@ function CreateCard({ onClick }: { onClick: () => void }) {
         style={{
           background: 'rgba(0,0,0,0.18)',
           border: '1px dashed rgba(106,247,209,0.35)',
-          boxShadow: 'inset 0 0 18px rgba(0,0,0,0.45), inset 0 0 6px rgba(106,247,209,0.06)',
+          boxShadow:
+            'inset 0 0 18px rgba(0,0,0,0.45), inset 0 0 6px rgba(106,247,209,0.06)',
         }}
       >
         <Plus className="w-10 h-10" style={{ color: '#6af7d1', opacity: 0.9 }} />
@@ -270,7 +288,7 @@ function AgentCard({
   return (
     <div
       className="relative h-[320px] rounded-[16px] p-6 flex flex-col justify-between"
-      style={{ background: UI.cardBg, border: UI.borderThin, boxShadow: UI.cardShadow }}
+      style={{ background: UI.cardBg, border: UI.border, boxShadow: UI.cardShadow }}
     >
       <div
         className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
@@ -290,7 +308,11 @@ function AgentCard({
             {[agent.language, agent.fromE164].filter(Boolean).join(' · ') || '—'}
           </div>
         </div>
-        <button onClick={onDelete} className="ml-auto p-1.5 rounded-md hover:bg-[#ff4d4d14]" title="Delete">
+        <button
+          onClick={onDelete}
+          className="ml-auto p-1.5 rounded-md hover:bg-[#ff4d4d14]"
+          title="Delete"
+        >
           <Trash2 className="w-4 h-4 text-white/70 hover:text-[#ff7a7a]" />
         </button>
       </div>
@@ -298,22 +320,23 @@ function AgentCard({
       <div className="flex items-center justify-between">
         <div className="text-[12px] text-white/50">Updated {fmt(agent.updatedAt)}</div>
         <div className="flex items-center gap-2">
-          {/* Show Test only if a number exists */}
           {agent.fromE164 && (
             <a
               href={`tel:${agent.fromE164}`}
               className="inline-flex items-center gap-2 px-3 py-2 rounded-[10px] text-sm border"
               style={{ borderColor: 'rgba(106,247,209,0.28)', background: 'rgba(0,255,194,0.06)' }}
             >
-              <Phone className="w-4 h-4" /> Test
+              <Phone className="w-4 h-4" /> Call
             </a>
           )}
           <button
             onClick={onOpen}
             className="inline-flex items-center gap-2 px-3 py-2 rounded-[10px] text-sm border hover:translate-y-[-1px] transition"
             style={{ borderColor: 'rgba(106,247,209,0.28)', background: 'rgba(16,19,20,0.90)' }}
+            title="Edit"
           >
-            Open <ArrowRight className="w-4 h-4" />
+            <Pencil className="w-4 h-4" />
+            Open
           </button>
         </div>
       </div>
