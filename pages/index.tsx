@@ -1,5 +1,6 @@
 // pages/index.tsx
 import Link from "next/link";
+import SignInButton from "@/components/SignInButton";
 
 export default function Landing() {
   return (
@@ -16,11 +17,16 @@ export default function Landing() {
           <span style={STYLES.logoDot} />
           <span>reduc.ai</span>
         </div>
+
         <nav style={STYLES.navLinks}>
           <a href="/builder" style={STYLES.link}>Builder</a>
           <a href="/improve" style={STYLES.link}>Improve</a>
           <a href="/voice-agent" style={STYLES.link}>Voice Agent</a>
           <a href="/api/voice/twilio/incoming" style={STYLES.link}>Webhook XML</a>
+
+          {/* Auth actions (right side) */}
+          <span style={STYLES.sepV} />
+          <SignInButton label="Sign in" href="/login" />
         </nav>
       </header>
 
@@ -32,12 +38,18 @@ export default function Landing() {
             Build sales & support AI <span style={{ color: "#6af7d1" }}>in minutes</span>
           </h1>
           <p style={STYLES.sub}>
-            Pixel‑perfect, fast, and deadly simple. Create an agent, refine the prompt,
+            Pixel-perfect, fast, and deadly simple. Create an agent, refine the prompt,
             test replies, then deploy.
           </p>
 
           <div style={STYLES.ctaRow}>
-            <Link href="/builder?step=1" style={STYLES.ctaPrimary}>Create a Build</Link>
+            {/* Primary "Sign up" goes to login page for now */}
+            <Link href="/login" style={STYLES.ctaPrimary}>
+              Sign up — it’s free
+            </Link>
+
+            {/* Your existing CTAs */}
+            <Link href="/builder?step=1" style={STYLES.ctaGhost}>Create a Build</Link>
             <Link href="/improve" style={STYLES.ctaGhost}>Open Improve</Link>
             <Link href="/voice-agent" style={STYLES.ctaGhost}>Voice Agent</Link>
           </div>
@@ -64,7 +76,7 @@ export default function Landing() {
           />
           <FeatureCard
             title="Support AI"
-            body="Answer FAQs, deflect tickets, keep tone on‑brand."
+            body="Answer FAQs, deflect tickets, keep tone on-brand."
             accent="#7cc3ff"
           />
           <FeatureCard
@@ -134,6 +146,7 @@ const STYLES: Record<string, React.CSSProperties> = {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
+    gap: 16,
   },
   brand: {
     display: "flex",
@@ -149,7 +162,8 @@ const STYLES: Record<string, React.CSSProperties> = {
     background: "#6af7d1",
     boxShadow: "0 0 16px rgba(106,247,209,.8)",
   },
-  navLinks: { display: "flex", gap: 18, fontWeight: 600, opacity: .9 },
+  navLinks: { display: "flex", gap: 18, fontWeight: 600, opacity: .9, alignItems: 'center' },
+  sepV: { width: 1, height: 22, background: "rgba(255,255,255,.18)" },
   link: {
     textDecoration: "none",
     color: "white",
@@ -188,10 +202,10 @@ const STYLES: Record<string, React.CSSProperties> = {
     padding: "12px 16px",
     borderRadius: 12,
     textDecoration: "none",
-    fontWeight: 800,
+    fontWeight: 900,
     background: "#00ffc2",
     color: "#001018",
-    boxShadow: "0 0 18px rgba(106,247,209,.35)",
+    boxShadow: "0 0 26px rgba(106,247,209,.45)", // a bit stronger glow
   },
   ctaGhost: {
     display: "inline-block",
