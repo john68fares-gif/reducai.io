@@ -1,343 +1,323 @@
-// components/voice/edit/VoiceAssistantEditor.tsx
 'use client';
 
-import React, { useEffect, useState } from 'react';
-import { Phone, Settings } from 'lucide-react';
-import { AnimatePresence, motion } from 'framer-motion';
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  ArrowLeft, Save, MessageSquare, Mic, Sliders, Wrench, BarChart3, Settings, Code2,
+  Phone, Zap
+} from 'lucide-react';
 
-type VoiceBot = {
-  id: string;
-  name: string;
-  type: 'voice';
-  provider?: 'openai';
-  model?: string;
-  temperature?: number;
-  maxTokens?: number;
-  firstMessage?: string;
-  systemPrompt?: string;
-  files?: string[];
-  voiceProvider?: 'vapi' | string;
-  voiceName?: string;
-  backgroundSound?: string;
-  fromE164?: string;
-  sttProvider?: 'deepgram' | string;
-  sttModel?: string;
-  sttLang?: string;
-  updatedAt?: string;
-  createdAt?: string;
+/* ---------- Shared look to match your app ---------- */
+const UI = {
+  frame: {
+    background: 'rgba(13,15,17,0.92)',
+    border: '1px solid rgba(106,247,209,0.18)',
+    boxShadow: 'inset 0 0 18px rgba(0,0,0,0.28), 0 0 24px rgba(6,180,140,0.10)',
+    borderRadius: 22,
+  } as React.CSSProperties,
+  card: {
+    background: '#101314',
+    border: '1px solid rgba(255,255,255,0.18)',
+    borderRadius: 18,
+    boxShadow: 'inset 0 0 22px rgba(0,0,0,0.28), 0 10px 40px rgba(0,0,0,0.35)',
+  } as React.CSSProperties,
+  thinBorder: '1px solid rgba(255,255,255,0.14)',
 };
 
-const wrap = 'w-full max-w-[1640px] mx-auto px-6 2xl:px-12 pt-8 pb-24';
-const panel =
-  'rounded-[16px] border border-white/10 bg-[rgba(11,12,14,0.82)] shadow-[0_10px_35px_rgba(0,0,0,0.35),_0_0_80px_rgba(0,255,194,0.05)]';
+type VoiceBuild = {
+  id: string;
+  type: 'voice';
+  name: string;
+  model?: string;
+  provider?: 'openai' | string;
+  firstMessage?: string;
+  systemPrompt?: string;
+  temperature?: number;
+  // Voice bits
+  voiceProvider?: 'vapi' | 'elevenlabs' | 'openai';
+  voiceName?: string;
+  // Telephony bits (optional placeholders)
+  twilioSid?: string;
+  twilioAuth?: string;
+  forwardingNumber?: string;
+  // Timestamps
+  createdAt?: string;
+  updatedAt?: string;
+};
 
-const TabBtn = ({ active, children, onClick }: { active:boolean; children:React.ReactNode; onClick:()=>void }) => (
-  <button
-    onClick={onClick}
-    className={`px-3 py-2 rounded-[10px] text-sm ${active ? 'bg-white/10 text-white' : 'text-white/70 hover:text-white'}`}
-  >
-    {children}
-  </button>
-);
+function nowISO() { return new Date().toISOString(); }
 
-function loadAll(): any[] {
-  try { return JSON.parse(localStorage.getItem('chatbots') || '[]') || []; } catch { return []; }
+function loadVoiceBuild(id?: string): VoiceBuild {
+  // Everything stays client-only; safe for SSR because this is a client component.
+  try {
+    const raw = localStorage.getItem('chatbots');
+    const arr = raw ? JSON.parse(raw) : [];
+    const hit = Array.isArray(arr) ? arr.find((b: any) => b.id === id) : null;
+    if (hit) return hit as VoiceBuild;
+  } catch {}
+  // defaults for a new voice build
+  return {
+    id: id || String(Date.now()),
+    type: 'voice',
+    name: 'New Voice Assistant',
+    provider: 'openai',
+    model: 'gpt-4o-mini',
+    firstMessage: 'Hello.',
+    systemPrompt:
+      'You are a polite, concise voice assistant. Keep replies short and ask one question at a time.',
+    temperature: 0.4,
+    voiceProvider: 'vapi',
+    voiceName: 'Elliot',
+    createdAt: nowISO(),
+    updatedAt: nowISO(),
+  };
 }
-function saveAll(next: any[]) {
-  try { localStorage.setItem('chatbots', JSON.stringify(next)); } catch {}
+
+function saveVoiceBuild(v: VoiceBuild) {
+  try {
+    const raw = localStorage.getItem('chatbots');
+    const arr: any[] = raw ? JSON.parse(raw) : [];
+    const i = Array.isArray(arr) ? arr.findIndex((b) => b.id === v.id) : -1;
+    const withStamped: VoiceBuild = { ...v, type: 'voice', updatedAt: nowISO(), createdAt: v.createdAt || nowISO() };
+    if (i >= 0) arr[i] = withStamped; else arr.unshift(withStamped);
+    localStorage.setItem('chatbots', JSON.stringify(arr));
+  } catch {}
 }
 
-export default function VoiceAssistantEditor({
-  agentId,
-  onBack,
-}: {
-  agentId: string;
-  onBack: () => void;
+/* Tabs for editor sections (visual only; keep it simple & fast) */
+const TABS = [
+  { key: 'model', label: 'Model', icon: Sliders },
+  { key: 'voice', label: 'Voice', icon: Mic },
+  { key: 'transcriber', label: 'Transcriber', icon: MessageSquare },
+  { key: 'tools', label: 'Tools', icon: Wrench },
+  { key: 'analysis', label: 'Analysis', icon: BarChart3 },
+  { key: 'advanced', label: 'Advanced', icon: Settings },
+  { key: 'widget', label: 'Widget', icon: Code2 },
+] as const;
+type TabKey = typeof TABS[number]['key'];
+
+export default function VoiceAssistantEditor(props: {
+  agentId?: string;                 // optional: if you pass it, we preload
+  onBack?: () => void;              // optional back to gallery
+  onSaved?: (agent: VoiceBuild) => void; // optional callback
 }) {
-  const [bot, setBot] = useState<VoiceBot | null>(null);
-  const [tab, setTab] = useState<'model' | 'voice' | 'transcriber' | 'tools' | 'analysis' | 'advanced' | 'widget'>('model');
-  const [saved, setSaved] = useState<string>('');
+  const [tab, setTab] = useState<TabKey>('model');
+  const [saving, setSaving] = useState(false);
+  const [savedToast, setSavedToast] = useState('');
+  const [v, setV] = useState<VoiceBuild>(() => loadVoiceBuild(props.agentId));
 
   useEffect(() => {
-    const arr = loadAll();
-    const found = arr.find((b: any) => b.id === agentId);
-    if (found) {
-      if (found.type !== 'voice') found.type = 'voice';
-      setBot(found as VoiceBot);
-    }
-  }, [agentId]);
+    // Preload if agentId changes
+    if (props.agentId) setV(loadVoiceBuild(props.agentId));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.agentId]);
 
-  const save = () => {
-    if (!bot) return;
-    const arr = loadAll();
-    const idx = arr.findIndex((b: any) => b.id === bot.id);
-    const next = { ...bot, type: 'voice', updatedAt: new Date().toISOString() };
-    if (idx >= 0) arr[idx] = next; else arr.unshift(next);
-    saveAll(arr);
-    setSaved('Saved');
-    setTimeout(() => setSaved(''), 1200);
-  };
-
-  if (!bot) {
-    return (
-      <section className={wrap}>
-        <div className="text-white/70">Voice agent not found.</div>
-        <button onClick={onBack} className="mt-4 rounded-[10px] px-3 py-2 border border-white/15 text-white/85 hover:bg-white/10">Back</button>
-      </section>
-    );
+  function onSave() {
+    setSaving(true);
+    saveVoiceBuild(v);
+    setSaving(false);
+    setSavedToast('Saved!');
+    setTimeout(() => setSavedToast(''), 1400);
+    props.onSaved?.(v);
   }
+
+  /* ---------- Simple cards per tab (practical subset) ---------- */
+  const ModelTab = (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div style={UI.card} className="p-4 space-y-3">
+        <div className="text-white/80 text-sm">Provider</div>
+        <select
+          value={v.provider || 'openai'}
+          onChange={(e) => setV({ ...v, provider: e.target.value as any })}
+          className="h-[42px] rounded-[12px] bg-black/30 border border-white/20 px-3 text-white outline-none focus:border-[#6af7d1]"
+        >
+          <option value="openai">OpenAI</option>
+        </select>
+
+        <div className="text-white/80 text-sm pt-2">Model</div>
+        <select
+          value={v.model || 'gpt-4o-mini'}
+          onChange={(e) => setV({ ...v, model: e.target.value })}
+          className="h-[42px] rounded-[12px] bg-black/30 border border-white/20 px-3 text-white outline-none focus:border-[#6af7d1]"
+        >
+          <option value="gpt-4o-mini">gpt-4o-mini</option>
+          <option value="gpt-4o">gpt-4o</option>
+          <option value="gpt-4.1">gpt-4.1</option>
+        </select>
+
+        <div className="text-white/80 text-sm pt-2">First Message</div>
+        <input
+          value={v.firstMessage || ''}
+          onChange={(e) => setV({ ...v, firstMessage: e.target.value })}
+          className="w-full h-[42px] rounded-[12px] bg-black/30 border border-white/20 px-3 text-white outline-none focus:border-[#6af7d1]"
+        />
+
+        <div className="text-white/80 text-sm pt-2">System Prompt</div>
+        <textarea
+          rows={8}
+          value={v.systemPrompt || ''}
+          onChange={(e) => setV({ ...v, systemPrompt: e.target.value })}
+          className="w-full rounded-[12px] bg-black/30 border border-white/20 px-3 py-2 text-white outline-none focus:border-[#6af7d1]"
+        />
+
+        <div className="text-white/80 text-sm pt-2">Temperature</div>
+        <input
+          type="range" min={0} max={1} step={0.1}
+          value={v.temperature ?? 0.4}
+          onChange={(e) => setV({ ...v, temperature: Number(e.target.value) })}
+          className="w-full"
+        />
+        <div className="text-xs text-white/60">Current: {v.temperature?.toFixed(1)}</div>
+      </div>
+
+      <div style={UI.card} className="p-4 space-y-3">
+        <div className="text-white/80 text-sm">Assistant Name</div>
+        <input
+          value={v.name}
+          onChange={(e) => setV({ ...v, name: e.target.value })}
+          className="w-full h-[42px] rounded-[12px] bg-black/30 border border-white/20 px-3 text-white outline-none focus:border-[#6af7d1]"
+        />
+
+        <div className="text-white/70 text-xs pt-2">
+          Saved locally. When you click <span className="text-[#6af7d1] font-semibold">Save</span>, this build
+          appears in your Voice Agents gallery.
+        </div>
+      </div>
+    </div>
+  );
+
+  const VoiceTab = (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div style={UI.card} className="p-4 space-y-3">
+        <div className="text-white/80 text-sm">Voice Provider</div>
+        <select
+          value={v.voiceProvider}
+          onChange={(e) => setV({ ...v, voiceProvider: e.target.value as any })}
+          className="h-[42px] rounded-[12px] bg-black/30 border border-white/20 px-3 text-white outline-none focus:border-[#6af7d1]"
+        >
+          <option value="vapi">Vapi</option>
+          <option value="elevenlabs">ElevenLabs</option>
+          <option value="openai">OpenAI</option>
+        </select>
+
+        <div className="text-white/80 text-sm pt-2">Voice</div>
+        <input
+          value={v.voiceName || ''}
+          onChange={(e) => setV({ ...v, voiceName: e.target.value })}
+          placeholder="Elliot"
+          className="w-full h-[42px] rounded-[12px] bg-black/30 border border-white/20 px-3 text-white outline-none focus:border-[#6af7d1]"
+        />
+      </div>
+
+      <div style={UI.card} className="p-4 space-y-3">
+        <div className="text-white/80 text-sm">Telephony (optional)</div>
+        <input
+          placeholder="Twilio Account SID"
+          value={v.twilioSid || ''}
+          onChange={(e) => setV({ ...v, twilioSid: e.target.value })}
+          className="w-full h-[42px] rounded-[12px] bg-black/30 border border-white/20 px-3 text-white outline-none focus:border-[#6af7d1]"
+        />
+        <input
+          placeholder="Twilio Auth Token"
+          value={v.twilioAuth || ''}
+          onChange={(e) => setV({ ...v, twilioAuth: e.target.value })}
+          className="w-full h-[42px] rounded-[12px] bg-black/30 border border-white/20 px-3 text-white outline-none focus:border-[#6af7d1]"
+        />
+        <input
+          placeholder="Forwarding Number (optional, E.164)"
+          value={v.forwardingNumber || ''}
+          onChange={(e) => setV({ ...v, forwardingNumber: e.target.value })}
+          className="w-full h-[42px] rounded-[12px] bg-black/30 border border-white/20 px-3 text-white outline-none focus:border-[#6af7d1]"
+        />
+      </div>
+    </div>
+  );
+
+  const Placeholder = (title: string, body = 'Coming soon — keep editing Model & Voice and click Save.') => (
+    <div style={UI.card} className="p-5">
+      <div className="text-white font-medium mb-1">{title}</div>
+      <div className="text-white/70 text-sm">{body}</div>
+    </div>
+  );
+
+  const tabContent = useMemo(() => {
+    switch (tab) {
+      case 'model': return ModelTab;
+      case 'voice': return VoiceTab;
+      case 'transcriber': return Placeholder('Transcriber');
+      case 'tools': return Placeholder('Tools');
+      case 'analysis': return Placeholder('Analysis / Summary / Structured Data');
+      case 'advanced': return Placeholder('Advanced settings');
+      case 'widget': return Placeholder('Widget');
+      default: return null;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, v]);
 
   return (
     <section className="w-full">
-      <div className={wrap}>
-        {/* Header */}
-        <div className="mb-6 flex items-start justify-between">
-          <div>
-            <div className="text-xs text-white/60 mb-1">Edit Assistant</div>
-            <h1 className="text-[28px] md:text-[34px] font-semibold leading-none">
-              {bot.name || 'Untitled'} <span className="text-white/50 ml-2">— Voice</span>
+      <div className="w-full max-w-[1400px] mx-auto px-6 2xl:px-12 pt-6 pb-16">
+        {/* Page Title (like your other screens) */}
+        <div className="mb-6">
+          <div className="text-[12px] text-white/55 mb-1">Edit Assistant</div>
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl flex items-center justify-center"
+                 style={{ background:'rgba(0,255,194,0.10)', border:'1px solid rgba(0,255,194,0.22)' }}>
+              <Mic className="w-5 h-5 text-[#6af7d1]" />
+            </div>
+            <h1 className="text-2xl md:text-[28px] leading-tight">
+              <span className="text-white font-semibold">{v.name || 'Voice Assistant'}</span>
+              <span className="text-white/50"> — Voice</span>
             </h1>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={onBack}
-              className="rounded-[10px] px-3 py-2 border border-white/15 text-white/85 hover:bg-white/10"
-              title="Back to Voice Agents"
-            >
-              Back
-            </button>
-            <button
-              onClick={save}
-              className="rounded-[10px] px-3 py-2 bg-[#00ffc2] text-black font-semibold shadow-[0_0_12px_rgba(106,247,209,0.35)] hover:brightness-110"
-            >
-              Save
-            </button>
-            <button
-              className="rounded-[10px] px-3 py-2 bg-white/10 border border-white/15 text-white/85"
-              title="Publish (stub)"
-            >
-              Publish
-            </button>
+        </div>
+
+        {/* Top bar actions */}
+        <div className="flex items-center gap-3 mb-4">
+          <button
+            onClick={props.onBack}
+            className="inline-flex items-center gap-2 px-3 h-[40px] rounded-[12px] text-white/90 hover:bg-white/10"
+            style={{ border: UI.thinBorder }}
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Back
+          </button>
+          <button
+            onClick={onSave}
+            disabled={saving}
+            className="inline-flex items-center gap-2 px-4 h-[40px] rounded-[15px] font-semibold transition"
+            style={{ background:'#00ffc2', color:'#081011', boxShadow:'0 0 10px rgba(106,247,209,0.35)' }}
+          >
+            <Save className="w-4 h-4" />
+            Save
+          </button>
+          {savedToast && (
+            <span className="text-sm text-[#6af7d1] ml-2">{savedToast}</span>
+          )}
+        </div>
+
+        {/* Editor frame */}
+        <div style={UI.frame} className="p-4 md:p-5">
+          {/* Tabs */}
+          <div className="flex flex-wrap gap-2 mb-4">
+            {TABS.map(({ key, label, icon: Icon }) => (
+              <button
+                key={key}
+                onClick={() => setTab(key)}
+                className={`inline-flex items-center gap-2 px-3 h-[36px] rounded-[12px] text-sm ${
+                  tab === key ? 'bg-[#0e3e35] text-white' : 'text-white/80 hover:bg-white/5'
+                }`}
+                style={{ border: UI.thinBorder }}
+              >
+                <Icon className="w-4 h-4 text-[#6af7d1]" />
+                {label}
+              </button>
+            ))}
           </div>
+
+          {/* Content */}
+          <div className="mt-3">{tabContent}</div>
         </div>
-
-        {/* Tabs */}
-        <div className="flex items-center gap-2 mb-6">
-          <TabBtn active={tab === 'model'} onClick={() => setTab('model')}>Model</TabBtn>
-          <TabBtn active={tab === 'voice'} onClick={() => setTab('voice')}>Voice</TabBtn>
-          <TabBtn active={tab === 'transcriber'} onClick={() => setTab('transcriber')}>Transcriber</TabBtn>
-          <TabBtn active={tab === 'tools'} onClick={() => setTab('tools')}>Tools</TabBtn>
-          <TabBtn active={tab === 'analysis'} onClick={() => setTab('analysis')}>Analysis</TabBtn>
-          <TabBtn active={tab === 'advanced'} onClick={() => setTab('advanced')}>Advanced</TabBtn>
-          <TabBtn active={tab === 'widget'} onClick={() => setTab('widget')}>Widget</TabBtn>
-          {!!saved && <span className="ml-auto text-xs text-[#6af7d1]">{saved}</span>}
-        </div>
-
-        {/* Panels */}
-        <AnimatePresence mode="wait">
-          {tab === 'model' && (
-            <motion.div key="model" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.18 }}>
-              <div className={`${panel} p-6 space-y-6`}>
-                <Section title="Model">
-                  <div className="grid sm:grid-cols-2 gap-3">
-                    <Field label="Provider">
-                      <select
-                        value={bot.provider || 'openai'}
-                        onChange={(e) => setBot({ ...bot, provider: e.target.value as any })}
-                        className="w-full h-[42px] rounded-[12px] bg-[#101314] border border-white/15 text-white px-3"
-                      >
-                        <option value="openai">OpenAI</option>
-                      </select>
-                    </Field>
-                    <Field label="Model">
-                      <select
-                        value={bot.model || 'gpt-4o-mini'}
-                        onChange={(e) => setBot({ ...bot, model: e.target.value })}
-                        className="w-full h-[42px] rounded-[12px] bg-[#101314] border border-white/15 text-white px-3"
-                      >
-                        <option value="gpt-4o-mini">gpt-4o-mini</option>
-                        <option value="gpt-4o">gpt-4o</option>
-                        <option value="gpt-4.1">gpt-4.1</option>
-                      </select>
-                    </Field>
-                    <Field label="Temperature (0–1)">
-                      <input
-                        type="number" step="0.1" min={0} max={1}
-                        value={bot.temperature ?? 0.5}
-                        onChange={(e) => setBot({ ...bot, temperature: Number(e.target.value) })}
-                        className="w-full h-[42px] rounded-[12px] bg-[#101314] border border-white/15 text-white px-3"
-                      />
-                    </Field>
-                    <Field label="Max Tokens">
-                      <input
-                        type="number"
-                        value={bot.maxTokens ?? 400}
-                        onChange={(e) => setBot({ ...bot, maxTokens: Number(e.target.value) })}
-                        className="w-full h-[42px] rounded-[12px] bg-[#101314] border border-white/15 text-white px-3"
-                      />
-                    </Field>
-                  </div>
-                </Section>
-
-                <Section title="Messages">
-                  <div className="grid gap-3">
-                    <Field label="First Message">
-                      <input
-                        value={bot.firstMessage ?? ''}
-                        onChange={(e) => setBot({ ...bot, firstMessage: e.target.value })}
-                        placeholder="Hello — thanks for calling…"
-                        className="w-full h-[42px] rounded-[12px] bg-[#101314] border border-white/15 text-white px-3"
-                      />
-                    </Field>
-                    <Field label="System Prompt">
-                      <textarea
-                        rows={6}
-                        value={bot.systemPrompt ?? ''}
-                        onChange={(e) => setBot({ ...bot, systemPrompt: e.target.value })}
-                        className="w-full rounded-[12px] bg-[#101314] border border-white/15 text-white px-3 py-2"
-                        placeholder="Core behavior, rules, style…"
-                      />
-                    </Field>
-                  </div>
-                </Section>
-              </div>
-            </motion.div>
-          )}
-
-          {tab === 'voice' && (
-            <motion.div key="voice" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.18 }}>
-              <div className={`${panel} p-6 space-y-6`}>
-                <Section title="Voice Configuration" icon={<Phone className="w-4 h-4" />}>
-                  <div className="grid sm:grid-cols-2 gap-3">
-                    <Field label="Provider">
-                      <select
-                        value={bot.voiceProvider || 'vapi'}
-                        onChange={(e) => setBot({ ...bot, voiceProvider: e.target.value as any })}
-                        className="w-full h-[42px] rounded-[12px] bg-[#101314] border border-white/15 text-white px-3"
-                      >
-                        <option value="vapi">Vapi</option>
-                      </select>
-                    </Field>
-                    <Field label="Voice">
-                      <input
-                        value={bot.voiceName || 'Elliot'}
-                        onChange={(e) => setBot({ ...bot, voiceName: e.target.value })}
-                        className="w-full h-[42px] rounded-[12px] bg-[#101314] border border-white/15 text-white px-3"
-                      />
-                    </Field>
-                  </div>
-                </Section>
-              </div>
-            </motion.div>
-          )}
-
-          {tab === 'transcriber' && (
-            <motion.div key="stt" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.18 }}>
-              <div className={`${panel} p-6 space-y-6`}>
-                <Section title="Transcriber">
-                  <div className="grid sm:grid-cols-3 gap-3">
-                    <Field label="Provider">
-                      <select
-                        value={bot.sttProvider || 'deepgram'}
-                        onChange={(e) => setBot({ ...bot, sttProvider: e.target.value as any })}
-                        className="w-full h-[42px] rounded-[12px] bg-[#101314] border border-white/15 text-white px-3"
-                      >
-                        <option value="deepgram">Deepgram</option>
-                      </select>
-                    </Field>
-                    <Field label="Model">
-                      <input
-                        value={bot.sttModel || 'Nova-2'}
-                        onChange={(e) => setBot({ ...bot, sttModel: e.target.value })}
-                        className="w-full h-[42px] rounded-[12px] bg-[#101314] border border-white/15 text-white px-3"
-                      />
-                    </Field>
-                    <Field label="Language">
-                      <input
-                        value={bot.sttLang || 'en'}
-                        onChange={(e) => setBot({ ...bot, sttLang: e.target.value })}
-                        className="w-full h-[42px] rounded-[12px] bg-[#101314] border border-white/15 text-white px-3"
-                      />
-                    </Field>
-                  </div>
-                </Section>
-              </div>
-            </motion.div>
-          )}
-
-          {tab === 'tools' && (
-            <motion.div key="tools" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.18 }}>
-              <div className={`${panel} p-6`}>
-                <Section title="Tools">
-                  <div className="text-white/70 text-sm">Wire custom tools/functions here later.</div>
-                </Section>
-              </div>
-            </motion.div>
-          )}
-
-          {tab === 'analysis' && (
-            <motion.div key="analysis" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.18 }}>
-              <div className={`${panel} p-6`}>
-                <Section title="Analysis">
-                  <div className="text-white/70 text-sm">Summary / success rubric settings placeholder.</div>
-                </Section>
-              </div>
-            </motion.div>
-          )}
-
-          {tab === 'advanced' && (
-            <motion.div key="adv" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.18 }}>
-              <div className={`${panel} p-6`}>
-                <Section title="Advanced">
-                  <div className="text-white/70 text-sm">Privacy, start speaking plan, voicemail detection…</div>
-                </Section>
-              </div>
-            </motion.div>
-          )}
-
-          {tab === 'widget' && (
-            <motion.div key="widget" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.18 }}>
-              <div className={`${panel} p-6`}>
-                <Section title="Widget / Embed">
-                  <code className="block text-xs text-white/80 bg-black/30 rounded-[12px] border border-white/10 p-3 overflow-x-auto">
-{`<vapi-widget assistant-id="${bot.id}" public-key="YOUR_PUBLIC_KEY"></vapi-widget>
-<script src="https://unpkg.com/@vapi-ai/client-sdk-react/dist/embed/widget.umd.js" async></script>`}
-                  </code>
-                </Section>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
       </div>
     </section>
-  );
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <label className="text-xs text-white/70">{label}</label>
-      {children}
-    </div>
-  );
-}
-
-function Section({
-  title,
-  icon,
-  children,
-}: {
-  title: string;
-  icon?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="rounded-[14px] border border-white/10 bg-black/20">
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-white/10">
-        {icon || <Settings className="w-4 h-4 text-white/70" />}
-        <div className="text-white font-medium">{title}</div>
-      </div>
-      <div className="p-4">{children}</div>
-    </div>
   );
 }
