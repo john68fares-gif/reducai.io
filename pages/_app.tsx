@@ -21,12 +21,9 @@ export default function MyApp({
         <title>Reduc AI</title>
       </Head>
 
-      {/* <-- ADD THIS WRAPPER */}
       <SessionProvider session={session}>
         <div style={{ minHeight: '100vh', background: '#0b0c10', color: '#ffffff' }}>
           {!onLanding && <Sidebar />}
-
-          {/* keep marginLeft so pages stay centered */}
           <main
             style={{
               marginLeft: onLanding ? 0 : 'var(--sidebar-w, 260px)',
