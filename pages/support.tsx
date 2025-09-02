@@ -5,7 +5,6 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Head from 'next/head';
 import { HelpCircle, ChevronDown } from 'lucide-react';
 
-/* ---------- Simple styles to fit your dark / glow UI ---------- */
 const FRAME: React.CSSProperties = {
   background: 'rgba(13,15,17,0.95)',
   border: '2px dashed rgba(106,247,209,0.30)',
@@ -19,7 +18,6 @@ const CARD: React.CSSProperties = {
   boxShadow: 'inset 0 0 22px rgba(0,0,0,0.28), 0 10px 40px rgba(0,0,0,0.35)',
 };
 
-/* ---------- Tiny Accordion (no localStorage here) ---------- */
 function AccordionItem({
   title,
   children,
@@ -54,8 +52,7 @@ function AccordionItem({
   );
 }
 
-/* --------------------- Support Chat (uses server route) --------------------- */
-/** Pulls newest text build from localStorage *after mount* and uses its prompt as system */
+/** Support Chat — uses newest text build prompt (after mount) as system prompt */
 function SupportChat() {
   type Msg = { role: 'user' | 'assistant'; content: string };
 
@@ -72,10 +69,10 @@ function SupportChat() {
 
   const boxRef = useRef<HTMLDivElement | null>(null);
 
-  // Load newest text build (if any) and use its prompt + model
+  // After mount: load newest text build from localStorage and grab its prompt/model
   useEffect(() => {
     try {
-      const raw = typeof window !== 'undefined' ? localStorage.getItem('chatbots') : null;
+      const raw = localStorage.getItem('chatbots');
       const arr = raw ? JSON.parse(raw) : [];
       if (Array.isArray(arr) && arr.length) {
         const sorted = arr
@@ -85,15 +82,11 @@ function SupportChat() {
               Date.parse(b?.updatedAt || b?.createdAt || '0') -
               Date.parse(a?.updatedAt || a?.createdAt || '0')
           );
-
-        // prefer non-voice; else take first
         const chosen = sorted.find((b: any) => (b?.type || 'text') !== 'voice') || sorted[0];
         if (chosen?.prompt) setSystem(String(chosen.prompt));
         if (chosen?.model) setModel(String(chosen.model));
       }
-    } catch {
-      // ignore
-    }
+    } catch {}
   }, []);
 
   useEffect(() => {
@@ -110,7 +103,7 @@ function SupportChat() {
     try {
       const payload = {
         model,
-        system, // system prompt from newest build
+        system, // newest build’s prompt
         messages: messages.concat({ role: 'user', content }).map((m) => ({ role: m.role, content: m.content })),
         temperature: 0.3,
         maxTokens: 400,
@@ -182,12 +175,10 @@ function SupportChat() {
   );
 }
 
-/* -------------------------------- Page -------------------------------- */
 export default function SupportPage() {
   return (
     <>
       <Head><title>Support • reduc.ai</title></Head>
-
       <main className="px-6 py-10" style={{ maxWidth: 980, margin: '0 auto' }}>
         <h1 className="text-2xl font-bold text-white flex items-center gap-2 mb-6">
           <HelpCircle className="w-6 h-6 text-[#6af7d1]" /> Support
@@ -203,9 +194,9 @@ export default function SupportPage() {
 
           <AccordionItem title="Quick Guide">
             <ol className="list-decimal list-inside space-y-2 text-sm text-white/85">
-              <li>Builder → create a **Text Build** (fill Description, Rules, Flow, Company Info).</li>
+              <li>Builder → create a <b>Text Build</b> (Description, Rules, Flow, Company Info).</li>
               <li>Step 2: choose a model (e.g., <code>gpt-4o-mini</code>), temperature ~0.3.</li>
-              <li>Step 4: click **Generate** to save it. That becomes the Support bot’s brain.</li>
+              <li>Step 4: click <b>Generate</b> to save it. That becomes the Support bot’s brain.</li>
               <li>Return here to test. Keep replies short and clear.</li>
             </ol>
           </AccordionItem>
@@ -217,7 +208,6 @@ export default function SupportPage() {
           </AccordionItem>
         </div>
       </main>
-
       <style jsx global>{` body { background:#0b0c10; } `}</style>
     </>
   );
