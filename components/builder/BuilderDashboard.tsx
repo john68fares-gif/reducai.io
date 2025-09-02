@@ -3,6 +3,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
+import { useSession } from 'next-auth/react';
+import OnboardingOverlay from '../ui/OnboardingOverlay';
 import dynamic from 'next/dynamic';
 import {
   Plus,
@@ -190,6 +192,38 @@ export default function BuilderDashboard() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
+  // --- Welcome overlay (per-user) ---
+  const { data: session, status } = useSession();
+  const userId = useMemo(() => (session?.user as any)?.id || '', [session]);
+
+  // flags from URL (after Google sign-up)
+  const modeParam = searchParams.get('mode');
+  const mode = (modeParam === 'signin' ? 'signin' : 'signup') as 'signup' | 'signin';
+  const onboard = searchParams.get('onboard') === '1';
+  const forceOverlay = searchParams.get('forceOverlay') === '1';
+
+  const [welcomeOpen, setWelcomeOpen] = useState(false);
+
+  // client guard (optional: middleware should also protect)
+  useEffect(() => {
+    if (status === 'unauthenticated') router.replace('/login');
+  }, [status, router]);
+
+  // decide if overlay should open over the dashboard
+  useEffect(() => {
+    if (status !== 'authenticated' || !userId) return;
+    const completed = localStorage.getItem(`user:${userId}:profile:completed`) === '1';
+    if (forceOverlay || onboard || (!completed && mode === 'signup')) setWelcomeOpen(true);
+  }, [status, userId, forceOverlay, onboard, mode]);
+
+  const closeWelcome = () => {
+    setWelcomeOpen(false);
+    const usp = new URLSearchParams(Array.from(searchParams.entries()));
+    usp.delete('onboard'); usp.delete('mode'); usp.delete('forceOverlay');
+    router.replace(`${pathname}?${usp.toString()}`, { scroll: false });
+  };
+  // --- end welcome overlay ---
+
   const rawStep = searchParams.get('step');
   const step = rawStep && ['1', '2', '3', '4'].includes(rawStep) ? rawStep : null;
 
@@ -351,6 +385,9 @@ export default function BuilderDashboard() {
       )}
 
       {viewedBot && <PromptOverlay bot={viewedBot} onClose={() => setViewId(null)} />}
+
+      {/* Welcome overlay floats above the dashboard / Create-a-Build panel */}
+      <OnboardingOverlay open={welcomeOpen} mode={mode} userId={userId} onDone={closeWelcome} />
     </div>
   );
 }
