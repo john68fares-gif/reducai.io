@@ -3,39 +3,50 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Head from 'next/head';
-import { MessageSquare, Send } from 'lucide-react';
-
-/** —— Shared palette (same vibe as your builder) —— */
-const MINT = '#00ffc2';
-const CARD_BG = 'rgba(13,15,17,0.95)';
-const THIN_BORDER = '1px solid rgba(255,255,255,0.10)';
-const SHADOW =
-  '0 20px 60px rgba(0,0,0,0.55), 0 0 24px rgba(0,255,194,0.04), inset 0 0 20px rgba(0,0,0,0.35)';
+import { MessageSquare, PaperPlane, Copy, Trash2, Share2 } from 'lucide-react';
 
 type Msg = { role: 'user' | 'assistant'; content: string };
+
+const UI = {
+  // very thin borders everywhere
+  border: '1px solid rgba(255,255,255,0.10)',
+  // main card glow (outside the box)
+  cardShadow:
+    '0 24px 60px rgba(0,0,0,0.55), 0 0 26px rgba(0,255,194,0.06)',
+  // solids for bubbles
+  bubbleAssistant: '#0f1314',
+  bubbleUser: '#0e3e35',
+  // brand greens
+  brand: '#00ffc2',
+  brandHover: '#00e6af',
+};
 
 export default function SupportPage() {
   const [messages, setMessages] = useState<Msg[]>([
     {
       role: 'assistant',
       content:
-        "Hi — I’m Riley. I can help you create a chatbot build, connect your API key, test it, or fix errors. What would you like to do?",
+        'Hi — I’m Riley. I can help you create a chatbot build, connect your API key, test it, or fix errors. What would you like to do?',
     },
   ]);
-  const [text, setText] = useState('');
+  const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
-  const boxRef = useRef<HTMLDivElement | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    boxRef.current?.scrollTo({ top: boxRef.current.scrollHeight, behavior: 'smooth' });
+    scrollRef.current?.scrollTo({
+      top: scrollRef.current.scrollHeight,
+      behavior: 'smooth',
+    });
   }, [messages.length]);
 
   async function send() {
-    const content = text.trim();
-    if (!content || busy) return;
-    setText('');
-    const next = [...messages, { role: 'user', content } as Msg];
+    const text = input.trim();
+    if (!text || busy) return;
+
+    const next = [...messages, { role: 'user', content: text } as Msg];
     setMessages(next);
+    setInput('');
     setBusy(true);
 
     try {
@@ -46,19 +57,22 @@ export default function SupportPage() {
       });
       const j = await r.json();
       const reply: string =
-        j?.reply ||
-        j?.message ||
-        'Something went wrong. Please try again or check your API key on the API Keys page.';
+        j?.reply || j?.message || 'Sorry—no reply. Try again.';
       setMessages((m) => [...m, { role: 'assistant', content: reply }]);
     } catch {
       setMessages((m) => [
         ...m,
-        { role: 'assistant', content: 'Network error. Please try again in a moment.' },
+        {
+          role: 'assistant',
+          content:
+            'Network error while contacting the model. Please try again in a few seconds.',
+        },
       ]);
     } finally {
       setBusy(false);
     }
   }
+
   function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -66,121 +80,177 @@ export default function SupportPage() {
     }
   }
 
+  function clearChat() {
+    setMessages(messages.slice(0, 1)); // keep greeting
+  }
+
   return (
     <>
       <Head>
-        <title>Riley — Support • reduc.ai</title>
+        <title>Support • reduc.ai</title>
       </Head>
 
-      <main className="min-h-screen px-6 2xl:px-12 py-8 font-movatif" style={{ background: '#0b0c10' }}>
-        {/* Page title */}
-        <div className="max-w-[1240px] mx-auto mb-6 flex items-center gap-4">
-          {/* Title icon (rounded square with chat bubble) */}
-          <div
-            className="w-12 h-12 rounded-2xl flex items-center justify-center"
-            style={{
-              background: 'linear-gradient(180deg, rgba(0,255,194,0.08), rgba(0,0,0,0.12))',
-              border: THIN_BORDER,
-              boxShadow: 'inset 0 0 18px rgba(0,0,0,0.4), 0 10px 30px rgba(0,0,0,0.35)',
-            }}
-          >
-            <MessageSquare className="w-6 h-6" style={{ color: '#2dbb9c' }} />
-          </div>
+      {/* Page title like the others */}
+      <header className="px-6 pt-8 pb-2">
+        <h1 className="font-movatif text-[26px] md:text-[30px] text-white/95 tracking-tight">
+          Support Center
+        </h1>
+      </header>
 
-          <div className="min-w-0">
-            <h1 className="text-white/95 tracking-tight" style={{ fontSize: 34, fontWeight: 500 }}>
-              <span>Riley</span>
-              <span className="text-white/55"> — Support</span>
-            </h1>
-            <p className="text-white/60 text-sm">
-              Ask our Support AI, or email
-              {' '}
-              <a className="text-[#59d9b3] hover:underline" href="mailto:support@reduc.ai">
-                support@reduc.ai
-              </a>
-              .
-            </p>
-          </div>
+      {/* top helper pill */}
+      <div className="px-6 mb-6">
+        <div
+          className="mx-auto w-full max-w-[1220px] rounded-[18px] px-5 py-3 text-sm text-white/80 flex items-center gap-2 justify-center"
+          style={{
+            background: 'rgba(10,13,14,0.70)',
+            border: UI.border,
+            boxShadow: '0 0 18px rgba(0,0,0,0.35)',
+          }}
+        >
+          Ask our Support AI, or email&nbsp;
+          <span className="text-[#6af7d1]">support@reduc.ai</span>
+          <button
+            onClick={() => navigator.clipboard.writeText('support@reduc.ai')}
+            className="ml-2 px-2.5 py-1 rounded-[8px] text-xs hover:bg-white/10 inline-flex items-center gap-1"
+            style={{ border: UI.border }}
+          >
+            <Copy className="w-3.5 h-3.5" />
+            Copy
+          </button>
         </div>
+      </div>
 
-        {/* Chat card */}
-        <section className="max-w-[1240px] mx-auto">
+      {/* Chat card */}
+      <main className="px-6 pb-16">
+        <section
+          className="mx-auto w-full max-w-[1220px] rounded-[16px] overflow-hidden"
+          style={{
+            background: 'rgba(13,15,17,0.92)',
+            border: UI.border,
+            boxShadow: UI.cardShadow,
+          }}
+        >
+          {/* header bar inside the card */}
           <div
-            className="rounded-[20px] overflow-hidden"
-            style={{ background: CARD_BG, border: THIN_BORDER, boxShadow: SHADOW }}
+            className="px-5 py-4 flex items-center justify-between"
+            style={{ borderBottom: UI.border }}
           >
-            {/* Messages area (solid bubbles, thin borders) */}
-            <div
-              ref={boxRef}
-              className="h-[66vh] min-h-[440px] max-h-[76vh] overflow-y-auto p-6 md:p-8"
-              style={{
-                background:
-                  'radial-gradient(1200px 600px at 20% 10%, rgba(0,255,194,0.06), transparent 60%)',
-              }}
-            >
-              <div className="space-y-4">
-                {messages.map((m, i) => (
-                  <Bubble key={i} role={m.role} text={m.content} />
-                ))}
+            {/* Riley header, not bold, bigger, with tinted icon square */}
+            <div className="flex items-center gap-3">
+              <div
+                className="w-9 h-9 rounded-[12px] flex items-center justify-center"
+                style={{
+                  background:
+                    'radial-gradient(120% 120% at 50% 0%, rgba(0,255,194,0.08) 0%, rgba(0,0,0,0.0) 100%)',
+                  border: UI.border,
+                  boxShadow: '0 4px 18px rgba(0,0,0,0.4)',
+                }}
+              >
+                <MessageSquare className="w-4.5 h-4.5 text-[#6af7d1]" />
+              </div>
+              <div className="font-movatif">
+                <div className="text-[17px] md:text-[18px] text-white/95">
+                  Riley <span className="text-white/50">— Support</span>
+                </div>
               </div>
             </div>
 
-            {/* Composer — single pill button (no extra icon button) */}
-            <div
-              className="p-3 md:p-4 flex items-center gap-3"
-              style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}
-            >
-              <input
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                onKeyDown={onKeyDown}
-                placeholder="Type your message..."
-                className="flex-1 h-[48px] md:h-[52px] px-4 md:px-5 text-white outline-none"
-                style={{
-                  background: '#0f1314',            // solid
-                  border: '1px solid rgba(255,255,255,0.12)', // thin
-                  borderRadius: 22,                 // much more rounded
-                }}
-              />
+            <div className="flex items-center gap-2">
               <button
-                onClick={send}
-                disabled={busy || !text.trim()}
-                className="inline-flex items-center gap-2 px-5 md:px-6 h-[48px] md:h-[52px] rounded-full font-semibold transition-transform active:scale-[0.99] disabled:opacity-60"
-                style={{
-                  background: MINT,
-                  color: '#07110f',
-                  boxShadow: '0 6px 18px rgba(0,255,194,0.28)',
-                }}
+                onClick={clearChat}
+                className="px-3 py-1.5 rounded-[10px] text-xs text-white/85 hover:bg-white/8"
+                style={{ border: UI.border }}
+                title="Clear"
               >
-                <Send className="w-4 h-4" style={{ color: '#ffffff' }} />
-                Send
+                <Trash2 className="w-3.5 h-3.5 inline mr-1.5" />
+                Clear
+              </button>
+              <button
+                className="px-3 py-1.5 rounded-[10px] text-xs text-white/85 hover:bg-white/8"
+                style={{ border: UI.border }}
+                title="Share (coming soon)"
+              >
+                <Share2 className="w-3.5 h-3.5 inline mr-1.5" />
+                Share
               </button>
             </div>
           </div>
+
+          {/* messages */}
+          <div
+            ref={scrollRef}
+            className="px-4 md:px-6 py-5 h-[68vh] min-h-[540px] overflow-y-auto"
+            style={{ scrollbarWidth: 'thin' }}
+          >
+            <div className="space-y-3">
+              {messages.map((m, i) => {
+                const mine = m.role === 'user';
+                return (
+                  <div key={i} className={`flex ${mine ? 'justify-start' : ''}`}>
+                    <div
+                      className={`max-w-[88%] text-[13.5px] leading-relaxed px-4 py-2.5 rounded-[18px] ${
+                        mine ? 'text-[#d9fff5]' : 'text-white/92'
+                      }`}
+                      style={{
+                        background: mine
+                          ? UI.bubbleUser
+                          : UI.bubbleAssistant,
+                        border: UI.border,
+                      }}
+                    >
+                      {m.content}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* composer */}
+          <div
+            className="px-4 md:px-6 py-4 flex items-center gap-3"
+            style={{ borderTop: UI.border }}
+          >
+            <input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={onKeyDown}
+              placeholder="Type your message..."
+              className="flex-1 h-[46px] px-4 rounded-[24px] text-white bg-[#0f1314] outline-none"
+              style={{ border: UI.border }}
+            />
+
+            {/* Only one send button – same style as Next buttons */}
+            <button
+              onClick={send}
+              disabled={busy || !input.trim()}
+              className="inline-flex items-center gap-2 px-4 h-[46px] rounded-[22px] font-semibold transition-colors disabled:opacity-50"
+              style={{
+                background: UI.brand,
+                color: '#000',
+                boxShadow: '0 10px 24px rgba(0,255,194,0.25)',
+              }}
+              onMouseEnter={(e) =>
+                ((e.currentTarget as HTMLButtonElement).style.background =
+                  UI.brandHover)
+              }
+              onMouseLeave={(e) =>
+                ((e.currentTarget as HTMLButtonElement).style.background =
+                  UI.brand)
+              }
+            >
+              <PaperPlane className="w-4.5 h-4.5 text-white" />
+              Send
+            </button>
+          </div>
         </section>
       </main>
-    </>
-  );
-}
 
-/** —— Message bubble (solid backgrounds) —— */
-function Bubble({ role, text }: { role: 'user' | 'assistant'; text: string }) {
-  const isUser = role === 'user';
-  const bg = isUser ? '#0f4136' : '#0f1314'; // solid, not transparent
-  const border = isUser ? '1px solid rgba(0,255,194,0.22)' : '1px solid rgba(255,255,255,0.12)';
-  return (
-    <div className={isUser ? 'flex justify-start' : 'flex justify-start'}>
-      <div
-        className="max-w-[880px] text-[14px] leading-relaxed text-white/92 px-4 py-3"
-        style={{
-          background: bg,
-          border,
-          borderRadius: 18, // rounded bubbles
-          boxShadow: '0 6px 16px rgba(0,0,0,0.35)',
-        }}
-      >
-        {text}
-      </div>
-    </div>
+      <style jsx global>{`
+        body {
+          background: #0b0c10;
+        }
+      `}</style>
+    </>
   );
 }
