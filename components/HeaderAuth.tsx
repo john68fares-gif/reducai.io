@@ -3,7 +3,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { supabase } from '../lib/supabaseClient';
+import { supabase } from '@/lib/supabaseClient';
 
 const ACCENT = '#00ffc2';
 
@@ -21,7 +21,6 @@ export default function HeaderAuth({ from = '/builder' }: { from?: string }) {
       const { data: { session } } = await supabase.auth.getSession();
       setSession(session);
 
-      // Light fetch to hydrate
       try {
         const r = await fetch('/api/me');
         const j = await r.json();
@@ -34,7 +33,6 @@ export default function HeaderAuth({ from = '/builder' }: { from?: string }) {
 
       unsub = supabase.auth.onAuthStateChange((_e, sess) => {
         setSession(sess);
-        // refetch info when state changes
         fetch('/api/me').then(r => r.json()).then(j => {
           if (j.ok) {
             setProfile(j.profile);
@@ -45,11 +43,7 @@ export default function HeaderAuth({ from = '/builder' }: { from?: string }) {
       setReady(true);
     })();
 
-    return () => {
-      if (unsub?.data?.subscription?.unsubscribe) {
-        unsub.data.subscription.unsubscribe();
-      }
-    };
+    return () => unsub?.data?.subscription?.unsubscribe?.();
   }, []);
 
   if (!ready) {
