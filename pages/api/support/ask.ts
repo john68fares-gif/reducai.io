@@ -58,7 +58,7 @@ async function embed(q: string) {
 
 /** ====== Handler ====== */
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  // --- Step 2: tiny health check (GET /api/support/ask?health=1) ---
+  // --- Health check (GET /api/support/ask?health=1) ---
   if (req.method === "GET") {
     if ("health" in req.query) {
       return res.status(200).json({
@@ -99,26 +99,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
-   
-    // Load local index and embed the query
-  // inside ask.ts, near the top of the try { ... }
-let idx: { vectors: any[] };
-try {
-  idx = loadIndex();
-} catch (e: any) {
-  // Fallback when /data/support_index.json is missing/not readable
-  idx = {
-    vectors: [
-      {
-        key: "build-flow",
-        text:
-          "Build flow: Step 1 choose AI type. Step 2 name/industry/language -> pick model & API key. Step 3 edit prompt boxes. Step 4 overview -> Generate AI -> dashboard.",
-        vec: Array.from({ length: 1536 }, () => 0), // same dim as text-embedding-3-large
-        meta: { path: "docs/build/flow.md", range: [1, 60] },
-      },
-    ],
-  };
-}
+    // Load local index (with fallback if file missing)
+    let idx: { vectors: any[] };
+    try {
+      idx = loadIndex();
+    } catch (e: any) {
+      idx = {
+        vectors: [
+          {
+            key: "build-flow",
+            text:
+              "Build flow: Step 1 choose AI type. Step 2 name/industry/language -> pick model & API key. Step 3 edit prompt boxes. Step 4 overview -> Generate AI -> dashboard.",
+            vec: Array.from({ length: 1536 }, () => 0), // match text-embedding-3-large dim
+            meta: { path: "docs/build/flow.md", range: [1, 60] },
+          },
+        ],
+      };
+    }
+
+    // 🔧 FIX: actually compute the embedding for the question
+    const qVec = await embed(question);
 
     // Score & pick top-K context
     const scored = idx.vectors
