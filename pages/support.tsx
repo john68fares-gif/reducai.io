@@ -2,138 +2,256 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { HelpCircle, CornerDownLeft } from 'lucide-react';
 
-type Msg = { role: 'user' | 'assistant'; content: string };
-type AskResponse = { reply?: string; citations?: string[]; error?: string };
+type Msg = { id: string; role: 'user' | 'assistant'; text: string };
+
+const sanitize = (text: string) =>
+  text
+    .replace(/\*\*/g, '')
+    .replace(/```[\s\S]*?```/g, '[redacted]')
+    .replace(/`([^`]+)`/g, '$1');
 
 export default function SupportPage() {
   const [messages, setMessages] = useState<Msg[]>([
     {
+      id: crypto.randomUUID(),
       role: 'assistant',
-      content:
-        "Hi — I'm Riley. I can help you create a chatbot build, connect your API key, test it, or fix errors. What would you like to do?"
-    }
+      text: "Hi, I’m Riley. How can I help you today?",
+    },
   ]);
-  const [text, setText] = useState('');
-  const [busy, setBusy] = useState(false);
-  const boxRef = useRef<HTMLDivElement | null>(null);
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(false);
+  const listRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll to latest message
   useEffect(() => {
-    boxRef.current?.scrollTo({ top: boxRef.current.scrollHeight, behavior: 'smooth' });
-  }, [messages]);
+    listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' });
+  }, [messages, loading]);
 
-  async function send() {
-    const content = text.trim();
-    if (!content || busy) return;
-    setText('');
-    setMessages(m => [...m, { role: 'user', content }]);
-    setBusy(true);
+  const send = async () => {
+    const value = input.trim();
+    if (!value || loading) return;
+
+    const userMsg: Msg = { id: crypto.randomUUID(), role: 'user', text: value };
+    setMessages(prev => [...prev, userMsg]);
+    setInput('');
+    setLoading(true);
 
     try {
-      const r = await fetch('/api/support/ask', {
+      const r = await fetch('/api/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question: content })
+        body: JSON.stringify({ message: value }),
       });
+      const data = await r.json();
+      const botText =
+        (data?.ok && typeof data?.message === 'string' ? data.message : 'Sorry, I can’t comply with that request.');
 
-      let reply = '';
-      let citations: string[] = [];
-
-      // Prefer JSON; fall back to text so real errors show up in-chat
-      try {
-        const j: AskResponse = await r.json();
-        reply = j?.reply || j?.error || '';
-        citations = Array.isArray(j?.citations) ? j.citations : [];
-      } catch {
-        const txt = await r.text().catch(() => '');
-        reply = `Server returned non-JSON (${r.status}). ${txt.slice(0, 200) || 'No details.'}`;
-      }
-
-      if (!reply) reply = r.ok ? 'No answer.' : `Server error (${r.status}).`;
-
-      const suffix = citations.length ? `\n\nSources: ${citations.join(', ')}` : '';
-      setMessages(m => [...m, { role: 'assistant', content: reply + suffix }]);
-    } catch (e: any) {
-      setMessages(m => [
-        ...m,
-        { role: 'assistant', content: `Network error. ${String(e).slice(0, 120)}` }
+      const assistantMsg: Msg = {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        text: sanitize(botText),
+      };
+      setMessages(prev => [...prev, assistantMsg]);
+    } catch {
+      setMessages(prev => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          text: 'Something went wrong. Please try again.',
+        },
       ]);
     } finally {
-      setBusy(false);
+      setLoading(false);
     }
-  }
+  };
 
-  function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      send();
-    }
-  }
-
-  function clearChat() {
-    setMessages([
-      {
-        role: 'assistant',
-        content:
-          "Hi — I'm Riley. I can help you create a chatbot build, connect your API key, test it, or fix errors. What would you like to do?"
-      }
-    ]);
-  }
+  const onKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') send();
+  };
 
   return (
-    <main className="px-6 py-10" style={{ maxWidth: 980, margin: '0 auto' }}>
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-          <HelpCircle className="w-6 h-6 text-[#6af7d1]" /> Support
-        </h1>
-        <button
-          onClick={clearChat}
-          className="text-xs px-3 py-1 rounded-lg border border-white/10 bg-black/30 text-white/80"
-          title="Clear conversation"
-        >
-          Clear
-        </button>
-      </div>
+    <div style={styles.wrap}>
+      <div style={styles.card}>
+        <div style={styles.header}>
+          <div style={styles.rileyDot} />
+          <span>Riley Support</span>
+        </div>
 
-      <div
-        ref={boxRef}
-        className="h-[480px] overflow-y-auto rounded-xl border border-white/10 bg-black/20 p-3 space-y-2"
-      >
-        {messages.map((m, i) => (
-          <div key={i} className="flex">
-            <div
-              className={`max-w-[86%] whitespace-pre-wrap text-sm px-3 py-2 rounded-lg ${
-                m.role === 'user'
-                  ? 'bg-[#0f4136] text-[#d9fff5]'
-                  : 'bg-[#0f1314] text-white/90 border border-white/10'
-              }`}
-            >
-              {m.content}
+        <div ref={listRef} style={styles.list}>
+          {messages.map(m => (
+            <div key={m.id} style={m.role === 'user' ? styles.rowUser : styles.rowBot}>
+              <div style={m.role === 'user' ? styles.bubbleUser : styles.bubbleBot}>
+                {m.text}
+              </div>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
 
-      <div className="mt-3 p-2 flex gap-2">
-        <input
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={onKeyDown}
-          placeholder="Type your question…"
-          className="flex-1 h-[44px] rounded-[12px] border border-white/20 bg-black/40 px-3 text-white outline-none focus:border-[#6af7d1]"
-        />
-        <button
-          onClick={send}
-          disabled={busy}
-          className="inline-flex items-center gap-2 h-[44px] px-4 rounded-[12px]"
-          style={{ background: '#59d9b3', color: '#0b0c10', opacity: busy ? 0.7 : 1 }}
-          title={busy ? 'Sending…' : 'Send'}
-        >
-          <CornerDownLeft className="w-4 h-4" /> Send
-        </button>
+          {loading && (
+            <div style={styles.rowBot}>
+              <div style={styles.bubbleBot}>
+                <TypingDots />
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div style={styles.inputRow}>
+          <input
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={onKey}
+            placeholder="Ask Riley…"
+            style={styles.input}
+          />
+          <button onClick={send} disabled={loading || !input.trim()} style={styles.button}>
+            Send
+          </button>
+        </div>
+
+        <div style={styles.note}>
+          Riley will never reveal or summarize code, file contents, or paths. If asked, Riley will refuse.
+        </div>
       </div>
-    </main>
+    </div>
   );
+}
+
+function TypingDots() {
+  return (
+    <span style={styles.dotsWrap} aria-label="Riley is thinking">
+      <span style={{ ...styles.dot, animationDelay: '0ms' }} />
+      <span style={{ ...styles.dot, animationDelay: '120ms' }} />
+      <span style={{ ...styles.dot, animationDelay: '240ms' }} />
+    </span>
+  );
+}
+
+const styles: Record<string, React.CSSProperties> = {
+  wrap: {
+    minHeight: '100vh',
+    background: 'radial-gradient(1200px 600px at 20% -10%, rgba(0,255,194,0.12), transparent), #0b0c10',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+  },
+  card: {
+    width: '100%',
+    maxWidth: 920,
+    background: '#0d0f11',
+    border: '1px dashed rgba(0,255,194,0.25)',
+    boxShadow: '0 0 40px rgba(0,255,194,0.12)',
+    borderRadius: 24,
+    padding: 16,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 12,
+  },
+  header: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    fontSize: 18,
+    color: '#e6fff7',
+  },
+  rileyDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 999,
+    background: 'rgba(0,255,194,0.9)',
+    boxShadow: '0 0 12px rgba(0,255,194,0.8)',
+  },
+  list: {
+    flex: 1,
+    minHeight: 360,
+    maxHeight: '60vh',
+    overflowY: 'auto',
+    padding: 8,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 10,
+  },
+  rowUser: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+  },
+  rowBot: {
+    display: 'flex',
+    justifyContent: 'flex-start',
+  },
+  bubbleUser: {
+    background: 'linear-gradient(180deg, rgba(0,255,194,0.25), rgba(0,255,194,0.12))',
+    border: '1px solid rgba(0,255,194,0.35)',
+    color: '#dffef6',
+    padding: '10px 12px',
+    borderRadius: 14,
+    maxWidth: '80%',
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+  },
+  bubbleBot: {
+    background: 'rgba(255,255,255,0.04)',
+    border: '1px solid rgba(255,255,255,0.08)',
+    color: '#e5f9f3',
+    padding: '10px 12px',
+    borderRadius: 14,
+    maxWidth: '80%',
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+  },
+  inputRow: {
+    display: 'flex',
+    gap: 8,
+    paddingTop: 6,
+  },
+  input: {
+    flex: 1,
+    background: '#0b0c10',
+    border: '1px solid rgba(255,255,255,0.08)',
+    color: '#e6fff7',
+    padding: '12px 14px',
+    borderRadius: 12,
+    outline: 'none',
+  },
+  button: {
+    background: 'rgba(0,255,194,0.15)',
+    border: '1px solid rgba(0,255,194,0.4)',
+    color: '#dffef6',
+    padding: '12px 16px',
+    borderRadius: 12,
+    cursor: 'pointer',
+  },
+  note: {
+    fontSize: 12,
+    opacity: 0.65,
+    textAlign: 'center',
+    paddingTop: 4,
+    color: '#c7efe6',
+  },
+  dotsWrap: {
+    display: 'inline-flex',
+    gap: 6,
+    alignItems: 'center',
+  },
+  dot: {
+    width: 6,
+    height: 6,
+    borderRadius: 999,
+    background: 'rgba(230,255,247,0.95)',
+    display: 'inline-block',
+    animation: 'riley-bounce 900ms infinite ease-in-out',
+  } as React.CSSProperties,
+};
+
+// Inject keyframes once
+if (typeof document !== 'undefined' && !document.getElementById('riley-bounce-style')) {
+  const style = document.createElement('style');
+  style.id = 'riley-bounce-style';
+  style.innerHTML = `
+  @keyframes riley-bounce {
+    0%, 80%, 100% { transform: translateY(0); opacity: .5; }
+    40% { transform: translateY(-6px); opacity: 1; }
+  }`;
+  document.head.appendChild(style);
 }
