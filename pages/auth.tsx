@@ -94,7 +94,6 @@ export default function AuthPage() {
         });
         if (error) throw error;
 
-        // If email confirmation is ON, Supabase may not create a session yet.
         if (!data.session) {
           setMsg('Account created! Check your email to verify your address, then come back to sign in.');
           setLoading(false);
@@ -102,13 +101,11 @@ export default function AuthPage() {
           return;
         }
 
-        // Email confirmations OFF -> session present -> go straight in
         localStorage.setItem('postAuthRedirect', `${from}?onboard=1&mode=signup`);
         setMsg('Setting up your account…');
         await delay(600);
         router.replace(`${from}?onboard=1&mode=signup`);
       } else {
-        // SIGN IN (no accidental signups)
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) {
           const m = (error.message || '').toLowerCase();
@@ -142,21 +139,23 @@ export default function AuthPage() {
     }
   };
 
-  const resendVerification = async () => {
+  // NEW: forgot password
+  const handleForgot = async () => {
+    setErr(null);
+    setMsg(null);
+    if (!email) {
+      setErr('Enter your email first, then click “Forgot password”.');
+      return;
+    }
     try {
       setLoading(true);
-      setErr(null);
-      setMsg(null);
-      const { error } = await supabase.auth.resend({
-        type: 'signup',
-        email,
-        options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/reset`,
       });
       if (error) throw error;
-      setResent(true);
-      setMsg('Verification email re-sent. Check your inbox.');
+      setMsg('Password reset email sent. Check your inbox.');
     } catch (e: any) {
-      setErr(e?.message || 'Could not resend verification right now.');
+      setErr(e?.message || 'Could not send reset email.');
     } finally {
       setLoading(false);
     }
@@ -169,7 +168,6 @@ export default function AuthPage() {
       </Head>
 
       <div className="min-h-screen font-movatif" style={{ background: '#0b0c10', color: '#fff' }}>
-        {/* subtle background glow */}
         <div
           className="fixed inset-0 -z-10 opacity-70"
           style={{
@@ -179,7 +177,6 @@ export default function AuthPage() {
         />
         <div className="mx-auto max-w-6xl px-5 py-12">
           <div className="grid gap-10 md:grid-cols-2 items-center">
-            {/* Left – trust / legit text (hidden on small if you prefer) */}
             <div className="hidden md:block">
               <div
                 className="rounded-2xl p-6"
@@ -211,7 +208,6 @@ export default function AuthPage() {
               </div>
             </div>
 
-            {/* Right – auth card */}
             <div className="flex justify-center">
               <div
                 className="w-full max-w-[520px] p-6 rounded-2xl"
@@ -222,7 +218,6 @@ export default function AuthPage() {
                     '0 30px 80px rgba(0,0,0,0.50), 0 0 26px rgba(106,247,209,0.18), inset 0 0 18px rgba(0,0,0,0.25)',
                 }}
               >
-                {/* Segmented control */}
                 <div className="flex gap-2 mb-5">
                   <button
                     onClick={() => switchMode('signin')}
@@ -299,7 +294,20 @@ export default function AuthPage() {
                   </button>
                 </form>
 
-                {/* Divider */}
+                {/* Forgot password (only on sign in) */}
+                {mode === 'signin' && (
+                  <div className="mt-3 text-right">
+                    <button
+                      onClick={handleForgot}
+                      disabled={loading}
+                      className="text-xs underline decoration-white/40 hover:decoration-white"
+                      style={{ color: '#fff', opacity: 0.9 }}
+                    >
+                      Forgot password?
+                    </button>
+                  </div>
+                )}
+
                 <div className="flex items-center gap-3 my-4 text-white/40 text-xs">
                   <div className="flex-1 h-px bg-white/10" />
                   <span>or</span>
@@ -319,7 +327,6 @@ export default function AuthPage() {
                   Continue with Google
                 </button>
 
-                {/* Info / errors */}
                 {(msg || err) && (
                   <div
                     className="mt-4 rounded-xl p-3 text-sm"
@@ -330,12 +337,29 @@ export default function AuthPage() {
                   </div>
                 )}
 
-                {/* Resend verification if needed */}
                 {showResend && (
                   <div className="mt-3 text-xs text-white/70 flex items-center justify-between">
                     <span>Didn’t get the verification email?</span>
                     <button
-                      onClick={resendVerification}
+                      onClick={async () => {
+                        try {
+                          setLoading(true);
+                          setErr(null);
+                          setMsg(null);
+                          const { error } = await supabase.auth.resend({
+                            type: 'signup',
+                            email,
+                            options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+                          });
+                          if (error) throw error;
+                          setResent(true);
+                          setMsg('Verification email re-sent. Check your inbox.');
+                        } catch (e: any) {
+                          setErr(e?.message || 'Could not resend verification right now.');
+                        } finally {
+                          setLoading(false);
+                        }
+                      }}
                       disabled={loading || !email || resent}
                       className="px-3 py-1 rounded-lg border"
                       style={{
