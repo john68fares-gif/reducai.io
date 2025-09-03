@@ -1,5 +1,8 @@
 // pages/builder.tsx
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/router';
 import dynamic from 'next/dynamic';
+import { supabase } from '@/lib/supabaseClient';
 
 // Robust dynamic that returns mod.default (if present) and shows a loader while it loads.
 const BuilderDashboard = dynamic(
@@ -10,13 +13,83 @@ const BuilderDashboard = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div style={{ padding: 32, color: 'white' }}>
-        Loading Builder…
+      <div
+        style={{
+          minHeight: '100vh',
+          padding: 32,
+          color: 'white',
+          background: '#0b0c10',
+          display: 'grid',
+          placeItems: 'center',
+        }}
+      >
+        <div className="flex items-center gap-3">
+          <span className="inline-block w-5 h-5 rounded-full border-2 border-white/70 border-t-transparent animate-spin" />
+          <span>Loading Builder…</span>
+        </div>
       </div>
     ),
   }
 );
 
 export default function BuilderPage() {
+  const router = useRouter();
+  const [checking, setChecking] = useState(true);
+  const [authed, setAuthed] = useState(false);
+
+  useEffect(() => {
+    let unsub: { data?: { subscription?: { unsubscribe?: () => void } } } | null = null;
+
+    (async () => {
+      // Initial check
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        router.replace(`/auth?mode=signin&from=${encodeURIComponent('/builder')}`);
+        setChecking(false);
+        return;
+      }
+      setAuthed(true);
+      setChecking(false);
+
+      // React to future auth changes (optional safety)
+      unsub = supabase.auth.onAuthStateChange((_e, sess) => {
+        if (!sess) {
+          router.replace(`/auth?mode=signin&from=${encodeURIComponent('/builder')}`);
+        } else {
+          setAuthed(true);
+        }
+      });
+    })();
+
+    return () => {
+      unsub?.data?.subscription?.unsubscribe?.();
+    };
+  }, [router]);
+
+  if (checking) {
+    return (
+      <div
+        style={{
+          minHeight: '100vh',
+          padding: 32,
+          color: 'white',
+          background: '#0b0c10',
+          display: 'grid',
+          placeItems: 'center',
+        }}
+      >
+        <div className="flex items-center gap-3">
+          <span className="inline-block w-6 h-6 rounded-full border-2 border-white/70 border-t-transparent animate-spin" />
+          <span>Checking session…</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!authed) {
+    // We already triggered a redirect; render nothing to avoid flicker.
+    return null;
+  }
+
   return <BuilderDashboard />;
 }
