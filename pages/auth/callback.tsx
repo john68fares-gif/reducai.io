@@ -1,5 +1,5 @@
-// pages/auth/callback.tsx
-import { useEffect } from 'react';
+// /pages/auth/callback.tsx
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 import { createClient } from '@supabase/supabase-js';
@@ -11,43 +11,45 @@ const supabase = createClient(
 
 export default function AuthCallback() {
   const router = useRouter();
+  const [msg, setMsg] = useState('Signing you in…');
 
   useEffect(() => {
-    // Supabase sets the session on load; when it exists, go where we came from.
-    const sub = supabase.auth.onAuthStateChange((_e, session) => {
-      if (session) {
+    (async () => {
+      try {
+        // 1) Exchange the OAuth "code" in the URL for a real session cookie.
+        const { error } = await supabase.auth.exchangeCodeForSession(window.location.href);
+        if (error) {
+          setMsg(error.message || 'Could not complete sign-in.');
+          return;
+        }
+
+        // 2) Figure out where to go next (from query or localStorage) and bounce.
         let from = (router.query.from as string) || '/builder';
         try {
-          from = localStorage.getItem('auth:from') || from;
-          localStorage.removeItem('auth:from');
+          const stored = localStorage.getItem('auth:from');
+          if (stored) {
+            from = stored;
+            localStorage.removeItem('auth:from');
+          }
         } catch {}
         router.replace(from);
+      } catch (e: any) {
+        setMsg(e?.message || 'Something went wrong.');
       }
-    });
-
-    // Safety net: if already signed in, bounce immediately
-    supabase.auth.getSession().then(({ data }) => {
-      if (data.session) {
-        let from = (router.query.from as string) || '/builder';
-        try {
-          from = localStorage.getItem('auth:from') || from;
-          localStorage.removeItem('auth:from');
-        } catch {}
-        router.replace(from);
-      }
-    });
-
-    return () => sub.data.subscription.unsubscribe();
+    })();
   }, [router]);
 
   return (
     <>
       <Head><title>Redirecting… · Reduc.ai</title></Head>
-      <div className="min-h-screen flex items-center justify-center" style={{ background: '#0b0c10', color: '#fff' }}>
+      <div
+        className="min-h-screen flex items-center justify-center"
+        style={{ background: '#0b0c10', color: '#fff' }}
+      >
         <div className="rounded-[16px] px-6 py-4 border border-white/15 bg-black/30">
           <div className="flex items-center gap-3">
             <span className="inline-block w-4 h-4 rounded-full border-2 border-white/70 border-t-transparent animate-spin" />
-            <span>Signing you in…</span>
+            <span>{msg}</span>
           </div>
         </div>
       </div>
