@@ -32,6 +32,17 @@ function Field({
   );
 }
 
+function LoadingOverlay({ text = 'Loading…' }: { text?: string }) {
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.45)' }}>
+      <div className="flex items-center gap-3 px-4 py-3 rounded-[12px]" style={{ background: 'rgba(16,19,20,0.92)', border: '1px solid rgba(255,255,255,0.08)' }}>
+        <div className="h-5 w-5 rounded-full border-2 border-white/20 border-t-[#00ffc2] animate-spin" />
+        <div className="text-white/90 text-sm">{text}</div>
+      </div>
+    </div>
+  );
+}
+
 export default function AuthPage() {
   const router = useRouter();
   const query = useMemo(
@@ -47,13 +58,10 @@ export default function AuthPage() {
   const [mode, setMode] = useState<'signin' | 'signup'>(startMode);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  // Optional: collect phone now (save it later when user finishes onboarding)
-  const [phone, setPhone] = useState('');
+  const [phone, setPhone] = useState(''); // optional—store later in onboarding if you want
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-
-  const go = (url: string) => router.push(url);
 
   const onGoogle = async () => {
     try {
@@ -74,11 +82,12 @@ export default function AuthPage() {
         },
       });
       if (error) throw error;
+      // Supabase will redirect; show loading until the browser navigates
       setMsg('Redirecting to Google…');
     } catch (e: any) {
       setErr(e?.message || 'Google sign-in failed. Is the Google provider enabled in Supabase?');
     } finally {
-      setBusy(false);
+      setBusy(false); // page will leave anyway; safe
     }
   };
 
@@ -90,28 +99,29 @@ export default function AuthPage() {
       if (!email || !password) throw new Error('Email and password are required.');
 
       if (mode === 'signup') {
-        // Tell Supabase where to return after the user clicks "Verify email"
         const origin = window.location.origin;
         const redirectTo = `${origin}/auth/callback?from=${encodeURIComponent(
           '/builder?mode=signup&onboard=1'
         )}`;
 
-        const { data, error } = await supabase.auth.signUp({
+        const { error } = await supabase.auth.signUp({
           email,
           password,
           options: { emailRedirectTo: redirectTo },
         });
         if (error) throw error;
 
-        // If email confirmation is ON, the user needs to click the link.
-        setMsg('Check your email for a verification link to finish creating your account.');
+        setMsg('Check your inbox. Click the verification link to finish creating your account.');
       } else {
-        const { data, error } = await supabase.auth.signInWithPassword({
+        const { error } = await supabase.auth.signInWithPassword({
           email,
           password,
         });
         if (error) throw error;
-        go('/builder');
+
+        setMsg('Signing you in…');
+        // small delay feels natural, then go
+        setTimeout(() => router.push('/builder'), 400);
         return;
       }
     } catch (e: any) {
@@ -126,6 +136,8 @@ export default function AuthPage() {
       className="min-h-screen w-full flex items-start justify-center pt-20 px-4"
       style={{ background: '#0b0c10', color: 'white' }}
     >
+      {busy && <LoadingOverlay text="Please wait…" />}
+
       <div
         className="w-full max-w-md rounded-[16px] p-6"
         style={{
@@ -174,7 +186,6 @@ export default function AuthPage() {
             onChange={setPassword}
             autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
           />
-          {/* Optional phone field (collected for later use) */}
           <Field
             label="Phone (optional)"
             type="tel"
@@ -184,8 +195,8 @@ export default function AuthPage() {
           />
 
           <button
-            disabled={busy}
             onClick={onEmail}
+            disabled={busy}
             className="w-full py-2 rounded-[10px] bg-[#00ffc2] text-black font-semibold shadow-[0_0_10px_rgba(106,247,209,0.28)] hover:brightness-110 disabled:opacity-60"
           >
             {mode === 'signup' ? 'Create account' : 'Sign in'}
