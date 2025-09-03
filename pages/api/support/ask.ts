@@ -99,9 +99,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
+   
     // Load local index and embed the query
-    const idx = loadIndex();
-    const qVec = await embed(question);
+  // inside ask.ts, near the top of the try { ... }
+let idx: { vectors: any[] };
+try {
+  idx = loadIndex();
+} catch (e: any) {
+  // Fallback when /data/support_index.json is missing/not readable
+  idx = {
+    vectors: [
+      {
+        key: "build-flow",
+        text:
+          "Build flow: Step 1 choose AI type. Step 2 name/industry/language -> pick model & API key. Step 3 edit prompt boxes. Step 4 overview -> Generate AI -> dashboard.",
+        vec: Array.from({ length: 1536 }, () => 0), // same dim as text-embedding-3-large
+        meta: { path: "docs/build/flow.md", range: [1, 60] },
+      },
+    ],
+  };
+}
 
     // Score & pick top-K context
     const scored = idx.vectors
