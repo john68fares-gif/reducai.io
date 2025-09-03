@@ -11,39 +11,67 @@ export default function AuthCallback() {
   useEffect(() => {
     (async () => {
       try {
-        // 1) Exchange the OAuth "code" in the URL for a real session cookie
+        // 0) If we already have a session (e.g., restored by the browser), just go.
+        const pre = await supabase.auth.getSession();
+        if (pre.data.session) {
+          return finishRedirect();
+        }
+
+        // 1) If no OAuth 'code' in URL, nothing to exchange. Bounce to /auth.
+        const url = new URL(window.location.href);
+        const code = url.searchParams.get('code');
+        if (!code) {
+          return failBack('No auth code found. Please sign in again.');
+        }
+
+        // 2) Try to exchange the code for a real session cookie.
         const { error } = await supabase.auth.exchangeCodeForSession(window.location.href);
         if (error) {
-          setMsg(error.message || 'Could not complete sign-in.');
-          return;
+          // Typical here: "both auth code and code verifier should be non-empty"
+          // This happens when the PKCE verifier wasn't available (different origin, cleared storage, etc.)
+          return failBack(error.message || 'Could not complete sign-in. Please try again.');
         }
 
-        // 2) Decide where to go next
-        let to = '/builder';
-        try {
-          const stored = localStorage.getItem('postAuthRedirect');
-          if (stored) {
-            to = stored;
-            localStorage.removeItem('postAuthRedirect');
-          } else if (typeof router.query.from === 'string' && router.query.from) {
-            to = router.query.from as string;
-          }
-        } catch {
-          // ignore storage errors
-        }
-
-        // 3) Final safety: ensure session exists, then redirect
+        // 3) Confirm session, then redirect.
         const { data: { session } } = await supabase.auth.getSession();
         if (!session) {
-          setMsg('Signed in, but session was not detected. Please try again.');
-          return;
+          return failBack('Signed in, but no session found. Please try again.');
         }
 
-        router.replace(to);
+        return finishRedirect();
       } catch (e: any) {
-        setMsg(e?.message || 'Something went wrong.');
+        return failBack(e?.message || 'Something went wrong. Please try again.');
       }
     })();
+
+    // — helpers —
+    function finishRedirect() {
+      let to = '/builder';
+
+      // prefer localStorage hint set before OAuth
+      try {
+        const stored = localStorage.getItem('postAuthRedirect');
+        if (stored) {
+          to = stored;
+          localStorage.removeItem('postAuthRedirect');
+        }
+      } catch {} // ignore storage errors
+
+      // otherwise use ?from=
+      const qFrom = (router.query.from as string) || '';
+      if (qFrom) to = qFrom;
+
+      router.replace(to);
+    }
+
+    function failBack(reason: string) {
+      const qFrom = (router.query.from as string) || '/builder';
+      const url = new URL(window.location.origin + '/auth');
+      url.searchParams.set('mode', 'signin');
+      url.searchParams.set('from', qFrom);
+      url.searchParams.set('msg', reason);
+      router.replace(url.toString());
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
