@@ -1,4 +1,4 @@
-// /pages/auth.tsx
+// pages/auth.tsx
 import { useEffect, useMemo, useState } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabase-client';
 
 type Mode = 'signin' | 'signup';
 
-const ACCENT = '#21e8c7';
+const ACCENT = '#6af7d1';
 const BG = '#0b0c10';
 
 export default function AuthPage() {
@@ -34,13 +34,10 @@ export default function AuthPage() {
 
   useEffect(() => {
     setMode(queryMode);
-    setErr(null);
-    setMsg(null);
-    setVerifySent(false);
-    setPhase('idle');
+    setErr(null); setMsg(null); setVerifySent(false); setPhase('idle');
   }, [queryMode]);
 
-  // If already signed in, bounce to "from"
+  // Already signed in? Bounce to "from"
   useEffect(() => {
     let unsub: any;
     (async () => {
@@ -60,33 +57,33 @@ export default function AuthPage() {
     router.replace({ pathname: '/auth', query: { mode: m, from } }, undefined, { shallow: true });
   };
 
+  function setServerVisibleCookie() {
+    // 14 days, server-readable (to satisfy middleware)
+    document.cookie = `ra_session=1; Path=/; Max-Age=${60 * 60 * 24 * 14}; SameSite=Lax; Secure`;
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setErr(null);
-    setMsg(null);
+    setErr(null); setMsg(null);
 
-    if (!email || !password) {
-      setErr('Please fill your email and password.');
-      return;
-    }
+    if (!email || !password) return setErr('Please fill your email and password.');
     if (mode === 'signup' && (!username || username.trim().length < 3)) {
-      setErr('Choose a username (3+ characters).');
-      return;
+      return setErr('Choose a username (3+ characters).');
     }
 
     try {
-      setBusy(true);
-      setPhase('checking');
-      await delay(250);
+      setBusy(true); setPhase('checking'); await delay(250);
 
       if (mode === 'signin') {
         setPhase('contacting');
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
 
-        setPhase('finalizing');
+        // make SSR/middleware happy
+        setServerVisibleCookie();
+
+        setPhase('finalizing'); await delay(350);
         localStorage.setItem('postAuthRedirect', from);
-        await delay(350);
         router.replace(from);
       } else {
         setPhase('contacting');
@@ -95,7 +92,7 @@ export default function AuthPage() {
           password,
           options: {
             data: {
-              full_name: username,
+              full_name: username,               // used by your triggers
               preferred_username: username,
               user_name: username,
               heard_about: heardAbout || 'unspecified',
@@ -105,14 +102,17 @@ export default function AuthPage() {
         });
         if (error) throw error;
 
-        setPhase('finalizing');
-        await delay(350);
+        setPhase('finalizing'); await delay(350);
 
+        // Most projects require email confirm → no session yet
         if (!data.session) {
           setVerifySent(true);
           setMsg('Account created! Verify your email, then sign in.');
           return;
         }
+
+        // If auto-confirm is on, set cookie and go
+        setServerVisibleCookie();
         localStorage.setItem('postAuthRedirect', `${from}?onboard=1&mode=signup`);
         router.replace(`${from}?onboard=1&mode=signup`);
       }
@@ -130,9 +130,8 @@ export default function AuthPage() {
 
   async function handleGoogle() {
     try {
-      setErr(null);
-      setBusy(true);
-      setPhase('contacting');
+      setErr(null); setBusy(true); setPhase('contacting');
+      // after Google → callback reads this and redirects
       localStorage.setItem(
         'postAuthRedirect',
         mode === 'signup' ? `${from}?onboard=1&mode=signup` : from
@@ -147,39 +146,25 @@ export default function AuthPage() {
       if (error) throw error;
     } catch (e: any) {
       setErr(e?.message || 'Could not open Google right now.');
-      setBusy(false);
-      setPhase('idle');
+      setBusy(false); setPhase('idle');
     }
   }
 
   return (
     <>
-      <Head>
-        <title>{mode === 'signup' ? 'Sign up' : 'Sign in'} · Reduc.ai</title>
-      </Head>
+      <Head><title>{mode === 'signup' ? 'Sign up' : 'Sign in'} · Reduc.ai</title></Head>
 
       <main className="page">
         <div className="glow glow1" />
         <div className="glow glow2" />
 
         <div className="wrap">
-          {/* LEFT — Auth card */}
+          {/* LEFT — Auth card (bigger, left-shifted) */}
           <section className="card auth appear">
+            {/* Tabs */}
             <div className="tabs">
-              <button
-                className={`tab ${mode === 'signin' ? 'active' : ''}`}
-                onClick={() => switchMode('signin')}
-                disabled={busy}
-              >
-                Sign in
-              </button>
-              <button
-                className={`tab ${mode === 'signup' ? 'active' : ''}`}
-                onClick={() => switchMode('signup')}
-                disabled={busy}
-              >
-                Sign up
-              </button>
+              <button className={`tab ${mode === 'signin' ? 'active' : ''}`} disabled={busy} onClick={() => switchMode('signin')}>Sign in</button>
+              <button className={`tab ${mode === 'signup' ? 'active' : ''}`} disabled={busy} onClick={() => switchMode('signup')}>Sign up</button>
             </div>
 
             {verifySent ? (
@@ -192,17 +177,8 @@ export default function AuthPage() {
               <form className="form" onSubmit={handleSubmit}>
                 {mode === 'signup' && (
                   <div className="row">
-                    <input
-                      value={username}
-                      onChange={(e) => setUsername(e.target.value)}
-                      placeholder="Username"
-                      className="input"
-                    />
-                    <select
-                      value={heardAbout}
-                      onChange={(e) => setHeardAbout(e.target.value)}
-                      className="input"
-                    >
+                    <input className="input" placeholder="Username" value={username} onChange={(e) => setUsername(e.target.value)} />
+                    <select className="input" value={heardAbout} onChange={(e) => setHeardAbout(e.target.value)}>
                       <option value="">Where did you hear about us?</option>
                       <option value="twitter">Twitter / X</option>
                       <option value="tiktok">TikTok</option>
@@ -214,20 +190,8 @@ export default function AuthPage() {
                   </div>
                 )}
 
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="Email address"
-                  className="input"
-                />
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder={mode === 'signup' ? 'Create a password' : 'Password'}
-                  className="input"
-                />
+                <input className="input" type="email" placeholder="Email address" value={email} onChange={(e) => setEmail(e.target.value)} />
+                <input className="input" type="password" placeholder={mode === 'signup' ? 'Create a password' : 'Password'} value={password} onChange={(e) => setPassword(e.target.value)} />
 
                 <button type="submit" className="primary" disabled={busy}>
                   {busy
@@ -242,14 +206,11 @@ export default function AuthPage() {
                 </button>
 
                 <div className="or">
-                  <div className="line" />
-                  <span>or</span>
-                  <div className="line" />
+                  <div className="line" /><span>or</span><div className="line" />
                 </div>
 
                 <button type="button" className="google" onClick={handleGoogle} disabled={busy}>
-                  <GoogleG />
-                  Continue with Google
+                  <GoogleG /> Continue with Google
                 </button>
 
                 {(msg || err) && (
@@ -264,132 +225,94 @@ export default function AuthPage() {
             )}
           </section>
 
-          {/* RIGHT — Welcome / trust */}
+          {/* RIGHT — Welcome card (same vibe as your components) */}
           <aside className="card welcome appear">
             <div className="welcomeHead">
               <div className="spark">✦</div>
               <h2>Welcome to Reduc.ai</h2>
             </div>
-            <p className="p">
-              Build and manage AI agents with clean onboarding and secure sessions.
-            </p>
+            <p className="p">Build and manage AI agents. Clean onboarding, secure sessions.</p>
             <ul className="list">
               <li>● Email + password or Google</li>
-              <li>● Secure sessions with Supabase Auth</li>
+              <li>● Secure sessions by Supabase Auth</li>
               <li>● You control your data</li>
             </ul>
           </aside>
         </div>
       </main>
 
+      {/* Self-contained styles (match StepV1/AgentCard look) */}
       <style jsx>{`
         :global(html, body) { margin: 0; }
         .page {
-          min-height: 100vh;
-          background: ${BG};
-          color: #fff;
-          position: relative;
-          overflow: hidden;
-          font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
+          min-height: 100vh; background: ${BG}; color: #fff; position: relative; overflow: hidden;
+          font-family: "Manrope", ui-sans-serif, system-ui, -apple-system, Segoe UI, Inter, Roboto, Arial;
         }
-        .glow {
-          position: absolute;
-          border-radius: 9999px;
-          pointer-events: none;
-          filter: blur(24px);
-        }
-        .glow1 { width: 740px; height: 740px; left: -180px; top: -160px; background: radial-gradient(circle, rgba(33,232,199,0.13), transparent 60%); }
-        .glow2 { width: 660px; height: 660px; right: -200px; bottom: -180px; background: radial-gradient(circle, rgba(33,232,199,0.08), transparent 65%); }
+        .glow { position: absolute; border-radius: 9999px; pointer-events: none; filter: blur(24px); }
+        .glow1 { width: 740px; height: 740px; left: -180px; top: -160px; background: radial-gradient(circle, rgba(106,247,209,0.10), transparent 60%); }
+        .glow2 { width: 660px; height: 660px; right: -200px; bottom: -180px; background: radial-gradient(circle, rgba(106,247,209,0.08), transparent 65%); }
 
-        .wrap {
-          max-width: 1120px;
-          margin: 0 auto;
-          padding: 56px 24px;
-          display: grid;
-          gap: 24px;
-          grid-template-columns: 1.2fr 0.8fr; /* shifted left */
-          align-items: start;
-        }
+        .wrap { max-width: 1180px; margin: 0 auto; padding: 56px 24px; display: grid; gap: 24px; grid-template-columns: 1.25fr 0.75fr; align-items: start; }
 
         .card {
-          background: rgba(14,16,18,0.96);
-          border: 1px solid rgba(255,255,255,0.12);
-          border-radius: 18px; /* outer less rounded per your note */
-          box-shadow: 0 30px 80px rgba(0,0,0,0.5), 0 0 22px rgba(33,232,199,0.10);
+          background: rgba(13,15,17,0.92);
+          border: 2px solid rgba(106,247,209,0.32);
+          box-shadow: 0 18px 60px rgba(0,0,0,0.50), inset 0 0 22px rgba(0,0,0,0.28), 0 0 20px rgba(106,247,209,0.06);
+          border-radius: 28px;
           padding: 22px;
         }
+        .appear { animation: fadeInUp 380ms ease-out both; }
+        @keyframes fadeInUp { from{opacity:0; transform:translateY(8px)} to{opacity:1; transform:translateY(0)} }
 
-        .appear { animation: fadeInUp 420ms ease-out both; }
-        @keyframes fadeInUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-
-        /* AUTH */
-        .auth { max-width: 640px; }
+        .auth { max-width: 680px; }
         .tabs { display: flex; gap: 10px; margin-bottom: 18px; }
         .tab {
-          flex: 1; padding: 10px 12px; border-radius: 14px;
-          background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.92);
-          border: 1px solid rgba(255,255,255,0.08);
-          font-weight: 700; cursor: pointer; transition: transform .08s ease, box-shadow .2s ease, background .2s ease;
+          flex: 1; padding: 10px 12px; border-radius: 14px; background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.92);
+          border: 1px solid rgba(255,255,255,0.08); font-weight: 800; cursor: pointer; transition: transform .08s ease, box-shadow .2s ease, background .2s ease;
         }
-        .tab.active { background: ${ACCENT}; color: ${BG}; box-shadow: 0 0 8px rgba(33,232,199,0.18); }
+        .tab.active { background: ${ACCENT}; color: ${BG}; box-shadow: 0 0 8px rgba(106,247,209,0.18); }
         .tab:active { transform: scale(0.995); }
 
         .form { display: flex; flex-direction: column; gap: 10px; }
         .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
         .input {
-          width: 100%;
-          border-radius: 14px; background: #0f1213;
-          border: 1px solid #173a32; color: #fff;
-          padding: 12px 14px; outline: none;
+          width: 100%; border-radius: 14px; background: #101314; border: 1px solid #13312b; color: #fff;
+          padding: 12px 14px; outline: none; box-shadow: 0 8px 34px rgba(0,0,0,0.25);
         }
-        .input:focus { border-color: ${ACCENT}; box-shadow: 0 0 0 2px rgba(33,232,199,0.08) inset; }
+        .input:focus { border-color: #13312b; box-shadow: 0 0 0 2px rgba(106,247,209,0.20) inset; }
 
         .primary {
           border: 0; border-radius: 14px; padding: 12px 16px;
-          background: ${ACCENT}; color: ${BG}; font-weight: 800; cursor: pointer;
-          box-shadow: 0 0 8px rgba(33,232,199,0.16);
-          transition: transform .08s ease, filter .2s ease, box-shadow .2s ease;
+          background: ${ACCENT}; color: #000; font-weight: 900; cursor: pointer;
+          box-shadow: 0 0 10px rgba(106,247,209,0.18);
+          transition: transform .08s ease, filter .2s ease;
         }
         .primary:active { transform: scale(0.995); }
         .primary:disabled { opacity: .7; cursor: not-allowed; }
 
-        .or { display: flex; align-items: center; gap: 10px; color: rgba(255,255,255,0.5); font-size: 12px; margin: 10px 0; }
+        .or { display: flex; align-items: center; gap: 10px; color: rgba(255,255,255,0.55); font-size: 12px; margin: 10px 0; }
         .line { height: 1px; background: rgba(255,255,255,0.10); flex: 1; }
 
         .google {
           display: inline-flex; align-items: center; justify-content: center; gap: 10px;
           width: 100%; padding: 12px 16px; border-radius: 14px;
-          border: 1px solid rgba(255,255,255,0.18); background: rgba(16,19,20,0.88);
+          border: 1px solid rgba(255,255,255,0.25); background: rgba(16,19,20,0.88);
           color: #fff; cursor: pointer; transition: transform .08s ease, box-shadow .2s ease;
         }
         .google:active { transform: scale(0.995); }
         .google:disabled { opacity: .7; cursor: not-allowed; }
 
-        .notice {
-          margin-top: 10px; border: 1px solid rgba(255,255,255,0.18);
-          background: rgba(16,19,20,0.88); border-radius: 12px; padding: 10px;
-          font-size: 14px;
-        }
+        .notice { margin-top: 10px; border: 1px solid rgba(255,255,255,0.25); background: rgba(16,19,20,0.88); border-radius: 12px; padding: 10px; font-size: 14px; }
         .msg { color: rgba(255,255,255,0.92); }
         .err { color: #ff9aa3; }
-
         .foot { margin-top: 4px; font-size: 12px; color: rgba(255,255,255,0.55); }
 
-        .verify h2 { margin: 0 0 6px; font-size: 18px; }
-        .ghost {
-          border: 1px solid rgba(255,255,255,0.2); background: rgba(16,19,20,0.88);
-          color: #fff; padding: 8px 12px; border-radius: 10px; cursor: pointer;
-        }
-
-        /* WELCOME */
-        .welcome .welcomeHead { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
-        .welcome h2 { margin: 0; font-size: 20px; font-weight: 700; }
+        .welcome .welcomeHead { display:flex; align-items:center; gap:10px; margin-bottom:6px; }
+        .welcome h2 { margin:0; font-size: 22px; font-weight: 800; }
         .spark { color: ${ACCENT}; font-size: 18px; }
-        .p { opacity: .82; margin: 0 0 12px; }
-        .list { list-style: none; padding: 0; margin: 0; opacity: .9; display: grid; gap: 8px; }
-        .list li { position: relative; padding-left: 0; }
+        .p { opacity:.84; margin:0 0 12px; }
+        .list { list-style:none; padding:0; margin:0; opacity:.9; display:grid; gap:8px; }
 
-        /* Responsive */
         @media (max-width: 980px) {
           .wrap { grid-template-columns: 1fr; }
           .auth { order: 1; }
@@ -402,6 +325,7 @@ export default function AuthPage() {
 }
 
 function GoogleG() {
+  // Official "G"
   return (
     <svg width="18" height="18" viewBox="0 0 256 262" xmlns="http://www.w3.org/2000/svg" aria-hidden>
       <path fill="#4285F4" d="M255.88 133.5c0-10.9-.9-18.8-2.9-27.1H130.5v49.1h71.9c-1.5 12.3-9.6 30.9-27.6 43.4l-.3 2.1 40.1 31 2.8.3c25.8-23.8 38.4-58.8 38.4-98.9z"/>
