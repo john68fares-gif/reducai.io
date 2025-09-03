@@ -1,37 +1,44 @@
-// pages/_app.tsx
+// /pages/_app.tsx
 import type { AppProps } from 'next/app';
-import Head from 'next/head';
-import { useRouter } from 'next/router';
-import { SessionProvider } from 'next-auth/react';
-import Sidebar from '../components/ui/Sidebar';
-import '../styles/globals.css';
+import { useEffect } from 'react';
+import { supabase } from '@/lib/supabase-client';
 
-export default function MyApp({
-  Component,
-  pageProps: { session, ...pageProps },
-}: AppProps) {
-  const router = useRouter();
-  const hideSidebar = router.pathname === '/' || router.pathname.startsWith('/auth');
+/**
+ * Why this fixes Google sign-in bouncing:
+ * - Supabase JS stores the auth session in localStorage (client-only).
+ * - Your middleware/SSR can't see localStorage, so it assumed you're logged out and
+ *   kept redirecting you back to /auth after Google returned.
+ * - Here we subscribe to Supabase auth events globally and set a SOFT, server-visible
+ *   cookie `ra_session=1` on SIGNED_IN, and clear it on SIGNED_OUT.
+ * - Your middleware should treat presence of `ra_session=1` as "authenticated".
+ *
+ * Make sure your /middleware.ts checks for either:
+ *   - /^sb-.*-auth-token$/ cookie  OR
+ *   - ra_session=1
+ */
 
-  return (
-    <SessionProvider session={session}>
-      <Head>
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>Reduc AI</title>
-      </Head>
+export default function App({ Component, pageProps }: AppProps) {
+  useEffect(() => {
+    const sub = supabase.auth.onAuthStateChange(async (event) => {
+      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        // 14 days, server-readable
+        document.cookie = `ra_session=1; Path=/; Max-Age=${60 * 60 * 24 * 14}; SameSite=Lax; Secure`;
+      } else if (event === 'SIGNED_OUT') {
+        // clear cookie so middleware blocks again
+        document.cookie = 'ra_session=; Path=/; Max-Age=0; SameSite=Lax; Secure';
+      }
+    });
 
-      <div style={{ minHeight: '100vh', background: '#0b0c10', color: '#ffffff' }}>
-        {!hideSidebar && <Sidebar />}
-        <main
-          style={{
-            marginLeft: hideSidebar ? 0 : 'var(--sidebar-w, 260px)',
-            transition: 'margin-left 220ms ease',
-            padding: 20,
-          }}
-        >
-          <Component {...pageProps} />
-        </main>
-      </div>
-    </SessionProvider>
-  );
+    // On first load, if a session already exists, ensure cookie is present.
+    (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        document.cookie = `ra_session=1; Path=/; Max-Age=${60 * 60 * 24 * 14}; SameSite=Lax; Secure`;
+      }
+    })();
+
+    return () => sub.data.subscription.unsubscribe();
+  }, []);
+
+  return <Component {...pageProps} />;
 }
