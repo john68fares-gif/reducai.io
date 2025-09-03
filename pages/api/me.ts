@@ -1,6 +1,6 @@
 // /pages/api/me.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { supabase } from '../../lib/supabaseClient';
+import { supabase } from '@/lib/supabaseClient';
 
 type Ok = {
   ok: true;
@@ -8,11 +8,10 @@ type Ok = {
   profile: any | null;
   accounts: Array<{ id: string; name: string }> | null;
 };
-
 type Err = { ok: false; error: string };
 
 export default async function handler(
-  req: NextApiRequest,
+  _req: NextApiRequest,
   res: NextApiResponse<Ok | Err>
 ) {
   try {
@@ -41,12 +40,7 @@ export default async function handler(
 
     const compact = (accounts || []).map((a: any) => ({ id: a.id, name: a.name }));
 
-    return res.status(200).json({
-      ok: true,
-      session,
-      profile,
-      accounts: compact
-    });
+    return res.status(200).json({ ok: true, session, profile, accounts: compact });
   } catch (e: any) {
     return res.status(500).json({ ok: false, error: e?.message || 'Server error' });
   }
