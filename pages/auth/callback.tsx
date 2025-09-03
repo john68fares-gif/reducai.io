@@ -1,4 +1,4 @@
-// /pages/auth/callback.tsx
+// pages/auth/callback.tsx
 import { useEffect } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
@@ -13,6 +13,7 @@ export default function AuthCallback() {
   const router = useRouter();
 
   useEffect(() => {
+    // Supabase sets the session on load; when it exists, go where we came from.
     const sub = supabase.auth.onAuthStateChange((_e, session) => {
       if (session) {
         let from = (router.query.from as string) || '/builder';
@@ -24,6 +25,7 @@ export default function AuthCallback() {
       }
     });
 
+    // Safety net: if already signed in, bounce immediately
     supabase.auth.getSession().then(({ data }) => {
       if (data.session) {
         let from = (router.query.from as string) || '/builder';
