@@ -18,9 +18,7 @@ export default function AuthCallback() {
     const run = async () => {
       const url = new URL(window.location.href);
       const from = url.searchParams.get('from') || '/builder';
-
       try {
-        // Case 1: OAuth code-style (?code=...)
         const code = url.searchParams.get('code');
         if (code) {
           const { error } = await supabase.auth.exchangeCodeForSession(window.location.href);
@@ -28,8 +26,6 @@ export default function AuthCallback() {
           router.replace(from);
           return;
         }
-
-        // Case 2: Fragment tokens (#access_token=...&refresh_token=...)
         const frag = parseHash(url.hash || '');
         if (frag.access_token && frag.refresh_token) {
           const { error } = await supabase.auth.setSession({
@@ -40,11 +36,8 @@ export default function AuthCallback() {
           router.replace(from);
           return;
         }
-
-        // Fallback: nothing to exchange, just go "from".
         router.replace(from);
-      } catch (e) {
-        // If anything goes wrong, send to builder; you can log or show a message if you want
+      } catch {
         router.replace('/builder');
       }
     };
@@ -52,11 +45,11 @@ export default function AuthCallback() {
   }, [router]);
 
   return (
-    <div
-      className="min-h-screen flex items-center justify-center"
-      style={{ background: '#0b0c10', color: 'white' }}
-    >
-      <div className="text-white/80">Completing sign-in…</div>
+    <div className="min-h-screen flex items-center justify-center" style={{ background: '#0b0c10', color: 'white' }}>
+      <div className="flex items-center gap-3 px-4 py-3 rounded-[12px]" style={{ background: 'rgba(16,19,20,0.92)', border: '1px solid rgba(255,255,255,0.08)' }}>
+        <div className="h-5 w-5 rounded-full border-2 border-white/20 border-t-[#00ffc2] animate-spin" />
+        <div className="text-white/90 text-sm">Completing sign-in…</div>
+      </div>
     </div>
   );
 }
