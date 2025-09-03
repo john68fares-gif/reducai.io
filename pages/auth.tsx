@@ -28,15 +28,31 @@ export default function AuthPage() {
     setMode(modeQ === 'signup' ? 'signup' : 'signin');
   }, [modeQ]);
 
-  const go = (url: string) => router.replace(url);
+  // If you already have a session, bounce to "from"
+  useEffect(() => {
+    let unsub: any;
+    (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        router.replace(from || '/builder');
+        return;
+      }
+      // listen in case session arrives (e.g. coming back from OAuth)
+      unsub = supabase.auth.onAuthStateChange((_e, sess) => {
+        if (sess) router.replace(from || '/builder');
+      });
+    })();
+    return () => unsub?.data?.subscription?.unsubscribe?.();
+  }, [from, router]);
+
   const card =
-    'w-[92vw] max-w-[440px] rounded-[20px] border-2 border-[rgba(106,247,209,0.32)] shadow-[0_0_30px_rgba(0,0,0,0.45)] bg-[rgba(13,15,17,0.92)] p-6';
+    'w-[92vw] max-w-[480px] rounded-2xl border border-[rgba(106,247,209,0.30)] shadow-[0_10px_60px_rgba(0,0,0,0.45)] bg-[rgba(13,15,17,0.96)] p-6';
   const input =
-    'w-full rounded-[14px] bg-[#101314] border border-[#13312b] text-white/95 px-4 py-3 outline-none focus:border-[#00ffc2] placeholder:text-white/40';
+    'w-full rounded-xl bg-[#0f1213] border border-[#173a32] text-white/95 px-4 py-3 outline-none focus:border-[#00ffc2] placeholder:text-white/45';
   const btn =
-    'w-full rounded-[14px] font-semibold py-3 transition active:scale-[0.995] disabled:opacity-50 disabled:cursor-not-allowed';
+    'w-full rounded-xl font-semibold py-3 transition active:scale-[0.995] disabled:opacity-50 disabled:cursor-not-allowed';
   const tab =
-    'flex-1 py-2 rounded-[12px] text-sm font-semibold transition';
+    'flex-1 py-2 rounded-xl text-sm font-semibold transition';
   const hr = 'h-px bg-white/10 my-4';
 
   async function handleSubmit(e: React.FormEvent) {
@@ -47,16 +63,22 @@ export default function AuthPage() {
       if (mode === 'signin') {
         const { data, error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
-        if (data.session) go(from || '/builder');
+
+        // double-check session to avoid redirect loop
+        const { data: s } = await supabase.auth.getSession();
+        if (s.session) {
+          router.replace(from || '/builder');
+        } else {
+          // edge: email not confirmed or cookie not set yet
+          setErr('Sign-in started. If this page doesn’t redirect, please try again.');
+        }
       } else {
         const { error } = await supabase.auth.signUp({
           email,
           password,
           options: {
             emailRedirectTo: `${window.location.origin}/auth/callback?from=${encodeURIComponent(from || '/builder')}`,
-            data: displayName
-              ? { full_name: displayName, preferred_username: displayName }
-              : undefined
+            data: displayName ? { full_name: displayName, preferred_username: displayName } : undefined,
           },
         });
         if (error) throw error;
@@ -79,7 +101,7 @@ export default function AuthPage() {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
+          redirectTo: `${window.location.origin}/auth/callback?from=${encodeURIComponent(from || '/builder')}`,
           queryParams: { prompt: 'select_account' },
         },
       });
@@ -97,12 +119,22 @@ export default function AuthPage() {
       </Head>
 
       <div
-        className="min-h-screen w-full flex items-center justify-center"
+        className="min-h-screen w-full flex items-center justify-center px-4"
         style={{ background: '#0b0c10', color: '#fff' }}
       >
-        <div className={card} style={{ boxShadow: 'inset 0 0 22px rgba(0,0,0,0.28), 0 0 20px rgba(106,247,209,0.06)' }}>
+        {/* soft glow */}
+        <div
+          aria-hidden
+          style={{
+            position: 'fixed',
+            width: 520, height: 520, borderRadius: 9999,
+            background: 'radial-gradient(circle, rgba(106,247,209,0.22) 0%, rgba(0,0,0,0) 70%)',
+            filter: 'blur(18px)', top: -160, left: -140, pointerEvents: 'none',
+          }}
+        />
+        <div className={card} style={{ boxShadow: 'inset 0 0 22px rgba(0,0,0,0.28), 0 0 28px rgba(106,247,209,0.08)' }}>
           {/* Tabs */}
-          <div className="flex gap-2 mb-5 bg-black/20 rounded-[12px] p-1 border border-white/10">
+          <div className="flex gap-2 mb-5 bg-black/20 rounded-xl p-1 border border-white/10">
             <button
               className={tab}
               style={{
@@ -172,7 +204,7 @@ export default function AuthPage() {
               />
 
               {err && (
-                <div className="text-[#ff7a7a] text-sm bg-[#ff7a7a14] border border-[#ff7a7a55] rounded-[12px] px-3 py-2">
+                <div className="text-[#ff7a7a] text-sm bg-[#ff7a7a14] border border-[#ff7a7a55] rounded-xl px-3 py-2">
                   {err}
                 </div>
               )}
@@ -196,7 +228,7 @@ export default function AuthPage() {
 
               <div className="relative">
                 <div className={hr} />
-                <div className="absolute left-1/2 -translate-x-1/2 -top-3 text-xs text-white/50 bg-[rgba(13,15,17,0.92)] px-2">
+                <div className="absolute left-1/2 -translate-x-1/2 -top-3 text-xs text-white/60 bg-[rgba(13,15,17,0.96)] px-2">
                   or
                 </div>
               </div>
@@ -221,7 +253,7 @@ export default function AuthPage() {
                 )}
               </button>
 
-              <p className="text-[11px] text-white/50 text-center pt-1">You must sign in to continue.</p>
+              <p className="text-[11px] text-white/55 text-center pt-1">You must sign in to continue.</p>
             </form>
           )}
         </div>
