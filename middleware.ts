@@ -1,18 +1,15 @@
 // /middleware.ts
-// Gate **the whole site** behind auth (except landing + auth pages).
-// Works with Supabase OAuth AND email/password by checking either:
-// 1) Supabase cookie: sb-<PROJECT_REF>-auth-token   (if present)
-// 2) Our soft cookie:  ra_session=1                  (set by your auth pages after login)
-//
-// NOTE: Make sure your auth flows set `document.cookie = "ra_session=1; Path=/; Max-Age=1209600; Secure; SameSite=Lax"`
-// after a successful sign-in/sign-up (and clear it on sign-out). Your Google callback
-// file should also set this cookie after `exchangeCodeForSession(...)`.
+import { NextRequest, NextResponse } from "next/server";
 
-import { NextResponse, type NextRequest } from "next/server";
-
-// Public routes (everything else requires auth)
-const PUBLIC = new Set<string>([
-  "/",                // landing page stays public
+/**
+ * Public routes — NEVER block these.
+ *  - "/" (landing)
+ *  - "/auth" (signin/signup)
+ *  - "/auth/callback" (Google bounces here; must be public!)
+ *  - Next.js internals and static assets
+ */
+const PUBLIC_PATHS = new Set<string>([
+  "/",
   "/auth",
   "/auth/callback",
   "/favicon.ico",
@@ -20,20 +17,24 @@ const PUBLIC = new Set<string>([
   "/sitemap.xml",
 ]);
 
-function isPublic(path: string) {
-  if (PUBLIC.has(path)) return true;
-
-  // Static & Next internals
+function isPublic(pathname: string) {
+  if (PUBLIC_PATHS.has(pathname)) return true;
   if (
-    path.startsWith("/_next") ||
-    path.startsWith("/static") ||
-    path.startsWith("/images") ||
-    path.startsWith("/fonts")
-  ) return true;
-
+    pathname.startsWith("/_next") ||
+    pathname.startsWith("/static") ||
+    pathname.startsWith("/images") ||
+    pathname.startsWith("/fonts")
+  ) {
+    return true;
+  }
   return false;
 }
 
+/**
+ * Auth detection:
+ * - If you're using @supabase/auth-helpers-nextjs, a cookie like sb-<ref>-auth-token exists.
+ * - If you're using plain supabase-js (localStorage), we also set a soft cookie "ra_session=1" on sign-in/callback.
+ */
 function hasSupabaseCookie(req: NextRequest) {
   for (const c of req.cookies.getAll()) {
     if (/^sb-[a-zA-Z0-9]+-auth-token$/.test(c.name) && c.value && c.value !== "null") {
@@ -51,24 +52,34 @@ function hasSoftCookie(req: NextRequest) {
 export function middleware(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
 
-  // Allow public pages
-  if (isPublic(pathname)) return NextResponse.next();
-
-  // Allow if we detect either Supabase cookie or our soft cookie
-  if (hasSupabaseCookie(req) || hasSoftCookie(req)) {
+  // Always allow public routes (especially /auth/callback)
+  if (isPublic(pathname)) {
     return NextResponse.next();
   }
 
-  // Otherwise, force Sign in
+  // If user is authenticated (via either cookie), allow access
+  if (hasSupabaseCookie(req) || hasSoftCookie(req)) {
+    // Optional nicety: if they hit /auth while authed, bounce them inside
+    if (pathname === "/auth") {
+      const url = req.nextUrl.clone();
+      url.pathname = "/builder";
+      return NextResponse.redirect(url);
+    }
+    return NextResponse.next();
+  }
+
+  // Not authed → send to /auth (preserve intended target)
   const url = req.nextUrl.clone();
   url.pathname = "/auth";
-  url.search = "";
+  url.search = ""; // reset first
   url.searchParams.set("mode", "signin");
   url.searchParams.set("from", pathname + (search || ""));
   return NextResponse.redirect(url);
 }
 
-// Run on all routes (including API) — static files are skipped by isPublic()
+/**
+ * Apply to everything; public paths are allowed by isPublic().
+ */
 export const config = {
   matcher: ["/:path*"],
 };
