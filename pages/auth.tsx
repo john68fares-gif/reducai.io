@@ -1,14 +1,27 @@
 // pages/auth.tsx
+'use client';
+
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { signIn } from 'next-auth/react';
+import { useMemo } from 'react';
 
 export default function AuthPage() {
   const router = useRouter();
   const mode = (router.query.mode === 'signin' ? 'signin' : 'signup') as 'signin' | 'signup';
   const from = (router.query.from as string) || '/builder';
 
-  const callbackUrl = `${from}${mode === 'signup' ? '?onboard=1&mode=signup' : '?mode=signin'}`;
+  // Where to send the user after Google
+  // - signup: show onboarding on /builder
+  // - signin: skip onboarding
+  const callbackUrl = useMemo(() => {
+    const base = from || '/builder';
+    return mode === 'signup'
+      ? `${base}?onboard=1&mode=signup`
+      : `${base}?mode=signin`;
+  }, [mode, from]);
+
+  const googleHref = `/api/auth/signin/google?callbackUrl=${encodeURIComponent(callbackUrl)}`;
 
   return (
     <>
@@ -17,25 +30,19 @@ export default function AuthPage() {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
       </Head>
 
-      <main style={STYLES.page}>
-        <div style={STYLES.grid} />
-        <div style={{ ...STYLES.glow, top: -220, left: -180 }} />
-        <div style={{ ...STYLES.glow, bottom: -260, right: -180 }} />
+      <main style={S.page}>
+        <div style={S.grid} />
+        <div style={{ ...S.glow, top: -220, left: -180 }} />
+        <div style={{ ...S.glow, bottom: -260, right: -180 }} />
 
-        <header style={STYLES.nav}>
-          <div style={STYLES.brand} onClick={() => router.replace('/')}>
-            <span style={STYLES.logoDot} />
-            <span>reduc.ai</span>
-          </div>
-          <div />
-        </header>
-
-        <section style={STYLES.centerWrap}>
-          <div style={STYLES.card}>
-            <div style={STYLES.tabRow}>
+        <section style={S.centerWrap}>
+          <div style={S.card}>
+            <div style={S.tabRow}>
               <button
-                onClick={() => router.replace(`/auth?mode=signin&from=${encodeURIComponent(from)}`)}
-                style={{ ...STYLES.tabBtn, ...(mode === 'signin' ? STYLES.tabActive : {}) }}
+                onClick={() =>
+                  router.replace(`/auth?mode=signin&from=${encodeURIComponent(from)}`)
+                }
+                style={{ ...S.tabBtn, ...(mode === 'signin' ? S.tabActive : {}) }}
               >
                 Sign in
               </button>
@@ -43,18 +50,25 @@ export default function AuthPage() {
                 onClick={() =>
                   router.replace(`/auth?mode=signup&from=${encodeURIComponent(from)}`)
                 }
-                style={{ ...STYLES.tabBtn, ...(mode === 'signup' ? STYLES.tabActive : {}) }}
+                style={{ ...S.tabBtn, ...(mode === 'signup' ? S.tabActive : {}) }}
               >
                 Sign up
               </button>
             </div>
 
-            <button
-              onClick={() => signIn('google', { callbackUrl })}
-              style={STYLES.googleBtn}
-            >
-              Continue with Google
-            </button>
+            {/* Anchor fallback + JS click = always works */}
+            <a href={googleHref} style={{ textDecoration: 'none' }}>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  signIn('google', { callbackUrl });
+                }}
+                style={S.googleBtn}
+              >
+                Continue with Google
+              </button>
+            </a>
 
             <div style={{ marginTop: 14, fontSize: 12, opacity: 0.7, textAlign: 'center' }}>
               You must sign {mode === 'signup' ? 'up' : 'in'} to continue.
@@ -66,7 +80,7 @@ export default function AuthPage() {
   );
 }
 
-const STYLES: Record<string, React.CSSProperties> = {
+const S: Record<string, React.CSSProperties> = {
   page: {
     position: 'relative',
     minHeight: '100vh',
@@ -92,32 +106,9 @@ const STYLES: Record<string, React.CSSProperties> = {
     filter: 'blur(60px)',
     pointerEvents: 'none',
   },
-  nav: {
-    maxWidth: 1120,
-    margin: '0 auto',
-    padding: '22px 20px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  brand: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 10,
-    fontWeight: 800,
-    letterSpacing: 0.3,
-    cursor: 'pointer',
-  },
-  logoDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 999,
-    background: '#6af7d1',
-    boxShadow: '0 0 16px rgba(106,247,209,.8)',
-  },
   centerWrap: {
     maxWidth: 520,
-    margin: '40px auto 0',
+    margin: '80px auto 0',
     padding: '0 20px',
   },
   card: {
