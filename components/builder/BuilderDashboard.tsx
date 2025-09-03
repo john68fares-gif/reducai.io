@@ -2,9 +2,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/router';
-import { useSession } from 'next-auth/react';
-import OnboardingOverlay from '../ui/OnboardingOverlay';
+import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import {
   Plus,
@@ -21,6 +19,8 @@ import {
   Landmark,
   ListChecks,
 } from 'lucide-react';
+import { supabase } from '@/lib/supabase-client';
+import OnboardingOverlay from '../ui/OnboardingOverlay';
 import CustomizeModal from './CustomizeModal';
 import Step1AIType from './Step1AIType';
 import Step2ModelSettings from './Step2ModelSettings';
@@ -62,7 +62,7 @@ type Bot = {
   language?: string;
   model?: string;
   description?: string;
-  prompt?: string; // Step 3 raw
+  prompt?: string;
   createdAt?: string;
   updatedAt?: string;
   appearance?: Appearance;
@@ -73,7 +73,6 @@ const SAVE_KEY = 'chatbots';
 const nowISO = () => new Date().toISOString();
 const fmtDate = (iso?: string) => (iso ? new Date(iso).toLocaleDateString() : '');
 
-// newest → oldest by updatedAt (fallback createdAt)
 const sortByNewest = (arr: Bot[]) =>
   arr
     .slice()
@@ -99,7 +98,7 @@ function loadBots(): Bot[] {
         language: s(b?.language),
         model: s(b?.model, 'gpt-4o-mini'),
         description: s(b?.description),
-        prompt: s(b?.prompt), // keep EXACT Step 3
+        prompt: s(b?.prompt),
         createdAt: b?.createdAt ?? nowISO(),
         updatedAt: b?.updatedAt ?? b?.createdAt ?? nowISO(),
         appearance: b?.appearance ?? undefined,
@@ -116,8 +115,6 @@ function saveBots(bots: Bot[]) {
   } catch {}
 }
 
-/* --------------------- Step 3 section splitter (no edits) --------------------- */
-
 type PromptSectionKey =
   | 'DESCRIPTION'
   | 'AI DESCRIPTION'
@@ -129,7 +126,7 @@ type PromptSectionKey =
 type SplitSection = {
   key: PromptSectionKey;
   title: string;
-  text: string; // exact slice from Step 3
+  text: string;
 };
 
 const DISPLAY_TITLES: Record<PromptSectionKey, string> = {
@@ -150,7 +147,6 @@ const ICONS: Record<PromptSectionKey, JSX.Element> = {
   'COMPANY FAQ': <Landmark className="w-4 h-4 text-[#6af7d1]" />,
 };
 
-// tolerant heading match (**, ###, numbered, etc.)
 const HEADING_REGEX =
   /^(?:\s*(?:[#>*-]|\d+\.)\s*)?(?:\*\*)?\s*(DESCRIPTION|AI\s*DESCRIPTION|RULES\s*(?:AND|&)\s*GUIDELINES|AI\s*RULES|QUESTION\s*FLOW|COMPANY\s*FAQ)\s*(?:\*\*)?\s*:?\s*$/gmi;
 
@@ -179,72 +175,87 @@ function splitStep3IntoSections(step3Raw?: string): SplitSection[] | null {
     out.push({
       key: h.label,
       title: DISPLAY_TITLES[h.label] || h.label,
-      text: step3Raw.slice(h.end, nextStart), // exact slice (no sanitizing)
+      text: step3Raw.slice(h.end, nextStart),
     });
   }
   return out;
 }
 
-/* ----------------------------------- UI ----------------------------------- */
-
 export default function BuilderDashboard() {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
 
-  // parse query via router (works in Pages Router)
-  const qs = useMemo(() => new URLSearchParams((router.asPath.split('?')[1] ?? '')), [router.asPath]);
+  // -------- AUTH GUARD (Supabase) --------
+  const [authed, setAuthed] = useState<boolean | null>(null);
+  const [userId, setUserId] = useState<string>('');
 
-  // --- Welcome overlay (first-time users only) ---
-  const { data: session, status } = useSession();
-  const userId = useMemo(() => (session?.user as any)?.id || '', [session]);
+  useEffect(() => {
+    let mounted = true;
+    const check = async () => {
+      const { data } = await supabase.auth.getSession();
+      if (!mounted) return;
+      const uid = data.session?.user?.id || '';
+      setUserId(uid);
+      if (!data.session) {
+        // Not logged in → send to auth
+        const q = new URLSearchParams({ mode: 'signin', from: '/builder' });
+        router.replace(`/auth?${q.toString()}`);
+        setAuthed(false);
+      } else {
+        setAuthed(true);
+      }
+    };
+    check();
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+      const uid = session?.user?.id || '';
+      setUserId(uid);
+      if (!session) {
+        const q = new URLSearchParams({ mode: 'signin', from: '/builder' });
+        router.replace(`/auth?${q.toString()}`);
+      } else {
+        setAuthed(true);
+      }
+    });
+    return () => {
+      mounted = false;
+      sub.subscription.unsubscribe();
+    };
+  }, [router]);
 
-  const mode = (qs.get('mode') === 'signin' ? 'signin' : 'signup') as 'signup' | 'signin';
-  const fromLanding = qs.get('from') === 'landing';
-  const onboard = qs.get('onboard') === '1';
-  const forceOverlay = qs.get('forceOverlay') === '1';
+  // Until we know, keep page blank to avoid flash
+  if (authed === null) {
+    return <div className="min-h-screen w-full bg-[#0b0c10]" />;
+  }
+  // -------- END AUTH GUARD --------
+
+  // Welcome overlay (only after SIGNUP)
+  const modeParam = searchParams.get('mode');
+  const mode = (modeParam === 'signin' ? 'signin' : 'signup') as 'signup' | 'signin';
+  const onboard = searchParams.get('onboard') === '1';
+  const forceOverlay = searchParams.get('forceOverlay') === '1';
 
   const [welcomeOpen, setWelcomeOpen] = useState(false);
 
   useEffect(() => {
-    const run = async () => {
-      if (status !== 'authenticated' || !userId) return;
-
-      try {
-        // Ask server if this user already has a profile row
-        const res = await fetch('/api/profile', { credentials: 'same-origin' });
-        if (!res.ok) return;
-        const { profile } = await res.json();
-
-        const isFirstTime = !profile;
-        // Open overlay only if it's the user's first time
-        if (forceOverlay || (isFirstTime && (onboard || fromLanding || mode === 'signup'))) {
-          setWelcomeOpen(true);
-        }
-      } catch {
-        // ignore
-      }
-    };
-    run();
-  }, [status, userId, forceOverlay, onboard, fromLanding, mode]);
+    if (!userId) return;
+    if (forceOverlay || (onboard && mode === 'signup')) {
+      setWelcomeOpen(true);
+    }
+  }, [userId, forceOverlay, onboard, mode]);
 
   const closeWelcome = () => {
     setWelcomeOpen(false);
-    try { localStorage.setItem(`user:${userId}:profile:completed`, '1'); } catch {}
-    // clean URL params we used
-    const q = new URLSearchParams((router.asPath.split('?')[1] ?? ''));
-    q.delete('onboard'); q.delete('mode'); q.delete('forceOverlay'); q.delete('from');
-    router.replace(
-      { pathname: router.pathname, query: Object.fromEntries(q.entries()) },
-      undefined,
-      { shallow: true }
-    );
+    try {
+      localStorage.setItem(`user:${userId}:profile:completed`, '1');
+    } catch {}
+    const usp = new URLSearchParams(Array.from(searchParams.entries()));
+    usp.delete('onboard'); usp.delete('mode'); usp.delete('forceOverlay');
+    router.replace(`${pathname}?${usp.toString()}`, { scroll: false });
   };
-  // --- end welcome overlay ---
 
-  // steps (kept same behavior)
-  const step = useMemo(() => {
-    const raw = qs.get('step');
-    return raw && ['1', '2', '3', '4'].includes(raw) ? raw : null;
-  }, [qs]);
+  const rawStep = searchParams.get('step');
+  const step = rawStep && ['1', '2', '3', '4'].includes(rawStep) ? rawStep : null;
 
   const [query, setQuery] = useState('');
   const [bots, setBots] = useState<Bot[]>([]);
@@ -298,13 +309,10 @@ export default function BuilderDashboard() {
   const viewedBot = useMemo(() => bots.find((b) => b.id === viewId), [bots, viewId]);
 
   const setStep = (next: string | null) => {
-    const q = new URLSearchParams((router.asPath.split('?')[1] ?? ''));
-    if (next) q.set('step', next); else q.delete('step');
-    router.replace(
-      { pathname: router.pathname, query: Object.fromEntries(q.entries()) },
-      undefined,
-      { shallow: true }
-    );
+    const usp = new URLSearchParams(Array.from(searchParams.entries()));
+    if (next) usp.set('step', next);
+    else usp.delete('step');
+    router.replace(`${pathname}?${usp.toString()}`, { scroll: false });
   };
 
   if (step) {
@@ -326,7 +334,7 @@ export default function BuilderDashboard() {
         <div className="flex items-center justify-between mb-7">
           <h1 className="text-2xl md:text-3xl font-semibold">Builds</h1>
           <button
-            onClick={() => router.push('/builder?step=1')}
+            onClick={() => setStep('1')}
             className="px-4 py-2 rounded-[10px] bg-[#00ffc2] text-black font-semibold shadow-[0_0_10px_rgba(106,247,209,0.28)] hover:brightness-110 transition"
           >
             Create a Build
@@ -343,7 +351,7 @@ export default function BuilderDashboard() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-7">
-          <CreateCard onClick={() => router.push('/builder?step=1')} />
+          <CreateCard onClick={() => setStep('1')} />
 
           {filtered.map((bot) => (
             <BuildCard
@@ -408,7 +416,7 @@ export default function BuilderDashboard() {
 
       {viewedBot && <PromptOverlay bot={viewedBot} onClose={() => setViewId(null)} />}
 
-      {/* Welcome overlay over the dashboard (first-time only) */}
+      {/* Welcome overlay over the dashboard (opens only after SIGN-UP) */}
       <OnboardingOverlay open={welcomeOpen} mode={mode} userId={userId} onDone={closeWelcome} />
     </div>
   );
@@ -664,7 +672,7 @@ function BuildCard({
           >
             <BotIcon className="w-5 h-5" style={{ color: accent }} />
           </div>
-          <div className="min-w-0">
+        <div className="min-w-0">
             <div className="font-semibold truncate">{bot.name}</div>
             <div className="text-[12px] text-white/60 truncate">
               {(bot.industry || '—') + (bot.language ? ` · ${bot.language}` : '')}
