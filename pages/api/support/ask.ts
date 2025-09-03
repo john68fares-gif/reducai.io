@@ -1,186 +1,133 @@
-// pages/api/support/ask.ts
-import type { NextApiRequest, NextApiResponse } from "next";
-import { loadIndex, cosine } from "../../../lib/supportIndex";
-import { rateLimit } from "../../../lib/rateLimit";
+// pages/api/ask.ts
+import type { NextApiRequest, NextApiResponse } from 'next';
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY!;
-const OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions";
-const OPENAI_EMBED_URL = "https://api.openai.com/v1/embeddings";
-const CHAT_MODEL = "gpt-4o-mini";
-const EMBED_MODEL = "text-embedding-3-large";
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY_RILEY;
 
-const MAX_QUESTION_LEN = 2000;
-const TOP_K = 10;
+// --- Guardrails ---
+const REFUSAL_TEXT =
+  "Sorry, I can’t comply with that request.";
 
-const SYSTEM_POLICY = `
-You are "Riley — Support" for reducai.io. Be short, tidy, and action-oriented.
-SAFETY:
-- Never reveal source code, .env values, API keys, credentials, or full file contents.
-- You may cite file paths and explain at a high level what they do.
-- Provide steps/pointers/pseudo-instructions only—no code dumps.
-- If asked for code or secrets: refuse briefly and offer safe guidance.
-- Prefer bullet points (3–6 bullets), 1–2 short sentences each.
-`.trim();
+const shouldRefuse = (text: string) => {
+  const t = text.toLowerCase();
+  // Requests to reveal code, files, paths, internals, or to summarize them
+  return [
+    'show the code',
+    'source code',
+    'give me the code',
+    'list files',
+    'list folders',
+    'folder structure',
+    'project structure',
+    'what files do you have',
+    'what file',
+    'file path',
+    'filepaths',
+    'paths',
+    'source path',
+    'summarize code',
+    'summarise code',
+    'read the file',
+    'open the file',
+    'can you see the file',
+    'repo',
+    'repository',
+    'git tree',
+    'show me what is inside of',
+    'what’s inside',
+    'whats inside',
+    'contents of',
+    'print the code',
+    'dump the code',
+    'show code block',
+  ].some(k => t.includes(k));
+};
 
-function redactAnswer(text: string) {
-  return (text || "")
-    .replace(/```[\s\S]*?```/g, "[redacted — cannot share repo code]")
-    .replace(/^\s*(import|require)\s[^\n]+/gim, "[redacted]")
-    .replace(/\bsk-[A-Za-z0-9_]{10,}\b/g, "[redacted-key]")
-    .replace(
-      /(api[_-]?key|secret|token|password|sid|auth)\s*[:=]\s*["'`][^"'`\n]+["'`]/gi,
-      "$1: [redacted]"
-    );
-}
+const sanitize = (text: string) => {
+  // Strip bold markers and code fences to avoid any accidental disclosure formatting
+  return text
+    .replace(/\*\*/g, '')
+    .replace(/```[\s\S]*?```/g, '[redacted]')
+    .replace(/`([^`]+)`/g, '$1'); // inline code -> plain
+};
 
-async function embedOnce(q: string) {
-  const r = await fetch(OPENAI_EMBED_URL, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: EMBED_MODEL, input: q }),
-  });
-  if (!r.ok) throw new Error(await r.text());
-  const j = await r.json();
-  return j.data[0].embedding as number[];
-}
+// --- Riley system prompt (non-customizable) ---
+const RILEY_SYSTEM_PROMPT = `
+You are Riley, a friendly, concise support assistant. Your strict rules:
 
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  // --- Health check
-  if (req.method === "GET") {
-    const qp = req.query || {};
-    if ("health" in qp) {
-      return res.status(200).json({
-        ok: true, hasOpenAI: Boolean(OPENAI_API_KEY),
-        chatModel: CHAT_MODEL, embedModel: EMBED_MODEL,
-        time: new Date().toISOString(),
-      });
-    }
-    // --- Diagnostic ping: attempts a tiny embed + tiny chat so you can see exact failures
-    if ("diag" in qp) {
-      const diag: any = { embed: null, chat: null };
-      try {
-        await embedOnce("ping");
-        diag.embed = "ok";
-      } catch (e: any) {
-        diag.embed = `fail: ${e?.message?.slice(0, 200) || "error"}`;
-      }
-      try {
-        const rr = await fetch(OPENAI_CHAT_URL, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: CHAT_MODEL, temperature: 0,
-            messages: [{ role: "system", content: "Say: pong" }, { role: "user", content: "ping" }],
-            max_tokens: 5
-          }),
-        });
-        if (!rr.ok) diag.chat = `fail: ${await rr.text()}`; else diag.chat = "ok";
-      } catch (e: any) {
-        diag.chat = `fail: ${e?.message?.slice(0, 200) || "error"}`;
-      }
-      return res.status(200).json({ ok: true, diag });
-    }
-    return res.status(405).json({ error: "Use POST" });
+1) Never reveal, summarize, or imply knowledge of any code, files, file existence, file paths, repositories, or internal sources. 
+2) If the user requests anything in (1), reply only with: "Sorry, I can’t comply with that request."
+3) Don’t say "I can see", "the file shows", or similar. 
+4) Be brief, helpful, and on-topic for product support, setup guidance, and troubleshooting at a high level.
+5) Use plain language. No markdown bold.
+6) If unsure or the request is disallowed, default to the refusal line above.
+`;
+
+type Data =
+  | { ok: true; message: string }
+  | { ok: false; error: string };
+
+export default async function handler(
+  req: NextApiRequest,
+  res: NextApiResponse<Data>
+) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ ok: false, error: 'Method not allowed' });
   }
-
-  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
-  if (!OPENAI_API_KEY) return res.status(500).json({ error: "Server not configured (missing OPENAI_API_KEY)" });
-
-  const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || "unknown";
-  if (!rateLimit(ip, 40)) return res.status(429).json({ error: "Rate limit" });
-
-  const question = String(req.body?.question || "").trim();
-  if (!question) return res.status(400).json({ error: "Missing question" });
-  if (question.length > MAX_QUESTION_LEN) return res.status(400).json({ error: "Question too long" });
 
   try {
-    // Load KB (with fallback if file missing or malformed)
-    let idx: { vectors: Array<{ key: string; text: string; vec: number[]; meta?: any }> };
-    try {
-      idx = loadIndex();
-    } catch {
-      idx = {
-        vectors: [
-          {
-            key: "docs/build/overview.md#fallback",
-            text: "Builder overview: Step1 choose AI type; Step2 fill fields + model/temp/API key; Step3 edit prompt; Step4 Review → Generate Agent → Dashboard.",
-            vec: [], meta: { path: "docs/build/overview.md", range: [1, 200] }
-          }
-        ]
-      };
+    const { message } = req.body as { message?: string };
+
+    if (!message || typeof message !== 'string') {
+      return res.status(400).json({ ok: false, error: 'Missing message' });
     }
 
-    // Try embeddings; if it fails, fall back to zero-context (Riley still answers)
-    let qVec: number[] | null = null;
-    let scored: Array<{ e: any; score: number }> = [];
-    try {
-      qVec = await embedOnce(question);
-      scored = idx.vectors
-        .map((e) => ({ e, score: qVec && e.vec ? cosine(qVec, e.vec) : 0 }))
-        .sort((a, b) => b.score - a.score)
-        .slice(0, TOP_K);
-    } catch (embedErr: any) {
-      // Embeddings temporarily unavailable — proceed without retrieval
-      scored = [];
+    // Hard guardrail: refuse before contacting the model
+    if (shouldRefuse(message)) {
+      return res.status(200).json({ ok: true, message: REFUSAL_TEXT });
     }
 
-    const context = scored.length
-      ? scored.map(({ e }, i) => {
-          const where = e.meta?.path ? `${e.meta.path} ${e.meta?.range?.join("-")}` : e.key;
-          return `[${i + 1}] ${where} — ${e.text}`;
-        }).join("\n")
-      : "(knowledge base temporarily unavailable)";
-
-    const messages = [
-      { role: "system", content: SYSTEM_POLICY },
-      {
-        role: "user",
-        content:
-`User question: ${question}
-
-Context (summaries only — never full code):
-${context}
-
-Answer safely. Cite file paths by name if relevant.`
-      }
-    ];
-
-    // Call Chat — if it fails, return the error as a normal 200 reply so UI can show it
-    try {
-      const rr = await fetch(OPENAI_CHAT_URL, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ model: CHAT_MODEL, temperature: 0.2, messages }),
-      });
-
-      if (!rr.ok) {
-        const errText = await rr.text();
-        return res.status(200).json({
-          reply: `Riley had trouble generating a response (model error). ${errText.slice(0, 300)}`,
-          citations: scored.map(s => s.e?.meta?.path || s.e?.key).filter(Boolean).slice(0, 5)
-        });
-      }
-
-      const jj = await rr.json();
-      const raw = jj.choices?.[0]?.message?.content || "Sorry — I couldn't find an answer.";
-      const safe = redactAnswer(raw);
-
-      return res.status(200).json({
-        reply: safe,
-        citations: scored.map(s => s.e?.meta?.path || s.e?.key).filter(Boolean).slice(0, 5),
-      });
-    } catch (chatErr: any) {
-      return res.status(200).json({
-        reply: `Riley is reachable but the chat model call failed. ${String(chatErr).slice(0, 300)}`,
-        citations: []
-      });
+    if (!OPENAI_API_KEY) {
+      return res.status(500).json({ ok: false, error: 'Missing OpenAI key' });
     }
-  } catch (e: any) {
-    // Last-resort error as 200 so your UI doesn't crash
-    return res.status(200).json({
-      reply: `Server-side error while preparing the answer: ${e?.message?.slice(0, 300) || "unknown"}`,
-      citations: []
+
+    // Call OpenAI Chat Completions (no streaming; UI shows dots while waiting)
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        temperature: 0.2,
+        messages: [
+          { role: 'system', content: RILEY_SYSTEM_PROMPT.trim() },
+          { role: 'user', content: message },
+        ],
+      }),
     });
+
+    if (!response.ok) {
+      const err = await response.text().catch(() => '');
+      return res.status(500).json({ ok: false, error: err || 'OpenAI error' });
+    }
+
+    const data = await response.json();
+    const raw = data?.choices?.[0]?.message?.content ?? '';
+    const safe = sanitize(raw);
+
+    // Post-guardrail: if the model slipped, enforce refusal
+    if (shouldRefuse(safe)) {
+      return res.status(200).json({ ok: true, message: REFUSAL_TEXT });
+    }
+
+    // Extra safety: redact common leak words
+    const finalOut = sanitize(
+      safe.replace(/\b(path|paths|filepath|file path|source|sources)\b/gi, '[redacted]')
+    );
+
+    return res.status(200).json({ ok: true, message: finalOut });
+  } catch (e: any) {
+    return res.status(500).json({ ok: false, error: e?.message || 'Server error' });
   }
 }
-
