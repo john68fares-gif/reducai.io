@@ -1,31 +1,52 @@
-// pages/auth/callback.tsx
-import { useEffect, useState } from 'react';
-import Head from 'next/head';
+// /pages/auth/callback.tsx
+import { useEffect } from 'react';
 import { useRouter } from 'next/router';
-import { supabase } from '../../lib/supabase-client';
+import Head from 'next/head';
+import { createClient } from '@supabase/supabase-js';
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
 export default function AuthCallback() {
   const router = useRouter();
-  const [status, setStatus] = useState('Finalizing sign-in…');
 
   useEffect(() => {
-    (async () => {
-      try {
-        // If this was an OAuth or PKCE flow, exchange code for a session
-        await supabase.auth.exchangeCodeForSession(window.location.href).catch(() => {});
-      } catch {}
-      const next = localStorage.getItem('postAuthRedirect') || '/builder';
-      setStatus('Redirecting…');
-      setTimeout(() => router.replace(next), 600);
-    })();
+    const sub = supabase.auth.onAuthStateChange((_e, session) => {
+      if (session) {
+        let from = (router.query.from as string) || '/builder';
+        try {
+          from = localStorage.getItem('auth:from') || from;
+          localStorage.removeItem('auth:from');
+        } catch {}
+        router.replace(from);
+      }
+    });
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (data.session) {
+        let from = (router.query.from as string) || '/builder';
+        try {
+          from = localStorage.getItem('auth:from') || from;
+          localStorage.removeItem('auth:from');
+        } catch {}
+        router.replace(from);
+      }
+    });
+
+    return () => sub.data.subscription.unsubscribe();
   }, [router]);
 
   return (
     <>
-      <Head><title>Finishing up…</title></Head>
-      <div className="min-h-screen grid place-items-center font-movatif" style={{ background:'#0b0c10', color:'#fff' }}>
-        <div className="px-6 py-4 rounded-lg" style={{ background:'rgba(16,19,20,0.9)', border:'1px solid rgba(255,255,255,0.2)' }}>
-          {status}
+      <Head><title>Redirecting… · Reduc.ai</title></Head>
+      <div className="min-h-screen flex items-center justify-center" style={{ background: '#0b0c10', color: '#fff' }}>
+        <div className="rounded-[16px] px-6 py-4 border border-white/15 bg-black/30">
+          <div className="flex items-center gap-3">
+            <span className="inline-block w-4 h-4 rounded-full border-2 border-white/70 border-t-transparent animate-spin" />
+            <span>Signing you in…</span>
+          </div>
         </div>
       </div>
     </>
