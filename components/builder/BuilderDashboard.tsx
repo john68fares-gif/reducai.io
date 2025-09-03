@@ -2,7 +2,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter, usePathname, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/router';
 import { useSession } from 'next-auth/react';
 import OnboardingOverlay from '../ui/OnboardingOverlay';
 import dynamic from 'next/dynamic';
@@ -189,36 +189,62 @@ function splitStep3IntoSections(step3Raw?: string): SplitSection[] | null {
 
 export default function BuilderDashboard() {
   const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
 
-  // --- Welcome overlay (only on SIGN-UP) ---
+  // parse query via router (works in Pages Router)
+  const qs = useMemo(() => new URLSearchParams((router.asPath.split('?')[1] ?? '')), [router.asPath]);
+
+  // --- Welcome overlay (first-time users only) ---
   const { data: session, status } = useSession();
   const userId = useMemo(() => (session?.user as any)?.id || '', [session]);
 
-  const modeParam = searchParams.get('mode');
-  const mode = (modeParam === 'signin' ? 'signin' : 'signup') as 'signup' | 'signin';
-  const onboard = searchParams.get('onboard') === '1';
-  const forceOverlay = searchParams.get('forceOverlay') === '1';
+  const mode = (qs.get('mode') === 'signin' ? 'signin' : 'signup') as 'signup' | 'signin';
+  const fromLanding = qs.get('from') === 'landing';
+  const onboard = qs.get('onboard') === '1';
+  const forceOverlay = qs.get('forceOverlay') === '1';
 
   const [welcomeOpen, setWelcomeOpen] = useState(false);
 
   useEffect(() => {
-    if (status !== 'authenticated' || !userId) return;
-    if (forceOverlay || (onboard && mode === 'signup')) setWelcomeOpen(true);
-  }, [status, userId, forceOverlay, onboard, mode]);
+    const run = async () => {
+      if (status !== 'authenticated' || !userId) return;
+
+      try {
+        // Ask server if this user already has a profile row
+        const res = await fetch('/api/profile', { credentials: 'same-origin' });
+        if (!res.ok) return;
+        const { profile } = await res.json();
+
+        const isFirstTime = !profile;
+        // Open overlay only if it's the user's first time
+        if (forceOverlay || (isFirstTime && (onboard || fromLanding || mode === 'signup'))) {
+          setWelcomeOpen(true);
+        }
+      } catch {
+        // ignore
+      }
+    };
+    run();
+  }, [status, userId, forceOverlay, onboard, fromLanding, mode]);
 
   const closeWelcome = () => {
     setWelcomeOpen(false);
     try { localStorage.setItem(`user:${userId}:profile:completed`, '1'); } catch {}
-    const usp = new URLSearchParams(Array.from(searchParams.entries()));
-    usp.delete('onboard'); usp.delete('mode'); usp.delete('forceOverlay');
-    router.replace(`${pathname}?${usp.toString()}`, { scroll: false });
+    // clean URL params we used
+    const q = new URLSearchParams((router.asPath.split('?')[1] ?? ''));
+    q.delete('onboard'); q.delete('mode'); q.delete('forceOverlay'); q.delete('from');
+    router.replace(
+      { pathname: router.pathname, query: Object.fromEntries(q.entries()) },
+      undefined,
+      { shallow: true }
+    );
   };
   // --- end welcome overlay ---
 
-  const rawStep = searchParams.get('step');
-  const step = rawStep && ['1', '2', '3', '4'].includes(rawStep) ? rawStep : null;
+  // steps (kept same behavior)
+  const step = useMemo(() => {
+    const raw = qs.get('step');
+    return raw && ['1', '2', '3', '4'].includes(raw) ? raw : null;
+  }, [qs]);
 
   const [query, setQuery] = useState('');
   const [bots, setBots] = useState<Bot[]>([]);
@@ -272,10 +298,13 @@ export default function BuilderDashboard() {
   const viewedBot = useMemo(() => bots.find((b) => b.id === viewId), [bots, viewId]);
 
   const setStep = (next: string | null) => {
-    const usp = new URLSearchParams(Array.from(searchParams.entries()));
-    if (next) usp.set('step', next);
-    else usp.delete('step');
-    router.replace(`${pathname}?${usp.toString()}`, { scroll: false });
+    const q = new URLSearchParams((router.asPath.split('?')[1] ?? ''));
+    if (next) q.set('step', next); else q.delete('step');
+    router.replace(
+      { pathname: router.pathname, query: Object.fromEntries(q.entries()) },
+      undefined,
+      { shallow: true }
+    );
   };
 
   if (step) {
@@ -379,7 +408,7 @@ export default function BuilderDashboard() {
 
       {viewedBot && <PromptOverlay bot={viewedBot} onClose={() => setViewId(null)} />}
 
-      {/* Welcome overlay over the dashboard (sign-up only) */}
+      {/* Welcome overlay over the dashboard (first-time only) */}
       <OnboardingOverlay open={welcomeOpen} mode={mode} userId={userId} onDone={closeWelcome} />
     </div>
   );
@@ -635,7 +664,7 @@ function BuildCard({
           >
             <BotIcon className="w-5 h-5" style={{ color: accent }} />
           </div>
-        <div className="min-w-0">
+          <div className="min-w-0">
             <div className="font-semibold truncate">{bot.name}</div>
             <div className="text-[12px] text-white/60 truncate">
               {(bot.industry || '—') + (bot.language ? ` · ${bot.language}` : '')}
