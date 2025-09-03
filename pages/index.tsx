@@ -171,6 +171,18 @@ function FeatureCard({ title, body, accent }: { title: string; body: string; acc
 }
 
 export default function Landing() {
+  // One place that handles the Google flow (works even if buttons somehow fail)
+  const goGoogle = (callbackUrl: string) => {
+    try {
+      // NextAuth helper (preferred)
+      return signIn("google", { callbackUrl });
+    } catch {
+      // Hard fallback if something blocks signIn import
+      window.location.href =
+        `/api/auth/signin/google?callbackUrl=${encodeURIComponent(callbackUrl)}`;
+    }
+  };
+
   return (
     <main style={STYLES.page}>
       {/* subtle animated grid */}
@@ -196,11 +208,9 @@ export default function Landing() {
 
         {/* right auth buttons */}
         <div style={{ display: "flex", gap: 10 }}>
-          {/* Sign up → Google → land on /builder with onboard flag (NO step=1) */}
+          {/* Sign up → Google → /builder (tag we came from landing) */}
           <button
-            onClick={() =>
-              signIn("google", { callbackUrl: "/builder?onboard=1&mode=signup" })
-            }
+            onClick={() => goGoogle("/builder?mode=signup&from=landing")}
             style={{
               padding: "10px 14px",
               borderRadius: 12,
@@ -214,11 +224,9 @@ export default function Landing() {
             Sign up
           </button>
 
-          {/* Log in → Google → land on /builder (NO step=1) */}
+          {/* Log in → Google → /builder */}
           <button
-            onClick={() =>
-              signIn("google", { callbackUrl: "/builder?mode=signin" })
-            }
+            onClick={() => goGoogle("/builder?mode=signin")}
             style={{
               padding: "10px 14px",
               borderRadius: 12,
@@ -247,8 +255,13 @@ export default function Landing() {
           </p>
 
           <div style={STYLES.ctaRow}>
-            {/* Create a Build → dashboard (NO step param) */}
-            <Link href="/builder" style={STYLES.ctaPrimary}>Create a Build</Link>
+            {/* Create a Build should also go through Google sign-in */}
+            <button
+              onClick={() => goGoogle("/builder?mode=signup&from=landing")}
+              style={STYLES.ctaPrimary as React.CSSProperties}
+            >
+              Create a Build
+            </button>
             <Link href="/improve" style={STYLES.ctaGhost}>Open Improve</Link>
             <Link href="/voice-agent" style={STYLES.ctaGhost}>Voice Agent</Link>
           </div>
