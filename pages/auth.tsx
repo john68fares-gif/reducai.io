@@ -1,234 +1,253 @@
 // pages/auth.tsx
 import { useEffect, useMemo, useState } from 'react';
+import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { signIn } from 'next-auth/react';
-import { supabase } from '../lib/supabaseClient';
+import { supabase } from '../lib/supabase-client';
 
 export default function AuthPage() {
   const router = useRouter();
-  const modeParam = (router.query.mode as string) || 'signup'; // 'signup' | 'signin'
-  const from = (router.query.from as string) || '/builder';
-  const [tab, setTab] = useState<'signup' | 'signin'>(modeParam === 'signin' ? 'signin' : 'signup');
+  const { mode: qMode, from: qFrom } = router.query as { mode?: string; from?: string };
+
+  const mode = (qMode === 'signin' ? 'signin' : 'signup') as 'signin' | 'signup';
+  const [tab, setTab] = useState<'signin' | 'signup'>(mode);
+  useEffect(() => setTab(mode), [mode]);
+
+  const from = qFrom || '/builder'; // where to go after auth
+  const callbackSignup = `${typeof window !== 'undefined' ? window.location.origin : ''}${from}?onboard=1&mode=signup`;
+  const callbackSignin = `${typeof window !== 'undefined' ? window.location.origin : ''}${from}?mode=signin`;
 
   const [email, setEmail] = useState('');
-  const [codeSent, setCodeSent] = useState(false);
-  const [code, setCode] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
-  const [err, setErr] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // if already authenticated via Supabase, bounce to from=…
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      if (data.session) {
-        router.replace(from);
-      }
-    });
-  }, [from, router]);
+  const goHome = () => router.replace('/');
 
-  const go = (isSignup: boolean) => {
-    const q = new URLSearchParams();
-    if (isSignup) q.set('onboard', '1');
-    q.set('mode', isSignup ? 'signup' : 'signin');
-    return `${from}?${q.toString()}`;
+  const handleGoogle = async () => {
+    const cb = tab === 'signup' ? callbackSignup : callbackSignin;
+    await signIn('google', { callbackUrl: cb });
   };
 
-  const handleGoogle = async (isSignup: boolean) => {
-    // Use your existing NextAuth Google provider
-    await signIn('google', { callbackUrl: go(isSignup) });
-  };
-
-  const sendEmailCode = async () => {
-    setErr(null); setMsg(null);
-    if (!email) return setErr('Enter your email');
+  // Email Magic Link with Supabase (works for both sign-in & sign-up)
+  const handleEmail = async () => {
+    if (!email) return;
+    setErrorMsg(null);
+    setSending(true);
     try {
-      setLoading(true);
-      // shouldCreateUser=true for Sign up; false for Sign in
-      const shouldCreateUser = tab === 'signup';
+      const redirectTo = `${window.location.origin}${from}${tab === 'signup' ? '?onboard=1&mode=signup' : '?mode=signin'}`;
       const { error } = await supabase.auth.signInWithOtp({
         email,
-        options: {
-          shouldCreateUser,
-          // optional: redirect for magic-link (still works with OTP)
-          emailRedirectTo: typeof window !== 'undefined' ? `${window.location.origin}${go(tab === 'signup')}` : undefined,
-        },
+        options: { emailRedirectTo: redirectTo },
       });
       if (error) throw error;
-      setCodeSent(true);
-      setMsg('We emailed you a 6-digit code. Enter it below.');
-    } catch (e: any) {
-      setErr(e?.message || 'Could not send code');
+      setSent(true);
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Could not send email.');
     } finally {
-      setLoading(false);
-    }
-  };
-
-  const verifyCode = async () => {
-    setErr(null); setMsg(null);
-    if (!email || !code) return setErr('Enter the code we sent.');
-    try {
-      setLoading(true);
-      const { data, error } = await supabase.auth.verifyOtp({
-        email,
-        token: code,
-        type: 'email', // 6-digit email OTP
-      });
-      if (error) throw error;
-      // success
-      router.replace(go(tab === 'signup'));
-    } catch (e: any) {
-      setErr(e?.message || 'Invalid code');
-    } finally {
-      setLoading(false);
+      setSending(false);
     }
   };
 
   return (
-    <main style={styles.page}>
-      <div style={styles.card}>
-        <div style={styles.tabs}>
-          <button
-            onClick={() => setTab('signup')}
-            style={{ ...styles.tab, ...(tab === 'signup' ? styles.tabActive : {}) }}
-          >
-            Sign up
-          </button>
-          <button
-            onClick={() => setTab('signin')}
-            style={{ ...styles.tab, ...(tab === 'signin' ? styles.tabActive : {}) }}
-          >
-            Log in
-          </button>
-        </div>
+    <>
+      <Head>
+        <title>{tab === 'signup' ? 'Sign up' : 'Sign in'} – Reduc AI</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+      </Head>
 
-        <div style={{ padding: 20 }}>
-          {/* Google */}
-          <button
-            onClick={() => handleGoogle(tab === 'signup')}
-            style={styles.googleBtn}
-          >
-            Continue with Google
-          </button>
+      <main style={STYLES.page}>
+        {/* background grid + glow */}
+        <div style={STYLES.grid} />
+        <div style={{ ...STYLES.glow, top: -220, left: -180 }} />
+        <div style={{ ...STYLES.glow, bottom: -260, right: -180 }} />
 
-          {/* Divider */}
-          <div style={styles.divider}>
-            <span style={{ background: '#0b0c10', padding: '0 8px', color: 'rgba(255,255,255,.7)' }}>or</span>
+        <header style={STYLES.nav}>
+          <div style={STYLES.brand} onClick={goHome}>
+            <span style={STYLES.logoDot} />
+            <span>reduc.ai</span>
           </div>
+          <div />
+        </header>
 
-          {/* Email OTP */}
-          {!codeSent ? (
-            <>
-              <label style={styles.label}>Email</label>
-              <input
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
-                style={styles.input}
-                type="email"
-              />
-              <button onClick={sendEmailCode} style={styles.primaryBtn} disabled={loading}>
-                {loading ? 'Sending…' : (tab === 'signup' ? 'Sign up with Email' : 'Log in with Email')}
+        <section style={STYLES.centerWrap}>
+          <div style={STYLES.card}>
+            {/* tabs */}
+            <div style={STYLES.tabRow}>
+              <button
+                onClick={() => setTab('signin')}
+                style={{ ...STYLES.tabBtn, ...(tab === 'signin' ? STYLES.tabActive : {}) }}
+              >
+                Sign in
               </button>
-            </>
-          ) : (
-            <>
-              <label style={styles.label}>Enter 6-digit code</label>
-              <input
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                placeholder="••••••"
-                maxLength={6}
-                style={styles.input}
-                inputMode="numeric"
-              />
-              <button onClick={verifyCode} style={styles.primaryBtn} disabled={loading}>
-                {loading ? 'Verifying…' : 'Continue'}
+              <button
+                onClick={() => setTab('signup')}
+                style={{ ...STYLES.tabBtn, ...(tab === 'signup' ? STYLES.tabActive : {}) }}
+              >
+                Sign up
               </button>
-              <button onClick={() => { setCodeSent(false); setCode(''); }} style={styles.linkBtn}>
-                Resend or change email
-              </button>
-            </>
-          )}
+            </div>
 
-          {msg && <div style={{ marginTop: 10, color: '#6af7d1' }}>{msg}</div>}
-          {err && <div style={{ marginTop: 10, color: '#ff8f8f' }}>{err}</div>}
-        </div>
-      </div>
-    </main>
+            {/* google */}
+            <button onClick={handleGoogle} style={STYLES.googleBtn}>
+              Continue with Google
+            </button>
+
+            {/* separator */}
+            <div style={STYLES.sepWrap}>
+              <div style={STYLES.sepLine} />
+              <span style={STYLES.sepText}>or</span>
+              <div style={STYLES.sepLine} />
+            </div>
+
+            {/* email */}
+            <label style={STYLES.label}>Email</label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@company.com"
+              style={STYLES.input}
+            />
+            <button onClick={handleEmail} style={STYLES.primaryBtn} disabled={sending || !email}>
+              {sending ? 'Sending…' : tab === 'signup' ? 'Send magic link to sign up' : 'Send magic link to sign in'}
+            </button>
+
+            {sent && (
+              <div style={STYLES.note}>
+                Check your email for a {tab === 'signup' ? 'sign-up' : 'sign-in'} link. After confirming,
+                you’ll be redirected to <code>{from}</code>.
+              </div>
+            )}
+            {errorMsg && <div style={STYLES.error}>{errorMsg}</div>}
+
+            {/* small note */}
+            <div style={{ marginTop: 16, fontSize: 12, opacity: 0.7 }}>
+              By continuing, you agree to our Terms & Privacy.
+            </div>
+          </div>
+        </section>
+      </main>
+    </>
   );
 }
 
-const styles: Record<string, React.CSSProperties> = {
+/* ------------------------------- styles -------------------------------- */
+const STYLES: Record<string, React.CSSProperties> = {
   page: {
+    position: 'relative',
     minHeight: '100vh',
     background: '#0b0c10',
-    display: 'grid',
-    placeItems: 'center',
-    fontFamily: 'Manrope, Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif',
     color: '#fff',
-    padding: 20,
+    overflow: 'hidden',
+    fontFamily:
+      'Manrope, Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif',
+  },
+  grid: {
+    position: 'absolute',
+    inset: 0,
+    backgroundImage:
+      'repeating-linear-gradient(0deg, rgba(255,255,255,0.04) 0 1px, transparent 1px 40px), repeating-linear-gradient(90deg, rgba(255,255,255,0.04) 0 1px, transparent 1px 40px)',
+    maskImage: 'radial-gradient(ellipse at 50% 0%, rgba(0,0,0,.9), transparent 65%)',
+    animation: 'gridShift 20s linear infinite',
+  } as React.CSSProperties,
+  glow: {
+    position: 'absolute',
+    width: 560,
+    height: 560,
+    borderRadius: '50%',
+    background: 'radial-gradient(circle, rgba(106,247,209,0.25), rgba(0,0,0,0))',
+    filter: 'blur(60px)',
+    pointerEvents: 'none',
+  },
+  nav: {
+    maxWidth: 1120,
+    margin: '0 auto',
+    padding: '22px 20px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  brand: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    fontWeight: 800,
+    letterSpacing: 0.3,
+    cursor: 'pointer',
+  },
+  logoDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 999,
+    background: '#6af7d1',
+    boxShadow: '0 0 16px rgba(106,247,209,.8)',
+  },
+  centerWrap: {
+    maxWidth: 520,
+    margin: '40px auto 0',
+    padding: '0 20px',
   },
   card: {
-    width: 560,
-    maxWidth: '95vw',
+    position: 'relative',
+    padding: 24,
     borderRadius: 20,
-    background: 'rgba(16,19,20,.92)',
+    background: 'rgba(13,15,17,.92)',
     border: '1px solid rgba(106,247,209,.25)',
     boxShadow: 'inset 0 0 22px rgba(0,0,0,.28), 0 0 28px rgba(106,247,209,.08)',
   },
-  tabs: {
+  tabRow: {
     display: 'flex',
-    gap: 6,
-    padding: 8,
-    borderBottom: '1px solid rgba(255,255,255,.15)',
+    gap: 8,
+    marginBottom: 16,
   },
-  tab: {
+  tabBtn: {
     flex: 1,
     padding: '10px 12px',
-    borderRadius: 10,
+    borderRadius: 12,
     fontWeight: 800,
-    background: 'transparent',
-    border: '1px solid rgba(255,255,255,.15)',
-    color: 'rgba(255,255,255,.85)',
+    border: '2px solid rgba(255,255,255,.15)',
+    background: 'rgba(0,0,0,.2)',
+    color: '#fff',
     cursor: 'pointer',
   },
   tabActive: {
-    background: '#00ffc2',
+    borderColor: '#00ffc2',
+    boxShadow: '0 0 18px rgba(106,247,209,.35)',
     color: '#001018',
-    boxShadow: '0 0 14px rgba(106,247,209,.35)',
-    border: '1px solid rgba(0,0,0,0)',
+    background: '#00ffc2',
   },
   googleBtn: {
     width: '100%',
-    padding: '12px 14px',
+    padding: '12px 16px',
     borderRadius: 12,
-    background: 'rgba(0,0,0,.2)',
+    fontWeight: 800,
+    background: '#fff',
+    color: '#111',
     border: '2px solid rgba(255,255,255,.15)',
-    color: '#fff',
-    fontWeight: 700,
     cursor: 'pointer',
   },
-  divider: {
-    display: 'grid',
-    alignItems: 'center',
-    gridTemplateColumns: '1fr auto 1fr',
-    gap: 10,
+  sepWrap: {
     margin: '14px 0',
-    color: 'rgba(255,255,255,.5)',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
   },
-  label: { fontSize: 13, opacity: .8, display: 'block', marginTop: 6, marginBottom: 6 },
+  sepLine: { flex: 1, height: 1, background: 'rgba(255,255,255,.15)' },
+  sepText: { fontSize: 12, opacity: 0.75 },
+  label: { fontSize: 13, marginTop: 6, marginBottom: 6, opacity: 0.85 },
   input: {
     width: '100%',
-    padding: '12px 14px',
-    borderRadius: 12,
+    borderRadius: 10,
     background: '#101314',
-    border: '1px solid rgba(255,255,255,.18)',
     color: '#fff',
+    border: '1px solid #13312b',
+    padding: '12px 14px',
     outline: 'none',
+    marginBottom: 10,
   },
   primaryBtn: {
     width: '100%',
-    marginTop: 12,
     padding: '12px 16px',
     borderRadius: 12,
     fontWeight: 800,
@@ -237,12 +256,14 @@ const styles: Record<string, React.CSSProperties> = {
     boxShadow: '0 0 18px rgba(106,247,209,.35)',
     cursor: 'pointer',
   },
-  linkBtn: {
+  note: {
     marginTop: 10,
-    background: 'transparent',
-    border: 'none',
-    color: 'rgba(255,255,255,.75)',
-    textDecoration: 'underline',
-    cursor: 'pointer',
+    fontSize: 13,
+    opacity: 0.85,
+  },
+  error: {
+    marginTop: 10,
+    fontSize: 13,
+    color: '#ff7a7a',
   },
 };
