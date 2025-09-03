@@ -1,9 +1,9 @@
 // pages/index.tsx
 import Link from "next/link";
-import AuthButtons from "../components/auth/AuthButtons";
-import type { CSSProperties } from "react";
+import { signIn } from "next-auth/react";
 
-const STYLES: Record<string, CSSProperties> = {
+/** Keep styles here so SSR never hits "STYLES is not defined" */
+const STYLES: Record<string, React.CSSProperties> = {
   page: {
     position: "relative",
     minHeight: "100vh",
@@ -19,7 +19,8 @@ const STYLES: Record<string, CSSProperties> = {
     backgroundImage:
       "repeating-linear-gradient(0deg, rgba(255,255,255,0.04) 0 1px, transparent 1px 40px), repeating-linear-gradient(90deg, rgba(255,255,255,0.04) 0 1px, transparent 1px 40px)",
     maskImage: "radial-gradient(ellipse at 50% 0%, rgba(0,0,0,.9), transparent 65%)",
-  },
+    animation: "gridShift 20s linear infinite",
+  } as React.CSSProperties,
   glow: {
     position: "absolute",
     width: 560,
@@ -51,11 +52,8 @@ const STYLES: Record<string, CSSProperties> = {
     background: "#6af7d1",
     boxShadow: "0 0 16px rgba(106,247,209,.8)",
   },
-  navLinks: { display: "flex", gap: 12, fontWeight: 600, alignItems: "center" },
-  link: {
-    textDecoration: "none",
-    color: "white",
-  },
+  navLinks: { display: "flex", gap: 18, fontWeight: 600, opacity: 0.9 },
+  link: { textDecoration: "none", color: "white" },
   heroWrap: {
     maxWidth: 1120,
     margin: "28px auto 0",
@@ -86,7 +84,7 @@ const STYLES: Record<string, CSSProperties> = {
   ctaRow: { display: "flex", gap: 10, flexWrap: "wrap" },
   ctaPrimary: {
     display: "inline-block",
-    padding: "10px 14px",
+    padding: "12px 16px",
     borderRadius: 12,
     textDecoration: "none",
     fontWeight: 800,
@@ -96,7 +94,7 @@ const STYLES: Record<string, CSSProperties> = {
   },
   ctaGhost: {
     display: "inline-block",
-    padding: "10px 14px",
+    padding: "12px 16px",
     borderRadius: 12,
     textDecoration: "none",
     fontWeight: 700,
@@ -120,11 +118,7 @@ const STYLES: Record<string, CSSProperties> = {
     boxShadow: "0 0 10px rgba(106,247,209,.7)",
   },
   sep: { width: 14, height: 1, background: "rgba(255,255,255,.2)" },
-  cards: {
-    display: "grid",
-    gap: 16,
-    alignContent: "start",
-  },
+  cards: { display: "grid", gap: 16, alignContent: "start" },
   card: {
     padding: 16,
     borderRadius: 16,
@@ -155,12 +149,25 @@ const STYLES: Record<string, CSSProperties> = {
   },
 };
 
+// helper: add alpha to hex like #6af7d1
 function hexWithAlpha(hex: string, alpha = 0.3) {
   const n = hex.replace("#", "");
   const r = parseInt(n.substring(0, 2), 16);
   const g = parseInt(n.substring(2, 4), 16);
   const b = parseInt(n.substring(4, 6), 16);
   return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function FeatureCard({ title, body, accent }: { title: string; body: string; accent: string }) {
+  return (
+    <div style={{ ...STYLES.card, borderColor: hexWithAlpha(accent, 0.35) }}>
+      <div style={{ ...STYLES.cardIcon, borderColor: hexWithAlpha(accent, 0.45) }}>
+        <div style={{ ...STYLES.cardDot, background: accent }} />
+      </div>
+      <div style={{ fontWeight: 700, fontSize: 16 }}>{title}</div>
+      <div style={{ opacity: 0.75, fontSize: 13, lineHeight: "20px" }}>{body}</div>
+    </div>
+  );
 }
 
 export default function Landing() {
@@ -179,22 +186,52 @@ export default function Landing() {
           <span>reduc.ai</span>
         </div>
 
+        {/* left links */}
         <nav style={STYLES.navLinks}>
-          <a href="/builder" style={STYLES.link}>
-            Builder
-          </a>
-          <a href="/improve" style={STYLES.link}>
-            Improve
-          </a>
-          <a href="/voice-agent" style={STYLES.link}>
-            Voice Agent
-          </a>
-
-          {/* Auth buttons (Google) */}
-          <div style={{ display: "flex", gap: 10 }}>
-            <AuthButtons compact />
-          </div>
+          <a href="/builder" style={STYLES.link}>Builder</a>
+          <a href="/improve" style={STYLES.link}>Improve</a>
+          <a href="/voice-agent" style={STYLES.link}>Voice Agent</a>
+          <a href="/api/voice/twilio/incoming" style={STYLES.link}>Webhook XML</a>
         </nav>
+
+        {/* right auth buttons */}
+        <div style={{ display: "flex", gap: 10 }}>
+          {/* Sign up → Google → land on /builder with onboard flag (NO step=1) */}
+          <button
+            onClick={() =>
+              signIn("google", { callbackUrl: "/builder?onboard=1&mode=signup" })
+            }
+            style={{
+              padding: "10px 14px",
+              borderRadius: 12,
+              fontWeight: 800,
+              background: "#00ffc2",
+              color: "#001018",
+              border: "none",
+              cursor: "pointer",
+            }}
+          >
+            Sign up
+          </button>
+
+          {/* Log in → Google → land on /builder (NO step=1) */}
+          <button
+            onClick={() =>
+              signIn("google", { callbackUrl: "/builder?mode=signin" })
+            }
+            style={{
+              padding: "10px 14px",
+              borderRadius: 12,
+              fontWeight: 700,
+              border: "2px solid rgba(255,255,255,.15)",
+              background: "rgba(0,0,0,.2)",
+              color: "#fff",
+              cursor: "pointer",
+            }}
+          >
+            Log in
+          </button>
+        </div>
       </header>
 
       {/* HERO */}
@@ -210,15 +247,10 @@ export default function Landing() {
           </p>
 
           <div style={STYLES.ctaRow}>
-            <Link href="/builder?step=1" style={STYLES.ctaPrimary}>
-              Create a Build
-            </Link>
-            <Link href="/improve" style={STYLES.ctaGhost}>
-              Open Improve
-            </Link>
-            <Link href="/voice-agent" style={STYLES.ctaGhost}>
-              Voice Agent
-            </Link>
+            {/* Create a Build → dashboard (NO step param) */}
+            <Link href="/builder" style={STYLES.ctaPrimary}>Create a Build</Link>
+            <Link href="/improve" style={STYLES.ctaGhost}>Open Improve</Link>
+            <Link href="/voice-agent" style={STYLES.ctaGhost}>Voice Agent</Link>
           </div>
 
           {/* trust row */}
@@ -262,29 +294,5 @@ export default function Landing() {
         </span>
       </footer>
     </main>
-  );
-}
-
-function FeatureCard({
-  title,
-  body,
-  accent,
-}: {
-  title: string;
-  body: string;
-  accent: string;
-}) {
-  return (
-    <div style={{ ...STYLES.card, borderColor: hexWithAlpha(accent, 0.35) }}>
-      <div
-        style={{ ...STYLES.cardIcon, borderColor: hexWithAlpha(accent, 0.45) }}
-      >
-        <div style={{ ...STYLES.cardDot, background: accent }} />
-      </div>
-      <div style={{ fontWeight: 700, fontSize: 16 }}>{title}</div>
-      <div style={{ opacity: 0.75, fontSize: 13, lineHeight: "20px" }}>
-        {body}
-      </div>
-    </div>
   );
 }
