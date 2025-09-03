@@ -3,12 +3,10 @@ import { useEffect, useMemo, useState } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { supabase } from '@/lib/supabase-client';
-import { Sparkles, CheckCircle2, Shield, Lock } from 'lucide-react';
+import { Sparkles, Shield, CheckCircle2, Lock } from 'lucide-react';
 
 type Mode = 'signin' | 'signup';
-
-const ACCENT = '#25f0c9'; // softer mint
-const ACCENT_DARK = '#0bd2ae';
+const ACCENT = '#00ffc2';
 
 export default function AuthPage() {
   const router = useRouter();
@@ -19,14 +17,14 @@ export default function AuthPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
-  // Sign-up extras
+  // signup-only fields
   const [username, setUsername] = useState('');
   const [heardAbout, setHeardAbout] = useState('');
 
   // UX
   const [busy, setBusy] = useState(false);
-  const [step, setStep] = useState<'idle'|'precheck'|'contacting'|'finalizing'>('idle');
-  const [msg, setMsg] = useState<string | null>(null);
+  const [phase, setPhase] = useState<'idle' | 'checking' | 'contacting' | 'finalizing'>('idle');
+  const [msg, setMsg] = useState<string | null>(typeof router.query.msg === 'string' ? router.query.msg : null);
   const [err, setErr] = useState<string | null>(null);
   const [verifySent, setVerifySent] = useState(false);
 
@@ -35,10 +33,10 @@ export default function AuthPage() {
     setErr(null);
     setMsg(null);
     setVerifySent(false);
-    setStep('idle');
+    setPhase('idle');
   }, [queryMode]);
 
-  // If already signed in, bounce to from
+  // If already signed in, bounce to "from"
   useEffect(() => {
     let unsub: any;
     (async () => {
@@ -63,38 +61,37 @@ export default function AuthPage() {
     setErr(null);
     setMsg(null);
 
-    if (mode === 'signup' && (!username || username.trim().length < 3)) {
-      setErr('Choose a username with at least 3 characters.');
+    if (!email || !password) {
+      setErr('Please fill your email and password.');
       return;
     }
-    if (!email || !password) {
-      setErr('Please fill in your email and password.');
+    if (mode === 'signup' && (!username || username.trim().length < 3)) {
+      setErr('Choose a username (3+ characters).');
       return;
     }
 
     try {
       setBusy(true);
-      setStep('precheck');
-      await delay(300);
+      setPhase('checking');
+      await delay(250);
 
       if (mode === 'signin') {
-        setStep('contacting');
+        setPhase('contacting');
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
 
-        setStep('finalizing');
-        await delay(400);
+        setPhase('finalizing');
         localStorage.setItem('postAuthRedirect', from);
+        await delay(350);
         router.replace(from);
       } else {
-        setStep('contacting');
+        setPhase('contacting');
         const { data, error } = await supabase.auth.signUp({
           email,
           password,
           options: {
-            // send everything we need for the DB trigger + analytics
             data: {
-              full_name: username,           // so your default account gets this name
+              full_name: username,              // for your DB trigger (account name)
               preferred_username: username,
               user_name: username,
               heard_about: heardAbout || 'unspecified',
@@ -104,33 +101,27 @@ export default function AuthPage() {
         });
         if (error) throw error;
 
-        // If email confirmation is on, user won't have a session yet.
+        setPhase('finalizing');
+        await delay(350);
+
+        // Most setups require email verification = no session yet
         if (!data.session) {
-          setStep('finalizing');
-          await delay(400);
           setVerifySent(true);
-          setMsg('Account created! Check your email to verify, then sign in.');
+          setMsg('Account created! Verify your email, then sign in.');
           return;
         }
 
-        // In case auto-confirm is enabled:
-        setStep('finalizing');
-        await delay(400);
+        // Auto-confirm case
         localStorage.setItem('postAuthRedirect', `${from}?onboard=1&mode=signup`);
         router.replace(`${from}?onboard=1&mode=signup`);
       }
     } catch (e: any) {
       const m = (e?.message || '').toLowerCase();
-      if (m.includes('invalid login credentials')) {
-        setErr('Wrong email or password.');
-      } else if (m.includes('email not confirmed')) {
-        setErr('Email not verified yet. Please check your inbox.');
-      } else if (m.includes('already registered')) {
-        setErr('Email already registered. Try signing in.');
-      } else {
-        setErr(e?.message || 'Something went wrong.');
-      }
-      setStep('idle');
+      if (m.includes('invalid login credentials')) setErr('Wrong email or password.');
+      else if (m.includes('email not confirmed')) setErr('Email not verified yet. Check your inbox.');
+      else if (m.includes('already registered')) setErr('This email is already registered. Try signing in.');
+      else setErr(e?.message || 'Something went wrong.');
+      setPhase('idle');
     } finally {
       setBusy(false);
     }
@@ -140,7 +131,7 @@ export default function AuthPage() {
     try {
       setErr(null);
       setBusy(true);
-      setStep('contacting');
+      setPhase('contacting');
       localStorage.setItem('postAuthRedirect', mode === 'signup' ? `${from}?onboard=1&mode=signup` : from);
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
@@ -153,229 +144,26 @@ export default function AuthPage() {
     } catch (e: any) {
       setErr(e?.message || 'Could not open Google right now.');
       setBusy(false);
-      setStep('idle');
+      setPhase('idle');
     }
   }
 
   return (
     <>
       <Head>
-        <title>{mode === 'signup' ? 'Sign up' : 'Sign in'} — Reduc.ai</title>
+        <title>{mode === 'signup' ? 'Sign up' : 'Sign in'} · Reduc.ai</title>
       </Head>
 
-      <div className="min-h-screen" style={{ background: '#0b0c10', color: '#fff' }}>
-        {/* subtle glows */}
-        <div
-          className="fixed inset-0 -z-10"
-          style={{
-            background:
-              'radial-gradient(700px 360px at 15% 12%, rgba(37,240,201,0.12), transparent 60%), radial-gradient(620px 320px at 92% 86%, rgba(37,240,201,0.08), transparent 60%)',
-          }}
-        />
-
-        {/* two-column, shifted left */}
-        <div className="mx-auto max-w-6xl px-5 py-14 grid gap-10 md:grid-cols-[1.2fr_1fr]">
-          {/* LEFT: the form (shifted left by grid) */}
-          <div className="order-2 md:order-1">
-            <div
-              className="w-full max-w-[560px] rounded-2xl p-6 md:p-7"
-              style={{
-                marginLeft: 0,
-                background: 'rgba(14,16,18,0.96)',
-                border: '1px solid rgba(255,255,255,0.12)',
-                boxShadow: '0 30px 80px rgba(0,0,0,0.50), 0 0 30px rgba(37,240,201,0.10)',
-              }}
-            >
-              {/* Tabs */}
-              <div className="flex gap-2 mb-5">
-                <button
-                  onClick={() => switchMode('signin')}
-                  className="flex-1 py-2 rounded-xl font-semibold transition"
-                  style={{
-                    background: mode === 'signin' ? ACCENT : 'rgba(255,255,255,0.06)',
-                    color: mode === 'signin' ? '#0b0c10' : 'rgba(255,255,255,0.92)',
-                    boxShadow: mode === 'signin' ? '0 0 10px rgba(37,240,201,0.18)' : 'none',
-                  }}
-                  disabled={busy}
-                >
-                  Sign in
-                </button>
-                <button
-                  onClick={() => switchMode('signup')}
-                  className="flex-1 py-2 rounded-xl font-semibold transition"
-                  style={{
-                    background: mode === 'signup' ? ACCENT : 'rgba(255,255,255,0.06)',
-                    color: mode === 'signup' ? '#0b0c10' : 'rgba(255,255,255,0.92)',
-                    boxShadow: mode === 'signup' ? '0 0 10px rgba(37,240,201,0.18)' : 'none',
-                  }}
-                  disabled={busy}
-                >
-                  Sign up
-                </button>
-              </div>
-
-              {/* Form */}
-              {verifySent ? (
-                <div className="space-y-4">
-                  <h2 className="text-xl font-semibold">Check your email</h2>
-                  <p className="text-white/80">
-                    We sent a verification link to <span className="text-white">{email}</span>. After verifying,
-                    come back here to sign in.
-                  </p>
-                  <button
-                    onClick={() => setVerifySent(false)}
-                    className="mt-2 py-2 px-3 rounded-lg border"
-                    style={{ borderColor: 'rgba(255,255,255,0.2)' }}
-                  >
-                    Use a different email
-                  </button>
-                </div>
-              ) : (
-                <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-                  {mode === 'signup' && (
-                    <>
-                      <div className="grid gap-3 md:grid-cols-2">
-                        <input
-                          value={username}
-                          onChange={(e) => setUsername(e.target.value)}
-                          placeholder="Username"
-                          className="w-full rounded-xl bg-[#0f1213] text-white text-sm border border-[#173a32] px-4 py-3 outline-none focus:border-[#25f0c9]"
-                        />
-                        <select
-                          value={heardAbout}
-                          onChange={(e) => setHeardAbout(e.target.value)}
-                          className="w-full rounded-xl bg-[#0f1213] text-white text-sm border border-[#173a32] px-4 py-3 outline-none focus:border-[#25f0c9]"
-                        >
-                          <option value="">Where did you hear about us?</option>
-                          <option value="twitter">Twitter / X</option>
-                          <option value="tiktok">TikTok</option>
-                          <option value="youtube">YouTube</option>
-                          <option value="friend">Friend / Colleague</option>
-                          <option value="search">Google Search</option>
-                          <option value="other">Other</option>
-                        </select>
-                      </div>
-                    </>
-                  )}
-
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="Email address"
-                    className="w-full rounded-xl bg-[#0f1213] text-white text-sm border border-[#173a32] px-4 py-3 outline-none focus:border-[#25f0c9]"
-                  />
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder={mode === 'signup' ? 'Create a password' : 'Password'}
-                    className="w-full rounded-xl bg-[#0f1213] text-white text-sm border border-[#173a32] px-4 py-3 outline-none focus:border-[#25f0c9]"
-                  />
-
-                  <button
-                    type="submit"
-                    disabled={busy}
-                    className="mt-1 py-3 rounded-xl font-semibold transition disabled:opacity-60"
-                    style={{
-                      background: ACCENT,
-                      color: '#0b0c10',
-                      boxShadow: '0 0 10px rgba(37,240,201,0.16)',
-                    }}
-                  >
-                    {busy
-                      ? step === 'precheck'
-                        ? 'Checking…'
-                        : step === 'contacting'
-                          ? (mode === 'signup' ? 'Creating your account…' : 'Signing you in…')
-                          : step === 'finalizing'
-                            ? 'Finalizing…'
-                            : mode === 'signup'
-                              ? 'Create account'
-                              : 'Sign in'
-                      : mode === 'signup'
-                        ? 'Create account'
-                        : 'Sign in'}
-                  </button>
-
-                  <div className="flex items-center gap-3 my-4 text-white/40 text-xs">
-                    <div className="flex-1 h-px bg-white/10" />
-                    <span>or</span>
-                    <div className="flex-1 h-px bg-white/10" />
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={handleGoogle}
-                    disabled={busy}
-                    className="w-full py-3 rounded-xl border text-sm transition disabled:opacity-60"
-                    style={{
-                      borderColor: 'rgba(255,255,255,0.18)',
-                      background: 'rgba(16,19,20,0.88)',
-                      color: '#fff',
-                    }}
-                  >
-                    Continue with Google
-                  </button>
-
-                  {(msg || err) && (
-                    <div
-                      className="mt-3 rounded-xl p-3 text-sm"
-                      style={{ background: 'rgba(16,19,20,0.88)', border: '1px solid rgba(255,255,255,0.18)' }}
-                    >
-                      {msg && <div className="text-white/90">{msg}</div>}
-                      {err && <div className="text-[#ff9aa3]">{err}</div>}
-                    </div>
-                  )}
-
-                  <div className="mt-2 text-xs text-white/55">
-                    You must {mode === 'signup' ? 'sign up' : 'sign in'} to continue.
-                  </div>
-                </form>
-              )}
-            </div>
-          </div>
-
-          {/* RIGHT: Welcome / trust */}
-          <div className="order-1 md:order-2">
-            <div
-              className="rounded-2xl p-6 md:p-7"
-              style={{
-                background: 'rgba(16,19,20,0.88)',
-                border: '1px solid rgba(255,255,255,0.12)',
-                boxShadow: '0 24px 70px rgba(0,0,0,0.45), 0 0 26px rgba(37,240,201,0.08)',
-              }}
-            >
-              <div className="flex items-center gap-2 mb-2">
-                <Sparkles size={18} style={{ color: ACCENT }} />
-                <h2 className="text-lg md:text-xl font-semibold">Welcome to Reduc.ai</h2>
-              </div>
-              <p className="text-white/80 mb-5">
-                Create your account to build and manage AI agents. Your data is encrypted and never shared.
-              </p>
-
-              <ul className="space-y-3 text-white/85">
-                <li className="flex items-center gap-2">
-                  <CheckCircle2 size={18} style={{ color: ACCENT }} />
-                  Email + password or Google
-                </li>
-                <li className="flex items-center gap-2">
-                  <Shield size={18} style={{ color: ACCENT }} />
-                  Secure sessions with Supabase Auth
-                </li>
-                <li className="flex items-center gap-2">
-                  <Lock size={18} style={{ color: ACCENT }} />
-                  You control your data
-                </li>
-              </ul>
-            </div>
-          </div>
+      <main className="min-h-screen font-movatif" style={{ background: '#0b0c10', color: '#fff' }}>
+        {/* Background accents */}
+        <div className="pointer-events-none fixed inset-0 -z-10">
+          <div className="absolute -top-28 -left-24 w-[720px] h-[720px] rounded-full"
+               style={{ background: 'radial-gradient(circle, rgba(0,255,194,0.13), transparent 60%)', filter: 'blur(22px)' }} />
+          <div className="absolute -bottom-40 -right-24 w-[620px] h-[620px] rounded-full"
+               style={{ background: 'radial-gradient(circle, rgba(0,255,194,0.09), transparent 65%)', filter: 'blur(24px)' }} />
         </div>
-      </div>
-    </>
-  );
-}
 
-function delay(ms: number) {
-  return new Promise((r) => setTimeout(r, ms));
-}
+        {/* Layout: form left, welcome right */}
+        <div className="mx-auto max-w-7xl px-5 py-14 grid gap-10 lg:grid-cols-[1.15fr_0.85fr]">
+          {/* LEFT — Auth card */}
+          <section className="order-
