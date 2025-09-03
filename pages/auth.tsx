@@ -1,148 +1,178 @@
 // pages/auth.tsx
-'use client';
-
-import Head from 'next/head';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
-import { signIn } from 'next-auth/react';
-import { useMemo } from 'react';
+import { supabase } from '../lib/supabase-client';
 
 export default function AuthPage() {
   const router = useRouter();
-  const mode = (router.query.mode === 'signin' ? 'signin' : 'signup') as 'signin' | 'signup';
-  const from = (router.query.from as string) || '/builder';
+  const { mode: qMode, from: qFrom } = router.query as { mode?: string; from?: string };
 
-  // Where to send the user after Google
-  // - signup: show onboarding on /builder
-  // - signin: skip onboarding
-  const callbackUrl = useMemo(() => {
-    const base = from || '/builder';
-    return mode === 'signup'
-      ? `${base}?onboard=1&mode=signup`
-      : `${base}?mode=signin`;
-  }, [mode, from]);
+  // default: we’re on “signup” and will return to /builder
+  const mode = useMemo<'signin' | 'signup'>(() => (qMode === 'signin' ? 'signin' : 'signup'), [qMode]);
+  const returnTo = useMemo(() => (qFrom && qFrom.startsWith('/') ? qFrom : '/builder'), [qFrom]);
 
-  const googleHref = `/api/auth/signin/google?callbackUrl=${encodeURIComponent(callbackUrl)}`;
+  const [tab, setTab] = useState<'signin' | 'signup'>(mode);
+  const [working, setWorking] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // If already logged in, skip this page
+  useEffect(() => {
+    let mounted = true;
+    supabase.auth.getSession().then(({ data }) => {
+      if (!mounted) return;
+      if (data.session?.user) {
+        router.replace('/builder');
+      }
+    });
+    return () => {
+      mounted = false;
+    };
+  }, [router]);
+
+  // When auth state changes (after OAuth), route correctly
+  useEffect(() => {
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        // new vs returning
+        const isSignup = tab === 'signup';
+        const url =
+          isSignup
+            ? `${returnTo}?onboard=1&mode=signup`
+            : `${returnTo}?mode=signin`;
+        router.replace(url);
+      }
+    });
+    return () => sub.subscription.unsubscribe();
+  }, [router, tab, returnTo]);
+
+  const continueWithGoogle = async () => {
+    try {
+      setError(null);
+      setWorking(true);
+
+      // Where we want to land after Supabase returns control
+      const callback =
+        typeof window !== 'undefined'
+          ? `${window.location.origin}${returnTo}${
+              tab === 'signup' ? '?onboard=1&mode=signup' : '?mode=signin'
+            }`
+          : returnTo;
+
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: callback,
+          queryParams: {
+            // optional but helps keep Google screen light
+            prompt: 'select_account',
+          },
+        },
+      });
+
+      if (error) throw error;
+      // Supabase will redirect; no further code runs here.
+    } catch (e: any) {
+      console.error(e);
+      setError(e?.message ?? 'Auth failed');
+    } finally {
+      setWorking(false);
+    }
+  };
 
   return (
-    <>
-      <Head>
-        <title>{mode === 'signup' ? 'Sign up' : 'Sign in'} – Reduc AI</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-      </Head>
+    <div
+      style={{
+        minHeight: 'calc(100vh - 40px)',
+        display: 'grid',
+        placeItems: 'center',
+        padding: 16,
+      }}
+    >
+      <div
+        style={{
+          width: 420,
+          maxWidth: '92vw',
+          borderRadius: 16,
+          border: '1px solid rgba(106,247,209,0.25)',
+          boxShadow: '0 10px 40px rgba(0,0,0,0.45)',
+          background: 'rgba(13,15,17,0.9)',
+          padding: 16,
+        }}
+      >
+        {/* Tabs */}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: 8,
+            marginBottom: 12,
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => setTab('signin')}
+            aria-pressed={tab === 'signin'}
+            style={{
+              height: 40,
+              borderRadius: 10,
+              border: '1px solid rgba(106,247,209,0.25)',
+              background: tab === 'signin' ? '#00ffc2' : 'transparent',
+              color: tab === 'signin' ? '#0b0c10' : '#fff',
+              fontWeight: 700,
+              cursor: 'pointer',
+            }}
+          >
+            Sign in
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab('signup')}
+            aria-pressed={tab === 'signup'}
+            style={{
+              height: 40,
+              borderRadius: 10,
+              border: '1px solid rgba(106,247,209,0.25)',
+              background: tab === 'signup' ? '#00ffc2' : 'transparent',
+              color: tab === 'signup' ? '#0b0c10' : '#fff',
+              fontWeight: 700,
+              cursor: 'pointer',
+            }}
+          >
+            Sign up
+          </button>
+        </div>
 
-      <main style={S.page}>
-        <div style={S.grid} />
-        <div style={{ ...S.glow, top: -220, left: -180 }} />
-        <div style={{ ...S.glow, bottom: -260, right: -180 }} />
+        {/* Google */}
+        <button
+          type="button"
+          onClick={continueWithGoogle}
+          disabled={working}
+          style={{
+            width: '100%',
+            height: 44,
+            borderRadius: 10,
+            border: '1px solid rgba(255,255,255,0.18)',
+            background: '#111417',
+            color: '#fff',
+            fontWeight: 700,
+            cursor: working ? 'not-allowed' : 'pointer',
+          }}
+        >
+          Continue with Google
+        </button>
 
-        <section style={S.centerWrap}>
-          <div style={S.card}>
-            <div style={S.tabRow}>
-              <button
-                onClick={() =>
-                  router.replace(`/auth?mode=signin&from=${encodeURIComponent(from)}`)
-                }
-                style={{ ...S.tabBtn, ...(mode === 'signin' ? S.tabActive : {}) }}
-              >
-                Sign in
-              </button>
-              <button
-                onClick={() =>
-                  router.replace(`/auth?mode=signup&from=${encodeURIComponent(from)}`)
-                }
-                style={{ ...S.tabBtn, ...(mode === 'signup' ? S.tabActive : {}) }}
-              >
-                Sign up
-              </button>
-            </div>
+        <div style={{ textAlign: 'center', fontSize: 12, color: '#93a2a8', marginTop: 8 }}>
+          {tab === 'signup'
+            ? 'You must sign up to continue.'
+            : 'Sign in to continue.'}
+        </div>
 
-            {/* Anchor fallback + JS click = always works */}
-            <a href={googleHref} style={{ textDecoration: 'none' }}>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.preventDefault();
-                  signIn('google', { callbackUrl });
-                }}
-                style={S.googleBtn}
-              >
-                Continue with Google
-              </button>
-            </a>
-
-            <div style={{ marginTop: 14, fontSize: 12, opacity: 0.7, textAlign: 'center' }}>
-              You must sign {mode === 'signup' ? 'up' : 'in'} to continue.
-            </div>
+        {error && (
+          <div style={{ color: '#ff8080', fontSize: 12, marginTop: 10, textAlign: 'center' }}>
+            {error}
           </div>
-        </section>
-      </main>
-    </>
+        )}
+      </div>
+    </div>
   );
 }
-
-const S: Record<string, React.CSSProperties> = {
-  page: {
-    position: 'relative',
-    minHeight: '100vh',
-    background: '#0b0c10',
-    color: '#fff',
-    overflow: 'hidden',
-    fontFamily:
-      'Manrope, Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif',
-  },
-  grid: {
-    position: 'absolute',
-    inset: 0,
-    backgroundImage:
-      'repeating-linear-gradient(0deg, rgba(255,255,255,0.04) 0 1px, transparent 1px 40px), repeating-linear-gradient(90deg, rgba(255,255,255,0.04) 0 1px, transparent 1px 40px)',
-    maskImage: 'radial-gradient(ellipse at 50% 0%, rgba(0,0,0,.9), transparent 65%)',
-  } as React.CSSProperties,
-  glow: {
-    position: 'absolute',
-    width: 560,
-    height: 560,
-    borderRadius: '50%',
-    background: 'radial-gradient(circle, rgba(106,247,209,0.25), rgba(0,0,0,0))',
-    filter: 'blur(60px)',
-    pointerEvents: 'none',
-  },
-  centerWrap: {
-    maxWidth: 520,
-    margin: '80px auto 0',
-    padding: '0 20px',
-  },
-  card: {
-    padding: 24,
-    borderRadius: 20,
-    background: 'rgba(13,15,17,.92)',
-    border: '1px solid rgba(106,247,209,.25)',
-    boxShadow: 'inset 0 0 22px rgba(0,0,0,.28), 0 0 28px rgba(106,247,209,.08)',
-  },
-  tabRow: { display: 'flex', gap: 8, marginBottom: 16 },
-  tabBtn: {
-    flex: 1,
-    padding: '10px 12px',
-    borderRadius: 12,
-    fontWeight: 800,
-    border: '2px solid rgba(255,255,255,.15)',
-    background: 'rgba(0,0,0,.2)',
-    color: '#fff',
-    cursor: 'pointer',
-  },
-  tabActive: {
-    borderColor: '#00ffc2',
-    boxShadow: '0 0 18px rgba(106,247,209,.35)',
-    color: '#001018',
-    background: '#00ffc2',
-  },
-  googleBtn: {
-    width: '100%',
-    padding: '12px 16px',
-    borderRadius: 12,
-    fontWeight: 800,
-    background: '#fff',
-    color: '#111',
-    border: '2px solid rgba(255,255,255,.15)',
-    cursor: 'pointer',
-  },
-};
