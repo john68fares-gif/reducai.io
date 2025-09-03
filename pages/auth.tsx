@@ -1,272 +1,390 @@
-// /pages/auth.tsx
+// pages/auth.tsx
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/router';
 import Head from 'next/head';
-import { createClient } from '@supabase/supabase-js';
+import { useRouter } from 'next/router';
+import { supabase } from '../lib/supabase-client';
+import { Shield, CheckCircle, Lock, Sparkles } from 'lucide-react';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+type Mode = 'signin' | 'signup';
 
 const ACCENT = '#00ffc2';
 
 export default function AuthPage() {
   const router = useRouter();
-  const modeQ = (router.query.mode as string) || 'signin';
-  const [mode, setMode] = useState<'signin' | 'signup'>(modeQ === 'signup' ? 'signup' : 'signin');
-  const from = useMemo(() => (router.query.from as string) || '/builder', [router.query.from]);
+  const qMode = (router.query.mode === 'signin' ? 'signin' : 'signup') as Mode;
+  const from = typeof router.query.from === 'string' ? router.query.from : '/builder';
 
-  const [displayName, setDisplayName] = useState('');
+  const [mode, setMode] = useState<Mode>(qMode);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [fullName, setFullName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [verifySent, setVerifySent] = useState(false);
+  const [showResend, setShowResend] = useState(false);
+  const [resent, setResent] = useState(false);
 
   useEffect(() => {
-    setMode(modeQ === 'signup' ? 'signup' : 'signin');
-  }, [modeQ]);
-
-  // If you already have a session, bounce to "from"
-  useEffect(() => {
-    let unsub: any;
-    (async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        router.replace(from || '/builder');
-        return;
-      }
-      // listen in case session arrives (e.g. coming back from OAuth)
-      unsub = supabase.auth.onAuthStateChange((_e, sess) => {
-        if (sess) router.replace(from || '/builder');
-      });
-    })();
-    return () => unsub?.data?.subscription?.unsubscribe?.();
-  }, [from, router]);
-
-  const card =
-    'w-[92vw] max-w-[480px] rounded-2xl border border-[rgba(106,247,209,0.30)] shadow-[0_10px_60px_rgba(0,0,0,0.45)] bg-[rgba(13,15,17,0.96)] p-6';
-  const input =
-    'w-full rounded-xl bg-[#0f1213] border border-[#173a32] text-white/95 px-4 py-3 outline-none focus:border-[#00ffc2] placeholder:text-white/45';
-  const btn =
-    'w-full rounded-xl font-semibold py-3 transition active:scale-[0.995] disabled:opacity-50 disabled:cursor-not-allowed';
-  const tab =
-    'flex-1 py-2 rounded-xl text-sm font-semibold transition';
-  const hr = 'h-px bg-white/10 my-4';
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+    setMode(qMode);
     setErr(null);
-    setBusy(true);
-    try {
-      if (mode === 'signin') {
-        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
+    setMsg(null);
+    setShowResend(false);
+    setResent(false);
+  }, [qMode]);
 
-        // double-check session to avoid redirect loop
-        const { data: s } = await supabase.auth.getSession();
-        if (s.session) {
-          router.replace(from || '/builder');
-        } else {
-          // edge: email not confirmed or cookie not set yet
-          setErr('Sign-in started. If this page doesn’t redirect, please try again.');
-        }
-      } else {
-        const { error } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            emailRedirectTo: `${window.location.origin}/auth/callback?from=${encodeURIComponent(from || '/builder')}`,
-            data: displayName ? { full_name: displayName, preferred_username: displayName } : undefined,
-          },
-        });
-        if (error) throw error;
-        setVerifySent(true);
-      }
-    } catch (e: any) {
-      setErr(e?.message ?? 'Something went wrong. Try again.');
-    } finally {
-      setBusy(false);
-    }
-  }
+  const switchMode = (m: Mode) => {
+    setMode(m);
+    setErr(null);
+    setMsg(null);
+    setShowResend(false);
+    setResent(false);
+    router.replace({ pathname: '/auth', query: { mode: m, from } }, undefined, { shallow: true });
+  };
 
-  async function handleGoogle() {
+  const handleGoogle = async () => {
     try {
+      setLoading(true);
       setErr(null);
-      setBusy(true);
-      try {
-        localStorage.setItem('auth:from', from || '/builder');
-      } catch {}
+      setMsg('Opening Google…');
+
+      localStorage.setItem(
+        'postAuthRedirect',
+        mode === 'signup' ? `${from}?onboard=1&mode=signup` : from
+      );
+
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: `${window.location.origin}/auth/callback?from=${encodeURIComponent(from || '/builder')}`,
+          redirectTo: `${window.location.origin}/auth/callback`,
           queryParams: { prompt: 'select_account' },
         },
       });
       if (error) throw error;
     } catch (e: any) {
-      setErr(e?.message ?? 'Unable to start Google sign-in.');
-      setBusy(false);
+      setErr(e?.message || 'Failed to open Google');
+      setLoading(false);
+      setMsg(null);
     }
-  }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErr(null);
+    setMsg(null);
+    setShowResend(false);
+    setResent(false);
+
+    if (!email || !password || (mode === 'signup' && !fullName)) {
+      setErr('Please fill all required fields.');
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      if (mode === 'signup') {
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            data: { full_name: fullName, phone },
+            emailRedirectTo: `${window.location.origin}/auth/callback`,
+          },
+        });
+        if (error) throw error;
+
+        if (!data.session) {
+          setMsg('Account created! Check your email to verify your address, then come back to sign in.');
+          setLoading(false);
+          setShowResend(true);
+          return;
+        }
+
+        localStorage.setItem('postAuthRedirect', `${from}?onboard=1&mode=signup`);
+        setMsg('Setting up your account…');
+        await delay(600);
+        router.replace(`${from}?onboard=1&mode=signup`);
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) {
+          const m = (error.message || '').toLowerCase();
+          if (m.includes('email not confirmed')) {
+            setErr('Email not verified yet. Please check your inbox.');
+            setShowResend(true);
+          } else if (m.includes('invalid login credentials')) {
+            setErr('Wrong email or password.');
+          } else {
+            setErr(error.message);
+          }
+          setLoading(false);
+          return;
+        }
+
+        localStorage.setItem('postAuthRedirect', from);
+        setMsg('Signing you in…');
+        await delay(600);
+        router.replace(from);
+      }
+    } catch (e: any) {
+      const m = e?.message || 'Something went wrong.';
+      if (m.toLowerCase().includes('user already registered')) {
+        setErr('This email is already registered. Try signing in.');
+        setShowResend(true);
+      } else {
+        setErr(m);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // NEW: forgot password
+  const handleForgot = async () => {
+    setErr(null);
+    setMsg(null);
+    if (!email) {
+      setErr('Enter your email first, then click “Forgot password”.');
+      return;
+    }
+    try {
+      setLoading(true);
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/reset`,
+      });
+      if (error) throw error;
+      setMsg('Password reset email sent. Check your inbox.');
+    } catch (e: any) {
+      setErr(e?.message || 'Could not send reset email.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <>
       <Head>
-        <title>{mode === 'signup' ? 'Sign up' : 'Sign in'} · Reduc.ai</title>
+        <title>{mode === 'signin' ? 'Sign in' : 'Sign up'} — Reduc AI</title>
       </Head>
 
-      <div
-        className="min-h-screen w-full flex items-center justify-center px-4"
-        style={{ background: '#0b0c10', color: '#fff' }}
-      >
-        {/* soft glow */}
+      <div className="min-h-screen font-movatif" style={{ background: '#0b0c10', color: '#fff' }}>
         <div
-          aria-hidden
+          className="fixed inset-0 -z-10 opacity-70"
           style={{
-            position: 'fixed',
-            width: 520, height: 520, borderRadius: 9999,
-            background: 'radial-gradient(circle, rgba(106,247,209,0.22) 0%, rgba(0,0,0,0) 70%)',
-            filter: 'blur(18px)', top: -160, left: -140, pointerEvents: 'none',
+            background:
+              'radial-gradient(600px 300px at 20% 15%, rgba(106,247,209,0.12), transparent 60%), radial-gradient(500px 250px at 85% 85%, rgba(106,247,209,0.08), transparent 60%)',
           }}
         />
-        <div className={card} style={{ boxShadow: 'inset 0 0 22px rgba(0,0,0,0.28), 0 0 28px rgba(106,247,209,0.08)' }}>
-          {/* Tabs */}
-          <div className="flex gap-2 mb-5 bg-black/20 rounded-xl p-1 border border-white/10">
-            <button
-              className={tab}
-              style={{
-                background: mode === 'signin' ? ACCENT : 'transparent',
-                color: mode === 'signin' ? '#000' : 'rgba(255,255,255,0.9)',
-              }}
-              onClick={() => router.push(`/auth?mode=signin&from=${encodeURIComponent(from)}`)}
-            >
-              Sign in
-            </button>
-            <button
-              className={tab}
-              style={{
-                background: mode === 'signup' ? ACCENT : 'transparent',
-                color: mode === 'signup' ? '#000' : 'rgba(255,255,255,0.9)',
-              }}
-              onClick={() => router.push(`/auth?mode=signup&from=${encodeURIComponent(from)}`)}
-            >
-              Sign up
-            </button>
-          </div>
-
-          {/* Content */}
-          {verifySent ? (
-            <div className="space-y-4 text-white/90">
-              <h2 className="text-xl font-semibold">Check your email</h2>
-              <p className="text-white/70">
-                We sent a verification link to <span className="text-white">{email}</span>. Open it to finish creating
-                your account, then we’ll bring you back to your workspace.
-              </p>
-              <div className={hr} />
-              <button
-                className={btn}
-                style={{ background: '#111415', border: '1px solid rgba(255,255,255,0.2)' }}
-                onClick={() => setVerifySent(false)}
-              >
-                Use a different email
-              </button>
-            </div>
-          ) : (
-            <form className="space-y-4" onSubmit={handleSubmit}>
-              {mode === 'signup' && (
-                <input
-                  type="text"
-                  placeholder="Display name (optional)"
-                  className={input}
-                  value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
-                />
-              )}
-
-              <input
-                required
-                type="email"
-                placeholder="Email address"
-                className={input}
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-              <input
-                required
-                type="password"
-                placeholder={mode === 'signup' ? 'Create a password' : 'Password'}
-                className={input}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-
-              {err && (
-                <div className="text-[#ff7a7a] text-sm bg-[#ff7a7a14] border border-[#ff7a7a55] rounded-xl px-3 py-2">
-                  {err}
-                </div>
-              )}
-
-              <button
-                type="submit"
-                disabled={busy}
-                className={btn}
-                style={{ background: ACCENT, color: '#000', boxShadow: '0 0 16px rgba(106,247,209,0.22)' }}
-              >
-                {busy ? (
-                  <span className="inline-flex items-center gap-2">
-                    <Spinner /> {mode === 'signup' ? 'Creating account…' : 'Signing in…'}
-                  </span>
-                ) : mode === 'signup' ? (
-                  'Create account'
-                ) : (
-                  'Sign in'
-                )}
-              </button>
-
-              <div className="relative">
-                <div className={hr} />
-                <div className="absolute left-1/2 -translate-x-1/2 -top-3 text-xs text-white/60 bg-[rgba(13,15,17,0.96)] px-2">
-                  or
-                </div>
-              </div>
-
-              <button
-                type="button"
-                disabled={busy}
-                onClick={handleGoogle}
-                className={btn}
+        <div className="mx-auto max-w-6xl px-5 py-12">
+          <div className="grid gap-10 md:grid-cols-2 items-center">
+            <div className="hidden md:block">
+              <div
+                className="rounded-2xl p-6"
                 style={{
-                  background: '#111415',
-                  border: '1px solid rgba(255,255,255,0.25)',
-                  color: 'rgba(255,255,255,0.95)',
+                  background: 'rgba(16,19,20,0.88)',
+                  border: '1px solid rgba(255,255,255,0.12)',
+                  boxShadow: '0 20px 60px rgba(0,0,0,0.45), 0 0 40px rgba(106,247,209,0.08)',
                 }}
               >
-                {busy ? (
-                  <span className="inline-flex items-center gap-2">
-                    <Spinner /> Working…
-                  </span>
-                ) : (
-                  'Continue with Google'
-                )}
-              </button>
+                <div className="flex items-center gap-3 mb-4">
+                  <Sparkles size={20} style={{ color: ACCENT }} />
+                  <h1 className="text-xl font-semibold">Welcome to Reduc.ai</h1>
+                </div>
+                <p className="text-white/80 mb-6">
+                  Create your account to build and manage AI agents. Your data is encrypted
+                  and we never share it with third parties.
+                </p>
+                <ul className="space-y-3 text-white/85">
+                  <li className="flex items-center gap-2">
+                    <CheckCircle size={18} style={{ color: ACCENT }} /> Email & password or Google
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <Shield size={18} style={{ color: ACCENT }} /> Secure sessions by Supabase Auth
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <Lock size={18} style={{ color: ACCENT }} /> Granular control & easy sign-out
+                  </li>
+                </ul>
+              </div>
+            </div>
 
-              <p className="text-[11px] text-white/55 text-center pt-1">You must sign in to continue.</p>
-            </form>
-          )}
+            <div className="flex justify-center">
+              <div
+                className="w-full max-w-[520px] p-6 rounded-2xl"
+                style={{
+                  background: 'rgba(13,15,17,0.92)',
+                  border: '2px dashed rgba(106,247,209,0.32)',
+                  boxShadow:
+                    '0 30px 80px rgba(0,0,0,0.50), 0 0 26px rgba(106,247,209,0.18), inset 0 0 18px rgba(0,0,0,0.25)',
+                }}
+              >
+                <div className="flex gap-2 mb-5">
+                  <button
+                    onClick={() => switchMode('signin')}
+                    className="flex-1 py-2 rounded-xl font-semibold transition"
+                    style={{
+                      background: mode === 'signin' ? ACCENT : 'rgba(255,255,255,0.06)',
+                      color: '#fff',
+                      boxShadow: mode === 'signin' ? '0 0 10px rgba(106,247,209,0.28)' : 'none',
+                    }}
+                    disabled={loading}
+                  >
+                    Sign in
+                  </button>
+                  <button
+                    onClick={() => switchMode('signup')}
+                    className="flex-1 py-2 rounded-xl font-semibold transition"
+                    style={{
+                      background: mode === 'signup' ? ACCENT : 'rgba(255,255,255,0.06)',
+                      color: '#fff',
+                      boxShadow: mode === 'signup' ? '0 0 10px rgba(106,247,209,0.28)' : 'none',
+                    }}
+                    disabled={loading}
+                  >
+                    Sign up
+                  </button>
+                </div>
+
+                <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+                  {mode === 'signup' && (
+                    <>
+                      <input
+                        value={fullName}
+                        onChange={(e) => setFullName(e.target.value)}
+                        placeholder="Full name"
+                        className="w-full rounded-xl bg-[#101314] text-white text-sm border border-[#13312b] px-4 py-3 outline-none focus:border-[#00ffc2]"
+                      />
+                      <input
+                        value={phone}
+                        onChange={(e) => setPhone(e.target.value)}
+                        placeholder="Phone (optional)"
+                        className="w-full rounded-xl bg-[#101314] text-white text-sm border border-[#13312b] px-4 py-3 outline-none focus:border-[#00ffc2]"
+                      />
+                    </>
+                  )}
+
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="Email address"
+                    className="w-full rounded-xl bg-[#101314] text-white text-sm border border-[#13312b] px-4 py-3 outline-none focus:border-[#00ffc2]"
+                  />
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder={mode === 'signup' ? 'Create a password' : 'Password'}
+                    className="w-full rounded-xl bg-[#101314] text-white text-sm border border-[#13312b] px-4 py-3 outline-none focus:border-[#00ffc2]"
+                  />
+
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="mt-1 py-3 rounded-xl font-semibold transition disabled:opacity-60"
+                    style={{ background: ACCENT, color: '#fff', boxShadow: '0 0 14px rgba(106,247,209,0.28)' }}
+                  >
+                    {loading
+                      ? mode === 'signup'
+                        ? 'Creating account…'
+                        : 'Signing in…'
+                      : mode === 'signup'
+                        ? 'Create account'
+                        : 'Sign in'}
+                  </button>
+                </form>
+
+                {/* Forgot password (only on sign in) */}
+                {mode === 'signin' && (
+                  <div className="mt-3 text-right">
+                    <button
+                      onClick={handleForgot}
+                      disabled={loading}
+                      className="text-xs underline decoration-white/40 hover:decoration-white"
+                      style={{ color: '#fff', opacity: 0.9 }}
+                    >
+                      Forgot password?
+                    </button>
+                  </div>
+                )}
+
+                <div className="flex items-center gap-3 my-4 text-white/40 text-xs">
+                  <div className="flex-1 h-px bg-white/10" />
+                  <span>or</span>
+                  <div className="flex-1 h-px bg-white/10" />
+                </div>
+
+                <button
+                  onClick={handleGoogle}
+                  disabled={loading}
+                  className="w-full py-3 rounded-xl border text-sm transition disabled:opacity-60"
+                  style={{
+                    borderColor: 'rgba(255,255,255,0.2)',
+                    background: 'rgba(16,19,20,0.88)',
+                    color: '#fff',
+                  }}
+                >
+                  Continue with Google
+                </button>
+
+                {(msg || err) && (
+                  <div
+                    className="mt-4 rounded-xl p-3 text-sm"
+                    style={{ background: 'rgba(16,19,20,0.88)', border: '1px solid rgba(255,255,255,0.2)' }}
+                  >
+                    {msg && <div className="text-white/90">{msg}</div>}
+                    {err && <div className="text-[#ff9aa2]">{err}</div>}
+                  </div>
+                )}
+
+                {showResend && (
+                  <div className="mt-3 text-xs text-white/70 flex items-center justify-between">
+                    <span>Didn’t get the verification email?</span>
+                    <button
+                      onClick={async () => {
+                        try {
+                          setLoading(true);
+                          setErr(null);
+                          setMsg(null);
+                          const { error } = await supabase.auth.resend({
+                            type: 'signup',
+                            email,
+                            options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+                          });
+                          if (error) throw error;
+                          setResent(true);
+                          setMsg('Verification email re-sent. Check your inbox.');
+                        } catch (e: any) {
+                          setErr(e?.message || 'Could not resend verification right now.');
+                        } finally {
+                          setLoading(false);
+                        }
+                      }}
+                      disabled={loading || !email || resent}
+                      className="px-3 py-1 rounded-lg border"
+                      style={{
+                        borderColor: 'rgba(255,255,255,0.25)',
+                        background: 'rgba(16,19,20,0.88)',
+                        color: '#fff',
+                      }}
+                    >
+                      {resent ? 'Sent ✓' : 'Resend'}
+                    </button>
+                  </div>
+                )}
+
+                <div className="mt-3 text-xs text-white/50">
+                  You must {mode === 'signup' ? 'sign up' : 'sign in'} to continue.
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </>
   );
 }
 
-function Spinner() {
-  return (
-    <span
-      className="inline-block w-4 h-4 rounded-full border-2 border-white/70 border-t-transparent animate-spin"
-      aria-hidden
-    />
-  );
+function delay(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
 }
