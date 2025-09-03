@@ -2,9 +2,8 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import dynamic from 'next/dynamic';
-import { supabase } from '@/lib/supabaseClient';
+import { supabase } from '@/lib/supabase-client';
 
-// Robust dynamic that returns mod.default (if present) and shows a loader while it loads.
 const BuilderDashboard = dynamic(
   async () => {
     const mod = await import('@/components/builder/BuilderDashboard');
@@ -41,7 +40,6 @@ export default function BuilderPage() {
     let unsub: { data?: { subscription?: { unsubscribe?: () => void } } } | null = null;
 
     (async () => {
-      // Initial check
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
         router.replace(`/auth?mode=signin&from=${encodeURIComponent('/builder')}`);
@@ -51,7 +49,6 @@ export default function BuilderPage() {
       setAuthed(true);
       setChecking(false);
 
-      // React to future auth changes (optional safety)
       unsub = supabase.auth.onAuthStateChange((_e, sess) => {
         if (!sess) {
           router.replace(`/auth?mode=signin&from=${encodeURIComponent('/builder')}`);
@@ -86,10 +83,7 @@ export default function BuilderPage() {
     );
   }
 
-  if (!authed) {
-    // We already triggered a redirect; render nothing to avoid flicker.
-    return null;
-  }
+  if (!authed) return null;
 
   return <BuilderDashboard />;
 }
