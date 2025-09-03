@@ -1,227 +1,252 @@
 // pages/auth.tsx
-'use client';
-
 import { useEffect, useMemo, useState } from 'react';
+import Head from 'next/head';
 import { useRouter } from 'next/router';
-import { supabase } from '@/lib/supabase-client';
+import { supabase } from '../lib/supabase-client';
 
-function Field({
-  label,
-  type = 'text',
-  value,
-  onChange,
-  autoComplete,
-}: {
-  label: string;
-  type?: string;
-  value: string;
-  onChange: (v: string) => void;
-  autoComplete?: string;
-}) {
-  return (
-    <label className="block">
-      <span className="text-xs text-white/70 pl-1">{label}</span>
-      <input
-        type={type}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        autoComplete={autoComplete}
-        className="mt-1 w-full px-3 py-2 rounded-[10px] bg-[#101314] text-white/95 border border-white/15 outline-none focus:border-[#00ffc2]"
-      />
-    </label>
-  );
-}
-
-function LoadingOverlay({ text = 'Loading…' }: { text?: string }) {
-  return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.45)' }}>
-      <div className="flex items-center gap-3 px-4 py-3 rounded-[12px]" style={{ background: 'rgba(16,19,20,0.92)', border: '1px solid rgba(255,255,255,0.08)' }}>
-        <div className="h-5 w-5 rounded-full border-2 border-white/20 border-t-[#00ffc2] animate-spin" />
-        <div className="text-white/90 text-sm">{text}</div>
-      </div>
-    </div>
-  );
-}
+type Mode = 'signin' | 'signup';
 
 export default function AuthPage() {
   const router = useRouter();
-  const query = useMemo(
-    () => new URLSearchParams((router.asPath.split('?')[1] ?? '')),
-    [router.asPath]
-  );
+  const qMode = (router.query.mode === 'signin' ? 'signin' : 'signup') as Mode;
+  const from = typeof router.query.from === 'string' ? router.query.from : '/builder';
 
-  const startMode = (query.get('mode') === 'signin' ? 'signin' : 'signup') as
-    | 'signin'
-    | 'signup';
-  const from = query.get('from') || '/builder';
-
-  const [mode, setMode] = useState<'signin' | 'signup'>(startMode);
+  const [mode, setMode] = useState<Mode>(qMode);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [phone, setPhone] = useState(''); // optional—store later in onboarding if you want
-  const [busy, setBusy] = useState(false);
+  const [fullName, setFullName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  const onGoogle = async () => {
+  useEffect(() => {
+    setMode(qMode);
+  }, [qMode]);
+
+  const title = mode === 'signin' ? 'Sign in' : 'Sign up';
+
+  const accent = '#00ffc2';
+  const cardStyle: React.CSSProperties = {
+    background: 'rgba(13,15,17,0.9)',
+    border: '2px dashed rgba(106,247,209,0.30)',
+    boxShadow: 'inset 0 0 18px rgba(0,0,0,0.25), 0 0 18px rgba(106,247,209,0.05)',
+    borderRadius: 10,
+  };
+
+  const switchMode = (m: Mode) => {
+    setErr(null);
+    setMsg(null);
+    setMode(m);
+    // keep the `from` page intact
+    router.replace({ pathname: '/auth', query: { mode: m, from } }, undefined, { shallow: true });
+  };
+
+  const handleGoogle = async () => {
     try {
-      setBusy(true);
+      setLoading(true);
       setErr(null);
-      setMsg(null);
-      const origin = window.location.origin;
-      const redirectTo = `${origin}/auth/callback?from=${
-        mode === 'signup'
-          ? encodeURIComponent('/builder?mode=signup&onboard=1')
-          : encodeURIComponent('/builder')
-      }`;
+      setMsg('Opening Google…');
+
+      // keep post-auth redirect in localStorage so callback can read it
+      localStorage.setItem(
+        'postAuthRedirect',
+        mode === 'signup' ? `${from}?onboard=1&mode=signup` : from
+      );
+
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo,
+          redirectTo: `${window.location.origin}/auth/callback`,
           queryParams: { prompt: 'select_account' },
         },
       });
       if (error) throw error;
-      // Supabase will redirect; show loading until the browser navigates
-      setMsg('Redirecting to Google…');
     } catch (e: any) {
-      setErr(e?.message || 'Google sign-in failed. Is the Google provider enabled in Supabase?');
-    } finally {
-      setBusy(false); // page will leave anyway; safe
+      setErr(e?.message || 'Failed to open Google');
+      setLoading(false);
+      setMsg(null);
     }
   };
 
-  const onEmail = async () => {
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErr(null);
+    setMsg(null);
+
+    if (!email || !password || (mode === 'signup' && !fullName)) {
+      setErr('Please fill all required fields.');
+      return;
+    }
+
+    setLoading(true);
+
     try {
-      setBusy(true);
-      setErr(null);
-      setMsg(null);
-      if (!email || !password) throw new Error('Email and password are required.');
-
       if (mode === 'signup') {
-        const origin = window.location.origin;
-        const redirectTo = `${origin}/auth/callback?from=${encodeURIComponent(
-          '/builder?mode=signup&onboard=1'
-        )}`;
-
-        const { error } = await supabase.auth.signUp({
+        // Password sign-up (no email wait). If your project requires email confirmation,
+        // Supabase will return a user with email_confirmed=false; we’ll still show a success
+        // message and nudge them, but this avoids the “feels like a scam” magic-link loop.
+        const { data, error } = await supabase.auth.signUp({
           email,
           password,
-          options: { emailRedirectTo: redirectTo },
+          options: {
+            data: { full_name: fullName, phone },
+            emailRedirectTo: `${window.location.origin}/auth/callback`,
+          },
         });
         if (error) throw error;
 
-        setMsg('Check your inbox. Click the verification link to finish creating your account.');
+        // If confirmation is required, user/session can be null here.
+        if (!data.session) {
+          setMsg('Account created. Check your email to verify, then come back.');
+          setLoading(false);
+          return;
+        }
+        // session is present (email confirmation disabled) → go on
+        localStorage.setItem('postAuthRedirect', `${from}?onboard=1&mode=signup`);
+        setMsg('Setting up your account…');
+        await smallDelay();
+        router.replace(`${from}?onboard=1&mode=signup`);
+        return;
       } else {
-        const { error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
+        // Sign in (checks if user exists — won’t create a new account)
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
 
+        localStorage.setItem('postAuthRedirect', from);
         setMsg('Signing you in…');
-        // small delay feels natural, then go
-        setTimeout(() => router.push('/builder'), 400);
+        await smallDelay();
+        router.replace(from);
         return;
       }
     } catch (e: any) {
-      setErr(e?.message || 'Authentication failed.');
+      const m = e?.message || 'Something went wrong.';
+      if (m.toLowerCase().includes('invalid login credentials')) {
+        setErr('Wrong email or password.');
+      } else if (m.toLowerCase().includes('user already registered')) {
+        setErr('This email is already registered. Try signing in.');
+      } else {
+        setErr(m);
+      }
     } finally {
-      setBusy(false);
+      setLoading(false);
     }
   };
 
   return (
-    <div
-      className="min-h-screen w-full flex items-start justify-center pt-20 px-4"
-      style={{ background: '#0b0c10', color: 'white' }}
-    >
-      {busy && <LoadingOverlay text="Please wait…" />}
+    <>
+      <Head>
+        <title>{title} — Reduc AI</title>
+      </Head>
 
-      <div
-        className="w-full max-w-md rounded-[16px] p-6"
-        style={{
-          background: 'rgba(16,19,20,0.88)',
-          border: '1px solid rgba(255,255,255,0.08)',
-          boxShadow: '0 10px 30px rgba(0,0,0,0.35)',
-        }}
-      >
-        {/* Tabs */}
-        <div className="flex gap-2 mb-5">
+      <div className="min-h-screen w-full font-movatif"
+           style={{ background: '#0b0c10', color: '#fff', display: 'grid', placeItems: 'center', padding: '40px 16px' }}>
+        <div className="w-full max-w-[520px] p-6" style={cardStyle}>
+          {/* Tabs */}
+          <div className="flex gap-2 mb-5">
+            <button
+              onClick={() => switchMode('signin')}
+              className="flex-1 py-2 rounded-[8px] font-semibold transition"
+              style={{
+                background: mode === 'signin' ? accent : 'rgba(255,255,255,0.06)',
+                color: mode === 'signin' ? '#000' : '#fff'
+              }}
+              disabled={loading}
+            >
+              Sign in
+            </button>
+            <button
+              onClick={() => switchMode('signup')}
+              className="flex-1 py-2 rounded-[8px] font-semibold transition"
+              style={{
+                background: mode === 'signup' ? accent : 'rgba(255,255,255,0.06)',
+                color: mode === 'signup' ? '#000' : '#fff'
+              }}
+              disabled={loading}
+            >
+              Sign up
+            </button>
+          </div>
+
+          {/* Form */}
+          <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+            {mode === 'signup' && (
+              <>
+                <input
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  placeholder="Full name"
+                  className="w-full rounded-md bg-[#101314] text-white text-sm border border-[#13312b] px-4 py-3 outline-none focus:border-[#00ffc2]"
+                />
+                <input
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  placeholder="Phone (optional)"
+                  className="w-full rounded-md bg-[#101314] text-white text-sm border border-[#13312b] px-4 py-3 outline-none focus:border-[#00ffc2]"
+                />
+              </>
+            )}
+
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="Email address"
+              className="w-full rounded-md bg-[#101314] text-white text-sm border border-[#13312b] px-4 py-3 outline-none focus:border-[#00ffc2]"
+            />
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder={mode === 'signup' ? 'Create a password' : 'Password'}
+              className="w-full rounded-md bg-[#101314] text-white text-sm border border-[#13312b] px-4 py-3 outline-none focus:border-[#00ffc2]"
+            />
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="mt-1 py-3 rounded-[8px] font-semibold shadow-[0_0_10px_rgba(106,247,209,0.28)] transition disabled:opacity-60"
+              style={{ background: accent, color: '#000' }}
+            >
+              {loading ? (mode === 'signup' ? 'Creating account…' : 'Signing in…') : (mode === 'signup' ? 'Create account' : 'Sign in')}
+            </button>
+          </form>
+
+          {/* Divider */}
+          <div className="flex items-center gap-3 my-4 text-white/40 text-xs">
+            <div className="flex-1 h-px bg-white/10" />
+            <span>or</span>
+            <div className="flex-1 h-px bg-white/10" />
+          </div>
+
           <button
-            onClick={() => setMode('signin')}
-            className={`flex-1 py-2 rounded-[10px] border transition ${
-              mode === 'signin'
-                ? 'bg-[#00ffc2] text-black border-[#00ffc2]'
-                : 'border-white/15 hover:bg-white/5'
-            }`}
-          >
-            Sign in
-          </button>
-          <button
-            onClick={() => setMode('signup')}
-            className={`flex-1 py-2 rounded-[10px] border transition ${
-              mode === 'signup'
-                ? 'bg-[#00ffc2] text-black border-[#00ffc2]'
-                : 'border-white/15 hover:bg-white/5'
-            }`}
-          >
-            Sign up
-          </button>
-        </div>
-
-        {/* Form */}
-        <div className="space-y-4">
-          <Field
-            label="Email"
-            type="email"
-            value={email}
-            onChange={setEmail}
-            autoComplete="email"
-          />
-          <Field
-            label="Password"
-            type="password"
-            value={password}
-            onChange={setPassword}
-            autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
-          />
-          <Field
-            label="Phone (optional)"
-            type="tel"
-            value={phone}
-            onChange={setPhone}
-            autoComplete="tel"
-          />
-
-          <button
-            onClick={onEmail}
-            disabled={busy}
-            className="w-full py-2 rounded-[10px] bg-[#00ffc2] text-black font-semibold shadow-[0_0_10px_rgba(106,247,209,0.28)] hover:brightness-110 disabled:opacity-60"
-          >
-            {mode === 'signup' ? 'Create account' : 'Sign in'}
-          </button>
-
-          <div className="relative my-2 text-center text-white/50 text-xs select-none">OR</div>
-
-          <button
-            disabled={busy}
-            onClick={onGoogle}
-            className="w-full py-2 rounded-[10px] border border-white/15 hover:bg-white/5 disabled:opacity-60"
+            onClick={handleGoogle}
+            disabled={loading}
+            className="w-full py-3 rounded-[8px] border text-sm transition disabled:opacity-60"
+            style={{ borderColor: 'rgba(255,255,255,0.2)', background: 'rgba(16,19,20,0.88)' }}
           >
             Continue with Google
           </button>
 
-          <div className="text-center text-xs text-white/60 mt-2">
-            {mode === 'signup'
-              ? 'Verify your email to continue.'
-              : 'You must sign in to continue.'}
-          </div>
+          {/* Messages */}
+          {(msg || err) && (
+            <div className="mt-4 rounded-md p-3 text-sm"
+                 style={{ background: 'rgba(16,19,20,0.88)', border: '1px solid rgba(255,255,255,0.2)' }}>
+              {msg && <div className="text-white/90">{msg}</div>}
+              {err && <div className="text-[#ff7a7a]">{err}</div>}
+            </div>
+          )}
 
-          {msg && <div className="text-[#6af7d1] text-sm mt-2">{msg}</div>}
-          {err && <div className="text-[#ff7a7a] text-sm mt-2">{err}</div>}
+          {/* Tiny helper */}
+          <div className="mt-3 text-xs text-white/50">
+            You must {mode === 'signup' ? 'sign up' : 'sign in'} to continue.
+          </div>
         </div>
       </div>
-    </div>
+    </>
   );
+}
+
+function smallDelay(ms = 650) {
+  return new Promise((r) => setTimeout(r, ms));
 }
