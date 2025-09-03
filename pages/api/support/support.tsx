@@ -9,12 +9,17 @@ type AskResponse = { reply?: string; citations?: string[]; error?: string };
 
 export default function SupportPage() {
   const [messages, setMessages] = useState<Msg[]>([
-    { role: 'assistant', content: "Hi — I'm Riley. Ask me anything about reducai.io." }
+    {
+      role: 'assistant',
+      content:
+        "Hi — I'm Riley. I can help you create a chatbot build, connect your API key, test it, or fix errors. What would you like to do?"
+    }
   ]);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const boxRef = useRef<HTMLDivElement | null>(null);
 
+  // auto-scroll to newest message
   useEffect(() => {
     boxRef.current?.scrollTo({ top: boxRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages]);
@@ -36,6 +41,7 @@ export default function SupportPage() {
       let reply = '';
       let citations: string[] = [];
 
+      // Prefer JSON, fall back to text to surface real errors
       try {
         const j: AskResponse = await r.json();
         reply = j?.reply || j?.error || '';
@@ -69,7 +75,13 @@ export default function SupportPage() {
   }
 
   function clearChat() {
-    setMessages([{ role: 'assistant', content: "Hi — I'm Riley. Ask me anything about reducai.io." }]);
+    setMessages([
+      {
+        role: 'assistant',
+        content:
+          "Hi — I'm Riley. I can help you create a chatbot build, connect your API key, test it, or fix errors. What would you like to do?"
+      }
+    ]);
   }
 
   return (
@@ -93,7 +105,7 @@ export default function SupportPage() {
         {messages.map((m, i) => (
           <div key={i} className="flex">
             <div
-              className={`max-w-[86%] text-sm px-3 py-2 rounded-lg ${
+              className={`max-w-[86%] whitespace-pre-wrap text-sm px-3 py-2 rounded-lg ${
                 m.role === 'user'
                   ? 'bg-[#0f4136] text-[#d9fff5]'
                   : 'bg-[#0f1314] text-white/90 border border-white/10'
@@ -118,6 +130,7 @@ export default function SupportPage() {
           disabled={busy}
           className="inline-flex items-center gap-2 h-[44px] px-4 rounded-[12px]"
           style={{ background: '#59d9b3', color: '#0b0c10', opacity: busy ? 0.7 : 1 }}
+          title={busy ? 'Sending…' : 'Send'}
         >
           <CornerDownLeft className="w-4 h-4" /> Send
         </button>
