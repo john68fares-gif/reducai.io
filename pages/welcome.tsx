@@ -1,105 +1,161 @@
+// /pages/welcome.tsx
 import { useEffect, useState } from 'react';
-import { useSession, signOut } from 'next-auth/react';
+import Head from 'next/head';
 import { useRouter } from 'next/router';
-import { motion } from 'framer-motion';
+import { supabase } from '@/lib/supabase-client';
 
-const CARD: React.CSSProperties = {
-  background: 'rgba(13,15,17,.96)',
-  border: '1px solid rgba(106,247,209,.28)',
-  borderRadius: 20,
-  boxShadow: '0 0 28px rgba(106,247,209,.10), inset 0 0 22px rgba(0,0,0,.28)',
-};
-
-const OPTIONS = [
-  'YouTube', 'TikTok', 'Instagram', 'Twitter/X', 'Reddit', 'Google Search',
-  'Friend/Referral', 'BuildMyAgent community', 'Other'
-];
-
-export default function Welcome() {
-  const { data: session, status } = useSession();
-  const [fullName, setFullName] = useState('');
-  const [heardFrom, setHeardFrom] = useState(OPTIONS[0]);
-  const [sending, setSending] = useState(false);
+export default function WelcomePage() {
   const router = useRouter();
+  const [status, setStatus] = useState<'checking' | 'ready' | 'redirecting'>('checking');
 
   useEffect(() => {
-    if (status === 'unauthenticated') router.replace('/login');
-  }, [status]);
+    let unsub: any;
 
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setSending(true);
-    try {
-      await fetch('/api/track/signup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fullName, heardFrom }),
+    (async () => {
+      // client-side session check (avoids SSR/localStorage problems)
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        setStatus('redirecting');
+        router.replace(`/auth?mode=signin&from=${encodeURIComponent('/welcome')}`);
+        return;
+      }
+
+      setStatus('ready');
+
+      // If they sign out while here, kick them to auth
+      unsub = supabase.auth.onAuthStateChange((_e, s) => {
+        if (!s) {
+          setStatus('redirecting');
+          router.replace(`/auth?mode=signin&from=${encodeURIComponent('/welcome')}`);
+        }
       });
-      // Optionally store locally for later use
-      try {
-        const u = session?.user || {};
-        localStorage.setItem('profile:completed', '1');
-        localStorage.setItem('profile:data', JSON.stringify({ id: (u as any).id, fullName, email: u?.email, heardFrom }));
-      } catch {}
-      router.replace('/builder?step=1'); // go inside app
-    } finally {
-      setSending(false);
-    }
+    })();
+
+    return () => unsub?.data?.subscription?.unsubscribe?.();
+  }, [router]);
+
+  if (status !== 'ready') {
+    return (
+      <>
+        <Head><title>Loading… · Reduc.ai</title></Head>
+        <div style={page}>
+          <div style={card}>
+            <span style={spinner} aria-hidden />
+            <span> {status === 'checking' ? 'Checking session…' : 'Redirecting…'} </span>
+          </div>
+        </div>
+      </>
+    );
   }
 
+  // --- Authenticated content below ---
   return (
-    <main className="min-h-screen relative" style={{ background:'#0b0c10', color:'#fff' }}>
-      {/* glow */}
-      <div style={{ position:'absolute', inset:0, pointerEvents:'none' }}>
-        <div style={{ position:'absolute', width:560, height:560, borderRadius:'50%',
-          background:'radial-gradient(circle, rgba(106,247,209,.24), transparent)', filter:'blur(70px)', top:-140, left:-140 }} />
-      </div>
-
-      <div className="min-h-screen flex items-center justify-center p-6">
-        <motion.div
-          initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: .35 }}
-          className="w-full max-w-lg p-6" style={CARD}
-        >
-          <h1 className="text-2xl font-bold">Finish signup</h1>
-          <p className="text-white/70 text-sm mt-1">Just two quick details.</p>
-
-          <form onSubmit={onSubmit} className="mt-6 grid gap-3">
-            <label className="text-xs text-white/70">Full name</label>
-            <input
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-              required
-              placeholder="Your name"
-              className="h-11 rounded-xl bg-black/30 border border-white/20 px-3 outline-none focus:border-[#6af7d1]"
-            />
-
-            <label className="text-xs text-white/70 mt-2">How did you hear about us?</label>
-            <select
-              value={heardFrom}
-              onChange={(e) => setHeardFrom(e.target.value)}
-              className="h-11 rounded-xl bg-black/30 border border-white/20 px-3 outline-none focus:border-[#6af7d1]"
-            >
-              {OPTIONS.map(op => <option key={op} value={op}>{op}</option>)}
-            </select>
-
-            <div className="mt-4 flex gap-10">
+    <>
+      <Head><title>Welcome · Reduc.ai</title></Head>
+      <main style={page}>
+        <div style={container}>
+          <div style={panel}>
+            <h1 style={h1}>Welcome 👋</h1>
+            <p style={p}>You’re signed in. Continue your onboarding or head to your builder.</p>
+            <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
               <button
-                type="submit"
-                disabled={sending}
-                className="h-11 px-5 rounded-xl font-semibold"
-                style={{ background:'#00ffc2', color:'#001018' }}
+                onClick={() => router.push('/builder?onboard=1')}
+                style={primary}
               >
-                {sending ? 'Saving…' : 'Continue'}
+                Continue setup
               </button>
-
-              <button type="button" onClick={() => signOut({ callbackUrl: '/login' })}
-                className="h-11 px-4 rounded-xl border border-white/20 bg-black/20">
-                Cancel
+              <button
+                onClick={() => router.push('/builder')}
+                style={ghost}
+              >
+                Open Builder
               </button>
             </div>
-          </form>
-        </motion.div>
-      </div>
-    </main>
+          </div>
+        </div>
+      </main>
+    </>
   );
+}
+
+// Force this page to be server-rendered at request time (no static prerender),
+// so Next won't try to run client hooks during build.
+export async function getServerSideProps() {
+  return { props: {} };
+}
+
+// --- inline styles (kept minimal and consistent with your dark UI) ---
+const ACCENT = '#6af7d1';
+
+const page: React.CSSProperties = {
+  minHeight: '100vh',
+  background: '#0b0c10',
+  color: '#fff',
+  display: 'grid',
+  placeItems: 'center',
+  padding: 24,
+};
+
+const container: React.CSSProperties = {
+  width: '100%',
+  maxWidth: 920,
+  padding: 16,
+};
+
+const panel: React.CSSProperties = {
+  borderRadius: 22,
+  background: 'rgba(13,15,17,0.92)',
+  border: '2px solid rgba(106,247,209,0.32)',
+  boxShadow: '0 18px 60px rgba(0,0,0,0.50), inset 0 0 22px rgba(0,0,0,0.28), 0 0 20px rgba(106,247,209,0.06)',
+  padding: '24px 22px',
+};
+
+const h1: React.CSSProperties = { margin: 0, fontSize: 28, fontWeight: 900, letterSpacing: '-0.02em' };
+const p: React.CSSProperties = { opacity: 0.85, marginTop: 8 };
+
+const primary: React.CSSProperties = {
+  padding: '12px 16px',
+  borderRadius: 14,
+  background: ACCENT,
+  color: '#000',
+  fontWeight: 800,
+  border: '1px solid rgba(106,247,209,0.45)',
+  boxShadow: '0 0 10px rgba(106,247,209,0.18)',
+  cursor: 'pointer',
+};
+
+const ghost: React.CSSProperties = {
+  padding: '12px 16px',
+  borderRadius: 14,
+  background: 'rgba(0,0,0,0.25)',
+  color: 'rgba(255,255,255,0.95)',
+  border: '1px solid rgba(255,255,255,0.20)',
+  fontWeight: 700,
+  cursor: 'pointer',
+};
+
+const card: React.CSSProperties = {
+  border: '1px solid rgba(255,255,255,0.12)',
+  background: 'rgba(16,19,20,0.88)',
+  borderRadius: 16,
+  padding: '14px 18px',
+  boxShadow: '0 20px 60px rgba(0,0,0,0.45)',
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 10,
+};
+
+const spinner: React.CSSProperties = {
+  width: 18, height: 18, borderRadius: 999,
+  border: '2px solid rgba(255,255,255,0.7)',
+  borderTopColor: 'transparent',
+  display: 'inline-block',
+  animation: 'spin 0.9s linear infinite',
+};
+
+// Keyframes for spinner (global)
+if (typeof document !== 'undefined') {
+  const style = document.createElement('style');
+  style.innerHTML = `@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}`;
+  document.head.appendChild(style);
 }
