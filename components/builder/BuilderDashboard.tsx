@@ -2,7 +2,9 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter, usePathname, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/router';
+import { useSession } from 'next-auth/react';
+import OnboardingOverlay from '../ui/OnboardingOverlay';
 import dynamic from 'next/dynamic';
 import {
   Plus,
@@ -19,8 +21,6 @@ import {
   Landmark,
   ListChecks,
 } from 'lucide-react';
-import { supabase } from '@/lib/supabase-client';
-import OnboardingOverlay from '../ui/OnboardingOverlay';
 import CustomizeModal from './CustomizeModal';
 import Step1AIType from './Step1AIType';
 import Step2ModelSettings from './Step2ModelSettings';
@@ -62,7 +62,7 @@ type Bot = {
   language?: string;
   model?: string;
   description?: string;
-  prompt?: string;
+  prompt?: string; // Step 3 raw
   createdAt?: string;
   updatedAt?: string;
   appearance?: Appearance;
@@ -73,6 +73,7 @@ const SAVE_KEY = 'chatbots';
 const nowISO = () => new Date().toISOString();
 const fmtDate = (iso?: string) => (iso ? new Date(iso).toLocaleDateString() : '');
 
+// newest → oldest by updatedAt (fallback createdAt)
 const sortByNewest = (arr: Bot[]) =>
   arr
     .slice()
@@ -98,7 +99,7 @@ function loadBots(): Bot[] {
         language: s(b?.language),
         model: s(b?.model, 'gpt-4o-mini'),
         description: s(b?.description),
-        prompt: s(b?.prompt),
+        prompt: s(b?.prompt), // keep EXACT Step 3
         createdAt: b?.createdAt ?? nowISO(),
         updatedAt: b?.updatedAt ?? b?.createdAt ?? nowISO(),
         appearance: b?.appearance ?? undefined,
@@ -115,6 +116,8 @@ function saveBots(bots: Bot[]) {
   } catch {}
 }
 
+/* --------------------- Step 3 section splitter (no edits) --------------------- */
+
 type PromptSectionKey =
   | 'DESCRIPTION'
   | 'AI DESCRIPTION'
@@ -126,7 +129,7 @@ type PromptSectionKey =
 type SplitSection = {
   key: PromptSectionKey;
   title: string;
-  text: string;
+  text: string; // exact slice from Step 3
 };
 
 const DISPLAY_TITLES: Record<PromptSectionKey, string> = {
@@ -147,6 +150,7 @@ const ICONS: Record<PromptSectionKey, JSX.Element> = {
   'COMPANY FAQ': <Landmark className="w-4 h-4 text-[#6af7d1]" />,
 };
 
+// tolerant heading match (**, ###, numbered, etc.)
 const HEADING_REGEX =
   /^(?:\s*(?:[#>*-]|\d+\.)\s*)?(?:\*\*)?\s*(DESCRIPTION|AI\s*DESCRIPTION|RULES\s*(?:AND|&)\s*GUIDELINES|AI\s*RULES|QUESTION\s*FLOW|COMPANY\s*FAQ)\s*(?:\*\*)?\s*:?\s*$/gmi;
 
@@ -175,86 +179,49 @@ function splitStep3IntoSections(step3Raw?: string): SplitSection[] | null {
     out.push({
       key: h.label,
       title: DISPLAY_TITLES[h.label] || h.label,
-      text: step3Raw.slice(h.end, nextStart),
+      text: step3Raw.slice(h.end, nextStart), // exact slice (no sanitizing)
     });
   }
   return out;
 }
 
+/* ----------------------------------- UI ----------------------------------- */
+
 export default function BuilderDashboard() {
   const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
 
-  // -------- AUTH GUARD (Supabase) --------
-  const [authed, setAuthed] = useState<boolean | null>(null);
-  const [userId, setUserId] = useState<string>('');
+  // Safe search param reader for pages/ router
+  const search = useMemo(
+    () => new URLSearchParams((router.asPath.split('?')[1] ?? '')),
+    [router.asPath]
+  );
+  const pathname = router.pathname;
 
-  useEffect(() => {
-    let mounted = true;
-    const check = async () => {
-      const { data } = await supabase.auth.getSession();
-      if (!mounted) return;
-      const uid = data.session?.user?.id || '';
-      setUserId(uid);
-      if (!data.session) {
-        // Not logged in → send to auth
-        const q = new URLSearchParams({ mode: 'signin', from: '/builder' });
-        router.replace(`/auth?${q.toString()}`);
-        setAuthed(false);
-      } else {
-        setAuthed(true);
-      }
-    };
-    check();
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
-      const uid = session?.user?.id || '';
-      setUserId(uid);
-      if (!session) {
-        const q = new URLSearchParams({ mode: 'signin', from: '/builder' });
-        router.replace(`/auth?${q.toString()}`);
-      } else {
-        setAuthed(true);
-      }
-    });
-    return () => {
-      mounted = false;
-      sub.subscription.unsubscribe();
-    };
-  }, [router]);
+  // --- Welcome overlay (only on SIGN-UP) ---
+  const { data: session, status } = useSession();
+  const userId = useMemo(() => (session?.user as any)?.id || '', [session]);
 
-  // Until we know, keep page blank to avoid flash
-  if (authed === null) {
-    return <div className="min-h-screen w-full bg-[#0b0c10]" />;
-  }
-  // -------- END AUTH GUARD --------
-
-  // Welcome overlay (only after SIGNUP)
-  const modeParam = searchParams.get('mode');
-  const mode = (modeParam === 'signin' ? 'signin' : 'signup') as 'signup' | 'signin';
-  const onboard = searchParams.get('onboard') === '1';
-  const forceOverlay = searchParams.get('forceOverlay') === '1';
+  const mode = (search.get('mode') === 'signin' ? 'signin' : 'signup') as 'signup' | 'signin';
+  const onboard = search.get('onboard') === '1';
+  const forceOverlay = search.get('forceOverlay') === '1';
 
   const [welcomeOpen, setWelcomeOpen] = useState(false);
 
   useEffect(() => {
-    if (!userId) return;
-    if (forceOverlay || (onboard && mode === 'signup')) {
-      setWelcomeOpen(true);
-    }
-  }, [userId, forceOverlay, onboard, mode]);
+    if (status !== 'authenticated' || !userId) return;
+    if (forceOverlay || (onboard && mode === 'signup')) setWelcomeOpen(true);
+  }, [status, userId, forceOverlay, onboard, mode]);
 
   const closeWelcome = () => {
     setWelcomeOpen(false);
-    try {
-      localStorage.setItem(`user:${userId}:profile:completed`, '1');
-    } catch {}
-    const usp = new URLSearchParams(Array.from(searchParams.entries()));
+    try { localStorage.setItem(`user:${userId}:profile:completed`, '1'); } catch {}
+    const usp = new URLSearchParams(search.toString());
     usp.delete('onboard'); usp.delete('mode'); usp.delete('forceOverlay');
-    router.replace(`${pathname}?${usp.toString()}`, { scroll: false });
+    router.replace(`${pathname}?${usp.toString()}`, undefined, { shallow: true });
   };
+  // --- end welcome overlay ---
 
-  const rawStep = searchParams.get('step');
+  const rawStep = search.get('step');
   const step = rawStep && ['1', '2', '3', '4'].includes(rawStep) ? rawStep : null;
 
   const [query, setQuery] = useState('');
@@ -309,10 +276,10 @@ export default function BuilderDashboard() {
   const viewedBot = useMemo(() => bots.find((b) => b.id === viewId), [bots, viewId]);
 
   const setStep = (next: string | null) => {
-    const usp = new URLSearchParams(Array.from(searchParams.entries()));
+    const usp = new URLSearchParams(search.toString());
     if (next) usp.set('step', next);
     else usp.delete('step');
-    router.replace(`${pathname}?${usp.toString()}`, { scroll: false });
+    router.replace(`${pathname}?${usp.toString()}`, undefined, { shallow: true });
   };
 
   if (step) {
@@ -334,7 +301,7 @@ export default function BuilderDashboard() {
         <div className="flex items-center justify-between mb-7">
           <h1 className="text-2xl md:text-3xl font-semibold">Builds</h1>
           <button
-            onClick={() => setStep('1')}
+            onClick={() => router.push('/builder?step=1')}
             className="px-4 py-2 rounded-[10px] bg-[#00ffc2] text-black font-semibold shadow-[0_0_10px_rgba(106,247,209,0.28)] hover:brightness-110 transition"
           >
             Create a Build
@@ -351,7 +318,7 @@ export default function BuilderDashboard() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-7">
-          <CreateCard onClick={() => setStep('1')} />
+          <CreateCard onClick={() => router.push('/builder?step=1')} />
 
           {filtered.map((bot) => (
             <BuildCard
@@ -416,7 +383,7 @@ export default function BuilderDashboard() {
 
       {viewedBot && <PromptOverlay bot={viewedBot} onClose={() => setViewId(null)} />}
 
-      {/* Welcome overlay over the dashboard (opens only after SIGN-UP) */}
+      {/* Welcome overlay over the dashboard (sign-up only) */}
       <OnboardingOverlay open={welcomeOpen} mode={mode} userId={userId} onDone={closeWelcome} />
     </div>
   );
