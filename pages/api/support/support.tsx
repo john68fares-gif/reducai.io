@@ -5,6 +5,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { HelpCircle, CornerDownLeft } from 'lucide-react';
 
 type Msg = { role: 'user' | 'assistant'; content: string };
+type AskResponse = { reply?: string; citations?: string[]; error?: string };
 
 export default function SupportPage() {
   const [messages, setMessages] = useState<Msg[]>([
@@ -31,11 +32,30 @@ export default function SupportPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question: content })
       });
-      const j = await r.json();
-      const reply = j?.reply || 'No answer.';
-      setMessages(m => [...m, { role: 'assistant', content: reply }]);
-    } catch {
-      setMessages(m => [...m, { role: 'assistant', content: 'Server error. Try again.' }]);
+
+      let reply = '';
+      let citations: string[] = [];
+
+      try {
+        const j: AskResponse = await r.json();
+        reply = j?.reply || j?.error || '';
+        citations = Array.isArray(j?.citations) ? j.citations : [];
+      } catch {
+        const txt = await r.text().catch(() => '');
+        reply = `Server returned non-JSON (${r.status}). ${txt.slice(0, 200) || 'No details.'}`;
+      }
+
+      if (!reply) {
+        reply = r.ok ? 'No answer.' : `Server error (${r.status}).`;
+      }
+
+      const suffix = citations.length ? `\n\nSources: ${citations.join(', ')}` : '';
+      setMessages(m => [...m, { role: 'assistant', content: reply + suffix }]);
+    } catch (e: any) {
+      setMessages(m => [
+        ...m,
+        { role: 'assistant', content: `Network error. ${String(e).slice(0, 120)}` }
+      ]);
     } finally {
       setBusy(false);
     }
@@ -48,11 +68,23 @@ export default function SupportPage() {
     }
   }
 
+  function clearChat() {
+    setMessages([{ role: 'assistant', content: "Hi — I'm Riley. Ask me anything about reducai.io." }]);
+  }
+
   return (
     <main className="px-6 py-10" style={{ maxWidth: 980, margin: '0 auto' }}>
-      <h1 className="text-2xl font-bold text-white flex items-center gap-2 mb-6">
-        <HelpCircle className="w-6 h-6 text-[#6af7d1]" /> Support
-      </h1>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl font-bold text-white flex items-center gap-2">
+          <HelpCircle className="w-6 h-6 text-[#6af7d1]" /> Support
+        </h1>
+        <button
+          onClick={clearChat}
+          className="text-xs px-3 py-1 rounded-lg border border-white/10 bg-black/30 text-white/80"
+        >
+          Clear
+        </button>
+      </div>
 
       <div
         ref={boxRef}
