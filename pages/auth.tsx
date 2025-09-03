@@ -1,18 +1,54 @@
 // pages/auth.tsx
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import { supabase } from '@/lib/supabase-client';
 
+function Field({
+  label,
+  type = 'text',
+  value,
+  onChange,
+  autoComplete,
+}: {
+  label: string;
+  type?: string;
+  value: string;
+  onChange: (v: string) => void;
+  autoComplete?: string;
+}) {
+  return (
+    <label className="block">
+      <span className="text-xs text-white/70 pl-1">{label}</span>
+      <input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        autoComplete={autoComplete}
+        className="mt-1 w-full px-3 py-2 rounded-[10px] bg-[#101314] text-white/95 border border-white/15 outline-none focus:border-[#00ffc2]"
+      />
+    </label>
+  );
+}
+
 export default function AuthPage() {
   const router = useRouter();
-  const modeQuery = (router.query.mode === 'signin' ? 'signin' : 'signup') as 'signin' | 'signup';
-  const from = (router.query.from as string) || '/builder';
+  const query = useMemo(
+    () => new URLSearchParams((router.asPath.split('?')[1] ?? '')),
+    [router.asPath]
+  );
 
-  const [mode, setMode] = useState<'signin' | 'signup'>(modeQuery);
+  const startMode = (query.get('mode') === 'signin' ? 'signin' : 'signup') as
+    | 'signin'
+    | 'signup';
+  const from = query.get('from') || '/builder';
+
+  const [mode, setMode] = useState<'signin' | 'signup'>(startMode);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  // Optional: collect phone now (save it later when user finishes onboarding)
+  const [phone, setPhone] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -20,84 +56,133 @@ export default function AuthPage() {
   const go = (url: string) => router.push(url);
 
   const onGoogle = async () => {
-    setBusy(true); setErr(null); setMsg(null);
     try {
+      setBusy(true);
+      setErr(null);
+      setMsg(null);
+      const origin = window.location.origin;
+      const redirectTo = `${origin}/auth/callback?from=${
+        mode === 'signup'
+          ? encodeURIComponent('/builder?mode=signup&onboard=1')
+          : encodeURIComponent('/builder')
+      }`;
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: `${window.location.origin}${from === '/builder'
-            ? '/builder?mode=signup&onboard=1'
-            : from}`,
-          queryParams: { prompt: 'select_account' }
-        }
+          redirectTo,
+          queryParams: { prompt: 'select_account' },
+        },
       });
       if (error) throw error;
       setMsg('Redirecting to Google…');
     } catch (e: any) {
-      setErr(e?.message || 'Google sign-in failed. Is the provider enabled in Supabase?');
+      setErr(e?.message || 'Google sign-in failed. Is the Google provider enabled in Supabase?');
     } finally {
       setBusy(false);
     }
   };
 
   const onEmail = async () => {
-    setBusy(true); setErr(null); setMsg(null);
     try {
+      setBusy(true);
+      setErr(null);
+      setMsg(null);
       if (!email || !password) throw new Error('Email and password are required.');
+
       if (mode === 'signup') {
-        const { data, error } = await supabase.auth.signUp({ email, password });
+        // Tell Supabase where to return after the user clicks "Verify email"
+        const origin = window.location.origin;
+        const redirectTo = `${origin}/auth/callback?from=${encodeURIComponent(
+          '/builder?mode=signup&onboard=1'
+        )}`;
+
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: { emailRedirectTo: redirectTo },
+        });
         if (error) throw error;
-        // If email confirmation is ON, user must confirm via email.
-        // Send them to builder with onboarding when session becomes active.
-        setMsg('Check your email to confirm your account. After confirming, you’ll be redirected.');
+
+        // If email confirmation is ON, the user needs to click the link.
+        setMsg('Check your email for a verification link to finish creating your account.');
       } else {
-        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
         if (error) throw error;
-        go('/builder'); // returning user
+        go('/builder');
         return;
       }
     } catch (e: any) {
-      setErr(e?.message || 'Auth failed.');
+      setErr(e?.message || 'Authentication failed.');
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <div className="min-h-screen flex items-start justify-center pt-24 px-4"
-         style={{ background: '#0b0c10', color: 'white' }}>
-      <div className="w-full max-w-md rounded-[16px] p-6"
-           style={{ background: 'rgba(16,19,20,0.88)', boxShadow: '0 0 24px rgba(0,0,0,0.35)' }}>
-        <div className="flex gap-2 mb-4">
+    <div
+      className="min-h-screen w-full flex items-start justify-center pt-20 px-4"
+      style={{ background: '#0b0c10', color: 'white' }}
+    >
+      <div
+        className="w-full max-w-md rounded-[16px] p-6"
+        style={{
+          background: 'rgba(16,19,20,0.88)',
+          border: '1px solid rgba(255,255,255,0.08)',
+          boxShadow: '0 10px 30px rgba(0,0,0,0.35)',
+        }}
+      >
+        {/* Tabs */}
+        <div className="flex gap-2 mb-5">
           <button
             onClick={() => setMode('signin')}
-            className={`flex-1 py-2 rounded-[10px] border ${mode==='signin' ? 'bg-[#00ffc2] text-black border-[#00ffc2]' : 'border-white/20'}`}
+            className={`flex-1 py-2 rounded-[10px] border transition ${
+              mode === 'signin'
+                ? 'bg-[#00ffc2] text-black border-[#00ffc2]'
+                : 'border-white/15 hover:bg-white/5'
+            }`}
           >
             Sign in
           </button>
           <button
             onClick={() => setMode('signup')}
-            className={`flex-1 py-2 rounded-[10px] border ${mode==='signup' ? 'bg-[#00ffc2] text-black border-[#00ffc2]' : 'border-white/20'}`}
+            className={`flex-1 py-2 rounded-[10px] border transition ${
+              mode === 'signup'
+                ? 'bg-[#00ffc2] text-black border-[#00ffc2]'
+                : 'border-white/15 hover:bg-white/5'
+            }`}
           >
             Sign up
           </button>
         </div>
 
-        <div className="space-y-3">
-          <input
+        {/* Form */}
+        <div className="space-y-4">
+          <Field
+            label="Email"
             type="email"
-            placeholder="Email"
             value={email}
-            onChange={(e)=>setEmail(e.target.value)}
-            className="w-full px-3 py-2 rounded-[10px] bg-[#101314] border border-white/15 outline-none"
+            onChange={setEmail}
+            autoComplete="email"
           />
-          <input
+          <Field
+            label="Password"
             type="password"
-            placeholder="Password"
             value={password}
-            onChange={(e)=>setPassword(e.target.value)}
-            className="w-full px-3 py-2 rounded-[10px] bg-[#101314] border border-white/15 outline-none"
+            onChange={setPassword}
+            autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
           />
+          {/* Optional phone field (collected for later use) */}
+          <Field
+            label="Phone (optional)"
+            type="tel"
+            value={phone}
+            onChange={setPhone}
+            autoComplete="tel"
+          />
+
           <button
             disabled={busy}
             onClick={onEmail}
@@ -106,20 +191,20 @@ export default function AuthPage() {
             {mode === 'signup' ? 'Create account' : 'Sign in'}
           </button>
 
-          <div className="relative my-3 text-center text-white/60 text-sm">
-            <span>or</span>
-          </div>
+          <div className="relative my-2 text-center text-white/50 text-xs select-none">OR</div>
 
           <button
             disabled={busy}
             onClick={onGoogle}
-            className="w-full py-2 rounded-[10px] border border-white/20 hover:bg-white/10 disabled:opacity-60"
+            className="w-full py-2 rounded-[10px] border border-white/15 hover:bg-white/5 disabled:opacity-60"
           >
             Continue with Google
           </button>
 
           <div className="text-center text-xs text-white/60 mt-2">
-            {mode === 'signup' ? 'You must sign up to continue.' : 'You must sign in to continue.'}
+            {mode === 'signup'
+              ? 'Verify your email to continue.'
+              : 'You must sign in to continue.'}
           </div>
 
           {msg && <div className="text-[#6af7d1] text-sm mt-2">{msg}</div>}
