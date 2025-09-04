@@ -79,7 +79,10 @@ export default function Sidebar() {
     >
       <div className="relative h-full flex flex-col">
         {/* Header */}
-        <div className="border-b px-4 py-5 flex items-center gap-3" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
+        <div
+          className="border-b px-4 py-5 flex items-center gap-3"
+          style={{ borderColor: 'rgba(255,255,255,0.06)' }}
+        >
           <div
             className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
             style={{
@@ -132,7 +135,8 @@ export default function Sidebar() {
             style={{
               background: 'rgba(15,18,20,0.85)',
               border: '1px solid rgba(0,255,194,0.12)',
-              boxShadow: 'inset 0 0 12px rgba(0,0,0,0.35), 0 0 10px rgba(0,255,194,0.04)',
+              boxShadow:
+                'inset 0 0 12px rgba(0,0,0,0.35), 0 0 10px rgba(0,255,194,0.04)',
             }}
           >
             <div className="flex items-center gap-3 shrink-0">
@@ -157,10 +161,15 @@ export default function Sidebar() {
           style={{
             border: '1px solid rgba(255,255,255,0.10)',
             background: 'rgba(16,19,21,0.95)',
-            boxShadow: '0 2px 12px rgba(0,0,0,0.45), 0 0 10px rgba(0,255,194,0.06)',
+            boxShadow:
+              '0 2px 12px rgba(0,0,0,0.45), 0 0 10px rgba(0,255,194,0.06)',
           }}
         >
-          {collapsed ? <ChevronRight className="w-4 h-4 text-white/80" /> : <ChevronLeft className="w-4 h-4 text-white/80" />}
+          {collapsed ? (
+            <ChevronRight className="w-4 h-4 text-white/80" />
+          ) : (
+            <ChevronLeft className="w-4 h-4 text-white/80" />
+          )}
         </button>
       </div>
     </aside>
@@ -183,30 +192,45 @@ function NavList({ children }: { children: React.ReactNode }) {
 }
 
 function Item({
-  href, label, sub, icon, active, disabled, collapsed,
+  href,
+  label,
+  sub,
+  icon,
+  active,
+  disabled,
+  collapsed,
 }: {
-  href: string; label: string; sub?: string; icon: React.ReactNode;
-  active?: boolean; disabled?: boolean; collapsed: boolean;
+  href: string;
+  label: string;
+  sub?: string;
+  icon: React.ReactNode;
+  active?: boolean;
+  disabled?: boolean;
+  collapsed: boolean;
 }) {
   const body = (
     <div
       className={cn(
-        'group rounded-xl flex items-center transition-colors duration-200',
-        'px-3 py-2.5', // hoogte blijft altijd gelijk
+        'group rounded-xl flex items-center h-12 transition-colors duration-200', // vaste hoogte
+        'px-3',
         disabled && 'opacity-50 cursor-not-allowed',
         !disabled && 'hover:translate-x-[1px]'
       )}
       style={{
-        border: `1px solid ${active ? 'rgba(0,255,194,0.28)' : 'rgba(255,255,255,0.06)'}`,
-        background: active ? 'rgba(0,255,194,0.06)' : 'rgba(15,18,20,0.55)',
+        border: `1px solid ${
+          active ? 'rgba(0,255,194,0.28)' : 'rgba(255,255,255,0.06)'
+        }`,
+        background: active
+          ? 'rgba(0,255,194,0.06)'
+          : 'rgba(15,18,20,0.55)',
         boxShadow: active
           ? '0 0 12px rgba(0,255,194,0.16) inset, 0 0 8px rgba(0,255,194,0.04)'
           : 'inset 0 0 10px rgba(0,0,0,0.28)',
       }}
       title={collapsed ? label : undefined}
     >
-      {/* Icon wrapper: zelf blijft klein, icoon altijd gecentreerd */}
-      <div className="shrink-0 flex items-center justify-center w-5 h-5 text-white/90">
+      {/* Icon wrapper: altijd vierkant en gecentreerd */}
+      <div className="w-8 h-8 flex items-center justify-center shrink-0 text-white/90">
         {icon}
       </div>
 
@@ -214,21 +238,39 @@ function Item({
       <div
         className={cn(
           'overflow-hidden ml-3 transition-all duration-500 ease-in-out',
-          collapsed ? 'opacity-0 max-w-0' : 'opacity-100 max-w-[200px]'
+          collapsed
+            ? 'opacity-0 max-w-0'
+            : 'opacity-100 max-w-[200px]'
         )}
       >
         <div className="leading-tight">
-          <div className="text-[13px] font-semibold text-white/95">{label}</div>
-          {sub && <div className="text-[11px] text-white/55 mt-[3px] group-hover:text-white/70">{sub}</div>}
+          <div className="text-[13px] font-semibold text-white/95">
+            {label}
+          </div>
+          {sub && (
+            <div className="text-[11px] text-white/55 mt-[3px] group-hover:text-white/70">
+              {sub}
+            </div>
+          )}
         </div>
       </div>
     </div>
   );
   if (disabled) return <div>{body}</div>;
-  return <Link href={href} className="block">{body}</Link>;
+  return (
+    <Link href={href} className="block">
+      {body}
+    </Link>
+  );
 }
 
-function AnimatedText({ collapsed, children }: { collapsed: boolean; children: React.ReactNode }) {
+function AnimatedText({
+  collapsed,
+  children,
+}: {
+  collapsed: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <div
       className={cn(
