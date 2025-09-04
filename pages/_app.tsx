@@ -1,4 +1,3 @@
-// /pages/_app.tsx
 import type { AppProps } from 'next/app';
 import '@/styles/globals.css';
 import { useEffect, useMemo, useState } from 'react';
@@ -14,7 +13,10 @@ export default function App({ Component, pageProps }: AppProps) {
   const pathname = router.pathname;
 
   const isPublic = useMemo(
-    () => PUBLIC_ROUTES.some((base) => pathname === base || pathname.startsWith(`${base}/`)),
+    () =>
+      PUBLIC_ROUTES.some(
+        (base) => pathname === base || pathname.startsWith(`${base}/`)
+      ),
     [pathname]
   );
 
@@ -30,13 +32,17 @@ export default function App({ Component, pageProps }: AppProps) {
         clearRASessionCookie();
         setAuthed(false);
         if (!isPublic) {
-          router.replace(`/auth?mode=signin&from=${encodeURIComponent(router.asPath || '/')}`);
+          router.replace(
+            `/auth?mode=signin&from=${encodeURIComponent(router.asPath || '/')}`
+          );
         }
       }
     });
 
     (async () => {
-      const { data: { session } } = await supabase.auth.getSession();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
       if (session) {
         setRASessionCookie();
         setAuthed(true);
@@ -44,7 +50,9 @@ export default function App({ Component, pageProps }: AppProps) {
         clearRASessionCookie();
         setAuthed(false);
         if (!isPublic) {
-          router.replace(`/auth?mode=signin&from=${encodeURIComponent(router.asPath || '/')}`);
+          router.replace(
+            `/auth?mode=signin&from=${encodeURIComponent(router.asPath || '/')}`
+          );
         }
       }
       setChecking(false);
@@ -57,7 +65,10 @@ export default function App({ Component, pageProps }: AppProps) {
 
   if (checking) {
     return (
-      <div className="min-h-screen grid place-items-center text-white" style={{ background: BG }}>
+      <div
+        className="min-h-screen grid place-items-center text-white"
+        style={{ background: BG }}
+      >
         <div className="flex items-center gap-3">
           <span className="w-6 h-6 rounded-full border-2 border-white/70 border-t-transparent animate-spin" />
           <span>Checking session…</span>
@@ -68,43 +79,32 @@ export default function App({ Component, pageProps }: AppProps) {
 
   if (!authed) return null;
 
-  /**
-   * Grid layout:
-   * - col 1: sidebar with responsive fixed width (prevents the thin icon-only gutter on desktop)
-   * - col 2: main content (fills remaining width), padded so content never touches the sidebar (“magnet” feel)
-   */
   return (
     <div className="min-h-screen w-full text-white" style={{ background: BG }}>
-      <div
-        className="
-          grid
-          grid-cols-[72px_1fr]          /* xs: tiny rail */
-          sm:grid-cols-[200px_1fr]      /* sm: compact sidebar */
-          md:grid-cols-[220px_1fr]      /* md: normal */
-          lg:grid-cols-[240px_1fr]      /* lg: wider */
-          xl:grid-cols-[260px_1fr]
-          gap-0
-        "
-      >
-        {/* Sidebar (sticky, responsive width) */}
-        <aside className="relative">
-          <div className="sticky top-0 h-screen overflow-y-auto">
-            <Sidebar />
-          </div>
-        </aside>
+      {/* Sidebar */}
+      <Sidebar />
 
-        {/* Main content (never overlaps / never touches) */}
-        <main className="min-w-0 px-4 sm:px-6 lg:px-8 py-8">
-          <Component {...pageProps} />
-        </main>
-      </div>
+      {/* Main content */}
+      <main
+        style={{
+          paddingLeft: 'var(--sidebar-w, 260px)',
+          transition: 'padding-left 0.7s ease-in-out',
+          paddingRight: 20,
+          paddingTop: 20,
+          paddingBottom: 20,
+        }}
+      >
+        <Component {...pageProps} />
+      </main>
     </div>
   );
 }
 
 function setRASessionCookie() {
   try {
-    document.cookie = `ra_session=1; Path=/; Max-Age=${60 * 60 * 24 * 14}; SameSite=Lax; Secure`;
+    document.cookie = `ra_session=1; Path=/; Max-Age=${
+      60 * 60 * 24 * 14
+    }; SameSite=Lax; Secure`;
   } catch {}
 }
 function clearRASessionCookie() {
