@@ -1,7 +1,7 @@
 // components/builder/BuilderDashboard.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import dynamic from 'next/dynamic';
 import {
@@ -27,6 +27,14 @@ import Step4Overview from './Step4Overview';
 import { s } from '@/utils/safe';
 import { supabase } from '@/lib/supabase-client';
 
+// Lazy & safe: overlay sometimes imports things that can throw in SSR.
+// We load it only on the client and render nothing while loading.
+const OnboardingOverlay = dynamic(() => import('../ui/OnboardingOverlay'), {
+  ssr: false,
+  loading: () => null,
+});
+
+// 3D bot: keep lazy (client only). We'll also wrap it in an error boundary.
 const Bot3D = dynamic(() => import('./Bot3D.client'), {
   ssr: false,
   loading: () => (
@@ -36,6 +44,22 @@ const Bot3D = dynamic(() => import('./Bot3D.client'), {
     />
   ),
 });
+
+// ---------- small error boundary so a child render can't crash the page ----------
+class ErrorBoundary extends React.Component<{ fallback?: React.ReactNode }, { hasError: boolean }> {
+  constructor(props: any) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  componentDidCatch() { /* no-op: just prevent crash */ }
+  render() {
+    if (this.state.hasError) return this.props.fallback ?? null;
+    return this.props.children as any;
+  }
+}
 
 type Appearance = {
   accent?: string;
@@ -61,7 +85,7 @@ type Bot = {
   language?: string;
   model?: string;
   description?: string;
-  prompt?: string;
+  prompt?: string; // Step 3 raw
   createdAt?: string;
   updatedAt?: string;
   appearance?: Appearance;
@@ -106,12 +130,10 @@ function loadBots(): Bot[] {
 }
 
 function saveBots(bots: Bot[]) {
-  try {
-    localStorage.setItem(SAVE_KEY, JSON.stringify(bots));
-  } catch {}
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(bots)); } catch {}
 }
 
-/* --------------------- Step 3 section splitter --------------------- */
+/* --------------------- Step 3 section splitter (unchanged) --------------------- */
 
 type PromptSectionKey =
   | 'DESCRIPTION'
@@ -188,7 +210,7 @@ export default function BuilderDashboard() {
   );
   const pathname = router.pathname;
 
-  // ===== AUTH (Supabase) =====
+  // ===== AUTH (Supabase only) =====
   const [userId, setUserId] = useState<string>('');
   useEffect(() => {
     let unsub: any;
@@ -199,6 +221,7 @@ export default function BuilderDashboard() {
     })();
     return () => unsub?.data?.subscription?.unsubscribe?.();
   }, []);
+  // ===== END AUTH =====
 
   // welcome overlay after sign-up
   const mode = (search.get('mode') === 'signin' ? 'signin' : 'signup') as 'signup' | 'signin';
@@ -218,8 +241,8 @@ export default function BuilderDashboard() {
     usp.delete('onboard'); usp.delete('mode'); usp.delete('forceOverlay');
     router.replace(`${pathname}?${usp.toString()}`, undefined, { shallow: true });
   };
-  // ===== END AUTH =====
 
+  // steps
   const rawStep = search.get('step');
   const step = rawStep && ['1', '2', '3', '4'].includes(rawStep) ? rawStep : null;
 
@@ -438,6 +461,7 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
               {[bot.name, bot.industry, bot.language].filter(Boolean).join(' · ') || '—'}
             </div>
           </div>
+
           <div className="flex items-center gap-2">
             <button
               onClick={copyAll}
@@ -445,7 +469,8 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
               style={{ background: '#0d0f11', borderColor: 'rgba(255,255,255,0.3)', color: 'white' }}
               title="Copy"
             >
-              <Copy className="w-3.5 h-3.5" /> Copy
+              <Copy className="w-3.5 h-3.5" />
+              Copy
             </button>
             <button
               onClick={downloadTxt}
@@ -453,7 +478,8 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
               style={{ background: '#0d0f11', borderColor: 'rgba(255,255,255,0.3)', color: 'white' }}
               title="Download"
             >
-              <DownloadIcon className="w-3.5 h-3.5" /> Download
+              <DownloadIcon className="w-3.5 h-3.5" />
+              Download
             </button>
             <button onClick={onClose} className="p-2 rounded-full hover:bg-white/10" aria-label="Close" title="Close">
               <X className="w-5 h-5 text-white" />
@@ -488,7 +514,11 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
 
         <div className="px-6 py-4 rounded-b-[30px]" style={{ borderTop: '1px solid rgba(255,255,255,0.3)', background: '#101314' }}>
           <div className="flex justify-end">
-            <button onClick={onClose} className="px-5 py-2 rounded-[14px] font-semibold" style={{ background: 'rgba(0,120,90,1)', color: 'white' }}>
+            <button
+              onClick={onClose}
+              className="px-5 py-2 rounded-[14px] font-semibold"
+              style={{ background: 'rgba(0,120,90,1)', color: 'white' }}
+            >
               Close
             </button>
           </div>
@@ -595,25 +625,37 @@ function BuildCard({
           <SlidersHorizontal className="w-3.5 h-3.5" />
           Customize
         </button>
-        {/* @ts-ignore */}
-        <Bot3D
-          className="h-full"
-          accent={ap.accent || accent}
-          shellColor={ap.shellColor}
-          bodyColor={ap.bodyColor}
-          trimColor={ap.trimColor}
-          faceColor={ap.faceColor}
-          variant={ap.variant || 'silver'}
-          eyes={ap.eyes || 'ovals'}
-          head={ap.head || 'rounded'}
-          torso={ap.torso || 'box'}
-          arms={ap.arms ?? 'capsule'}
-          legs={ap.legs ?? 'capsule'}
-          antenna={ap.hasOwnProperty('antenna') ? Boolean((ap as any).antenna) : true}
-          withBody={ap.hasOwnProperty('withBody') ? Boolean(ap.withBody) : true}
-          idle={ap.hasOwnProperty('idle') ? Boolean(ap.idle) : hover}
-        />
+
+        {/* Guarded 3D preview so it can’t crash the page */}
+        <ErrorBoundary
+          fallback={
+            <div
+              className="h-full w-full"
+              style={{ background: 'linear-gradient(180deg, rgba(106,247,209,0.10), rgba(16,19,20,0.6))' }}
+            />
+          }
+        >
+          {/* @ts-ignore */}
+          <Bot3D
+            className="h-full"
+            accent={ap.accent || accent}
+            shellColor={ap.shellColor}
+            bodyColor={ap.bodyColor}
+            trimColor={ap.trimColor}
+            faceColor={ap.faceColor}
+            variant={ap.variant || 'silver'}
+            eyes={ap.eyes || 'ovals'}
+            head={ap.head || 'rounded'}
+            torso={ap.torso || 'box'}
+            arms={ap.arms ?? 'capsule'}
+            legs={ap.legs ?? 'capsule'}
+            antenna={ap.hasOwnProperty('antenna') ? Boolean((ap as any).antenna) : true}
+            withBody={ap.hasOwnProperty('withBody') ? Boolean(ap.withBody) : true}
+            idle={ap.hasOwnProperty('idle') ? Boolean(ap.idle) : hover}
+          />
+        </ErrorBoundary>
       </div>
+
       <div className="p-6 flex-1 flex flex-col justify-between">
         <div className="flex items-center gap-3">
           <div
