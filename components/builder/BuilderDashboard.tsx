@@ -246,6 +246,18 @@ export default function BuilderDashboard() {
   const rawStep = search.get('step');
   const step = rawStep && ['1', '2', '3', '4'].includes(rawStep) ? rawStep : null;
 
+  // NEW: tiny loading overlay when switching steps
+  const [stepLoading, setStepLoading] = useState(false);
+  useEffect(() => {
+    if (step) {
+      setStepLoading(true);
+      const t = setTimeout(() => setStepLoading(false), 450);
+      return () => clearTimeout(t);
+    } else {
+      setStepLoading(false);
+    }
+  }, [step]);
+
   const [query, setQuery] = useState('');
   const [bots, setBots] = useState<Bot[]>([]);
   const [customizingId, setCustomizingId] = useState<string | null>(null);
@@ -306,13 +318,25 @@ export default function BuilderDashboard() {
 
   if (step) {
     return (
-      <div className="min-h-screen w-full text-white font-movatif bg-[#0b0c10]">
-        <main className="w-full min-h-screen">
+      <div className="min-h-screen w-full text-white font-movatif bg-[#0b0c10] relative">
+        {stepLoading && (
+          <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 backdrop-blur-[1px]">
+            <span className="inline-block w-8 h-8 rounded-full border-2 border-white/70 border-t-transparent animate-spin" />
+          </div>
+        )}
+        <main className="w-full min-h-screen animate-fade-in">
           {step === '1' && <Step1AIType onNext={() => setStep('2')} />}
           {step === '2' && <Step2ModelSettings onBack={() => setStep('1')} onNext={() => setStep('3')} />}
           {step === '3' && <Step3PromptEditor onBack={() => setStep('2')} onNext={() => setStep('4')} />}
           {step === '4' && <Step4Overview onBack={() => setStep('3')} onFinish={() => setStep(null)} />}
         </main>
+
+        {/* minimal animation (global) */}
+        <style jsx global>{`
+          @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+          .animate-fade-in { animation: fadeIn .28s ease-out both; }
+          .card-fade { animation: fadeIn .28s ease-out both; }
+        `}</style>
       </div>
     );
   }
@@ -322,9 +346,10 @@ export default function BuilderDashboard() {
       <main className="flex-1 w-full px-4 sm:px-6 pt-10 pb-24">
         <div className="flex items-center justify-between mb-7">
           <h1 className="text-2xl md:text-3xl font-semibold">Builds</h1>
+          {/* TEXT ONLY -> white */}
           <button
             onClick={() => router.push('/builder?step=1')}
-            className="px-4 py-2 rounded-[10px] bg-[#00ffc2] text-black font-semibold shadow-[0_0_10px_rgba(106,247,209,0.28)] hover:brightness-110 transition"
+            className="px-4 py-2 rounded-[10px] bg-[#00ffc2] text-white font-semibold shadow-[0_0_10px_rgba(106,247,209,0.28)] hover:brightness-110 transition"
           >
             Create a Build
           </button>
@@ -537,33 +562,14 @@ function CreateCard({ onClick }: { onClick: () => void }) {
       onClick={onClick}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      className="group relative h-[380px] rounded-[16px] p-7 flex flex-col items-center justify-center transition-all active:scale-[0.995]"
+      className="group relative h-[380px] rounded-[16px] p-7 flex flex-col items-center justify-center transition-all active:scale-[0.995] card-fade"
       style={{
         background: 'rgba(13,15,17,0.92)',
         border: '2px solid rgba(106,247,209,0.32)',
         boxShadow: 'inset 0 0 22px rgba(0,0,0,0.28), 0 0 20px rgba(106,247,209,0.06)',
       }}
     >
-      <div
-        className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
-        style={{ background: 'radial-gradient(circle, rgba(106,247,209,0.12) 0%, transparent 70%)', filter: 'blur(38px)' }}
-      />
-      {hover && (
-        <div
-          className="pointer-events-none absolute inset-0 rounded-[16px] animate-pulse"
-          style={{ boxShadow: '0 0 34px 10px rgba(106,247,209,0.25), inset 0 0 14px rgba(106,247,209,0.20)' }}
-        />
-      )}
-      <div
-        className="pointer-events-none absolute top-0 bottom-0 w-[55%] rounded-[16px]"
-        style={{
-          left: hover ? '120%' : '-120%',
-          background:
-            'linear-gradient(110deg, transparent 0%, rgba(255,255,255,0.08) 40%, rgba(255,255,255,0.18) 50%, rgba(255,255,255,0.08) 60%, transparent 100%)',
-          filter: 'blur(1px)',
-          transition: 'left 420ms cubic-bezier(.22,.61,.36,1)',
-        }}
-      />
+      {/* removed: glow/highlight layers */}
       <div
         className="w-20 h-20 rounded-full flex items-center justify-center mb-5"
         style={{
@@ -601,17 +607,14 @@ function BuildCard({
   const ap = bot.appearance || {};
   return (
     <div
-      className="relative h-[380px] rounded-[16px] p-0 flex flex-col justify-between group transition-all"
+      className="relative h-[380px] rounded-[16px] p-0 flex flex-col justify-between group transition-all card-fade"
       style={{
         background: 'rgba(13,15,17,0.92)',
         border: '2px solid rgba(106,247,209,0.32)',
         boxShadow: 'inset 0 0 22px rgba(0,0,0,0.28), 0 0 20px rgba(106,247,209,0.06)',
       }}
     >
-      <div
-        className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
-        style={{ background: 'radial-gradient(circle, rgba(106,247,209,0.10) 0%, transparent 70%)', filter: 'blur(38px)' }}
-      />
+      {/* removed: big radial glow layer */}
       <div
         className="h-48 border-b border-white/10 overflow-hidden relative"
         onMouseEnter={() => setHover(true)}
