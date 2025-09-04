@@ -1,3 +1,4 @@
+// /pages/_app.tsx
 import type { AppProps } from 'next/app';
 import '@/styles/globals.css';
 import { useEffect, useMemo, useState } from 'react';
@@ -81,21 +82,19 @@ export default function App({ Component, pageProps }: AppProps) {
 
   return (
     <div className="min-h-screen w-full text-white" style={{ background: BG }}>
-      {/* Sidebar */}
-      <Sidebar />
+      <div className="grid grid-cols-[var(--sidebar-w,260px)_1fr] gap-0">
+        {/* Sidebar */}
+        <aside className="relative">
+          <div className="sticky top-0 h-screen overflow-y-auto">
+            <Sidebar />
+          </div>
+        </aside>
 
-      {/* Main content */}
-      <main
-        style={{
-          paddingLeft: 'var(--sidebar-w, 260px)',
-          transition: 'padding-left 0.7s ease-in-out',
-          paddingRight: 20,
-          paddingTop: 20,
-          paddingBottom: 20,
-        }}
-      >
-        <Component {...pageProps} />
-      </main>
+        {/* Main content with consistent edge */}
+        <main className="min-w-0 p-6 lg:p-8">
+          <Component {...pageProps} />
+        </main>
+      </div>
     </div>
   );
 }
