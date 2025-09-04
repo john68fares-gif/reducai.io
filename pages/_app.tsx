@@ -69,23 +69,8 @@ export default function App({ Component, pageProps }: AppProps) {
 
   return (
     <div className="min-h-screen w-full text-white" style={{ background: BG }}>
-      {/* Sidebar */}
       <Sidebar />
-
-      {/* Main content fills everything beside sidebar */}
-      <main
-        className="fixed top-0 right-0 bottom-0 min-h-screen"
-        style={{
-          left: 'var(--sidebar-w, 260px)',
-          background: 'rgba(15,18,20,0.95)',
-          borderLeft: '1px solid rgba(255,255,255,0.06)',
-          boxShadow: 'inset 0 0 35px rgba(0,255,194,0.04)',
-          padding: '24px',
-          overflowY: 'auto',
-        }}
-      >
-        <Component {...pageProps} />
-      </main>
+      <Component {...pageProps} />
     </div>
   );
 }
