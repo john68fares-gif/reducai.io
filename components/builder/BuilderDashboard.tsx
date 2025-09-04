@@ -3,8 +3,6 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
-import { useSession } from 'next-auth/react';
-import OnboardingOverlay from '../ui/OnboardingOverlay';
 import dynamic from 'next/dynamic';
 import {
   Plus,
@@ -27,6 +25,7 @@ import Step2ModelSettings from './Step2ModelSettings';
 import Step3PromptEditor from './Step3PromptEditor';
 import Step4Overview from './Step4Overview';
 import { s } from '@/utils/safe';
+import { supabase } from '@/lib/supabase-client';
 
 const Bot3D = dynamic(() => import('./Bot3D.client'), {
   ssr: false,
@@ -62,7 +61,7 @@ type Bot = {
   language?: string;
   model?: string;
   description?: string;
-  prompt?: string; // Step 3 raw
+  prompt?: string;
   createdAt?: string;
   updatedAt?: string;
   appearance?: Appearance;
@@ -72,16 +71,12 @@ const STORAGE_KEYS = ['chatbots', 'agents', 'builds'];
 const SAVE_KEY = 'chatbots';
 const nowISO = () => new Date().toISOString();
 const fmtDate = (iso?: string) => (iso ? new Date(iso).toLocaleDateString() : '');
-
-// newest → oldest by updatedAt (fallback createdAt)
 const sortByNewest = (arr: Bot[]) =>
-  arr
-    .slice()
-    .sort(
-      (a, b) =>
-        Date.parse(b.updatedAt || b.createdAt || '0') -
-        Date.parse(a.updatedAt || a.createdAt || '0')
-    );
+  arr.slice().sort(
+    (a, b) =>
+      Date.parse(b.updatedAt || b.createdAt || '0') -
+      Date.parse(a.updatedAt || a.createdAt || '0')
+  );
 
 function loadBots(): Bot[] {
   if (typeof window === 'undefined') return [];
@@ -99,7 +94,7 @@ function loadBots(): Bot[] {
         language: s(b?.language),
         model: s(b?.model, 'gpt-4o-mini'),
         description: s(b?.description),
-        prompt: s(b?.prompt), // keep EXACT Step 3
+        prompt: s(b?.prompt),
         createdAt: b?.createdAt ?? nowISO(),
         updatedAt: b?.updatedAt ?? b?.createdAt ?? nowISO(),
         appearance: b?.appearance ?? undefined,
@@ -116,7 +111,7 @@ function saveBots(bots: Bot[]) {
   } catch {}
 }
 
-/* --------------------- Step 3 section splitter (no edits) --------------------- */
+/* --------------------- Step 3 section splitter --------------------- */
 
 type PromptSectionKey =
   | 'DESCRIPTION'
@@ -129,11 +124,11 @@ type PromptSectionKey =
 type SplitSection = {
   key: PromptSectionKey;
   title: string;
-  text: string; // exact slice from Step 3
+  text: string;
 };
 
 const DISPLAY_TITLES: Record<PromptSectionKey, string> = {
-  'DESCRIPTION': 'DESCRIPTION',
+  DESCRIPTION: 'DESCRIPTION',
   'AI DESCRIPTION': 'AI Description',
   'RULES AND GUIDELINES': 'RULES AND GUIDELINES',
   'AI RULES': 'AI Rules',
@@ -142,7 +137,7 @@ const DISPLAY_TITLES: Record<PromptSectionKey, string> = {
 };
 
 const ICONS: Record<PromptSectionKey, JSX.Element> = {
-  'DESCRIPTION': <FileText className="w-4 h-4 text-[#6af7d1]" />,
+  DESCRIPTION: <FileText className="w-4 h-4 text-[#6af7d1]" />,
   'AI DESCRIPTION': <FileText className="w-4 h-4 text-[#6af7d1]" />,
   'RULES AND GUIDELINES': <Settings className="w-4 h-4 text-[#6af7d1]" />,
   'AI RULES': <ListChecks className="w-4 h-4 text-[#6af7d1]" />,
@@ -150,13 +145,11 @@ const ICONS: Record<PromptSectionKey, JSX.Element> = {
   'COMPANY FAQ': <Landmark className="w-4 h-4 text-[#6af7d1]" />,
 };
 
-// tolerant heading match (**, ###, numbered, etc.)
 const HEADING_REGEX =
   /^(?:\s*(?:[#>*-]|\d+\.)\s*)?(?:\*\*)?\s*(DESCRIPTION|AI\s*DESCRIPTION|RULES\s*(?:AND|&)\s*GUIDELINES|AI\s*RULES|QUESTION\s*FLOW|COMPANY\s*FAQ)\s*(?:\*\*)?\s*:?\s*$/gmi;
 
 function splitStep3IntoSections(step3Raw?: string): SplitSection[] | null {
   if (!step3Raw) return null;
-
   const matches: Array<{ start: number; end: number; label: PromptSectionKey }> = [];
   let m: RegExpExecArray | null;
   HEADING_REGEX.lastIndex = 0;
@@ -165,11 +158,9 @@ function splitStep3IntoSections(step3Raw?: string): SplitSection[] | null {
       .toUpperCase()
       .replace(/\s*&\s*/g, ' AND ')
       .replace(/\s+/g, ' ') as PromptSectionKey;
-
     const label = rawLabel === 'AI  DESCRIPTION' ? ('AI DESCRIPTION' as PromptSectionKey) : rawLabel;
     matches.push({ start: m.index, end: HEADING_REGEX.lastIndex, label });
   }
-
   if (matches.length === 0) return null;
 
   const out: SplitSection[] = [];
@@ -179,7 +170,7 @@ function splitStep3IntoSections(step3Raw?: string): SplitSection[] | null {
     out.push({
       key: h.label,
       title: DISPLAY_TITLES[h.label] || h.label,
-      text: step3Raw.slice(h.end, nextStart), // exact slice (no sanitizing)
+      text: step3Raw.slice(h.end, nextStart),
     });
   }
   return out;
@@ -190,27 +181,35 @@ function splitStep3IntoSections(step3Raw?: string): SplitSection[] | null {
 export default function BuilderDashboard() {
   const router = useRouter();
 
-  // Safe search param reader for pages/ router
+  // read query params
   const search = useMemo(
     () => new URLSearchParams((router.asPath.split('?')[1] ?? '')),
     [router.asPath]
   );
   const pathname = router.pathname;
 
-  // --- Welcome overlay (only on SIGN-UP) ---
-  const { data: session, status } = useSession();
-  const userId = useMemo(() => (session?.user as any)?.id || '', [session]);
+  // ===== AUTH (Supabase) =====
+  const [userId, setUserId] = useState<string>('');
+  useEffect(() => {
+    let unsub: any;
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      setUserId(user?.id || '');
+      unsub = supabase.auth.onAuthStateChange((_e, session) => setUserId(session?.user?.id || ''));
+    })();
+    return () => unsub?.data?.subscription?.unsubscribe?.();
+  }, []);
 
+  // welcome overlay after sign-up
   const mode = (search.get('mode') === 'signin' ? 'signin' : 'signup') as 'signup' | 'signin';
   const onboard = search.get('onboard') === '1';
   const forceOverlay = search.get('forceOverlay') === '1';
-
   const [welcomeOpen, setWelcomeOpen] = useState(false);
 
   useEffect(() => {
-    if (status !== 'authenticated' || !userId) return;
+    if (!userId) return;
     if (forceOverlay || (onboard && mode === 'signup')) setWelcomeOpen(true);
-  }, [status, userId, forceOverlay, onboard, mode]);
+  }, [userId, forceOverlay, onboard, mode]);
 
   const closeWelcome = () => {
     setWelcomeOpen(false);
@@ -219,7 +218,7 @@ export default function BuilderDashboard() {
     usp.delete('onboard'); usp.delete('mode'); usp.delete('forceOverlay');
     router.replace(`${pathname}?${usp.toString()}`, undefined, { shallow: true });
   };
-  // --- end welcome overlay ---
+  // ===== END AUTH =====
 
   const rawStep = search.get('step');
   const step = rawStep && ['1', '2', '3', '4'].includes(rawStep) ? rawStep : null;
@@ -403,9 +402,7 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
   const sections = splitStep3IntoSections(bot.prompt);
 
   const copyAll = async () => {
-    try {
-      await navigator.clipboard.writeText(rawOut);
-    } catch {}
+    try { await navigator.clipboard.writeText(rawOut); } catch {}
   };
 
   const downloadTxt = () => {
@@ -441,7 +438,6 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
               {[bot.name, bot.industry, bot.language].filter(Boolean).join(' · ') || '—'}
             </div>
           </div>
-
           <div className="flex items-center gap-2">
             <button
               onClick={copyAll}
@@ -449,8 +445,7 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
               style={{ background: '#0d0f11', borderColor: 'rgba(255,255,255,0.3)', color: 'white' }}
               title="Copy"
             >
-              <Copy className="w-3.5 h-3.5" />
-              Copy
+              <Copy className="w-3.5 h-3.5" /> Copy
             </button>
             <button
               onClick={downloadTxt}
@@ -458,15 +453,9 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
               style={{ background: '#0d0f11', borderColor: 'rgba(255,255,255,0.3)', color: 'white' }}
               title="Download"
             >
-              <DownloadIcon className="w-3.5 h-3.5" />
-              Download
+              <DownloadIcon className="w-3.5 h-3.5" /> Download
             </button>
-            <button
-              onClick={onClose}
-              className="p-2 rounded-full hover:bg-white/10"
-              aria-label="Close"
-              title="Close"
-            >
+            <button onClick={onClose} className="p-2 rounded-full hover:bg-white/10" aria-label="Close" title="Close">
               <X className="w-5 h-5 text-white" />
             </button>
           </div>
@@ -474,9 +463,7 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
 
         <div className="flex-1 overflow-y-auto p-6">
           {!bot.prompt ? (
-            <div className="p-5 text-white/80" style={CARD_STYLE}>
-              (No Step 3 prompt yet)
-            </div>
+            <div className="p-5 text-white/80" style={CARD_STYLE}>(No Step 3 prompt yet)</div>
           ) : sections ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {sections.map((sec, i) => (
@@ -501,11 +488,7 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
 
         <div className="px-6 py-4 rounded-b-[30px]" style={{ borderTop: '1px solid rgba(255,255,255,0.3)', background: '#101314' }}>
           <div className="flex justify-end">
-            <button
-              onClick={onClose}
-              className="px-5 py-2 rounded-[14px] font-semibold"
-              style={{ background: 'rgba(0,120,90,1)', color: 'white' }}
-            >
+            <button onClick={onClose} className="px-5 py-2 rounded-[14px] font-semibold" style={{ background: 'rgba(0,120,90,1)', color: 'white' }}>
               Close
             </button>
           </div>
@@ -639,7 +622,7 @@ function BuildCard({
           >
             <BotIcon className="w-5 h-5" style={{ color: accent }} />
           </div>
-        <div className="min-w-0">
+          <div className="min-w-0">
             <div className="font-semibold truncate">{bot.name}</div>
             <div className="text-[12px] text-white/60 truncate">
               {(bot.industry || '—') + (bot.language ? ` · ${bot.language}` : '')}
