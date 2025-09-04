@@ -75,8 +75,7 @@ export default function Sidebar() {
         width: widthPx,
         background: 'linear-gradient(180deg, rgba(10,12,13,0.98), rgba(9,11,12,0.98))',
         borderRight: '1px solid rgba(0,255,194,0.08)',
-        boxShadow:
-          'inset 0 0 18px rgba(0,0,0,0.35), 0 0 0 1px rgba(0,0,0,0.25)',
+        boxShadow: 'inset 0 0 18px rgba(0,0,0,0.35), 0 0 0 1px rgba(0,0,0,0.25)',
       }}
     >
       <div className="relative h-full flex flex-col">
@@ -109,55 +108,12 @@ export default function Sidebar() {
         {/* Workspace */}
         <Section>
           <NavList>
-            <Item
-              collapsed={collapsed}
-              href="/builder"
-              label="Build"
-              sub="Create AI agent"
-              icon={<Home />}
-              active={pathname?.startsWith('/builder')}
-            />
-            <Item
-              collapsed={collapsed}
-              href={lastBotId ? `/improve/${lastBotId}` : '#'}
-              label="Improve"
-              sub="Integrate & optimize"
-              icon={<Hammer />}
-              active={pathname?.startsWith('/improve')}
-              disabled={!lastBotId}
-            />
-            <Item
-              collapsed={collapsed}
-              href="/voice-agent"
-              label="Voice Agent"
-              sub="Calls & persona"
-              icon={<Mic />}
-              active={pathname?.startsWith('/voice-agent')}
-            />
-            <Item
-              collapsed={collapsed}
-              href="/phone-numbers"
-              label="Phone Numbers"
-              sub="Link provider numbers"
-              icon={<Phone />}
-              active={pathname?.startsWith('/phone-numbers')}
-            />
-            <Item
-              collapsed={collapsed}
-              href="/demo"
-              label="Demo"
-              sub="Showcase to clients"
-              icon={<Monitor />}
-              active={pathname === '/demo'}
-            />
-            <Item
-              collapsed={collapsed}
-              href="/launch"
-              label="Launch"
-              sub="Deploy to production"
-              icon={<Rocket />}
-              active={pathname === '/launch'}
-            />
+            <Item collapsed={collapsed} href="/builder" label="Build" sub="Create AI agent" icon={<Home />} active={pathname?.startsWith('/builder')} />
+            <Item collapsed={collapsed} href={lastBotId ? `/improve/${lastBotId}` : '#'} label="Improve" sub="Integrate & optimize" icon={<Hammer />} active={pathname?.startsWith('/improve')} disabled={!lastBotId} />
+            <Item collapsed={collapsed} href="/voice-agent" label="Voice Agent" sub="Calls & persona" icon={<Mic />} active={pathname?.startsWith('/voice-agent')} />
+            <Item collapsed={collapsed} href="/phone-numbers" label="Phone Numbers" sub="Link provider numbers" icon={<Phone />} active={pathname?.startsWith('/phone-numbers')} />
+            <Item collapsed={collapsed} href="/demo" label="Demo" sub="Showcase to clients" icon={<Monitor />} active={pathname === '/demo'} />
+            <Item collapsed={collapsed} href="/launch" label="Launch" sub="Deploy to production" icon={<Rocket />} active={pathname === '/launch'} />
           </NavList>
         </Section>
 
@@ -171,14 +127,7 @@ export default function Sidebar() {
             <Item collapsed={collapsed} href="/apikeys" label="API Key" icon={<Key />} />
             <Item collapsed={collapsed} href="#" label="Bulk Tester" icon={<Package />} />
             <Item collapsed={collapsed} href="#" label="Video Guides" icon={<HelpCircle />} />
-            <Item
-              collapsed={collapsed}
-              href="/support"
-              label="Support"
-              sub="Help & FAQ"
-              icon={<HelpCircle />}
-              active={pathname === '/support'}
-            />
+            <Item collapsed={collapsed} href="/support" label="Support" sub="Help & FAQ" icon={<HelpCircle />} active={pathname === '/support'} />
           </NavList>
         </Section>
 
@@ -189,8 +138,7 @@ export default function Sidebar() {
             style={{
               background: 'rgba(15,18,20,0.85)',
               border: '1px solid rgba(0,255,194,0.12)',
-              boxShadow:
-                'inset 0 0 12px rgba(0,0,0,0.35), 0 0 10px rgba(0,255,194,0.04)',
+              boxShadow: 'inset 0 0 12px rgba(0,0,0,0.35), 0 0 10px rgba(0,255,194,0.04)',
             }}
           >
             <div className="flex items-center gap-3 shrink-0">
@@ -200,9 +148,7 @@ export default function Sidebar() {
               <AnimatedText collapsed={collapsed}>
                 <div className="leading-tight">
                   <div className="text-sm font-semibold">My Account</div>
-                  <div className="text-[11px] text-yellow-300/90">
-                    980 XP • Bronze
-                  </div>
+                  <div className="text-[11px] text-yellow-300/90">980 XP • Bronze</div>
                 </div>
               </AnimatedText>
             </div>
@@ -217,8 +163,7 @@ export default function Sidebar() {
           style={{
             border: '1px solid rgba(255,255,255,0.10)',
             background: 'rgba(16,19,21,0.95)',
-            boxShadow:
-              '0 2px 12px rgba(0,0,0,0.45), 0 0 10px rgba(0,255,194,0.06)',
+            boxShadow: '0 2px 12px rgba(0,0,0,0.45), 0 0 10px rgba(0,255,194,0.06)',
           }}
         >
           {collapsed ? (
@@ -234,11 +179,10 @@ export default function Sidebar() {
 
 /* ---------- Helpers ---------- */
 
-// Empty section that only preserves spacing
 function Section({ children }: { children: React.ReactNode }) {
   return (
     <div className="px-4 pt-4">
-      <div className="mb-2.5 h-4" /> {/* keeps vertical space, no text */}
+      <div className="mb-2.5 h-4" />
       {children}
     </div>
   );
@@ -274,12 +218,8 @@ function Item({
         !disabled && 'hover:translate-x-[1px]'
       )}
       style={{
-        border: `1px solid ${
-          active ? 'rgba(0,255,194,0.28)' : 'rgba(255,255,255,0.06)'
-        }`,
-        background: active
-          ? 'rgba(0,255,194,0.06)'
-          : 'rgba(15,18,20,0.55)',
+        border: `1px solid ${active ? 'rgba(0,255,194,0.28)' : 'rgba(255,255,255,0.06)'}`,
+        background: active ? 'rgba(0,255,194,0.06)' : 'rgba(15,18,20,0.55)',
         boxShadow: active
           ? '0 0 12px rgba(0,255,194,0.16) inset, 0 0 8px rgba(0,255,194,0.04)'
           : 'inset 0 0 10px rgba(0,0,0,0.28)',
@@ -305,13 +245,9 @@ function Item({
         )}
       >
         <div className="leading-tight">
-          <div className="text-[13px] font-semibold text-white/95">
-            {label}
-          </div>
+          <div className="text-[13px] font-semibold text-white/95">{label}</div>
           {sub && (
-            <div className="text-[11px] text-white/55 mt-[3px] group-hover:text-white/70">
-              {sub}
-            </div>
+            <div className="text-[11px] text-white/55 mt-[3px] group-hover:text-white/70">{sub}</div>
           )}
         </div>
       </div>
@@ -326,14 +262,7 @@ function Item({
   );
 }
 
-/* Text fade/slide wrapper */
-function AnimatedText({
-  collapsed,
-  children,
-}: {
-  collapsed: boolean;
-  children: React.ReactNode;
-}) {
+function AnimatedText({ collapsed, children }: { collapsed: boolean; children: React.ReactNode }) {
   return (
     <div
       className={cn(
