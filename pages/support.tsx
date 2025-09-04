@@ -1,4 +1,3 @@
-// pages/support.tsx
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -37,14 +36,16 @@ export default function SupportPage() {
     setLoading(true);
 
     try {
-      const r = await fetch('/api/ask', {
+      const r = await fetch('/api/support/ask', {   // 👈 aangepast pad
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: value }),
       });
       const data = await r.json();
       const botText =
-        (data?.ok && typeof data?.message === 'string' ? data.message : 'Sorry, I can’t comply with that request.');
+        (data?.ok && typeof data?.message === 'string'
+          ? data.message
+          : 'Sorry, I can’t comply with that request.');
 
       const assistantMsg: Msg = {
         id: crypto.randomUUID(),
@@ -130,7 +131,8 @@ function TypingDots() {
 const styles: Record<string, React.CSSProperties> = {
   wrap: {
     minHeight: '100vh',
-    background: 'radial-gradient(1200px 600px at 20% -10%, rgba(0,255,194,0.12), transparent), #0b0c10',
+    background:
+      'radial-gradient(1200px 600px at 20% -10%, rgba(0,255,194,0.12), transparent), #0b0c10',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -172,14 +174,8 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: 'column',
     gap: 10,
   },
-  rowUser: {
-    display: 'flex',
-    justifyContent: 'flex-end',
-  },
-  rowBot: {
-    display: 'flex',
-    justifyContent: 'flex-start',
-  },
+  rowUser: { display: 'flex', justifyContent: 'flex-end' },
+  rowBot: { display: 'flex', justifyContent: 'flex-start' },
   bubbleUser: {
     background: 'linear-gradient(180deg, rgba(0,255,194,0.25), rgba(0,255,194,0.12))',
     border: '1px solid rgba(0,255,194,0.35)',
@@ -200,11 +196,7 @@ const styles: Record<string, React.CSSProperties> = {
     whiteSpace: 'pre-wrap',
     wordBreak: 'break-word',
   },
-  inputRow: {
-    display: 'flex',
-    gap: 8,
-    paddingTop: 6,
-  },
+  inputRow: { display: 'flex', gap: 8, paddingTop: 6 },
   input: {
     flex: 1,
     background: '#0b0c10',
@@ -229,11 +221,7 @@ const styles: Record<string, React.CSSProperties> = {
     paddingTop: 4,
     color: '#c7efe6',
   },
-  dotsWrap: {
-    display: 'inline-flex',
-    gap: 6,
-    alignItems: 'center',
-  },
+  dotsWrap: { display: 'inline-flex', gap: 6, alignItems: 'center' },
   dot: {
     width: 6,
     height: 6,
@@ -244,7 +232,6 @@ const styles: Record<string, React.CSSProperties> = {
   } as React.CSSProperties,
 };
 
-// Inject keyframes once
 if (typeof document !== 'undefined' && !document.getElementById('riley-bounce-style')) {
   const style = document.createElement('style');
   style.id = 'riley-bounce-style';
