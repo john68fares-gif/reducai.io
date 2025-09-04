@@ -82,19 +82,21 @@ export default function App({ Component, pageProps }: AppProps) {
 
   return (
     <div className="min-h-screen w-full text-white" style={{ background: BG }}>
-      <div className="grid grid-cols-[var(--sidebar-w,260px)_1fr] gap-0">
-        {/* Sidebar */}
-        <aside className="relative">
-          <div className="sticky top-0 h-screen overflow-y-auto">
-            <Sidebar />
-          </div>
-        </aside>
+      {/* Sidebar (fixed width via CSS var) */}
+      <Sidebar />
 
-        {/* Main content with consistent edge */}
-        <main className="min-w-0 p-6 lg:p-8">
-          <Component {...pageProps} />
-        </main>
-      </div>
+      {/* Main content wrapper with glow + edge spacing */}
+      <main
+        className="min-h-screen transition-all"
+        style={{
+          marginLeft: 'var(--sidebar-w, 260px)',
+          padding: '24px',
+          border: '1px solid rgba(255,255,255,0.06)',
+          boxShadow: '0 0 25px rgba(0,255,194,0.05)',
+        }}
+      >
+        <Component {...pageProps} />
+      </main>
     </div>
   );
 }
