@@ -1,10 +1,10 @@
 // /pages/_app.tsx
 import type { AppProps } from 'next/app';
-import '../styles/globals.css';
+import '@/styles/globals.css';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
-import { supabase } from '../lib/supabase-client';
-import Sidebar from '../components/ui/Sidebar';
+import { supabase } from '@/lib/supabase-client';
+import Sidebar from '@/components/ui/Sidebar';
 
 const BG = '#0b0c10';
 const PUBLIC_ROUTES = ['/', '/auth', '/auth/callback'];
@@ -68,17 +68,36 @@ export default function App({ Component, pageProps }: AppProps) {
 
   if (!authed) return null;
 
+  /**
+   * Grid layout:
+   * - col 1: sidebar with responsive fixed width (prevents the thin icon-only gutter on desktop)
+   * - col 2: main content (fills remaining width), padded so content never touches the sidebar (“magnet” feel)
+   */
   return (
-    <div className="min-h-screen w-full flex text-white" style={{ background: BG }}>
-      {/* Sidebar always sticks left, relative to screen size */}
-      <aside className="w-[clamp(220px,18vw,280px)] bg-[#0b0c10] border-r border-white/10">
-        <Sidebar />
-      </aside>
+    <div className="min-h-screen w-full text-white" style={{ background: BG }}>
+      <div
+        className="
+          grid
+          grid-cols-[72px_1fr]          /* xs: tiny rail */
+          sm:grid-cols-[200px_1fr]      /* sm: compact sidebar */
+          md:grid-cols-[220px_1fr]      /* md: normal */
+          lg:grid-cols-[240px_1fr]      /* lg: wider */
+          xl:grid-cols-[260px_1fr]
+          gap-0
+        "
+      >
+        {/* Sidebar (sticky, responsive width) */}
+        <aside className="relative">
+          <div className="sticky top-0 h-screen overflow-y-auto">
+            <Sidebar />
+          </div>
+        </aside>
 
-      {/* Main content expands to fill rest of screen, with padding */}
-      <main className="flex-1 px-6 py-8">
-        <Component {...pageProps} />
-      </main>
+        {/* Main content (never overlaps / never touches) */}
+        <main className="min-w-0 px-4 sm:px-6 lg:px-8 py-8">
+          <Component {...pageProps} />
+        </main>
+      </div>
     </div>
   );
 }
