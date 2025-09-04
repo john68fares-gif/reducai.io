@@ -27,38 +27,28 @@ import Step4Overview from './Step4Overview';
 import { s } from '@/utils/safe';
 import { supabase } from '@/lib/supabase-client';
 
-// Lazy & safe: overlay sometimes imports things that can throw in SSR.
-// We load it only on the client and render nothing while loading.
+// Lazy-only components
 const OnboardingOverlay = dynamic(() => import('../ui/OnboardingOverlay'), {
   ssr: false,
   loading: () => null,
 });
 
-// 3D bot: keep lazy (client only). We'll also wrap it in an error boundary.
 const Bot3D = dynamic(() => import('./Bot3D.client'), {
   ssr: false,
   loading: () => (
-    <div
-      className="h-full w-full"
-      style={{ background: 'linear-gradient(180deg, rgba(106,247,209,0.10), rgba(16,19,20,0.6))' }}
-    />
+    <div className="h-full w-full" style={{ background: 'linear-gradient(180deg, rgba(106,247,209,0.10), rgba(16,19,20,0.6))' }} />
   ),
 });
 
-// ---------- small error boundary so a child render can't crash the page ----------
+// ---------- Error Boundary ----------
 class ErrorBoundary extends React.Component<{ fallback?: React.ReactNode }, { hasError: boolean }> {
   constructor(props: any) {
     super(props);
     this.state = { hasError: false };
   }
-  static getDerivedStateFromError() {
-    return { hasError: true };
-  }
-  componentDidCatch() { /* no-op: just prevent crash */ }
-  render() {
-    if (this.state.hasError) return this.props.fallback ?? null;
-    return this.props.children as any;
-  }
+  static getDerivedStateFromError() { return { hasError: true }; }
+  componentDidCatch() {}
+  render() { return this.state.hasError ? (this.props.fallback ?? null) : (this.props.children as any); }
 }
 
 type Appearance = {
@@ -85,7 +75,7 @@ type Bot = {
   language?: string;
   model?: string;
   description?: string;
-  prompt?: string; // Step 3 raw
+  prompt?: string;
   createdAt?: string;
   updatedAt?: string;
   appearance?: Appearance;
@@ -98,8 +88,7 @@ const fmtDate = (iso?: string) => (iso ? new Date(iso).toLocaleDateString() : ''
 const sortByNewest = (arr: Bot[]) =>
   arr.slice().sort(
     (a, b) =>
-      Date.parse(b.updatedAt || b.createdAt || '0') -
-      Date.parse(a.updatedAt || a.createdAt || '0')
+      Date.parse(b.updatedAt || b.createdAt || '0') - Date.parse(a.updatedAt || a.createdAt || '0')
   );
 
 function loadBots(): Bot[] {
@@ -251,6 +240,9 @@ export default function BuilderDashboard() {
   const [customizingId, setCustomizingId] = useState<string | null>(null);
   const [viewId, setViewId] = useState<string | null>(null);
 
+  // NEW: loading indicator between steps
+  const [stepLoading, setStepLoading] = useState(false);
+
   useEffect(() => {
     try {
       if (localStorage.getItem('builder:cleanup') === '1') {
@@ -298,36 +290,59 @@ export default function BuilderDashboard() {
   const viewedBot = useMemo(() => bots.find((b) => b.id === viewId), [bots, viewId]);
 
   const setStep = (next: string | null) => {
+    setStepLoading(true);
     const usp = new URLSearchParams(search.toString());
     if (next) usp.set('step', next);
     else usp.delete('step');
-    router.replace(`${pathname}?${usp.toString()}`, undefined, { shallow: true });
+    // brief transition for smoother step change
+    router
+      .replace(`${pathname}?${usp.toString()}`, undefined, { shallow: true })
+      .finally(() => setTimeout(() => setStepLoading(false), 350));
   };
 
   if (step) {
     return (
-      <div className="min-h-screen w-full text-white font-movatif bg-[#0b0c10]">
-        <main className="w-full min-h-screen">
+      <div className="min-h-screen w-full text-white font-movatif bg-[#0b0c10] relative">
+        {/* Step loading overlay */}
+        {stepLoading && (
+          <div className="fixed inset-0 z-[60] grid place-items-center bg-black/50" style={{ backdropFilter: 'blur(2px)' }}>
+            <div className="flex items-center gap-3 animate-fadeSlideUp">
+              <span className="inline-block w-6 h-6 rounded-full border-2 border-white/70 border-t-transparent animate-spin" />
+              <span className="text-white/90">Loading…</span>
+            </div>
+          </div>
+        )}
+
+        <main className="w-full min-h-screen animate-fadeSlideUp">
           {step === '1' && <Step1AIType onNext={() => setStep('2')} />}
           {step === '2' && <Step2ModelSettings onBack={() => setStep('1')} onNext={() => setStep('3')} />}
           {step === '3' && <Step3PromptEditor onBack={() => setStep('2')} onNext={() => setStep('4')} />}
           {step === '4' && <Step4Overview onBack={() => setStep('3')} onFinish={() => setStep(null)} />}
         </main>
+
+        <StyleAnimations />
       </div>
     );
   }
 
   return (
     <div className="min-h-screen w-full text-white font-movatif bg-[#0b0c10]">
-      <main className="flex-1 w-full px-4 sm:px-6 pt-10 pb-24">
+      {/* container keeps content away from edges/left sidebar */}
+      <main className="flex-1 w-full px-4 sm:px-6 pt-10 pb-24 max-w-screen-2xl mx-auto">
         <div className="flex items-center justify-between mb-7">
           <h1 className="text-2xl md:text-3xl font-semibold">Builds</h1>
+
+          {/* REMOVED top-right "Create a Build" button as requested.
+              If you prefer keeping it with WHITE TEXT, uncomment below and keep `text-white`.
+          */}
+          {/*
           <button
             onClick={() => router.push('/builder?step=1')}
-            className="px-4 py-2 rounded-[10px] bg-[#00ffc2] text-black font-semibold shadow-[0_0_10px_rgba(106,247,209,0.28)] hover:brightness-110 transition"
+            className="px-4 py-2 rounded-[10px] bg-[#00ffc2] text-white font-semibold shadow-[0_0_10px_rgba(106,247,209,0.28)] hover:brightness-110 transition"
           >
             Create a Build
           </button>
+          */}
         </div>
 
         <div className="mb-8">
@@ -407,6 +422,8 @@ export default function BuilderDashboard() {
 
       {/* Welcome overlay over the dashboard (sign-up only) */}
       <OnboardingOverlay open={welcomeOpen} mode={mode} userId={userId} onDone={closeWelcome} />
+
+      <StyleAnimations />
     </div>
   );
 }
@@ -452,7 +469,7 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: 'rgba(0,0,0,0.5)' }}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4 animate-fadeIn" style={{ background: 'rgba(0,0,0,0.5)' }}>
       <div className="relative w-full max-w-[1280px] max-h-[88vh] flex flex-col" style={FRAME_STYLE}>
         <div className="flex items-center justify-between px-6 py-4 rounded-t-[30px]" style={HEADER_BORDER}>
           <div className="min-w-0">
@@ -493,7 +510,7 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
           ) : sections ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {sections.map((sec, i) => (
-                <div key={i} style={CARD_STYLE} className="overflow-hidden">
+                <div key={i} style={CARD_STYLE} className="overflow-hidden animate-fadeSlideUp">
                   <div className="px-5 pt-4 pb-3">
                     <div className="flex items-center gap-2 text-white font-semibold text-sm">
                       {ICONS[sec.key]} {sec.title}
@@ -506,7 +523,7 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
               ))}
             </div>
           ) : (
-            <div style={CARD_STYLE} className="p-5">
+            <div style={CARD_STYLE} className="p-5 animate-fadeSlideUp">
               <pre className="whitespace-pre-wrap text-sm leading-6 text-white">{bot.prompt}</pre>
             </div>
           )}
@@ -537,39 +554,23 @@ function CreateCard({ onClick }: { onClick: () => void }) {
       onClick={onClick}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      className="group relative h-[380px] rounded-[16px] p-7 flex flex-col items-center justify-center transition-all active:scale-[0.995]"
+      className="group relative h-[380px] rounded-[16px] p-7 flex flex-col items-center justify-center transition-all active:scale-[0.995] animate-fadeSlideUp"
       style={{
         background: 'rgba(13,15,17,0.92)',
         border: '2px solid rgba(106,247,209,0.32)',
-        boxShadow: 'inset 0 0 22px rgba(0,0,0,0.28), 0 0 20px rgba(106,247,209,0.06)',
+        // keep the SHADOWS
+        boxShadow: 'inset 0 0 22px rgba(0,0,0,0.28), 0 8px 24px rgba(0,0,0,0.35)',
       }}
     >
-      <div
-        className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
-        style={{ background: 'radial-gradient(circle, rgba(106,247,209,0.12) 0%, transparent 70%)', filter: 'blur(38px)' }}
-      />
-      {hover && (
-        <div
-          className="pointer-events-none absolute inset-0 rounded-[16px] animate-pulse"
-          style={{ boxShadow: '0 0 34px 10px rgba(106,247,209,0.25), inset 0 0 14px rgba(106,247,209,0.20)' }}
-        />
-      )}
-      <div
-        className="pointer-events-none absolute top-0 bottom-0 w-[55%] rounded-[16px]"
-        style={{
-          left: hover ? '120%' : '-120%',
-          background:
-            'linear-gradient(110deg, transparent 0%, rgba(255,255,255,0.08) 40%, rgba(255,255,255,0.18) 50%, rgba(255,255,255,0.08) 60%, transparent 100%)',
-          filter: 'blur(1px)',
-          transition: 'left 420ms cubic-bezier(.22,.61,.36,1)',
-        }}
-      />
+      {/* Removed the “glass/glow” highlight layers */}
       <div
         className="w-20 h-20 rounded-full flex items-center justify-center mb-5"
         style={{
           background: 'rgba(0,0,0,0.18)',
           border: '2px dashed rgba(106,247,209,0.35)',
           boxShadow: 'inset 0 0 18px rgba(0,0,0,0.45), inset 0 0 6px rgba(106,247,209,0.06)',
+          transform: hover ? 'scale(1.04)' : 'scale(1)',
+          transition: 'transform .2s ease',
         }}
       >
         <Plus className="w-10 h-10" style={{ color: '#6af7d1', opacity: 0.9 }} />
@@ -601,22 +602,18 @@ function BuildCard({
   const ap = bot.appearance || {};
   return (
     <div
-      className="relative h-[380px] rounded-[16px] p-0 flex flex-col justify-between group transition-all"
+      className="relative h-[380px] rounded-[16px] p-0 flex flex-col justify-between group transition-all animate-fadeSlideUp"
       style={{
         background: 'rgba(13,15,17,0.92)',
         border: '2px solid rgba(106,247,209,0.32)',
-        boxShadow: 'inset 0 0 22px rgba(0,0,0,0.28), 0 0 20px rgba(106,247,209,0.06)',
+        // keep the SHADOWS
+        boxShadow: 'inset 0 0 22px rgba(0,0,0,0.28), 0 8px 24px rgba(0,0,0,0.35)',
       }}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
     >
-      <div
-        className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
-        style={{ background: 'radial-gradient(circle, rgba(106,247,209,0.10) 0%, transparent 70%)', filter: 'blur(38px)' }}
-      />
-      <div
-        className="h-48 border-b border-white/10 overflow-hidden relative"
-        onMouseEnter={() => setHover(true)}
-        onMouseLeave={() => setHover(false)}
-      >
+      {/* Removed “glass/glow” background layer */}
+      <div className="h-48 border-b border-white/10 overflow-hidden relative">
         <button
           onClick={onCustomize}
           className="absolute right-3 top-3 z-10 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-[10px] text-xs border transition"
@@ -626,13 +623,9 @@ function BuildCard({
           Customize
         </button>
 
-        {/* Guarded 3D preview so it can’t crash the page */}
         <ErrorBoundary
           fallback={
-            <div
-              className="h-full w-full"
-              style={{ background: 'linear-gradient(180deg, rgba(106,247,209,0.10), rgba(16,19,20,0.6))' }}
-            />
+            <div className="h-full w-full" style={{ background: 'linear-gradient(180deg, rgba(106,247,209,0.10), rgba(16,19,20,0.6))' }} />
           }
         >
           {/* @ts-ignore */}
@@ -686,5 +679,24 @@ function BuildCard({
         </div>
       </div>
     </div>
+  );
+}
+
+/* ------------ tiny styled-jsx block for animations (no global css edits needed) ----------- */
+
+function StyleAnimations() {
+  return (
+    <style jsx global>{`
+      @keyframes fadeSlideUp {
+        from { opacity: 0; transform: translateY(8px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      @keyframes fadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+      }
+      .animate-fadeSlideUp { animation: fadeSlideUp .35s ease-out both; }
+      .animate-fadeIn { animation: fadeIn .25s ease-out both; }
+    `}</style>
   );
 }
