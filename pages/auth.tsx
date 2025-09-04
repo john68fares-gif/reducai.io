@@ -20,45 +20,37 @@ export default function AuthPage() {
   const [mode, setMode] = useState<Mode>(queryMode);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-
-  // signup-only
   const [username, setUsername] = useState('');
   const [heardAbout, setHeardAbout] = useState('');
 
-  // UX
   const [busy, setBusy] = useState(false);
   const [phase, setPhase] = useState<'idle' | 'checking' | 'contacting' | 'finalizing'>('idle');
   const [msg, setMsg] = useState<string | null>(typeof router.query.msg === 'string' ? router.query.msg : null);
   const [err, setErr] = useState<string | null>(null);
   const [verifySent, setVerifySent] = useState(false);
+  const [hasSession, setHasSession] = useState(false); // show a banner instead of auto-redirect
 
   useEffect(() => {
     setMode(queryMode);
     setErr(null); setMsg(null); setVerifySent(false); setPhase('idle');
   }, [queryMode]);
 
-  // Already signed in? Bounce to "from"
+  // Check whether a session exists (for banner only — DO NOT REDIRECT)
   useEffect(() => {
     let unsub: any;
     (async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        router.replace(from || '/builder');
-        return;
-      }
-      unsub = supabase.auth.onAuthStateChange((_e, sess) => {
-        if (sess) router.replace(from || '/builder');
-      });
+      setHasSession(!!session);
+      unsub = supabase.auth.onAuthStateChange((_e, sess) => setHasSession(!!sess));
     })();
     return () => unsub?.data?.subscription?.unsubscribe?.();
-  }, [from, router]);
+  }, []);
 
   const switchMode = (m: Mode) => {
     router.replace({ pathname: '/auth', query: { mode: m, from } }, undefined, { shallow: true });
   };
 
   function setServerVisibleCookie() {
-    // 14 days, server-readable (to satisfy middleware)
     document.cookie = `ra_session=1; Path=/; Max-Age=${60 * 60 * 24 * 14}; SameSite=Lax; Secure`;
   }
 
@@ -79,9 +71,7 @@ export default function AuthPage() {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
 
-        // make SSR/middleware happy
         setServerVisibleCookie();
-
         setPhase('finalizing'); await delay(350);
         localStorage.setItem('postAuthRedirect', from);
         router.replace(from);
@@ -92,7 +82,7 @@ export default function AuthPage() {
           password,
           options: {
             data: {
-              full_name: username,               // used by your triggers
+              full_name: username,
               preferred_username: username,
               user_name: username,
               heard_about: heardAbout || 'unspecified',
@@ -104,14 +94,12 @@ export default function AuthPage() {
 
         setPhase('finalizing'); await delay(350);
 
-        // Most projects require email confirm → no session yet
         if (!data.session) {
           setVerifySent(true);
           setMsg('Account created! Verify your email, then sign in.');
           return;
         }
 
-        // If auto-confirm is on, set cookie and go
         setServerVisibleCookie();
         localStorage.setItem('postAuthRedirect', `${from}?onboard=1&mode=signup`);
         router.replace(`${from}?onboard=1&mode=signup`);
@@ -131,11 +119,7 @@ export default function AuthPage() {
   async function handleGoogle() {
     try {
       setErr(null); setBusy(true); setPhase('contacting');
-      // after Google → callback reads this and redirects
-      localStorage.setItem(
-        'postAuthRedirect',
-        mode === 'signup' ? `${from}?onboard=1&mode=signup` : from
-      );
+      localStorage.setItem('postAuthRedirect', mode === 'signup' ? `${from}?onboard=1&mode=signup` : from);
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
@@ -159,9 +143,15 @@ export default function AuthPage() {
         <div className="glow glow2" />
 
         <div className="wrap">
-          {/* LEFT — Auth card (bigger, left-shifted) */}
           <section className="card auth appear">
-            {/* Tabs */}
+            {/* If a session exists, show an info bar instead of auto-redirecting */}
+            {hasSession && (
+              <div className="already">
+                You’re already signed in.
+                <button className="mini" onClick={() => router.replace(from)}>Open builder</button>
+              </div>
+            )}
+
             <div className="tabs">
               <button className={`tab ${mode === 'signin' ? 'active' : ''}`} disabled={busy} onClick={() => switchMode('signin')}>Sign in</button>
               <button className={`tab ${mode === 'signup' ? 'active' : ''}`} disabled={busy} onClick={() => switchMode('signup')}>Sign up</button>
@@ -205,9 +195,7 @@ export default function AuthPage() {
                       : 'Sign in'}
                 </button>
 
-                <div className="or">
-                  <div className="line" /><span>or</span><div className="line" />
-                </div>
+                <div className="or"><div className="line" /><span>or</span><div className="line" /></div>
 
                 <button type="button" className="google" onClick={handleGoogle} disabled={busy}>
                   <GoogleG /> Continue with Google
@@ -225,7 +213,6 @@ export default function AuthPage() {
             )}
           </section>
 
-          {/* RIGHT — Welcome card (same vibe as your components) */}
           <aside className="card welcome appear">
             <div className="welcomeHead">
               <div className="spark">✦</div>
@@ -241,7 +228,6 @@ export default function AuthPage() {
         </div>
       </main>
 
-      {/* Self-contained styles (match StepV1/AgentCard look) */}
       <style jsx>{`
         :global(html, body) { margin: 0; }
         .page {
@@ -265,6 +251,17 @@ export default function AuthPage() {
         @keyframes fadeInUp { from{opacity:0; transform:translateY(8px)} to{opacity:1; transform:translateY(0)} }
 
         .auth { max-width: 680px; }
+
+        .already {
+          display:flex; align-items:center; justify-content:space-between;
+          gap:10px; margin-bottom:10px; padding:10px 12px; border-radius:12px;
+          background: rgba(16,19,20,0.9); border:1px solid rgba(255,255,255,0.18); font-size:13px;
+        }
+        .mini {
+          border:1px solid rgba(255,255,255,0.25); background:rgba(0,0,0,0.25); color:#fff;
+          padding:6px 10px; border-radius:10px; cursor:pointer;
+        }
+
         .tabs { display: flex; gap: 10px; margin-bottom: 18px; }
         .tab {
           flex: 1; padding: 10px 12px; border-radius: 14px; background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.92);
@@ -325,7 +322,6 @@ export default function AuthPage() {
 }
 
 function GoogleG() {
-  // Official "G"
   return (
     <svg width="18" height="18" viewBox="0 0 256 262" xmlns="http://www.w3.org/2000/svg" aria-hidden>
       <path fill="#4285F4" d="M255.88 133.5c0-10.9-.9-18.8-2.9-27.1H130.5v49.1h71.9c-1.5 12.3-9.6 30.9-27.6 43.4l-.3 2.1 40.1 31 2.8.3c25.8-23.8 38.4-58.8 38.4-98.9z"/>
