@@ -27,14 +27,21 @@ import Step4Overview from './Step4Overview';
 import { s } from '@/utils/safe';
 import { supabase } from '@/lib/supabase-client';
 
+// Lazy & safe: overlay sometimes imports things that can throw in SSR.
 const OnboardingOverlay = dynamic(() => import('../ui/OnboardingOverlay'), {
   ssr: false,
   loading: () => null,
 });
 
+// 3D bot preview
 const Bot3D = dynamic(() => import('./Bot3D.client'), {
   ssr: false,
-  loading: () => <div className="h-full w-full bg-[#121517]" />,
+  loading: () => (
+    <div
+      className="h-full w-full"
+      style={{ background: 'linear-gradient(180deg, rgba(106,247,209,0.10), rgba(16,19,20,0.6))' }}
+    />
+  ),
 });
 
 // ---------- small error boundary so a child render can't crash the page ----------
@@ -46,7 +53,7 @@ class ErrorBoundary extends React.Component<{ fallback?: React.ReactNode }, { ha
   static getDerivedStateFromError() {
     return { hasError: true };
   }
-  componentDidCatch() {}
+  componentDidCatch() { /* no-op */ }
   render() {
     if (this.state.hasError) return this.props.fallback ?? null;
     return this.props.children as any;
@@ -77,7 +84,7 @@ type Bot = {
   language?: string;
   model?: string;
   description?: string;
-  prompt?: string;
+  prompt?: string; // Step 3 raw
   createdAt?: string;
   updatedAt?: string;
   appearance?: Appearance;
@@ -238,7 +245,7 @@ export default function BuilderDashboard() {
   const rawStep = search.get('step');
   const step = rawStep && ['1', '2', '3', '4'].includes(rawStep) ? rawStep : null;
 
-  // ---- NEW: short loading overlay whenever step changes
+  /* NEW: quick loading overlay when the step changes */
   const [stepLoading, setStepLoading] = useState(false);
   useEffect(() => {
     if (step) {
@@ -311,23 +318,24 @@ export default function BuilderDashboard() {
   if (step) {
     return (
       <div className="min-h-screen w-full text-white font-movatif bg-[#0b0c10] relative">
-        {/* loading overlay between steps */}
+        {/* NEW: loading overlay between steps */}
         {stepLoading && (
           <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 backdrop-blur-[1px]">
             <span className="inline-block w-8 h-8 rounded-full border-2 border-white/70 border-t-transparent animate-spin" />
           </div>
         )}
-        <main className="w-full min-h-screen animate-card-pop">
+        <main className="w-full min-h-screen animate-fade-in">
           {step === '1' && <Step1AIType onNext={() => setStep('2')} />}
           {step === '2' && <Step2ModelSettings onBack={() => setStep('1')} onNext={() => setStep('3')} />}
           {step === '3' && <Step3PromptEditor onBack={() => setStep('2')} onNext={() => setStep('4')} />}
           {step === '4' && <Step4Overview onBack={() => setStep('3')} onFinish={() => setStep(null)} />}
         </main>
 
-        {/* animations CSS */}
+        {/* Minimal animation keyframes (no style changes elsewhere) */}
         <style jsx global>{`
-          @keyframes cardPop { from { opacity:0; transform: translateY(6px) scale(.995); } to { opacity:1; transform: translateY(0) scale(1); } }
-          .animate-card-pop { animation: cardPop .32s ease-out both; }
+          @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+          .animate-fade-in { animation: fadeIn .28s ease-out both; }
+          .card-fade { animation: fadeIn .28s ease-out both; }
         `}</style>
       </div>
     );
@@ -338,10 +346,10 @@ export default function BuilderDashboard() {
       <main className="flex-1 w-full px-4 sm:px-6 pt-10 pb-24">
         <div className="flex items-center justify-between mb-7">
           <h1 className="text-2xl md:text-3xl font-semibold">Builds</h1>
-          {/* TOP RIGHT BUTTON — keep it, but make text WHITE as requested */}
+          {/* CHANGED: only the text color -> white */}
           <button
             onClick={() => router.push('/builder?step=1')}
-            className="px-4 py-2 rounded-[10px] bg-[#00ffc2] text-white font-semibold shadow-none hover:brightness-110 transition"
+            className="px-4 py-2 rounded-[10px] bg-[#00ffc2] text-white font-semibold shadow-[0_0_10px_rgba(106,247,209,0.28)] hover:brightness-110 transition"
           >
             Create a Build
           </button>
@@ -352,7 +360,7 @@ export default function BuilderDashboard() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search projects and builds…"
-            className="w-full rounded-[10px] bg-[#101314] text-white/95 border border-[#1e2a28] px-5 py-4 text-[15px] outline-none focus:border-[#00ffc2]"
+            className="w-full rounded-[10px] bg-[#101314] text-white/95 border border-[#13312b] px-5 py-4 text-[15px] outline-none focus:border-[#00ffc2]"
           />
         </div>
 
@@ -424,12 +432,6 @@ export default function BuilderDashboard() {
 
       {/* Welcome overlay over the dashboard (sign-up only) */}
       <OnboardingOverlay open={welcomeOpen} mode={mode} userId={userId} onDone={closeWelcome} />
-
-      {/* global animations for cards */}
-      <style jsx global>{`
-        @keyframes fadeUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
-        .animate-card { animation: fadeUp .28s ease-out both; }
-      `}</style>
     </div>
   );
 }
@@ -462,22 +464,22 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
   };
 
   const FRAME_STYLE: React.CSSProperties = {
-    background: '#0f1114',
-    border: '1px solid rgba(106,247,209,0.25)',
-    borderRadius: 24,
-    boxShadow: '0 20px 60px rgba(0,0,0,0.45)',
+    background: 'rgba(13,15,17,0.95)',
+    border: '2px dashed rgba(106,247,209,0.3)',
+    boxShadow: '0 0 40px rgba(0,0,0,0.7)',
+    borderRadius: 30,
   };
-  const HEADER_BORDER = { borderBottom: '1px solid rgba(255,255,255,0.08)' };
+  const HEADER_BORDER = { borderBottom: '1px solid rgba(255,255,255,0.4)' };
   const CARD_STYLE: React.CSSProperties = {
     background: '#101314',
-    border: '1px solid rgba(255,255,255,0.08)',
-    borderRadius: 16,
+    border: '1px solid rgba(255,255,255,0.3)',
+    borderRadius: 20,
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-black/50">
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: 'rgba(0,0,0,0.5)' }}>
       <div className="relative w-full max-w-[1280px] max-h-[88vh] flex flex-col" style={FRAME_STYLE}>
-        <div className="flex items-center justify-between px-6 py-4 rounded-t-[24px]" style={HEADER_BORDER}>
+        <div className="flex items-center justify-between px-6 py-4 rounded-t-[30px]" style={HEADER_BORDER}>
           <div className="min-w-0">
             <h2 className="text-white text-xl font-semibold truncate">Prompt</h2>
             <div className="text-white/90 text-xs md:text-sm truncate">
@@ -488,7 +490,8 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
           <div className="flex items-center gap-2">
             <button
               onClick={copyAll}
-              className="inline-flex items-center gap-2 rounded-[12px] px-3 py-2 text-xs border border-white/20 bg-[#0d0f11] text-white"
+              className="inline-flex items-center gap-2 rounded-[14px] px-3 py-2 text-xs border"
+              style={{ background: '#0d0f11', borderColor: 'rgba(255,255,255,0.3)', color: 'white' }}
               title="Copy"
             >
               <Copy className="w-3.5 h-3.5" />
@@ -496,18 +499,14 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
             </button>
             <button
               onClick={downloadTxt}
-              className="inline-flex items-center gap-2 rounded-[12px] px-3 py-2 text-xs border border-white/20 bg-[#0d0f11] text-white"
+              className="inline-flex items-center gap-2 rounded-[14px] px-3 py-2 text-xs border"
+              style={{ background: '#0d0f11', borderColor: 'rgba(255,255,255,0.3)', color: 'white' }}
               title="Download"
             >
               <DownloadIcon className="w-3.5 h-3.5" />
               Download
             </button>
-            <button
-              onClick={onClose}
-              className="p-2 rounded-full hover:bg-white/10"
-              aria-label="Close"
-              title="Close"
-            >
+            <button onClick={onClose} className="p-2 rounded-full hover:bg-white/10" aria-label="Close" title="Close">
               <X className="w-5 h-5 text-white" />
             </button>
           </div>
@@ -538,11 +537,12 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
           )}
         </div>
 
-        <div className="px-6 py-4 rounded-b-[24px]" style={{ borderTop: '1px solid rgba(255,255,255,0.08)', background: '#101314' }}>
+        <div className="px-6 py-4 rounded-b-[30px]" style={{ borderTop: '1px solid rgba(255,255,255,0.3)', background: '#101314' }}>
           <div className="flex justify-end">
             <button
               onClick={onClose}
-              className="px-5 py-2 rounded-[12px] font-semibold bg-[rgba(0,120,90,1)] text-white"
+              className="px-5 py-2 rounded-[14px] font-semibold"
+              style={{ background: 'rgba(0,120,90,1)', color: 'white' }}
             >
               Close
             </button>
@@ -562,20 +562,20 @@ function CreateCard({ onClick }: { onClick: () => void }) {
       onClick={onClick}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      className="group relative h-[380px] rounded-[16px] p-7 flex flex-col items-center justify-center transition-all active:scale-[0.995] animate-card"
+      className="group relative h-[380px] rounded-[16px] p-7 flex flex-col items-center justify-center transition-all active:scale-[0.995] card-fade"
       style={{
-        // GLASS REMOVED: flat, clean card
-        background: '#13161a',
-        border: '1px solid #1e2a28',
-        boxShadow: hover ? '0 10px 28px rgba(0,0,0,0.35)' : 'none',
+        background: 'rgba(13,15,17,0.92)',
+        border: '2px solid rgba(106,247,209,0.32)',
+        boxShadow: 'inset 0 0 22px rgba(0,0,0,0.28), 0 0 20px rgba(106,247,209,0.06)',
       }}
     >
-      {/* removed radial glow + pulse strip */}
+      {/* REMOVED: the two glass/glow layers */}
       <div
         className="w-20 h-20 rounded-full flex items-center justify-center mb-5"
         style={{
           background: 'rgba(0,0,0,0.18)',
-          border: '1px dashed rgba(106,247,209,0.35)',
+          border: '2px dashed rgba(106,247,209,0.35)',
+          boxShadow: 'inset 0 0 18px rgba(0,0,0,0.45), inset 0 0 6px rgba(106,247,209,0.06)',
         }}
       >
         <Plus className="w-10 h-10" style={{ color: '#6af7d1', opacity: 0.9 }} />
@@ -607,15 +607,14 @@ function BuildCard({
   const ap = bot.appearance || {};
   return (
     <div
-      className="relative h-[380px] rounded-[16px] p-0 flex flex-col justify-between group transition-all animate-card"
+      className="relative h-[380px] rounded-[16px] p-0 flex flex-col justify-between group transition-all card-fade"
       style={{
-        // GLASS REMOVED
-        background: '#13161a',
-        border: '1px solid #1e2a28',
-        boxShadow: hover ? '0 10px 28px rgba(0,0,0,0.35)' : 'none',
+        background: 'rgba(13,15,17,0.92)',
+        border: '2px solid rgba(106,247,209,0.32)',
+        boxShadow: 'inset 0 0 22px rgba(0,0,0,0.28), 0 0 20px rgba(106,247,209,0.06)',
       }}
     >
-      {/* removed big radial background glow */}
+      {/* REMOVED: the large radial background glow layer */}
       <div
         className="h-48 border-b border-white/10 overflow-hidden relative"
         onMouseEnter={() => setHover(true)}
@@ -624,13 +623,21 @@ function BuildCard({
         <button
           onClick={onCustomize}
           className="absolute right-3 top-3 z-10 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-[10px] text-xs border transition"
-          style={{ background: 'rgba(16,19,20,0.88)', border: '1px solid rgba(106,247,209,0.4)' }}
+          style={{ background: 'rgba(16,19,20,0.88)', border: '2px solid rgba(106,247,209,0.4)', boxShadow: '0 0 14px rgba(106,247,209,0.12)' }}
         >
           <SlidersHorizontal className="w-3.5 h-3.5" />
           Customize
         </button>
 
-        <ErrorBoundary fallback={<div className="h-full w-full bg-[#121517]" />}>
+        {/* Guarded 3D preview so it can’t crash the page */}
+        <ErrorBoundary
+          fallback={
+            <div
+              className="h-full w-full"
+              style={{ background: 'linear-gradient(180deg, rgba(106,247,209,0.10), rgba(16,19,20,0.6))' }}
+            />
+          }
+        >
           {/* @ts-ignore */}
           <Bot3D
             className="h-full"
@@ -656,7 +663,7 @@ function BuildCard({
         <div className="flex items-center gap-3">
           <div
             className="w-11 h-11 rounded-[10px] flex items-center justify-center"
-            style={{ background: 'rgba(0,0,0,0.15)', border: '1px solid rgba(106,247,209,0.32)' }}
+            style={{ background: 'rgba(0,0,0,0.15)', border: '2px solid rgba(106,247,209,0.32)' }}
           >
             <BotIcon className="w-5 h-5" style={{ color: accent }} />
           </div>
@@ -675,7 +682,7 @@ function BuildCard({
           <button
             onClick={onOpen}
             className="inline-flex items-center gap-2 px-3.5 py-2 rounded-[10px] text-sm border transition hover:translate-y-[-1px]"
-            style={{ background: 'rgba(16,19,20,0.88)', border: '1px solid rgba(106,247,209,0.4)' }}
+            style={{ background: 'rgba(16,19,20,0.88)', border: '2px solid rgba(106,247,209,0.4)', boxShadow: '0 0 14px rgba(106,247,209,0.12)' }}
           >
             Open <ArrowRight className="w-4 h-4" />
           </button>
