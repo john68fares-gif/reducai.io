@@ -100,7 +100,7 @@ export default function Sidebar() {
         </div>
 
         {/* Workspace */}
-        <Section title="Workspace" collapsed={collapsed}>
+        <Section title="WORKSPACE" collapsed={collapsed}>
           <NavList>
             <Item collapsed={collapsed} href="/builder" label="Build" sub="Create AI agent" icon={<Home />} active={pathname?.startsWith('/builder')} />
             <Item collapsed={collapsed} href={lastBotId ? `/improve/${lastBotId}` : '#'} label="Improve" sub="Integrate & optimize" icon={<Hammer />} active={pathname?.startsWith('/improve')} disabled={!lastBotId} />
@@ -114,7 +114,7 @@ export default function Sidebar() {
         <div className="my-3 border-t border-white/10" />
 
         {/* Resources */}
-        <Section title="Resources" collapsed={collapsed}>
+        <Section title="RESOURCES" collapsed={collapsed}>
           <NavList>
             <Item collapsed={collapsed} href="#" label="Marketplace" icon={<ShoppingCart />} />
             <Item collapsed={collapsed} href="#" label="AI Mentor" icon={<BookOpen />} />
@@ -172,10 +172,12 @@ export default function Sidebar() {
 function Section({ title, collapsed, children }: { title: string; collapsed: boolean; children: React.ReactNode }) {
   return (
     <div className="px-4 pt-4">
+      {/* Title always present, just dims when collapsed */}
       <div
         className={cn(
-          "text-[11px] uppercase tracking-wide text-white/55 mb-2.5 px-1 h-4 transition-opacity duration-300 ease-in-out",
-          collapsed ? "opacity-0" : "opacity-100"
+          "text-[11px] uppercase tracking-wide mb-2.5 h-4 flex items-center",
+          "transition-opacity duration-300 ease-in-out",
+          collapsed ? "opacity-40" : "opacity-70 text-white/55"
         )}
       >
         {title}
@@ -212,22 +214,30 @@ function Item({
       }}
       title={collapsed ? label : undefined}
     >
+      {/* Icon */}
       <div className="shrink-0 flex items-center justify-center w-5 h-5 text-white/90">
         {icon}
       </div>
-      <AnimatedText collapsed={collapsed}>
+
+      {/* Text + Sub */}
+      <div
+        className={cn(
+          'overflow-hidden ml-3 transition-all duration-300 ease-in-out',
+          collapsed ? 'opacity-0 max-w-0' : 'opacity-100 max-w-[200px]'
+        )}
+      >
         <div className="leading-tight">
           <div className="text-[13px] font-semibold text-white/95">{label}</div>
           {sub && <div className="text-[11px] text-white/55 mt-[3px] group-hover:text-white/70">{sub}</div>}
         </div>
-      </AnimatedText>
+      </div>
     </div>
   );
   if (disabled) return <div>{body}</div>;
   return <Link href={href} className="block">{body}</Link>;
 }
 
-/* Animated text wrapper */
+/* Text fade/slide wrapper */
 function AnimatedText({ collapsed, children }: { collapsed: boolean; children: React.ReactNode }) {
   return (
     <div
