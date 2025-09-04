@@ -384,3 +384,10 @@ function ApiKeysScreen() {
 
 /* Export with SSR disabled so localStorage is safe */
 export default dynamic(() => Promise.resolve(ApiKeysScreen), { ssr: false });
+// ... (rest of your code unchanged above)
+
+function ApiKeysScreen() {
+  // everything as you wrote…
+}
+
+export default dynamic(() => Promise.resolve(ApiKeysScreen), { ssr: false });
