@@ -5,10 +5,7 @@ import React, { useEffect, useRef, useState } from 'react';
 type Msg = { id: string; role: 'user' | 'assistant'; text: string };
 
 const sanitize = (text: string) =>
-  text
-    .replace(/\*\*/g, '')
-    .replace(/```[\s\S]*?```/g, '[redacted]')
-    .replace(/`([^`]+)`/g, '$1');
+  text.replace(/\*\*/g, '').replace(/```[\s\S]*?```/g, '[redacted]').replace(/`([^`]+)`/g, '$1');
 
 export default function SupportPage() {
   const [messages, setMessages] = useState<Msg[]>([
@@ -31,7 +28,7 @@ export default function SupportPage() {
     if (!value || loading) return;
 
     const userMsg: Msg = { id: crypto.randomUUID(), role: 'user', text: value };
-    setMessages(prev => [...prev, userMsg]);
+    setMessages((prev) => [...prev, userMsg]);
     setInput('');
     setLoading(true);
 
@@ -43,18 +40,18 @@ export default function SupportPage() {
       });
       const data = await r.json();
       const botText =
-        (data?.ok && typeof data?.message === 'string'
+        data?.ok && typeof data?.message === 'string'
           ? data.message
-          : 'Sorry, I can’t comply with that request.');
+          : 'Sorry, I can’t comply with that request.';
 
       const assistantMsg: Msg = {
         id: crypto.randomUUID(),
         role: 'assistant',
         text: sanitize(botText),
       };
-      setMessages(prev => [...prev, assistantMsg]);
+      setMessages((prev) => [...prev, assistantMsg]);
     } catch {
-      setMessages(prev => [
+      setMessages((prev) => [
         ...prev,
         {
           id: crypto.randomUUID(),
@@ -72,47 +69,53 @@ export default function SupportPage() {
   };
 
   return (
-    <div style={styles.wrap}>
-      <div style={styles.card}>
-        <div style={styles.header}>
-          <div style={styles.rileyDot} />
-          <span>Riley Support</span>
-        </div>
+    <div className="w-full h-full flex flex-col gap-4">
+      <div className="flex items-center gap-2 text-lg font-semibold">
+        <div className="w-3 h-3 rounded-full bg-[#00ffc2] shadow-[0_0_8px_#00ffc2]" />
+        Riley Support
+      </div>
 
-        <div ref={listRef} style={styles.list}>
-          {messages.map(m => (
-            <div key={m.id} style={m.role === 'user' ? styles.rowUser : styles.rowBot}>
-              <div style={m.role === 'user' ? styles.bubbleUser : styles.bubbleBot}>
-                {m.text}
-              </div>
+      <div ref={listRef} className="flex-1 overflow-y-auto rounded-xl border border-white/10 p-4 bg-black/20">
+        {messages.map((m) => (
+          <div
+            key={m.id}
+            className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}
+          >
+            <div
+              className={`px-3 py-2 rounded-lg max-w-[80%] ${
+                m.role === 'user'
+                  ? 'bg-[#00ffc233] border border-[#00ffc244] text-white'
+                  : 'bg-white/10 border border-white/20 text-white'
+              }`}
+            >
+              {m.text}
             </div>
-          ))}
-
-          {loading && (
-            <div style={styles.rowBot}>
-              <div style={styles.bubbleBot}>
-                <TypingDots />
-              </div>
+          </div>
+        ))}
+        {loading && (
+          <div className="flex justify-start">
+            <div className="px-3 py-2 rounded-lg bg-white/10 border border-white/20 text-white">
+              <TypingDots />
             </div>
-          )}
-        </div>
+          </div>
+        )}
+      </div>
 
-        <div style={styles.inputRow}>
-          <input
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={onKey}
-            placeholder="Ask Riley…"
-            style={styles.input}
-          />
-          <button onClick={send} disabled={loading || !input.trim()} style={styles.button}>
-            Send
-          </button>
-        </div>
-
-        <div style={styles.note}>
-          Riley will never reveal or summarize code, file contents, or paths. If asked, Riley will refuse.
-        </div>
+      <div className="flex gap-2">
+        <input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={onKey}
+          placeholder="Ask Riley…"
+          className="flex-1 rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-white outline-none"
+        />
+        <button
+          onClick={send}
+          disabled={loading || !input.trim()}
+          className="px-4 py-2 rounded-lg bg-[#00ffc2] text-black font-semibold disabled:opacity-50"
+        >
+          Send
+        </button>
       </div>
     </div>
   );
@@ -120,125 +123,10 @@ export default function SupportPage() {
 
 function TypingDots() {
   return (
-    <span style={styles.dotsWrap} aria-label="Riley is thinking">
-      <span style={{ ...styles.dot, animationDelay: '0ms' }} />
-      <span style={{ ...styles.dot, animationDelay: '120ms' }} />
-      <span style={{ ...styles.dot, animationDelay: '240ms' }} />
+    <span className="inline-flex gap-1">
+      <span className="w-2 h-2 rounded-full bg-white/80 animate-bounce" />
+      <span className="w-2 h-2 rounded-full bg-white/80 animate-bounce delay-150" />
+      <span className="w-2 h-2 rounded-full bg-white/80 animate-bounce delay-300" />
     </span>
   );
-}
-
-const styles: Record<string, React.CSSProperties> = {
-  wrap: {
-    minHeight: '100vh',
-    background:
-      'radial-gradient(1200px 600px at 20% -10%, rgba(0,255,194,0.12), transparent), #0b0c10',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 16,
-  },
-  card: {
-    width: '100%',
-    maxWidth: 920,
-    background: '#0d0f11',
-    border: '1px dashed rgba(0,255,194,0.25)',
-    boxShadow: '0 0 40px rgba(0,255,194,0.12)',
-    borderRadius: 24,
-    padding: 16,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 12,
-  },
-  header: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 10,
-    fontSize: 18,
-    color: '#e6fff7',
-  },
-  rileyDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 999,
-    background: 'rgba(0,255,194,0.9)',
-    boxShadow: '0 0 12px rgba(0,255,194,0.8)',
-  },
-  list: {
-    flex: 1,
-    minHeight: 360,
-    maxHeight: '60vh',
-    overflowY: 'auto',
-    padding: 8,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 10,
-  },
-  rowUser: { display: 'flex', justifyContent: 'flex-end' },
-  rowBot: { display: 'flex', justifyContent: 'flex-start' },
-  bubbleUser: {
-    background: 'linear-gradient(180deg, rgba(0,255,194,0.25), rgba(0,255,194,0.12))',
-    border: '1px solid rgba(0,255,194,0.35)',
-    color: '#dffef6',
-    padding: '10px 12px',
-    borderRadius: 14,
-    maxWidth: '80%',
-    whiteSpace: 'pre-wrap',
-    wordBreak: 'break-word',
-  },
-  bubbleBot: {
-    background: 'rgba(255,255,255,0.04)',
-    border: '1px solid rgba(255,255,255,0.08)',
-    color: '#e5f9f3',
-    padding: '10px 12px',
-    borderRadius: 14,
-    maxWidth: '80%',
-    whiteSpace: 'pre-wrap',
-    wordBreak: 'break-word',
-  },
-  inputRow: { display: 'flex', gap: 8, paddingTop: 6 },
-  input: {
-    flex: 1,
-    background: '#0b0c10',
-    border: '1px solid rgba(255,255,255,0.08)',
-    color: '#e6fff7',
-    padding: '12px 14px',
-    borderRadius: 12,
-    outline: 'none',
-  },
-  button: {
-    background: 'rgba(0,255,194,0.15)',
-    border: '1px solid rgba(0,255,194,0.4)',
-    color: '#dffef6',
-    padding: '12px 16px',
-    borderRadius: 12,
-    cursor: 'pointer',
-  },
-  note: {
-    fontSize: 12,
-    opacity: 0.65,
-    textAlign: 'center',
-    paddingTop: 4,
-    color: '#c7efe6',
-  },
-  dotsWrap: { display: 'inline-flex', gap: 6, alignItems: 'center' },
-  dot: {
-    width: 6,
-    height: 6,
-    borderRadius: 999,
-    background: 'rgba(230,255,247,0.95)',
-    display: 'inline-block',
-    animation: 'riley-bounce 900ms infinite ease-in-out',
-  } as React.CSSProperties,
-};
-
-if (typeof document !== 'undefined' && !document.getElementById('riley-bounce-style')) {
-  const style = document.createElement('style');
-  style.id = 'riley-bounce-style';
-  style.innerHTML = `
-  @keyframes riley-bounce {
-    0%, 80%, 100% { transform: translateY(0); opacity: .5; }
-    40% { transform: translateY(-6px); opacity: 1; }
-  }`;
-  document.head.appendChild(style);
 }
