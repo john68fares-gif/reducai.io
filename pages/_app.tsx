@@ -7,7 +7,9 @@ import { supabase } from '@/lib/supabase-client';
 import Sidebar from '@/components/ui/Sidebar';
 
 const BG = '#0b0c10';
-const PUBLIC_ROUTES = ['/auth', '/auth/callback']; // everything else requires auth
+
+// ❗ Sidebar should NOT appear on these pages (and they don't require auth)
+const PUBLIC_ROUTES = ['/', '/auth', '/auth/callback'];
 
 export default function App({ Component, pageProps }: AppProps) {
   const router = useRouter();
@@ -22,7 +24,7 @@ export default function App({ Component, pageProps }: AppProps) {
   const [authed, setAuthed] = useState(false);
 
   useEffect(() => {
-    // auth change → keep cookie visible to server / middleware
+    // Keep a server-visible cookie in sync so middleware/SSR can see auth state
     const sub = supabase.auth.onAuthStateChange((event) => {
       if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
         setRASessionCookie();
@@ -36,7 +38,7 @@ export default function App({ Component, pageProps }: AppProps) {
       }
     });
 
-    // initial check on load
+    // Initial check at load/refresh
     (async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (session) {
@@ -55,10 +57,12 @@ export default function App({ Component, pageProps }: AppProps) {
     return () => sub.data.subscription.unsubscribe();
   }, [router, isPublic]);
 
-  // Public pages render bare (auth UI, callback, etc.)
-  if (isPublic) return <Component {...pageProps} />;
+  // Public pages render bare (no sidebar)
+  if (isPublic) {
+    return <Component {...pageProps} />;
+  }
 
-  // Soft loader while we decide
+  // Soft loader while deciding on protected pages
   if (checking) {
     return (
       <div
@@ -78,9 +82,10 @@ export default function App({ Component, pageProps }: AppProps) {
     );
   }
 
+  // If unauthenticated, we already redirected; render nothing
   if (!authed) return null;
 
-  // Authenticated app layout using YOUR Sidebar component
+  // Authenticated app layout (sidebar on all private pages)
   return (
     <div className="min-h-screen w-full text-white" style={{ background: BG }}>
       <div className="mx-auto max-w-[1400px] px-4 sm:px-6 lg:px-8 py-8 grid grid-cols-12 gap-6">
