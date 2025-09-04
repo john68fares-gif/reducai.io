@@ -211,8 +211,8 @@ function Item({
   const body = (
     <div
       className={cn(
-        'group rounded-xl flex items-center h-12 transition-colors duration-200', // vaste hoogte
-        'px-3',
+        'group rounded-xl flex items-center h-12 transition-colors duration-200',
+        collapsed ? 'px-0 justify-center' : 'px-3',
         disabled && 'opacity-50 cursor-not-allowed',
         !disabled && 'hover:translate-x-[1px]'
       )}
@@ -229,7 +229,7 @@ function Item({
       }}
       title={collapsed ? label : undefined}
     >
-      {/* Icon wrapper: altijd vierkant en gecentreerd */}
+      {/* Icon wrapper: gecentreerd */}
       <div className="w-8 h-8 flex items-center justify-center shrink-0 text-white/90">
         {icon}
       </div>
