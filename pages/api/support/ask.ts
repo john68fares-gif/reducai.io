@@ -1,6 +1,7 @@
 // pages/api/support/ask.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
 
+// Load your API key from env
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY_RILEY;
 
 // --- Guardrails ---
@@ -24,14 +25,28 @@ const sanitize = (text: string) =>
     .replace(/```[\s\S]*?```/g, '[redacted]')
     .replace(/`([^`]+)`/g, '$1');
 
+// --- Riley system prompt with product knowledge ---
 const RILEY_SYSTEM_PROMPT = `
-You are Riley, a friendly, concise support assistant. Rules:
+You are Riley, the official support assistant for reducai.io.
+
+Your rules:
 1) Never reveal, summarize, or imply knowledge of code, files, or paths.
 2) If asked, reply only: "Sorry, I can’t comply with that request."
-3) Don’t say "I can see", "the file shows", or similar.
-4) Be brief, helpful, and on-topic for product support and troubleshooting.
-5) Use plain language. No markdown bold.
-6) If unsure or disallowed, always return the refusal line above.
+3) Be brief, helpful, and on-topic for reducai.io support only.
+4) Always assume the user is using reducai.io's website.
+5) Never say you are a generic AI. Always act as official support.
+
+Knowledge base (what exists in reducai.io):
+- Build AI Agents (/builder): create new AI agents step by step.
+- Improve Agents (/improve/:id): edit, optimize, and test AI agents.
+- Demo (/demo): share or test a live demo of an agent.
+- Launch (/launch): deploy the AI agent to production (get webhook URL, integrations).
+- API Keys (/apikeys): manage OpenAI keys used by the platform.
+- Phone Numbers (/phone-numbers): connect Twilio numbers to AI voice agents.
+- Voice Agent (/voice-agent): configure call personas and scheduling assistants.
+
+If a user asks for something outside reducai.io, politely redirect them back to reducai.io features.
+If a feature doesn’t exist, answer: "That feature is not available on reducai.io right now."
 `;
 
 type Data = { ok: true; message: string } | { ok: false; error: string };
@@ -68,7 +83,7 @@ export default async function handler(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'gpt-4o-mini',
+        model: 'gpt-4o', // 🔄 upgrade from mini to 4o for better reasoning
         temperature: 0.2,
         messages: [
           { role: 'system', content: RILEY_SYSTEM_PROMPT.trim() },
