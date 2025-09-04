@@ -1,14 +1,22 @@
+You’re right — use your own components/ui/Sidebar.tsx everywhere and don’t invent a new shell.
+
+Here’s a single drop-in _app.tsx that:
+	•	gates all routes except /auth and /auth/callback with Supabase,
+	•	keeps your ra_session cookie in sync,
+	•	and wraps every authenticated page in your existing <Sidebar /> layout (no duplicate styling).
+
+Replace /pages/_app.tsx with this:
+
 // /pages/_app.tsx
 import type { AppProps } from 'next/app';
 import '@/styles/globals.css';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import { supabase } from '@/lib/supabase-client';
 import Sidebar from '@/components/ui/Sidebar';
 
 const BG = '#0b0c10';
-// Public routes: NO sidebar, NO auth gating
-const PUBLIC_ROUTES = ['/', '/auth', '/auth/callback'];
+const PUBLIC_ROUTES = ['/auth', '/auth/callback']; // everything else requires auth
 
 export default function App({ Component, pageProps }: AppProps) {
   const router = useRouter();
@@ -23,6 +31,7 @@ export default function App({ Component, pageProps }: AppProps) {
   const [authed, setAuthed] = useState(false);
 
   useEffect(() => {
+    // auth change → keep cookie visible to server / middleware
     const sub = supabase.auth.onAuthStateChange((event) => {
       if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
         setRASessionCookie();
@@ -36,6 +45,7 @@ export default function App({ Component, pageProps }: AppProps) {
       }
     });
 
+    // initial check on load
     (async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (session) {
@@ -54,15 +64,23 @@ export default function App({ Component, pageProps }: AppProps) {
     return () => sub.data.subscription.unsubscribe();
   }, [router, isPublic]);
 
-  // 1) Public pages render bare (landing, auth, callback)
+  // Public pages render bare (auth UI, callback, etc.)
   if (isPublic) return <Component {...pageProps} />;
 
-  // 2) Protected pages: loader while we decide
+  // Soft loader while we decide
   if (checking) {
     return (
-      <div className="min-h-screen grid place-items-center text-white" style={{ background: BG }}>
+      <div
+        style={{
+          minHeight: '100vh',
+          display: 'grid',
+          placeItems: 'center',
+          color: 'white',
+          background: BG,
+        }}
+      >
         <div className="flex items-center gap-3">
-          <span className="w-6 h-6 rounded-full border-2 border-white/70 border-t-transparent animate-spin" />
+          <span className="inline-block w-6 h-6 rounded-full border-2 border-white/70 border-t-transparent animate-spin" />
           <span>Checking session…</span>
         </div>
       </div>
@@ -71,77 +89,27 @@ export default function App({ Component, pageProps }: AppProps) {
 
   if (!authed) return null;
 
-  // 3) Authenticated pages: wrap with flex shell using *measured* sidebar width
+  // Authenticated app layout using YOUR Sidebar component
   return (
-    <Shell>
-      <Component {...pageProps} />
-    </Shell>
-  );
-}
-
-/* ------------------------------ Shell ------------------------------ */
-/**
- * Flex row: [ Sidebar | Main ]
- * - Sidebar width is whatever your <Sidebar /> renders (expanded or collapsed).
- * - We measure it with ResizeObserver and set CSS var --sbw, used only to fix layout jitter on first paint.
- * - Main is flex:1 and expands ONLY when sidebar actually shrinks.
- */
-function Shell({ children }: { children: React.ReactNode }) {
-  const sbWrapRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    const wrap = sbWrapRef.current;
-    if (!wrap || typeof ResizeObserver === 'undefined') return;
-
-    // Initialize CSS var to current width
-    const apply = (w: number) => {
-      const clamped = Math.max(44, Math.min(420, Math.round(w)));
-      document.documentElement.style.setProperty('--sbw', `${clamped}px`);
-    };
-    apply(wrap.getBoundingClientRect().width);
-
-    // Track width changes (expanded/collapsed)
-    const ro = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const w =
-          // borderBoxSize is most accurate when available
-          (entry as any).borderBoxSize?.[0]?.inlineSize ??
-          entry.contentRect?.width ??
-          wrap.getBoundingClientRect().width;
-        apply(w);
-      }
-    });
-    ro.observe(wrap);
-    return () => ro.disconnect();
-  }, []);
-
-  return (
-    <div className="min-h-screen text-white" style={{ background: BG }}>
-      <div className="mx-auto max-w-[1400px] px-4 sm:px-6 lg:px-8 py-8">
-        <div className="flex gap-6">
-          {/* Sidebar column: never grows or shrinks content; just has its own width */}
-          <div ref={sbWrapRef} className="shrink-0">
-            <div className="sticky top-6">
-              <Sidebar />
-            </div>
+    <div className="min-h-screen w-full text-white" style={{ background: BG }}>
+      <div className="mx-auto max-w-[1400px] px-4 sm:px-6 lg:px-8 py-8 grid grid-cols-12 gap-6">
+        {/* Sidebar column */}
+        <aside className="hidden md:block md:col-span-3 lg:col-span-3">
+          <div className="sticky top-6">
+            <Sidebar />
           </div>
+        </aside>
 
-          {/* Main: always takes remaining space. Smoothly adapts when sidebar collapses/expands */}
-          <main
-            className="flex-1 min-w-0"
-            style={{
-              transition: 'width 200ms ease, flex-basis 200ms ease', // pleasant resize when the sidebar animates
-            }}
-          >
-            {children}
-          </main>
-        </div>
+        {/* Main content */}
+        <section className="col-span-12 md:col-span-9 lg:col-span-9">
+          <Component {...pageProps} />
+        </section>
       </div>
     </div>
   );
 }
 
-/* ----------------------- Cookie helpers for SSR ----------------------- */
+/* ---------------- cookie helpers (server-visible) ---------------- */
 function setRASessionCookie() {
   try {
     document.cookie = `ra_session=1; Path=/; Max-Age=${60 * 60 * 24 * 14}; SameSite=Lax; Secure`;
@@ -152,3 +120,7 @@ function clearRASessionCookie() {
     document.cookie = 'ra_session=; Path=/; Max-Age=0; SameSite=Lax; Secure';
   } catch {}
 }
+
+Notes (so you don’t have surprises):
+	•	Keep pages like /builder without their own sidebar now (just render the page content). The shell above injects Sidebar globally for every authenticated route.
+	•	If later you want any public page (e.g. a landing at /), just add '/' to PUBLIC_ROUTES.
