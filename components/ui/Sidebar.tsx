@@ -226,8 +226,13 @@ function Item({
       }}
       title={collapsed ? label : undefined}
     >
-      {/* Icon wrapper: locked center */}
-      <div className="flex items-center justify-center w-12 h-12">
+      {/* Icon wrapper: fixed size, centered */}
+      <div
+        className={cn(
+          'flex items-center justify-center',
+          collapsed ? 'w-8 h-8 mx-auto' : 'w-8 h-8 mr-3'
+        )}
+      >
         <div className="w-5 h-5 flex items-center justify-center text-white/90">
           {icon}
         </div>
@@ -236,7 +241,7 @@ function Item({
       {/* Text + Sub */}
       <div
         className={cn(
-          'overflow-hidden ml-3 transition-all duration-500 ease-in-out',
+          'overflow-hidden transition-all duration-500 ease-in-out',
           collapsed
             ? 'opacity-0 max-w-0'
             : 'opacity-100 max-w-[200px]'
