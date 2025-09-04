@@ -43,7 +43,6 @@ export default function Sidebar() {
       if (raw != null) setCollapsed(JSON.parse(raw));
     } catch {}
   }, []);
-
   useEffect(() => {
     try {
       localStorage.setItem(LS_COLLAPSED, JSON.stringify(collapsed));
@@ -80,10 +79,7 @@ export default function Sidebar() {
     >
       <div className="relative h-full flex flex-col">
         {/* Header */}
-        <div
-          className="border-b px-4 py-5 flex items-center gap-3"
-          style={{ borderColor: 'rgba(255,255,255,0.06)' }}
-        >
+        <div className="border-b px-4 py-5 flex items-center gap-3" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
           <div
             className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
             style={{
@@ -98,9 +94,7 @@ export default function Sidebar() {
               <div className="text-[17px] font-semibold tracking-wide">
                 reduc<span style={{ color: '#00ffc2' }}>ai.io</span>
               </div>
-              <div className="text-[11px] text-white/55">
-                Builder Workspace
-              </div>
+              <div className="text-[11px] text-white/55">Builder Workspace</div>
             </div>
           </AnimatedText>
         </div>
@@ -158,7 +152,7 @@ export default function Sidebar() {
 
         {/* Collapse handle */}
         <button
-          onClick={() => setCollapsed((c) => !c)}
+          onClick={() => setCollapsed(c => !c)}
           className="absolute top-1/2 -right-3 translate-y-[-50%] rounded-full p-1.5 transition-colors duration-200"
           style={{
             border: '1px solid rgba(255,255,255,0.10)',
@@ -166,11 +160,7 @@ export default function Sidebar() {
             boxShadow: '0 2px 12px rgba(0,0,0,0.45), 0 0 10px rgba(0,255,194,0.06)',
           }}
         >
-          {collapsed ? (
-            <ChevronRight className="w-4 h-4 text-white/80" />
-          ) : (
-            <ChevronLeft className="w-4 h-4 text-white/80" />
-          )}
+          {collapsed ? <ChevronRight className="w-4 h-4 text-white/80" /> : <ChevronLeft className="w-4 h-4 text-white/80" />}
         </button>
       </div>
     </aside>
@@ -179,10 +169,11 @@ export default function Sidebar() {
 
 /* ---------- Helpers ---------- */
 
+// Empty section that only preserves spacing
 function Section({ children }: { children: React.ReactNode }) {
   return (
     <div className="px-4 pt-4">
-      <div className="mb-2.5 h-4" />
+      <div className="mb-2.5 h-4" /> {/* keeps vertical space, no text */}
       {children}
     </div>
   );
@@ -193,21 +184,10 @@ function NavList({ children }: { children: React.ReactNode }) {
 }
 
 function Item({
-  href,
-  label,
-  sub,
-  icon,
-  active,
-  disabled,
-  collapsed,
+  href, label, sub, icon, active, disabled, collapsed,
 }: {
-  href: string;
-  label: string;
-  sub?: string;
-  icon: React.ReactNode;
-  active?: boolean;
-  disabled?: boolean;
-  collapsed: boolean;
+  href: string; label: string; sub?: string; icon: React.ReactNode;
+  active?: boolean; disabled?: boolean; collapsed: boolean;
 }) {
   const body = (
     <div
@@ -226,8 +206,8 @@ function Item({
       }}
       title={collapsed ? label : undefined}
     >
-      {/* Icon (fixed square, no stretching) */}
-      <div className="flex items-center justify-center text-white/90 w-5 h-5 shrink-0">
+      {/* Icon */}
+      <div className="shrink-0 flex items-center justify-center w-5 h-5 text-white/90">
         {icon}
       </div>
 
@@ -240,22 +220,16 @@ function Item({
       >
         <div className="leading-tight">
           <div className="text-[13px] font-semibold text-white/95">{label}</div>
-          {sub && (
-            <div className="text-[11px] text-white/55 mt-[3px] group-hover:text-white/70">{sub}</div>
-          )}
+          {sub && <div className="text-[11px] text-white/55 mt-[3px] group-hover:text-white/70">{sub}</div>}
         </div>
       </div>
     </div>
   );
-
   if (disabled) return <div>{body}</div>;
-  return (
-    <Link href={href} className="block">
-      {body}
-    </Link>
-  );
+  return <Link href={href} className="block">{body}</Link>;
 }
 
+/* Text fade/slide wrapper */
 function AnimatedText({ collapsed, children }: { collapsed: boolean; children: React.ReactNode }) {
   return (
     <div
