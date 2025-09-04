@@ -227,13 +227,7 @@ function Item({
       title={collapsed ? label : undefined}
     >
       {/* Icon */}
-      <div
-        className={cn(
-          'flex items-center justify-center text-white/90',
-          collapsed ? 'w-full h-full' : 'w-5 h-5 shrink-0'
-        )}
-        style={collapsed ? { minWidth: 40, minHeight: 40 } : {}}
-      >
+      <div className="flex items-center justify-center text-white/90 w-5 h-5 shrink-0">
         {icon}
       </div>
 
