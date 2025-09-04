@@ -1,12 +1,3 @@
-You’re right — use your own components/ui/Sidebar.tsx everywhere and don’t invent a new shell.
-
-Here’s a single drop-in _app.tsx that:
-	•	gates all routes except /auth and /auth/callback with Supabase,
-	•	keeps your ra_session cookie in sync,
-	•	and wraps every authenticated page in your existing <Sidebar /> layout (no duplicate styling).
-
-Replace /pages/_app.tsx with this:
-
 // /pages/_app.tsx
 import type { AppProps } from 'next/app';
 import '@/styles/globals.css';
@@ -120,7 +111,3 @@ function clearRASessionCookie() {
     document.cookie = 'ra_session=; Path=/; Max-Age=0; SameSite=Lax; Secure';
   } catch {}
 }
-
-Notes (so you don’t have surprises):
-	•	Keep pages like /builder without their own sidebar now (just render the page content). The shell above injects Sidebar globally for every authenticated route.
-	•	If later you want any public page (e.g. a landing at /), just add '/' to PUBLIC_ROUTES.
