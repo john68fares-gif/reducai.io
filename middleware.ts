@@ -1,48 +1,42 @@
-// middleware.ts  (place at project root)
+// middleware.ts  — put at project root
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 
-// Only these paths are public. EVERYTHING else requires a valid Supabase auth cookie.
-const PUBLIC = new Set<string>(['/auth', '/auth/callback']);
+// PUBLIC pages (no auth required, no sidebar):
+const PUBLIC = new Set<string>(['/', '/auth', '/auth/callback']);
 
-// Allow Next internals & static assets
 function isAsset(pathname: string) {
   return (
     pathname.startsWith('/_next') ||
     pathname.startsWith('/favicon') ||
     pathname.startsWith('/images') ||
     pathname.startsWith('/fonts') ||
-    pathname.startsWith('/static') ||
-    pathname.startsWith('/api/public')
+    pathname.startsWith('/static')
   );
 }
 
-// Detect if any Supabase auth cookie exists (covers both cookie names/styles Supabase uses)
+// Detect Supabase auth cookies (covers standard names + sb- prefixed)
 function hasSupabaseAuthCookie(req: NextRequest) {
   const cookies = req.cookies.getAll();
-  // common cookie names used by Supabase
-  const names = new Set([
-    'sb-access-token',
-    'sb-refresh-token',
-  ]);
-  // some deployments prefix cookies with "sb-" + ref; also catch any "sb-" auth cookie
   return cookies.some(
-    (c) => names.has(c.name) || c.name.startsWith('sb-')
+    (c) =>
+      c.name === 'sb-access-token' ||
+      c.name === 'sb-refresh-token' ||
+      c.name.startsWith('sb-') // e.g. sb-project-ref-auth-token
   );
 }
 
 export function middleware(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
 
-  // Skip internals/assets
+  // Allow Next internals and static assets
   if (isAsset(pathname)) return NextResponse.next();
 
-  // Public routes
+  // Allow public routes (/, /auth, /auth/callback)
   if (PUBLIC.has(pathname)) return NextResponse.next();
 
-  // Everything else requires Supabase auth cookie
-  const authed = hasSupabaseAuthCookie(req);
-  if (!authed) {
+  // Everything else requires Supabase auth
+  if (!hasSupabaseAuthCookie(req)) {
     const url = req.nextUrl.clone();
     url.pathname = '/auth';
     url.search = `?mode=signin&from=${encodeURIComponent(pathname + (search || ''))}`;
@@ -52,7 +46,6 @@ export function middleware(req: NextRequest) {
   return NextResponse.next();
 }
 
-// Apply to every route except Next internals/assets (handled above)
 export const config = {
   matcher: ['/((?!_next/|favicon|images/|fonts/|static/).*)'],
 };
