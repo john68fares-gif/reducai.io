@@ -19,6 +19,7 @@ import {
   Landmark,
   ListChecks,
 } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import CustomizeModal from './CustomizeModal';
 import Step1AIType from './Step1AIType';
 import Step2ModelSettings from './Step2ModelSettings';
@@ -59,6 +60,26 @@ class ErrorBoundary extends React.Component<{ fallback?: React.ReactNode }, { ha
     if (this.state.hasError) return this.props.fallback ?? null;
     return this.props.children as any;
   }
+}
+
+/* ---------- tiny loader overlay ---------- */
+function LoaderOverlay({ message }: { message?: string }) {
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center"
+      style={{ background: 'rgba(0,0,0,0.55)' }}>
+      <div className="relative">
+        <div className="absolute -inset-10 -z-10"
+          style={{ background: 'radial-gradient(circle, rgba(106,247,209,0.20) 0%, transparent 70%)', filter: 'blur(30px)' }} />
+        <div className="flex flex-col items-center gap-4 rounded-2xl px-8 py-7"
+          style={{ background: '#0d0f11', border: '1px solid rgba(106,247,209,0.35)', boxShadow: '0 0 30px rgba(0,0,0,0.5)' }}>
+          <div className="h-9 w-9 animate-spin rounded-full border-2"
+            style={{ borderColor: 'rgba(106,247,209,0.35)', borderTopColor: '#6af7d1' }} />
+          <div className="text-white/90 text-sm">{message || 'Loading…'}</div>
+          <div className="text-white/50 text-[11px]">Please wait</div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 type Appearance = {
@@ -251,29 +272,20 @@ export default function BuilderDashboard() {
   const [customizingId, setCustomizingId] = useState<string | null>(null);
   const [viewId, setViewId] = useState<string | null>(null);
 
+  // global/action loaders + messages
+  const [loading, setLoading] = useState<{ on: boolean; msg?: string }>({ on: false, msg: '' });
+
+  const doPhase = async (msg: string, fn: () => Promise<void> | void) => {
+    setLoading({ on: true, msg });
+    try { await fn(); } finally { setTimeout(() => setLoading({ on: false, msg: '' }), 420); }
+  };
+
   useEffect(() => {
     try {
       if (localStorage.getItem('builder:cleanup') === '1') {
         ['builder:step1', 'builder:step2', 'builder:step3'].forEach((k) => localStorage.removeItem(k));
         localStorage.removeItem('builder:cleanup');
       }
-    } catch {}
-  }, []);
-
-  useEffect(() => {
-    try {
-      const normalize = (k: string) => {
-        const raw = localStorage.getItem(k);
-        if (!raw) return;
-        const v = JSON.parse(raw);
-        if (v && typeof v === 'object') {
-          (['name', 'industry', 'language'] as const).forEach((key) => {
-            if (v[key] !== undefined) v[key] = typeof v[key] === 'string' ? v[key] : '';
-          });
-          localStorage.setItem(k, JSON.stringify(v));
-        }
-      };
-      ['builder:step1', 'builder:step2', 'builder:step3'].forEach(normalize);
     } catch {}
   }, []);
 
@@ -304,26 +316,72 @@ export default function BuilderDashboard() {
     router.replace(`${pathname}?${usp.toString()}`, undefined, { shallow: true });
   };
 
+  // centered shell
+  const Shell: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+    <div className="min-h-screen w-full text-white font-movatif bg-[#0b0c10]">
+      <main className="flex w-full min-h-screen items-center justify-center">
+        <div className="w-full max-w-[1200px] px-4 sm:px-6 py-10">{children}</div>
+      </main>
+    </div>
+  );
+
   if (step) {
     return (
-      <div className="min-h-screen w-full text-white font-movatif bg-[#0b0c10]">
-        <main className="w-full min-h-screen">
-          {step === '1' && <Step1AIType onNext={() => setStep('2')} />}
-          {step === '2' && <Step2ModelSettings onBack={() => setStep('1')} onNext={() => setStep('3')} />}
-          {step === '3' && <Step3PromptEditor onBack={() => setStep('2')} onNext={() => setStep('4')} />}
-          {step === '4' && <Step4Overview onBack={() => setStep('3')} onFinish={() => setStep(null)} />}
-        </main>
-      </div>
+      <Shell>
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={step}
+            initial={{ opacity: 0, y: 14, scale: 0.99 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -10, scale: 0.99 }}
+            transition={{ duration: 0.28, ease: [0.22, 0.61, 0.36, 1] }}
+            className="w-full"
+          >
+            {step === '1' && (
+              <Step1AIType
+                onNext={() => doPhase('Preparing model settings…', () => setStep('2'))}
+              />
+            )}
+            {step === '2' && (
+              <Step2ModelSettings
+                onBack={() => doPhase('Going back…', () => setStep('1'))}
+                onNext={() => doPhase('Opening prompt editor…', () => setStep('3'))}
+              />
+            )}
+            {step === '3' && (
+              <Step3PromptEditor
+                onBack={() => doPhase('Returning to settings…', () => setStep('2'))}
+                onNext={() => doPhase('Generating overview…', () => setStep('4'))}
+              />
+            )}
+            {step === '4' && (
+              <Step4Overview
+                onBack={() => doPhase('Reopening prompt…', () => setStep('3'))}
+                onFinish={() => doPhase('Finalizing build…', () => setStep(null))}
+              />
+            )}
+          </motion.div>
+        </AnimatePresence>
+
+        <AnimatePresence>{loading.on && <motion.div
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+          <LoaderOverlay message={loading.msg} />
+        </motion.div>}</AnimatePresence>
+      </Shell>
     );
   }
 
   return (
-    <div className="min-h-screen w-full text-white font-movatif bg-[#0b0c10]">
-      <main className="flex-1 w-full px-4 sm:px-6 pt-10 pb-24">
+    <Shell>
+      <motion.div
+        initial={{ opacity: 0, y: 14, scale: 0.99 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ duration: 0.3, ease: [0.22, 0.61, 0.36, 1] }}
+      >
         <div className="flex items-center justify-between mb-7">
           <h1 className="text-2xl md:text-3xl font-semibold">Builds</h1>
           <button
-            onClick={() => router.push('/builder?step=1')}
+            onClick={() => doPhase('Starting a new build…', () => router.push('/builder?step=1'))}
             className="px-4 py-2 rounded-[10px] bg-[#00ffc2] text-black font-semibold shadow-[0_0_10px_rgba(106,247,209,0.28)] hover:brightness-110 transition"
           >
             Create a Build
@@ -339,75 +397,114 @@ export default function BuilderDashboard() {
           />
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-7">
-          <CreateCard onClick={() => router.push('/builder?step=1')} />
+        <motion.div
+          layout
+          className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-7"
+          transition={{ duration: 0.25 }}
+        >
+          <motion.div
+            layout
+            initial={{ opacity: 0, y: 10, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ duration: 0.25, delay: 0.02 }}
+          >
+            <CreateCard onClick={() => doPhase('Opening builder…', () => router.push('/builder?step=1'))} />
+          </motion.div>
 
-          {filtered.map((bot) => (
-            <BuildCard
+          {filtered.map((bot, i) => (
+            <motion.div
               key={bot.id}
-              bot={bot}
-              accent={bot.appearance?.accent || accentFor(bot.id)}
-              onOpen={() => setViewId(bot.id)}
-              onDelete={() => {
-                const next = bots.filter((b) => b.id !== bot.id);
-                const sorted = sortByNewest(next);
-                setBots(sorted);
-                saveBots(sorted);
-              }}
-              onCustomize={() => setCustomizingId(bot.id)}
-            />
+              layout
+              initial={{ opacity: 0, y: 10, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              transition={{ duration: 0.25, delay: 0.03 + i * 0.02 }}
+            >
+              <BuildCard
+                bot={bot}
+                accent={bot.appearance?.accent || accentFor(bot.id)}
+                onOpen={() => doPhase('Opening prompt…', () => setViewId(bot.id))}
+                onDelete={() =>
+                  doPhase('Deleting build…', () => {
+                    const next = bots.filter((b) => b.id !== bot.id);
+                    const sorted = sortByNewest(next);
+                    setBots(sorted);
+                    saveBots(sorted);
+                  })
+                }
+                onCustomize={() => doPhase('Loading customization…', () => setCustomizingId(bot.id))}
+              />
+            </motion.div>
           ))}
-        </div>
+        </motion.div>
 
         {filtered.length === 0 && (
           <div className="mt-12 text-center text-white/60">
             No builds found. Click <span className="text-[#00ffc2]">Create a Build</span> to get started.
           </div>
         )}
-      </main>
+      </motion.div>
 
-      {selectedBot && (
-        <CustomizeModal
-          bot={selectedBot}
-          onClose={() => setCustomizingId(null)}
-          onApply={(ap) => {
-            if (!customizingId) return;
-            const next = bots.map((b) =>
-              b.id === customizingId
-                ? { ...b, appearance: { ...(b.appearance ?? {}), ...ap }, updatedAt: nowISO() }
-                : b
-            );
-            const sorted = sortByNewest(next);
-            setBots(sorted);
-            saveBots(sorted);
-            setCustomizingId(null);
-          }}
-          onReset={() => {
-            if (!customizingId) return;
-            const next = bots.map((b) =>
-              b.id === customizingId ? { ...b, appearance: undefined, updatedAt: nowISO() } : b
-            );
-            const sorted = sortByNewest(next);
-            setBots(sorted);
-            saveBots(sorted);
-            setCustomizingId(null);
-          }}
-          onSaveDraft={(name, ap) => {
-            if (!customizingId) return;
-            const key = `drafts:${customizingId}`;
-            const arr: Array<{ name: string; appearance: Appearance; ts: string }> =
-              JSON.parse(localStorage.getItem(key) || '[]');
-            arr.unshift({ name: name || `Draft ${new Date().toLocaleString()}`, appearance: ap, ts: nowISO() });
-            localStorage.setItem(key, JSON.stringify(arr.slice(0, 20)));
-          }}
-        />
-      )}
+      {/* Modals & overlays */}
+      <AnimatePresence>
+        {selectedBot && !loading.on && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <CustomizeModal
+              bot={selectedBot}
+              onClose={() => setCustomizingId(null)}
+              onApply={(ap) => {
+                if (!customizingId) return;
+                const next = bots.map((b) =>
+                  b.id === customizingId
+                    ? { ...b, appearance: { ...(b.appearance ?? {}), ...ap }, updatedAt: nowISO() }
+                    : b
+                );
+                const sorted = sortByNewest(next);
+                setBots(sorted);
+                saveBots(sorted);
+                setCustomizingId(null);
+              }}
+              onReset={() => {
+                if (!customizingId) return;
+                const next = bots.map((b) =>
+                  b.id === customizingId ? { ...b, appearance: undefined, updatedAt: nowISO() } : b
+                );
+                const sorted = sortByNewest(next);
+                setBots(sorted);
+                saveBots(sorted);
+                setCustomizingId(null);
+              }}
+              onSaveDraft={(name, ap) => {
+                if (!customizingId) return;
+                const key = `drafts:${customizingId}`;
+                const arr: Array<{ name: string; appearance: Appearance; ts: string }> =
+                  JSON.parse(localStorage.getItem(key) || '[]');
+                arr.unshift({ name: name || `Draft ${new Date().toLocaleString()}`, appearance: ap, ts: nowISO() });
+                localStorage.setItem(key, JSON.stringify(arr.slice(0, 20)));
+              }}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      {viewedBot && <PromptOverlay bot={viewedBot} onClose={() => setViewId(null)} />}
+      <AnimatePresence>
+        {viewedBot && !loading.on && (
+          <motion.div key="promptOverlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <PromptOverlay bot={viewedBot} onClose={() => setViewId(null)} />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Welcome overlay over the dashboard (sign-up only) */}
       <OnboardingOverlay open={welcomeOpen} mode={mode} userId={userId} onDone={closeWelcome} />
-    </div>
+
+      <AnimatePresence>
+        {loading.on && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <LoaderOverlay message={loading.msg} />
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </Shell>
   );
 }
 
@@ -554,17 +651,7 @@ function CreateCard({ onClick }: { onClick: () => void }) {
           style={{ boxShadow: '0 0 34px 10px rgba(106,247,209,0.25), inset 0 0 14px rgba(106,247,209,0.20)' }}
         />
       )}
-      {/* Removed glassy sweep overlay */}
-      {/* <div
-        className="pointer-events-none absolute top-0 bottom-0 w-[55%] rounded-[16px]"
-        style={{
-          left: hover ? '120%' : '-120%',
-          background:
-            'linear-gradient(110deg, transparent 0%, rgba(255,255,255,0.08) 40%, rgba(255,255,255,0.18) 50%, rgba(255,255,255,0.08) 60%, transparent 100%)',
-          filter: 'blur(1px)',
-          transition: 'left 420ms cubic-bezier(.22,.61,.36,1)',
-        }}
-      /> */}
+      {/* glassy sweep overlay intentionally removed */}
       <div
         className="w-20 h-20 rounded-full flex items-center justify-center mb-5"
         style={{
@@ -601,13 +688,15 @@ function BuildCard({
   const [hover, setHover] = useState(false);
   const ap = bot.appearance || {};
   return (
-    <div
+    <motion.div
       className="relative h-[380px] rounded-[16px] p-0 flex flex-col justify-between group transition-all"
       style={{
         background: 'rgba(13,15,17,0.92)',
         border: '2px solid rgba(106,247,209,0.32)',
         boxShadow: 'inset 0 0 22px rgba(0,0,0,0.28), 0 0 20px rgba(106,247,209,0.06)',
       }}
+      whileHover={{ y: -2 }}
+      transition={{ type: 'spring', stiffness: 220, damping: 22 }}
     >
       <div
         className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
@@ -686,6 +775,6 @@ function BuildCard({
           </button>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }
