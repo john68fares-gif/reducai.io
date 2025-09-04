@@ -36,7 +36,6 @@ export default function Sidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const [lastBotId, setLastBotId] = useState<string | null>(null);
 
-  // localStorage state
   useEffect(() => {
     try {
       const raw = localStorage.getItem(LS_COLLAPSED);
@@ -49,7 +48,6 @@ export default function Sidebar() {
     } catch {}
   }, [collapsed]);
 
-  // last bot
   useEffect(() => {
     try {
       const bots = JSON.parse(localStorage.getItem('chatbots') || '[]');
@@ -60,7 +58,6 @@ export default function Sidebar() {
 
   const widthPx = collapsed ? W_COLLAPSED : W_EXPANDED;
 
-  // drive page padding
   useEffect(() => {
     document.documentElement.style.setProperty('--sidebar-w', `${widthPx}px`);
   }, [widthPx]);
@@ -181,7 +178,7 @@ export default function Sidebar() {
 function Section({ children }: { children: React.ReactNode }) {
   return (
     <div className="px-4 pt-4">
-      <div className="mb-2.5 h-4" /> {/* keeps vertical space */}
+      <div className="mb-2.5 h-4" />
       {children}
     </div>
   );
@@ -229,14 +226,11 @@ function Item({
       }}
       title={collapsed ? label : undefined}
     >
-      {/* Icon wrapper: exact midden */}
-      <div
-        className={cn(
-          'flex items-center justify-center text-white/90',
-          collapsed ? 'w-8 h-8 mx-auto' : 'w-8 h-8 shrink-0'
-        )}
-      >
-        <div className="w-5 h-5 flex items-center justify-center">{icon}</div>
+      {/* Icon wrapper: locked center */}
+      <div className="flex items-center justify-center w-12 h-12">
+        <div className="w-5 h-5 flex items-center justify-center text-white/90">
+          {icon}
+        </div>
       </div>
 
       {/* Text + Sub */}
