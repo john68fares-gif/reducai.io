@@ -1,4 +1,3 @@
-// pages/apikeys.tsx
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
@@ -249,7 +248,7 @@ function ApiKeysScreen() {
     else if (l[0]) setSelected(l[0].id);
   }, []);
 
-  // Persist selection for other screens (e.g., Support)
+  // Persist selection
   useEffect(() => {
     if (!isBrowser) return;
     if (selected) localStorage.setItem(LS_SELECTED, selected);
@@ -383,11 +382,4 @@ function ApiKeysScreen() {
 }
 
 /* Export with SSR disabled so localStorage is safe */
-export default dynamic(() => Promise.resolve(ApiKeysScreen), { ssr: false });
-// ... (rest of your code unchanged above)
-
-function ApiKeysScreen() {
-  // everything as you wrote…
-}
-
 export default dynamic(() => Promise.resolve(ApiKeysScreen), { ssr: false });
