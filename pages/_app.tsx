@@ -7,8 +7,7 @@ import { supabase } from '@/lib/supabase-client';
 import Sidebar from '@/components/ui/Sidebar';
 
 const BG = '#0b0c10';
-
-// ❗ Sidebar should NOT appear on these pages (and they don't require auth)
+// Public pages (no sidebar, no auth required)
 const PUBLIC_ROUTES = ['/', '/auth', '/auth/callback'];
 
 export default function App({ Component, pageProps }: AppProps) {
@@ -24,7 +23,6 @@ export default function App({ Component, pageProps }: AppProps) {
   const [authed, setAuthed] = useState(false);
 
   useEffect(() => {
-    // Keep a server-visible cookie in sync so middleware/SSR can see auth state
     const sub = supabase.auth.onAuthStateChange((event) => {
       if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
         setRASessionCookie();
@@ -38,7 +36,6 @@ export default function App({ Component, pageProps }: AppProps) {
       }
     });
 
-    // Initial check at load/refresh
     (async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (session) {
@@ -58,54 +55,43 @@ export default function App({ Component, pageProps }: AppProps) {
   }, [router, isPublic]);
 
   // Public pages render bare (no sidebar)
-  if (isPublic) {
-    return <Component {...pageProps} />;
-  }
+  if (isPublic) return <Component {...pageProps} />;
 
-  // Soft loader while deciding on protected pages
+  // Loader while deciding on private pages
   if (checking) {
     return (
-      <div
-        style={{
-          minHeight: '100vh',
-          display: 'grid',
-          placeItems: 'center',
-          color: 'white',
-          background: BG,
-        }}
-      >
+      <div className="min-h-screen grid place-items-center text-white" style={{ background: BG }}>
         <div className="flex items-center gap-3">
-          <span className="inline-block w-6 h-6 rounded-full border-2 border-white/70 border-t-transparent animate-spin" />
+          <span className="w-6 h-6 rounded-full border-2 border-white/70 border-t-transparent animate-spin" />
           <span>Checking session…</span>
         </div>
       </div>
     );
   }
 
-  // If unauthenticated, we already redirected; render nothing
   if (!authed) return null;
 
-  // Authenticated app layout (sidebar on all private pages)
+  // ✅ Full-width flex shell: sidebar (fixed) + main (flex-1 expands)
   return (
     <div className="min-h-screen w-full text-white" style={{ background: BG }}>
-      <div className="mx-auto max-w-[1400px] px-4 sm:px-6 lg:px-8 py-8 grid grid-cols-12 gap-6">
-        {/* Sidebar column */}
-        <aside className="hidden md:block md:col-span-3 lg:col-span-3">
+      <div className="flex gap-6 px-4 sm:px-6 lg:px-8 py-8">
+        {/* Sidebar column (does not grow) */}
+        <aside className="hidden md:block shrink-0">
           <div className="sticky top-6">
             <Sidebar />
           </div>
         </aside>
 
-        {/* Main content */}
-        <section className="col-span-12 md:col-span-9 lg:col-span-9">
+        {/* Main content (always fills remaining width) */}
+        <main className="flex-1 min-w-0">
           <Component {...pageProps} />
-        </section>
+        </main>
       </div>
     </div>
   );
 }
 
-/* ---------------- cookie helpers (server-visible) ---------------- */
+/* ---------- cookie helpers (server-visible for middleware/SSR) ---------- */
 function setRASessionCookie() {
   try {
     document.cookie = `ra_session=1; Path=/; Max-Age=${60 * 60 * 24 * 14}; SameSite=Lax; Secure`;
