@@ -23,222 +23,89 @@ let SIDEBAR_MOUNTED = false;
 export default function Sidebar() {
   const pathname = usePathname();
   const [allowed, setAllowed] = useState<boolean>(() => !SIDEBAR_MOUNTED);
+  const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
     if (SIDEBAR_MOUNTED) {
-      setAllowed(false);
-      return;
+      setAllowed(true);
     }
     SIDEBAR_MOUNTED = true;
-    return () => void (SIDEBAR_MOUNTED = false);
+
+    const stored = localStorage.getItem(LS_COLLAPSED);
+    if (stored) {
+      setCollapsed(stored === '1');
+    }
   }, []);
 
-  const [collapsed, setCollapsed] = useState(false);
-  const [lastBotId, setLastBotId] = useState<string | null>(null);
+  const toggle = () => {
+    const next = !collapsed;
+    setCollapsed(next);
+    localStorage.setItem(LS_COLLAPSED, next ? '1' : '0');
+  };
 
-  // localStorage state
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(LS_COLLAPSED);
-      if (raw != null) setCollapsed(JSON.parse(raw));
-    } catch {}
-  }, []);
-  useEffect(() => {
-    try {
-      localStorage.setItem(LS_COLLAPSED, JSON.stringify(collapsed));
-    } catch {}
-  }, [collapsed]);
-
-  // last bot
-  useEffect(() => {
-    try {
-      const bots = JSON.parse(localStorage.getItem('chatbots') || '[]');
-      const lastBot = bots[bots.length - 1];
-      if (lastBot?.id) setLastBotId(lastBot.id);
-    } catch {}
-  }, []);
-
-  const widthPx = collapsed ? W_COLLAPSED : W_EXPANDED;
-
-  // drive page padding
-  useEffect(() => {
-    document.documentElement.style.setProperty('--sidebar-w', `${widthPx}px`);
-  }, [widthPx]);
+  const links = [
+    { href: '/', icon: Home, label: 'Home' },
+    { href: '/build', icon: Hammer, label: 'Build' },
+    { href: '/improve', icon: Monitor, label: 'Improve' },
+    { href: '/launch', icon: Rocket, label: 'Launch' },
+    { href: '/keys', icon: Key, label: 'API Keys' },
+    { href: '/packages', icon: Package, label: 'Packages' },
+    { href: '/docs', icon: BookOpen, label: 'Docs' },
+    { href: '/support', icon: HelpCircle, label: 'Support' },
+    { href: '/shop', icon: ShoppingCart, label: 'Shop' },
+    { href: '/agents', icon: Bot, label: 'Agents' },
+    { href: '/profile', icon: User, label: 'Profile' },
+    { href: '/voice', icon: Mic, label: 'Voice' },
+    { href: '/phone', icon: Phone, label: 'Phone' },
+  ];
 
   if (!allowed) return null;
 
   return (
-    <aside
-      className="fixed left-0 top-0 h-screen z-50 text-white font-movatif transition-[width] duration-500 ease-in-out"
-      style={{
-        width: widthPx,
-        background: 'linear-gradient(180deg, rgba(10,12,13,0.98), rgba(9,11,12,0.98))',
-        borderRight: '1px solid rgba(0,255,194,0.08)',
-        boxShadow: 'inset 0 0 18px rgba(0,0,0,0.35), 0 0 0 1px rgba(0,0,0,0.25)',
-      }}
-    >
-      <div className="relative h-full flex flex-col">
-        {/* Header */}
-        <div className="border-b px-4 py-5 flex items-center gap-3" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
-          <div
-            className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
-            style={{
-              background: '#00ffc2',
-              boxShadow: '0 0 10px rgba(0,255,194,0.35)',
-            }}
-          >
-            <Bot className="w-5 h-5 text-black" />
-          </div>
-          <AnimatedText collapsed={collapsed}>
-            <div className="leading-tight">
-              <div className="text-[17px] font-semibold tracking-wide">
-                reduc<span style={{ color: '#00ffc2' }}>ai.io</span>
-              </div>
-              <div className="text-[11px] text-white/55">Builder Workspace</div>
-            </div>
-          </AnimatedText>
-        </div>
-
-        {/* Workspace */}
-        <Section>
-          <NavList>
-            <Item collapsed={collapsed} href="/builder" label="Build" sub="Create AI agent" icon={<Home />} active={pathname?.startsWith('/builder')} />
-            <Item collapsed={collapsed} href={lastBotId ? `/improve/${lastBotId}` : '#'} label="Improve" sub="Integrate & optimize" icon={<Hammer />} active={pathname?.startsWith('/improve')} disabled={!lastBotId} />
-            <Item collapsed={collapsed} href="/voice-agent" label="Voice Agent" sub="Calls & persona" icon={<Mic />} active={pathname?.startsWith('/voice-agent')} />
-            <Item collapsed={collapsed} href="/phone-numbers" label="Phone Numbers" sub="Link provider numbers" icon={<Phone />} active={pathname?.startsWith('/phone-numbers')} />
-            <Item collapsed={collapsed} href="/demo" label="Demo" sub="Showcase to clients" icon={<Monitor />} active={pathname === '/demo'} />
-            <Item collapsed={collapsed} href="/launch" label="Launch" sub="Deploy to production" icon={<Rocket />} active={pathname === '/launch'} />
-          </NavList>
-        </Section>
-
-        <div className="my-3 border-t border-white/10" />
-
-        {/* Resources */}
-        <Section>
-          <NavList>
-            <Item collapsed={collapsed} href="#" label="Marketplace" icon={<ShoppingCart />} />
-            <Item collapsed={collapsed} href="#" label="AI Mentor" icon={<BookOpen />} />
-            <Item collapsed={collapsed} href="/apikeys" label="API Key" icon={<Key />} />
-            <Item collapsed={collapsed} href="#" label="Bulk Tester" icon={<Package />} />
-            <Item collapsed={collapsed} href="#" label="Video Guides" icon={<HelpCircle />} />
-            <Item collapsed={collapsed} href="/support" label="Support" sub="Help & FAQ" icon={<HelpCircle />} active={pathname === '/support'} />
-          </NavList>
-        </Section>
-
-        {/* Account */}
-        <div className="mt-auto px-4 pb-5">
-          <div
-            className="rounded-2xl flex items-center justify-between px-4 py-3 transition-all duration-500 ease-in-out"
-            style={{
-              background: 'rgba(15,18,20,0.85)',
-              border: '1px solid rgba(0,255,194,0.12)',
-              boxShadow: 'inset 0 0 12px rgba(0,0,0,0.35), 0 0 10px rgba(0,255,194,0.04)',
-            }}
-          >
-            <div className="flex items-center gap-3 shrink-0">
-              <div className="w-8 h-8 rounded-full bg-orange-500 flex items-center justify-center shadow-[0_0_8px_rgba(255,165,0,0.30)]">
-                <User className="w-4 h-4 text-white" />
-              </div>
-              <AnimatedText collapsed={collapsed}>
-                <div className="leading-tight">
-                  <div className="text-sm font-semibold">My Account</div>
-                  <div className="text-[11px] text-yellow-300/90">980 XP • Bronze</div>
-                </div>
-              </AnimatedText>
-            </div>
-            {!collapsed && <div className="text-white/60 text-xs">▼</div>}
-          </div>
-        </div>
-
-        {/* Collapse handle */}
-        <button
-          onClick={() => setCollapsed(c => !c)}
-          className="absolute top-1/2 -right-3 translate-y-[-50%] rounded-full p-1.5 transition-colors duration-200"
-          style={{
-            border: '1px solid rgba(255,255,255,0.10)',
-            background: 'rgba(16,19,21,0.95)',
-            boxShadow: '0 2px 12px rgba(0,0,0,0.45), 0 0 10px rgba(0,255,194,0.06)',
-          }}
-        >
-          {collapsed ? <ChevronRight className="w-4 h-4 text-white/80" /> : <ChevronLeft className="w-4 h-4 text-white/80" />}
-        </button>
-      </div>
-    </aside>
-  );
-}
-
-/* ---------- Helpers ---------- */
-
-// Empty section that only preserves spacing
-function Section({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="px-4 pt-4">
-      <div className="mb-2.5 h-4" /> {/* keeps vertical space, no text */}
-      {children}
-    </div>
-  );
-}
-
-function NavList({ children }: { children: React.ReactNode }) {
-  return <nav className="space-y-2.5">{children}</nav>;
-}
-
-function Item({
-  href, label, sub, icon, active, disabled, collapsed,
-}: {
-  href: string; label: string; sub?: string; icon: React.ReactNode;
-  active?: boolean; disabled?: boolean; collapsed: boolean;
-}) {
-  const body = (
     <div
-      className={cn(
-        'group rounded-xl flex items-center transition-colors duration-200',
-        'px-3 py-2.5',
-        disabled && 'opacity-50 cursor-not-allowed',
-        !disabled && 'hover:translate-x-[1px]'
-      )}
-      style={{
-        border: `1px solid ${active ? 'rgba(0,255,194,0.28)' : 'rgba(255,255,255,0.06)'}`,
-        background: active ? 'rgba(0,255,194,0.06)' : 'rgba(15,18,20,0.55)',
-        boxShadow: active
-          ? '0 0 12px rgba(0,255,194,0.16) inset, 0 0 8px rgba(0,255,194,0.04)'
-          : 'inset 0 0 10px rgba(0,0,0,0.28)',
-      }}
-      title={collapsed ? label : undefined}
+      className="h-screen flex flex-col bg-[#0d0f11] border-r border-[#00ffc220] transition-[width] duration-500 ease-in-out"
+      style={{ width: collapsed ? W_COLLAPSED : W_EXPANDED }}
     >
-      {/* Icon */}
-      <div className="shrink-0 flex items-center justify-center w-5 h-5 text-white/90">
-        {icon}
+      <div className="flex-1 overflow-y-auto">
+        <nav className="flex flex-col gap-1 p-2">
+          {links.map(({ href, icon: Icon, label }) => {
+            const active = pathname === href;
+            return (
+              <Link
+                key={href}
+                href={href}
+                className={cn(
+                  'flex items-center rounded-lg px-3 py-3 transition-colors duration-300',
+                  active
+                    ? 'bg-[#00ffc220] text-white'
+                    : 'text-gray-400 hover:text-white hover:bg-[#00ffc210]'
+                )}
+              >
+                <Icon className="w-6 h-6 shrink-0" />
+                <span
+                  className={cn(
+                    'ml-3 whitespace-nowrap overflow-hidden transition-all duration-500 ease-in-out',
+                    collapsed ? 'opacity-0 w-0' : 'opacity-100 w-auto'
+                  )}
+                >
+                  {label}
+                </span>
+              </Link>
+            );
+          })}
+        </nav>
       </div>
 
-      {/* Text + Sub */}
-      <div
-        className={cn(
-          'overflow-hidden ml-3 transition-all duration-500 ease-in-out',
-          collapsed ? 'opacity-0 max-w-0' : 'opacity-100 max-w-[200px]'
-        )}
+      <button
+        onClick={toggle}
+        className="flex items-center justify-center p-3 hover:bg-[#00ffc210] text-gray-400 hover:text-white transition-colors duration-300"
       >
-        <div className="leading-tight">
-          <div className="text-[13px] font-semibold text-white/95">{label}</div>
-          {sub && <div className="text-[11px] text-white/55 mt-[3px] group-hover:text-white/70">{sub}</div>}
-        </div>
-      </div>
-    </div>
-  );
-  if (disabled) return <div>{body}</div>;
-  return <Link href={href} className="block">{body}</Link>;
-}
-
-/* Text fade/slide wrapper */
-function AnimatedText({ collapsed, children }: { collapsed: boolean; children: React.ReactNode }) {
-  return (
-    <div
-      className={cn(
-        'overflow-hidden transition-all duration-500 ease-in-out',
-        collapsed ? 'opacity-0 max-w-0' : 'opacity-100 max-w-[200px]'
-      )}
-    >
-      {children}
+        {collapsed ? (
+          <ChevronRight className="w-5 h-5" />
+        ) : (
+          <ChevronLeft className="w-5 h-5" />
+        )}
+      </button>
     </div>
   );
 }
