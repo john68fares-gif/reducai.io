@@ -66,7 +66,7 @@ export default function Sidebar() {
 
   return (
     <aside
-      className="fixed left-0 top-0 h-screen z-50 text-white font-movatif transition-[width] duration-500 ease-in-out"
+      className="fixed left-0 top-0 h-screen z-50 text-white font-movatif transition-[width] duration-700 ease-in-out"
       style={{
         width: widthPx,
         background: 'linear-gradient(180deg, rgba(10,12,13,0.98), rgba(9,11,12,0.98))',
@@ -128,7 +128,7 @@ export default function Sidebar() {
         {/* Account */}
         <div className="mt-auto px-4 pb-5">
           <div
-            className="rounded-2xl flex items-center justify-between px-4 py-3 transition-all duration-500 ease-in-out"
+            className="rounded-2xl flex items-center justify-between px-4 py-3 transition-all duration-700 ease-in-out"
             style={{
               background: 'rgba(15,18,20,0.85)',
               border: '1px solid rgba(0,255,194,0.12)',
@@ -226,7 +226,7 @@ function Item({
       }}
       title={collapsed ? label : undefined}
     >
-      {/* Icon wrapper: fixed size, centered */}
+      {/* Icon wrapper */}
       <div
         className={cn(
           'flex items-center justify-center',
@@ -239,14 +239,7 @@ function Item({
       </div>
 
       {/* Text + Sub */}
-      <div
-        className={cn(
-          'overflow-hidden transition-all duration-500 ease-in-out',
-          collapsed
-            ? 'opacity-0 max-w-0'
-            : 'opacity-100 max-w-[200px]'
-        )}
-      >
+      <AnimatedText collapsed={collapsed}>
         <div className="leading-tight">
           <div className="text-[13px] font-semibold text-white/95">
             {label}
@@ -257,7 +250,7 @@ function Item({
             </div>
           )}
         </div>
-      </div>
+      </AnimatedText>
     </div>
   );
   if (disabled) return <div>{body}</div>;
@@ -278,11 +271,15 @@ function AnimatedText({
   return (
     <div
       className={cn(
-        'overflow-hidden transition-all duration-500 ease-in-out',
-        collapsed ? 'opacity-0 max-w-0' : 'opacity-100 max-w-[200px]'
+        'overflow-hidden transition-[max-width,opacity,transform] duration-700 ease-in-out',
+        collapsed
+          ? 'opacity-0 max-w-0 -translate-x-2'
+          : 'opacity-100 max-w-[200px] translate-x-0'
       )}
     >
-      {children}
+      <div className="transition-opacity duration-700 ease-in-out">
+        {children}
+      </div>
     </div>
   );
 }
