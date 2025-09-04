@@ -212,7 +212,7 @@ function Item({
     <div
       className={cn(
         'group rounded-xl flex items-center h-12 transition-colors duration-200',
-        collapsed ? 'px-2 justify-center' : 'px-3',
+        collapsed ? 'justify-center' : 'px-3',
         disabled && 'opacity-50 cursor-not-allowed',
         !disabled && 'hover:translate-x-[1px]'
       )}
@@ -229,9 +229,12 @@ function Item({
       }}
       title={collapsed ? label : undefined}
     >
-      {/* Icon wrapper: gecentreerd */}
-      <div className="w-8 h-8 flex items-center justify-center shrink-0 text-white/90">
-        {icon}
+      {/* Icon wrapper: exact midden */}
+      <div className={cn(
+        collapsed ? 'flex items-center justify-center w-full' : 'w-8 h-8 flex items-center justify-center shrink-0',
+        'text-white/90'
+      )}>
+        <div className="w-5 h-5 flex items-center justify-center">{icon}</div>
       </div>
 
       {/* Text + Sub */}
