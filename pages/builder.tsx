@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import dynamic from 'next/dynamic';
 import { supabase } from '@/lib/supabase-client';
+import Sidebar from '@/components/ui/Sidebar';
 
 const BuilderDashboard = dynamic(
   async () => {
@@ -85,5 +86,15 @@ export default function BuilderPage() {
 
   if (!authed) return null;
 
-  return <BuilderDashboard />;
+  return (
+    <div>
+      <Sidebar />
+      <main
+        className="min-h-screen"
+        style={{ marginLeft: 'var(--sidebar-w, 260px)', padding: '24px' }}
+      >
+        <BuilderDashboard />
+      </main>
+    </div>
+  );
 }
