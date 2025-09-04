@@ -82,17 +82,19 @@ export default function App({ Component, pageProps }: AppProps) {
 
   return (
     <div className="min-h-screen w-full text-white" style={{ background: BG }}>
-      {/* Sidebar (fixed width via CSS var) */}
+      {/* Sidebar */}
       <Sidebar />
 
-      {/* Main content wrapper with glow + edge spacing */}
+      {/* Main content fills everything beside sidebar */}
       <main
-        className="min-h-screen transition-all"
+        className="fixed top-0 right-0 bottom-0 min-h-screen"
         style={{
-          marginLeft: 'var(--sidebar-w, 260px)',
+          left: 'var(--sidebar-w, 260px)', // fills from sidebar edge to screen edge
+          background: 'rgba(15,18,20,0.95)', // subtle overlay
+          borderLeft: '1px solid rgba(255,255,255,0.06)', // faint divider
+          boxShadow: 'inset 0 0 35px rgba(0,255,194,0.04)', // subtle glow inside
           padding: '24px',
-          border: '1px solid rgba(255,255,255,0.06)',
-          boxShadow: '0 0 25px rgba(0,255,194,0.05)',
+          overflowY: 'auto', // scroll content if needed
         }}
       >
         <Component {...pageProps} />
