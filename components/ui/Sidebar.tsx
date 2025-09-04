@@ -230,10 +230,12 @@ function Item({
       title={collapsed ? label : undefined}
     >
       {/* Icon wrapper: exact midden */}
-      <div className={cn(
-        collapsed ? 'flex items-center justify-center w-full' : 'w-8 h-8 flex items-center justify-center shrink-0',
-        'text-white/90'
-      )}>
+      <div
+        className={cn(
+          'flex items-center justify-center text-white/90',
+          collapsed ? 'w-8 h-8 mx-auto' : 'w-8 h-8 shrink-0'
+        )}
+      >
         <div className="w-5 h-5 flex items-center justify-center">{icon}</div>
       </div>
 
