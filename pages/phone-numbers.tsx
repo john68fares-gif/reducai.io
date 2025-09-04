@@ -1,5 +1,6 @@
 import Head from 'next/head';
 import dynamic from 'next/dynamic';
+import ContentWrapper from '@/components/layout/ContentWrapper';
 
 const PhoneNumbersSection = dynamic(
   () => import('../components/phone-numbers/PhoneNumbersSection'),
@@ -9,13 +10,10 @@ const PhoneNumbersSection = dynamic(
 export default function PhoneNumbersPage() {
   return (
     <>
-      <Head>
-        <title>Phone Numbers • ReducAI</title>
-      </Head>
-      <div className="w-full h-full">
+      <Head><title>Phone Numbers • ReducAI</title></Head>
+      <ContentWrapper>
         <PhoneNumbersSection />
-      </div>
+      </ContentWrapper>
     </>
   );
 }
-
