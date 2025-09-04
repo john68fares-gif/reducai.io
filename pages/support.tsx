@@ -36,7 +36,7 @@ export default function SupportPage() {
     setLoading(true);
 
     try {
-      const r = await fetch('/api/support/ask', {   // 👈 aangepast pad
+      const r = await fetch('/api/support/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: value }),
