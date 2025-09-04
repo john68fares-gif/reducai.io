@@ -85,11 +85,8 @@ export default function BuilderPage() {
   if (!authed) return null;
 
   return (
-    <main
-      className="min-h-screen"
-      style={{ marginLeft: 'var(--sidebar-w, 260px)', padding: '24px' }}
-    >
+    <div className="w-full h-full">
       <BuilderDashboard />
-    </main>
+    </div>
   );
 }
