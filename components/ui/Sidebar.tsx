@@ -84,8 +84,8 @@ export default function Sidebar() {
                 <Icon className="w-6 h-6 shrink-0" />
                 <span
                   className={cn(
-                    'ml-3 whitespace-nowrap overflow-hidden transition-all duration-500 ease-in-out',
-                    collapsed ? 'opacity-0 w-0' : 'opacity-100 w-auto'
+                    'ml-3 whitespace-nowrap transition-all duration-700 ease-in-out',
+                    collapsed ? 'opacity-0 scale-95' : 'opacity-100 scale-100'
                   )}
                 >
                   {label}
