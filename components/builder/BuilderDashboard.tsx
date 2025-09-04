@@ -28,13 +28,12 @@ import { s } from '@/utils/safe';
 import { supabase } from '@/lib/supabase-client';
 
 // Lazy & safe: overlay sometimes imports things that can throw in SSR.
-// We load it only on the client and render nothing while loading.
 const OnboardingOverlay = dynamic(() => import('../ui/OnboardingOverlay'), {
   ssr: false,
   loading: () => null,
 });
 
-// 3D bot: keep lazy (client only). We'll also wrap it in an error boundary.
+// 3D bot preview (client only)
 const Bot3D = dynamic(() => import('./Bot3D.client'), {
   ssr: false,
   loading: () => (
@@ -45,7 +44,7 @@ const Bot3D = dynamic(() => import('./Bot3D.client'), {
   ),
 });
 
-// ---------- small error boundary so a child render can't crash the page ----------
+// ---------- error boundary so a child render can't crash the page ----------
 class ErrorBoundary extends React.Component<{ fallback?: React.ReactNode }, { hasError: boolean }> {
   constructor(props: any) {
     super(props);
@@ -54,7 +53,7 @@ class ErrorBoundary extends React.Component<{ fallback?: React.ReactNode }, { ha
   static getDerivedStateFromError() {
     return { hasError: true };
   }
-  componentDidCatch() { /* no-op: just prevent crash */ }
+  componentDidCatch() {}
   render() {
     if (this.state.hasError) return this.props.fallback ?? null;
     return this.props.children as any;
@@ -96,11 +95,13 @@ const SAVE_KEY = 'chatbots';
 const nowISO = () => new Date().toISOString();
 const fmtDate = (iso?: string) => (iso ? new Date(iso).toLocaleDateString() : '');
 const sortByNewest = (arr: Bot[]) =>
-  arr.slice().sort(
-    (a, b) =>
-      Date.parse(b.updatedAt || b.createdAt || '0') -
-      Date.parse(a.updatedAt || a.createdAt || '0')
-  );
+  arr
+    .slice()
+    .sort(
+      (a, b) =>
+        Date.parse(b.updatedAt || b.createdAt || '0') -
+        Date.parse(a.updatedAt || a.createdAt || '0')
+    );
 
 function loadBots(): Bot[] {
   if (typeof window === 'undefined') return [];
@@ -130,7 +131,9 @@ function loadBots(): Bot[] {
 }
 
 function saveBots(bots: Bot[]) {
-  try { localStorage.setItem(SAVE_KEY, JSON.stringify(bots)); } catch {}
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify(bots));
+  } catch {}
 }
 
 /* --------------------- Step 3 section splitter (unchanged) --------------------- */
@@ -168,7 +171,7 @@ const ICONS: Record<PromptSectionKey, JSX.Element> = {
 };
 
 const HEADING_REGEX =
-  /^(?:\s*(?:[#>*-]|\d+\.)\s*)?(?:\*\*)?\s*(DESCRIPTION|AI\s*DESCRIPTION|RULES\s*(?:AND|&)\s*GUIDELINES|AI\s*RULES|QUESTION\s*FLOW|COMPANY\s*FAQ)\s*(?:\*\*)?\s*:?\s*$/gmi;
+  /^(?:\s*(?:[#>*-]|\d+\.)\s*)?(?:\*\*)?\s*(DESCRIPTION|AI\s*DESCRIPTION|RULES\s*(?:AND|&)\s*GUIDELINES|AI\s*RULES|QUESTION\s*FLOW|COMPANY\s*FAQ)\s*(?:\*\*)?\s*:?\s*$/gim;
 
 function splitStep3IntoSections(step3Raw?: string): SplitSection[] | null {
   if (!step3Raw) return null;
@@ -215,16 +218,22 @@ export default function BuilderDashboard() {
   useEffect(() => {
     let unsub: any;
     (async () => {
-      const { data: { user } } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
       setUserId(user?.id || '');
-      unsub = supabase.auth.onAuthStateChange((_e, session) => setUserId(session?.user?.id || ''));
+      unsub = supabase.auth.onAuthStateChange((_e, session) =>
+        setUserId(session?.user?.id || '')
+      );
     })();
     return () => unsub?.data?.subscription?.unsubscribe?.();
   }, []);
   // ===== END AUTH =====
 
   // welcome overlay after sign-up
-  const mode = (search.get('mode') === 'signin' ? 'signin' : 'signup') as 'signup' | 'signin';
+  const mode = (search.get('mode') === 'signin' ? 'signin' : 'signup') as
+    | 'signup'
+    | 'signin';
   const onboard = search.get('onboard') === '1';
   const forceOverlay = search.get('forceOverlay') === '1';
   const [welcomeOpen, setWelcomeOpen] = useState(false);
@@ -236,9 +245,13 @@ export default function BuilderDashboard() {
 
   const closeWelcome = () => {
     setWelcomeOpen(false);
-    try { localStorage.setItem(`user:${userId}:profile:completed`, '1'); } catch {}
+    try {
+      localStorage.setItem(`user:${userId}:profile:completed`, '1');
+    } catch {}
     const usp = new URLSearchParams(search.toString());
-    usp.delete('onboard'); usp.delete('mode'); usp.delete('forceOverlay');
+    usp.delete('onboard');
+    usp.delete('mode');
+    usp.delete('forceOverlay');
     router.replace(`${pathname}?${usp.toString()}`, undefined, { shallow: true });
   };
 
@@ -246,16 +259,13 @@ export default function BuilderDashboard() {
   const rawStep = search.get('step');
   const step = rawStep && ['1', '2', '3', '4'].includes(rawStep) ? rawStep : null;
 
-  // NEW: tiny loading overlay when switching steps
+  // small loading between steps
   const [stepLoading, setStepLoading] = useState(false);
   useEffect(() => {
-    if (step) {
-      setStepLoading(true);
-      const t = setTimeout(() => setStepLoading(false), 450);
-      return () => clearTimeout(t);
-    } else {
-      setStepLoading(false);
-    }
+    if (!step) return;
+    setStepLoading(true);
+    const t = setTimeout(() => setStepLoading(false), 360);
+    return () => clearTimeout(t);
   }, [step]);
 
   const [query, setQuery] = useState('');
@@ -266,7 +276,9 @@ export default function BuilderDashboard() {
   useEffect(() => {
     try {
       if (localStorage.getItem('builder:cleanup') === '1') {
-        ['builder:step1', 'builder:step2', 'builder:step3'].forEach((k) => localStorage.removeItem(k));
+        ['builder:step1', 'builder:step2', 'builder:step3'].forEach((k) =>
+          localStorage.removeItem(k)
+        );
         localStorage.removeItem('builder:cleanup');
       }
     } catch {}
@@ -306,7 +318,10 @@ export default function BuilderDashboard() {
     return bots.filter((b) => b.name.toLowerCase().includes(q));
   }, [bots, query]);
 
-  const selectedBot = useMemo(() => bots.find((b) => b.id === customizingId), [bots, customizingId]);
+  const selectedBot = useMemo(
+    () => bots.find((b) => b.id === customizingId),
+    [bots, customizingId]
+  );
   const viewedBot = useMemo(() => bots.find((b) => b.id === viewId), [bots, viewId]);
 
   const setStep = (next: string | null) => {
@@ -318,25 +333,29 @@ export default function BuilderDashboard() {
 
   if (step) {
     return (
-      <div className="min-h-screen w-full text-white font-movatif bg-[#0b0c10] relative">
-        {stepLoading && (
-          <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 backdrop-blur-[1px]">
-            <span className="inline-block w-8 h-8 rounded-full border-2 border-white/70 border-t-transparent animate-spin" />
-          </div>
-        )}
-        <main className="w-full min-h-screen animate-fade-in">
+      <div className="min-h-screen w-full text-white font-movatif bg-[#0b0c10]">
+        <main className="w-full min-h-screen relative">
+          {stepLoading && (
+            <div
+              className="absolute inset-0 grid place-items-center z-40"
+              style={{ background: 'rgba(0,0,0,0.45)' }}
+            >
+              <div className="flex items-center gap-3">
+                <span className="inline-block w-6 h-6 rounded-full border-2 border-white/70 border-t-transparent animate-spin" />
+                <span className="text-white/90">Loading…</span>
+              </div>
+            </div>
+          )}
+
           {step === '1' && <Step1AIType onNext={() => setStep('2')} />}
-          {step === '2' && <Step2ModelSettings onBack={() => setStep('1')} onNext={() => setStep('3')} />}
-          {step === '3' && <Step3PromptEditor onBack={() => setStep('2')} onNext={() => setStep('4')} />}
+          {step === '2' && (
+            <Step2ModelSettings onBack={() => setStep('1')} onNext={() => setStep('3')} />
+          )}
+          {step === '3' && (
+            <Step3PromptEditor onBack={() => setStep('2')} onNext={() => setStep('4')} />
+          )}
           {step === '4' && <Step4Overview onBack={() => setStep('3')} onFinish={() => setStep(null)} />}
         </main>
-
-        {/* minimal animation (global) */}
-        <style jsx global>{`
-          @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
-          .animate-fade-in { animation: fadeIn .28s ease-out both; }
-          .card-fade { animation: fadeIn .28s ease-out both; }
-        `}</style>
       </div>
     );
   }
@@ -346,7 +365,6 @@ export default function BuilderDashboard() {
       <main className="flex-1 w-full px-4 sm:px-6 pt-10 pb-24">
         <div className="flex items-center justify-between mb-7">
           <h1 className="text-2xl md:text-3xl font-semibold">Builds</h1>
-          {/* TEXT ONLY -> white */}
           <button
             onClick={() => router.push('/builder?step=1')}
             className="px-4 py-2 rounded-[10px] bg-[#00ffc2] text-white font-semibold shadow-[0_0_10px_rgba(106,247,209,0.28)] hover:brightness-110 transition"
@@ -386,7 +404,8 @@ export default function BuilderDashboard() {
 
         {filtered.length === 0 && (
           <div className="mt-12 text-center text-white/60">
-            No builds found. Click <span className="text-[#00ffc2]">Create a Build</span> to get started.
+            No builds found. Click <span className="text-[#00ffc2]">Create a Build</span> to get
+            started.
           </div>
         )}
       </main>
@@ -420,9 +439,14 @@ export default function BuilderDashboard() {
           onSaveDraft={(name, ap) => {
             if (!customizingId) return;
             const key = `drafts:${customizingId}`;
-            const arr: Array<{ name: string; appearance: Appearance; ts: string }> =
-              JSON.parse(localStorage.getItem(key) || '[]');
-            arr.unshift({ name: name || `Draft ${new Date().toLocaleString()}`, appearance: ap, ts: nowISO() });
+            const arr: Array<{ name: string; appearance: Appearance; ts: string }> = JSON.parse(
+              localStorage.getItem(key) || '[]'
+            );
+            arr.unshift({
+              name: name || `Draft ${new Date().toLocaleString()}`,
+              appearance: ap,
+              ts: nowISO(),
+            });
             localStorage.setItem(key, JSON.stringify(arr.slice(0, 20)));
           }}
         />
@@ -450,7 +474,9 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
   const sections = splitStep3IntoSections(bot.prompt);
 
   const copyAll = async () => {
-    try { await navigator.clipboard.writeText(rawOut); } catch {}
+    try {
+      await navigator.clipboard.writeText(rawOut);
+    } catch {}
   };
 
   const downloadTxt = () => {
@@ -466,7 +492,7 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
   const FRAME_STYLE: React.CSSProperties = {
     background: 'rgba(13,15,17,0.95)',
     border: '2px dashed rgba(106,247,209,0.3)',
-    boxShadow: '0 0 40px rgba(0,0,0,0.7)',
+    boxShadow: '0 18px 40px rgba(0,0,0,0.55), 0 6px 14px rgba(0,0,0,0.35)',
     borderRadius: 30,
   };
   const HEADER_BORDER = { borderBottom: '1px solid rgba(255,255,255,0.4)' };
@@ -477,7 +503,10 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: 'rgba(0,0,0,0.5)' }}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center px-4"
+      style={{ background: 'rgba(0,0,0,0.5)' }}
+    >
       <div className="relative w-full max-w-[1280px] max-h-[88vh] flex flex-col" style={FRAME_STYLE}>
         <div className="flex items-center justify-between px-6 py-4 rounded-t-[30px]" style={HEADER_BORDER}>
           <div className="min-w-0">
@@ -514,7 +543,9 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
 
         <div className="flex-1 overflow-y-auto p-6">
           {!bot.prompt ? (
-            <div className="p-5 text-white/80" style={CARD_STYLE}>(No Step 3 prompt yet)</div>
+            <div className="p-5 text-white/80" style={CARD_STYLE}>
+              (No Step 3 prompt yet)
+            </div>
           ) : sections ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {sections.map((sec, i) => (
@@ -537,7 +568,10 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
           )}
         </div>
 
-        <div className="px-6 py-4 rounded-b-[30px]" style={{ borderTop: '1px solid rgba(255,255,255,0.3)', background: '#101314' }}>
+        <div
+          className="px-6 py-4 rounded-b-[30px]"
+          style={{ borderTop: '1px solid rgba(255,255,255,0.3)', background: '#101314' }}
+        >
           <div className="flex justify-end">
             <button
               onClick={onClose}
@@ -562,20 +596,21 @@ function CreateCard({ onClick }: { onClick: () => void }) {
       onClick={onClick}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      className="group relative h-[380px] rounded-[16px] p-7 flex flex-col items-center justify-center transition-all active:scale-[0.995] card-fade"
+      className="group relative h-[380px] rounded-[16px] p-7 flex flex-col items-center justify-center transition-all active:scale-[0.995] hover:translate-y-[-1px]"
       style={{
         background: 'rgba(13,15,17,0.92)',
         border: '2px solid rgba(106,247,209,0.32)',
-        boxShadow: 'inset 0 0 22px rgba(0,0,0,0.28), 0 0 20px rgba(106,247,209,0.06)',
+        boxShadow:
+          '0 18px 40px rgba(0,0,0,0.55), 0 6px 14px rgba(0,0,0,0.35), inset 0 0 22px rgba(0,0,0,0.28), 0 0 20px rgba(106,247,209,0.06)',
       }}
     >
-      {/* removed: glow/highlight layers */}
+      {/* minimal icon + text, no glass layers */}
       <div
         className="w-20 h-20 rounded-full flex items-center justify-center mb-5"
         style={{
           background: 'rgba(0,0,0,0.18)',
           border: '2px dashed rgba(106,247,209,0.35)',
-          boxShadow: 'inset 0 0 18px rgba(0,0,0,0.45), inset 0 0 6px rgba(106,247,209,0.06)',
+          boxShadow: 'inset 0 0 18px rgba(0,0,0,0.45)',
         }}
       >
         <Plus className="w-10 h-10" style={{ color: '#6af7d1', opacity: 0.9 }} />
@@ -607,29 +642,33 @@ function BuildCard({
   const ap = bot.appearance || {};
   return (
     <div
-      className="relative h-[380px] rounded-[16px] p-0 flex flex-col justify-between group transition-all card-fade"
+      className="relative h-[380px] rounded-[16px] p-0 flex flex-col justify-between group transition-all hover:translate-y-[-1px]"
       style={{
         background: 'rgba(13,15,17,0.92)',
         border: '2px solid rgba(106,247,209,0.32)',
-        boxShadow: 'inset 0 0 22px rgba(0,0,0,0.28), 0 0 20px rgba(106,247,209,0.06)',
+        boxShadow:
+          '0 18px 40px rgba(0,0,0,0.55), 0 6px 14px rgba(0,0,0,0.35), inset 0 0 22px rgba(0,0,0,0.28), 0 0 20px rgba(106,247,209,0.06)',
       }}
     >
-      {/* removed: big radial glow layer */}
       <div
         className="h-48 border-b border-white/10 overflow-hidden relative"
         onMouseEnter={() => setHover(true)}
         onMouseLeave={() => setHover(false)}
+        style={{ boxShadow: 'inset 0 -18px 36px rgba(0,0,0,0.45)' }}
       >
         <button
           onClick={onCustomize}
           className="absolute right-3 top-3 z-10 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-[10px] text-xs border transition"
-          style={{ background: 'rgba(16,19,20,0.88)', border: '2px solid rgba(106,247,209,0.4)', boxShadow: '0 0 14px rgba(106,247,209,0.12)' }}
+          style={{
+            background: 'rgba(16,19,20,0.88)',
+            border: '2px solid rgba(106,247,209,0.4)',
+            boxShadow: '0 0 14px rgba(106,247,209,0.12)',
+          }}
         >
           <SlidersHorizontal className="w-3.5 h-3.5" />
           Customize
         </button>
 
-        {/* Guarded 3D preview so it can’t crash the page */}
         <ErrorBoundary
           fallback={
             <div
@@ -667,25 +706,39 @@ function BuildCard({
           >
             <BotIcon className="w-5 h-5" style={{ color: accent }} />
           </div>
+        </div>
+
+        <div className="flex items-end justify-between">
           <div className="min-w-0">
             <div className="font-semibold truncate">{bot.name}</div>
             <div className="text-[12px] text-white/60 truncate">
               {(bot.industry || '—') + (bot.language ? ` · ${bot.language}` : '')}
             </div>
+            <div className="text-[12px] text-white/50 mt-2">
+              Updated {fmtDate(bot.updatedAt || bot.createdAt)}
+            </div>
           </div>
-          <button onClick={onDelete} className="ml-auto p-1.5 rounded-md hover:bg-[#ff4d4d14] transition" title="Delete build">
-            <Trash2 className="w-4 h-4 text-white/70 hover:text-[#ff7a7a]" />
-          </button>
-        </div>
-        <div className="mt-4 flex items-end justify-between">
-          <div className="text-[12px] text-white/50">Updated {fmtDate(bot.updatedAt || bot.createdAt)}</div>
-          <button
-            onClick={onOpen}
-            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-[10px] text-sm border transition hover:translate-y-[-1px]"
-            style={{ background: 'rgba(16,19,20,0.88)', border: '2px solid rgba(106,247,209,0.4)', boxShadow: '0 0 14px rgba(106,247,209,0.12)' }}
-          >
-            Open <ArrowRight className="w-4 h-4" />
-          </button>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onDelete}
+              className="p-1.5 rounded-md hover:bg-[#ff4d4d14] transition"
+              title="Delete build"
+            >
+              <Trash2 className="w-4 h-4 text-white/70 hover:text-[#ff7a7a]" />
+            </button>
+            <button
+              onClick={onOpen}
+              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-[10px] text-sm border transition hover:translate-y-[-1px]"
+              style={{
+                background: 'rgba(16,19,20,0.88)',
+                border: '2px solid rgba(106,247,209,0.4)',
+                boxShadow: '0 0 14px rgba(106,247,209,0.12)',
+              }}
+            >
+              Open <ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       </div>
     </div>
