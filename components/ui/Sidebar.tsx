@@ -212,7 +212,7 @@ function Item({
     <div
       className={cn(
         'group rounded-xl flex items-center h-12 transition-colors duration-200',
-        collapsed ? 'px-0 justify-center' : 'px-3',
+        collapsed ? 'px-2 justify-center' : 'px-3',
         disabled && 'opacity-50 cursor-not-allowed',
         !disabled && 'hover:translate-x-[1px]'
       )}
