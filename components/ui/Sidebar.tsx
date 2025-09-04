@@ -18,12 +18,25 @@ const LS_COLLAPSED = 'ui:sidebarCollapsed';
 const W_EXPANDED = 260;
 const W_COLLAPSED = 72;
 
+let SIDEBAR_MOUNTED = false;
+
 export default function Sidebar() {
   const pathname = usePathname();
+  const [allowed, setAllowed] = useState<boolean>(() => !SIDEBAR_MOUNTED);
+
+  useEffect(() => {
+    if (SIDEBAR_MOUNTED) {
+      setAllowed(false);
+      return;
+    }
+    SIDEBAR_MOUNTED = true;
+    return () => void (SIDEBAR_MOUNTED = false);
+  }, []);
+
   const [collapsed, setCollapsed] = useState(false);
   const [lastBotId, setLastBotId] = useState<string | null>(null);
 
-  // Load collapse state from localStorage
+  // localStorage state
   useEffect(() => {
     try {
       const raw = localStorage.getItem(LS_COLLAPSED);
@@ -36,7 +49,7 @@ export default function Sidebar() {
     } catch {}
   }, [collapsed]);
 
-  // Load last bot ID for Improve link
+  // last bot
   useEffect(() => {
     try {
       const bots = JSON.parse(localStorage.getItem('chatbots') || '[]');
@@ -52,6 +65,8 @@ export default function Sidebar() {
     document.documentElement.style.setProperty('--sidebar-w', `${widthPx}px`);
   }, [widthPx]);
 
+  if (!allowed) return null;
+
   return (
     <aside
       className={cn(
@@ -64,40 +79,34 @@ export default function Sidebar() {
         borderRight: '1px solid rgba(0,255,194,0.08)',
         boxShadow: 'inset 0 0 18px rgba(0,0,0,0.35), 0 0 0 1px rgba(0,0,0,0.25)',
       }}
+      aria-expanded={!collapsed}
     >
       <div className="relative h-full flex flex-col">
         {/* Header */}
-        <div
-          className={cn(
-            'border-b transition-all duration-300 ease-in-out',
-            collapsed ? 'px-3 pt-5 pb-4' : 'px-5 pt-6 pb-5'
-          )}
-          style={{ borderColor: 'rgba(255,255,255,0.06)' }}
-        >
-          <div className="flex items-center gap-3">
-            <div
-              className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
-              style={{
-                background: '#00ffc2',
-                boxShadow: '0 0 10px rgba(0,255,194,0.35)',
-              }}
-              aria-label="reducai.io"
-            >
-              <Bot className="w-5 h-5 text-black" />
-            </div>
-            <div
-              className={cn(
-                'overflow-hidden transition-all duration-300 ease-in-out',
-                collapsed ? 'opacity-0 blur-sm w-0' : 'opacity-100 blur-0 w-40'
-              )}
-            >
+        <div className={cn('border-b px-4 py-5 flex items-center gap-3')} style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
+          <div
+            className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+            style={{
+              background: '#00ffc2',
+              boxShadow: '0 0 10px rgba(0,255,194,0.35)',
+            }}
+          >
+            <Bot className="w-5 h-5 text-black" />
+          </div>
+          <div
+            className={cn(
+              'overflow-hidden transition-opacity duration-300 ease-in-out',
+              collapsed ? 'opacity-0' : 'opacity-100'
+            )}
+          >
+            {!collapsed && (
               <div className="leading-tight">
                 <div className="text-[17px] font-semibold tracking-wide">
                   reduc<span style={{ color: '#00ffc2' }}>ai.io</span>
                 </div>
                 <div className="text-[11px] text-white/55">Builder Workspace</div>
               </div>
-            </div>
+            )}
           </div>
         </div>
 
@@ -128,42 +137,33 @@ export default function Sidebar() {
         </Section>
 
         {/* Account */}
-        <div className={cn('mt-auto transition-all duration-300 ease-in-out', collapsed ? 'px-2 pb-4' : 'px-4 pb-5')}>
+        <div className={cn('mt-auto px-4 pb-5')}>
           <div
-            className={cn(
-              'rounded-2xl flex items-center justify-between transition-all duration-300 ease-in-out',
-              collapsed ? 'px-2 py-2' : 'px-4 py-3'
-            )}
+            className="rounded-2xl flex items-center justify-between transition-all duration-300 ease-in-out px-4 py-3"
             style={{
               background: 'rgba(15,18,20,0.85)',
               border: '1px solid rgba(0,255,194,0.12)',
               boxShadow: 'inset 0 0 12px rgba(0,0,0,0.35), 0 0 10px rgba(0,255,194,0.04)',
             }}
           >
-            <div className={cn('flex items-center gap-3 shrink-0', collapsed && 'justify-center w-full gap-0')}>
+            <div className="flex items-center gap-3 shrink-0">
               <div className="w-8 h-8 rounded-full bg-orange-500 flex items-center justify-center shadow-[0_0_8px_rgba(255,165,0,0.30)]">
                 <User className="w-4 h-4 text-white" />
               </div>
-              <div
-                className={cn(
-                  'overflow-hidden transition-all duration-300 ease-in-out',
-                  collapsed ? 'opacity-0 blur-sm w-0' : 'opacity-100 blur-0 w-36'
-                )}
-              >
-                <div className="leading-tight">
+              {!collapsed && (
+                <div className="leading-tight transition-opacity duration-300 ease-in-out">
                   <div className="text-sm font-semibold">My Account</div>
                   <div className="text-[11px] text-yellow-300/90">980 XP • Bronze</div>
                 </div>
-              </div>
+              )}
             </div>
             {!collapsed && <div className="text-white/60 text-xs">▼</div>}
           </div>
         </div>
 
-        {/* Expand/Collapse handle */}
+        {/* Collapse handle */}
         <button
           onClick={() => setCollapsed(c => !c)}
-          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           className="absolute top-1/2 -right-3 translate-y-[-50%] rounded-full p-1.5 transition-colors duration-200"
           style={{
             border: '1px solid rgba(255,255,255,0.10)',
@@ -171,18 +171,14 @@ export default function Sidebar() {
             boxShadow: '0 2px 12px rgba(0,0,0,0.45), 0 0 10px rgba(0,255,194,0.06)',
           }}
         >
-          {collapsed ? (
-            <ChevronRight className="w-4 h-4 text-white/80" />
-          ) : (
-            <ChevronLeft className="w-4 h-4 text-white/80" />
-          )}
+          {collapsed ? <ChevronRight className="w-4 h-4 text-white/80" /> : <ChevronLeft className="w-4 h-4 text-white/80" />}
         </button>
       </div>
     </aside>
   );
 }
 
-/* ---------- Building blocks ---------- */
+/* ---------- Helpers ---------- */
 
 function Section({ title, showTitle, children }: { title: string; showTitle: boolean; children: React.ReactNode }) {
   return (
@@ -224,26 +220,19 @@ function Item({
       }}
       title={collapsed ? label : undefined}
     >
-      <div
-        className="shrink-0 flex items-center justify-center w-5 h-5 text-white/90 transition-colors duration-300"
-        style={{ color: active ? '#00ffc2' : 'rgba(255,255,255,0.86)' }}
-      >
+      <div className="shrink-0 flex items-center justify-center w-5 h-5">
         {icon}
       </div>
-      <div
-        className={cn(
-          'overflow-hidden transition-all duration-300 ease-in-out',
-          collapsed ? 'opacity-0 blur-sm w-0' : 'opacity-100 blur-0 w-full ml-3'
-        )}
-      >
-        <div className="leading-tight">
-          <div className="text-[13px] font-semibold text-white/95">{label}</div>
-          {sub && <div className="text-[11px] text-white/55 mt-[3px] group-hover:text-white/70">{sub}</div>}
+      {!collapsed && (
+        <div className="overflow-hidden transition-opacity duration-300 ease-in-out ml-3">
+          <div className="leading-tight">
+            <div className="text-[13px] font-semibold text-white/95">{label}</div>
+            {sub && <div className="text-[11px] text-white/55 mt-[3px] group-hover:text-white/70">{sub}</div>}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
-
   if (disabled) return <div>{body}</div>;
   return <Link href={href} className="block">{body}</Link>;
 }
