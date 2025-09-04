@@ -69,17 +69,13 @@ export default function Sidebar() {
 
   return (
     <aside
-      className={cn(
-        'fixed left-0 top-0 h-screen z-50 text-white font-movatif',
-        'transition-[width] duration-400 ease-in-out'
-      )}
+      className="fixed left-0 top-0 h-screen z-50 text-white font-movatif transition-[width] duration-300 ease-in-out"
       style={{
         width: widthPx,
-        background: 'linear-gradient(180deg, rgba(10,12,13,0.98) 0%, rgba(9,11,12,0.98) 100%)',
+        background: 'linear-gradient(180deg, rgba(10,12,13,0.98), rgba(9,11,12,0.98))',
         borderRight: '1px solid rgba(0,255,194,0.08)',
         boxShadow: 'inset 0 0 18px rgba(0,0,0,0.35), 0 0 0 1px rgba(0,0,0,0.25)',
       }}
-      aria-expanded={!collapsed}
     >
       <div className="relative h-full flex flex-col">
         {/* Header */}
@@ -93,21 +89,14 @@ export default function Sidebar() {
           >
             <Bot className="w-5 h-5 text-black" />
           </div>
-          <div
-            className={cn(
-              'overflow-hidden transition-all duration-400 ease-in-out',
-              collapsed ? 'opacity-0 blur-sm -translate-x-2' : 'opacity-100 blur-0 translate-x-0'
-            )}
-          >
-            {!collapsed && (
-              <div className="leading-tight">
-                <div className="text-[17px] font-semibold tracking-wide">
-                  reduc<span style={{ color: '#00ffc2' }}>ai.io</span>
-                </div>
-                <div className="text-[11px] text-white/55">Builder Workspace</div>
+          <AnimatedText collapsed={collapsed}>
+            <div className="leading-tight">
+              <div className="text-[17px] font-semibold tracking-wide">
+                reduc<span style={{ color: '#00ffc2' }}>ai.io</span>
               </div>
-            )}
-          </div>
+              <div className="text-[11px] text-white/55">Builder Workspace</div>
+            </div>
+          </AnimatedText>
         </div>
 
         {/* Workspace */}
@@ -139,7 +128,7 @@ export default function Sidebar() {
         {/* Account */}
         <div className="mt-auto px-4 pb-5">
           <div
-            className="rounded-2xl flex items-center justify-between px-4 py-3 transition-all duration-400 ease-in-out"
+            className="rounded-2xl flex items-center justify-between px-4 py-3 transition-all duration-300 ease-in-out"
             style={{
               background: 'rgba(15,18,20,0.85)',
               border: '1px solid rgba(0,255,194,0.12)',
@@ -150,19 +139,12 @@ export default function Sidebar() {
               <div className="w-8 h-8 rounded-full bg-orange-500 flex items-center justify-center shadow-[0_0_8px_rgba(255,165,0,0.30)]">
                 <User className="w-4 h-4 text-white" />
               </div>
-              <div
-                className={cn(
-                  'overflow-hidden transition-all duration-400 ease-in-out',
-                  collapsed ? 'opacity-0 blur-sm -translate-x-2' : 'opacity-100 blur-0 translate-x-0'
-                )}
-              >
-                {!collapsed && (
-                  <div className="leading-tight">
-                    <div className="text-sm font-semibold">My Account</div>
-                    <div className="text-[11px] text-yellow-300/90">980 XP • Bronze</div>
-                  </div>
-                )}
-              </div>
+              <AnimatedText collapsed={collapsed}>
+                <div className="leading-tight">
+                  <div className="text-sm font-semibold">My Account</div>
+                  <div className="text-[11px] text-yellow-300/90">980 XP • Bronze</div>
+                </div>
+              </AnimatedText>
             </div>
             {!collapsed && <div className="text-white/60 text-xs">▼</div>}
           </div>
@@ -192,8 +174,8 @@ function Section({ title, collapsed, children }: { title: string; collapsed: boo
     <div className="px-4 pt-4">
       <div
         className={cn(
-          "text-[11px] uppercase tracking-wide text-white/55 mb-2.5 px-1 h-4 transition-all duration-400 ease-in-out",
-          collapsed ? "opacity-0 blur-sm" : "opacity-100 blur-0"
+          "text-[11px] uppercase tracking-wide text-white/55 mb-2.5 px-1 h-4 transition-opacity duration-300 ease-in-out",
+          collapsed ? "opacity-0" : "opacity-100"
         )}
       >
         {title}
@@ -216,8 +198,8 @@ function Item({
   const body = (
     <div
       className={cn(
-        'group rounded-xl flex items-center transition-all duration-400 ease-in-out',
-        collapsed ? 'justify-center px-0 py-2.5' : 'px-3 py-2.5',
+        'group rounded-xl flex items-center transition-colors duration-200',
+        'px-3 py-2.5',
         disabled && 'opacity-50 cursor-not-allowed',
         !disabled && 'hover:translate-x-[1px]'
       )}
@@ -230,24 +212,31 @@ function Item({
       }}
       title={collapsed ? label : undefined}
     >
-      <div className="shrink-0 flex items-center justify-center w-5 h-5">
+      <div className="shrink-0 flex items-center justify-center w-5 h-5 text-white/90">
         {icon}
       </div>
-      <div
-        className={cn(
-          'overflow-hidden transition-all duration-400 ease-in-out ml-3',
-          collapsed ? 'opacity-0 blur-sm -translate-x-2 w-0' : 'opacity-100 blur-0 translate-x-0 w-full'
-        )}
-      >
-        {!collapsed && (
-          <div className="leading-tight">
-            <div className="text-[13px] font-semibold text-white/95">{label}</div>
-            {sub && <div className="text-[11px] text-white/55 mt-[3px] group-hover:text-white/70">{sub}</div>}
-          </div>
-        )}
-      </div>
+      <AnimatedText collapsed={collapsed}>
+        <div className="leading-tight">
+          <div className="text-[13px] font-semibold text-white/95">{label}</div>
+          {sub && <div className="text-[11px] text-white/55 mt-[3px] group-hover:text-white/70">{sub}</div>}
+        </div>
+      </AnimatedText>
     </div>
   );
   if (disabled) return <div>{body}</div>;
   return <Link href={href} className="block">{body}</Link>;
+}
+
+/* Animated text wrapper */
+function AnimatedText({ collapsed, children }: { collapsed: boolean; children: React.ReactNode }) {
+  return (
+    <div
+      className={cn(
+        'overflow-hidden transition-all duration-300 ease-in-out',
+        collapsed ? 'opacity-0 max-w-0' : 'opacity-100 max-w-[200px]'
+      )}
+    >
+      {children}
+    </div>
+  );
 }
