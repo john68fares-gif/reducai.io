@@ -69,7 +69,7 @@ export default function Sidebar() {
 
   return (
     <aside
-      className="fixed left-0 top-0 h-screen z-50 text-white font-movatif transition-[width] duration-300 ease-in-out"
+      className="fixed left-0 top-0 h-screen z-50 text-white font-movatif transition-[width] duration-500 ease-in-out"
       style={{
         width: widthPx,
         background: 'linear-gradient(180deg, rgba(10,12,13,0.98), rgba(9,11,12,0.98))',
@@ -100,7 +100,7 @@ export default function Sidebar() {
         </div>
 
         {/* Workspace */}
-        <Section title="WORKSPACE" collapsed={collapsed}>
+        <Section>
           <NavList>
             <Item collapsed={collapsed} href="/builder" label="Build" sub="Create AI agent" icon={<Home />} active={pathname?.startsWith('/builder')} />
             <Item collapsed={collapsed} href={lastBotId ? `/improve/${lastBotId}` : '#'} label="Improve" sub="Integrate & optimize" icon={<Hammer />} active={pathname?.startsWith('/improve')} disabled={!lastBotId} />
@@ -114,7 +114,7 @@ export default function Sidebar() {
         <div className="my-3 border-t border-white/10" />
 
         {/* Resources */}
-        <Section title="RESOURCES" collapsed={collapsed}>
+        <Section>
           <NavList>
             <Item collapsed={collapsed} href="#" label="Marketplace" icon={<ShoppingCart />} />
             <Item collapsed={collapsed} href="#" label="AI Mentor" icon={<BookOpen />} />
@@ -128,7 +128,7 @@ export default function Sidebar() {
         {/* Account */}
         <div className="mt-auto px-4 pb-5">
           <div
-            className="rounded-2xl flex items-center justify-between px-4 py-3 transition-all duration-300 ease-in-out"
+            className="rounded-2xl flex items-center justify-between px-4 py-3 transition-all duration-500 ease-in-out"
             style={{
               background: 'rgba(15,18,20,0.85)',
               border: '1px solid rgba(0,255,194,0.12)',
@@ -169,19 +169,11 @@ export default function Sidebar() {
 
 /* ---------- Helpers ---------- */
 
-function Section({ title, collapsed, children }: { title: string; collapsed: boolean; children: React.ReactNode }) {
+// Empty section that only preserves spacing
+function Section({ children }: { children: React.ReactNode }) {
   return (
     <div className="px-4 pt-4">
-      {/* Title always present, just dims when collapsed */}
-      <div
-        className={cn(
-          "text-[11px] uppercase tracking-wide mb-2.5 h-4 flex items-center",
-          "transition-opacity duration-300 ease-in-out",
-          collapsed ? "opacity-40" : "opacity-70 text-white/55"
-        )}
-      >
-        {title}
-      </div>
+      <div className="mb-2.5 h-4" /> {/* keeps vertical space, no text */}
       {children}
     </div>
   );
@@ -222,7 +214,7 @@ function Item({
       {/* Text + Sub */}
       <div
         className={cn(
-          'overflow-hidden ml-3 transition-all duration-300 ease-in-out',
+          'overflow-hidden ml-3 transition-all duration-500 ease-in-out',
           collapsed ? 'opacity-0 max-w-0' : 'opacity-100 max-w-[200px]'
         )}
       >
@@ -242,7 +234,7 @@ function AnimatedText({ collapsed, children }: { collapsed: boolean; children: R
   return (
     <div
       className={cn(
-        'overflow-hidden transition-all duration-300 ease-in-out',
+        'overflow-hidden transition-all duration-500 ease-in-out',
         collapsed ? 'opacity-0 max-w-0' : 'opacity-100 max-w-[200px]'
       )}
     >
