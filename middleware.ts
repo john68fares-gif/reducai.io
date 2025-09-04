@@ -1,39 +1,48 @@
-// middleware.ts
+// middleware.ts  (place at project root)
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 
-/**
- * Server-side gate for the entire site.
- * - Allows only /auth and /auth/callback without a session.
- * - Everything else requires the ra_session cookie (set to "1" after login).
- * - Redirects unauthenticated users to /auth?mode=signin&from=<original>
- *
- * NOTE: Keep your _app.tsx (or auth page) setting/clearing `ra_session` on
- * SIGNED_IN / SIGNED_OUT so middleware can read it server-side.
- */
-const PUBLIC_PATHS = new Set<string>(['/auth', '/auth/callback']);
+// Only these paths are public. EVERYTHING else requires a valid Supabase auth cookie.
+const PUBLIC = new Set<string>(['/auth', '/auth/callback']);
+
+// Allow Next internals & static assets
+function isAsset(pathname: string) {
+  return (
+    pathname.startsWith('/_next') ||
+    pathname.startsWith('/favicon') ||
+    pathname.startsWith('/images') ||
+    pathname.startsWith('/fonts') ||
+    pathname.startsWith('/static') ||
+    pathname.startsWith('/api/public')
+  );
+}
+
+// Detect if any Supabase auth cookie exists (covers both cookie names/styles Supabase uses)
+function hasSupabaseAuthCookie(req: NextRequest) {
+  const cookies = req.cookies.getAll();
+  // common cookie names used by Supabase
+  const names = new Set([
+    'sb-access-token',
+    'sb-refresh-token',
+  ]);
+  // some deployments prefix cookies with "sb-" + ref; also catch any "sb-" auth cookie
+  return cookies.some(
+    (c) => names.has(c.name) || c.name.startsWith('sb-')
+  );
+}
 
 export function middleware(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
 
-  // Skip Next.js internals and static assets
-  if (
-    pathname.startsWith('/_next') ||
-    pathname.startsWith('/favicon') ||
-    pathname.startsWith('/images') ||
-    pathname.startsWith('/fonts')
-  ) {
-    return NextResponse.next();
-  }
+  // Skip internals/assets
+  if (isAsset(pathname)) return NextResponse.next();
 
-  // Public pages (no sidebar, no auth required)
-  if (PUBLIC_PATHS.has(pathname)) {
-    return NextResponse.next();
-  }
+  // Public routes
+  if (PUBLIC.has(pathname)) return NextResponse.next();
 
-  // Require session for everything else
-  const hasSession = req.cookies.get('ra_session')?.value === '1';
-  if (!hasSession) {
+  // Everything else requires Supabase auth cookie
+  const authed = hasSupabaseAuthCookie(req);
+  if (!authed) {
     const url = req.nextUrl.clone();
     url.pathname = '/auth';
     url.search = `?mode=signin&from=${encodeURIComponent(pathname + (search || ''))}`;
@@ -43,10 +52,7 @@ export function middleware(req: NextRequest) {
   return NextResponse.next();
 }
 
-/**
- * Apply to all routes except Next internals and static assets.
- * (We explicitly allow /auth and /auth/callback in the middleware body.)
- */
+// Apply to every route except Next internals/assets (handled above)
 export const config = {
-  matcher: ['/((?!_next/|favicon|images/|fonts/).*)'],
+  matcher: ['/((?!_next/|favicon|images/|fonts/|static/).*)'],
 };
