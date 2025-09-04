@@ -71,7 +71,7 @@ export default function Sidebar() {
     <aside
       className={cn(
         'fixed left-0 top-0 h-screen z-50 text-white font-movatif',
-        'transition-[width] duration-300 ease-in-out'
+        'transition-[width] duration-400 ease-in-out'
       )}
       style={{
         width: widthPx,
@@ -83,7 +83,7 @@ export default function Sidebar() {
     >
       <div className="relative h-full flex flex-col">
         {/* Header */}
-        <div className={cn('border-b px-4 py-5 flex items-center gap-3')} style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
+        <div className="border-b px-4 py-5 flex items-center gap-3" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
           <div
             className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
             style={{
@@ -95,8 +95,8 @@ export default function Sidebar() {
           </div>
           <div
             className={cn(
-              'overflow-hidden transition-opacity duration-300 ease-in-out',
-              collapsed ? 'opacity-0' : 'opacity-100'
+              'overflow-hidden transition-all duration-400 ease-in-out',
+              collapsed ? 'opacity-0 blur-sm -translate-x-2' : 'opacity-100 blur-0 translate-x-0'
             )}
           >
             {!collapsed && (
@@ -111,7 +111,7 @@ export default function Sidebar() {
         </div>
 
         {/* Workspace */}
-        <Section title="Workspace" showTitle={!collapsed}>
+        <Section title="Workspace" collapsed={collapsed}>
           <NavList>
             <Item collapsed={collapsed} href="/builder" label="Build" sub="Create AI agent" icon={<Home />} active={pathname?.startsWith('/builder')} />
             <Item collapsed={collapsed} href={lastBotId ? `/improve/${lastBotId}` : '#'} label="Improve" sub="Integrate & optimize" icon={<Hammer />} active={pathname?.startsWith('/improve')} disabled={!lastBotId} />
@@ -125,7 +125,7 @@ export default function Sidebar() {
         <div className="my-3 border-t border-white/10" />
 
         {/* Resources */}
-        <Section title="Resources" showTitle={!collapsed}>
+        <Section title="Resources" collapsed={collapsed}>
           <NavList>
             <Item collapsed={collapsed} href="#" label="Marketplace" icon={<ShoppingCart />} />
             <Item collapsed={collapsed} href="#" label="AI Mentor" icon={<BookOpen />} />
@@ -137,9 +137,9 @@ export default function Sidebar() {
         </Section>
 
         {/* Account */}
-        <div className={cn('mt-auto px-4 pb-5')}>
+        <div className="mt-auto px-4 pb-5">
           <div
-            className="rounded-2xl flex items-center justify-between transition-all duration-300 ease-in-out px-4 py-3"
+            className="rounded-2xl flex items-center justify-between px-4 py-3 transition-all duration-400 ease-in-out"
             style={{
               background: 'rgba(15,18,20,0.85)',
               border: '1px solid rgba(0,255,194,0.12)',
@@ -150,12 +150,19 @@ export default function Sidebar() {
               <div className="w-8 h-8 rounded-full bg-orange-500 flex items-center justify-center shadow-[0_0_8px_rgba(255,165,0,0.30)]">
                 <User className="w-4 h-4 text-white" />
               </div>
-              {!collapsed && (
-                <div className="leading-tight transition-opacity duration-300 ease-in-out">
-                  <div className="text-sm font-semibold">My Account</div>
-                  <div className="text-[11px] text-yellow-300/90">980 XP • Bronze</div>
-                </div>
-              )}
+              <div
+                className={cn(
+                  'overflow-hidden transition-all duration-400 ease-in-out',
+                  collapsed ? 'opacity-0 blur-sm -translate-x-2' : 'opacity-100 blur-0 translate-x-0'
+                )}
+              >
+                {!collapsed && (
+                  <div className="leading-tight">
+                    <div className="text-sm font-semibold">My Account</div>
+                    <div className="text-[11px] text-yellow-300/90">980 XP • Bronze</div>
+                  </div>
+                )}
+              </div>
             </div>
             {!collapsed && <div className="text-white/60 text-xs">▼</div>}
           </div>
@@ -180,14 +187,17 @@ export default function Sidebar() {
 
 /* ---------- Helpers ---------- */
 
-function Section({ title, showTitle, children }: { title: string; showTitle: boolean; children: React.ReactNode }) {
+function Section({ title, collapsed, children }: { title: string; collapsed: boolean; children: React.ReactNode }) {
   return (
     <div className="px-4 pt-4">
-      {showTitle && (
-        <div className="text-[11px] uppercase tracking-wide text-white/55 mb-2.5 px-1">
-          {title}
-        </div>
-      )}
+      <div
+        className={cn(
+          "text-[11px] uppercase tracking-wide text-white/55 mb-2.5 px-1 h-4 transition-all duration-400 ease-in-out",
+          collapsed ? "opacity-0 blur-sm" : "opacity-100 blur-0"
+        )}
+      >
+        {title}
+      </div>
       {children}
     </div>
   );
@@ -206,7 +216,7 @@ function Item({
   const body = (
     <div
       className={cn(
-        'group rounded-xl flex items-center transition-all duration-300 ease-in-out',
+        'group rounded-xl flex items-center transition-all duration-400 ease-in-out',
         collapsed ? 'justify-center px-0 py-2.5' : 'px-3 py-2.5',
         disabled && 'opacity-50 cursor-not-allowed',
         !disabled && 'hover:translate-x-[1px]'
@@ -223,14 +233,19 @@ function Item({
       <div className="shrink-0 flex items-center justify-center w-5 h-5">
         {icon}
       </div>
-      {!collapsed && (
-        <div className="overflow-hidden transition-opacity duration-300 ease-in-out ml-3">
+      <div
+        className={cn(
+          'overflow-hidden transition-all duration-400 ease-in-out ml-3',
+          collapsed ? 'opacity-0 blur-sm -translate-x-2 w-0' : 'opacity-100 blur-0 translate-x-0 w-full'
+        )}
+      >
+        {!collapsed && (
           <div className="leading-tight">
             <div className="text-[13px] font-semibold text-white/95">{label}</div>
             {sub && <div className="text-[11px] text-white/55 mt-[3px] group-hover:text-white/70">{sub}</div>}
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
   if (disabled) return <div>{body}</div>;
