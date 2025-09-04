@@ -99,35 +99,34 @@ export default function Sidebar() {
           </AnimatedText>
         </div>
 
-        {/* Centered Nav Section */}
-        <div className="flex-1 flex flex-col justify-center gap-6">
-          {/* Workspace */}
-          <Section>
-            <NavList>
-              <Item collapsed={collapsed} href="/builder" label="Build" sub="Create AI agent" icon={<Home />} active={pathname?.startsWith('/builder')} />
-              <Item collapsed={collapsed} href={lastBotId ? `/improve/${lastBotId}` : '#'} label="Improve" sub="Integrate & optimize" icon={<Hammer />} active={pathname?.startsWith('/improve')} disabled={!lastBotId} />
-              <Item collapsed={collapsed} href="/voice-agent" label="Voice Agent" sub="Calls & persona" icon={<Mic />} active={pathname?.startsWith('/voice-agent')} />
-              <Item collapsed={collapsed} href="/phone-numbers" label="Phone Numbers" sub="Link provider numbers" icon={<Phone />} active={pathname?.startsWith('/phone-numbers')} />
-              <Item collapsed={collapsed} href="/demo" label="Demo" sub="Showcase to clients" icon={<Monitor />} active={pathname === '/demo'} />
-              <Item collapsed={collapsed} href="/launch" label="Launch" sub="Deploy to production" icon={<Rocket />} active={pathname === '/launch'} />
-            </NavList>
-          </Section>
+        {/* Workspace */}
+        <Section>
+          <NavList>
+            <Item collapsed={collapsed} href="/builder" label="Build" sub="Create AI agent" icon={<Home />} active={pathname?.startsWith('/builder')} />
+            <Item collapsed={collapsed} href={lastBotId ? `/improve/${lastBotId}` : '#'} label="Improve" sub="Integrate & optimize" icon={<Hammer />} active={pathname?.startsWith('/improve')} disabled={!lastBotId} />
+            <Item collapsed={collapsed} href="/voice-agent" label="Voice Agent" sub="Calls & persona" icon={<Mic />} active={pathname?.startsWith('/voice-agent')} />
+            <Item collapsed={collapsed} href="/phone-numbers" label="Phone Numbers" sub="Link provider numbers" icon={<Phone />} active={pathname?.startsWith('/phone-numbers')} />
+            <Item collapsed={collapsed} href="/demo" label="Demo" sub="Showcase to clients" icon={<Monitor />} active={pathname === '/demo'} />
+            <Item collapsed={collapsed} href="/launch" label="Launch" sub="Deploy to production" icon={<Rocket />} active={pathname === '/launch'} />
+          </NavList>
+        </Section>
 
-          {/* Resources */}
-          <Section>
-            <NavList>
-              <Item collapsed={collapsed} href="#" label="Marketplace" icon={<ShoppingCart />} />
-              <Item collapsed={collapsed} href="#" label="AI Mentor" icon={<BookOpen />} />
-              <Item collapsed={collapsed} href="/apikeys" label="API Key" icon={<Key />} />
-              <Item collapsed={collapsed} href="#" label="Bulk Tester" icon={<Package />} />
-              <Item collapsed={collapsed} href="#" label="Video Guides" icon={<HelpCircle />} />
-              <Item collapsed={collapsed} href="/support" label="Support" sub="Help & FAQ" icon={<HelpCircle />} active={pathname === '/support'} />
-            </NavList>
-          </Section>
-        </div>
+        <div className="my-3 border-t border-white/10" />
+
+        {/* Resources */}
+        <Section>
+          <NavList>
+            <Item collapsed={collapsed} href="#" label="Marketplace" icon={<ShoppingCart />} />
+            <Item collapsed={collapsed} href="#" label="AI Mentor" icon={<BookOpen />} />
+            <Item collapsed={collapsed} href="/apikeys" label="API Key" icon={<Key />} />
+            <Item collapsed={collapsed} href="#" label="Bulk Tester" icon={<Package />} />
+            <Item collapsed={collapsed} href="#" label="Video Guides" icon={<HelpCircle />} />
+            <Item collapsed={collapsed} href="/support" label="Support" sub="Help & FAQ" icon={<HelpCircle />} active={pathname === '/support'} />
+          </NavList>
+        </Section>
 
         {/* Account */}
-        <div className="px-4 pb-5">
+        <div className="mt-auto px-4 pb-5">
           <div
             className="rounded-2xl flex items-center justify-between px-4 py-3 transition-all duration-500 ease-in-out"
             style={{
@@ -170,10 +169,9 @@ export default function Sidebar() {
 
 /* ---------- Helpers ---------- */
 
-// Empty section that only preserves spacing
 function Section({ children }: { children: React.ReactNode }) {
   return (
-    <div className="px-4">
+    <div className="px-4 pt-4">
       <div className="mb-2.5 h-4" /> {/* keeps vertical spacing */}
       {children}
     </div>
@@ -207,8 +205,8 @@ function Item({
       }}
       title={collapsed ? label : undefined}
     >
-      {/* Icon */}
-      <div className="shrink-0 flex items-center justify-center w-5 h-5 text-white/90">
+      {/* Icon box (always centered in square) */}
+      <div className="shrink-0 flex items-center justify-center w-8 h-8 text-white/90">
         {icon}
       </div>
 
