@@ -1,55 +1,52 @@
-// /middleware.ts
-import { NextRequest, NextResponse } from 'next/server';
+// middleware.ts
+import type { NextRequest } from 'next/server';
+import { NextResponse } from 'next/server';
 
-const PUBLIC = new Set<string>([
-  '/',                  // landing
-  '/auth',              // sign in/up
-  '/auth/callback',     // google oauth return
-  '/favicon.ico',
-  '/robots.txt',
-  '/sitemap.xml',
-]);
-
-function isPublic(path: string) {
-  if (PUBLIC.has(path)) return true;
-  if (path.startsWith('/_next') || path.startsWith('/static') || path.startsWith('/images') || path.startsWith('/fonts')) {
-    return true;
-  }
-  return false;
-}
-
-function hasSupabaseCookie(req: NextRequest) {
-  for (const c of req.cookies.getAll()) {
-    if (/^sb-[a-zA-Z0-9]+-auth-token$/.test(c.name) && c.value && c.value !== 'null') return true;
-  }
-  return false;
-}
-function hasSoftCookie(req: NextRequest) {
-  return req.cookies.get('ra_session')?.value === '1';
-}
+/**
+ * Server-side gate for the entire site.
+ * - Allows only /auth and /auth/callback without a session.
+ * - Everything else requires the ra_session cookie (set to "1" after login).
+ * - Redirects unauthenticated users to /auth?mode=signin&from=<original>
+ *
+ * NOTE: Keep your _app.tsx (or auth page) setting/clearing `ra_session` on
+ * SIGNED_IN / SIGNED_OUT so middleware can read it server-side.
+ */
+const PUBLIC_PATHS = new Set<string>(['/auth', '/auth/callback']);
 
 export function middleware(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
 
-  // Always allow public routes (especially /auth & /auth/callback)
-  if (isPublic(pathname)) return NextResponse.next();
-
-  const authed = hasSupabaseCookie(req) || hasSoftCookie(req);
-  if (authed) {
-    // IMPORTANT: do NOT force /auth -> /builder here.
-    // Just allow the request; users can still visit /auth if they want.
+  // Skip Next.js internals and static assets
+  if (
+    pathname.startsWith('/_next') ||
+    pathname.startsWith('/favicon') ||
+    pathname.startsWith('/images') ||
+    pathname.startsWith('/fonts')
+  ) {
     return NextResponse.next();
   }
 
-  // Not authed -> require sign-in
-  const url = req.nextUrl.clone();
-  url.pathname = '/auth';
-  url.search = '';
-  url.searchParams.set('mode', 'signin');
-  url.searchParams.set('from', pathname + (search || ''));
-  return NextResponse.redirect(url);
+  // Public pages (no sidebar, no auth required)
+  if (PUBLIC_PATHS.has(pathname)) {
+    return NextResponse.next();
+  }
+
+  // Require session for everything else
+  const hasSession = req.cookies.get('ra_session')?.value === '1';
+  if (!hasSession) {
+    const url = req.nextUrl.clone();
+    url.pathname = '/auth';
+    url.search = `?mode=signin&from=${encodeURIComponent(pathname + (search || ''))}`;
+    return NextResponse.redirect(url);
+  }
+
+  return NextResponse.next();
 }
 
+/**
+ * Apply to all routes except Next internals and static assets.
+ * (We explicitly allow /auth and /auth/callback in the middleware body.)
+ */
 export const config = {
-  matcher: ['/:path*'],
+  matcher: ['/((?!_next/|favicon|images/|fonts/).*)'],
 };
