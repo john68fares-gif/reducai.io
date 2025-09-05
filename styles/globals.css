@@ -2,7 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-/* -------------------- Font -------------------- */
+/* Font */
 @font-face {
   font-family: 'Movatif Bold';
   src: url('/fonts/Movatif-Bold.ttf') format('truetype');
@@ -10,95 +10,81 @@
   font-style: normal;
 }
 
-/* -------------------- Theme Tokens -------------------- */
-/* Default: DARK (matches your current look) */
-:root {
-  /* app */
-  --app-bg: #0b0c10;
-  --text-main: #ffffff;
-  --text-muted: rgba(255,255,255,0.70);
-  --text-soft: rgba(255,255,255,0.55);
-
-  /* cards/panels */
-  --card-bg: rgba(13,15,17,0.92);
-  --card-border: 2px solid rgba(106,247,209,0.32);
-  --card-shadow: inset 0 0 22px rgba(0,0,0,0.28), 0 0 20px rgba(106,247,209,0.06);
-
-  --panel-bg: rgba(16,19,20,0.90);
-  --panel-border: 1px solid rgba(255,255,255,0.06);
-
-  --muted-bg: #101314;
-  --muted-border: 1px solid #13312b;
-
-  /* accent */
-  --accent: #00ffc2;
-  --accent-weak: rgba(0,255,194,0.06);
-  --accent-border: 2px solid rgba(106,247,209,0.4);
-  --accent-glow: 0 0 14px rgba(106,247,209,0.12);
-
-  /* misc */
-  --divider: rgba(255,255,255,0.10);
-  --chip-bg: rgba(0,0,0,0.18);
-  --chip-dashed: 2px dashed rgba(106,247,209,0.35);
-
-  --spot-hero: radial-gradient(circle, rgba(106,247,209,0.12) 0%, transparent 70%);
-  --spot-hero-soft: radial-gradient(circle, rgba(106,247,209,0.10) 0%, transparent 70%);
-}
-
-/* LIGHT override */
-:root[data-theme='light'] {
-  --app-bg: #f6f7f8;
-  --text-main: #0b0c10;
-  --text-muted: rgba(0,0,0,0.70);
-  --text-soft: rgba(0,0,0,0.55);
-
-  --card-bg: rgba(255,255,255,0.92);
-  --card-border: 2px solid rgba(0,0,0,0.08);
-  --card-shadow: inset 0 0 22px rgba(0,0,0,0.04), 0 0 20px rgba(0,0,0,0.04);
-
-  --panel-bg: rgba(255,255,255,0.92);
-  --panel-border: 1px solid rgba(0,0,0,0.08);
-
-  --muted-bg: #ffffff;
-  --muted-border: 1px solid rgba(0,0,0,0.08);
-
-  --accent: #00b894;                 /* slight tweak for light */
-  --accent-weak: rgba(0,184,148,0.08);
-  --accent-border: 2px solid rgba(0,184,148,0.35);
-  --accent-glow: 0 0 14px rgba(0,184,148,0.12);
-
-  --divider: rgba(0,0,0,0.08);
-  --chip-bg: rgba(0,0,0,0.06);
-  --chip-dashed: 2px dashed rgba(0,0,0,0.18);
-
-  --spot-hero: radial-gradient(circle, rgba(0,184,148,0.10) 0%, transparent 70%);
-  --spot-hero-soft: radial-gradient(circle, rgba(0,184,148,0.08) 0%, transparent 70%);
-}
-
-/* -------------------- Base -------------------- */
+/* Base reset: DO NOT hard-code background/text here anymore */
 html, body {
   font-family: 'Movatif Bold', sans-serif;
-  background: var(--app-bg);
-  color: var(--text-main);
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  text-rendering: optimizeLegibility;
+  min-height: 100%;
 }
 
-/* Smooth theme switch */
-*,
-*::before,
-*::after {
-  transition: background-color .18s linear, color .18s linear, border-color .18s linear, box-shadow .18s linear;
+/* === THEME TOKENS ========================================================= */
+:root {
+  --bg: #0b0c10;
+  --bg-elev-1: #101314;
+  --bg-elev-2: #0d0f11;
+  --text: #ffffff;
+  --text-dim: rgba(255,255,255,0.75);
+  --border: rgba(255,255,255,0.08);
+  --brand: #00ffc2;
+  --brand-weak: rgba(106,247,209,0.28);
 }
 
-/* Optional: scrollbar (matches theme) */
-*::-webkit-scrollbar { width: 10px; height: 10px; }
-*::-webkit-scrollbar-track { background: transparent; }
-*::-webkit-scrollbar-thumb {
-  background: rgba(255,255,255,0.18);
-  border-radius: 10px;
+:root[data-theme="dark"] {
+  --bg: #0b0c10;
+  --bg-elev-1: #101314;
+  --bg-elev-2: #0d0f11;
+  --text: #ffffff;
+  --text-dim: rgba(255,255,255,0.75);
+  --border: rgba(255,255,255,0.08);
+  --brand: #00ffc2;
+  --brand-weak: rgba(106,247,209,0.28);
 }
-:root[data-theme='light'] *::-webkit-scrollbar-thumb {
-  background: rgba(0,0,0,0.2);
+
+:root[data-theme="light"] {
+  --bg: #f6f7f9;
+  --bg-elev-1: #ffffff;
+  --bg-elev-2: #f2f3f5;
+  --text: #0b0c10;
+  --text-dim: rgba(0,0,0,0.65);
+  --border: rgba(0,0,0,0.08);
+  --brand: #00c79a;
+  --brand-weak: rgba(0,199,154,0.25);
+}
+
+/* Apply tokens to page */
+html, body, #__next {
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* Smoothen the switch */
+* {
+  transition: background-color 180ms ease, color 180ms ease, border-color 180ms ease;
+}
+
+/* === OVERRIDES for your existing fixed dark colors ========================
+   These remap the most-used dark hex utilities to light equivalents when
+   data-theme="light" is set, so you don't have to edit every component.
+--------------------------------------------------------------------------- */
+:root[data-theme="light"] .bg-\[\#0b0c10\] { background-color: var(--bg) !important; }
+:root[data-theme="light"] .bg-\[\#101314\] { background-color: var(--bg-elev-1) !important; }
+:root[data-theme="light"] .bg-\[\#0d0f11\] { background-color: var(--bg-elev-2) !important; }
+:root[data-theme="light"] .text-white      { color: var(--text) !important; }
+:root[data-theme="light"] .text-white\/95  { color: color-mix(in srgb, var(--text) 95%, transparent) !important; }
+:root[data-theme="light"] .text-white\/90  { color: color-mix(in srgb, var(--text) 90%, transparent) !important; }
+:root[data-theme="light"] .text-white\/80  { color: color-mix(in srgb, var(--text) 80%, transparent) !important; }
+:root[data-theme="light"] .text-white\/70  { color: color-mix(in srgb, var(--text) 70%, transparent) !important; }
+:root[data-theme="light"] .text-white\/60  { color: color-mix(in srgb, var(--text) 60%, transparent) !important; }
+:root[data-theme="light"] .border-\[\#13312b\] { border-color: var(--border) !important; }
+
+/* Buttons that use brand */
+.btn-brand {
+  background: var(--brand);
+  color: #000; /* readable for both themes; override as needed */
+}
+
+/* Card helpers that many of your components mimic */
+.card {
+  background: var(--bg-elev-1);
+  border: 1px solid var(--border);
+  border-radius: 12px;
 }
