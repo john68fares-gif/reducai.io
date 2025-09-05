@@ -28,12 +28,8 @@ import { s } from '@/utils/safe';
 
 const Bot3D = dynamic(() => import('./Bot3D.client'), {
   ssr: false,
-  loading: () => (
-    <div
-      className="h-full w-full"
-      style={{ background: 'linear-gradient(180deg, rgba(106,247,209,0.10), rgba(16,19,20,0.6))' }}
-    />
-  ),
+  // flat placeholder (no glassy gradient)
+  loading: () => <div className="h-full w-full bg-[#0f1314]" />,
 });
 
 type Appearance = {
@@ -60,7 +56,7 @@ type Bot = {
   language?: string;
   model?: string;
   description?: string;
-  prompt?: string; // Step 3 raw
+  prompt?: string;
   createdAt?: string;
   updatedAt?: string;
   appearance?: Appearance;
@@ -73,13 +69,11 @@ const fmtDate = (iso?: string) => (iso ? new Date(iso).toLocaleDateString() : ''
 
 // newest → oldest by updatedAt (fallback createdAt)
 const sortByNewest = (arr: Bot[]) =>
-  arr
-    .slice()
-    .sort(
-      (a, b) =>
-        Date.parse(b.updatedAt || b.createdAt || '0') -
-        Date.parse(a.updatedAt || a.createdAt || '0')
-    );
+  arr.slice().sort(
+    (a, b) =>
+      Date.parse(b.updatedAt || b.createdAt || '0') -
+      Date.parse(a.updatedAt || a.createdAt || '0')
+  );
 
 function loadBots(): Bot[] {
   if (typeof window === 'undefined') return [];
@@ -97,7 +91,7 @@ function loadBots(): Bot[] {
         language: s(b?.language),
         model: s(b?.model, 'gpt-4o-mini'),
         description: s(b?.description),
-        prompt: s(b?.prompt), // keep EXACT Step 3
+        prompt: s(b?.prompt),
         createdAt: b?.createdAt ?? nowISO(),
         updatedAt: b?.updatedAt ?? b?.createdAt ?? nowISO(),
         appearance: b?.appearance ?? undefined,
@@ -127,11 +121,11 @@ type PromptSectionKey =
 type SplitSection = {
   key: PromptSectionKey;
   title: string;
-  text: string; // exact slice from Step 3
+  text: string;
 };
 
 const DISPLAY_TITLES: Record<PromptSectionKey, string> = {
-  'DESCRIPTION': 'DESCRIPTION',
+  DESCRIPTION: 'DESCRIPTION',
   'AI DESCRIPTION': 'AI Description',
   'RULES AND GUIDELINES': 'RULES AND GUIDELINES',
   'AI RULES': 'AI Rules',
@@ -140,7 +134,7 @@ const DISPLAY_TITLES: Record<PromptSectionKey, string> = {
 };
 
 const ICONS: Record<PromptSectionKey, JSX.Element> = {
-  'DESCRIPTION': <FileText className="w-4 h-4 text-[#6af7d1]" />,
+  DESCRIPTION: <FileText className="w-4 h-4 text-[#6af7d1]" />,
   'AI DESCRIPTION': <FileText className="w-4 h-4 text-[#6af7d1]" />,
   'RULES AND GUIDELINES': <Settings className="w-4 h-4 text-[#6af7d1]" />,
   'AI RULES': <ListChecks className="w-4 h-4 text-[#6af7d1]" />,
@@ -177,7 +171,7 @@ function splitStep3IntoSections(step3Raw?: string): SplitSection[] | null {
     out.push({
       key: h.label,
       title: DISPLAY_TITLES[h.label] || h.label,
-      text: step3Raw.slice(h.end, nextStart), // exact slice (no sanitizing)
+      text: step3Raw.slice(h.end, nextStart),
     });
   }
   return out;
@@ -197,6 +191,7 @@ export default function BuilderDashboard() {
   const [bots, setBots] = useState<Bot[]>([]);
   const [customizingId, setCustomizingId] = useState<string | null>(null);
   const [viewId, setViewId] = useState<string | null>(null);
+  const [loadingBots, setLoadingBots] = useState(true); // lightweight loading phase
 
   useEffect(() => {
     try {
@@ -225,7 +220,11 @@ export default function BuilderDashboard() {
   }, []);
 
   useEffect(() => {
-    setBots(loadBots());
+    // simulate/allow paint before reading localStorage for smoother feel
+    requestAnimationFrame(() => {
+      setBots(loadBots());
+      setLoadingBots(false);
+    });
     const onStorage = (e: StorageEvent) => {
       if (STORAGE_KEYS.includes(e.key || '')) setBots(loadBots());
     };
@@ -271,7 +270,7 @@ export default function BuilderDashboard() {
           <h1 className="text-2xl md:text-3xl font-semibold">Builds</h1>
           <button
             onClick={() => router.push('/builder?step=1')}
-            className="px-4 py-2 rounded-[10px] bg-[#00ffc2] text-black font-semibold shadow-[0_0_10px_rgba(106,247,209,0.28)] hover:brightness-110 transition"
+            className="px-4 py-2 rounded-[10px] bg-[#00ffc2] text-white font-semibold shadow-[0_0_10px_rgba(106,247,209,0.28)] hover:brightness-110 transition"
           >
             Create a Build
           </button>
@@ -282,31 +281,43 @@ export default function BuilderDashboard() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search projects and builds…"
-            className="w-full rounded-[10px] bg-[#101314] text-white/95 border border-[#13312b] px-5 py-4 text-[15px] outline-none focus:border-[#00ffc2]"
+            className="w-full rounded-[10px] bg-[#101314] text-white/95 border border-[#13312b] px-5 py-4 text-[15px] outline-none focus:border-[#00ffc2] transition-colors"
           />
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-7">
-          <CreateCard onClick={() => router.push('/builder?step=1')} />
+        {/* skeleton while reading localStorage */}
+        {loadingBots ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-7">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div
+                key={i}
+                className="h-[380px] rounded-[16px] bg-[#111416] border border-white/10 animate-pulse"
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-7">
+            <CreateCard onClick={() => router.push('/builder?step=1')} />
 
-          {filtered.map((bot) => (
-            <BuildCard
-              key={bot.id}
-              bot={bot}
-              accent={bot.appearance?.accent || accentFor(bot.id)}
-              onOpen={() => setViewId(bot.id)}
-              onDelete={() => {
-                const next = bots.filter((b) => b.id !== bot.id);
-                const sorted = sortByNewest(next);
-                setBots(sorted);
-                saveBots(sorted);
-              }}
-              onCustomize={() => setCustomizingId(bot.id)}
-            />
-          ))}
-        </div>
+            {filtered.map((bot) => (
+              <BuildCard
+                key={bot.id}
+                bot={bot}
+                accent={bot.appearance?.accent || accentFor(bot.id)}
+                onOpen={() => setViewId(bot.id)}
+                onDelete={() => {
+                  const next = bots.filter((b) => b.id !== bot.id);
+                  const sorted = sortByNewest(next);
+                  setBots(sorted);
+                  saveBots(sorted);
+                }}
+                onCustomize={() => setCustomizingId(bot.id)}
+              />
+            ))}
+          </div>
+        )}
 
-        {filtered.length === 0 && (
+        {!loadingBots && filtered.length === 0 && (
           <div className="mt-12 text-center text-white/60">
             No builds found. Click <span className="text-[#00ffc2]">Create a Build</span> to get started.
           </div>
@@ -356,8 +367,6 @@ export default function BuilderDashboard() {
 }
 
 /* --------------------------- Prompt Overlay --------------------------- */
-/* Style matches your ChatWidget: rounded-[30px], dashed green border,
-   white headers. Content uses ONLY Step 1 (header line) + Step 3 (body). */
 
 function buildRawStep1PlusStep3(bot: Bot): string {
   const head = [bot.name, bot.industry, bot.language].filter(Boolean).join('\n');
@@ -386,28 +395,26 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
     URL.revokeObjectURL(url);
   };
 
-  // ChatWidget-like frame
+  // simple, flat frame
   const FRAME_STYLE: React.CSSProperties = {
-    background: 'rgba(13,15,17,0.95)',
-    border: '2px dashed rgba(106,247,209,0.3)',
-    boxShadow: '0 0 40px rgba(0,0,0,0.7)',
-    borderRadius: 30,
+    background: '#0f1314',
+    border: '1px solid rgba(255,255,255,0.12)',
+    borderRadius: 20,
   };
-  const HEADER_BORDER = { borderBottom: '1px solid rgba(255,255,255,0.4)' };
   const CARD_STYLE: React.CSSProperties = {
     background: '#101314',
-    border: '1px solid rgba(255,255,255,0.3)',
-    borderRadius: 20,
+    border: '1px solid rgba(255,255,255,0.12)',
+    borderRadius: 14,
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: 'rgba(0,0,0,0.5)' }}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-black/50">
       <div className="relative w-full max-w-[1280px] max-h-[88vh] flex flex-col" style={FRAME_STYLE}>
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 rounded-t-[30px]" style={HEADER_BORDER}>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
           <div className="min-w-0">
             <h2 className="text-white text-xl font-semibold truncate">Prompt</h2>
-            <div className="text-white/90 text-xs md:text-sm truncate">
+            <div className="text-white/80 text-xs md:text-sm truncate">
               {[bot.name, bot.industry, bot.language].filter(Boolean).join(' · ') || '—'}
             </div>
           </div>
@@ -415,8 +422,7 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
           <div className="flex items-center gap-2">
             <button
               onClick={copyAll}
-              className="inline-flex items-center gap-2 rounded-[14px] px-3 py-2 text-xs border"
-              style={{ background: '#0d0f11', borderColor: 'rgba(255,255,255,0.3)', color: 'white' }}
+              className="inline-flex items-center gap-2 rounded-md px-3 py-2 text-xs border border-white/20 bg-[#0d0f11] text-white hover:bg-white/5"
               title="Copy"
             >
               <Copy className="w-3.5 h-3.5" />
@@ -424,8 +430,7 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
             </button>
             <button
               onClick={downloadTxt}
-              className="inline-flex items-center gap-2 rounded-[14px] px-3 py-2 text-xs border"
-              style={{ background: '#0d0f11', borderColor: 'rgba(255,255,255,0.3)', color: 'white' }}
+              className="inline-flex items-center gap-2 rounded-md px-3 py-2 text-xs border border-white/20 bg-[#0d0f11] text-white hover:bg-white/5"
               title="Download"
             >
               <DownloadIcon className="w-3.5 h-3.5" />
@@ -471,12 +476,11 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 rounded-b-[30px]" style={{ borderTop: '1px solid rgba(255,255,255,0.3)', background: '#101314' }}>
+        <div className="px-6 py-4 border-t border-white/10 bg-[#0f1314] rounded-b-[20px]">
           <div className="flex justify-end">
             <button
               onClick={onClose}
-              className="px-5 py-2 rounded-[14px] font-semibold"
-              style={{ background: 'rgba(0,120,90,1)', color: 'white' }}
+              className="px-5 py-2 rounded-md font-semibold bg-[#0b8a6a] text-white hover:brightness-110"
             >
               Close
             </button>
@@ -490,47 +494,12 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
 /* --------------------------------- Cards --------------------------------- */
 
 function CreateCard({ onClick }: { onClick: () => void }) {
-  const [hover, setHover] = useState(false);
   return (
     <button
       onClick={onClick}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      className="group relative h-[380px] rounded-[16px] p-7 flex flex-col items-center justify-center transition-all active:scale-[0.995]"
-      style={{
-        background: 'rgba(13,15,17,0.92)',
-        border: '2px solid rgba(106,247,209,0.32)',
-        boxShadow: 'inset 0 0 22px rgba(0,0,0,0.28), 0 0 20px rgba(106,247,209,0.06)',
-      }}
+      className="group relative h-[380px] rounded-[16px] p-7 flex flex-col items-center justify-center transition-transform active:scale-[0.995] bg-[#111416] border border-white/10 hover:border-white/20"
     >
-      <div
-        className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
-        style={{ background: 'radial-gradient(circle, rgba(106,247,209,0.12) 0%, transparent 70%)', filter: 'blur(38px)' }}
-      />
-      {hover && (
-        <div
-          className="pointer-events-none absolute inset-0 rounded-[16px] animate-pulse"
-          style={{ boxShadow: '0 0 34px 10px rgba(106,247,209,0.25), inset 0 0 14px rgba(106,247,209,0.20)' }}
-        />
-      )}
-      <div
-        className="pointer-events-none absolute top-0 bottom-0 w-[55%] rounded-[16px]"
-        style={{
-          left: hover ? '120%' : '-120%',
-          background:
-            'linear-gradient(110deg, transparent 0%, rgba(255,255,255,0.08) 40%, rgba(255,255,255,0.18) 50%, rgba(255,255,255,0.08) 60%, transparent 100%)',
-          filter: 'blur(1px)',
-          transition: 'left 420ms cubic-bezier(.22,.61,.36,1)',
-        }}
-      />
-      <div
-        className="w-20 h-20 rounded-full flex items-center justify-center mb-5"
-        style={{
-          background: 'rgba(0,0,0,0.18)',
-          border: '2px dashed rgba(106,247,209,0.35)',
-          boxShadow: 'inset 0 0 18px rgba(0,0,0,0.45), inset 0 0 6px rgba(106,247,209,0.06)',
-        }}
-      >
+      <div className="w-20 h-20 rounded-full flex items-center justify-center mb-5 border-2 border-dashed border-[#6af7d1] bg-black/20">
         <Plus className="w-10 h-10" style={{ color: '#6af7d1', opacity: 0.9 }} />
       </div>
       <div className="text-[20px]">Create a Build</div>
@@ -560,17 +529,8 @@ function BuildCard({
   const ap = bot.appearance || {};
   return (
     <div
-      className="relative h-[380px] rounded-[16px] p-0 flex flex-col justify-between group transition-all"
-      style={{
-        background: 'rgba(13,15,17,0.92)',
-        border: '2px solid rgba(106,247,209,0.32)',
-        boxShadow: 'inset 0 0 22px rgba(0,0,0,0.28), 0 0 20px rgba(106,247,209,0.06)',
-      }}
+      className="relative h-[380px] rounded-[16px] p-0 flex flex-col justify-between transition-all bg-[#111416] border border-white/10 hover:border-white/20"
     >
-      <div
-        className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
-        style={{ background: 'radial-gradient(circle, rgba(106,247,209,0.10) 0%, transparent 70%)', filter: 'blur(38px)' }}
-      />
       <div
         className="h-48 border-b border-white/10 overflow-hidden relative"
         onMouseEnter={() => setHover(true)}
@@ -578,8 +538,7 @@ function BuildCard({
       >
         <button
           onClick={onCustomize}
-          className="absolute right-3 top-3 z-10 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-[10px] text-xs border transition"
-          style={{ background: 'rgba(16,19,20,0.88)', border: '2px solid rgba(106,247,209,0.4)', boxShadow: '0 0 14px rgba(106,247,209,0.12)' }}
+          className="absolute right-3 top-3 z-10 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-[10px] text-xs border border-white/20 bg-[#101314] hover:bg-white/5"
         >
           <SlidersHorizontal className="w-3.5 h-3.5" />
           Customize
@@ -605,19 +564,20 @@ function BuildCard({
       </div>
       <div className="p-6 flex-1 flex flex-col justify-between">
         <div className="flex items-center gap-3">
-          <div
-            className="w-11 h-11 rounded-[10px] flex items-center justify-center"
-            style={{ background: 'rgba(0,0,0,0.15)', border: '2px solid rgba(106,247,209,0.32)' }}
-          >
+          <div className="w-11 h-11 rounded-[10px] flex items-center justify-center border-2 border-[#6af7d1]/35 bg-black/20">
             <BotIcon className="w-5 h-5" style={{ color: accent }} />
           </div>
-        <div className="min-w-0">
+          <div className="min-w-0">
             <div className="font-semibold truncate">{bot.name}</div>
             <div className="text-[12px] text-white/60 truncate">
               {(bot.industry || '—') + (bot.language ? ` · ${bot.language}` : '')}
             </div>
           </div>
-          <button onClick={onDelete} className="ml-auto p-1.5 rounded-md hover:bg-[#ff4d4d14] transition" title="Delete build">
+          <button
+            onClick={onDelete}
+            className="ml-auto p-1.5 rounded-md hover:bg-[#ff4d4d14] transition"
+            title="Delete build"
+          >
             <Trash2 className="w-4 h-4 text-white/70 hover:text-[#ff7a7a]" />
           </button>
         </div>
@@ -625,8 +585,7 @@ function BuildCard({
           <div className="text-[12px] text-white/50">Updated {fmtDate(bot.updatedAt || bot.createdAt)}</div>
           <button
             onClick={onOpen}
-            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-[10px] text-sm border transition hover:translate-y-[-1px]"
-            style={{ background: 'rgba(16,19,20,0.88)', border: '2px solid rgba(106,247,209,0.4)', boxShadow: '0 0 14px rgba(106,247,209,0.12)' }}
+            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-[10px] text-sm border border-white/20 bg-[#101314] hover:bg-white/5 transition hover:translate-y-[-1px]"
           >
             Open <ArrowRight className="w-4 h-4" />
           </button>
