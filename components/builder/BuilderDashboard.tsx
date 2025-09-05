@@ -27,13 +27,13 @@ import Step4Overview from './Step4Overview';
 import { s } from '@/utils/safe';
 import { supabase } from '@/lib/supabase-client';
 
-// Lazy & safe overlay (renders nothing while loading)
+// Lazy, client-only overlay
 const OnboardingOverlay = dynamic(() => import('../ui/OnboardingOverlay'), {
   ssr: false,
   loading: () => null,
 });
 
-// Lazy 3D bot (client-only)
+// 3D bot preview (client only)
 const Bot3D = dynamic(() => import('./Bot3D.client'), {
   ssr: false,
   loading: () => (
@@ -44,7 +44,7 @@ const Bot3D = dynamic(() => import('./Bot3D.client'), {
   ),
 });
 
-/* ------------------------- tiny error boundary ------------------------- */
+// ---------- tiny error boundary: prevents a flaky child from crashing ----------
 class ErrorBoundary extends React.Component<{ fallback?: React.ReactNode }, { hasError: boolean }> {
   constructor(props: any) {
     super(props);
@@ -53,6 +53,7 @@ class ErrorBoundary extends React.Component<{ fallback?: React.ReactNode }, { ha
   static getDerivedStateFromError() {
     return { hasError: true };
   }
+  // eslint-disable-next-line @typescript-eslint/no-empty-function
   componentDidCatch() {}
   render() {
     if (this.state.hasError) return this.props.fallback ?? null;
@@ -60,7 +61,6 @@ class ErrorBoundary extends React.Component<{ fallback?: React.ReactNode }, { ha
   }
 }
 
-/* -------------------------------- types -------------------------------- */
 type Appearance = {
   accent?: string;
   shellColor?: string;
@@ -91,12 +91,10 @@ type Bot = {
   appearance?: Appearance;
 };
 
-/* --------------------------- local storage utils --------------------------- */
 const STORAGE_KEYS = ['chatbots', 'agents', 'builds'];
 const SAVE_KEY = 'chatbots';
 const nowISO = () => new Date().toISOString();
 const fmtDate = (iso?: string) => (iso ? new Date(iso).toLocaleDateString() : '');
-
 const sortByNewest = (arr: Bot[]) =>
   arr
     .slice()
@@ -122,7 +120,7 @@ function loadBots(): Bot[] {
         language: s(b?.language),
         model: s(b?.model, 'gpt-4o-mini'),
         description: s(b?.description),
-        prompt: s(b?.prompt), // keep EXACT Step 3
+        prompt: s(b?.prompt),
         createdAt: b?.createdAt ?? nowISO(),
         updatedAt: b?.updatedAt ?? b?.createdAt ?? nowISO(),
         appearance: b?.appearance ?? undefined,
@@ -161,7 +159,6 @@ const DISPLAY_TITLES: Record<PromptSectionKey, string> = {
   'RULES AND GUIDELINES': 'RULES AND GUIDELINES',
   'AI RULES': 'AI Rules',
   'QUESTION FLOW': 'QUESTION FLOW',
-  COMPANY: 'COMPANY FAQ',
   'COMPANY FAQ': 'COMPANY FAQ',
 };
 
@@ -174,9 +171,9 @@ const ICONS: Record<PromptSectionKey, JSX.Element> = {
   'COMPANY FAQ': <Landmark className="w-4 h-4 text-[#6af7d1]" />,
 };
 
-// tolerant heading match (** / ### / bullet / numbered)
+// tolerant heading match (**, ###, numbered, etc.)
 const HEADING_REGEX =
-  /^(?:\s*(?:[#>*-]|\d+\.)\s*)?(?:\*\*)?\s*(DESCRIPTION|AI\s*DESCRIPTION|RULES\s*(?:AND|&)\s*GUIDELINES|AI\s*RULES|QUESTION\s*FLOW|COMPANY\s*FAQ)\s*(?:\*\*)?\s*:?\s*$/gmi;
+  /^(?:\s*(?:[#>*-]|\d+\.)\s*)?(?:\*\*)?\s*(DESCRIPTION|AI\s*DESCRIPTION|RULES\s*(?:AND|&)\s*GUIDELINES|AI\s*RULES|QUESTION\s*FLOW|COMPANY\s*FAQ)\s*(?:\*\*)?\s*:?\s*$/gim;
 
 function splitStep3IntoSections(step3Raw?: string): SplitSection[] | null {
   if (!step3Raw) return null;
@@ -203,7 +200,7 @@ function splitStep3IntoSections(step3Raw?: string): SplitSection[] | null {
     out.push({
       key: h.label,
       title: DISPLAY_TITLES[h.label] || h.label,
-      text: step3Raw.slice(h.end, nextStart), // exact slice
+      text: step3Raw.slice(h.end, nextStart),
     });
   }
   return out;
@@ -211,21 +208,14 @@ function splitStep3IntoSections(step3Raw?: string): SplitSection[] | null {
 
 /* ----------------------------------- UI ----------------------------------- */
 
-const palette = ['#6af7d1', '#7cc3ff', '#b28bff', '#ffd68a', '#ff9db1'];
-const accentFor = (id: string) =>
-  palette[Math.abs([...id].reduce((h, c) => h + c.charCodeAt(0), 0)) % palette.length];
-
 export default function BuilderDashboard() {
   const router = useRouter();
 
-  // query params (router.asPath to keep shallow client routing)
-  const search = useMemo(
-    () => new URLSearchParams((router.asPath.split('?')[1] ?? '')),
-    [router.asPath]
-  );
+  // read query params (pages router)
+  const search = useMemo(() => new URLSearchParams((router.asPath.split('?')[1] ?? '')), [router.asPath]);
   const pathname = router.pathname;
 
-  /* ------------------------------- auth state ------------------------------ */
+  // ===== AUTH (Supabase only) =====
   const [userId, setUserId] = useState<string>('');
   useEffect(() => {
     let unsub: any;
@@ -236,8 +226,9 @@ export default function BuilderDashboard() {
     })();
     return () => unsub?.data?.subscription?.unsubscribe?.();
   }, []);
+  // ===== END AUTH =====
 
-  /* -------------------------- welcome overlay flags ------------------------- */
+  // welcome overlay after sign-up
   const mode = (search.get('mode') === 'signin' ? 'signin' : 'signup') as 'signup' | 'signin';
   const onboard = search.get('onboard') === '1';
   const forceOverlay = search.get('forceOverlay') === '1';
@@ -254,11 +245,13 @@ export default function BuilderDashboard() {
       localStorage.setItem(`user:${userId}:profile:completed`, '1');
     } catch {}
     const usp = new URLSearchParams(search.toString());
-    usp.delete('onboard'); usp.delete('mode'); usp.delete('forceOverlay');
+    usp.delete('onboard');
+    usp.delete('mode');
+    usp.delete('forceOverlay');
     router.replace(`${pathname}?${usp.toString()}`, undefined, { shallow: true });
   };
 
-  /* --------------------------------- steps --------------------------------- */
+  // steps
   const rawStep = search.get('step');
   const step = rawStep && ['1', '2', '3', '4'].includes(rawStep) ? rawStep : null;
 
@@ -320,7 +313,6 @@ export default function BuilderDashboard() {
     router.replace(`${pathname}?${usp.toString()}`, undefined, { shallow: true });
   };
 
-  /* ------------------------------ wizard route ----------------------------- */
   if (step) {
     return (
       <div className="min-h-screen w-full text-white font-movatif bg-[#0b0c10]">
@@ -334,7 +326,6 @@ export default function BuilderDashboard() {
     );
   }
 
-  /* ------------------------------- dashboard ------------------------------- */
   return (
     <div className="min-h-screen w-full text-white font-movatif bg-[#0b0c10]">
       <main className="flex-1 w-full px-4 sm:px-6 pt-10 pb-24">
@@ -502,12 +493,7 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
               <DownloadIcon className="w-3.5 h-3.5" />
               Download
             </button>
-            <button
-              onClick={onClose}
-              className="p-2 rounded-full hover:bg-white/10"
-              aria-label="Close"
-              title="Close"
-            >
+            <button onClick={onClose} className="p-2 rounded-full hover:bg-white/10" aria-label="Close" title="Close">
               <X className="w-5 h-5 text-white" />
             </button>
           </div>
@@ -542,10 +528,7 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
         </div>
 
         {/* Footer */}
-        <div
-          className="px-6 py-4 rounded-b-[30px]"
-          style={{ borderTop: '1px solid rgba(255,255,255,0.3)', background: '#101314' }}
-        >
+        <div className="px-6 py-4 rounded-b-[30px]" style={{ borderTop: '1px solid rgba(255,255,255,0.3)', background: '#101314' }}>
           <div className="flex justify-end">
             <button
               onClick={onClose}
@@ -564,22 +547,45 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
 /* --------------------------------- Cards --------------------------------- */
 
 function CreateCard({ onClick }: { onClick: () => void }) {
-  // Clean, solid card — no glassy sheen/glow
+  const [hover, setHover] = useState(false);
   return (
     <button
       onClick={onClick}
-      className="group relative h-[380px] rounded-[16px] p-7 flex flex-col items-center justify-center transition-transform active:scale-[0.995]"
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      className="group relative h-[380px] rounded-[16px] p-7 flex flex-col items-center justify-center transition-all active:scale-[0.995]"
       style={{
-        background: '#0f1214',
-        border: '1px solid rgba(255,255,255,0.06)',
-        boxShadow: '0 10px 30px rgba(0,0,0,0.25)',
+        background: 'rgba(13,15,17,0.92)',
+        border: '2px solid rgba(106,247,209,0.32)',
+        boxShadow: 'inset 0 0 22px rgba(0,0,0,0.28), 0 0 20px rgba(106,247,209,0.06)',
       }}
     >
       <div
+        className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
+        style={{ background: 'radial-gradient(circle, rgba(106,247,209,0.12) 0%, transparent 70%)', filter: 'blur(38px)' }}
+      />
+      {hover && (
+        <div
+          className="pointer-events-none absolute inset-0 rounded-[16px] animate-pulse"
+          style={{ boxShadow: '0 0 34px 10px rgba(106,247,209,0.25), inset 0 0 14px rgba(106,247,209,0.20)' }}
+        />
+      )}
+      <div
+        className="pointer-events-none absolute top-0 bottom-0 w-[55%] rounded-[16px]"
+        style={{
+          left: hover ? '120%' : '-120%',
+          background:
+            'linear-gradient(110deg, transparent 0%, rgba(255,255,255,0.08) 40%, rgba(255,255,255,0.18) 50%, rgba(255,255,255,0.08) 60%, transparent 100%)',
+          filter: 'blur(1px)',
+          transition: 'left 420ms cubic-bezier(.22,.61,.36,1)',
+        }}
+      />
+      <div
         className="w-20 h-20 rounded-full flex items-center justify-center mb-5"
         style={{
-          background: '#0b0e10',
-          border: '1px dashed rgba(106,247,209,0.35)',
+          background: 'rgba(0,0,0,0.18)',
+          border: '2px dashed rgba(106,247,209,0.35)',
+          boxShadow: 'inset 0 0 18px rgba(0,0,0,0.45), inset 0 0 6px rgba(106,247,209,0.06)',
         }}
       >
         <Plus className="w-10 h-10" style={{ color: '#6af7d1', opacity: 0.9 }} />
@@ -589,6 +595,10 @@ function CreateCard({ onClick }: { onClick: () => void }) {
     </button>
   );
 }
+
+const palette = ['#6af7d1', '#7cc3ff', '#b28bff', '#ffd68a', '#ff9db1'];
+const accentFor = (id: string) =>
+  palette[Math.abs([...id].reduce((h, c) => h + c.charCodeAt(0), 0)) % palette.length];
 
 function BuildCard({
   bot,
@@ -609,11 +619,15 @@ function BuildCard({
     <div
       className="relative h-[380px] rounded-[16px] p-0 flex flex-col justify-between group transition-all"
       style={{
-        background: '#0f1214',
-        border: '1px solid rgba(255,255,255,0.06)',
-        boxShadow: '0 10px 30px rgba(0,0,0,0.25)',
+        background: 'rgba(13,15,17,0.92)',
+        border: '2px solid rgba(106,247,209,0.32)',
+        boxShadow: 'inset 0 0 22px rgba(0,0,0,0.28), 0 0 20px rgba(106,247,209,0.06)',
       }}
     >
+      <div
+        className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
+        style={{ background: 'radial-gradient(circle, rgba(106,247,209,0.10) 0%, transparent 70%)', filter: 'blur(38px)' }}
+      />
       <div
         className="h-48 border-b border-white/10 overflow-hidden relative"
         onMouseEnter={() => setHover(true)}
@@ -622,11 +636,7 @@ function BuildCard({
         <button
           onClick={onCustomize}
           className="absolute right-3 top-3 z-10 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-[10px] text-xs border transition"
-          style={{
-            background: 'rgba(16,19,20,0.88)',
-            border: '2px solid rgba(106,247,209,0.4)',
-            boxShadow: '0 0 14px rgba(106,247,209,0.12)',
-          }}
+          style={{ background: 'rgba(16,19,20,0.88)', border: '2px solid rgba(106,247,209,0.4)', boxShadow: '0 0 14px rgba(106,247,209,0.12)' }}
         >
           <SlidersHorizontal className="w-3.5 h-3.5" />
           Customize
@@ -676,11 +686,7 @@ function BuildCard({
               {(bot.industry || '—') + (bot.language ? ` · ${bot.language}` : '')}
             </div>
           </div>
-          <button
-            onClick={onDelete}
-            className="ml-auto p-1.5 rounded-md hover:bg-[#ff4d4d14] transition"
-            title="Delete build"
-          >
+          <button onClick={onDelete} className="ml-auto p-1.5 rounded-md hover:bg-[#ff4d4d14] transition" title="Delete build">
             <Trash2 className="w-4 h-4 text-white/70 hover:text-[#ff7a7a]" />
           </button>
         </div>
@@ -689,11 +695,7 @@ function BuildCard({
           <button
             onClick={onOpen}
             className="inline-flex items-center gap-2 px-3.5 py-2 rounded-[10px] text-sm border transition hover:translate-y-[-1px]"
-            style={{
-              background: 'rgba(16,19,20,0.88)',
-              border: '2px solid rgba(106,247,209,0.4)',
-              boxShadow: '0 0 14px rgba(106,247,209,0.12)',
-            }}
+            style={{ background: 'rgba(16,19,20,0.88)', border: '2px solid rgba(106,247,209,0.4)', boxShadow: '0 0 14px rgba(106,247,209,0.12)' }}
           >
             Open <ArrowRight className="w-4 h-4" />
           </button>
