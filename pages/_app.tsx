@@ -7,6 +7,7 @@ import { supabase } from '@/lib/supabase-client';
 import Sidebar from '@/components/ui/Sidebar';
 
 const BG = '#0b0c10';
+const SECTION_BG = '#101314'; // the “section” color you use inside pages
 const PUBLIC_ROUTES = ['/', '/auth', '/auth/callback'];
 
 export default function App({ Component, pageProps }: AppProps) {
@@ -69,12 +70,20 @@ export default function App({ Component, pageProps }: AppProps) {
   if (!authed) return null;
 
   /**
-   * Grid layout:
-   * - col 1: sidebar with responsive fixed width (prevents the thin icon-only gutter on desktop)
-   * - col 2: main content (fills remaining width), padded so content never touches the sidebar (“magnet” feel)
+   * Layout note:
+   * - Full-bleed SECTION_BG layer sits behind the whole grid (so it extends under the sidebar).
+   * - Main content remains centered and never touches the sidebar via the inner max-width container.
+   * - No logic changed.
    */
   return (
-    <div className="min-h-screen w-full text-white" style={{ background: BG }}>
+    <div className="relative min-h-screen w-full text-white" style={{ background: BG }}>
+      {/* full-bleed “section” background under everything (including the sidebar) */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 -z-10"
+        style={{ background: SECTION_BG }}
+      />
+
       <div
         className="
           grid
@@ -93,9 +102,12 @@ export default function App({ Component, pageProps }: AppProps) {
           </div>
         </aside>
 
-        {/* Main content (never overlaps / never touches) */}
+        {/* Main content */}
         <main className="min-w-0 px-4 sm:px-6 lg:px-8 py-8">
-          <Component {...pageProps} />
+          {/* center the inner content so cards don’t touch the sidebar */}
+          <div style={{ maxWidth: 1280, margin: '0 auto' }}>
+            <Component {...pageProps} />
+          </div>
         </main>
       </div>
     </div>
