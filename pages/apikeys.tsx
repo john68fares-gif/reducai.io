@@ -22,19 +22,18 @@ function saveKeys(list: StoredKey[]) {
 
 /* ------------------------------ Shared styling ------------------------------ */
 const FRAME: React.CSSProperties = {
-  background: 'rgba(13,15,17,0.95)',
-  border: '2px dashed rgba(106,247,209,0.30)',
-  boxShadow: '0 0 40px rgba(0,0,0,0.7)',
+  background: 'var(--panel)',
+  border: '1px solid var(--border)',
+  boxShadow: 'var(--shadow-card)',
   borderRadius: 30,
 };
 const CARD: React.CSSProperties = {
-  background: '#101314',
-  border: '1px solid rgba(255,255,255,0.30)',
+  background: 'var(--card)',
+  border: '1px solid var(--border)',
   borderRadius: 20,
-  boxShadow: 'inset 0 0 22px rgba(0,0,0,0.28), 0 0 20px rgba(106,247,209,0.06)',
+  boxShadow: 'var(--shadow-soft)',
 };
-const BTN_GREEN = '#59d9b3';
-const BTN_GREEN_HOVER = '#54cfa9';
+const BTN_GREEN = 'var(--brand)';
 
 /* ------------------------------ InlineSelect ------------------------------ */
 type Opt = { value: string; label: string; sub?: string };
@@ -80,20 +79,20 @@ function InlineSelect({
         ref={btnRef}
         onClick={() => setOpen((v) => !v)}
         className="w-full flex items-center justify-between gap-3 px-4 h-[44px] rounded-[14px] text-sm outline-none transition"
-        style={{ background: 'rgba(0,0,0,0.30)', border: '1px solid rgba(255,255,255,0.20)', color: 'white' }}
+        style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }}
       >
         <span className="flex items-center gap-2 truncate">
-          <KeyRound className="w-4 h-4 text-[#6af7d1]" />
+          <KeyRound className="w-4 h-4" style={{ color: 'var(--brand)' }} />
           {sel ? (
             <span className="truncate">
               {sel.label}
-              {sel.sub ? <span className="text-white/60 ml-2">{sel.sub}</span> : null}
+              {sel.sub ? <span style={{ color: 'var(--text-muted)' }} className="ml-2">{sel.sub}</span> : null}
             </span>
           ) : (
-            <span className="text-white/60">{placeholder}</span>
+            <span style={{ color: 'var(--text-muted)' }}>{placeholder}</span>
           )}
         </span>
-        <ChevronDown className="w-4 h-4 opacity-80" />
+        <ChevronDown className="w-4 h-4 opacity-80" style={{ color: 'var(--text-muted)' }} />
       </button>
 
       {open && rect && (
@@ -103,7 +102,7 @@ function InlineSelect({
           style={{ ...CARD, left: rect.left, top: rect.top, width: rect.width }}
         >
           {options.length === 0 && (
-            <div className="px-3 py-2 text-sm text-white/80">No items.</div>
+            <div className="px-3 py-2 text-sm" style={{ color: 'var(--text-muted)' }}>No items.</div>
           )}
           {options.map((o) => (
             <button
@@ -112,11 +111,12 @@ function InlineSelect({
                 onChange(o.value);
                 setOpen(false);
               }}
-              className="w-full text-left px-3 py-2 rounded-[10px] flex items-center gap-2 text-white hover:bg-white/5"
+              className="w-full text-left px-3 py-2 rounded-[10px] flex items-center gap-2 hover:opacity-80"
+              style={{ color: 'var(--text)' }}
             >
-              <KeyRound className="w-4 h-4 text-[#6af7d1]" />
+              <KeyRound className="w-4 h-4" style={{ color: 'var(--brand)' }} />
               <span className="flex-1 truncate">{o.label}</span>
-              {o.sub && <span className="text-xs text-white/60">{o.sub}</span>}
+              {o.sub && <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{o.sub}</span>}
             </button>
           ))}
         </div>
@@ -143,68 +143,72 @@ function AddKeyModal({
     <div className="fixed inset-0 z-[9998] flex items-center justify-center px-4" style={{ background: 'rgba(0,0,0,0.5)' }}>
       <div className="w-full max-w-[560px]" style={FRAME}>
         {/* header */}
-        <div className="flex items-center justify-between px-6 py-4 rounded-t-[30px]" style={{ borderBottom: '1px solid rgba(255,255,255,0.4)' }}>
+        <div className="flex items-center justify-between px-6 py-4 rounded-t-[30px]" style={{ borderBottom: '1px solid var(--border)' }}>
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(0,255,194,0.12)', border: '1px solid rgba(0,255,194,0.22)' }}>
-              <KeyIcon className="w-5 h-5 text-[#6af7d1]" />
+            <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background: 'var(--brand-weak)' }}>
+              <KeyIcon className="w-5 h-5" style={{ color: 'var(--brand)' }} />
             </div>
             <div className="min-w-0">
-              <div className="text-white text-xl font-semibold">Add New Project API Key</div>
-              <div className="text-white/80 text-xs md:text-sm">
+              <div className="text-xl font-semibold" style={{ color: 'var(--text)' }}>Add New Project API Key</div>
+              <div className="text-xs md:text-sm" style={{ color: 'var(--text-muted)' }}>
                 Provide a project name and your OpenAI API key. (Stored locally in your browser.)
               </div>
             </div>
           </div>
-          <button onClick={onClose} className="p-2 rounded-full hover:bg-white/10"><X className="w-5 h-5 text-white" /></button>
+          <button onClick={onClose} className="p-2 rounded-full hover:opacity-70">
+            <X className="w-5 h-5" style={{ color: 'var(--text)' }} />
+          </button>
         </div>
 
         {/* body */}
         <div className="p-6 space-y-4">
           <div>
-            <label className="block text-xs text-white/70 mb-1">Project Name <span className="text-[#6af7d1]">*</span></label>
+            <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>
+              Project Name <span style={{ color: 'var(--brand)' }}>*</span>
+            </label>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g., My Main Project"
-              className="w-full rounded-[14px] border border-white/20 bg-black/30 px-3 h-[44px] text-sm outline-none focus:border-[#6af7d1] text-white"
+              className="w-full rounded-[14px] border px-3 h-[44px] text-sm outline-none"
+              style={{ background: 'var(--card)', borderColor: 'var(--border)', color: 'var(--text)' }}
             />
           </div>
           <div>
-            <label className="block text-xs text-white/70 mb-1">OpenAI API Key <span className="text-[#6af7d1]">*</span></label>
+            <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>
+              OpenAI API Key <span style={{ color: 'var(--brand)' }}>*</span>
+            </label>
             <input
               type="password"
               value={val}
               onChange={(e) => setVal(e.target.value)}
               placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-              className="w-full rounded-[14px] border border-white/20 bg-black/30 px-3 h-[44px] text-sm outline-none focus:border-[#6af7d1] text-white"
+              className="w-full rounded-[14px] border px-3 h-[44px] text-sm outline-none"
+              style={{ background: 'var(--card)', borderColor: 'var(--border)', color: 'var(--text)' }}
             />
-            <div className="mt-2 text-xs text-white/70">
+            <div className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
               Saved locally under <code>apiKeys.v1</code>.
             </div>
           </div>
         </div>
 
         {/* footer */}
-        <div className="px-6 pb-6">
-          <div className="flex gap-3">
-            <button
-              onClick={onClose}
-              className="w-full h-[44px] rounded-[18px] font-semibold text-white"
-              style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.18)' }}
-            >
-              Cancel
-            </button>
-            <button
-              onClick={() => { if (name && val) onSave(name, val); }}
-              className="w-full h-[44px] rounded-[18px] font-semibold text-white flex items-center justify-center gap-2"
-              style={{ background: BTN_GREEN }}
-              onMouseEnter={(e) => ((e.currentTarget).style.background = BTN_GREEN_HOVER)}
-              onMouseLeave={(e) => ((e.currentTarget).style.background = BTN_GREEN)}
-            >
-              <KeyRound className="w-4 h-4" />
-              Save API Key
-            </button>
-          </div>
+        <div className="px-6 pb-6 flex gap-3">
+          <button
+            onClick={onClose}
+            className="w-full h-[44px] rounded-[18px] font-semibold"
+            style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => { if (name && val) onSave(name, val); }}
+            className="w-full h-[44px] rounded-[18px] font-semibold flex items-center justify-center gap-2"
+            style={{ background: BTN_GREEN, color: '#fff' }}
+          >
+            <KeyRound className="w-4 h-4" />
+            Save API Key
+          </button>
         </div>
       </div>
     </div>
@@ -217,15 +221,15 @@ function Toast({ text, onClose }: { text: string; onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-[9997] pointer-events-none flex items-center justify-center">
       <div
-        className="pointer-events-auto flex items-center gap-4 px-6 py-4 rounded-2xl text-white"
-        style={{ ...CARD, border: '1px solid rgba(0,255,194,0.35)', background: 'rgba(0,255,194,0.10)' }}
+        className="pointer-events-auto flex items-center gap-4 px-6 py-4 rounded-2xl"
+        style={{ ...CARD, border: '1px solid var(--brand)', background: 'var(--panel)', color: 'var(--text)' }}
       >
-        <div className="w-10 h-10 rounded-full bg-[#0e3e35] flex items-center justify-center">
-          <CheckCircle2 className="w-5 h-5 text-[#6af7d1]" />
+        <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ background: 'var(--brand-weak)' }}>
+          <CheckCircle2 className="w-5 h-5" style={{ color: 'var(--brand)' }} />
         </div>
         <div className="text-sm">{text}</div>
-        <button onClick={onClose} className="ml-2 p-1 rounded hover:bg-white/10">
-          <X className="w-4 h-4 text-white/80" />
+        <button onClick={onClose} className="ml-2 p-1 rounded hover:opacity-70">
+          <X className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
         </button>
       </div>
     </div>
@@ -294,27 +298,24 @@ function ApiKeysScreen() {
   }
 
   return (
-    <div className="px-6 py-10">
+    <div className="px-6 py-10" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
       <div className="mx-auto w-full max-w-[880px]" style={FRAME}>
         <div className="flex items-start justify-between px-6 py-6">
           <div>
-            <h1 className="text-2xl font-semibold text-white">API Keys</h1>
-            <p className="text-white/70 text-sm mt-1">
+            <h1 className="text-2xl font-semibold" style={{ color: 'var(--text)' }}>API Keys</h1>
+            <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
               Manage your OpenAI API keys for different projects
             </p>
           </div>
-          <div
-            className="w-10 h-10 rounded-2xl flex items-center justify-center"
-            style={{ background: 'rgba(0,255,194,0.12)', border: '1px solid rgba(0,255,194,0.22)' }}
-          >
-            <KeyRound className="w-5 h-5 text-[#6af7d1]" />
+          <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background: 'var(--brand-weak)' }}>
+            <KeyRound className="w-5 h-5" style={{ color: 'var(--brand)' }} />
           </div>
         </div>
 
         <div className="px-6 pb-6 space-y-4">
           {/* Select */}
           <div style={CARD} className="p-4">
-            <label className="block text-xs text-white/70 mb-2">Select API Key</label>
+            <label className="block text-xs mb-2" style={{ color: 'var(--text-muted)' }}>Select API Key</label>
             <InlineSelect
               id="apikey-select"
               value={selected}
@@ -328,25 +329,25 @@ function ApiKeysScreen() {
           <div style={CARD} className="p-4">
             {selectedKey ? (
               <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-[#0e3e35] flex items-center justify-center">
-                  <CheckCircle2 className="w-4 h-4 text-[#6af7d1]" />
+                <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: 'var(--brand-weak)' }}>
+                  <CheckCircle2 className="w-4 h-4" style={{ color: 'var(--brand)' }} />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="text-white font-medium">{selectedKey.name}</div>
-                  <div className="text-xs text-white/70">
+                  <div className="font-medium" style={{ color: 'var(--text)' }}>{selectedKey.name}</div>
+                  <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
                     Key ending in: {(selectedKey.key || '').slice(-4).toUpperCase()}
                   </div>
                 </div>
                 <button
                   onClick={() => removeKey(selectedKey.id)}
-                  className="p-2 rounded-lg hover:bg-red-500/15"
+                  className="p-2 rounded-lg hover:opacity-80"
                   aria-label="Delete"
                 >
                   <Trash2 className="w-4 h-4 text-red-400" />
                 </button>
               </div>
             ) : (
-              <div className="text-white/80">No API Keys Found</div>
+              <div style={{ color: 'var(--text-muted)' }}>No API Keys Found</div>
             )}
           </div>
 
@@ -354,8 +355,8 @@ function ApiKeysScreen() {
           <div className="flex items-center gap-4">
             <button
               onClick={() => setShowAdd(true)}
-              className="inline-flex items-center gap-2 px-4 h-[44px] rounded-[14px] text-white font-semibold"
-              style={{ background: 'rgba(0,0,0,0.30)', border: '1px solid rgba(255,255,255,0.20)' }}
+              className="inline-flex items-center gap-2 px-4 h-[44px] rounded-[14px] font-semibold"
+              style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }}
             >
               <Plus className="w-4 h-4" />
               Add New API Key
@@ -363,10 +364,8 @@ function ApiKeysScreen() {
 
             <button
               onClick={testKey}
-              className="flex-1 h-[44px] rounded-[18px] font-semibold text-white flex items-center justify-center gap-2"
-              style={{ background: BTN_GREEN }}
-              onMouseEnter={(e) => ((e.currentTarget).style.background = BTN_GREEN_HOVER)}
-              onMouseLeave={(e) => ((e.currentTarget).style.background = BTN_GREEN)}
+              className="flex-1 h-[44px] rounded-[18px] font-semibold flex items-center justify-center gap-2"
+              style={{ background: BTN_GREEN, color: '#fff' }}
             >
               <Zap className="w-4 h-4" />
               Test API Key
