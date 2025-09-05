@@ -9,10 +9,6 @@ export type Scoped = {
   ensureOwnerGuard(): Promise<void>;
 };
 
-/**
- * Namespaces localStorage keys per-user and ensures the previous user’s data
- * is not shown after account switches.
- */
 export async function scopedStorage(): Promise<Scoped> {
   const { data: { user } } = await supabase.auth.getUser();
   const uid = user?.id || 'anon';
@@ -35,13 +31,13 @@ export async function scopedStorage(): Promise<Scoped> {
     try { localStorage.removeItem(await keyFor(key)); } catch {}
   }
 
-  // Guard: if account changes, wipe non-namespaced leftovers and set new owner
+  // When the logged-in user changes, clear legacy global keys so their data
+  // doesn't bleed between accounts on the same device.
   async function ensureOwnerGuard() {
     try {
       const ownerKey = 'workspace:owner';
       const prev = localStorage.getItem(ownerKey);
       if (prev && prev !== uid) {
-        // clear all non-namespaced legacy keys you used before
         ['chatbots','agents','builds','builder:step1','builder:step2','builder:step3','builder:draft','builder:cleanup','builder:step2Numbers']
           .forEach(k => localStorage.removeItem(k));
       }
@@ -52,7 +48,7 @@ export async function scopedStorage(): Promise<Scoped> {
   return { getJSON, setJSON, remove, keyFor, ensureOwnerGuard };
 }
 
-/** One-time migration from old global keys → namespaced keys */
+/** One-time migration from legacy global keys → current user namespace */
 export async function migrateLegacyKeysToUser() {
   const { data: { user } } = await supabase.auth.getUser();
   const uid = user?.id || 'anon';
@@ -66,7 +62,7 @@ export async function migrateLegacyKeysToUser() {
         localStorage.setItem(`${prefix}${k}`, raw);
       }
     }
-    // optional: clear legacy after migrating
+    // Optional: uncomment to purge old globals after first run
     // LEGACY.forEach(k => localStorage.removeItem(k));
   } catch {}
 }
