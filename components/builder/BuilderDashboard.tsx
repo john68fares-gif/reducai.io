@@ -1,8 +1,8 @@
 // components/builder/BuilderDashboard.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { useRouter, usePathname, useSearchParams } from 'next/navigation';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/router';
 import dynamic from 'next/dynamic';
 import {
   Plus,
@@ -25,7 +25,15 @@ import Step2ModelSettings from './Step2ModelSettings';
 import Step3PromptEditor from './Step3PromptEditor';
 import Step4Overview from './Step4Overview';
 import { s } from '@/utils/safe';
+import { supabase } from '@/lib/supabase-client';
 
+// Lazy, client-only overlay
+const OnboardingOverlay = dynamic(() => import('../ui/OnboardingOverlay'), {
+  ssr: false,
+  loading: () => null,
+});
+
+// 3D bot preview (client only)
 const Bot3D = dynamic(() => import('./Bot3D.client'), {
   ssr: false,
   loading: () => (
@@ -36,11 +44,22 @@ const Bot3D = dynamic(() => import('./Bot3D.client'), {
   ),
 });
 
-/* ------------------------------------------------------------------ */
-/* Size tokens — keep cards the same on desktop + iPad                 */
-/* ------------------------------------------------------------------ */
-const CARD_H = 'h-[360px]';      // overall card height (Create + Build cards)
-const COVER_H = 'h-[200px]';     // top visual region height on every card
+// ---------- tiny error boundary: prevents a flaky child from crashing ----------
+class ErrorBoundary extends React.Component<{ fallback?: React.ReactNode }, { hasError: boolean }> {
+  constructor(props: any) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  // eslint-disable-next-line @typescript-eslint/no-empty-function
+  componentDidCatch() {}
+  render() {
+    if (this.state.hasError) return this.props.fallback ?? null;
+    return this.props.children as any;
+  }
+}
 
 type Appearance = {
   accent?: string;
@@ -66,7 +85,7 @@ type Bot = {
   language?: string;
   model?: string;
   description?: string;
-  prompt?: string;
+  prompt?: string; // Step 3 raw
   createdAt?: string;
   updatedAt?: string;
   appearance?: Appearance;
@@ -76,7 +95,6 @@ const STORAGE_KEYS = ['chatbots', 'agents', 'builds'];
 const SAVE_KEY = 'chatbots';
 const nowISO = () => new Date().toISOString();
 const fmtDate = (iso?: string) => (iso ? new Date(iso).toLocaleDateString() : '');
-
 const sortByNewest = (arr: Bot[]) =>
   arr
     .slice()
@@ -136,7 +154,7 @@ type SplitSection = {
 };
 
 const DISPLAY_TITLES: Record<PromptSectionKey, string> = {
-  'DESCRIPTION': 'DESCRIPTION',
+  DESCRIPTION: 'DESCRIPTION',
   'AI DESCRIPTION': 'AI Description',
   'RULES AND GUIDELINES': 'RULES AND GUIDELINES',
   'AI RULES': 'AI Rules',
@@ -145,7 +163,7 @@ const DISPLAY_TITLES: Record<PromptSectionKey, string> = {
 };
 
 const ICONS: Record<PromptSectionKey, JSX.Element> = {
-  'DESCRIPTION': <FileText className="w-4 h-4 text-[#6af7d1]" />,
+  DESCRIPTION: <FileText className="w-4 h-4 text-[#6af7d1]" />,
   'AI DESCRIPTION': <FileText className="w-4 h-4 text-[#6af7d1]" />,
   'RULES AND GUIDELINES': <Settings className="w-4 h-4 text-[#6af7d1]" />,
   'AI RULES': <ListChecks className="w-4 h-4 text-[#6af7d1]" />,
@@ -153,8 +171,9 @@ const ICONS: Record<PromptSectionKey, JSX.Element> = {
   'COMPANY FAQ': <Landmark className="w-4 h-4 text-[#6af7d1]" />,
 };
 
+// tolerant heading match (**, ###, numbered, etc.)
 const HEADING_REGEX =
-  /^(?:\s*(?:[#>*-]|\d+\.)\s*)?(?:\*\*)?\s*(DESCRIPTION|AI\s*DESCRIPTION|RULES\s*(?:AND|&)\s*GUIDELINES|AI\s*RULES|QUESTION\s*FLOW|COMPANY\s*FAQ)\s*(?:\*\*)?\s*:?\s*$/gmi;
+  /^(?:\s*(?:[#>*-]|\d+\.)\s*)?(?:\*\*)?\s*(DESCRIPTION|AI\s*DESCRIPTION|RULES\s*(?:AND|&)\s*GUIDELINES|AI\s*RULES|QUESTION\s*FLOW|COMPANY\s*FAQ)\s*(?:\*\*)?\s*:?\s*$/gim;
 
 function splitStep3IntoSections(step3Raw?: string): SplitSection[] | null {
   if (!step3Raw) return null;
@@ -191,10 +210,49 @@ function splitStep3IntoSections(step3Raw?: string): SplitSection[] | null {
 
 export default function BuilderDashboard() {
   const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
 
-  const rawStep = searchParams.get('step');
+  // read query params (pages router)
+  const search = useMemo(() => new URLSearchParams((router.asPath.split('?')[1] ?? '')), [router.asPath]);
+  const pathname = router.pathname;
+
+  // ===== AUTH (Supabase only) =====
+  const [userId, setUserId] = useState<string>('');
+  useEffect(() => {
+    let unsub: any;
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      setUserId(user?.id || '');
+      unsub = supabase.auth.onAuthStateChange((_e, session) => setUserId(session?.user?.id || ''));
+    })();
+    return () => unsub?.data?.subscription?.unsubscribe?.();
+  }, []);
+  // ===== END AUTH =====
+
+  // welcome overlay after sign-up
+  const mode = (search.get('mode') === 'signin' ? 'signin' : 'signup') as 'signup' | 'signin';
+  const onboard = search.get('onboard') === '1';
+  const forceOverlay = search.get('forceOverlay') === '1';
+  const [welcomeOpen, setWelcomeOpen] = useState(false);
+
+  useEffect(() => {
+    if (!userId) return;
+    if (forceOverlay || (onboard && mode === 'signup')) setWelcomeOpen(true);
+  }, [userId, forceOverlay, onboard, mode]);
+
+  const closeWelcome = () => {
+    setWelcomeOpen(false);
+    try {
+      localStorage.setItem(`user:${userId}:profile:completed`, '1');
+    } catch {}
+    const usp = new URLSearchParams(search.toString());
+    usp.delete('onboard');
+    usp.delete('mode');
+    usp.delete('forceOverlay');
+    router.replace(`${pathname}?${usp.toString()}`, undefined, { shallow: true });
+  };
+
+  // steps
+  const rawStep = search.get('step');
   const step = rawStep && ['1', '2', '3', '4'].includes(rawStep) ? rawStep : null;
 
   const [query, setQuery] = useState('');
@@ -249,10 +307,10 @@ export default function BuilderDashboard() {
   const viewedBot = useMemo(() => bots.find((b) => b.id === viewId), [bots, viewId]);
 
   const setStep = (next: string | null) => {
-    const usp = new URLSearchParams(Array.from(searchParams.entries()));
+    const usp = new URLSearchParams(search.toString());
     if (next) usp.set('step', next);
     else usp.delete('step');
-    router.replace(`${pathname}?${usp.toString()}`, { scroll: false });
+    router.replace(`${pathname}?${usp.toString()}`, undefined, { shallow: true });
   };
 
   if (step) {
@@ -355,6 +413,9 @@ export default function BuilderDashboard() {
       )}
 
       {viewedBot && <PromptOverlay bot={viewedBot} onClose={() => setViewId(null)} />}
+
+      {/* Welcome overlay over the dashboard (sign-up only) */}
+      <OnboardingOverlay open={welcomeOpen} mode={mode} userId={userId} onDone={closeWelcome} />
     </div>
   );
 }
@@ -404,6 +465,7 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: 'rgba(0,0,0,0.5)' }}>
       <div className="relative w-full max-w-[1280px] max-h-[88vh] flex flex-col" style={FRAME_STYLE}>
+        {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 rounded-t-[30px]" style={HEADER_BORDER}>
           <div className="min-w-0">
             <h2 className="text-white text-xl font-semibold truncate">Prompt</h2>
@@ -431,17 +493,13 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
               <DownloadIcon className="w-3.5 h-3.5" />
               Download
             </button>
-            <button
-              onClick={onClose}
-              className="p-2 rounded-full hover:bg-white/10"
-              aria-label="Close"
-              title="Close"
-            >
+            <button onClick={onClose} className="p-2 rounded-full hover:bg-white/10" aria-label="Close" title="Close">
               <X className="w-5 h-5 text-white" />
             </button>
           </div>
         </div>
 
+        {/* Body */}
         <div className="flex-1 overflow-y-auto p-6">
           {!bot.prompt ? (
             <div className="p-5 text-white/80" style={CARD_STYLE}>
@@ -469,6 +527,7 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
           )}
         </div>
 
+        {/* Footer */}
         <div className="px-6 py-4 rounded-b-[30px]" style={{ borderTop: '1px solid rgba(255,255,255,0.3)', background: '#101314' }}>
           <div className="flex justify-end">
             <button
@@ -488,10 +547,13 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
 /* --------------------------------- Cards --------------------------------- */
 
 function CreateCard({ onClick }: { onClick: () => void }) {
+  const [hover, setHover] = useState(false);
   return (
     <button
       onClick={onClick}
-      className={`group relative ${CARD_H} rounded-[16px] p-7 flex flex-col items-center justify-between transition-all active:scale-[0.995]`}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      className="group relative h-[380px] rounded-[16px] p-7 flex flex-col items-center justify-center transition-all active:scale-[0.995]"
       style={{
         background: 'rgba(13,15,17,0.92)',
         border: '2px solid rgba(106,247,209,0.32)',
@@ -499,25 +561,37 @@ function CreateCard({ onClick }: { onClick: () => void }) {
       }}
     >
       <div
-        className={`w-full ${COVER_H} rounded-[14px] grid place-items-center mb-4`}
+        className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
+        style={{ background: 'radial-gradient(circle, rgba(106,247,209,0.12) 0%, transparent 70%)', filter: 'blur(38px)' }}
+      />
+      {hover && (
+        <div
+          className="pointer-events-none absolute inset-0 rounded-[16px] animate-pulse"
+          style={{ boxShadow: '0 0 34px 10px rgba(106,247,209,0.25), inset 0 0 14px rgba(106,247,209,0.20)' }}
+        />
+      )}
+      <div
+        className="pointer-events-none absolute top-0 bottom-0 w-[55%] rounded-[16px]"
         style={{
-          background: 'radial-gradient(120% 120% at 50% 0%, rgba(106,247,209,0.10) 0%, transparent 70%)',
-          border: '1px dashed rgba(106,247,209,0.28)',
+          left: hover ? '120%' : '-120%',
+          background:
+            'linear-gradient(110deg, transparent 0%, rgba(255,255,255,0.08) 40%, rgba(255,255,255,0.18) 50%, rgba(255,255,255,0.08) 60%, transparent 100%)',
+          filter: 'blur(1px)',
+          transition: 'left 420ms cubic-bezier(.22,.61,.36,1)',
+        }}
+      />
+      <div
+        className="w-20 h-20 rounded-full flex items-center justify-center mb-5"
+        style={{
+          background: 'rgba(0,0,0,0.18)',
+          border: '2px dashed rgba(106,247,209,0.35)',
+          boxShadow: 'inset 0 0 18px rgba(0,0,0,0.45), inset 0 0 6px rgba(106,247,209,0.06)',
         }}
       >
-        <div className="w-20 h-20 rounded-full grid place-items-center"
-          style={{
-            background: 'rgba(0,0,0,0.18)',
-            border: '2px dashed rgba(106,247,209,0.35)',
-            boxShadow: 'inset 0 0 18px rgba(0,0,0,0.45), inset 0 0 6px rgba(106,247,209,0.06)',
-          }}
-        >
-          <Plus className="w-10 h-10" style={{ color: '#6af7d1', opacity: 0.9 }} />
-        </div>
+        <Plus className="w-10 h-10" style={{ color: '#6af7d1', opacity: 0.9 }} />
       </div>
-
-      <div className="text-[18px]">Create a Build</div>
-      <div className="text-[13px] text-white/65">Start building your AI assistant</div>
+      <div className="text-[20px]">Create a Build</div>
+      <div className="text-[13px] text-white/65 mt-2">Start building your AI assistant</div>
     </button>
   );
 }
@@ -543,7 +617,7 @@ function BuildCard({
   const ap = bot.appearance || {};
   return (
     <div
-      className={`relative ${CARD_H} rounded-[16px] p-0 flex flex-col justify-between group transition-all`}
+      className="relative h-[380px] rounded-[16px] p-0 flex flex-col justify-between group transition-all"
       style={{
         background: 'rgba(13,15,17,0.92)',
         border: '2px solid rgba(106,247,209,0.32)',
@@ -551,7 +625,11 @@ function BuildCard({
       }}
     >
       <div
-        className={`${COVER_H} border-b border-white/10 overflow-hidden relative`}
+        className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
+        style={{ background: 'radial-gradient(circle, rgba(106,247,209,0.10) 0%, transparent 70%)', filter: 'blur(38px)' }}
+      />
+      <div
+        className="h-48 border-b border-white/10 overflow-hidden relative"
         onMouseEnter={() => setHover(true)}
         onMouseLeave={() => setHover(false)}
       >
@@ -563,24 +641,35 @@ function BuildCard({
           <SlidersHorizontal className="w-3.5 h-3.5" />
           Customize
         </button>
-        {/* @ts-ignore */}
-        <Bot3D
-          className="h-full"
-          accent={ap.accent || accent}
-          shellColor={ap.shellColor}
-          bodyColor={ap.bodyColor}
-          trimColor={ap.trimColor}
-          faceColor={ap.faceColor}
-          variant={ap.variant || 'silver'}
-          eyes={ap.eyes || 'ovals'}
-          head={ap.head || 'rounded'}
-          torso={ap.torso || 'box'}
-          arms={ap.arms ?? 'capsule'}
-          legs={ap.legs ?? 'capsule'}
-          antenna={ap.hasOwnProperty('antenna') ? Boolean((ap as any).antenna) : true}
-          withBody={ap.hasOwnProperty('withBody') ? Boolean(ap.withBody) : true}
-          idle={ap.hasOwnProperty('idle') ? Boolean(ap.idle) : hover}
-        />
+
+        {/* Guarded 3D preview so it can’t crash the page */}
+        <ErrorBoundary
+          fallback={
+            <div
+              className="h-full w-full"
+              style={{ background: 'linear-gradient(180deg, rgba(106,247,209,0.10), rgba(16,19,20,0.6))' }}
+            />
+          }
+        >
+          {/* @ts-ignore */}
+          <Bot3D
+            className="h-full"
+            accent={ap.accent || accent}
+            shellColor={ap.shellColor}
+            bodyColor={ap.bodyColor}
+            trimColor={ap.trimColor}
+            faceColor={ap.faceColor}
+            variant={ap.variant || 'silver'}
+            eyes={ap.eyes || 'ovals'}
+            head={ap.head || 'rounded'}
+            torso={ap.torso || 'box'}
+            arms={ap.arms ?? 'capsule'}
+            legs={ap.legs ?? 'capsule'}
+            antenna={ap.hasOwnProperty('antenna') ? Boolean((ap as any).antenna) : true}
+            withBody={ap.hasOwnProperty('withBody') ? Boolean(ap.withBody) : true}
+            idle={ap.hasOwnProperty('idle') ? Boolean(ap.idle) : hover}
+          />
+        </ErrorBoundary>
       </div>
 
       <div className="p-6 flex-1 flex flex-col justify-between">
