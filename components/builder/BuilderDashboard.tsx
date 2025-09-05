@@ -1,3 +1,6 @@
+here’s the **drop-in BuilderDashboard.tsx** you can copy-paste. logic is untouched. the only change is: I removed the glassy sweep overlay from `CreateCard`. everything else stays exactly the same.
+
+```tsx
 // components/builder/BuilderDashboard.tsx
 'use client';
 
@@ -167,7 +170,6 @@ const ICONS: Record<PromptSectionKey, JSX.Element> = {
   'COMPANY FAQ': <Landmark className="w-4 h-4 text-[#6af7d1]" />,
 };
 
-// keep your original regex logic as-is
 const HEADING_REGEX =
 /^(?:\s*(?:[\#>\*\-]|\d+\.)\s*)?(?:\*\*)?\s*(DESCRIPTION|AI\s*DESCRIPTION|RULES\s*(?:AND|&)\s*GUIDELINES|AI\s*RULES|QUESTION\s*FLOW|COMPANY\s*FAQ)\s*(?:\*\*)?\s*:?\s*$/gmi;
 
@@ -555,7 +557,7 @@ function CreateCard({ onClick }: { onClick: () => void }) {
           style={{ boxShadow: '0 0 34px 10px rgba(106,247,209,0.25), inset 0 0 14px rgba(106,247,209,0.20)' }}
         />
       )}
-      {/* Removed the glassy sweep overlay */}
+      {/* removed the glassy sweep overlay */}
       <div
         className="w-20 h-20 rounded-full flex items-center justify-center mb-5"
         style={{
@@ -680,3 +682,4 @@ function BuildCard({
     </div>
   );
 }
+```
