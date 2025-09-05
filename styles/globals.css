@@ -31,7 +31,7 @@
   --shadow-soft: 0 10px 30px rgba(0,0,0,0.08);
   --shadow-card: 0 1px 0 rgba(0,0,0,0.04), 0 8px 22px rgba(0,0,0,0.06);
 
-  /* Sidebar (always dark when expanded) */
+  /* Sidebar */
   --sidebar-bg: #0f1214;
   --sidebar-border: rgba(255,255,255,0.06);
   --sidebar-text: #ffffff;
@@ -97,22 +97,10 @@ html, body {
 
 /* ---- Sidebar ---- */
 .sidebar {
+  background: var(--sidebar-bg);
   color: var(--sidebar-text);
   border-right: 1px solid var(--sidebar-border);
-  transition: width 0.3s ease, background 0.3s ease;
-  overflow: hidden;
 }
-
-/* Expanded: dark block */
-.sidebar.w-\[260px\] {
-  background: var(--sidebar-bg);
-}
-
-/* Collapsed: blend with page */
-.sidebar.w-\[72px\] {
-  background: var(--background);
-}
-
 .sidebar-muted {
   color: var(--sidebar-muted);
 }
