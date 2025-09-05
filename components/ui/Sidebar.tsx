@@ -21,6 +21,9 @@ import {
   ChevronRight,
 } from "lucide-react";
 
+// Prevent duplicate sidebars if _app renders twice on client
+let SIDEBAR_MOUNTED = false;
+
 // tiny class joiner
 function cn(...a: Array<string | false | null | undefined>) {
   return a.filter(Boolean).join(" ");
@@ -30,15 +33,10 @@ export default function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
 
-  // persist collapsed state
   useEffect(() => {
-    const saved = localStorage.getItem("sidebar-collapsed");
-    if (saved) setCollapsed(saved === "true");
+    if (SIDEBAR_MOUNTED) return;
+    SIDEBAR_MOUNTED = true;
   }, []);
-
-  useEffect(() => {
-    localStorage.setItem("sidebar-collapsed", String(collapsed));
-  }, [collapsed]);
 
   const navItems = [
     { href: "/build", label: "Build", icon: Home },
@@ -54,7 +52,7 @@ export default function Sidebar() {
     <div
       className={cn(
         "sidebar flex flex-col h-screen border-r transition-all duration-300",
-        collapsed ? "collapsed w-[72px]" : "expanded w-[260px]"
+        collapsed ? "w-[72px]" : "w-[260px]"
       )}
     >
       {/* Collapse toggle */}
