@@ -102,4 +102,45 @@ export default function Step2ModelSettings({ onNext, onBack }: Props) {
             onChange={(e) => setTemperature(parseFloat(e.target.value))}
             className="w-full accent-[#00ffc2]"
           />
-          <div className="text-sm
+          <div className="text-sm text-gray-400 mt-1">Creativity: {temperature}</div>
+        </div>
+
+        <div>
+          <label className="block text-sm text-gray-300 mb-1">API Key</label>
+          <select
+            className="w-full bg-[#0b0c10] border border-[#00ffc2] rounded-lg px-3 py-2 text-white focus:outline-none"
+            value={apiKeyId}
+            onChange={(e) => setApiKeyId(e.target.value)}
+          >
+            <option value="">Select a saved key</option>
+            {keys.map((k) => (
+              <option key={k.id} value={k.id}>
+                {k.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex justify-between mt-6">
+          <button
+            onClick={onBack}
+            className="flex items-center gap-2 px-4 py-2 bg-[#0b0c10] border border-gray-600 rounded-lg text-gray-300 hover:bg-gray-800 transition"
+          >
+            <ArrowLeft size={16} /> Back
+          </button>
+          <button
+            disabled={!valid}
+            onClick={() => onNext({ name, industry, language, model, temperature, apiKeyId })}
+            className={`flex items-center gap-2 px-6 py-2 rounded-lg transition ${
+              valid
+                ? 'bg-[#00ffc2] text-black hover:bg-[#00e6b0]'
+                : 'bg-gray-700 text-gray-400 cursor-not-allowed'
+            }`}
+          >
+            Next <ArrowRight size={16} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
