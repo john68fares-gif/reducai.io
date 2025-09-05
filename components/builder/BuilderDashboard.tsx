@@ -682,4 +682,3 @@ function BuildCard({
     </div>
   );
 }
-```
