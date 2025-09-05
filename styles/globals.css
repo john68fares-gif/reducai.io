@@ -10,81 +10,90 @@
   font-style: normal;
 }
 
-/* Base reset: DO NOT hard-code background/text here anymore */
-html, body {
-  font-family: 'Movatif Bold', sans-serif;
-  min-height: 100%;
-}
-
-/* === THEME TOKENS ========================================================= */
+/* ---- Theme tokens ---- */
 :root {
-  --bg: #0b0c10;
-  --bg-elev-1: #101314;
-  --bg-elev-2: #0d0f11;
-  --text: #ffffff;
-  --text-dim: rgba(255,255,255,0.75);
-  --border: rgba(255,255,255,0.08);
+  /* Brand */
   --brand: #00ffc2;
-  --brand-weak: rgba(106,247,209,0.28);
-}
+  --brand-weak: rgba(0, 255, 194, 0.28);
 
-:root[data-theme="dark"] {
-  --bg: #0b0c10;
-  --bg-elev-1: #101314;
-  --bg-elev-2: #0d0f11;
-  --text: #ffffff;
-  --text-dim: rgba(255,255,255,0.75);
-  --border: rgba(255,255,255,0.08);
-  --brand: #00ffc2;
-  --brand-weak: rgba(106,247,209,0.28);
-}
-
-:root[data-theme="light"] {
-  --bg: #f6f7f9;
-  --bg-elev-1: #ffffff;
-  --bg-elev-2: #f2f3f5;
+  /* Typography */
   --text: #0b0c10;
-  --text-dim: rgba(0,0,0,0.65);
-  --border: rgba(0,0,0,0.08);
-  --brand: #00c79a;
-  --brand-weak: rgba(0,199,154,0.25);
+  --text-muted: rgba(11, 12, 16, 0.65);
+
+  /* Surfaces */
+  --bg: #f5f7f8;
+  --panel: #ffffff;
+  --card: #ffffff;
+  --border: rgba(11, 12, 16, 0.10);
+  --ring: rgba(0, 0, 0, 0.06);
+
+  /* Shadows */
+  --shadow-soft: 0 10px 30px rgba(0,0,0,0.08);
+  --shadow-card: 0 1px 0 rgba(0,0,0,0.04), 0 8px 22px rgba(0,0,0,0.06);
+
+  /* Sidebar (keeping it dark in both themes for brand contrast) */
+  --sidebar-bg: #0f1214;
+  --sidebar-border: rgba(255,255,255,0.06);
+  --sidebar-text: #ffffff;
+  --sidebar-muted: rgba(255,255,255,0.6);
 }
 
-/* Apply tokens to page */
-html, body, #__next {
+[data-theme="dark"] {
+  --text: #ffffff;
+  --text-muted: rgba(255,255,255,0.65);
+  --bg: #0b0c10;
+  --panel: #0f1214;
+  --card: #101314;
+  --border: rgba(255,255,255,0.06);
+  --ring: rgba(0,255,194,0.10);
+
+  --shadow-soft: 0 10px 30px rgba(0,0,0,0.45);
+  --shadow-card: inset 0 0 22px rgba(0,0,0,0.28), 0 0 20px rgba(0,255,194,0.06);
+
+  --sidebar-bg: #0f1214;
+  --sidebar-border: rgba(255,255,255,0.06);
+  --sidebar-text: #ffffff;
+  --sidebar-muted: rgba(255,255,255,0.6);
+}
+
+/* Base */
+html, body {
+  font-family: 'Movatif Bold', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol';
   background: var(--bg);
   color: var(--text);
 }
 
-/* Smoothen the switch */
-* {
-  transition: background-color 180ms ease, color 180ms ease, border-color 180ms ease;
+/* Reusable surface helpers */
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-soft);
+  border-radius: 16px;
 }
 
-/* === OVERRIDES for your existing fixed dark colors ========================
-   These remap the most-used dark hex utilities to light equivalents when
-   data-theme="light" is set, so you don't have to edit every component.
---------------------------------------------------------------------------- */
-:root[data-theme="light"] .bg-\[\#0b0c10\] { background-color: var(--bg) !important; }
-:root[data-theme="light"] .bg-\[\#101314\] { background-color: var(--bg-elev-1) !important; }
-:root[data-theme="light"] .bg-\[\#0d0f11\] { background-color: var(--bg-elev-2) !important; }
-:root[data-theme="light"] .text-white      { color: var(--text) !important; }
-:root[data-theme="light"] .text-white\/95  { color: color-mix(in srgb, var(--text) 95%, transparent) !important; }
-:root[data-theme="light"] .text-white\/90  { color: color-mix(in srgb, var(--text) 90%, transparent) !important; }
-:root[data-theme="light"] .text-white\/80  { color: color-mix(in srgb, var(--text) 80%, transparent) !important; }
-:root[data-theme="light"] .text-white\/70  { color: color-mix(in srgb, var(--text) 70%, transparent) !important; }
-:root[data-theme="light"] .text-white\/60  { color: color-mix(in srgb, var(--text) 60%, transparent) !important; }
-:root[data-theme="light"] .border-\[\#13312b\] { border-color: var(--border) !important; }
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-card);
+  border-radius: 16px;
+}
 
-/* Buttons that use brand */
+/* Buttons & inputs */
 .btn-brand {
   background: var(--brand);
-  color: #000; /* readable for both themes; override as needed */
+  color: #fff; /* requested: white text */
 }
 
-/* Card helpers that many of your components mimic */
-.card {
-  background: var(--bg-elev-1);
+.input {
+  background: var(--card);
+  color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 12px;
 }
+
+/* Sidebar shell */
+.sidebar {
+  background: var(--sidebar-bg);
+  color: var(--sidebar-text);
+  border-right: 1px solid var(--sidebar-border);
+}
+.sidebar-muted { color: var(--sidebar-muted); }
