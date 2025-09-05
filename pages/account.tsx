@@ -16,6 +16,8 @@ import {
   KeyRound,
   CheckCircle2,
   AlertCircle,
+  Crown,
+  Zap,
 } from 'lucide-react';
 
 const UI = {
@@ -28,11 +30,7 @@ type ThemeMode = 'dark' | 'light';
 
 function fmtDate(iso?: string) {
   if (!iso) return '—';
-  try {
-    return new Date(iso).toLocaleString();
-  } catch {
-    return iso;
-  }
+  try { return new Date(iso).toLocaleString(); } catch { return iso; }
 }
 
 export default function AccountPage() {
@@ -42,6 +40,8 @@ export default function AccountPage() {
   const [userName, setUserName] = useState<string | null>(null);
   const [userCreated, setUserCreated] = useState<string | null>(null);
   const [userUpdated, setUserUpdated] = useState<string | null>(null);
+  const [plan, setPlan] = useState<'Free' | 'Pro' | 'Team' | 'Enterprise'>('Free');
+  const [usage, setUsage] = useState<{requests:number; limit:number}>({ requests: 0, limit: 10000 });
 
   // theme
   const [theme, setTheme] = useState<ThemeMode>('dark');
@@ -52,7 +52,7 @@ export default function AccountPage() {
   const [resetLoading, setResetLoading] = useState(false);
   const [resetMsg, setResetMsg] = useState<'idle' | 'sent' | 'err'>('idle');
 
-  // fetch user
+  // fetch user + meta
   useEffect(() => {
     let unsub: any;
     (async () => {
@@ -61,6 +61,14 @@ export default function AccountPage() {
       setUserName((user?.user_metadata as any)?.full_name ?? user?.user_metadata?.name ?? null);
       setUserCreated(user?.created_at ?? null);
       setUserUpdated(user?.updated_at ?? null);
+
+      const p = (user?.user_metadata as any)?.plan_tier as string | undefined;
+      if (p && ['Free','Pro','Team','Enterprise'].includes(p)) setPlan(p as any);
+
+      // optional usage demo (replace with real fetch)
+      const u = (user?.user_metadata as any)?.requests_used as number | undefined;
+      setUsage({ requests: typeof u === 'number' ? u : 0, limit: 10000 });
+
       setLoading(false);
 
       unsub = supabase.auth.onAuthStateChange((_e, session) => {
@@ -69,13 +77,14 @@ export default function AccountPage() {
         setUserName((u?.user_metadata as any)?.full_name ?? u?.user_metadata?.name ?? null);
         setUserCreated(u?.created_at ?? null);
         setUserUpdated(u?.updated_at ?? null);
-        setLoading(false);
+        const pt = (u?.user_metadata as any)?.plan_tier as string | undefined;
+        if (pt && ['Free','Pro','Team','Enterprise'].includes(pt)) setPlan(pt as any);
       });
     })();
     return () => unsub?.data?.subscription?.unsubscribe?.();
   }, []);
 
-  // load theme from localStorage / DOM
+  // theme init
   useEffect(() => {
     try {
       const ls = (localStorage.getItem('ui:theme') as ThemeMode) || 'dark';
@@ -94,19 +103,11 @@ export default function AccountPage() {
     setSavingTheme(true);
     setSaveMsg('idle');
     try {
-      // apply + persist
       document.documentElement.dataset.theme = theme;
       localStorage.setItem('ui:theme', theme);
-      // optional: store in user metadata (safe no-op if not allowed)
-      const { error } = await supabase.auth.updateUser({
-        data: { ui_theme: theme },
-      });
-      if (error) {
-        // not fatal for UX; just show local success anyway
-        setSaveMsg('ok');
-      } else {
-        setSaveMsg('ok');
-      }
+      const { error } = await supabase.auth.updateUser({ data: { ui_theme: theme } });
+      if (error) throw error;
+      setSaveMsg('ok');
     } catch {
       setSaveMsg('err');
     } finally {
@@ -134,55 +135,39 @@ export default function AccountPage() {
   };
 
   const signOut = async () => {
-    try {
-      await supabase.auth.signOut();
-      // middleware will redirect unauthenticated users automatically
-    } catch {}
+    try { await supabase.auth.signOut(); } catch {}
   };
 
   return (
     <>
-      <Head>
-        <title>Account • Reduc AI</title>
-      </Head>
+      <Head><title>Account • Reduc AI</title></Head>
 
-      <div className="min-h-screen text-white" style={{ background: '#0b0c10' }}>
+      <div className="min-h-screen" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
         <main className="w-full max-w-[1640px] mx-auto px-6 2xl:px-12 pt-10 pb-28">
           <div className="flex items-center justify-between mb-8">
             <h1 className="text-2xl md:text-3xl font-semibold">Account</h1>
           </div>
 
-          {/* GRID */}
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-7">
-            {/* Profile card */}
+          {/* 2×2 on desktop, 1-col on iPad/phone */}
+          <div className="grid grid-cols-1 xl:grid-cols-12 gap-7">
+            {/* Profile */}
             <motion.section
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.22 }}
-              className="rounded-[16px] p-6"
+              className="rounded-[16px] p-6 xl:col-span-4"
               style={{ background: UI.cardBg, border: UI.border, boxShadow: UI.cardShadow }}
             >
               <div className="flex items-center gap-4 mb-5">
-                <div
-                  className="w-12 h-12 rounded-full flex items-center justify-center"
-                  style={{ background: 'rgba(0,255,194,0.22)' }}
-                >
+                <div className="w-12 h-12 rounded-full flex items-center justify-center" style={{ background: 'rgba(0,255,194,0.22)' }}>
                   <UserIcon className="w-6 h-6 text-black/80" />
                 </div>
                 <div className="min-w-0">
                   <div className="text-lg font-semibold truncate">
-                    {loading ? (
-                      <span className="inline-block h-5 w-40 bg-white/10 rounded animate-pulse" />
-                    ) : (
-                      displayName
-                    )}
+                    {loading ? <span className="inline-block h-5 w-40 bg-white/10 rounded animate-pulse" /> : displayName}
                   </div>
                   <div className="text-white/70 text-sm truncate">
-                    {loading ? (
-                      <span className="inline-block h-4 w-56 bg-white/5 rounded animate-pulse" />
-                    ) : (
-                      userEmail || '—'
-                    )}
+                    {loading ? <span className="inline-block h-4 w-56 bg-white/5 rounded animate-pulse" /> : (userEmail || '—')}
                   </div>
                 </div>
               </div>
@@ -217,12 +202,12 @@ export default function AccountPage() {
               </div>
             </motion.section>
 
-            {/* Theme card */}
+            {/* Appearance */}
             <motion.section
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.22, delay: 0.05 }}
-              className="rounded-[16px] p-6"
+              className="rounded-[16px] p-6 xl:col-span-4"
               style={{ background: UI.cardBg, border: UI.border, boxShadow: UI.cardShadow }}
             >
               <div className="flex items-center justify-between mb-5">
@@ -230,18 +215,8 @@ export default function AccountPage() {
               </div>
 
               <div className="grid grid-cols-2 gap-4">
-                <ThemeTile
-                  label="Dark"
-                  active={theme === 'dark'}
-                  icon={<Moon className="w-4 h-4" />}
-                  onClick={() => setTheme('dark')}
-                />
-                <ThemeTile
-                  label="Light"
-                  active={theme === 'light'}
-                  icon={<Sun className="w-4 h-4" />}
-                  onClick={() => setTheme('light')}
-                />
+                <ThemeTile label="Dark"  active={theme === 'dark'}  icon={<Moon className="w-4 h-4" />} onClick={() => setTheme('dark')} />
+                <ThemeTile label="Light" active={theme === 'light'} icon={<Sun  className="w-4 h-4" />} onClick={() => setTheme('light')} />
               </div>
 
               <div className="mt-6 flex items-center gap-3">
@@ -257,22 +232,12 @@ export default function AccountPage() {
 
                 <AnimatePresence mode="popLayout">
                   {saveMsg === 'ok' && (
-                    <motion.span
-                      initial={{ opacity: 0, y: 4 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -4 }}
-                      className="inline-flex items-center gap-1 text-[#57f0c6]"
-                    >
+                    <motion.span initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} className="inline-flex items-center gap-1 text-[#57f0c6]">
                       <CheckCircle2 className="w-4 h-4" /> Saved
                     </motion.span>
                   )}
                   {saveMsg === 'err' && (
-                    <motion.span
-                      initial={{ opacity: 0, y: 4 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -4 }}
-                      className="inline-flex items-center gap-1 text-[#ff9db1]"
-                    >
+                    <motion.span initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} className="inline-flex items-center gap-1 text-[#ff9db1]">
                       <AlertCircle className="w-4 h-4" /> Failed
                     </motion.span>
                   )}
@@ -280,21 +245,19 @@ export default function AccountPage() {
               </div>
             </motion.section>
 
-            {/* Security card */}
+            {/* Security */}
             <motion.section
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.22, delay: 0.1 }}
-              className="rounded-[16px] p-6"
+              className="rounded-[16px] p-6 xl:col-span-4"
               style={{ background: UI.cardBg, border: UI.border, boxShadow: UI.cardShadow }}
             >
               <div className="flex items-center justify-between mb-5">
                 <h2 className="text-lg font-semibold">Security</h2>
               </div>
 
-              <p className="text-white/80 text-sm leading-6">
-                To change your password, we’ll send a verification link to your email.
-              </p>
+              <p className="text-white/80 text-sm leading-6">To change your password, we’ll send a verification link to your email.</p>
 
               <div className="mt-5 flex items-center gap-3">
                 <button
@@ -309,26 +272,57 @@ export default function AccountPage() {
 
                 <AnimatePresence>
                   {resetMsg === 'sent' && (
-                    <motion.span
-                      initial={{ opacity: 0, y: 4 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -4 }}
-                      className="inline-flex items-center gap-1 text-[#57f0c6]"
-                    >
+                    <motion.span initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} className="inline-flex items-center gap-1 text-[#57f0c6]">
                       <CheckCircle2 className="w-4 h-4" /> Sent
                     </motion.span>
                   )}
                   {resetMsg === 'err' && (
-                    <motion.span
-                      initial={{ opacity: 0, y: 4 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -4 }}
-                      className="inline-flex items-center gap-1 text-[#ff9db1]"
-                    >
+                    <motion.span initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} className="inline-flex items-center gap-1 text-[#ff9db1]">
                       <AlertCircle className="w-4 h-4" /> Failed
                     </motion.span>
                   )}
                 </AnimatePresence>
+              </div>
+            </motion.section>
+
+            {/* Upgrade / Plan */}
+            <motion.section
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.22, delay: 0.12 }}
+              className="rounded-[16px] p-6 xl:col-span-12"
+              style={{ background: UI.cardBg, border: UI.border, boxShadow: UI.cardShadow }}
+            >
+              <div className="flex items-start justify-between gap-6 flex-col md:flex-row">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(0,255,194,0.15)' }}>
+                    <Crown className="w-5 h-5 text-[#00ffc2]" />
+                  </div>
+                  <div>
+                    <div className="text-lg font-semibold">Plan: {plan}</div>
+                    <div className="text-white/70 text-sm">
+                      Usage: {usage.requests.toLocaleString()} / {usage.limit.toLocaleString()} requests
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3">
+                  <a
+                    href="/billing"
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-[10px] border"
+                    style={{ borderColor: 'rgba(106,247,209,0.28)', background: 'rgba(0,255,194,0.06)' }}
+                  >
+                    <Zap className="w-4 h-4" />
+                    Upgrade
+                  </a>
+                  <a
+                    href="/pricing"
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-[10px] border"
+                    style={{ borderColor: 'rgba(255,255,255,0.12)', background: 'rgba(16,19,20,0.9)' }}
+                  >
+                    View pricing
+                  </a>
+                </div>
               </div>
             </motion.section>
           </div>
@@ -338,13 +332,8 @@ export default function AccountPage() {
   );
 }
 
-/* -------------------------- subcomponents -------------------------- */
-
 function ThemeTile({
-  label,
-  active,
-  onClick,
-  icon,
+  label, active, onClick, icon,
 }: {
   label: string;
   active: boolean;
