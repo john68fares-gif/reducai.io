@@ -1,6 +1,3 @@
-here’s the **drop-in BuilderDashboard.tsx** you can copy-paste. logic is untouched. the only change is: I removed the glassy sweep overlay from `CreateCard`. everything else stays exactly the same.
-
-```tsx
 // components/builder/BuilderDashboard.tsx
 'use client';
 
