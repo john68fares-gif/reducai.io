@@ -1,4 +1,3 @@
-// components/ui/Sidebar.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -6,183 +5,189 @@ import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import {
   Home, Hammer, Monitor, Rocket, Key,
-  Package, BookOpen, HelpCircle, Users,
-  ShoppingCart, Bot, User, Mic, Phone
+  Package, BookOpen, HelpCircle, ShoppingCart,
+  Bot, User, Mic, Phone, ChevronLeft, ChevronRight,
 } from 'lucide-react';
 
-// ---- Singleton guard (prevents duplicate sidebars) ----
-let SIDEBAR_MOUNTED = false;
-
-// tiny class joiner
 function cn(...a: Array<string | false | null | undefined>) {
   return a.filter(Boolean).join(' ');
 }
 
+const LS_COLLAPSED = 'ui:sidebarCollapsed';
+const W_EXPANDED = 260;
+const W_COLLAPSED = 72;
+
+let SIDEBAR_MOUNTED = false;
+
 export default function Sidebar() {
-  // 1) ALL hooks must be declared before any early return.
+  const pathname = usePathname();
   const [allowed, setAllowed] = useState<boolean>(() => !SIDEBAR_MOUNTED);
+
   useEffect(() => {
     if (SIDEBAR_MOUNTED) {
       setAllowed(false);
       return;
     }
     SIDEBAR_MOUNTED = true;
-    return () => {
-      SIDEBAR_MOUNTED = false;
-    };
+    return () => void (SIDEBAR_MOUNTED = false);
   }, []);
 
-  const pathname = usePathname();
+  const [collapsed, setCollapsed] = useState(false);
   const [lastBotId, setLastBotId] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(LS_COLLAPSED);
+      if (raw != null) setCollapsed(JSON.parse(raw));
+    } catch {}
+  }, []);
+  useEffect(() => {
+    try {
+      localStorage.setItem(LS_COLLAPSED, JSON.stringify(collapsed));
+    } catch {}
+  }, [collapsed]);
+
   useEffect(() => {
     try {
       const bots = JSON.parse(localStorage.getItem('chatbots') || '[]');
       const lastBot = bots[bots.length - 1];
-      if (lastBot) setLastBotId(lastBot.id);
+      if (lastBot?.id) setLastBotId(lastBot.id);
     } catch {}
   }, []);
 
-  // 2) Now it's safe to short-circuit the render.
+  const widthPx = collapsed ? W_COLLAPSED : W_EXPANDED;
+
+  useEffect(() => {
+    document.documentElement.style.setProperty('--sidebar-w', `${widthPx}px`);
+  }, [widthPx]);
+
   if (!allowed) return null;
 
   return (
+    // NOTE: removed `fixed left-0 top-0 h-screen`
     <aside
-      className="fixed left-0 top-0 h-screen w-[260px] z-50 text-white font-movatif"
+      className="relative z-10 text-white font-movatif transition-[width] duration-700 ease-in-out"
       style={{
-        background: 'linear-gradient(180deg, rgba(13,15,17,0.98) 0%, rgba(10,12,13,0.98) 100%)',
-        borderRight: '1px solid rgba(0,255,194,0.12)',
-        boxShadow: 'inset 0 0 22px rgba(0,0,0,0.35)',
+        width: widthPx,
+        background: 'linear-gradient(180deg, rgba(10,12,13,0.98), rgba(9,11,12,0.98))',
+        borderRight: '1px solid rgba(0,255,194,0.08)',
+        boxShadow: 'inset 0 0 18px rgba(0,0,0,0.35), 0 0 0 1px rgba(0,0,0,0.25)',
       }}
     >
-      {/* teal auras */}
-      <div
-        className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
-        style={{ background: 'radial-gradient(circle, rgba(106,247,209,0.10) 0%, transparent 70%)', filter: 'blur(38px)' }}
-      />
-      <div
-        className="pointer-events-none absolute -bottom-[28%] -right-[28%] w-[70%] h-[70%] rounded-full"
-        style={{ background: 'radial-gradient(circle, rgba(106,247,209,0.10) 0%, transparent 70%)', filter: 'blur(38px)' }}
-      />
-
       <div className="relative h-full flex flex-col">
         {/* Header */}
-        <div className="px-5 pt-6 pb-5 border-b border-white/10">
-          <div className="flex items-center gap-3">
-            <div
-              className="w-9 h-9 rounded-xl flex items-center justify-center"
-              style={{ background: '#00ffc2', boxShadow: '0 0 14px rgba(0,255,194,0.45)' }}
-            >
-              <Bot className="w-5 h-5 text-black" />
-            </div>
+        <div
+          className="border-b px-4 py-5 flex items-center gap-3"
+          style={{ borderColor: 'rgba(255,255,255,0.06)' }}
+        >
+          <div
+            className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+            style={{
+              background: '#00ffc2',
+              boxShadow: '0 0 10px rgba(0,255,194,0.35)',
+            }}
+          >
+            <Bot className="w-5 h-5 text-black" />
+          </div>
+          <AnimatedText collapsed={collapsed}>
             <div className="leading-tight">
               <div className="text-[17px] font-semibold tracking-wide">
                 reduc<span style={{ color: '#00ffc2' }}>ai.io</span>
               </div>
               <div className="text-[11px] text-white/55">Builder Workspace</div>
             </div>
-          </div>
+          </AnimatedText>
         </div>
 
         {/* Workspace */}
-        <div className="px-4 py-4">
-          <div className="text-[11px] uppercase tracking-wide text-white/55 mb-3 px-1">Workspace</div>
-          <nav className="space-y-2">
-            <SidebarItem
-              href="/builder"
-              label="Build"
-              sub="Create AI agent"
-              icon={<Home className="w-4 h-4" />}
-              active={pathname?.startsWith('/builder')}
-            />
-            <SidebarItem
-              href={lastBotId ? `/improve/${lastBotId}` : '#'}
-              label="Improve"
-              sub="Integrate & optimize"
-              icon={<Hammer className="w-4 h-4" />}
-              active={pathname?.startsWith('/improve')}
-              disabled={!lastBotId}
-            />
-            <SidebarItem
-              href="/voice-agent"
-              label="Voice Agent"
-              sub="Calls & persona"
-              icon={<Mic className="w-4 h-4" />}
-              active={pathname === '/voice-agent' || pathname?.startsWith('/voice-agent')}
-            />
-            <SidebarItem
-              href="/phone-numbers"
-              label="Phone Numbers"
-              sub="Link provider numbers"
-              icon={<Phone className="w-4 h-4" />}
-              active={pathname === '/phone-numbers' || pathname?.startsWith('/phone-numbers')}
-            />
-            <SidebarItem
-              href="/demo"
-              label="Demo"
-              sub="Showcase to clients"
-              icon={<Monitor className="w-4 h-4" />}
-              active={pathname === '/demo'}
-            />
-            <SidebarItem
-              href="/launch"
-              label="Launch"
-              sub="Deploy to production"
-              icon={<Rocket className="w-4 h-4" />}
-              active={pathname === '/launch'}
-            />
-          </nav>
-        </div>
+        <Section>
+          <NavList>
+            <Item collapsed={collapsed} href="/builder" label="Build" sub="Create AI agent" icon={<Home />} active={pathname?.startsWith('/builder')} />
+            <Item collapsed={collapsed} href={lastBotId ? `/improve/${lastBotId}` : '#'} label="Improve" sub="Integrate & optimize" icon={<Hammer />} active={pathname?.startsWith('/improve')} disabled={!lastBotId} />
+            <Item collapsed={collapsed} href="/voice-agent" label="Voice Agent" sub="Calls & persona" icon={<Mic />} active={pathname?.startsWith('/voice-agent')} />
+            <Item collapsed={collapsed} href="/phone-numbers" label="Phone Numbers" sub="Link provider numbers" icon={<Phone />} active={pathname?.startsWith('/phone-numbers')} />
+            <Item collapsed={collapsed} href="/demo" label="Demo" sub="Showcase to clients" icon={<Monitor />} active={pathname === '/demo'} />
+            <Item collapsed={collapsed} href="/launch" label="Launch" sub="Deploy to production" icon={<Rocket />} active={pathname === '/launch'} />
+          </NavList>
+        </Section>
 
-        {/* Divider */}
-        <div className="mt-2 mb-3 border-t border-white/10" />
+        <div className="my-3 border-t border-white/10" />
 
         {/* Resources */}
-        <div className="px-4">
-          <div className="text-[11px] uppercase tracking-wide text-white/55 mb-3 px-1">Resources</div>
-          <nav className="space-y-2">
-            <SidebarItem href="#" label="Marketplace" icon={<ShoppingCart className="w-4 h-4" />} />
-            <SidebarItem href="#" label="AI Mentor" icon={<BookOpen className="w-4 h-4" />} />
-            <SidebarItem href="/apikeys" label="API Key" icon={<Key className="w-4 h-4" />} />
-            <SidebarItem href="#" label="Bulk Tester" icon={<Package className="w-4 h-4" />} />
-            <SidebarItem href="#" label="Video Guides" icon={<HelpCircle className="w-4 h-4" />} />
-            <SidebarItem href="#" label="Support" icon={<Users className="w-4 h-4" />} />
-          </nav>
-        </div>
+        <Section>
+          <NavList>
+            <Item collapsed={collapsed} href="#" label="Marketplace" icon={<ShoppingCart />} />
+            <Item collapsed={collapsed} href="#" label="AI Mentor" icon={<BookOpen />} />
+            <Item collapsed={collapsed} href="/apikeys" label="API Key" icon={<Key />} />
+            <Item collapsed={collapsed} href="#" label="Bulk Tester" icon={<Package />} />
+            <Item collapsed={collapsed} href="#" label="Video Guides" icon={<HelpCircle />} />
+            <Item collapsed={collapsed} href="/support" label="Support" sub="Help & FAQ" icon={<HelpCircle />} active={pathname === '/support'} />
+          </NavList>
+        </Section>
 
-        {/* Account card */}
-        <div className="mt-auto px-4 pb-5 pt-4">
+        {/* Account */}
+        <div className="mt-auto px-4 pb-5">
           <div
-            className="rounded-2xl px-4 py-3 flex items-center justify-between"
+            className="rounded-2xl flex items-center justify-between px-4 py-3 transition-all duration-700 ease-in-out"
             style={{
-              background: 'rgba(16,19,20,0.90)',
-              border: '1px solid rgba(0,255,194,0.18)',
-              boxShadow: '0 0 14px rgba(0,255,194,0.06), inset 0 0 14px rgba(0,0,0,0.35)',
+              background: 'rgba(15,18,20,0.85)',
+              border: '1px solid rgba(0,255,194,0.12)',
+              boxShadow: 'inset 0 0 12px rgba(0,0,0,0.35), 0 0 10px rgba(0,255,194,0.04)',
             }}
           >
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-full bg-orange-500 flex items-center justify-center shadow-[0_0_10px_rgba(255,165,0,0.35)]">
+            <div className="flex items-center gap-3 shrink-0">
+              <div className="w-8 h-8 rounded-full bg-orange-500 flex items-center justify-center shadow-[0_0_8px_rgba(255,165,0,0.30)]">
                 <User className="w-4 h-4 text-white" />
               </div>
-              <div className="leading-tight">
-                <div className="text-sm font-semibold">My Account</div>
-                <div className="text-[11px] text-yellow-300/90">980 XP • Bronze</div>
-              </div>
+              <AnimatedText collapsed={collapsed}>
+                <div className="leading-tight">
+                  <div className="text-sm font-semibold">My Account</div>
+                  <div className="text-[11px] text-yellow-300/90">980 XP • Bronze</div>
+                </div>
+              </AnimatedText>
             </div>
-            <div className="text-white/60 text-xs">▼</div>
+            {!collapsed && <div className="text-white/60 text-xs">▼</div>}
           </div>
         </div>
+
+        {/* Collapse handle (kept, positioned relative to sidebar) */}
+        <button
+          onClick={() => setCollapsed(c => !c)}
+          className="absolute top-1/2 -right-3 translate-y-[-50%] rounded-full p-1.5 transition-colors duration-200"
+          style={{
+            border: '1px solid rgba(255,255,255,0.10)',
+            background: 'rgba(16,19,21,0.95)',
+            boxShadow: '0 2px 12px rgba(0,0,0,0.45), 0 0 10px rgba(0,255,194,0.06)',
+          }}
+        >
+          {collapsed ? (
+            <ChevronRight className="w-4 h-4 text-white/80" />
+          ) : (
+            <ChevronLeft className="w-4 h-4 text-white/80" />
+          )}
+        </button>
       </div>
     </aside>
   );
 }
 
-function SidebarItem({
-  href,
-  label,
-  sub,
-  icon,
-  active,
-  disabled,
+/* ---------- Helpers ---------- */
+
+function Section({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="px-4 pt-4">
+      <div className="mb-2.5 h-4" />
+      {children}
+    </div>
+  );
+}
+
+function NavList({ children }: { children: React.ReactNode }) {
+  return <nav className="space-y-2.5">{children}</nav>;
+}
+
+function Item({
+  href, label, sub, icon, active, disabled, collapsed,
 }: {
   href: string;
   label: string;
@@ -190,38 +195,50 @@ function SidebarItem({
   icon: React.ReactNode;
   active?: boolean;
   disabled?: boolean;
+  collapsed: boolean;
 }) {
-  const inner = (
+  const body = (
     <div
       className={cn(
-        'group rounded-xl px-3 py-2.5 flex items-start gap-3 transition-all',
+        'group rounded-xl flex items-center h-12 transition-colors duration-200',
+        collapsed ? 'justify-center' : 'px-3',
         disabled && 'opacity-50 cursor-not-allowed',
         !disabled && 'hover:translate-x-[1px]'
       )}
       style={{
-        border: `1px solid ${active ? 'rgba(0,255,194,0.45)' : 'rgba(0,255,194,0.18)'}`,
-        background: active ? 'rgba(0,255,194,0.10)' : 'rgba(15,18,20,0.65)',
+        border: `1px solid ${active ? 'rgba(0,255,194,0.28)' : 'rgba(255,255,255,0.06)'}`,
+        background: active ? 'rgba(0,255,194,0.06)' : 'rgba(15,18,20,0.55)',
         boxShadow: active
-          ? '0 0 16px rgba(0,255,194,0.22), inset 0 0 16px rgba(0,0,0,0.30)'
-          : 'inset 0 0 16px rgba(0,0,0,0.28)',
+          ? '0 0 12px rgba(0,255,194,0.16) inset, 0 0 8px rgba(0,255,194,0.04)'
+          : 'inset 0 0 10px rgba(0,0,0,0.28)',
       }}
+      title={collapsed ? label : undefined}
     >
-      <div className="mt-[2px] shrink-0" style={{ color: active ? '#00ffc2' : 'rgba(255,255,255,0.85)' }}>
-        {icon}
+      <div className={cn('flex items-center justify-center', collapsed ? 'w-8 h-8 mx-auto' : 'w-8 h-8 mr-3')}>
+        <div className="w-5 h-5 flex items-center justify-center text-white/90">{icon}</div>
       </div>
-      <div className="leading-tight">
-        <div className="text-[13px] font-semibold">
-          <span className={cn(!active && 'text-white/90')}>{label}</span>
+
+      <AnimatedText collapsed={collapsed}>
+        <div className="leading-tight">
+          <div className="text-[13px] font-semibold text-white/95">{label}</div>
+          {sub && <div className="text-[11px] text-white/55 mt-[3px] group-hover:text-white/70">{sub}</div>}
         </div>
-        {sub && <div className="text-[11px] text-white/55 group-hover:text-white/70">{sub}</div>}
-      </div>
+      </AnimatedText>
     </div>
   );
+  if (disabled) return <div>{body}</div>;
+  return <Link href={href} className="block">{body}</Link>;
+}
 
-  if (disabled) return <div>{inner}</div>;
+function AnimatedText({ collapsed, children }: { collapsed: boolean; children: React.ReactNode }) {
   return (
-    <Link href={href} className="block relative">
-      {inner}
-    </Link>
+    <div
+      className={cn(
+        'overflow-hidden transition-[max-width,opacity,transform] duration-700 ease-in-out',
+        collapsed ? 'opacity-0 max-w-0 -translate-x-2' : 'opacity-100 max-w-[200px] translate-x-0'
+      )}
+    >
+      <div className="transition-opacity duration-700 ease-in-out">{children}</div>
+    </div>
   );
 }
