@@ -308,32 +308,58 @@ export default function AccountPage() {
                 subtitle="Manage your account info, theme, and security"
               />
 
-              {/* rest of profile... unchanged */}
+              <Card>
+                <motion.div
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.25 }}
+                >
+                  <div className="flex items-center gap-4 mb-6">
+                    <div className="w-12 h-12 rounded-full flex items-center justify-center bg-[var(--brand-weak)]">
+                      <UserIcon className="w-6 h-6 text-black/80" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-lg font-semibold truncate">
+                        {loading ? (
+                          <span className="inline-block h-5 w-40 bg-white/10 rounded animate-pulse" />
+                        ) : (
+                          displayName
+                        )}
+                      </div>
+                      <div className="text-sm text-[color:var(--text-muted)] truncate">
+                        {loading ? (
+                          <span className="inline-block h-4 w-56 bg-white/5 rounded animate-pulse" />
+                        ) : (
+                          userEmail || '—'
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="grid sm:grid-cols-3 gap-3 text-sm">
+                    <InfoRow icon={<Mail className="w-4 h-4" />} label="Email" value={userEmail || '—'} />
+                    <InfoRow icon={<Calendar className="w-4 h-4" />} label="Created" value={fmtDate(userCreated || undefined)} />
+                    <InfoRow icon={<Calendar className="w-4 h-4" />} label="Updated" value={fmtDate(userUpdated || undefined)} />
+                  </div>
+
+                  <div className="mt-6 flex flex-wrap gap-3">
+                    <button
+                      onClick={signOut}
+                      className="inline-flex items-center gap-2 px-4 py-2 rounded-[10px] border transition hover:translate-y-[-1px]"
+                      style={{ borderColor: 'var(--border)', background: 'var(--btn-bg)', color: 'var(--btn-text)' }}
+                    >
+                      <LogOut className="w-4 h-4" />
+                      Sign out
+                    </button>
+                  </div>
+                </motion.div>
+              </Card>
 
               {/* Appearance */}
               <SubHeader icon={<Palette className="w-4 h-4" />} title="Appearance" subtitle="Customize how the app looks" />
               <Card>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <ThemeTile
-                    label="Dark"
-                    active={theme === 'dark'}
-                    icon={<Moon className="w-4 h-4" />}
-                    onClick={() => {
-                      setTheme('dark');
-                      document.documentElement.dataset.theme = 'dark';
-                      localStorage.setItem('ui:theme', 'dark');
-                    }}
-                  />
-                  <ThemeTile
-                    label="Light"
-                    active={theme === 'light'}
-                    icon={<Sun className="w-4 h-4" />}
-                    onClick={() => {
-                      setTheme('light');
-                      document.documentElement.dataset.theme = 'light';
-                      localStorage.setItem('ui:theme', 'light');
-                    }}
-                  />
+                  <ThemeTile label="Dark" active={theme === 'dark'} icon={<Moon className="w-4 h-4" />} onClick={() => setTheme('dark')} />
+                  <ThemeTile label="Light" active={theme === 'light'} icon={<Sun className="w-4 h-4" />} onClick={() => setTheme('light')} />
                 </div>
 
                 <div className="mt-6 flex items-center gap-3">
@@ -341,7 +367,7 @@ export default function AccountPage() {
                     onClick={saveTheme}
                     disabled={savingTheme}
                     className="inline-flex items-center gap-2 px-4 py-2 rounded-[10px] border transition hover:translate-y-[-1px] disabled:opacity-60"
-                    style={{ borderColor: 'var(--border)', background: 'var(--panel)', color: 'var(--text)' }}
+                    style={{ borderColor: 'var(--border)', background: 'var(--btn-bg)', color: 'var(--btn-text)' }}
                   >
                     {savingTheme ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                     Save theme
@@ -361,9 +387,156 @@ export default function AccountPage() {
                   </AnimatePresence>
                 </div>
               </Card>
+
+              {/* Account & Security */}
+              <SubHeader icon={<Shield className="w-4 h-4" />} title="Account & Security" subtitle="Sign-in methods and password" />
+              <Card>
+                <div className="grid gap-4">
+                  {/* Sign-in methods */}
+                  <Band>
+                    <div className="text-sm font-semibold mb-2">Sign-in methods</div>
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-[color:var(--text-muted)]">
+                      {hasEmailPassword ? (
+                        <Badge>EMAIL & PASSWORD</Badge>
+                      ) : (
+                        <BadgeMuted>
+                          EMAIL & PASSWORD <span className="ml-1 px-1 rounded bg-red-500 text-white">NOT SET</span>
+                        </BadgeMuted>
+                      )}
+                      {hasGoogle && <Badge>GOOGLE</Badge>}
+                    </div>
+                  </Band>
+
+                  {/* Create password */}
+                  {!hasEmailPassword && (
+                    <Band accent>
+                      <div className="flex items-center gap-2 mb-2">
+                        <LockKeyhole className="w-4 h-4" />
+                        <div className="text-sm font-semibold">Create a password</div>
+                      </div>
+                      <p className="text-xs text-[color:var(--text-muted)] mb-3">Add a password so you can also sign in with email + password.</p>
+
+                      <div className="grid gap-3">
+                        <input type="password" className="w-full rounded-[10px] px-3 py-2 bg-[var(--card)] border border-[var(--border)] outline-none" placeholder="New password" value={pw1} onChange={(e) => setPw1(e.target.value)} />
+                        <input type="password" className="w-full rounded-[10px] px-3 py-2 bg-[var(--card)] border border-[var(--border)] outline-none" placeholder="Confirm password" value={pw2} onChange={(e) => setPw2(e.target.value)} />
+
+                        <div className="h-1 w-full bg-[var(--border)] rounded overflow-hidden">
+                          <div className="h-full" style={{ width: `${(pwStrength / 4) * 100}%`, background: 'linear-gradient(90deg,#40f3c9,#7bf7d8)', transition: 'width 220ms ease' }} />
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                          <button
+                            onClick={createPassword}
+                            disabled={createPwLoading}
+                            className="inline-flex items-center gap-2 px-4 py-2 rounded-[10px] border transition hover:translate-y-[-1px] disabled:opacity-60"
+                            style={{ borderColor: 'var(--border)', background: 'var(--btn-bg)', color: 'var(--btn-text)' }}
+                          >
+                            {createPwLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
+                            Create password
+                          </button>
+
+                          <AnimatePresence>
+                            {createPwMsg === 'ok' && (
+                              <motion.span className="inline-flex items-center gap-1 text-[var(--brand)]">
+                                <CheckCircle2 className="w-4 h-4" /> Saved
+                              </motion.span>
+                            )}
+                            {createPwMsg === 'err' && (
+                              <motion.span className="inline-flex items-center gap-1 text-red-400">
+                                <ShieldAlert className="w-4 h-4" /> Check passwords
+                              </motion.span>
+                            )}
+                          </AnimatePresence>
+                        </div>
+                      </div>
+                    </Band>
+                  )}
+
+                  {/* Change password */}
+                  {hasEmailPassword && (
+                    <Band>
+                      <div className="flex items-center gap-2 mb-1">
+                        <LockKeyhole className="w-4 h-4" />
+                        <div className="text-sm font-semibold">Change password</div>
+                      </div>
+                      <p className="text-xs text-[color:var(--text-muted)] mb-3">We’ll send a secure link to your email to update your password.</p>
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={sendReset}
+                          disabled={!userEmail || resetLoading}
+                          className="inline-flex items-center gap-2 px-4 py-2 rounded-[10px] border transition hover:translate-y-[-1px] disabled:opacity-60"
+                          style={{ borderColor: 'var(--border)', background: 'var(--btn-bg)', color: 'var(--btn-text)' }}
+                        >
+                          {resetLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
+                          Send reset link
+                        </button>
+
+                        <AnimatePresence>
+                          {resetMsg === 'sent' && (
+                            <motion.span className="inline-flex items-center gap-1 text-[var(--brand)]">
+                              <CheckCircle2 className="w-4 h-4" /> Sent
+                            </motion.span>
+                          )}
+                          {resetMsg === 'err' && (
+                            <motion.span className="inline-flex items-center gap-1 text-red-400">
+                              <AlertCircle className="w-4 h-4" /> Failed
+                            </motion.span>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    </Band>
+                  )}
+                </div>
+              </Card>
             </div>
 
-            {/* Plan & Billing ... unchanged */}
+            {/* Plan & Billing */}
+            <div id="billing" className="scroll-mt-16">
+              <Header icon={<Box className="w-5 h-5" />} title="Current Plan" subtitle="Your current subscription plan" />
+              <Card>
+                <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-[var(--brand-weak)]">
+                      <Crown className="w-5 h-5 text-[var(--brand)]" />
+                    </div>
+                    <div>
+                      <div className="text-lg font-semibold">Plan & Billing</div>
+                      <div className="text-sm text-[color:var(--text-muted)]">Current plan: <span className="font-semibold">{plan}</span></div>
+                    </div>
+                  </div>
+
+                  <div className="text-xs text-[color:var(--text-muted)] mb-4">
+                    Usage: {usage.requests.toLocaleString()} / {usage.limit.toLocaleString()} requests
+                  </div>
+
+                  <div className="text-xs text-[color:var(--text-muted)] mb-6 flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4" /> Free is demo-only. Upgrade to Pro for full features.
+                  </div>
+
+                  <div className="flex flex-wrap gap-3">
+                    <Link
+                      href="/account/pricing"
+                      className="inline-flex items-center gap-2 px-5 py-2 rounded-[10px] border transition hover:translate-y-[-1px]"
+                      style={{ borderColor: 'var(--border)', background: 'var(--btn-bg)', color: 'var(--btn-text)' }}
+                    >
+                      View pricing <ChevronRight className="w-4 h-4" />
+                    </Link>
+
+                    {plan !== 'Pro' && (
+                      <a
+                        href="https://buy.stripe.com/3cI7sLgWz0zb0uT5hrgUM00"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-2 px-5 py-2 rounded-[10px] border font-semibold transition hover:translate-y-[-1px]"
+                        style={{ borderColor: 'var(--brand-weak)', background: 'var(--brand-weak)', color: '#000' }}
+                      >
+                        <Zap className="w-4 h-4" /> Upgrade to Pro (€19.99/mo)
+                      </a>
+                    )}
+                  </div>
+                </motion.div>
+              </Card>
+            </div>
           </section>
         </main>
       </div>
@@ -372,21 +545,64 @@ export default function AccountPage() {
 }
 
 /* ---------- small building blocks ---------- */
-function Header({ icon, title, subtitle }:{ icon: React.ReactNode; title: string; subtitle?: string }) { /* unchanged */ }
-function SubHeader({ icon, title, subtitle }:{ icon: React.ReactNode; title: string; subtitle?: string }) { /* unchanged */ }
-function Card({ children }: { children: React.ReactNode }) { /* unchanged */ }
-function Band({ children, accent = false }:{ children: React.ReactNode; accent?: boolean }) { /* unchanged */ }
-function InfoRow({ icon, label, value }: { icon: React.ReactNode; label: string; value: React.ReactNode }) { /* unchanged */ }
+
+function Header({ icon, title, subtitle }:{ icon: React.ReactNode; title: string; subtitle?: string }) {
+  return (
+    <div className="mb-3">
+      <div className="flex items-center gap-2 text-[17px] font-semibold">
+        <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg border bg-[var(--brand-weak)] border-[var(--brand-weak)]">
+          {icon}
+        </span>
+        <span>{title}</span>
+      </div>
+      {subtitle && <div className="text-sm text-[color:var(--text-muted)] ml-10 -mt-1">{subtitle}</div>}
+    </div>
+  );
+}
+
+function SubHeader({ icon, title, subtitle }:{ icon: React.ReactNode; title: string; subtitle?: string }) {
+  return (
+    <div className="mt-8 mb-3">
+      <div className="flex items-center gap-2 text-sm font-semibold">
+        <span className="inline-flex items-center justify-center w-6 h-6 rounded-md border bg-[var(--panel)] border-[var(--border)]">
+          {icon}
+        </span>
+        <span>{title}</span>
+      </div>
+      {subtitle && <div className="text-xs text-[color:var(--text-muted)] ml-8 mt-1">{subtitle}</div>}
+    </div>
+  );
+}
+
+function Card({ children }: { children: React.ReactNode }) {
+  return (
+    <motion.section initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.28 }} className="card p-6">
+      {children}
+    </motion.section>
+  );
+}
+
+function Band({ children, accent = false }:{ children: React.ReactNode; accent?: boolean }) {
+  return (
+    <div className={`rounded-[12px] p-4 ${accent ? 'ring-1 ring-[var(--brand-weak)]' : ''}`} style={{ background: 'var(--panel)', border: '1px solid var(--border)' }}>
+      {children}
+    </div>
+  );
+}
+
+function InfoRow({ icon, label, value }: { icon: React.ReactNode; label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-2 text-sm">
+      {icon}
+      <span className="w-28 shrink-0 text-[color:var(--text-muted)]">{label}</span>
+      <span className="truncate">{value}</span>
+    </div>
+  );
+}
+
 function ThemeTile({ label, active, onClick, icon }: { label: string; active: boolean; onClick: () => void; icon: React.ReactNode; }) {
   return (
-    <motion.button
-      whileHover={{ y: -1 }}
-      whileTap={{ scale: 0.98 }}
-      onClick={onClick}
-      className={`card p-4 text-left transition-all ${
-        active ? 'ring-2 ring-[var(--brand-weak)]' : ''
-      }`}
-    >
+    <motion.button whileHover={{ y: -1 }} whileTap={{ scale: 0.98 }} onClick={onClick} className={`card p-4 text-left transition-all ${active ? 'ring-1 ring-[var(--brand-weak)]' : ''}`}>
       <div className="flex items-center gap-2">
         <div className="w-8 h-8 rounded-[10px] flex items-center justify-center bg-[var(--panel)] border border-[var(--border)]">
           {icon}
@@ -399,6 +615,28 @@ function ThemeTile({ label, active, onClick, icon }: { label: string; active: bo
     </motion.button>
   );
 }
-function SettingsLink({ icon, label, href }: { icon: React.ReactNode; label: string; href: string; }) { /* unchanged */ }
-function Badge({ children }: { children: React.ReactNode }) { /* unchanged */ }
-function BadgeMuted({ children }: { children: React.ReactNode }) { /* unchanged */ }
+
+function SettingsLink({ icon, label, href }: { icon: React.ReactNode; label: string; href: string; }) {
+  return (
+    <a href={href} className="panel flex items-center justify-between rounded-[12px] px-3 py-2 transition hover:translate-y-[-1px]" style={{ color: 'var(--text)' }}>
+      <span className="flex items-center gap-2 text-sm">{icon}{label}</span>
+      <ChevronRight className="w-4 h-4 text-[color:var(--text-muted)]" />
+    </a>
+  );
+}
+
+function Badge({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="px-2.5 py-1 rounded-md border text-[11px] uppercase tracking-wide" style={{ borderColor: 'var(--brand-weak)', background: 'var(--brand-weak)', color: '#000' }}>
+      {children}
+    </span>
+  );
+}
+
+function BadgeMuted({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="px-2.5 py-1 rounded-md border text-[11px] uppercase tracking-wide text-[color:var(--text-muted)]" style={{ borderColor: 'var(--border)', background: 'var(--card)' }}>
+      {children}
+    </span>
+  );
+}
