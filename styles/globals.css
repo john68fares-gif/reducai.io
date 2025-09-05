@@ -2,7 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ---- Custom Font ---- */
+/* ---- Custom Fonts ---- */
 @font-face {
   font-family: 'Movatif';
   src: url('/fonts/Movatif-Bold.ttf') format('truetype');
@@ -10,38 +10,40 @@
   font-style: normal;
 }
 
-/* ---- Base theme (light by default) ---- */
+/* ---- Theme tokens (light default) ---- */
 :root {
   /* Brand */
   --brand: #00ffc2;
   --brand-weak: rgba(0, 255, 194, 0.28);
 
-  /* Light mode tokens */
-  --background: #ffffff;
+  /* Typography */
   --foreground: #0b0c10;
   --foreground-muted: rgba(11, 12, 16, 0.65);
 
+  /* Surfaces */
+  --background: #ffffff;
   --panel: #f5f7f8;
   --card: #ffffff;
   --border: rgba(11, 12, 16, 0.10);
   --ring: rgba(0, 0, 0, 0.06);
 
+  /* Shadows */
   --shadow-soft: 0 10px 30px rgba(0,0,0,0.08);
   --shadow-card: 0 1px 0 rgba(0,0,0,0.04), 0 8px 22px rgba(0,0,0,0.06);
 
-  /* Sidebar (always dark for brand contrast) */
+  /* Sidebar (always dark when expanded) */
   --sidebar-bg: #0f1214;
   --sidebar-border: rgba(255,255,255,0.06);
   --sidebar-text: #ffffff;
   --sidebar-muted: rgba(255,255,255,0.6);
 }
 
-/* ---- Dark mode overrides ---- */
+/* ---- Dark theme overrides ---- */
 .dark {
-  --background: #0b0c10;
   --foreground: #ffffff;
   --foreground-muted: rgba(255,255,255,0.65);
 
+  --background: #0b0c10;
   --panel: #0f1214;
   --card: #101314;
   --border: rgba(255,255,255,0.06);
@@ -95,10 +97,22 @@ html, body {
 
 /* ---- Sidebar ---- */
 .sidebar {
-  background: var(--sidebar-bg);
   color: var(--sidebar-text);
   border-right: 1px solid var(--sidebar-border);
+  transition: width 0.3s ease, background 0.3s ease;
+  overflow: hidden;
 }
+
+/* Expanded: dark block */
+.sidebar.w-\[260px\] {
+  background: var(--sidebar-bg);
+}
+
+/* Collapsed: blend with page */
+.sidebar.w-\[72px\] {
+  background: var(--background);
+}
+
 .sidebar-muted {
   color: var(--sidebar-muted);
 }
