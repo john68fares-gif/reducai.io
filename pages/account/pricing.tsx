@@ -1,4 +1,3 @@
-// pages/account/pricing.tsx
 'use client';
 
 import Head from 'next/head';
@@ -19,57 +18,73 @@ export default function PricingPage() {
 
   return (
     <>
-      <Head>
-        <title>Pricing • Reduc AI</title>
-      </Head>
-      <div className="min-h-screen bg-white text-black dark:bg-[#0b0c10] dark:text-white">
+      <Head><title>Pricing • Reduc AI</title></Head>
+      <div
+        className="min-h-screen"
+        style={{ background: 'var(--bg)', color: 'var(--text)' }}
+      >
         <main className="w-full max-w-[980px] mx-auto px-6 pt-10 pb-24">
-          {/* Header */}
+          {/* header */}
           <div className="flex items-center justify-between mb-6">
             <div>
               <div className="flex items-center gap-2 text-[17px] font-semibold">
-                <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-[#0d0f11]">
-                  <Percent className="w-5 h-5" />
+                <span
+                  className="inline-flex items-center justify-center w-8 h-8 rounded-lg"
+                  style={{
+                    border: '1px solid var(--brand-weak)',
+                    background: 'var(--card)',
+                  }}
+                >
+                  <Percent className="w-5 h-5" style={{ color: 'var(--brand)' }} />
                 </span>
                 <span>Pricing</span>
               </div>
-              <div className="text-gray-600 dark:text-gray-400 text-sm ml-10 -mt-1">
+              <div
+                className="text-sm ml-10 -mt-1"
+                style={{ color: 'var(--text-muted)' }}
+              >
                 Choose a plan that fits your launch
               </div>
             </div>
+
             <Link
               href="/account"
-              className="inline-flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 hover:text-black dark:hover:text-white"
+              className="inline-flex items-center gap-2 text-sm opacity-80 hover:opacity-100"
+              style={{ color: 'var(--text-muted)' }}
             >
               <ArrowLeft className="w-4 h-4" /> Back to settings
             </Link>
           </div>
 
-          {/* Billing toggle */}
+          {/* billing toggle */}
           <div className="flex items-center gap-2 mb-8">
             <button
               onClick={() => setBilling('monthly')}
               className={`px-3 py-1.5 rounded-full text-sm border ${
-                billing === 'monthly'
-                  ? 'font-semibold bg-green-100 dark:bg-emerald-900/30 border-green-300 dark:border-emerald-600'
-                  : 'border-gray-300 dark:border-gray-600'
+                billing === 'monthly' ? 'font-semibold' : ''
               }`}
+              style={{
+                borderColor: 'var(--brand-weak)',
+                background: billing === 'monthly' ? 'var(--card)' : 'transparent',
+              }}
             >
               Monthly
             </button>
             <button
               onClick={() => setBilling('yearly')}
               className={`px-3 py-1.5 rounded-full text-sm border ${
-                billing === 'yearly'
-                  ? 'font-semibold bg-green-100 dark:bg-emerald-900/30 border-green-300 dark:border-emerald-600'
-                  : 'border-gray-300 dark:border-gray-600'
+                billing === 'yearly' ? 'font-semibold' : ''
               }`}
+              style={{
+                borderColor: 'var(--brand-weak)',
+                background: billing === 'yearly' ? 'var(--card)' : 'transparent',
+              }}
             >
               Yearly • {Math.round(yearlyDiscount * 100)}% off
             </button>
           </div>
 
-          {/* Plans */}
+          {/* plans */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <PlanCard
               title="Free"
@@ -87,7 +102,12 @@ export default function PricingPage() {
               cta={
                 <button
                   disabled
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-md border border-gray-300 dark:border-gray-700 bg-gray-100 dark:bg-[#0d0f11] opacity-70 cursor-not-allowed"
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-md border opacity-70 cursor-not-allowed"
+                  style={{
+                    borderColor: 'var(--border)',
+                    background: 'var(--card)',
+                    color: 'var(--text-muted)',
+                  }}
                 >
                   Demo only
                 </button>
@@ -120,9 +140,14 @@ export default function PricingPage() {
                   href="https://buy.stripe.com/3cI7sLgWz0zb0uT5hrgUM00"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-md border font-semibold border-green-300 dark:border-emerald-600 bg-green-100 dark:bg-emerald-900/30 hover:bg-green-200 dark:hover:bg-emerald-800/50 transition"
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-md border font-semibold"
+                  style={{
+                    borderColor: 'var(--brand-weak)',
+                    background: 'var(--card)',
+                    color: 'var(--text)',
+                  }}
                 >
-                  <Zap className="w-4 h-4" />{' '}
+                  <Zap className="w-4 h-4" style={{ color: 'var(--brand)' }} />{' '}
                   {billing === 'monthly'
                     ? 'Subscribe to Pro'
                     : 'Go annual & save'}
@@ -131,24 +156,39 @@ export default function PricingPage() {
             />
           </div>
 
-          {/* Savings banner */}
+          {/* savings banner */}
           {billing === 'yearly' && (
-            <div className="mt-8 text-center text-sm rounded-lg px-4 py-3 border border-green-300 dark:border-emerald-600 bg-green-100 dark:bg-emerald-900/30">
-              Switch to annual billing and save{' '}
-              {Math.round(yearlyDiscount * 100)}%!
+            <div
+              className="mt-8 text-center text-sm rounded-md px-4 py-3"
+              style={{
+                border: '1px solid var(--brand-weak)',
+                background: 'var(--card)',
+                color: 'var(--text)',
+              }}
+            >
+              Switch to annual billing and save {Math.round(yearlyDiscount * 100)}%!
             </div>
           )}
 
-          {/* Billing & Subscription panel */}
+          {/* billing panel */}
           <section className="mt-10">
             <div className="mb-3">
               <div className="flex items-center gap-2 text-[17px] font-semibold">
-                <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-[#0d0f11]">
-                  <Crown className="w-5 h-5" />
+                <span
+                  className="inline-flex items-center justify-center w-8 h-8 rounded-lg"
+                  style={{
+                    border: '1px solid var(--brand-weak)',
+                    background: 'var(--card)',
+                  }}
+                >
+                  <Crown className="w-5 h-5" style={{ color: 'var(--brand)' }} />
                 </span>
                 <span>Billing & Subscription</span>
               </div>
-              <div className="text-gray-600 dark:text-gray-400 text-sm ml-10 -mt-1">
+              <div
+                className="text-sm ml-10 -mt-1"
+                style={{ color: 'var(--text-muted)' }}
+              >
                 Manage your subscription and invoices
               </div>
             </div>
@@ -157,29 +197,56 @@ export default function PricingPage() {
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.28 }}
-              className="rounded-xl p-6 bg-white dark:bg-[#0d0f11] border border-gray-200 dark:border-gray-700 shadow-sm"
+              className="rounded-lg p-6"
+              style={{
+                background: 'var(--card)',
+                border: '1px solid var(--border)',
+                boxShadow: 'var(--shadow-card)',
+              }}
             >
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                <div className="rounded-lg p-4 bg-gray-50 dark:bg-[#14171b] border border-gray-200 dark:border-gray-700">
-                  <div className="text-gray-600 dark:text-gray-400 mb-1">
+                <div
+                  className="rounded-md p-4"
+                  style={{
+                    background: 'var(--panel)',
+                    border: '1px solid var(--border)',
+                  }}
+                >
+                  <div style={{ color: 'var(--text-muted)' }} className="mb-1">
                     Manage Billing
                   </div>
                   <a
                     href="YOUR_STRIPE_PORTAL_LINK"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-md border font-semibold border-green-300 dark:border-emerald-600 bg-green-100 dark:bg-emerald-900/30 hover:bg-green-200 dark:hover:bg-emerald-800/50 transition"
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-md border font-semibold"
+                    style={{
+                      borderColor: 'var(--brand-weak)',
+                      background: 'var(--card)',
+                      color: 'var(--text)',
+                    }}
                   >
                     Open Customer Portal
                   </a>
                 </div>
-                <div className="rounded-lg p-4 bg-gray-50 dark:bg-[#14171b] border border-gray-200 dark:border-gray-700">
-                  <div className="text-gray-600 dark:text-gray-400 mb-1">
+                <div
+                  className="rounded-md p-4"
+                  style={{
+                    background: 'var(--panel)',
+                    border: '1px solid var(--border)',
+                  }}
+                >
+                  <div style={{ color: 'var(--text-muted)' }} className="mb-1">
                     Need to cancel?
                   </div>
                   <a
                     href="YOUR_UNSUBSCRIBE_LINK"
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-md border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-[#0d0f11] hover:bg-gray-200 dark:hover:bg-[#1a1d21] transition"
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-md border"
+                    style={{
+                      borderColor: 'var(--border)',
+                      background: 'var(--card)',
+                      color: 'var(--text-muted)',
+                    }}
                   >
                     Unsubscribe
                   </a>
@@ -219,39 +286,64 @@ function PlanCard({
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.28 }}
-      className="rounded-xl p-6 bg-white dark:bg-[#0d0f11] border border-gray-200 dark:border-gray-700 shadow-sm relative"
-      whileHover={{ y: -2 }}
+      className="rounded-lg p-6 relative"
+      style={{
+        background: 'var(--card)',
+        border: '1px solid var(--border)',
+        boxShadow: 'var(--shadow-card)',
+      }}
     >
       {badge && (
         <span
           className={`absolute -top-3 left-4 px-2 py-1 rounded-full text-[11px] border ${
             badgeMuted ? 'opacity-70' : ''
-          } border-green-300 dark:border-emerald-600 bg-green-100 dark:bg-emerald-900/30`}
+          }`}
+          style={{
+            borderColor: 'var(--brand-weak)',
+            background: 'var(--card)',
+            color: 'var(--text)',
+          }}
         >
           {badge}
         </span>
       )}
       <div className="flex items-start gap-3">
-        <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-gray-100 dark:bg-[#14171b] border border-gray-300 dark:border-gray-600">
+        <div
+          className="w-10 h-10 rounded-xl flex items-center justify-center"
+          style={{
+            background: 'var(--panel)',
+            border: '1px solid var(--border)',
+          }}
+        >
           {icon}
         </div>
         <div className="flex-1 min-w-0">
-          <div className="flex flex-col">
+          <div className="flex flex-wrap items-baseline gap-2">
             <div className="text-base font-semibold">{title}</div>
-            <div className="text-gray-600 dark:text-gray-400 text-sm">
+            <div style={{ color: 'var(--text-muted)' }} className="text-sm">
               {subtitle}
             </div>
           </div>
           <div className="mt-1 text-lg font-semibold">
             {price}{' '}
-            <span className="text-gray-600 dark:text-gray-400 text-sm font-normal">
+            <span
+              className="text-sm font-normal"
+              style={{ color: 'var(--text-muted)' }}
+            >
               {period}
             </span>
           </div>
-          <ul className="mt-3 text-sm space-y-1.5 text-gray-700 dark:text-gray-300">
+          <ul
+            className="mt-3 text-sm space-y-1.5"
+            style={{ color: 'var(--text)' }}
+          >
             {features.map((f, i) => (
               <li key={i} className="flex items-start gap-2">
-                <Check className="w-4 h-4 mt-0.5 text-green-500" /> {f}
+                <Check
+                  className="w-4 h-4 mt-0.5"
+                  style={{ color: 'var(--brand)' }}
+                />{' '}
+                {f}
               </li>
             ))}
           </ul>
