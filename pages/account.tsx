@@ -4,7 +4,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
-import { useRouter } from 'next/router';
 import { supabase } from '@/lib/supabase-client';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -34,10 +33,7 @@ import {
 const UI = {
   cardBg: 'rgba(13,15,17,0.92)',
   border: '1px solid rgba(106,247,209,0.22)',
-  cardShadow:
-    '0 10px 30px rgba(0,0,0,0.45), inset 0 0 22px rgba(0,0,0,0.35), 0 0 18px rgba(0,255,194,0.06)',
-  hoverShadow:
-    '0 14px 40px rgba(0,0,0,0.55), inset 0 0 26px rgba(0,0,0,0.40), 0 0 22px rgba(0,255,194,0.10)',
+  cardShadow: '0 10px 30px rgba(0,0,0,0.45), inset 0 0 22px rgba(0,0,0,0.35), 0 0 18px rgba(0,255,194,0.06)',
 };
 
 type ThemeMode = 'dark' | 'light';
@@ -49,8 +45,6 @@ function fmtDate(iso?: string) {
 }
 
 export default function AccountPage() {
-  const router = useRouter();
-
   // loader
   const [booting, setBooting] = useState(true);
 
@@ -79,7 +73,6 @@ export default function AccountPage() {
   // password flows
   const [resetLoading, setResetLoading] = useState(false);
   const [resetMsg, setResetMsg] = useState<'idle' | 'sent' | 'err'>('idle');
-
   const [createPwLoading, setCreatePwLoading] = useState(false);
   const [createPwMsg, setCreatePwMsg] = useState<'idle' | 'ok' | 'err'>('idle');
   const [pw1, setPw1] = useState('');
@@ -118,7 +111,7 @@ export default function AccountPage() {
       setUsage({ requests: typeof u === 'number' ? u : 0, limit: 10000 });
 
       setLoading(false);
-      setTimeout(() => setBooting(false), 500);
+      setTimeout(() => setBooting(false), 450);
 
       unsub = supabase.auth.onAuthStateChange((_e, session) => {
         const u2 = session?.user;
@@ -215,10 +208,9 @@ export default function AccountPage() {
     try {
       const { error } = await supabase.auth.updateUser({ password: pw1 });
       if (error) throw error;
-      await refreshProviders(); // <- immediately show EMAIL & PASSWORD badge
+      await refreshProviders(); // show EMAIL & PASSWORD immediately
       setCreatePwMsg('ok');
-      setPw1('');
-      setPw2('');
+      setPw1(''); setPw2('');
     } catch {
       setCreatePwMsg('err');
     } finally {
@@ -227,38 +219,24 @@ export default function AccountPage() {
     }
   };
 
-  const signOut = async () => {
-    try { await supabase.auth.signOut(); } catch {}
-  };
+  const signOut = async () => { try { await supabase.auth.signOut(); } catch {} };
 
   return (
     <>
       <Head><title>Account • Reduc AI</title></Head>
 
-      {/* Loader overlay */}
+      {/* Loader */}
       <AnimatePresence>
         {(booting || loading) && (
-          <motion.div
-            key="boot"
-            className="fixed inset-0 z-50 flex items-center justify-center"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            style={{
-              background:
-                'radial-gradient(1000px 500px at 50% -10%, rgba(0,255,194,0.10), transparent 60%), #0b0c10',
-              backdropFilter: 'blur(2px)',
-            }}
-          >
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
+          <motion.div key="boot" className="fixed inset-0 z-50 flex items-center justify-center"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            style={{ background: 'radial-gradient(1000px 500px at 50% -10%, rgba(0,255,194,0.10), transparent 60%), #0b0c10', backdropFilter: 'blur(2px)' }}>
+            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
               className="px-6 py-5 rounded-2xl border"
-              style={{ border: '1px solid rgba(106,247,209,0.25)', background: UI.cardBg, boxShadow: UI.cardShadow }}
-            >
+              style={{ border: '1px solid rgba(106,247,209,0.25)', background: UI.cardBg, boxShadow: UI.cardShadow }}>
               <div className="flex items-center gap-3">
                 <Loader2 className="w-5 h-5 animate-spin" />
-                <div className="text-sm">Loading your account…</div>
+                <div className="text-sm">Loading your settings…</div>
               </div>
             </motion.div>
           </motion.div>
@@ -269,32 +247,30 @@ export default function AccountPage() {
       <div className="min-h-screen" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
         <main className="w-full max-w-[1100px] mx-auto px-6 pt-10 pb-24 grid grid-cols-1 md:grid-cols-[260px,1fr] gap-8">
 
-          {/* Left: Settings nav (LinkedIn-style) */}
+          {/* Left: compact nav */}
           <aside>
             <div className="text-xl font-semibold mb-4">Settings</div>
             <nav className="space-y-2">
               <SettingsLink icon={<UserIcon className="w-4 h-4" />} label="Profile" href="#profile" />
-              <SettingsLink icon={<Palette className="w-4 h-4" />} label="Appearance" href="#appearance" />
-              <SettingsLink icon={<Shield className="w-4 h-4" />} label="Account & Security" href="#security" />
               <SettingsLink icon={<CreditCard className="w-4 h-4" />} label="Plan & Billing" href="#billing" />
-              <SettingsLink icon={<Crown className="w-4 h-4" />} label="Pricing" href="/account/pricing" external={false} />
             </nav>
           </aside>
 
-          {/* Right: Sections */}
+          {/* Right */}
           <section className="space-y-8">
-
-            {/* Profile */}
+            {/* Profile (includes appearance + security) */}
             <div id="profile">
               <SectionTitle>Profile</SectionTitle>
+
+              {/* Profile Card */}
               <Card>
                 <div className="flex items-center gap-4 mb-5">
-                  <motion.div whileHover={{ scale: 1.03 }} className="w-12 h-12 rounded-full flex items-center justify-center" style={{ background: 'rgba(0,255,194,0.22)' }}>
+                  <div className="w-12 h-12 rounded-full flex items-center justify-center" style={{ background: 'rgba(0,255,194,0.22)' }}>
                     <UserIcon className="w-6 h-6 text-black/80" />
-                  </motion.div>
+                  </div>
                   <div className="min-w-0">
                     <div className="text-lg font-semibold truncate">
-                      {loading ? <span className="inline-block h-5 w-40 bg-white/10 rounded animate-pulse" /> : displayName}
+                      {loading ? <span className="inline-block h-5 w-40 bg-white/10 rounded animate-pulse" /> : (userName || 'Account')}
                     </div>
                     <div className="text-white/70 text-sm truncate">
                       {loading ? <span className="inline-block h-4 w-56 bg-white/5 rounded animate-pulse" /> : (userEmail || '—')}
@@ -309,11 +285,11 @@ export default function AccountPage() {
                 </div>
 
                 <div className="mt-6 flex flex-wrap gap-3">
-                  <motion.button whileTap={{ scale: 0.98 }} onClick={signOut}
+                  <button onClick={signOut}
                     className="inline-flex items-center gap-2 px-4 py-2 rounded-[10px] border transition hover:translate-y-[-1px]"
                     style={{ borderColor: 'rgba(106,247,209,0.28)', background: 'rgba(16,19,20,0.90)' }}>
                     <LogOut className="w-4 h-4" /> Sign out
-                  </motion.button>
+                  </button>
 
                   <div className="inline-flex items-center gap-2 text-xs text-white/70">
                     <ShieldCheck className="w-4 h-4" />
@@ -321,49 +297,43 @@ export default function AccountPage() {
                   </div>
                 </div>
               </Card>
-            </div>
 
-            {/* Appearance */}
-            <div id="appearance">
-              <SectionTitle>Appearance</SectionTitle>
+              {/* Appearance (inside Profile) */}
+              <SubSectionTitle icon={<Palette className="w-4 h-4" />} title="Appearance" />
               <Card>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <ThemeTile label="Dark"  active={theme === 'dark'}  icon={<Moon className="w-4 h-4" />} onClick={() => setTheme('dark')} />
                   <ThemeTile label="Light" active={theme === 'light'} icon={<Sun  className="w-4 h-4" />} onClick={() => setTheme('light')} />
                 </div>
 
                 <div className="mt-6 flex items-center gap-3">
-                  <motion.button whileTap={{ scale: 0.98 }} onClick={saveTheme} disabled={savingTheme}
+                  <button onClick={saveTheme} disabled={savingTheme}
                     className="inline-flex items-center gap-2 px-4 py-2 rounded-[10px] border transition hover:translate-y-[-1px] disabled:opacity-60"
                     style={{ borderColor: 'rgba(106,247,209,0.28)', background: 'rgba(16,19,20,0.90)' }}>
                     {savingTheme ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                     Save theme
-                  </motion.button>
+                  </button>
 
                   <AnimatePresence mode="popLayout">
                     {saveMsg === 'ok' && (
-                      <motion.span initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }}
-                        className="inline-flex items-center gap-1 text-[#57f0c6]">
+                      <motion.span initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} className="inline-flex items-center gap-1 text-[#57f0c6]">
                         <CheckCircle2 className="w-4 h-4" /> Saved
                       </motion.span>
                     )}
                     {saveMsg === 'err' && (
-                      <motion.span initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }}
-                        className="inline-flex items-center gap-1 text-[#ff9db1]">
+                      <motion.span initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} className="inline-flex items-center gap-1 text-[#ff9db1]">
                         <AlertCircle className="w-4 h-4" /> Failed
                       </motion.span>
                     )}
                   </AnimatePresence>
                 </div>
               </Card>
-            </div>
 
-            {/* Account & Security */}
-            <div id="security">
-              <SectionTitle>Account & Security</SectionTitle>
+              {/* Account & Security (inside Profile) */}
+              <SubSectionTitle icon={<Shield className="w-4 h-4" />} title="Account & Security" />
               <Card>
                 <div className="grid gap-4">
-                  {/* Sign-in methods row */}
+                  {/* Sign-in methods */}
                   <div className="rounded-[12px] p-4" style={{ background: 'rgba(15,18,20,0.55)', border: '1px solid rgba(255,255,255,0.06)' }}>
                     <div className="text-sm font-semibold mb-2">Sign-in methods</div>
                     <div className="flex flex-wrap items-center gap-2 text-xs text-white/80">
@@ -378,17 +348,15 @@ export default function AccountPage() {
                     </div>
                   </div>
 
-                  {/* Google-only -> Create Password */}
+                  {/* Google-only → Create password */}
                   {!hasEmailPassword && (
                     <div className="rounded-[12px] p-4"
-                      style={{ background: 'rgba(0,255,194,0.06)', border: '1px solid rgba(0,255,194,0.25)', boxShadow: '0 0 18px rgba(0,255,194,0.10) inset' }}>
+                         style={{ background: 'rgba(0,255,194,0.06)', border: '1px solid rgba(0,255,194,0.25)', boxShadow: '0 0 18px rgba(0,255,194,0.10) inset' }}>
                       <div className="flex items-center gap-2 mb-2">
                         <LockKeyhole className="w-4 h-4" />
                         <div className="text-sm font-semibold">Create a password</div>
                       </div>
-                      <p className="text-xs text-white/80 mb-3">
-                        You currently sign in with Google. Add a password so you can also sign in with email + password.
-                      </p>
+                      <p className="text-xs text-white/80 mb-3">Add a password so you can also sign in with email + password.</p>
 
                       <div className="grid gap-3">
                         <input type="password" className="w-full rounded-[10px] px-3 py-2 bg-black/20 border border-white/10 outline-none"
@@ -396,28 +364,25 @@ export default function AccountPage() {
                         <input type="password" className="w-full rounded-[10px] px-3 py-2 bg-black/20 border border-white/10 outline-none"
                                placeholder="Confirm password" value={pw2} onChange={(e) => setPw2(e.target.value)} />
                         <div className="h-1 w-full bg-white/10 rounded overflow-hidden">
-                          <div className="h-full"
-                               style={{ width: `${(pwStrength / 4) * 100}%`, background: 'linear-gradient(90deg,#40f3c9,#7bf7d8)', transition: 'width 220ms ease' }} />
+                          <div className="h-full" style={{ width: `${(pwStrength / 4) * 100}%`, background: 'linear-gradient(90deg,#40f3c9,#7bf7d8)', transition: 'width 220ms ease' }} />
                         </div>
 
                         <div className="flex items-center gap-3">
-                          <motion.button whileTap={{ scale: 0.98 }} onClick={createPassword} disabled={createPwLoading}
-                            className="inline-flex items-center gap-2 px-4 py-2 rounded-[10px] border transition hover:translate-y-[-1px] disabled:opacity-60"
-                            style={{ borderColor: 'rgba(106,247,209,0.28)', background: 'rgba(16,19,20,0.90)' }}>
+                          <button onClick={createPassword} disabled={createPwLoading}
+                                  className="inline-flex items-center gap-2 px-4 py-2 rounded-[10px] border transition hover:translate-y-[-1px] disabled:opacity-60"
+                                  style={{ borderColor: 'rgba(106,247,209,0.28)', background: 'rgba(16,19,20,0.90)' }}>
                             {createPwLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
                             Create password
-                          </motion.button>
+                          </button>
 
                           <AnimatePresence>
                             {createPwMsg === 'ok' && (
-                              <motion.span initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }}
-                                className="inline-flex items-center gap-1 text-[#57f0c6]">
+                              <motion.span initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} className="inline-flex items-center gap-1 text-[#57f0c6]">
                                 <CheckCircle2 className="w-4 h-4" /> Saved
                               </motion.span>
                             )}
                             {createPwMsg === 'err' && (
-                              <motion.span initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }}
-                                className="inline-flex items-center gap-1 text-[#ff9db1]">
+                              <motion.span initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} className="inline-flex items-center gap-1 text-[#ff9db1]">
                                 <ShieldAlert className="w-4 h-4" /> Check passwords
                               </motion.span>
                             )}
@@ -427,7 +392,7 @@ export default function AccountPage() {
                     </div>
                   )}
 
-                  {/* Email+password -> Reset link */}
+                  {/* Email+password → Reset link */}
                   {hasEmailPassword && (
                     <div className="rounded-[12px] p-4" style={{ background: 'rgba(15,18,20,0.55)', border: '1px solid rgba(255,255,255,0.06)' }}>
                       <div className="flex items-center gap-2 mb-1">
@@ -436,23 +401,21 @@ export default function AccountPage() {
                       </div>
                       <p className="text-xs text-white/80 mb-3">We’ll send a secure link to your email to update your password.</p>
                       <div className="flex items-center gap-3">
-                        <motion.button whileTap={{ scale: 0.98 }} onClick={sendReset} disabled={!userEmail || resetLoading}
-                          className="inline-flex items-center gap-2 px-4 py-2 rounded-[10px] border transition hover:translate-y-[-1px] disabled:opacity-60"
-                          style={{ borderColor: 'rgba(106,247,209,0.28)', background: 'rgba(16,19,20,0.90)' }}>
+                        <button onClick={sendReset} disabled={!userEmail || resetLoading}
+                                className="inline-flex items-center gap-2 px-4 py-2 rounded-[10px] border transition hover:translate-y-[-1px] disabled:opacity-60"
+                                style={{ borderColor: 'rgba(106,247,209,0.28)', background: 'rgba(16,19,20,0.90)' }}>
                           {resetLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
                           Send reset link
-                        </motion.button>
+                        </button>
 
                         <AnimatePresence>
                           {resetMsg === 'sent' && (
-                            <motion.span initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }}
-                              className="inline-flex items-center gap-1 text-[#57f0c6]">
+                            <motion.span initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} className="inline-flex items-center gap-1 text-[#57f0c6]">
                               <CheckCircle2 className="w-4 h-4" /> Sent
                             </motion.span>
                           )}
                           {resetMsg === 'err' && (
-                            <motion.span initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }}
-                              className="inline-flex items-center gap-1 text-[#ff9db1]">
+                            <motion.span initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} className="inline-flex items-center gap-1 text-[#ff9db1]">
                               <AlertCircle className="w-4 h-4" /> Failed
                             </motion.span>
                           )}
@@ -464,7 +427,7 @@ export default function AccountPage() {
               </Card>
             </div>
 
-            {/* Plan & Billing (no pricing list here) */}
+            {/* Plan & Billing (separate from pricing page) */}
             <div id="billing">
               <SectionTitle>Plan & Billing</SectionTitle>
               <Card>
@@ -483,23 +446,21 @@ export default function AccountPage() {
                 </div>
 
                 <div className="text-white/70 text-xs mb-5 flex items-center gap-2">
-                  <ShieldCheck className="w-4 h-4" /> Each account has its own private workspace. Free is demo-only; Pro unlocks full power.
+                  <ShieldCheck className="w-4 h-4" /> Free is demo-only. Upgrade to Pro for full features.
                 </div>
 
                 <div className="flex flex-wrap gap-3">
-                  {plan !== 'Pro' && (
-                    <motion.a whileTap={{ scale: 0.98 }}
-                      href="https://buy.stripe.com/3cI7sLgWz0zb0uT5hrgUM00" target="_blank" rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2 px-5 py-2 rounded-[10px] border font-semibold transition hover:translate-y-[-1px]"
-                      style={{ borderColor: 'rgba(106,247,209,0.28)', background: 'rgba(0,255,194,0.06)', boxShadow: '0 0 18px rgba(0,255,194,0.06)' }}>
-                      <Zap className="w-4 h-4" /> Upgrade to Pro (€19.99/mo)
-                    </motion.a>
-                  )}
-
                   <Link href="/account/pricing" className="inline-flex items-center gap-2 px-5 py-2 rounded-[10px] border hover:translate-y-[-1px]"
                         style={{ borderColor: 'rgba(106,247,209,0.28)', background: 'rgba(16,19,20,0.90)' }}>
                     View pricing <ChevronRight className="w-4 h-4" />
                   </Link>
+                  {plan !== 'Pro' && (
+                    <a href="https://buy.stripe.com/3cI7sLgWz0zb0uT5hrgUM00" target="_blank" rel="noopener noreferrer"
+                       className="inline-flex items-center gap-2 px-5 py-2 rounded-[10px] border font-semibold hover:translate-y-[-1px]"
+                       style={{ borderColor: 'rgba(106,247,209,0.28)', background: 'rgba(0,255,194,0.06)' }}>
+                      <Zap className="w-4 h-4" /> Upgrade to Pro (€19.99/mo)
+                    </a>
+                  )}
                 </div>
               </Card>
             </div>
@@ -510,10 +471,18 @@ export default function AccountPage() {
   );
 }
 
-/* ---------- small building blocks ---------- */
+/* ---------- helpers ---------- */
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return <h2 className="text-lg font-semibold mb-3">{children}</h2>;
+}
+
+function SubSectionTitle({ icon, title }: { icon: React.ReactNode; title: string }) {
+  return (
+    <div className="flex items-center gap-2 mt-8 mb-3 text-sm font-semibold text-white/90">
+      {icon}<span>{title}</span>
+    </div>
+  );
 }
 
 function Card({ children }: { children: React.ReactNode }) {
@@ -522,11 +491,8 @@ function Card({ children }: { children: React.ReactNode }) {
       initial={{ opacity: 0, y: 14 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.28 }}
-      whileHover={{ y: -2 }}
-      className="rounded-[16px] p-6 transition-shadow"
+      className="rounded-[16px] p-6"
       style={{ background: UI.cardBg, border: UI.border, boxShadow: UI.cardShadow }}
-      onMouseEnter={(e) => ((e.currentTarget as HTMLDivElement).style.boxShadow = UI.hoverShadow)}
-      onMouseLeave={(e) => ((e.currentTarget as HTMLDivElement).style.boxShadow = UI.cardShadow)}
     >
       {children}
     </motion.section>
@@ -545,35 +511,33 @@ function InfoRow({ icon, label, value }: { icon: React.ReactNode; label: string;
 
 function ThemeTile({ label, active, onClick, icon }: { label: string; active: boolean; onClick: () => void; icon: React.ReactNode; }) {
   return (
-    <motion.button whileTap={{ scale: 0.98 }}
+    <button
       onClick={onClick}
       className="rounded-[14px] p-4 text-left transition-all hover:translate-y-[-1px]"
       style={{
         background: active ? 'rgba(0,255,194,0.08)' : 'rgba(15,18,20,0.55)',
         border: `1px solid ${active ? 'rgba(0,255,194,0.28)' : 'rgba(255,255,255,0.06)'}`,
         boxShadow: active ? '0 0 14px rgba(0,255,194,0.18) inset, 0 0 10px rgba(0,255,194,0.05)' : 'inset 0 0 12px rgba(0,0,0,0.32)',
-      }}>
+      }}
+    >
       <div className="flex items-center gap-2">
         <div className="w-8 h-8 rounded-[10px] flex items-center justify-center bg-black/20 border border-white/10">{icon}</div>
         <div className="font-semibold">{label}</div>
       </div>
       <div className="text-xs text-white/60 mt-2">{label === 'Light' ? 'Bright backgrounds and dark text.' : 'Dim backgrounds and light text.'}</div>
-    </motion.button>
+    </button>
   );
 }
 
-function SettingsLink({ icon, label, href, external=false }: { icon: React.ReactNode; label: string; href: string; external?: boolean; }) {
-  const content = (
-    <div className="w-full flex items-center justify-between rounded-[12px] px-3 py-2 border text-white/85 hover:translate-y-[-1px] transition"
-         style={{ borderColor: 'rgba(255,255,255,0.08)', background: 'rgba(15,18,20,0.55)' }}>
+function SettingsLink({ icon, label, href }: { icon: React.ReactNode; label: string; href: string; }) {
+  return (
+    <a href={href}
+       className="w-full flex items-center justify-between rounded-[12px] px-3 py-2 border text-white/85 hover:translate-y-[-1px] transition"
+       style={{ borderColor: 'rgba(255,255,255,0.08)', background: 'rgba(15,18,20,0.55)' }}>
       <span className="flex items-center gap-2 text-sm">{icon}{label}</span>
       <ChevronRight className="w-4 h-4 text-white/60" />
-    </div>
+    </a>
   );
-  if (external || href.startsWith('/')) {
-    return <Link href={href}>{content}</Link>;
-  }
-  return <a href={href}>{content}</a>;
 }
 
 function Badge({ children }: { children: React.ReactNode }) {
