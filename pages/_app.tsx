@@ -70,19 +70,20 @@ export default function App({ Component, pageProps }: AppProps) {
 
   /**
    * Grid layout:
-   * - col 1: sidebar
-   * - col 2: centered main content (max width)
+   * - col 1: sidebar with responsive fixed width (prevents the thin icon-only gutter on desktop)
+   * - col 2: main content (fills remaining width), padded so content never touches the sidebar (“magnet” feel)
    */
   return (
-    <div className="min-h-screen w-full text-white relative" style={{ background: BG }}>
+    <div className="min-h-screen w-full text-white" style={{ background: BG }}>
       <div
         className="
           grid
-          grid-cols-[72px_1fr]
-          sm:grid-cols-[200px_1fr]
-          md:grid-cols-[220px_1fr]
-          lg:grid-cols-[240px_1fr]
+          grid-cols-[72px_1fr]          /* xs: tiny rail */
+          sm:grid-cols-[200px_1fr]      /* sm: compact sidebar */
+          md:grid-cols-[220px_1fr]      /* md: normal */
+          lg:grid-cols-[240px_1fr]      /* lg: wider */
           xl:grid-cols-[260px_1fr]
+          gap-0
         "
       >
         {/* Sidebar (sticky, responsive width) */}
@@ -90,19 +91,11 @@ export default function App({ Component, pageProps }: AppProps) {
           <div className="sticky top-0 h-screen overflow-y-auto">
             <Sidebar />
           </div>
-          {/* soft edge highlight to separate from content */}
-          <div className="pointer-events-none absolute top-0 right-0 h-full w-px bg-white/5" />
-          <div
-            className="pointer-events-none absolute top-0 right-0 h-full w-24 hidden md:block"
-            style={{ background: 'linear-gradient(90deg, rgba(0,0,0,0), rgba(0,0,0,0.18))' }}
-          />
         </aside>
 
-        {/* Main content (centered, capped width) */}
+        {/* Main content (never overlaps / never touches) */}
         <main className="min-w-0 px-4 sm:px-6 lg:px-8 py-8">
-          <div className="mx-auto w-full max-w-[1200px]">
-            <Component {...pageProps} />
-          </div>
+          <Component {...pageProps} />
         </main>
       </div>
     </div>
