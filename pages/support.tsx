@@ -53,35 +53,56 @@ export default function SupportPage() {
 
   return (
     <ContentWrapper>
-      <div style={styles.card}>
-        <div style={styles.header}>
-          <div style={styles.rileyDot} />
-          <span>Riley Support</span>
+      <div className="w-full max-w-3xl mx-auto bg-white dark:bg-[#0d0f11] border border-gray-200 dark:border-gray-700 rounded-2xl shadow-sm p-4 flex flex-col gap-3">
+        {/* Header */}
+        <div className="flex items-center gap-2 text-lg font-semibold text-black dark:text-white">
+          <div className="w-2.5 h-2.5 rounded-full bg-green-400 shadow" />
+          Riley Support
         </div>
 
-        <div ref={listRef} style={styles.list}>
+        {/* Messages */}
+        <div ref={listRef} className="flex-1 min-h-[360px] max-h-[60vh] overflow-y-auto flex flex-col gap-3 p-2">
           {messages.map(m => (
-            <div key={m.id} style={m.role === 'user' ? styles.rowUser : styles.rowBot}>
-              <div style={m.role === 'user' ? styles.bubbleUser : styles.bubbleBot}>{m.text}</div>
+            <div key={m.id} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
+              <div
+                className={`px-3 py-2 rounded-lg max-w-[80%] whitespace-pre-wrap break-words text-sm
+                ${m.role === 'user'
+                  ? 'bg-green-100 text-black dark:bg-emerald-900/30 dark:border dark:border-emerald-600/40 dark:text-emerald-100'
+                  : 'bg-gray-100 text-black dark:bg-gray-800/50 dark:border dark:border-gray-700 dark:text-gray-100'}`}
+              >
+                {m.text}
+              </div>
             </div>
           ))}
-          {loading && <div style={styles.rowBot}><div style={styles.bubbleBot}><TypingDots /></div></div>}
+          {loading && (
+            <div className="flex justify-start">
+              <div className="px-3 py-2 rounded-lg max-w-[80%] text-sm bg-gray-100 text-black dark:bg-gray-800/50 dark:text-gray-100">
+                <TypingDots />
+              </div>
+            </div>
+          )}
         </div>
 
-        <div style={styles.inputRow}>
+        {/* Input */}
+        <div className="flex gap-2 pt-2">
           <input
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={onKey}
             placeholder="Ask Riley…"
-            style={styles.input}
+            className="flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#0b0c10] text-black dark:text-white outline-none"
           />
-          <button onClick={send} disabled={loading || !input.trim()} style={styles.button}>
+          <button
+            onClick={send}
+            disabled={loading || !input.trim()}
+            className="px-4 py-2 rounded-lg border border-green-400 bg-green-100 text-black font-medium hover:bg-green-200 dark:bg-emerald-900/30 dark:text-emerald-100 dark:hover:bg-emerald-800/50 transition disabled:opacity-50"
+          >
             Send
           </button>
         </div>
 
-        <div style={styles.note}>
+        {/* Note */}
+        <div className="text-xs text-center text-gray-500 dark:text-gray-400">
           Riley will never reveal or summarize code, file contents, or paths. If asked, Riley will refuse.
         </div>
       </div>
@@ -91,77 +112,10 @@ export default function SupportPage() {
 
 function TypingDots() {
   return (
-    <span style={styles.dotsWrap} aria-label="Riley is thinking">
-      <span style={{ ...styles.dot, animationDelay: '0ms' }} />
-      <span style={{ ...styles.dot, animationDelay: '120ms' }} />
-      <span style={{ ...styles.dot, animationDelay: '240ms' }} />
+    <span className="flex gap-1 items-center" aria-label="Riley is thinking">
+      <span className="w-1.5 h-1.5 rounded-full bg-gray-400 dark:bg-gray-200 animate-bounce [animation-delay:0ms]" />
+      <span className="w-1.5 h-1.5 rounded-full bg-gray-400 dark:bg-gray-200 animate-bounce [animation-delay:120ms]" />
+      <span className="w-1.5 h-1.5 rounded-full bg-gray-400 dark:bg-gray-200 animate-bounce [animation-delay:240ms]" />
     </span>
   );
-}
-
-const styles: Record<string, React.CSSProperties> = {
-  card: {
-    width: '100%',
-    maxWidth: 920,
-    margin: '0 auto',
-    background: '#0d0f11',
-    border: '1px dashed rgba(0,255,194,0.25)',
-    boxShadow: '0 0 40px rgba(0,255,194,0.12)',
-    borderRadius: 24,
-    padding: 16,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 12,
-  },
-  header: { display: 'flex', alignItems: 'center', gap: 10, fontSize: 18, color: '#e6fff7' },
-  rileyDot: {
-    width: 10, height: 10, borderRadius: 999,
-    background: 'rgba(0,255,194,0.9)', boxShadow: '0 0 12px rgba(0,255,194,0.8)',
-  },
-  list: { flex: 1, minHeight: 360, maxHeight: '60vh', overflowY: 'auto', padding: 8, display: 'flex', flexDirection: 'column', gap: 10 },
-  rowUser: { display: 'flex', justifyContent: 'flex-end' },
-  rowBot: { display: 'flex', justifyContent: 'flex-start' },
-  bubbleUser: {
-    background: 'linear-gradient(180deg, rgba(0,255,194,0.25), rgba(0,255,194,0.12))',
-    border: '1px solid rgba(0,255,194,0.35)',
-    color: '#dffef6',
-    padding: '10px 12px',
-    borderRadius: 14,
-    maxWidth: '80%',
-    whiteSpace: 'pre-wrap',
-    wordBreak: 'break-word',
-  },
-  bubbleBot: {
-    background: 'rgba(255,255,255,0.04)',
-    border: '1px solid rgba(255,255,255,0.08)',
-    color: '#e5f9f3',
-    padding: '10px 12px',
-    borderRadius: 14,
-    maxWidth: '80%',
-    whiteSpace: 'pre-wrap',
-    wordBreak: 'break-word',
-  },
-  inputRow: { display: 'flex', gap: 8, paddingTop: 6 },
-  input: {
-    flex: 1, background: '#0b0c10', border: '1px solid rgba(255,255,255,0.08)',
-    color: '#e6fff7', padding: '12px 14px', borderRadius: 12, outline: 'none',
-  },
-  button: {
-    background: 'rgba(0,255,194,0.15)', border: '1px solid rgba(0,255,194,0.4)',
-    color: '#dffef6', padding: '12px 16px', borderRadius: 12, cursor: 'pointer',
-  },
-  note: { fontSize: 12, opacity: 0.65, textAlign: 'center', paddingTop: 4, color: '#c7efe6' },
-  dotsWrap: { display: 'inline-flex', gap: 6, alignItems: 'center' },
-  dot: { width: 6, height: 6, borderRadius: 999, background: 'rgba(230,255,247,0.95)', display: 'inline-block', animation: 'riley-bounce 900ms infinite ease-in-out' } as React.CSSProperties,
-};
-
-if (typeof document !== 'undefined' && !document.getElementById('riley-bounce-style')) {
-  const style = document.createElement('style');
-  style.id = 'riley-bounce-style';
-  style.innerHTML = `
-  @keyframes riley-bounce {
-    0%, 80%, 100% { transform: translateY(0); opacity: .5; }
-    40% { transform: translateY(-6px); opacity: 1; }
-  }`;
-  document.head.appendChild(style);
 }
