@@ -4,9 +4,9 @@ import React, { useEffect, useState } from 'react';
 
 type ApiKey = {
   id: string;
-  name: string;   // project name
-  short: string;  // first 4 chars for preview
-  key: string;    // full key (kept in localStorage only)
+  name: string;
+  short: string;
+  key: string;
 };
 
 const STORAGE_KEY = 'apiKeys';
@@ -16,7 +16,6 @@ export default function ApiKeysPage() {
   const [projectName, setProjectName] = useState('');
   const [apiKeyValue, setApiKeyValue] = useState('');
 
-  // Load on mount
   useEffect(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
@@ -36,12 +35,7 @@ export default function ApiKeysPage() {
 
     const next: ApiKey[] = [
       ...apiKeys,
-      {
-        id: Date.now().toString(),
-        name,
-        short: value.slice(0, 4),
-        key: value,
-      },
+      { id: Date.now().toString(), name, short: value.slice(0, 4), key: value },
     ];
     persist(next);
     setProjectName('');
@@ -49,52 +43,54 @@ export default function ApiKeysPage() {
   };
 
   const removeKey = (id: string) => {
-    persist(apiKeys.filter(k => k.id !== id));
+    persist(apiKeys.filter((k) => k.id !== id));
   };
 
   const copyKey = async (full: string) => {
     try {
       await navigator.clipboard.writeText(full);
-      // quick UX ping — optional
       alert('API key copied to clipboard');
     } catch {}
   };
 
   return (
-    <div className="min-h-screen bg-[#0b0c10] text-white px-6 py-10 md:pl-[260px]">
+    <div className="min-h-screen bg-white text-black dark:bg-[#0b0c10] dark:text-white px-6 py-10 md:pl-[260px]">
       <div className="max-w-3xl mx-auto">
-        <h1 className="text-3xl font-bold mb-2 text-[#00ffc2] drop-shadow-[0_0_10px_#00ffc2]">
-          API Keys
-        </h1>
-        <p className="text-white/70 mb-8">
-          Manage your OpenAI API keys for different projects. Keys are stored in your browser (localStorage).
+        <h1 className="text-3xl font-bold mb-2">API Keys</h1>
+        <p className="text-gray-600 dark:text-gray-400 mb-8">
+          Manage your OpenAI API keys for different projects. Keys are stored
+          in your browser (localStorage).
         </p>
 
         {/* List */}
-        <div className="bg-[#0d0f11] border border-[#00ffc240] rounded-2xl shadow-[0_0_20px_#00ffc230] p-6">
+        <div className="bg-white dark:bg-[#0d0f11] border border-gray-200 dark:border-gray-700 rounded-2xl p-6 shadow-sm">
           {apiKeys.length === 0 ? (
-            <p className="text-center text-white/60">No API keys saved yet.</p>
+            <p className="text-center text-gray-500 dark:text-gray-400">
+              No API keys saved yet.
+            </p>
           ) : (
             <ul className="space-y-3">
-              {apiKeys.map(k => (
+              {apiKeys.map((k) => (
                 <li
                   key={k.id}
-                  className="flex items-center justify-between gap-3 bg-[#14171b] border border-[#00ffc220] rounded-xl p-3"
+                  className="flex items-center justify-between gap-3 bg-gray-50 dark:bg-[#14171b] border border-gray-200 dark:border-gray-700 rounded-xl p-3"
                 >
                   <div className="truncate">
                     <div className="font-semibold">{k.name}</div>
-                    <div className="text-sm text-white/60">({k.short}***)</div>
+                    <div className="text-sm text-gray-500 dark:text-gray-400">
+                      ({k.short}***)
+                    </div>
                   </div>
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => copyKey(k.key)}
-                      className="px-3 py-1.5 rounded-lg bg-[#00ffc2] text-black text-sm font-semibold shadow-[0_0_10px_#00ffc2] hover:shadow-[0_0_18px_#00ffc2]"
+                      className="px-3 py-1.5 rounded-lg bg-green-400 text-black text-sm font-semibold hover:bg-green-300 transition"
                     >
                       Copy
                     </button>
                     <button
                       onClick={() => removeKey(k.id)}
-                      className="px-3 py-1.5 rounded-lg bg-red-500/20 text-red-300 text-sm hover:bg-red-500/30"
+                      className="px-3 py-1.5 rounded-lg bg-red-100 text-red-600 text-sm hover:bg-red-200 dark:bg-red-500/20 dark:text-red-300 dark:hover:bg-red-500/30 transition"
                     >
                       Delete
                     </button>
@@ -106,25 +102,25 @@ export default function ApiKeysPage() {
         </div>
 
         {/* Add Form */}
-        <div className="mt-6 bg-[#0d0f11] border border-[#00ffc240] rounded-2xl shadow-[0_0_15px_#00ffc230] p-6">
-          <h3 className="text-lg mb-3 text-[#00ffc2]">Add New Project API Key</h3>
+        <div className="mt-6 bg-white dark:bg-[#0d0f11] border border-gray-200 dark:border-gray-700 rounded-2xl p-6 shadow-sm">
+          <h3 className="text-lg mb-3 font-semibold">Add New Project API Key</h3>
           <input
             type="text"
             placeholder="Project Name"
             value={projectName}
             onChange={(e) => setProjectName(e.target.value)}
-            className="w-full mb-3 p-2 rounded-lg bg-[#0a0a0a] border border-[#333] text-white"
+            className="w-full mb-3 p-2 rounded-lg bg-gray-50 dark:bg-[#0a0a0a] border border-gray-300 dark:border-gray-700 text-black dark:text-white outline-none"
           />
           <input
             type="password"
             placeholder="sk-xxxxxxxxxxxxxxxxxxxx"
             value={apiKeyValue}
             onChange={(e) => setApiKeyValue(e.target.value)}
-            className="w-full mb-4 p-2 rounded-lg bg-[#0a0a0a] border border-[#333] text-white"
+            className="w-full mb-4 p-2 rounded-lg bg-gray-50 dark:bg-[#0a0a0a] border border-gray-300 dark:border-gray-700 text-black dark:text-white outline-none"
           />
           <button
             onClick={addKey}
-            className="w-full bg-[#00ffc2] text-black font-semibold py-2 rounded-lg shadow-[0_0_10px_#00ffc2] hover:shadow-[0_0_20px_#00ffc2]"
+            className="w-full bg-green-400 text-black font-semibold py-2 rounded-lg hover:bg-green-300 transition"
           >
             Save API Key
           </button>
