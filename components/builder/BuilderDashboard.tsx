@@ -28,8 +28,8 @@ import { s } from '@/utils/safe';
 
 const Bot3D = dynamic(() => import('./Bot3D.client'), {
   ssr: false,
-  // flat placeholder (no glassy gradient)
-  loading: () => <div className="h-full w-full bg-[#0f1314]" />,
+  // simple non-glassy placeholder
+  loading: () => <div className="h-full w-full bg-[#121517]" />,
 });
 
 type Appearance = {
@@ -56,7 +56,7 @@ type Bot = {
   language?: string;
   model?: string;
   description?: string;
-  prompt?: string;
+  prompt?: string; // Step 3 raw
   createdAt?: string;
   updatedAt?: string;
   appearance?: Appearance;
@@ -69,11 +69,13 @@ const fmtDate = (iso?: string) => (iso ? new Date(iso).toLocaleDateString() : ''
 
 // newest → oldest by updatedAt (fallback createdAt)
 const sortByNewest = (arr: Bot[]) =>
-  arr.slice().sort(
-    (a, b) =>
-      Date.parse(b.updatedAt || b.createdAt || '0') -
-      Date.parse(a.updatedAt || a.createdAt || '0')
-  );
+  arr
+    .slice()
+    .sort(
+      (a, b) =>
+        Date.parse(b.updatedAt || b.createdAt || '0') -
+        Date.parse(a.updatedAt || a.createdAt || '0')
+    );
 
 function loadBots(): Bot[] {
   if (typeof window === 'undefined') return [];
@@ -91,7 +93,7 @@ function loadBots(): Bot[] {
         language: s(b?.language),
         model: s(b?.model, 'gpt-4o-mini'),
         description: s(b?.description),
-        prompt: s(b?.prompt),
+        prompt: s(b?.prompt), // keep EXACT Step 3
         createdAt: b?.createdAt ?? nowISO(),
         updatedAt: b?.updatedAt ?? b?.createdAt ?? nowISO(),
         appearance: b?.appearance ?? undefined,
@@ -121,7 +123,7 @@ type PromptSectionKey =
 type SplitSection = {
   key: PromptSectionKey;
   title: string;
-  text: string;
+  text: string; // exact slice from Step 3
 };
 
 const DISPLAY_TITLES: Record<PromptSectionKey, string> = {
@@ -171,7 +173,7 @@ function splitStep3IntoSections(step3Raw?: string): SplitSection[] | null {
     out.push({
       key: h.label,
       title: DISPLAY_TITLES[h.label] || h.label,
-      text: step3Raw.slice(h.end, nextStart),
+      text: step3Raw.slice(h.end, nextStart), // exact slice (no sanitizing)
     });
   }
   return out;
@@ -191,7 +193,7 @@ export default function BuilderDashboard() {
   const [bots, setBots] = useState<Bot[]>([]);
   const [customizingId, setCustomizingId] = useState<string | null>(null);
   const [viewId, setViewId] = useState<string | null>(null);
-  const [loadingBots, setLoadingBots] = useState(true); // lightweight loading phase
+  const [booting, setBooting] = useState(true); // lightweight loading phase
 
   useEffect(() => {
     try {
@@ -200,6 +202,21 @@ export default function BuilderDashboard() {
         localStorage.removeItem('builder:cleanup');
       }
     } catch {}
+  }, []);
+
+  useEffect(() => {
+    // initial load
+    const initial = loadBots();
+    setBots(initial);
+    setBooting(false);
+
+    const onStorage = (e: StorageEvent) => {
+      if (STORAGE_KEYS.includes(e.key || '')) setBots(loadBots());
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('storage', onStorage);
+      return () => window.removeEventListener('storage', onStorage);
+    }
   }, []);
 
   useEffect(() => {
@@ -217,21 +234,6 @@ export default function BuilderDashboard() {
       };
       ['builder:step1', 'builder:step2', 'builder:step3'].forEach(normalize);
     } catch {}
-  }, []);
-
-  useEffect(() => {
-    // simulate/allow paint before reading localStorage for smoother feel
-    requestAnimationFrame(() => {
-      setBots(loadBots());
-      setLoadingBots(false);
-    });
-    const onStorage = (e: StorageEvent) => {
-      if (STORAGE_KEYS.includes(e.key || '')) setBots(loadBots());
-    };
-    if (typeof window !== 'undefined') {
-      window.addEventListener('storage', onStorage);
-      return () => window.removeEventListener('storage', onStorage);
-    }
   }, []);
 
   const filtered = useMemo(() => {
@@ -270,7 +272,7 @@ export default function BuilderDashboard() {
           <h1 className="text-2xl md:text-3xl font-semibold">Builds</h1>
           <button
             onClick={() => router.push('/builder?step=1')}
-            className="px-4 py-2 rounded-[10px] bg-[#00ffc2] text-white font-semibold shadow-[0_0_10px_rgba(106,247,209,0.28)] hover:brightness-110 transition"
+            className="px-4 py-2 rounded-[10px] bg-[#00ffc2] text-white font-semibold shadow-[0_10px_30px_rgba(0,255,194,0.25)] hover:brightness-110 transition"
           >
             Create a Build
           </button>
@@ -281,17 +283,18 @@ export default function BuilderDashboard() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search projects and builds…"
-            className="w-full rounded-[10px] bg-[#101314] text-white/95 border border-[#13312b] px-5 py-4 text-[15px] outline-none focus:border-[#00ffc2] transition-colors"
+            className="w-full rounded-[10px] bg-[#101314] text-white/95 border border-[#13312b] px-5 py-4 text-[15px] outline-none focus:border-[#00ffc2]"
           />
         </div>
 
-        {/* skeleton while reading localStorage */}
-        {loadingBots ? (
+        {/* Loading skeletons */}
+        {booting ? (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-7">
             {Array.from({ length: 6 }).map((_, i) => (
               <div
                 key={i}
                 className="h-[380px] rounded-[16px] bg-[#111416] border border-white/10 animate-pulse"
+                style={{ boxShadow: '0 14px 40px rgba(0,0,0,0.45)' }}
               />
             ))}
           </div>
@@ -317,7 +320,7 @@ export default function BuilderDashboard() {
           </div>
         )}
 
-        {!loadingBots && filtered.length === 0 && (
+        {!booting && filtered.length === 0 && (
           <div className="mt-12 text-center text-white/60">
             No builds found. Click <span className="text-[#00ffc2]">Create a Build</span> to get started.
           </div>
@@ -367,6 +370,7 @@ export default function BuilderDashboard() {
 }
 
 /* --------------------------- Prompt Overlay --------------------------- */
+/* Same structure; non-glassy surfaces. */
 
 function buildRawStep1PlusStep3(bot: Bot): string {
   const head = [bot.name, bot.industry, bot.language].filter(Boolean).join('\n');
@@ -395,26 +399,21 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
     URL.revokeObjectURL(url);
   };
 
-  // simple, flat frame
   const FRAME_STYLE: React.CSSProperties = {
-    background: '#0f1314',
-    border: '1px solid rgba(255,255,255,0.12)',
-    borderRadius: 20,
-  };
-  const CARD_STYLE: React.CSSProperties = {
-    background: '#101314',
-    border: '1px solid rgba(255,255,255,0.12)',
-    borderRadius: 14,
+    background: '#0f1214',
+    border: '1px solid rgba(255,255,255,0.10)',
+    boxShadow: '0 30px 80px rgba(0,0,0,0.70)',
+    borderRadius: 30,
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-black/50">
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-black/60">
       <div className="relative w-full max-w-[1280px] max-h-[88vh] flex flex-col" style={FRAME_STYLE}>
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
+        <div className="flex items-center justify-between px-6 py-4 rounded-t-[30px] border-b border-white/15">
           <div className="min-w-0">
             <h2 className="text-white text-xl font-semibold truncate">Prompt</h2>
-            <div className="text-white/80 text-xs md:text-sm truncate">
+            <div className="text-white/90 text-xs md:text-sm truncate">
               {[bot.name, bot.industry, bot.language].filter(Boolean).join(' · ') || '—'}
             </div>
           </div>
@@ -422,7 +421,7 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
           <div className="flex items-center gap-2">
             <button
               onClick={copyAll}
-              className="inline-flex items-center gap-2 rounded-md px-3 py-2 text-xs border border-white/20 bg-[#0d0f11] text-white hover:bg-white/5"
+              className="inline-flex items-center gap-2 rounded-[12px] px-3 py-2 text-xs border border-white/20 bg-[#101314] hover:bg-white/5"
               title="Copy"
             >
               <Copy className="w-3.5 h-3.5" />
@@ -430,7 +429,7 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
             </button>
             <button
               onClick={downloadTxt}
-              className="inline-flex items-center gap-2 rounded-md px-3 py-2 text-xs border border-white/20 bg-[#0d0f11] text-white hover:bg-white/5"
+              className="inline-flex items-center gap-2 rounded-[12px] px-3 py-2 text-xs border border-white/20 bg-[#101314] hover:bg-white/5"
               title="Download"
             >
               <DownloadIcon className="w-3.5 h-3.5" />
@@ -450,13 +449,11 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
         {/* Body */}
         <div className="flex-1 overflow-y-auto p-6">
           {!bot.prompt ? (
-            <div className="p-5 text-white/80" style={CARD_STYLE}>
-              (No Step 3 prompt yet)
-            </div>
+            <div className="p-5 text-white/80 rounded-2xl border border-white/10 bg-[#121517]">(No Step 3 prompt yet)</div>
           ) : sections ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {sections.map((sec, i) => (
-                <div key={i} style={CARD_STYLE} className="overflow-hidden">
+                <div key={i} className="overflow-hidden rounded-2xl border border-white/10 bg-[#121517]">
                   <div className="px-5 pt-4 pb-3">
                     <div className="flex items-center gap-2 text-white font-semibold text-sm">
                       {ICONS[sec.key]} {sec.title}
@@ -469,18 +466,18 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
               ))}
             </div>
           ) : (
-            <div style={CARD_STYLE} className="p-5">
+            <div className="p-5 rounded-2xl border border-white/10 bg-[#121517]">
               <pre className="whitespace-pre-wrap text-sm leading-6 text-white">{bot.prompt}</pre>
             </div>
           )}
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 border-t border-white/10 bg-[#0f1314] rounded-b-[20px]">
+        <div className="px-6 py-4 rounded-b-[30px] border-t border-white/15 bg-[#101314]">
           <div className="flex justify-end">
             <button
               onClick={onClose}
-              className="px-5 py-2 rounded-md font-semibold bg-[#0b8a6a] text-white hover:brightness-110"
+              className="px-5 py-2 rounded-[12px] font-semibold bg-emerald-700 text-white hover:brightness-110"
             >
               Close
             </button>
@@ -497,7 +494,17 @@ function CreateCard({ onClick }: { onClick: () => void }) {
   return (
     <button
       onClick={onClick}
-      className="group relative h-[380px] rounded-[16px] p-7 flex flex-col items-center justify-center transition-transform active:scale-[0.995] bg-[#111416] border border-white/10 hover:border-white/20"
+      className="
+        group relative h-[380px] rounded-[16px] p-7
+        flex flex-col items-center justify-center
+        transition-all active:scale-[0.995]
+        bg-[#111416] border border-white/10
+        hover:border-white/20
+      "
+      style={{
+        boxShadow:
+          '0 14px 40px rgba(0,0,0,0.45), 0 2px 0 rgba(0,0,0,0.08), 0 0 0 1px rgba(255,255,255,0.04) inset',
+      }}
     >
       <div className="w-20 h-20 rounded-full flex items-center justify-center mb-5 border-2 border-dashed border-[#6af7d1] bg-black/20">
         <Plus className="w-10 h-10" style={{ color: '#6af7d1', opacity: 0.9 }} />
@@ -529,13 +536,22 @@ function BuildCard({
   const ap = bot.appearance || {};
   return (
     <div
-      className="relative h-[380px] rounded-[16px] p-0 flex flex-col justify-between transition-all bg-[#111416] border border-white/10 hover:border-white/20"
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      className="
+        relative h-[380px] rounded-[16px] p-0
+        flex flex-col justify-between
+        transition-all
+        bg-[#111416] border border-white/10 hover:border-white/20
+      "
+      style={{
+        transform: hover ? 'translateY(-2px)' : 'none',
+        boxShadow: hover
+          ? '0 18px 50px rgba(0,0,0,0.55), 0 2px 0 rgba(0,0,0,0.08), 0 0 0 1px rgba(255,255,255,0.05) inset'
+          : '0 14px 40px rgba(0,0,0,0.45), 0 2px 0 rgba(0,0,0,0.08), 0 0 0 1px rgba(255,255,255,0.04) inset',
+      }}
     >
-      <div
-        className="h-48 border-b border-white/10 overflow-hidden relative"
-        onMouseEnter={() => setHover(true)}
-        onMouseLeave={() => setHover(false)}
-      >
+      <div className="h-48 border-b border-white/10 overflow-hidden relative">
         <button
           onClick={onCustomize}
           className="absolute right-3 top-3 z-10 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-[10px] text-xs border border-white/20 bg-[#101314] hover:bg-white/5"
@@ -543,6 +559,7 @@ function BuildCard({
           <SlidersHorizontal className="w-3.5 h-3.5" />
           Customize
         </button>
+
         {/* @ts-ignore */}
         <Bot3D
           className="h-full"
@@ -562,6 +579,7 @@ function BuildCard({
           idle={ap.hasOwnProperty('idle') ? Boolean(ap.idle) : hover}
         />
       </div>
+
       <div className="p-6 flex-1 flex flex-col justify-between">
         <div className="flex items-center gap-3">
           <div className="w-11 h-11 rounded-[10px] flex items-center justify-center border-2 border-[#6af7d1]/35 bg-black/20">
@@ -581,11 +599,14 @@ function BuildCard({
             <Trash2 className="w-4 h-4 text-white/70 hover:text-[#ff7a7a]" />
           </button>
         </div>
-        <div className="mt-4 flex items-end justify-between">
+
+        <div className="mt-4 flex items/end justify-between">
           <div className="text-[12px] text-white/50">Updated {fmtDate(bot.updatedAt || bot.createdAt)}</div>
           <button
             onClick={onOpen}
-            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-[10px] text-sm border border-white/20 bg-[#101314] hover:bg-white/5 transition hover:translate-y-[-1px]"
+            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-[10px] text-sm
+                       border border-white/20 bg-[#101314] hover:bg-white/5
+                       transition-transform hover:-translate-y-[1px]"
           >
             Open <ArrowRight className="w-4 h-4" />
           </button>
