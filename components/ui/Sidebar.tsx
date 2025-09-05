@@ -41,11 +41,13 @@ export default function Sidebar() {
 
   return (
     <div className="sidebar flex flex-col h-screen w-[260px] border-r">
+      {/* Logo / title */}
       <div className="px-4 py-6">
         <div className="text-lg font-bold text-accent-green">reducai.io</div>
         <div className="text-xs text-foreground/60">Builder Workspace</div>
       </div>
 
+      {/* Nav links */}
       <nav className="flex flex-col gap-2 px-2">
         {navItems.map(({ href, label, desc, icon: Icon }) => {
           const active = pathname.startsWith(href);
