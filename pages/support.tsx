@@ -1,4 +1,5 @@
 'use client';
+
 import React, { useEffect, useRef, useState } from 'react';
 import ContentWrapper from '@/components/layout/ContentWrapper';
 
@@ -53,22 +54,40 @@ export default function SupportPage() {
 
   return (
     <ContentWrapper>
-      <div className="w-full max-w-3xl mx-auto bg-white dark:bg-[#0d0f11] border border-gray-200 dark:border-gray-700 rounded-2xl shadow-sm p-4 flex flex-col gap-3">
-        {/* Header */}
-        <div className="flex items-center gap-2 text-lg font-semibold text-black dark:text-white">
-          <div className="w-2.5 h-2.5 rounded-full bg-green-400 shadow" />
+      <div
+        className="w-full max-w-[920px] mx-auto rounded-2xl flex flex-col gap-3 p-4"
+        style={{
+          background: 'var(--panel)',
+          border: '1px dashed var(--brand-weak)',
+          boxShadow: 'var(--shadow-card)',
+        }}
+      >
+        {/* header */}
+        <div className="flex items-center gap-3 text-lg font-medium" style={{ color: 'var(--text)' }}>
+          <div
+            className="w-3 h-3 rounded-full"
+            style={{ background: 'var(--brand)', boxShadow: `0 0 12px var(--brand)` }}
+          />
           Riley Support
         </div>
 
-        {/* Messages */}
-        <div ref={listRef} className="flex-1 min-h-[360px] max-h-[60vh] overflow-y-auto flex flex-col gap-3 p-2">
+        {/* messages */}
+        <div
+          ref={listRef}
+          className="flex-1 min-h-[360px] max-h-[60vh] overflow-y-auto p-2 flex flex-col gap-2"
+        >
           {messages.map(m => (
             <div key={m.id} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
               <div
-                className={`px-3 py-2 rounded-lg max-w-[80%] whitespace-pre-wrap break-words text-sm
-                ${m.role === 'user'
-                  ? 'bg-green-100 text-black dark:bg-emerald-900/30 dark:border dark:border-emerald-600/40 dark:text-emerald-100'
-                  : 'bg-gray-100 text-black dark:bg-gray-800/50 dark:border dark:border-gray-700 dark:text-gray-100'}`}
+                className="px-3 py-2 rounded-lg max-w-[80%] whitespace-pre-wrap break-words text-sm"
+                style={{
+                  background:
+                    m.role === 'user'
+                      ? 'var(--brand-weak)'
+                      : 'var(--card)',
+                  border: `1px solid var(--border)`,
+                  color: 'var(--text)',
+                }}
               >
                 {m.text}
               </div>
@@ -76,33 +95,45 @@ export default function SupportPage() {
           ))}
           {loading && (
             <div className="flex justify-start">
-              <div className="px-3 py-2 rounded-lg max-w-[80%] text-sm bg-gray-100 text-black dark:bg-gray-800/50 dark:text-gray-100">
+              <div
+                className="px-3 py-2 rounded-lg max-w-[80%] text-sm"
+                style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }}
+              >
                 <TypingDots />
               </div>
             </div>
           )}
         </div>
 
-        {/* Input */}
+        {/* input */}
         <div className="flex gap-2 pt-2">
           <input
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={onKey}
             placeholder="Ask Riley…"
-            className="flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#0b0c10] text-black dark:text-white outline-none"
+            className="flex-1 rounded-lg px-3 py-2 text-sm outline-none"
+            style={{
+              background: 'var(--card)',
+              border: '1px solid var(--border)',
+              color: 'var(--text)',
+            }}
           />
           <button
             onClick={send}
             disabled={loading || !input.trim()}
-            className="px-4 py-2 rounded-lg border border-green-400 bg-green-100 text-black font-medium hover:bg-green-200 dark:bg-emerald-900/30 dark:text-emerald-100 dark:hover:bg-emerald-800/50 transition disabled:opacity-50"
+            className="px-4 py-2 rounded-lg font-medium"
+            style={{
+              background: 'var(--brand)',
+              color: '#fff',
+              opacity: loading || !input.trim() ? 0.6 : 1,
+            }}
           >
             Send
           </button>
         </div>
 
-        {/* Note */}
-        <div className="text-xs text-center text-gray-500 dark:text-gray-400">
+        <div className="text-xs text-center pt-1" style={{ color: 'var(--text-muted)' }}>
           Riley will never reveal or summarize code, file contents, or paths. If asked, Riley will refuse.
         </div>
       </div>
@@ -112,10 +143,10 @@ export default function SupportPage() {
 
 function TypingDots() {
   return (
-    <span className="flex gap-1 items-center" aria-label="Riley is thinking">
-      <span className="w-1.5 h-1.5 rounded-full bg-gray-400 dark:bg-gray-200 animate-bounce [animation-delay:0ms]" />
-      <span className="w-1.5 h-1.5 rounded-full bg-gray-400 dark:bg-gray-200 animate-bounce [animation-delay:120ms]" />
-      <span className="w-1.5 h-1.5 rounded-full bg-gray-400 dark:bg-gray-200 animate-bounce [animation-delay:240ms]" />
+    <span className="inline-flex gap-1 items-center">
+      <span className="w-2 h-2 rounded-full animate-bounce" style={{ background: 'var(--text-muted)' }} />
+      <span className="w-2 h-2 rounded-full animate-bounce" style={{ background: 'var(--text-muted)', animationDelay: '120ms' }} />
+      <span className="w-2 h-2 rounded-full animate-bounce" style={{ background: 'var(--text-muted)', animationDelay: '240ms' }} />
     </span>
   );
 }
