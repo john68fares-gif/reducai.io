@@ -18,6 +18,7 @@ import {
   AlertCircle,
   Crown,
   Zap,
+  Check,
 } from 'lucide-react';
 
 const UI = {
@@ -40,6 +41,8 @@ export default function AccountPage() {
   const [userName, setUserName] = useState<string | null>(null);
   const [userCreated, setUserCreated] = useState<string | null>(null);
   const [userUpdated, setUserUpdated] = useState<string | null>(null);
+
+  // plan + usage (simple client-side read; replace with your API/billing data when ready)
   const [plan, setPlan] = useState<'Free' | 'Pro' | 'Team' | 'Enterprise'>('Free');
   const [usage, setUsage] = useState<{requests:number; limit:number}>({ requests: 0, limit: 10000 });
 
@@ -62,22 +65,22 @@ export default function AccountPage() {
       setUserCreated(user?.created_at ?? null);
       setUserUpdated(user?.updated_at ?? null);
 
+      // read plan + usage from user metadata if you store it there
       const p = (user?.user_metadata as any)?.plan_tier as string | undefined;
       if (p && ['Free','Pro','Team','Enterprise'].includes(p)) setPlan(p as any);
-
-      // optional usage demo (replace with real fetch)
       const u = (user?.user_metadata as any)?.requests_used as number | undefined;
       setUsage({ requests: typeof u === 'number' ? u : 0, limit: 10000 });
 
       setLoading(false);
 
       unsub = supabase.auth.onAuthStateChange((_e, session) => {
-        const u = session?.user;
-        setUserEmail(u?.email ?? null);
-        setUserName((u?.user_metadata as any)?.full_name ?? u?.user_metadata?.name ?? null);
-        setUserCreated(u?.created_at ?? null);
-        setUserUpdated(u?.updated_at ?? null);
-        const pt = (u?.user_metadata as any)?.plan_tier as string | undefined;
+        const u2 = session?.user;
+        setUserEmail(u2?.email ?? null);
+        setUserName((u2?.user_metadata as any)?.full_name ?? u2?.user_metadata?.name ?? null);
+        setUserCreated(u2?.created_at ?? null);
+        setUserUpdated(u2?.updated_at ?? null);
+
+        const pt = (u2?.user_metadata as any)?.plan_tier as string | undefined;
         if (pt && ['Free','Pro','Team','Enterprise'].includes(pt)) setPlan(pt as any);
       });
     })();
@@ -143,19 +146,17 @@ export default function AccountPage() {
       <Head><title>Account • Reduc AI</title></Head>
 
       <div className="min-h-screen" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
-        <main className="w-full max-w-[1640px] mx-auto px-6 2xl:px-12 pt-10 pb-28">
-          <div className="flex items-center justify-between mb-8">
-            <h1 className="text-2xl md:text-3xl font-semibold">Account</h1>
-          </div>
+        <main className="w-full max-w-[1000px] mx-auto px-6 pt-10 pb-28">
+          <h1 className="text-2xl md:text-3xl font-semibold mb-8">Account</h1>
 
-          {/* 2×2 on desktop, 1-col on iPad/phone */}
-          <div className="grid grid-cols-1 xl:grid-cols-12 gap-7">
+          {/* Everything stacked vertically, always */}
+          <div className="grid grid-cols-1 gap-7">
             {/* Profile */}
             <motion.section
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.22 }}
-              className="rounded-[16px] p-6 xl:col-span-4"
+              className="rounded-[16px] p-6"
               style={{ background: UI.cardBg, border: UI.border, boxShadow: UI.cardShadow }}
             >
               <div className="flex items-center gap-4 mb-5">
@@ -207,12 +208,10 @@ export default function AccountPage() {
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.22, delay: 0.05 }}
-              className="rounded-[16px] p-6 xl:col-span-4"
+              className="rounded-[16px] p-6"
               style={{ background: UI.cardBg, border: UI.border, boxShadow: UI.cardShadow }}
             >
-              <div className="flex items-center justify-between mb-5">
-                <h2 className="text-lg font-semibold">Appearance</h2>
-              </div>
+              <h2 className="text-lg font-semibold mb-5">Appearance</h2>
 
               <div className="grid grid-cols-2 gap-4">
                 <ThemeTile label="Dark"  active={theme === 'dark'}  icon={<Moon className="w-4 h-4" />} onClick={() => setTheme('dark')} />
@@ -250,14 +249,13 @@ export default function AccountPage() {
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.22, delay: 0.1 }}
-              className="rounded-[16px] p-6 xl:col-span-4"
+              className="rounded-[16px] p-6"
               style={{ background: UI.cardBg, border: UI.border, boxShadow: UI.cardShadow }}
             >
-              <div className="flex items-center justify-between mb-5">
-                <h2 className="text-lg font-semibold">Security</h2>
-              </div>
-
-              <p className="text-white/80 text-sm leading-6">To change your password, we’ll send a verification link to your email.</p>
+              <h2 className="text-lg font-semibold mb-3">Security</h2>
+              <p className="text-white/80 text-sm leading-6">
+                To change your password, we’ll send a verification link to your email.
+              </p>
 
               <div className="mt-5 flex items-center gap-3">
                 <button
@@ -285,45 +283,51 @@ export default function AccountPage() {
               </div>
             </motion.section>
 
-            {/* Upgrade / Plan */}
+            {/* Pro Subscription */}
             <motion.section
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.22, delay: 0.12 }}
-              className="rounded-[16px] p-6 xl:col-span-12"
+              className="rounded-[16px] p-6"
               style={{ background: UI.cardBg, border: UI.border, boxShadow: UI.cardShadow }}
             >
-              <div className="flex items-start justify-between gap-6 flex-col md:flex-row">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(0,255,194,0.15)' }}>
-                    <Crown className="w-5 h-5 text-[#00ffc2]" />
-                  </div>
-                  <div>
-                    <div className="text-lg font-semibold">Plan: {plan}</div>
-                    <div className="text-white/70 text-sm">
-                      Usage: {usage.requests.toLocaleString()} / {usage.limit.toLocaleString()} requests
-                    </div>
-                  </div>
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(0,255,194,0.15)' }}>
+                  <Crown className="w-5 h-5 text-[#00ffc2]" />
                 </div>
-
-                <div className="flex flex-wrap items-center gap-3">
-                  <a
-                    href="/billing"
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-[10px] border"
-                    style={{ borderColor: 'rgba(106,247,209,0.28)', background: 'rgba(0,255,194,0.06)' }}
-                  >
-                    <Zap className="w-4 h-4" />
-                    Upgrade
-                  </a>
-                  <a
-                    href="/pricing"
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-[10px] border"
-                    style={{ borderColor: 'rgba(255,255,255,0.12)', background: 'rgba(16,19,20,0.9)' }}
-                  >
-                    View pricing
-                  </a>
+                <div>
+                  <div className="text-lg font-semibold">Pro — €19.99 / month</div>
+                  <div className="text-white/70 text-sm">Current plan: <span className="font-semibold">{plan}</span></div>
+                  <div className="text-white/60 text-xs mt-1">
+                    Usage: {usage.requests.toLocaleString()} / {usage.limit.toLocaleString()} requests
+                  </div>
                 </div>
               </div>
+
+              <ul className="text-white/85 text-sm space-y-2 mb-6">
+                <li className="flex items-start gap-2"><Check className="w-4 h-4 mt-0.5 text-[#57f0c6]" /> Higher request limits</li>
+                <li className="flex items-start gap-2"><Check className="w-4 h-4 mt-0.5 text-[#57f0c6]" /> Priority worker queue</li>
+                <li className="flex items-start gap-2"><Check className="w-4 h-4 mt-0.5 text-[#57f0c6]" /> Team-ready features</li>
+              </ul>
+
+              {plan !== 'Pro' ? (
+                <a
+                  href="https://buy.stripe.com/3cI7sLgWz0zb0uT5hrgUM00"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 px-5 py-2 rounded-[10px] border font-semibold"
+                  style={{ borderColor: 'rgba(106,247,209,0.28)', background: 'rgba(0,255,194,0.06)' }}
+                >
+                  <Zap className="w-4 h-4" />
+                  Subscribe to Pro
+                </a>
+              ) : (
+                <div className="inline-flex items-center gap-2 px-5 py-2 rounded-[10px] border font-semibold text-white/80"
+                  style={{ borderColor: 'rgba(106,247,209,0.28)', background: 'rgba(0,255,194,0.06)' }}>
+                  <Check className="w-4 h-4" />
+                  You’re on Pro
+                </div>
+              )}
             </motion.section>
           </div>
         </main>
