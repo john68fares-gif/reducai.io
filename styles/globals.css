@@ -1,19 +1,16 @@
-@@ -2,46 +2,46 @@
+@tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 /* Font */
-/* ---- Custom Font ---- */
 @font-face {
   font-family: 'Movatif Bold';
-  font-family: 'Movatif';
   src: url('/fonts/Movatif-Bold.ttf') format('truetype');
   font-weight: bold;
   font-style: normal;
 }
 
 /* ---- Theme tokens ---- */
-/* ---- Base theme (light by default) ---- */
 :root {
   /* Brand */
   --brand: #00ffc2;
@@ -22,15 +19,10 @@
   /* Typography */
   --text: #0b0c10;
   --text-muted: rgba(11, 12, 16, 0.65);
-  /* Light mode tokens */
-  --background: #ffffff;
-  --foreground: #0b0c10;
-  --foreground-muted: rgba(11, 12, 16, 0.65);
 
   /* Surfaces */
   --bg: #f5f7f8;
   --panel: #ffffff;
-  --panel: #f5f7f8;
   --card: #ffffff;
   --border: rgba(11, 12, 16, 0.10);
   --ring: rgba(0, 0, 0, 0.06);
@@ -40,7 +32,6 @@
   --shadow-card: 0 1px 0 rgba(0,0,0,0.04), 0 8px 22px rgba(0,0,0,0.06);
 
   /* Sidebar (keeping it dark in both themes for brand contrast) */
-  /* Sidebar (always dark for brand contrast) */
   --sidebar-bg: #0f1214;
   --sidebar-border: rgba(255,255,255,0.06);
   --sidebar-text: #ffffff;
@@ -51,65 +42,58 @@
   --text: #ffffff;
   --text-muted: rgba(255,255,255,0.65);
   --bg: #0b0c10;
-/* ---- Dark mode overrides ---- */
-.dark {
-  --background: #0b0c10;
-  --foreground: #ffffff;
-  --foreground-muted: rgba(255,255,255,0.65);
-
   --panel: #0f1214;
   --card: #101314;
   --border: rgba(255,255,255,0.06);
-@@ -56,14 +56,17 @@
+  --ring: rgba(0,255,194,0.10);
+
+  --shadow-soft: 0 10px 30px rgba(0,0,0,0.45);
+  --shadow-card: inset 0 0 22px rgba(0,0,0,0.28), 0 0 20px rgba(0,255,194,0.06);
+
+  --sidebar-bg: #0f1214;
+  --sidebar-border: rgba(255,255,255,0.06);
+  --sidebar-text: #ffffff;
   --sidebar-muted: rgba(255,255,255,0.6);
 }
 
 /* Base */
-/* ---- Base styles ---- */
 html, body {
   font-family: 'Movatif Bold', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol';
   background: var(--bg);
   color: var(--text);
-  @apply min-h-screen bg-background text-foreground transition-colors duration-300;
-  font-family: 'Movatif', 'Manrope', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol';
-}
-
-* {
-  @apply transition-colors duration-300;
 }
 
 /* Reusable surface helpers */
-/* ---- Surface helpers ---- */
 .panel {
   background: var(--panel);
   border: 1px solid var(--border);
-@@ -78,22 +81,24 @@ html, body {
+  box-shadow: var(--shadow-soft);
+  border-radius: 16px;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-card);
   border-radius: 16px;
 }
 
 /* Buttons & inputs */
-/* ---- Buttons & inputs ---- */
 .btn-brand {
   background: var(--brand);
   color: #fff; /* requested: white text */
-  color: #fff;
 }
 
 .input {
   background: var(--card);
   color: var(--text);
-  color: var(--foreground);
   border: 1px solid var(--border);
 }
 
 /* Sidebar shell */
-/* ---- Sidebar ---- */
 .sidebar {
   background: var(--sidebar-bg);
   color: var(--sidebar-text);
   border-right: 1px solid var(--sidebar-border);
 }
 .sidebar-muted { color: var(--sidebar-muted); }
-.sidebar-muted {
-  color: var(--sidebar-muted);
-}
