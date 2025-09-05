@@ -23,8 +23,8 @@ module.exports = {
         },
       },
       fontFamily: {
-        sans: ["Manrope", "sans-serif"], // default font
-        movatif: ["Movatif", "sans-serif"], // your custom font
+        sans: ["Manrope", "sans-serif"], // default
+        movatif: ["Manrope", "sans-serif"], // Movatif fallback → Manrope
       },
     },
   },
