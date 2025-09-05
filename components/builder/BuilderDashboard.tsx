@@ -1,4 +1,4 @@
-// BuilderDashboard.tsx (updated colors)
+// BuilderDashboard.tsx (fixed step + updated colors)
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
@@ -23,11 +23,33 @@ const Bot3D = dynamic(() => import('./Bot3D.client'), {
   loading: () => <div className="h-full w-full bg-gray-100 dark:bg-[#0d0f11]" />,
 });
 
-// … same helper functions as before …
+// ---------- helpers ----------
+const palette = ['#00ffc2', '#7cc3ff', '#b28bff', '#ffd68a', '#ff9db1'];
+const accentFor = (id: string) =>
+  palette[Math.abs([...id].reduce((h, c) => h + c.charCodeAt(0), 0)) % palette.length];
+
+const fmtDate = (iso?: string) => (iso ? new Date(iso).toLocaleDateString() : '');
 
 export default function BuilderDashboard() {
   const router = useRouter();
-  // … same state & hooks …
+
+  // 🔹 restore step logic
+  const search = useMemo(
+    () => new URLSearchParams((router.asPath.split('?')[1] ?? '')),
+    [router.asPath]
+  );
+  const pathname = router.pathname;
+
+  const rawStep = search.get('step');
+  const step = rawStep && ['1', '2', '3', '4'].includes(rawStep) ? rawStep : null;
+
+  const setStepParam = (next: string | null) => {
+    const usp = new URLSearchParams(search.toString());
+    if (next) usp.set('step', next); else usp.delete('step');
+    router.replace(`${pathname}?${usp.toString()}`, undefined, { shallow: true });
+  };
+
+  // … your state hooks here (bots, query, etc.) …
 
   if (step) {
     return (
