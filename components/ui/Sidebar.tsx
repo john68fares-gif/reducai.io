@@ -38,7 +38,6 @@ function getDisplayName(name?: string | null, email?: string | null) {
 export default function Sidebar() {
   const pathname = usePathname();
 
-  // collapse (persist)
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     try {
       const raw = localStorage.getItem(LS_COLLAPSED);
@@ -54,7 +53,6 @@ export default function Sidebar() {
     document.documentElement.style.setProperty('--sidebar-w', `${collapsed ? W_COLLAPSED : W_EXPANDED}px`);
   }, [collapsed]);
 
-  // user
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [userName, setUserName] = useState<string | null>(null);
   const [acctOpen, setAcctOpen] = useState(false);
@@ -105,7 +103,7 @@ export default function Sidebar() {
           disabled ? 'opacity-50 cursor-not-allowed' : 'hover:translate-x-[1px]',
           active
             ? 'border border-green-400 bg-green-50 dark:bg-green-900/20'
-            : 'border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#0b0c10]',
+            : 'border border-gray-200 dark:border-gray-700 bg-[var(--taskbar-bg)]',
         ].join(' ')}
         title={collapsed ? label : undefined}
       >
@@ -136,8 +134,8 @@ export default function Sidebar() {
 
   return (
     <aside
-      className="fixed left-0 top-0 h-screen z-50 font-movatif transition-[width] duration-300 ease-out bg-white dark:bg-[#0b0c10] text-black dark:text-white border-r border-gray-200 dark:border-gray-700"
-      style={{ width: collapsed ? W_COLLAPSED : W_EXPANDED }}
+      className="fixed left-0 top-0 h-screen z-50 font-movatif transition-[width] duration-300 ease-out text-black dark:text-white border-r border-gray-200 dark:border-gray-700"
+      style={{ width: collapsed ? W_COLLAPSED : W_EXPANDED, background: 'var(--taskbar-bg)' }}
       aria-label="Primary"
     >
       <div className="relative h-full flex flex-col">
@@ -180,7 +178,8 @@ export default function Sidebar() {
             onClick={() => setAcctOpen((v) => !v)}
             aria-expanded={acctOpen}
             aria-haspopup="true"
-            className="w-full rounded-2xl px-4 py-3 flex items-center gap-3 text-left border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#0b0c10] hover:bg-gray-50 dark:hover:bg-[#1a1d21] transition"
+            className="w-full rounded-2xl px-4 py-3 flex items-center gap-3 text-left border border-gray-200 dark:border-gray-700"
+            style={{ background: 'var(--taskbar-bg)' }}
           >
             <div
               className="w-8 h-8 rounded-full flex items-center justify-center"
@@ -208,7 +207,7 @@ export default function Sidebar() {
                 transition={{ duration: 0.16 }}
                 className="relative hidden md:block"
               >
-                <div className="mt-2 rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#0b0c10]">
+                <div className="mt-2 rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700" style={{ background: 'var(--taskbar-bg)' }}>
                   <Link
                     href="/account"
                     onClick={() => setAcctOpen(false)}
@@ -233,7 +232,8 @@ export default function Sidebar() {
         {/* Collapse handle */}
         <button
           onClick={() => setCollapsed((c) => !c)}
-          className="absolute top-1/2 -right-3 translate-y-[-50%] rounded-full p-1.5 border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#0b0c10] shadow"
+          className="absolute top-1/2 -right-3 translate-y-[-50%] rounded-full p-1.5 border border-gray-200 dark:border-gray-700 shadow"
+          style={{ background: 'var(--taskbar-bg)' }}
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
           {collapsed ? (
