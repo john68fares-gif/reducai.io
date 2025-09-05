@@ -7,7 +7,6 @@ import { supabase } from '@/lib/supabase-client';
 import Sidebar from '@/components/ui/Sidebar';
 
 const BG = '#0b0c10';
-const SECTION_BG = '#101314'; // the “section” color you use inside pages
 const PUBLIC_ROUTES = ['/', '/auth', '/auth/callback'];
 
 export default function App({ Component, pageProps }: AppProps) {
@@ -70,27 +69,17 @@ export default function App({ Component, pageProps }: AppProps) {
   if (!authed) return null;
 
   /**
-   * Layout note:
-   * - Full-bleed SECTION_BG layer sits behind the whole grid (so it extends under the sidebar).
-   * - Main content remains centered and never touches the sidebar via the inner max-width container.
-   * - No logic changed.
+   * Layout: unchanged logic, just remove main padding so pages can go full width.
    */
   return (
-    <div className="relative min-h-screen w-full text-white" style={{ background: BG }}>
-      {/* full-bleed “section” background under everything (including the sidebar) */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 -z-10"
-        style={{ background: SECTION_BG }}
-      />
-
+    <div className="min-h-screen w-full text-white" style={{ background: BG }}>
       <div
         className="
           grid
-          grid-cols-[72px_1fr]          /* xs: tiny rail */
-          sm:grid-cols-[200px_1fr]      /* sm: compact sidebar */
-          md:grid-cols-[220px_1fr]      /* md: normal */
-          lg:grid-cols-[240px_1fr]      /* lg: wider */
+          grid-cols-[72px_1fr]
+          sm:grid-cols-[200px_1fr]
+          md:grid-cols-[220px_1fr]
+          lg:grid-cols-[240px_1fr]
           xl:grid-cols-[260px_1fr]
           gap-0
         "
@@ -102,12 +91,9 @@ export default function App({ Component, pageProps }: AppProps) {
           </div>
         </aside>
 
-        {/* Main content */}
-        <main className="min-w-0 px-4 sm:px-6 lg:px-8 py-8">
-          {/* center the inner content so cards don’t touch the sidebar */}
-          <div style={{ maxWidth: 1280, margin: '0 auto' }}>
-            <Component {...pageProps} />
-          </div>
+        {/* Main content column: full-width, no padding */}
+        <main className="min-w-0 p-0">
+          <Component {...pageProps} />
         </main>
       </div>
     </div>
