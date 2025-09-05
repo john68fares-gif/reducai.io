@@ -68,32 +68,32 @@ export default function App({ Component, pageProps }: AppProps) {
 
   if (!authed) return null;
 
-  /**
-   * Layout: unchanged logic, just remove main padding so pages can go full width.
-   */
+  // --- FULL-SCREEN LAYOUT (style-only) ---
   return (
-    <div className="min-h-screen w-full text-white" style={{ background: BG }}>
+    <div className="h-screen w-screen text-white overflow-hidden" style={{ background: BG }}>
       <div
         className="
-          grid
+          grid h-full w-full
           grid-cols-[72px_1fr]
           sm:grid-cols-[200px_1fr]
           md:grid-cols-[220px_1fr]
           lg:grid-cols-[240px_1fr]
           xl:grid-cols-[260px_1fr]
-          gap-0
         "
       >
-        {/* Sidebar (sticky, responsive width) */}
-        <aside className="relative">
+        {/* Sidebar column (sticky) */}
+        <aside className="relative h-full">
           <div className="sticky top-0 h-screen overflow-y-auto">
             <Sidebar />
           </div>
         </aside>
 
-        {/* Main content column: full-width, no padding */}
-        <main className="min-w-0 p-0">
-          <Component {...pageProps} />
+        {/* Main column: truly full-screen inside the content area */}
+        <main className="h-full w-full p-0 overflow-auto">
+          {/* give the page component the full canvas */}
+          <div className="min-h-full w-full">
+            <Component {...pageProps} />
+          </div>
         </main>
       </div>
     </div>
