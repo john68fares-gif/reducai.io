@@ -14,9 +14,9 @@ import {
   ShoppingCart,
   BookOpen,
   Package,
+  User,
 } from "lucide-react";
 
-// tiny class joiner
 function cn(...a: Array<string | false | null | undefined>) {
   return a.filter(Boolean).join(" ");
 }
@@ -40,41 +40,56 @@ export default function Sidebar() {
   ];
 
   return (
-    <div className="sidebar flex flex-col h-screen w-[260px] border-r">
-      {/* Logo / title */}
-      <div className="px-4 py-6">
-        <div className="text-lg font-bold text-accent-green">reducai.io</div>
-        <div className="text-xs text-foreground/60">Builder Workspace</div>
+    <div className="sidebar flex flex-col h-screen w-[260px] border-r justify-between">
+      <div>
+        {/* Logo / title */}
+        <div className="px-4 py-6">
+          <div className="text-lg font-bold text-accent-green">reducai.io</div>
+          <div className="text-xs text-foreground/60">Builder Workspace</div>
+        </div>
+
+        {/* Nav links */}
+        <nav className="flex flex-col gap-2 px-2">
+          {navItems.map(({ href, label, desc, icon: Icon }) => {
+            const active = pathname.startsWith(href);
+            return (
+              <Link
+                key={href}
+                href={href}
+                className={cn(
+                  "group flex items-center gap-3 rounded-xl px-3 py-3 transition-all",
+                  active
+                    ? "bg-accent-green/10 text-accent-green shadow-[0_0_12px_rgba(0,255,194,0.25)]"
+                    : "text-foreground/70 hover:bg-accent-green/5 hover:text-foreground"
+                )}
+              >
+                <Icon size={20} />
+                <div className="flex flex-col">
+                  <span className="text-sm font-medium">{label}</span>
+                  {desc && (
+                    <span className="text-xs text-foreground/50 group-hover:text-foreground/70">
+                      {desc}
+                    </span>
+                  )}
+                </div>
+              </Link>
+            );
+          })}
+        </nav>
       </div>
 
-      {/* Nav links */}
-      <nav className="flex flex-col gap-2 px-2">
-        {navItems.map(({ href, label, desc, icon: Icon }) => {
-          const active = pathname.startsWith(href);
-          return (
-            <Link
-              key={href}
-              href={href}
-              className={cn(
-                "group flex items-center gap-3 rounded-xl px-3 py-3 transition-all",
-                active
-                  ? "bg-accent-green/10 text-accent-green shadow-[0_0_12px_rgba(0,255,194,0.25)]"
-                  : "text-foreground/70 hover:bg-accent-green/5 hover:text-foreground"
-              )}
-            >
-              <Icon size={20} />
-              <div className="flex flex-col">
-                <span className="text-sm font-medium">{label}</span>
-                {desc && (
-                  <span className="text-xs text-foreground/50 group-hover:text-foreground/70">
-                    {desc}
-                  </span>
-                )}
-              </div>
-            </Link>
-          );
-        })}
-      </nav>
+      {/* Bottom account section */}
+      <div className="p-4">
+        <div className="flex items-center gap-3 rounded-xl bg-accent-green/10 px-3 py-3 cursor-pointer hover:bg-accent-green/20 transition">
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-accent-green text-black">
+            <User size={18} />
+          </div>
+          <div className="flex flex-col">
+            <span className="text-sm font-medium">My Account</span>
+            <span className="text-xs text-foreground/70">980 XP · Bronze</span>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
