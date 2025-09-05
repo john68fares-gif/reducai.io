@@ -5,13 +5,18 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import { supabase } from '@/lib/supabase-client';
 import Sidebar from '@/components/ui/Sidebar';
+import { initTheme } from '@/lib/theme'; // <-- ADD
 
-const BG = '#0b0c10';
+const BG = 'var(--bg)'; // <-- use token (optional)
+
 const PUBLIC_ROUTES = ['/', '/auth', '/auth/callback'];
 
 export default function App({ Component, pageProps }: AppProps) {
   const router = useRouter();
   const pathname = router.pathname;
+
+  // THEME INIT (runs once, before anything renders)
+  useEffect(() => { initTheme(); }, []); // <-- ADD
 
   const isPublic = useMemo(
     () => PUBLIC_ROUTES.some((base) => pathname === base || pathname.startsWith(`${base}/`)),
@@ -53,12 +58,11 @@ export default function App({ Component, pageProps }: AppProps) {
     return () => sub.data.subscription.unsubscribe();
   }, [router, isPublic]);
 
-  // Public routes bypass layout
   if (isPublic) return <Component {...pageProps} />;
 
   if (checking) {
     return (
-      <div className="min-h-screen grid place-items-center text-white" style={{ background: BG }}>
+      <div className="min-h-screen grid place-items-center text-white" style={{ background: 'var(--bg)' }}>
         <div className="flex items-center gap-3">
           <span className="w-6 h-6 rounded-full border-2 border-white/70 border-t-transparent animate-spin" />
           <span>Checking session…</span>
@@ -69,26 +73,15 @@ export default function App({ Component, pageProps }: AppProps) {
 
   if (!authed) return null;
 
-  /**
-   * STYLE-ONLY LAYOUT:
-   * - Sidebar is a normal (non-fixed) column.
-   * - Main fills the rest of the screen width/height.
-   * - Page background flows under everything for one solid "section".
-   * - Inner pages control their own padding; content won’t touch the sidebar.
-   */
   return (
-    <div className="min-h-screen w-full text-white" style={{ background: BG }}>
-      <div className="flex items-stretch min-h-screen">
-        {/* Sidebar column (not fixed) */}
-        <aside
-          className="shrink-0"
-          style={{ width: 'var(--sidebar-w, 260px)' }} // Sidebar component still sets this CSS var
-        >
-          <Sidebar />
+    <div className="min-h-screen w-full text-white" style={{ background: 'var(--bg)' }}>
+      <div className="grid grid-cols-[72px_1fr] sm:grid-cols-[200px_1fr] md:grid-cols-[220px_1fr] lg:grid-cols-[240px_1fr] xl:grid-cols-[260px_1fr] gap-0">
+        <aside className="relative">
+          <div className="sticky top-0 h-screen overflow-y-auto">
+            <Sidebar />
+          </div>
         </aside>
-
-        {/* Main column (fills screen) */}
-        <main className="flex-1 min-w-0 w-full">
+        <main className="min-w-0 px-4 sm:px-6 lg:px-8 py-8">
           <Component {...pageProps} />
         </main>
       </div>
