@@ -1,82 +1,73 @@
+// components/builder/Step1AIType.tsx
 'use client';
 
 import React, { useState } from 'react';
-import { Home, Hammer, Bot, Rocket } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 
 type Props = {
-  onNext: () => void;
+  onNext: (type: 'sales' | 'support' | 'blank') => void;
 };
 
 export default function Step1AIType({ onNext }: Props) {
   const [selected, setSelected] = useState<string | null>(null);
 
-  const cards = [
-    {
-      id: 'sales',
-      title: 'Sales AI',
-      desc: 'Convert visitors into customers with persuasive conversations.',
-      icon: <Rocket className="w-6 h-6" style={{ color: 'var(--brand)' }} />,
-    },
-    {
-      id: 'support',
-      title: 'Support AI',
-      desc: 'Answer FAQs, handle issues, and provide 24/7 assistance.',
-      icon: <Hammer className="w-6 h-6" style={{ color: 'var(--brand)' }} />,
-    },
-    {
-      id: 'blank',
-      title: 'Start Blank',
-      desc: 'Fully custom AI agent without predefined flow.',
-      icon: <Bot className="w-6 h-6" style={{ color: 'var(--brand)' }} />,
-    },
-  ];
-
   return (
-    <div className="flex flex-col items-center justify-center w-full min-h-screen px-6">
-      <h1 className="text-2xl font-semibold mb-6" style={{ color: 'var(--text)' }}>
-        Choose Your AI Type
-      </h1>
+    <div className="flex flex-col items-center justify-center min-h-screen bg-[#0b0c10]">
+      <div className="w-full max-w-4xl bg-[#0d0f11] border border-[#00ffc220] rounded-2xl p-10 space-y-6">
+        <h2 className="text-2xl font-bold text-white text-center mb-2">Step 1: Choose AI Type</h2>
+        <p className="text-gray-400 text-center mb-8">Select the type of AI agent you want to build</p>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-5xl">
-        {cards.map((c) => (
-          <button
-            key={c.id}
-            onClick={() => setSelected(c.id)}
-            className="rounded-xl p-6 text-left transition transform active:scale-[0.98]"
-            style={{
-              background: 'var(--card)',
-              border: `1px solid ${
-                selected === c.id ? 'var(--brand)' : 'var(--border)'
-              }`,
-              boxShadow:
-                selected === c.id ? '0 0 12px var(--ring)' : 'var(--shadow-card)',
-              color: 'var(--text)',
-            }}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div
+            onClick={() => setSelected('sales')}
+            className={`cursor-pointer rounded-xl p-6 border transition ${
+              selected === 'sales'
+                ? 'border-[#00ffc2] bg-[#0b0c10]'
+                : 'border-gray-700 bg-[#0d0f11]'
+            }`}
           >
-            <div className="flex items-center gap-3 mb-3">
-              {c.icon}
-              <span className="text-lg font-semibold">{c.title}</span>
-            </div>
-            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-              {c.desc}
-            </p>
-          </button>
-        ))}
-      </div>
+            <p className="text-lg font-semibold text-white mb-2">Sales AI</p>
+            <p className="text-sm text-gray-400">Convert visitors into customers with persuasive conversations.</p>
+          </div>
 
-      <div className="mt-8">
-        <button
-          disabled={!selected}
-          onClick={onNext}
-          className="px-6 py-2 rounded-lg font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed"
-          style={{
-            background: 'var(--brand)',
-            color: '#fff',
-            boxShadow: '0 0 10px var(--ring)',
-          }}
-        >
-          Continue →
-        </button>
+          <div
+            onClick={() => setSelected('support')}
+            className={`cursor-pointer rounded-xl p-6 border transition ${
+              selected === 'support'
+                ? 'border-[#00ffc2] bg-[#0b0c10]'
+                : 'border-gray-700 bg-[#0d0f11]'
+            }`}
+          >
+            <p className="text-lg font-semibold text-white mb-2">Support AI</p>
+            <p className="text-sm text-gray-400">Answer FAQs, handle issues, and provide 24/7 assistance.</p>
+          </div>
+
+          <div
+            onClick={() => setSelected('blank')}
+            className={`cursor-pointer rounded-xl p-6 border transition ${
+              selected === 'blank'
+                ? 'border-[#00ffc2] bg-[#0b0c10]'
+                : 'border-gray-700 bg-[#0d0f11]'
+            }`}
+          >
+            <p className="text-lg font-semibold text-white mb-2">Start Blank</p>
+            <p className="text-sm text-gray-400">Fully custom AI agent without predefined flow.</p>
+          </div>
+        </div>
+
+        <div className="flex justify-center mt-8">
+          <button
+            disabled={!selected}
+            onClick={() => selected && onNext(selected as any)}
+            className={`flex items-center gap-2 px-6 py-2 rounded-lg transition ${
+              selected
+                ? 'bg-[#00ffc2] text-black hover:bg-[#00e6b0]'
+                : 'bg-gray-700 text-gray-400 cursor-not-allowed'
+            }`}
+          >
+            Continue <ArrowRight size={16} />
+          </button>
+        </div>
       </div>
     </div>
   );
