@@ -9,6 +9,7 @@ export type Scoped = {
   ensureOwnerGuard(): Promise<void>;
 };
 
+/** Per-user localStorage namespace with a simple account-switch guard. */
 export async function scopedStorage(): Promise<Scoped> {
   const { data: { user } } = await supabase.auth.getUser();
   const uid = user?.id || 'anon';
@@ -19,7 +20,7 @@ export async function scopedStorage(): Promise<Scoped> {
   async function getJSON<T>(key: string, fallback: T): Promise<T> {
     try {
       const raw = localStorage.getItem(await keyFor(key));
-      return raw ? JSON.parse(raw) as T : fallback;
+      return raw ? (JSON.parse(raw) as T) : fallback;
     } catch { return fallback; }
   }
 
@@ -27,19 +28,24 @@ export async function scopedStorage(): Promise<Scoped> {
     try { localStorage.setItem(await keyFor(key), JSON.stringify(value)); } catch {}
   }
 
-  async function remove(key: string) {
+  async function remove(key: string): Promise<void> {
     try { localStorage.removeItem(await keyFor(key)); } catch {}
   }
 
-  // When the logged-in user changes, clear legacy global keys so their data
-  // doesn't bleed between accounts on the same device.
-  async function ensureOwnerGuard() {
+  /**
+   * If a different user signs in on the same device, legacy global keys are cleared
+   * so the previous user's local data doesn't appear.
+   */
+  async function ensureOwnerGuard(): Promise<void> {
     try {
       const ownerKey = 'workspace:owner';
       const prev = localStorage.getItem(ownerKey);
       if (prev && prev !== uid) {
-        ['chatbots','agents','builds','builder:step1','builder:step2','builder:step3','builder:draft','builder:cleanup','builder:step2Numbers']
-          .forEach(k => localStorage.removeItem(k));
+        [
+          'chatbots','agents','builds',
+          'builder:step1','builder:step2','builder:step3',
+          'builder:draft','builder:cleanup','builder:step2Numbers'
+        ].forEach(k => localStorage.removeItem(k));
       }
       localStorage.setItem(ownerKey, uid);
     } catch {}
@@ -48,12 +54,16 @@ export async function scopedStorage(): Promise<Scoped> {
   return { getJSON, setJSON, remove, keyFor, ensureOwnerGuard };
 }
 
-/** One-time migration from legacy global keys → current user namespace */
+/** One-time migration from legacy (global) keys to the current user's namespace. */
 export async function migrateLegacyKeysToUser() {
   const { data: { user } } = await supabase.auth.getUser();
   const uid = user?.id || 'anon';
   const prefix = `user:${uid}:`;
-  const LEGACY = ['chatbots','agents','builds','builder:step1','builder:step2','builder:step3','builder:draft','builder:step2Numbers'];
+  const LEGACY = [
+    'chatbots','agents','builds',
+    'builder:step1','builder:step2','builder:step3',
+    'builder:draft','builder:step2Numbers'
+  ];
 
   try {
     for (const k of LEGACY) {
@@ -62,7 +72,7 @@ export async function migrateLegacyKeysToUser() {
         localStorage.setItem(`${prefix}${k}`, raw);
       }
     }
-    // Optional: uncomment to purge old globals after first run
+    // Optional: purge after migration
     // LEGACY.forEach(k => localStorage.removeItem(k));
   } catch {}
 }
