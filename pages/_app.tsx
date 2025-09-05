@@ -2,19 +2,19 @@
 import type { AppProps } from 'next/app';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
-import { SessionProvider } from 'next-auth/react';   // 👈 add
+import { SessionProvider } from 'next-auth/react';
 import Sidebar from '../components/ui/Sidebar';
 import '../styles/globals.css';
 
 export default function MyApp({
   Component,
-  pageProps: { session, ...pageProps },            // 👈 pass session through
+  pageProps: { session, ...pageProps },
 }: AppProps) {
   const router = useRouter();
   const onLanding = router.pathname === '/';
 
   return (
-    <SessionProvider session={session}>             {/* 👈 wrap the app */}
+    <SessionProvider session={session}>
       <Head>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Reduc AI</title>
@@ -29,7 +29,10 @@ export default function MyApp({
             padding: 20,
           }}
         >
-          <Component {...pageProps} />
+          {/* style-only: center page content without affecting layout logic */}
+          <div style={{ maxWidth: 1200, margin: '0 auto' }}>
+            <Component {...pageProps} />
+          </div>
         </main>
       </div>
     </SessionProvider>
