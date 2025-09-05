@@ -1,97 +1,70 @@
+// components/builder/StepProgress.tsx
 'use client';
 
-import dynamic from 'next/dynamic';
 import React from 'react';
 
-const Bot3D = dynamic(() => import('./Bot3D.client'), { ssr: false });
+type Props = {
+  step: number; // current step (1–4)
+};
 
-function DotDivider() {
+const steps = [
+  { id: 1, title: 'AI Type' },
+  { id: 2, title: 'Model Settings' },
+  { id: 3, title: 'Personality & Knowledge' },
+  { id: 4, title: 'Overview' },
+];
+
+export default function StepProgress({ step }: Props) {
   return (
-    <div
-      className="flex-1 mx-2 h-px rounded-full"
-      style={{ background: 'linear-gradient(90deg, transparent, rgba(106,247,209,0.25), transparent)' }}
-    />
-  );
-}
+    <div className="w-full flex items-center justify-center mb-12">
+      <div className="flex items-center gap-6">
+        {steps.map((s, i) => {
+          const active = s.id === step;
+          const completed = s.id < step;
 
-function Stage({
-  active,
-  label,
-  stage,
-}: {
-  active: boolean;
-  label: string;
-  stage: 1 | 2 | 3 | 4;
-}) {
-  // Gray palette (not black)
-  const ap = {
-    accent: '#6af7d1',
-    shellColor: '#3a4044',
-    bodyColor:  '#485155',
-    trimColor:  '#5e7377',
-    faceColor:  '#242b2e',
-  };
+          return (
+            <div key={s.id} className="flex items-center">
+              {/* Step circle */}
+              <div
+                className={`w-10 h-10 flex items-center justify-center rounded-full border-2 transition shadow-md ${
+                  completed
+                    ? 'bg-[#00ffc2] border-[#00ffc2] text-black shadow-[0_0_15px_rgba(0,255,194,0.7)]'
+                    : active
+                    ? 'border-[#00ffc2] text-[#00ffc2] shadow-[0_0_12px_rgba(0,255,194,0.5)]'
+                    : 'border-gray-600 text-gray-500'
+                }`}
+              >
+                {s.id}
+              </div>
 
-  const withBody = stage >= 2;
-  const arms = stage >= 3 ? 'segment' : 'none';
-  const legs = stage >= 4 ? 'segment' : 'none';
+              {/* Step title */}
+              <span
+                className={`ml-2 text-sm font-medium ${
+                  active
+                    ? 'text-[#00ffc2]'
+                    : completed
+                    ? 'text-gray-300'
+                    : 'text-gray-500'
+                }`}
+              >
+                {s.title}
+              </span>
 
-  return (
-    <div className="flex items-center gap-3 min-w-0">
-      <div
-        className="w-12 h-12 rounded-2xl flex items-center justify-center"
-        style={{
-          background: active ? 'rgba(0,255,194,0.15)' : 'rgba(255,255,255,0.05)',
-          border: `1px solid ${active ? 'rgba(0,255,194,0.38)' : 'rgba(255,255,255,0.10)'}`,
-          boxShadow: active ? '0 0 16px rgba(0,255,194,0.25)' : undefined,
-        }}
-      >
-        {/* @ts-ignore */}
-        <Bot3D
-          className="w-8 h-8"
-          accent={ap.accent}
-          shellColor={ap.shellColor}
-          bodyColor={ap.bodyColor}
-          trimColor={ap.trimColor}
-          faceColor={ap.faceColor}
-          head="round"
-          torso="capsule"
-          eyes="dots"
-          antenna
-          withBody={withBody}
-          arms={arms}
-          legs={legs}
-          idle={false}
-        />
-      </div>
-      <div className={`text-xs truncate ${active ? 'text-white' : 'text-white/70'}`}>{label}</div>
-    </div>
-  );
-}
-
-export default function StepProgress({ current }: { current: 1 | 2 | 3 | 4 }) {
-  return (
-    <div
-      className="w-full mb-7 rounded-[28px] px-4 py-3 flex items-center"
-      style={{
-        background: 'rgba(13,15,17,0.92)',
-        border: '1px solid rgba(106,247,209,0.32)',
-        boxShadow: 'inset 0 0 22px rgba(0,0,0,0.28), 0 0 18px rgba(106,247,209,0.06)',
-      }}
-    >
-      <Stage active={current === 1} label="AI Type & Basics" stage={1} />
-      <DotDivider />
-      <Stage active={current === 2} label="Model Settings" stage={2} />
-      <DotDivider />
-      <Stage active={current === 3} label="Personality & Knowledge" stage={3} />
-      <DotDivider />
-      <Stage active={current === 4} label="Final Review" stage={4} />
-
-      <div
-        className="ml-auto text-white/75 text-xs rounded-xl px-2 py-1 border"
-        style={{ borderColor: 'rgba(255,255,255,0.16)', background: 'rgba(255,255,255,0.05)' }}
-      >
-        {current} / 4
+              {/* Divider line (except after last step) */}
+              {i < steps.length - 1 && (
+                <div
+                  className={`w-12 h-0.5 mx-3 transition ${
+                    completed
+                      ? 'bg-[#00ffc2] shadow-[0_0_10px_rgba(0,255,194,0.7)]'
+                      : active
+                      ? 'bg-[#00ffc2]/60'
+                      : 'bg-gray-700'
+                  }`}
+                />
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
