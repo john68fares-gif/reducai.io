@@ -5,12 +5,12 @@ import Head from 'next/head';
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Crown, Zap, Check, ArrowLeft } from 'lucide-react';
+import { Crown, Zap, Check, ArrowLeft, Percent } from 'lucide-react';
 
 const UI = {
   cardBg: 'rgba(13,15,17,0.92)',
-  border: '1px solid rgba(106,247,209,0.22)',
-  cardShadow: '0 10px 30px rgba(0,0,0,0.45), inset 0 0 22px rgba(0,0,0,0.35), 0 0 18px rgba(0,255,194,0.06)',
+  cardBorder: '1px solid rgba(106,247,209,0.22)',
+  cardShadow: '0 12px 34px rgba(0,0,0,0.5), inset 0 0 26px rgba(0,0,0,0.38), 0 0 18px rgba(0,255,194,0.06)',
 };
 
 export default function PricingPage() {
@@ -19,23 +19,32 @@ export default function PricingPage() {
   // numbers (edit as needed)
   const monthlyPrice = 19.99;
   const yearlyDiscount = 0.40;
-  const yearlyPrice = useMemo(() => Math.round((monthlyPrice*12)*(1-yearlyDiscount)), [monthlyPrice]);
+  const yearlyPrice = useMemo(() => Math.round((monthlyPrice * 12) * (1 - yearlyDiscount)), [monthlyPrice]);
 
   return (
     <>
       <Head><title>Pricing • Reduc AI</title></Head>
       <div className="min-h-screen" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
         <main className="w-full max-w-[980px] mx-auto px-6 pt-10 pb-24">
-
           <div className="flex items-center justify-between mb-6">
-            <h1 className="text-2xl md:text-3xl font-semibold">Pricing</h1>
+            <div>
+              <div className="flex items-center gap-2 text-[17px] font-semibold">
+                <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg border"
+                      style={{ borderColor:'rgba(106,247,209,0.28)', background:'rgba(0,255,194,0.06)' }}>
+                  <Percent className="w-5 h-5" />
+                </span>
+                <span>Pricing</span>
+              </div>
+              <div className="text-white/60 text-sm ml-10 -mt-1">Choose a plan that fits your launch</div>
+            </div>
+
             <Link href="/account" className="inline-flex items-center gap-2 text-sm opacity-80 hover:opacity-100">
               <ArrowLeft className="w-4 h-4" /> Back to settings
             </Link>
           </div>
 
-          {/* Toggle */}
-          <div className="flex items-center gap-2 mb-6">
+          {/* Billing toggle */}
+          <div className="flex items-center gap-2 mb-8">
             <button onClick={() => setBilling('monthly')}
               className={`px-3 py-1.5 rounded-full text-sm border ${billing==='monthly'?'font-semibold':''}`}
               style={{ borderColor: 'rgba(106,247,209,0.28)', background: billing==='monthly' ? 'rgba(0,255,194,0.10)' : 'transparent' }}>
@@ -63,10 +72,12 @@ export default function PricingPage() {
               ]}
               badge="Current plan"
               badgeMuted
-              cta={<button disabled className="inline-flex items-center gap-2 px-4 py-2 rounded-[10px] border opacity-70 cursor-not-allowed"
-                           style={{ borderColor: 'rgba(106,247,209,0.28)', background: 'rgba(16,19,20,0.90)' }}>
-                      Demo only
-                    </button>}
+              cta={
+                <button disabled className="inline-flex items-center gap-2 px-4 py-2 rounded-[10px] border opacity-70 cursor-not-allowed"
+                        style={{ borderColor: 'rgba(106,247,209,0.28)', background: 'rgba(16,19,20,0.90)' }}>
+                  Demo only
+                </button>
+              }
             />
 
             <PlanCard
@@ -94,36 +105,46 @@ export default function PricingPage() {
 
           {/* Savings banner */}
           {billing==='yearly' && (
-            <div className="mt-6 text-center text-sm rounded-[12px] px-4 py-3"
+            <div className="mt-8 text-center text-sm rounded-[12px] px-4 py-3"
                  style={{ border:'1px solid rgba(106,247,209,0.28)', background:'rgba(0,255,194,0.06)' }}>
               Switch to annual billing and save {Math.round(yearlyDiscount*100)}%!
             </div>
           )}
 
-          {/* Billing & Subscription (customer portal) */}
+          {/* Billing & Subscription panel (portal links) */}
           <section className="mt-10">
-            <h2 className="text-lg font-semibold mb-3">Billing & Subscription</h2>
+            <div className="mb-3">
+              <div className="flex items-center gap-2 text-[17px] font-semibold">
+                <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg border"
+                      style={{ borderColor:'rgba(106,247,209,0.28)', background:'rgba(0,255,194,0.06)' }}>
+                  <Crown className="w-5 h-5" />
+                </span>
+                <span>Billing & Subscription</span>
+              </div>
+              <div className="text-white/60 text-sm ml-10 -mt-1">Manage your subscription and invoices</div>
+            </div>
+
             <motion.section
-              initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.28 }}
+              initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.28 }}
               className="rounded-[16px] p-6"
-              style={{ background: UI.cardBg, border: UI.border, boxShadow: UI.cardShadow }}
+              style={{ background: UI.cardBg, border: UI.cardBorder, boxShadow: UI.cardShadow }}
             >
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                 <div className="rounded-[12px] p-4" style={{ background:'rgba(15,18,20,0.55)', border:'1px solid rgba(255,255,255,0.06)' }}>
                   <div className="text-white/70 mb-1">Manage Billing</div>
                   <a
-                    href="YOUR_STRIPE_PORTAL_LINK"  // TODO: replace with your generated customer portal URL
+                    href="YOUR_STRIPE_PORTAL_LINK"  // replace with the URL from your backend/Stripe portal session
                     target="_blank" rel="noopener noreferrer"
                     className="inline-flex items-center gap-2 px-4 py-2 rounded-[10px] border font-semibold"
                     style={{ borderColor:'rgba(106,247,209,0.28)', background:'rgba(0,255,194,0.06)' }}
                   >
-                    Open Stripe Customer Portal
+                    Open Customer Portal
                   </a>
                 </div>
                 <div className="rounded-[12px] p-4" style={{ background:'rgba(15,18,20,0.55)', border:'1px solid rgba(255,255,255,0.06)' }}>
                   <div className="text-white/70 mb-1">Need to cancel?</div>
                   <a
-                    href="YOUR_UNSUBSCRIBE_LINK" // optional: or route to contact
+                    href="YOUR_UNSUBSCRIBE_LINK"
                     className="inline-flex items-center gap-2 px-4 py-2 rounded-[10px] border"
                     style={{ borderColor:'rgba(255,255,255,0.12)', background:'rgba(16,19,20,0.90)' }}
                   >
@@ -133,7 +154,6 @@ export default function PricingPage() {
               </div>
             </motion.section>
           </section>
-
         </main>
       </div>
     </>
@@ -148,9 +168,12 @@ function PlanCard({
   badge?: string; badgeMuted?: boolean;
 }) {
   return (
-    <motion.section initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.28 }}
+    <motion.section
+      initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.28 }}
       className="rounded-[16px] p-6 relative"
-      style={{ background: UI.cardBg, border: UI.border, boxShadow: UI.cardShadow }}>
+      style={{ background: UI.cardBg, border: UI.cardBorder, boxShadow: UI.cardShadow }}
+      whileHover={{ y: -2 }}
+    >
       {badge && (
         <span className={`absolute -top-3 left-4 px-2 py-1 rounded-full text-[11px] border ${badgeMuted?'opacity-70':''}`}
               style={{ borderColor:'rgba(106,247,209,0.28)', background:'rgba(0,255,194,0.10)' }}>
@@ -158,7 +181,9 @@ function PlanCard({
         </span>
       )}
       <div className="flex items-start gap-3">
-        <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-black/20 border border-white/10">{icon}</div>
+        <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-black/20 border border-white/10">
+          {icon}
+        </div>
         <div className="flex-1 min-w-0">
           <div className="flex flex-wrap items-baseline gap-2">
             <div className="text-base font-semibold">{title}</div>
