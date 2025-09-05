@@ -27,6 +27,7 @@ export default function App({ Component, pageProps }: AppProps) {
   const [checking, setChecking] = useState(true);
   const [authed, setAuthed] = useState(false);
 
+  // --- AUTH: unchanged ---
   useEffect(() => {
     const sub = supabase.auth.onAuthStateChange((event) => {
       if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
@@ -68,6 +69,7 @@ export default function App({ Component, pageProps }: AppProps) {
 
     return () => sub.data.subscription.unsubscribe();
   }, [router, isPublic]);
+  // --- END AUTH ---
 
   return (
     <ThemeProvider>
@@ -76,21 +78,34 @@ export default function App({ Component, pageProps }: AppProps) {
         <title>Reduc AI</title>
       </Head>
 
-      {/* Page loader overlay */}
+      {/* Global page loader overlay */}
       <GlobalRouteLoader />
 
       {isPublic ? (
-        <Component {...pageProps} />
+        // Wrap public pages so they inherit theme tokens and avoid any stray dark bg
+        <div style={{ minHeight: "100vh", background: "var(--bg)", color: "var(--text)" }}>
+          <Component {...pageProps} />
+        </div>
       ) : checking ? (
-        <div className="min-h-screen grid place-items-center bg-background text-foreground">
+        // Replace Tailwind color classes with CSS tokens to prevent the “dark halo”
+        <div
+          className="min-h-screen grid place-items-center"
+          style={{ background: "var(--bg)", color: "var(--text)" }}
+        >
           <div className="flex items-center gap-3">
-            <span className="w-6 h-6 rounded-full border-2 border-foreground/40 border-t-accent-green animate-spin" />
+            <span
+              className="w-6 h-6 rounded-full border-2 animate-spin"
+              style={{
+                borderColor: "color-mix(in oklab, var(--text) 40%, transparent)",
+                borderTopColor: "var(--brand)",
+              }}
+            />
             <span>Checking session…</span>
           </div>
         </div>
       ) : !authed ? null : (
-        <div className="min-h-screen w-full bg-background text-foreground">
-          {/* Simple shell: dark sidebar + content area */}
+        // App shell uses theme variables; sidebar styles come from your .sidebar tokens in globals.css
+        <div style={{ minHeight: "100vh", background: "var(--bg)", color: "var(--text)" }}>
           <div className="grid grid-cols-[260px_1fr] min-h-screen">
             <aside className="sidebar">
               <Sidebar />
@@ -107,14 +122,11 @@ export default function App({ Component, pageProps }: AppProps) {
 
 function setRASessionCookie() {
   try {
-    document.cookie = `ra_session=1; Path=/; Max-Age=${
-      60 * 60 * 24 * 14
-    }; SameSite=Lax; Secure`;
+    document.cookie = `ra_session=1; Path=/; Max-Age=${60 * 60 * 24 * 14}; SameSite=Lax; Secure`;
   } catch {}
 }
 function clearRASessionCookie() {
   try {
-    document.cookie =
-      "ra_session=; Path=/; Max-Age=0; SameSite=Lax; Secure";
+    document.cookie = "ra_session=; Path=/; Max-Age=0; SameSite=Lax; Secure";
   } catch {}
 }
