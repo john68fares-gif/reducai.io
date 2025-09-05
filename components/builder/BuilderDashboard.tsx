@@ -1,4 +1,3 @@
-// components/builder/BuilderDashboard.tsx
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
@@ -18,9 +17,7 @@ import {
   MessageSquareText,
   Landmark,
   ListChecks,
-  Search,
 } from 'lucide-react';
-import { motion } from 'framer-motion';
 import CustomizeModal from './CustomizeModal';
 import Step1AIType from './Step1AIType';
 import Step2ModelSettings from './Step2ModelSettings';
@@ -30,12 +27,7 @@ import { s } from '@/utils/safe';
 
 const Bot3D = dynamic(() => import('./Bot3D.client'), {
   ssr: false,
-  loading: () => (
-    <div
-      className="h-full w-full"
-      style={{ background: 'linear-gradient(180deg, rgba(106,247,209,0.10), rgba(16,19,20,0.6))' }}
-    />
-  ),
+  loading: () => <div className="h-full w-full bg-[linear-gradient(180deg,rgba(106,247,209,0.10),rgba(16,19,20,0.6))]" />,
 });
 
 type Appearance = {
@@ -62,7 +54,7 @@ type Bot = {
   language?: string;
   model?: string;
   description?: string;
-  prompt?: string; // Step 3 raw
+  prompt?: string;
   createdAt?: string;
   updatedAt?: string;
   appearance?: Appearance;
@@ -73,7 +65,6 @@ const SAVE_KEY = 'chatbots';
 const nowISO = () => new Date().toISOString();
 const fmtDate = (iso?: string) => (iso ? new Date(iso).toLocaleDateString() : '');
 
-// newest → oldest by updatedAt (fallback createdAt)
 const sortByNewest = (arr: Bot[]) =>
   arr
     .slice()
@@ -99,7 +90,7 @@ function loadBots(): Bot[] {
         language: s(b?.language),
         model: s(b?.model, 'gpt-4o-mini'),
         description: s(b?.description),
-        prompt: s(b?.prompt), // keep EXACT Step 3
+        prompt: s(b?.prompt),
         createdAt: b?.createdAt ?? nowISO(),
         updatedAt: b?.updatedAt ?? b?.createdAt ?? nowISO(),
         appearance: b?.appearance ?? undefined,
@@ -116,8 +107,7 @@ function saveBots(bots: Bot[]) {
   } catch {}
 }
 
-/* --------------------- Step 3 section splitter (no edits) --------------------- */
-
+/* ---------- Step 3 splitter ---------- */
 type PromptSectionKey =
   | 'DESCRIPTION'
   | 'AI DESCRIPTION'
@@ -129,7 +119,7 @@ type PromptSectionKey =
 type SplitSection = {
   key: PromptSectionKey;
   title: string;
-  text: string; // exact slice from Step 3
+  text: string;
 };
 
 const DISPLAY_TITLES: Record<PromptSectionKey, string> = {
@@ -150,13 +140,11 @@ const ICONS: Record<PromptSectionKey, JSX.Element> = {
   'COMPANY FAQ': <Landmark className="w-4 h-4 text-[#6af7d1]" />,
 };
 
-// tolerant heading match (**, ###, numbered, etc.)
 const HEADING_REGEX =
   /^(?:\s*(?:[#>*-]|\d+\.)\s*)?(?:\*\*)?\s*(DESCRIPTION|AI\s*DESCRIPTION|RULES\s*(?:AND|&)\s*GUIDELINES|AI\s*RULES|QUESTION\s*FLOW|COMPANY\s*FAQ)\s*(?:\*\*)?\s*:?\s*$/gmi;
 
 function splitStep3IntoSections(step3Raw?: string): SplitSection[] | null {
   if (!step3Raw) return null;
-
   const matches: Array<{ start: number; end: number; label: PromptSectionKey }> = [];
   let m: RegExpExecArray | null;
   HEADING_REGEX.lastIndex = 0;
@@ -165,11 +153,9 @@ function splitStep3IntoSections(step3Raw?: string): SplitSection[] | null {
       .toUpperCase()
       .replace(/\s*&\s*/g, ' AND ')
       .replace(/\s+/g, ' ') as PromptSectionKey;
-
     const label = rawLabel === 'AI  DESCRIPTION' ? ('AI DESCRIPTION' as PromptSectionKey) : rawLabel;
     matches.push({ start: m.index, end: HEADING_REGEX.lastIndex, label });
   }
-
   if (matches.length === 0) return null;
 
   const out: SplitSection[] = [];
@@ -179,26 +165,13 @@ function splitStep3IntoSections(step3Raw?: string): SplitSection[] | null {
     out.push({
       key: h.label,
       title: DISPLAY_TITLES[h.label] || h.label,
-      text: step3Raw.slice(h.end, nextStart), // exact slice (no sanitizing)
+      text: step3Raw.slice(h.end, nextStart),
     });
   }
   return out;
 }
 
-/* ----------------------------------- UI ----------------------------------- */
-
-const UI = {
-  containerW: 'max-w-[1640px]',
-  cardBg: 'rgba(13,15,17,0.92)',
-  border: '1px solid rgba(106,247,209,0.18)',
-  cardShadow: 'inset 0 0 18px rgba(0,0,0,0.28), 0 0 12px rgba(106,247,209,0.06)',
-};
-
-const fadeUp = {
-  initial: { opacity: 0, y: 12 },
-  animate: { opacity: 1, y: 0 },
-  transition: { duration: 0.22 },
-};
+/* -------------------------------- UI -------------------------------- */
 
 export default function BuilderDashboard() {
   const router = useRouter();
@@ -267,7 +240,6 @@ export default function BuilderDashboard() {
   };
 
   if (step) {
-    // steps page: keep plain full width (logic unchanged)
     return (
       <div className="min-h-screen w-full text-white font-movatif bg-[#0b0c10]">
         <main className="w-full min-h-screen">
@@ -280,12 +252,10 @@ export default function BuilderDashboard() {
     );
   }
 
-  // -------- Gallery (Create a Build) styled like Voice Agents ----------
   return (
-    <section className="w-full text-white font-movatif bg-[#0b0c10]">
-      <div className={`w-full ${UI.containerW} mx-auto px-6 2xl:px-12 pt-8 pb-24`}>
-        {/* Header row */}
-        <motion.div {...fadeUp} className="flex items-center justify-between mb-7">
+    <div className="min-h-screen w-full text-white font-movatif bg-[#0b0c10]">
+      <main className="flex-1 w-full px-5 md:px-8 2xl:px-14 pt-8 pb-24 max-w-[1640px] mx-auto">
+        <div className="flex items-center justify-between mb-7">
           <h1 className="text-2xl md:text-3xl font-semibold">Builds</h1>
           <button
             onClick={() => router.push('/builder?step=1')}
@@ -293,28 +263,19 @@ export default function BuilderDashboard() {
           >
             Create a Build
           </button>
-        </motion.div>
+        </div>
 
-        {/* Search */}
-        <motion.div {...fadeUp} className="mb-8">
-          <div className="relative">
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search projects and builds…"
-              className="w-full rounded-[10px] bg-[#101314] text-white/95 border border-[#13312b] px-5 py-4 text-[15px] outline-none focus:border-[#00ffc2]"
-            />
-            <Search className="w-4 h-4 absolute right-4 top-1/2 -translate-y-1/2 text-white/60" />
-          </div>
-        </motion.div>
+        <div className="mb-8">
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search projects and builds…"
+            className="w-full rounded-[10px] bg-[#101314] text-white/95 border border-[#13312b] px-5 py-4 text-[15px] outline-none focus:border-[#00ffc2]"
+          />
+        </div>
 
-        {/* Grid */}
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.22 }}
-          className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-7"
-        >
+        {/* Same-sized cards (including the Create card) on iPad/desktop */}
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-7">
           <CreateCard onClick={() => router.push('/builder?step=1')} />
 
           {filtered.map((bot) => (
@@ -332,16 +293,15 @@ export default function BuilderDashboard() {
               onCustomize={() => setCustomizingId(bot.id)}
             />
           ))}
-        </motion.div>
+        </div>
 
         {filtered.length === 0 && (
-          <motion.div {...fadeUp} className="mt-12 text-center text-white/60">
+          <div className="mt-12 text-center text-white/60">
             No builds found. Click <span className="text-[#00ffc2]">Create a Build</span> to get started.
-          </motion.div>
+          </div>
         )}
-      </div>
+      </main>
 
-      {/* Modals/Overlays kept identical to your logic */}
       {selectedBot && (
         <CustomizeModal
           bot={selectedBot}
@@ -380,7 +340,7 @@ export default function BuilderDashboard() {
       )}
 
       {viewedBot && <PromptOverlay bot={viewedBot} onClose={() => setViewId(null)} />}
-    </section>
+    </div>
   );
 }
 
@@ -427,9 +387,8 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: 'rgba(0,0,0,0.5)' }}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-[rgba(0,0,0,0.5)]">
       <div className="relative w-full max-w-[1280px] max-h-[88vh] flex flex-col" style={FRAME_STYLE}>
-        {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 rounded-t-[30px]" style={HEADER_BORDER}>
           <div className="min-w-0">
             <h2 className="text-white text-xl font-semibold truncate">Prompt</h2>
@@ -468,7 +427,6 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
           </div>
         </div>
 
-        {/* Body */}
         <div className="flex-1 overflow-y-auto p-6">
           {!bot.prompt ? (
             <div className="p-5 text-white/80" style={CARD_STYLE}>
@@ -496,13 +454,11 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
           )}
         </div>
 
-        {/* Footer */}
-        <div className="px-6 py-4 rounded-b-[30px]" style={{ borderTop: '1px solid rgba(255,255,255,0.3)', background: '#101314' }}>
+        <div className="px-6 py-4 rounded-b-[30px] border-t border-white/30 bg-[#101314]">
           <div className="flex justify-end">
             <button
               onClick={onClose}
-              className="px-5 py-2 rounded-[14px] font-semibold"
-              style={{ background: 'rgba(0,120,90,1)', color: 'white' }}
+              className="px-5 py-2 rounded-[14px] font-semibold bg-[rgba(0,120,90,1)] text-white"
             >
               Close
             </button>
@@ -515,32 +471,38 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
 
 /* --------------------------------- Cards --------------------------------- */
 
+const UI = {
+  cardBg: 'rgba(13,15,17,0.92)',
+  border: '1px solid rgba(106,247,209,0.18)',
+  cardShadow: 'inset 0 0 18px rgba(0,0,0,0.28), 0 0 12px rgba(106,247,209,0.06)',
+};
+
 function CreateCard({ onClick }: { onClick: () => void }) {
   return (
     <button
       onClick={onClick}
-      className="group relative h-[320px] rounded-[16px] p-7 flex flex-col items-center justify-center transition-all active:scale-[0.995]"
+      className="group relative rounded-[16px] flex flex-col transition-all active:scale-[0.995] overflow-hidden"
       style={{ background: UI.cardBg, border: UI.border, boxShadow: UI.cardShadow }}
     >
-      <div
-        className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
-        style={{
-          background: 'radial-gradient(circle, rgba(106,247,209,0.12) 0%, transparent 70%)',
-          filter: 'blur(36px)',
-        }}
-      />
-      <div
-        className="w-20 h-20 rounded-full flex items-center justify-center mb-5"
-        style={{
-          background: 'rgba(0,0,0,0.18)',
-          border: '1px dashed rgba(106,247,209,0.35)',
-          boxShadow: 'inset 0 0 18px rgba(0,0,0,0.45), inset 0 0 6px rgba(106,247,209,0.06)',
-        }}
-      >
-        <Plus className="w-10 h-10" style={{ color: '#6af7d1', opacity: 0.9 }} />
+      {/* Maintain same height as other cards on iPad/desktop */}
+      <div className="h-[260px] md:h-[300px] xl:h-[300px] flex flex-col items-center justify-center p-7">
+        <div
+          className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
+          style={{ background: 'radial-gradient(circle, rgba(106,247,209,0.12) 0%, transparent 70%)', filter: 'blur(36px)' }}
+        />
+        <div
+          className="w-20 h-20 rounded-full flex items-center justify-center mb-5"
+          style={{
+            background: 'rgba(0,0,0,0.18)',
+            border: '1px dashed rgba(106,247,209,0.35)',
+            boxShadow: 'inset 0 0 18px rgba(0,0,0,0.45), inset 0 0 6px rgba(106,247,209,0.06)',
+          }}
+        >
+          <Plus className="w-10 h-10" style={{ color: '#6af7d1', opacity: 0.9 }} />
+        </div>
+        <div className="text-[18px] md:text-[20px]">Create a Build</div>
+        <div className="text-[13px] text-white/65 mt-2">Start building your AI assistant</div>
       </div>
-      <div className="text-[18px]">Create a Build</div>
-      <div className="text-[13px] text-white/65 mt-2">Start building your AI assistant</div>
     </button>
   );
 }
@@ -562,32 +524,22 @@ function BuildCard({
   onDelete: () => void;
   onCustomize: () => void;
 }) {
-  const [hover, setHover] = useState(false);
   const ap = bot.appearance || {};
   return (
     <div
-      className="relative h-[380px] rounded-[16px] p-0 flex flex-col justify-between group transition-all"
+      className="relative rounded-[16px] p-0 flex flex-col justify-between transition-all overflow-hidden"
       style={{ background: UI.cardBg, border: UI.border, boxShadow: UI.cardShadow }}
     >
-      <div
-        className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
-        style={{ background: 'radial-gradient(circle, rgba(106,247,209,0.10) 0%, transparent 70%)', filter: 'blur(36px)' }}
-      />
-
-      <div
-        className="h-48 border-b border-white/10 overflow-hidden relative"
-        onMouseEnter={() => setHover(true)}
-        onMouseLeave={() => setHover(false)}
-      >
+      {/* same visual height block as CreateCard */}
+      <div className="h-[260px] md:h-[300px] xl:h-[300px] border-b border-white/10 relative">
         <button
           onClick={onCustomize}
           className="absolute right-3 top-3 z-10 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-[10px] text-xs border transition"
-          style={{ background: 'rgba(16,19,20,0.88)', border: '2px solid rgba(106,247,209,0.4)', boxShadow: '0 0 14px rgba(106,247,209,0.12)' }}
+          style={{ background: 'rgba(16,19,20,0.88)', border: '1px solid rgba(106,247,209,0.28)' }}
         >
           <SlidersHorizontal className="w-3.5 h-3.5" />
           Customize
         </button>
-
         {/* @ts-ignore */}
         <Bot3D
           className="h-full"
@@ -604,7 +556,7 @@ function BuildCard({
           legs={ap.legs ?? 'capsule'}
           antenna={ap.hasOwnProperty('antenna') ? Boolean((ap as any).antenna) : true}
           withBody={ap.hasOwnProperty('withBody') ? Boolean(ap.withBody) : true}
-          idle={ap.hasOwnProperty('idle') ? Boolean(ap.idle) : hover}
+          idle={true}
         />
       </div>
 
@@ -630,13 +582,12 @@ function BuildCard({
             <Trash2 className="w-4 h-4 text-white/70 hover:text-[#ff7a7a]" />
           </button>
         </div>
-
         <div className="mt-4 flex items-end justify-between">
           <div className="text-[12px] text-white/50">Updated {fmtDate(bot.updatedAt || bot.createdAt)}</div>
           <button
             onClick={onOpen}
             className="inline-flex items-center gap-2 px-3.5 py-2 rounded-[10px] text-sm border transition hover:translate-y-[-1px]"
-            style={{ background: 'rgba(16,19,20,0.90)', border: '2px solid rgba(106,247,209,0.28)' }}
+            style={{ background: 'rgba(16,19,20,0.90)', border: '1px solid rgba(106,247,209,0.28)' }}
           >
             Open <ArrowRight className="w-4 h-4" />
           </button>
