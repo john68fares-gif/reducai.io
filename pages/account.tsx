@@ -1,7 +1,7 @@
 // pages/account.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase-client';
@@ -30,70 +30,37 @@ import {
   Box,
 } from 'lucide-react';
 
-type ThemeMode = 'dark' | 'light';
+type ThemeMode = 'light' | 'dark';
 type PlanTier = 'Free' | 'Pro';
 
 function fmtDate(iso?: string) {
   if (!iso) return '—';
   try {
-    return new Date(iso).toLocaleString();
+    return new Date(iso).toLocaleDateString();
   } catch {
     return iso;
   }
 }
 
 export default function AccountPage() {
-  // Loader
-  const [booting, setBooting] = useState(true);
-
-  // User
-  const [loading, setLoading] = useState(true);
-  const [userId, setUserId] = useState<string | null>(null);
-  const [userEmail, setUserEmail] = useState<string | null>(null);
-  const [userName, setUserName] = useState<string | null>(null);
-  const [userCreated, setUserCreated] = useState<string | null>(null);
-  const [userUpdated, setUserUpdated] = useState<string | null>(null);
-
-  // Providers
-  const [providers, setProviders] = useState<string[]>([]);
-  const [passwordEnabled, setPasswordEnabled] = useState<boolean>(false);
-  const hasEmailPassword = providers.includes('email') || passwordEnabled;
-  const hasGoogle = providers.includes('google');
-
-  // Plan + usage
-  const [plan, setPlan] = useState<PlanTier>('Free');
-  const [usage, setUsage] = useState({ requests: 0, limit: 10000 });
-
-  // Theme
-  const [theme, setTheme] = useState<ThemeMode>('dark');
+  // Theme state
+  const [theme, setTheme] = useState<ThemeMode>('light');
   const [savingTheme, setSavingTheme] = useState(false);
   const [saveMsg, setSaveMsg] = useState<'idle' | 'ok' | 'err'>('idle');
 
-  // Password flows
-  const [resetLoading, setResetLoading] = useState(false);
-  const [resetMsg, setResetMsg] = useState<'idle' | 'sent' | 'err'>('idle');
-  const [createPwLoading, setCreatePwLoading] = useState(false);
-  const [createPwMsg, setCreatePwMsg] = useState<'idle' | 'ok' | 'err'>('idle');
-  const [pw1, setPw1] = useState('');
-  const [pw2, setPw2] = useState('');
+  // User state
+  const [loading, setLoading] = useState(true);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [userName, setUserName] = useState<string | null>(null);
+  const [userCreated, setUserCreated] = useState<string | null>(null);
 
-  // Strength meter
-  const pwStrength = useMemo(() => {
-    let s = 0;
-    if (pw1.length >= 8) s++;
-    if (/[A-Z]/.test(pw1)) s++;
-    if (/[0-9]/.test(pw1)) s++;
-    if (/[^A-Za-z0-9]/.test(pw1)) s++;
-    return s;
-  }, [pw1]);
+  // Plan
+  const [plan, setPlan] = useState<PlanTier>('Free');
+  const [usage, setUsage] = useState({ requests: 0, limit: 10000 });
 
-  // Fetch user
   useEffect(() => {
-    let unsub: any;
     (async () => {
       const { data: { user } } = await supabase.auth.getUser();
-
-      setUserId(user?.id ?? null);
       setUserEmail(user?.email ?? null);
       setUserName(
         (user?.user_metadata as any)?.full_name ??
@@ -101,78 +68,45 @@ export default function AccountPage() {
           null
       );
       setUserCreated(user?.created_at ?? null);
-      setUserUpdated(user?.updated_at ?? null);
-
-      const ids = (user as any)?.identities || [];
-      const provs = Array.from(
-        new Set(ids.map((i: any) => i?.provider).filter(Boolean))
-      );
-      setProviders(provs);
-
-      const pwdMeta = (user?.user_metadata as any)?.password_enabled;
-      setPasswordEnabled(Boolean(pwdMeta));
 
       const p = (user?.user_metadata as any)?.plan_tier as PlanTier | undefined;
-      if (p && (p === 'Free' || p === 'Pro')) setPlan(p);
+      if (p) setPlan(p);
 
       const u = (user?.user_metadata as any)?.requests_used;
       setUsage({ requests: typeof u === 'number' ? u : 0, limit: 10000 });
 
       setLoading(false);
-      setTimeout(() => setBooting(false), 420);
-
-      unsub = supabase.auth.onAuthStateChange((_e, session) => {
-        const u2 = session?.user;
-        setUserId(u2?.id ?? null);
-        setUserEmail(u2?.email ?? null);
-        setUserName(
-          (u2?.user_metadata as any)?.full_name ??
-            u2?.user_metadata?.name ??
-            null
-        );
-        setUserCreated(u2?.created_at ?? null);
-        setUserUpdated(u2?.updated_at ?? null);
-
-        const ids2 = (u2 as any)?.identities || [];
-        const provs2 = Array.from(
-          new Set(ids2.map((i: any) => i?.provider).filter(Boolean))
-        );
-        setProviders(provs2);
-
-        const pwdMeta2 = (u2?.user_metadata as any)?.password_enabled;
-        setPasswordEnabled(Boolean(pwdMeta2));
-
-        const pt = (u2?.user_metadata as any)?.plan_tier as PlanTier | undefined;
-        if (pt && (pt === 'Free' || pt === 'Pro')) setPlan(pt);
-      });
     })();
-    return () => unsub?.data?.subscription?.unsubscribe?.();
-  }, []);
 
-  // Theme init
-  useEffect(() => {
-    try {
-      const ls = (localStorage.getItem('ui:theme') as ThemeMode) || 'dark';
-      setTheme(ls === 'light' ? 'light' : 'dark');
-      document.documentElement.dataset.theme = ls;
-    } catch {}
+    // init theme from localStorage
+    const stored = localStorage.getItem('ui:theme') as ThemeMode | null;
+    if (stored === 'dark') {
+      setTheme('dark');
+      document.documentElement.classList.add('dark');
+    } else {
+      setTheme('light');
+      document.documentElement.classList.remove('dark');
+    }
   }, []);
 
   const displayName = useMemo(() => {
     if (userName && userName.trim()) return userName.trim();
-    if (userEmail && userEmail.includes('@'))
-      return userEmail.split('@')[0];
+    if (userEmail && userEmail.includes('@')) return userEmail.split('@')[0];
     return 'Account';
   }, [userName, userEmail]);
 
-  const saveTheme = async () => {
-    setSavingTheme(true);
-    setSaveMsg('idle');
+  const toggleTheme = async (mode: ThemeMode) => {
+    setTheme(mode);
+    localStorage.setItem('ui:theme', mode);
+    if (mode === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
     try {
-      document.documentElement.dataset.theme = theme;
-      localStorage.setItem('ui:theme', theme);
+      setSavingTheme(true);
       const { error } = await supabase.auth.updateUser({
-        data: { ui_theme: theme },
+        data: { ui_theme: mode },
       });
       if (error) throw error;
       setSaveMsg('ok');
@@ -180,57 +114,12 @@ export default function AccountPage() {
       setSaveMsg('err');
     } finally {
       setSavingTheme(false);
-      setTimeout(() => setSaveMsg('idle'), 1800);
-    }
-  };
-
-  const sendReset = async () => {
-    if (!userEmail) return;
-    setResetLoading(true);
-    setResetMsg('idle');
-    try {
-      const { error } = await supabase.auth.resetPasswordForEmail(
-        userEmail,
-        { redirectTo: `${window.location.origin}/auth/callback` }
-      );
-      if (error) throw error;
-      setResetMsg('sent');
-    } catch {
-      setResetMsg('err');
-    } finally {
-      setResetLoading(false);
-      setTimeout(() => setResetMsg('idle'), 3200);
-    }
-  };
-
-  const createPassword = async () => {
-    if (!pw1 || pw1 !== pw2) {
-      setCreatePwMsg('err');
-      setTimeout(() => setCreatePwMsg('idle'), 2000);
-      return;
-    }
-    setCreatePwLoading(true);
-    setCreatePwMsg('idle');
-    try {
-      const { error } = await supabase.auth.updateUser({ password: pw1 });
-      if (error) throw error;
-      await supabase.auth.updateUser({ data: { password_enabled: true } });
-      setPasswordEnabled(true);
-      setCreatePwMsg('ok');
-      setPw1('');
-      setPw2('');
-    } catch {
-      setCreatePwMsg('err');
-    } finally {
-      setCreatePwLoading(false);
-      setTimeout(() => setCreatePwMsg('idle'), 2800);
+      setTimeout(() => setSaveMsg('idle'), 2000);
     }
   };
 
   const signOut = async () => {
-    try {
-      await supabase.auth.signOut();
-    } catch {}
+    await supabase.auth.signOut();
   };
 
   return (
@@ -239,34 +128,9 @@ export default function AccountPage() {
         <title>Account • Reduc AI</title>
       </Head>
 
-      {/* Loader */}
-      <AnimatePresence>
-        {(booting || loading) && (
-          <motion.div
-            key="boot"
-            className="fixed inset-0 z-50 flex items-center justify-center"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            style={{
-              background: theme === 'dark' ? '#0b0c10' : '#fff',
-            }}
-          >
-            <Loader2 className="w-6 h-6 animate-spin text-[var(--brand)]" />
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Page */}
-      <div
-        className="min-h-screen"
-        style={{
-          background: theme === 'dark' ? '#0b0c10' : '#fff',
-          color: theme === 'dark' ? '#fff' : '#000',
-        }}
-      >
+      <div className="min-h-screen bg-white text-black dark:bg-[#0b0c10] dark:text-white transition-colors">
         <main className="w-full max-w-[1100px] mx-auto px-6 pt-10 pb-24 grid grid-cols-1 md:grid-cols-[260px,1fr] gap-8">
-          {/* Left nav */}
+          {/* Sidebar */}
           <aside className="md:sticky md:top-10 h-fit">
             <div className="text-xl font-semibold mb-4">Settings</div>
             <nav className="space-y-2">
@@ -283,63 +147,124 @@ export default function AccountPage() {
             </nav>
           </aside>
 
-          {/* Right content */}
+          {/* Content */}
           <section className="space-y-10">
             {/* Profile */}
             <div id="profile">
-              {/* Profile details… */}
+              <Header
+                icon={<UserIcon className="w-5 h-5" />}
+                title="Profile"
+                subtitle="Manage your account info and theme"
+              />
+              <Card>
+                <div className="flex items-center gap-4 mb-6">
+                  <div className="w-12 h-12 rounded-full flex items-center justify-center bg-gray-200 dark:bg-gray-700">
+                    <UserIcon className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <div className="text-lg font-semibold">{displayName}</div>
+                    <div className="text-sm text-gray-500 dark:text-gray-400">
+                      {userEmail || '—'}
+                    </div>
+                  </div>
+                </div>
+                <div className="grid sm:grid-cols-2 gap-3 text-sm">
+                  <InfoRow
+                    icon={<Mail className="w-4 h-4" />}
+                    label="Email"
+                    value={userEmail || '—'}
+                  />
+                  <InfoRow
+                    icon={<Calendar className="w-4 h-4" />}
+                    label="Created"
+                    value={fmtDate(userCreated || undefined)}
+                  />
+                </div>
+                <div className="mt-6">
+                  <button
+                    onClick={signOut}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-[#0d0f11] hover:translate-y-[-1px] transition"
+                  >
+                    <LogOut className="w-4 h-4" /> Sign out
+                  </button>
+                </div>
+              </Card>
+
+              {/* Appearance */}
+              <SubHeader
+                icon={<Palette className="w-4 h-4" />}
+                title="Appearance"
+                subtitle="Choose light or dark mode"
+              />
+              <Card>
+                <div className="grid grid-cols-2 gap-4">
+                  <ThemeTile
+                    label="Light"
+                    active={theme === 'light'}
+                    icon={<Sun className="w-4 h-4" />}
+                    onClick={() => toggleTheme('light')}
+                  />
+                  <ThemeTile
+                    label="Dark"
+                    active={theme === 'dark'}
+                    icon={<Moon className="w-4 h-4" />}
+                    onClick={() => toggleTheme('dark')}
+                  />
+                </div>
+                <div className="mt-4">
+                  <AnimatePresence>
+                    {saveMsg === 'ok' && (
+                      <motion.span className="text-sm text-green-500">
+                        <CheckCircle2 className="inline w-4 h-4" /> Theme saved
+                      </motion.span>
+                    )}
+                    {saveMsg === 'err' && (
+                      <motion.span className="text-sm text-red-500">
+                        <AlertCircle className="inline w-4 h-4" /> Failed to save
+                      </motion.span>
+                    )}
+                  </AnimatePresence>
+                </div>
+              </Card>
             </div>
 
             {/* Plan & Billing */}
             <div id="billing">
               <Header
                 icon={<Box className="w-5 h-5" />}
-                title="Current Plan"
-                subtitle="Your current subscription plan"
+                title="Plan & Billing"
+                subtitle="Your subscription and usage"
               />
               <Card>
                 <div className="flex items-center gap-3 mb-2">
-                  <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-[var(--brand-weak)]">
-                    <Crown className="w-5 h-5 text-[var(--brand)]" />
+                  <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-gray-200 dark:bg-gray-700">
+                    <Crown className="w-5 h-5 text-yellow-500" />
                   </div>
                   <div>
-                    <div className="text-lg font-semibold">Plan & Billing</div>
-                    <div className="text-sm text-[color:var(--text-muted)]">
-                      Current plan: <span className="font-semibold">{plan}</span>
+                    <div className="font-semibold">Current Plan</div>
+                    <div className="text-sm text-gray-500 dark:text-gray-400">
+                      {plan}
                     </div>
                   </div>
                 </div>
-
-                <div className="text-xs text-[color:var(--text-muted)] mb-4">
+                <div className="text-sm text-gray-500 dark:text-gray-400 mb-4">
                   Usage: {usage.requests.toLocaleString()} / {usage.limit.toLocaleString()} requests
                 </div>
-
                 <div className="flex flex-wrap gap-3">
                   <Link
                     href="/account/pricing"
-                    className="inline-flex items-center gap-2 px-5 py-2 rounded-[10px] border font-medium"
-                    style={{
-                      borderColor: 'var(--border)',
-                      background: theme === 'dark' ? 'var(--panel)' : '#fff',
-                      color: 'var(--text)',
-                    }}
+                    className="px-5 py-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-[#0d0f11] hover:translate-y-[-1px] transition"
                   >
-                    View pricing <ChevronRight className="w-4 h-4" />
+                    View pricing
                   </Link>
-
                   {plan !== 'Pro' && (
                     <a
                       href="https://buy.stripe.com/3cI7sLgWz0zb0uT5hrgUM00"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2 px-5 py-2 rounded-[10px] border font-semibold"
-                      style={{
-                        borderColor: 'var(--brand-weak)',
-                        background: 'var(--brand-weak)',
-                        color: '#000',
-                      }}
+                      className="px-5 py-2 rounded-md border bg-green-400 text-black font-semibold hover:bg-green-300 transition"
                     >
-                      <Zap className="w-4 h-4" /> Upgrade to Pro (€19.99/mo)
+                      <Zap className="inline w-4 h-4" /> Upgrade to Pro (€19.99/mo)
                     </a>
                   )}
                 </div>
@@ -352,51 +277,79 @@ export default function AccountPage() {
   );
 }
 
-/* --- building blocks (unchanged) --- */
+/* --- building blocks --- */
 
 function Header({ icon, title, subtitle }:{ icon: React.ReactNode; title: string; subtitle?: string }) {
   return (
     <div className="mb-3">
-      <div className="flex items-center gap-2 text-[17px] font-semibold">
-        <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg border bg-[var(--brand-weak)] border-[var(--brand-weak)]">
+      <div className="flex items-center gap-2 text-lg font-semibold">
+        <span className="inline-flex items-center justify-center w-8 h-8 rounded-md bg-gray-200 dark:bg-gray-700">
           {icon}
         </span>
-        <span>{title}</span>
+        {title}
       </div>
-      {subtitle && (
-        <div className="text-sm text-[color:var(--text-muted)] ml-10 -mt-1">
-          {subtitle}
-        </div>
-      )}
+      {subtitle && <div className="text-sm text-gray-500 dark:text-gray-400 ml-10">{subtitle}</div>}
+    </div>
+  );
+}
+
+function SubHeader({ icon, title, subtitle }:{ icon: React.ReactNode; title: string; subtitle?: string }) {
+  return (
+    <div className="mt-8 mb-3">
+      <div className="flex items-center gap-2 text-sm font-semibold">
+        <span className="inline-flex items-center justify-center w-6 h-6 rounded bg-gray-200 dark:bg-gray-700">
+          {icon}
+        </span>
+        {title}
+      </div>
+      {subtitle && <div className="text-xs text-gray-500 dark:text-gray-400 ml-8">{subtitle}</div>}
     </div>
   );
 }
 
 function Card({ children }: { children: React.ReactNode }) {
   return (
-    <motion.section
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.28 }}
-      className="card p-6 rounded-xl shadow"
-      style={{ background: 'var(--panel)', border: '1px solid var(--border)' }}
-    >
+    <section className="p-6 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#0d0f11] shadow-sm transition">
       {children}
-    </motion.section>
+    </section>
   );
 }
 
-function SettingsLink({ icon, label, href }:{ icon: React.ReactNode; label: string; href: string; }) {
+function InfoRow({ icon, label, value }:{ icon: React.ReactNode; label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-2 text-sm">
+      {icon}
+      <span className="w-24 text-gray-500 dark:text-gray-400">{label}</span>
+      <span>{value}</span>
+    </div>
+  );
+}
+
+function ThemeTile({ label, active, icon, onClick }:{ label: string; active: boolean; icon: React.ReactNode; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`p-4 rounded-lg border transition ${
+        active
+          ? 'border-green-400 bg-green-50 dark:bg-green-900/20'
+          : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-[#0d0f11]'
+      }`}
+    >
+      <div className="flex items-center gap-2 font-medium">
+        {icon} {label}
+      </div>
+    </button>
+  );
+}
+
+function SettingsLink({ icon, label, href }:{ icon: React.ReactNode; label: string; href: string }) {
   return (
     <a
       href={href}
-      className="panel flex items-center justify-between rounded-[12px] px-3 py-2 transition hover:translate-y-[-1px]"
-      style={{ color: 'var(--text)' }}
+      className="flex items-center justify-between px-3 py-2 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#0d0f11] hover:translate-y-[-1px] transition text-sm"
     >
-      <span className="flex items-center gap-2 text-sm">
-        {icon}{label}
-      </span>
-      <ChevronRight className="w-4 h-4 text-[color:var(--text-muted)]" />
+      <span className="flex items-center gap-2">{icon}{label}</span>
+      <ChevronRight className="w-4 h-4 text-gray-400" />
     </a>
   );
 }
