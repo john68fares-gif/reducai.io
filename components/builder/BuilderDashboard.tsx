@@ -1,3 +1,4 @@
+// components/builder/BuilderDashboard.tsx
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
@@ -27,8 +28,19 @@ import { s } from '@/utils/safe';
 
 const Bot3D = dynamic(() => import('./Bot3D.client'), {
   ssr: false,
-  loading: () => <div className="h-full w-full bg-[linear-gradient(180deg,rgba(106,247,209,0.10),rgba(16,19,20,0.6))]" />,
+  loading: () => (
+    <div
+      className="h-full w-full"
+      style={{ background: 'linear-gradient(180deg, rgba(106,247,209,0.10), rgba(16,19,20,0.6))' }}
+    />
+  ),
 });
+
+/* ------------------------------------------------------------------ */
+/* Size tokens — keep cards the same on desktop + iPad                 */
+/* ------------------------------------------------------------------ */
+const CARD_H = 'h-[360px]';      // overall card height (Create + Build cards)
+const COVER_H = 'h-[200px]';     // top visual region height on every card
 
 type Appearance = {
   accent?: string;
@@ -107,7 +119,8 @@ function saveBots(bots: Bot[]) {
   } catch {}
 }
 
-/* ---------- Step 3 splitter ---------- */
+/* --------------------- Step 3 section splitter (unchanged) --------------------- */
+
 type PromptSectionKey =
   | 'DESCRIPTION'
   | 'AI DESCRIPTION'
@@ -123,7 +136,7 @@ type SplitSection = {
 };
 
 const DISPLAY_TITLES: Record<PromptSectionKey, string> = {
-  DESCRIPTION: 'DESCRIPTION',
+  'DESCRIPTION': 'DESCRIPTION',
   'AI DESCRIPTION': 'AI Description',
   'RULES AND GUIDELINES': 'RULES AND GUIDELINES',
   'AI RULES': 'AI Rules',
@@ -132,7 +145,7 @@ const DISPLAY_TITLES: Record<PromptSectionKey, string> = {
 };
 
 const ICONS: Record<PromptSectionKey, JSX.Element> = {
-  DESCRIPTION: <FileText className="w-4 h-4 text-[#6af7d1]" />,
+  'DESCRIPTION': <FileText className="w-4 h-4 text-[#6af7d1]" />,
   'AI DESCRIPTION': <FileText className="w-4 h-4 text-[#6af7d1]" />,
   'RULES AND GUIDELINES': <Settings className="w-4 h-4 text-[#6af7d1]" />,
   'AI RULES': <ListChecks className="w-4 h-4 text-[#6af7d1]" />,
@@ -145,6 +158,7 @@ const HEADING_REGEX =
 
 function splitStep3IntoSections(step3Raw?: string): SplitSection[] | null {
   if (!step3Raw) return null;
+
   const matches: Array<{ start: number; end: number; label: PromptSectionKey }> = [];
   let m: RegExpExecArray | null;
   HEADING_REGEX.lastIndex = 0;
@@ -153,9 +167,11 @@ function splitStep3IntoSections(step3Raw?: string): SplitSection[] | null {
       .toUpperCase()
       .replace(/\s*&\s*/g, ' AND ')
       .replace(/\s+/g, ' ') as PromptSectionKey;
+
     const label = rawLabel === 'AI  DESCRIPTION' ? ('AI DESCRIPTION' as PromptSectionKey) : rawLabel;
     matches.push({ start: m.index, end: HEADING_REGEX.lastIndex, label });
   }
+
   if (matches.length === 0) return null;
 
   const out: SplitSection[] = [];
@@ -171,7 +187,7 @@ function splitStep3IntoSections(step3Raw?: string): SplitSection[] | null {
   return out;
 }
 
-/* -------------------------------- UI -------------------------------- */
+/* ----------------------------------- UI ----------------------------------- */
 
 export default function BuilderDashboard() {
   const router = useRouter();
@@ -254,7 +270,7 @@ export default function BuilderDashboard() {
 
   return (
     <div className="min-h-screen w-full text-white font-movatif bg-[#0b0c10]">
-      <main className="flex-1 w-full px-5 md:px-8 2xl:px-14 pt-8 pb-24 max-w-[1640px] mx-auto">
+      <main className="flex-1 w-full px-4 sm:px-6 pt-10 pb-24">
         <div className="flex items-center justify-between mb-7">
           <h1 className="text-2xl md:text-3xl font-semibold">Builds</h1>
           <button
@@ -274,7 +290,6 @@ export default function BuilderDashboard() {
           />
         </div>
 
-        {/* Same-sized cards (including the Create card) on iPad/desktop */}
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-7">
           <CreateCard onClick={() => router.push('/builder?step=1')} />
 
@@ -387,7 +402,7 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-[rgba(0,0,0,0.5)]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: 'rgba(0,0,0,0.5)' }}>
       <div className="relative w-full max-w-[1280px] max-h-[88vh] flex flex-col" style={FRAME_STYLE}>
         <div className="flex items-center justify-between px-6 py-4 rounded-t-[30px]" style={HEADER_BORDER}>
           <div className="min-w-0">
@@ -454,11 +469,12 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
           )}
         </div>
 
-        <div className="px-6 py-4 rounded-b-[30px] border-t border-white/30 bg-[#101314]">
+        <div className="px-6 py-4 rounded-b-[30px]" style={{ borderTop: '1px solid rgba(255,255,255,0.3)', background: '#101314' }}>
           <div className="flex justify-end">
             <button
               onClick={onClose}
-              className="px-5 py-2 rounded-[14px] font-semibold bg-[rgba(0,120,90,1)] text-white"
+              className="px-5 py-2 rounded-[14px] font-semibold"
+              style={{ background: 'rgba(0,120,90,1)', color: 'white' }}
             >
               Close
             </button>
@@ -471,38 +487,37 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
 
 /* --------------------------------- Cards --------------------------------- */
 
-const UI = {
-  cardBg: 'rgba(13,15,17,0.92)',
-  border: '1px solid rgba(106,247,209,0.18)',
-  cardShadow: 'inset 0 0 18px rgba(0,0,0,0.28), 0 0 12px rgba(106,247,209,0.06)',
-};
-
 function CreateCard({ onClick }: { onClick: () => void }) {
   return (
     <button
       onClick={onClick}
-      className="group relative rounded-[16px] flex flex-col transition-all active:scale-[0.995] overflow-hidden"
-      style={{ background: UI.cardBg, border: UI.border, boxShadow: UI.cardShadow }}
+      className={`group relative ${CARD_H} rounded-[16px] p-7 flex flex-col items-center justify-between transition-all active:scale-[0.995]`}
+      style={{
+        background: 'rgba(13,15,17,0.92)',
+        border: '2px solid rgba(106,247,209,0.32)',
+        boxShadow: 'inset 0 0 22px rgba(0,0,0,0.28), 0 0 20px rgba(106,247,209,0.06)',
+      }}
     >
-      {/* Maintain same height as other cards on iPad/desktop */}
-      <div className="h-[260px] md:h-[300px] xl:h-[300px] flex flex-col items-center justify-center p-7">
-        <div
-          className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
-          style={{ background: 'radial-gradient(circle, rgba(106,247,209,0.12) 0%, transparent 70%)', filter: 'blur(36px)' }}
-        />
-        <div
-          className="w-20 h-20 rounded-full flex items-center justify-center mb-5"
+      <div
+        className={`w-full ${COVER_H} rounded-[14px] grid place-items-center mb-4`}
+        style={{
+          background: 'radial-gradient(120% 120% at 50% 0%, rgba(106,247,209,0.10) 0%, transparent 70%)',
+          border: '1px dashed rgba(106,247,209,0.28)',
+        }}
+      >
+        <div className="w-20 h-20 rounded-full grid place-items-center"
           style={{
             background: 'rgba(0,0,0,0.18)',
-            border: '1px dashed rgba(106,247,209,0.35)',
+            border: '2px dashed rgba(106,247,209,0.35)',
             boxShadow: 'inset 0 0 18px rgba(0,0,0,0.45), inset 0 0 6px rgba(106,247,209,0.06)',
           }}
         >
           <Plus className="w-10 h-10" style={{ color: '#6af7d1', opacity: 0.9 }} />
         </div>
-        <div className="text-[18px] md:text-[20px]">Create a Build</div>
-        <div className="text-[13px] text-white/65 mt-2">Start building your AI assistant</div>
       </div>
+
+      <div className="text-[18px]">Create a Build</div>
+      <div className="text-[13px] text-white/65">Start building your AI assistant</div>
     </button>
   );
 }
@@ -524,18 +539,26 @@ function BuildCard({
   onDelete: () => void;
   onCustomize: () => void;
 }) {
+  const [hover, setHover] = useState(false);
   const ap = bot.appearance || {};
   return (
     <div
-      className="relative rounded-[16px] p-0 flex flex-col justify-between transition-all overflow-hidden"
-      style={{ background: UI.cardBg, border: UI.border, boxShadow: UI.cardShadow }}
+      className={`relative ${CARD_H} rounded-[16px] p-0 flex flex-col justify-between group transition-all`}
+      style={{
+        background: 'rgba(13,15,17,0.92)',
+        border: '2px solid rgba(106,247,209,0.32)',
+        boxShadow: 'inset 0 0 22px rgba(0,0,0,0.28), 0 0 20px rgba(106,247,209,0.06)',
+      }}
     >
-      {/* same visual height block as CreateCard */}
-      <div className="h-[260px] md:h-[300px] xl:h-[300px] border-b border-white/10 relative">
+      <div
+        className={`${COVER_H} border-b border-white/10 overflow-hidden relative`}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+      >
         <button
           onClick={onCustomize}
           className="absolute right-3 top-3 z-10 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-[10px] text-xs border transition"
-          style={{ background: 'rgba(16,19,20,0.88)', border: '1px solid rgba(106,247,209,0.28)' }}
+          style={{ background: 'rgba(16,19,20,0.88)', border: '2px solid rgba(106,247,209,0.4)', boxShadow: '0 0 14px rgba(106,247,209,0.12)' }}
         >
           <SlidersHorizontal className="w-3.5 h-3.5" />
           Customize
@@ -556,7 +579,7 @@ function BuildCard({
           legs={ap.legs ?? 'capsule'}
           antenna={ap.hasOwnProperty('antenna') ? Boolean((ap as any).antenna) : true}
           withBody={ap.hasOwnProperty('withBody') ? Boolean(ap.withBody) : true}
-          idle={true}
+          idle={ap.hasOwnProperty('idle') ? Boolean(ap.idle) : hover}
         />
       </div>
 
@@ -564,7 +587,7 @@ function BuildCard({
         <div className="flex items-center gap-3">
           <div
             className="w-11 h-11 rounded-[10px] flex items-center justify-center"
-            style={{ background: 'rgba(0,0,0,0.15)', border: '1px solid rgba(106,247,209,0.28)' }}
+            style={{ background: 'rgba(0,0,0,0.15)', border: '2px solid rgba(106,247,209,0.32)' }}
           >
             <BotIcon className="w-5 h-5" style={{ color: accent }} />
           </div>
@@ -574,11 +597,7 @@ function BuildCard({
               {(bot.industry || '—') + (bot.language ? ` · ${bot.language}` : '')}
             </div>
           </div>
-          <button
-            onClick={onDelete}
-            className="ml-auto p-1.5 rounded-md hover:bg-[#ff4d4d14] transition"
-            title="Delete build"
-          >
+          <button onClick={onDelete} className="ml-auto p-1.5 rounded-md hover:bg-[#ff4d4d14] transition" title="Delete build">
             <Trash2 className="w-4 h-4 text-white/70 hover:text-[#ff7a7a]" />
           </button>
         </div>
@@ -587,7 +606,7 @@ function BuildCard({
           <button
             onClick={onOpen}
             className="inline-flex items-center gap-2 px-3.5 py-2 rounded-[10px] text-sm border transition hover:translate-y-[-1px]"
-            style={{ background: 'rgba(16,19,20,0.90)', border: '1px solid rgba(106,247,209,0.28)' }}
+            style={{ background: 'rgba(16,19,20,0.88)', border: '2px solid rgba(106,247,209,0.4)', boxShadow: '0 0 14px rgba(106,247,209,0.12)' }}
           >
             Open <ArrowRight className="w-4 h-4" />
           </button>
