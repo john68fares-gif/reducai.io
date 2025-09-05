@@ -1,642 +1,324 @@
 // pages/account.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Head from 'next/head';
-import Link from 'next/link';
 import { supabase } from '@/lib/supabase-client';
-import { motion, AnimatePresence } from 'framer-motion';
 import {
   User as UserIcon,
   Mail,
   Calendar,
   Sun,
   Moon,
-  Save,
   LogOut,
-  KeyRound,
-  CheckCircle2,
-  AlertCircle,
-  Crown,
-  Zap,
+  CreditCard,
   ShieldCheck,
   Loader2,
-  LockKeyhole,
-  ShieldAlert,
-  ChevronRight,
-  Palette,
+  X,
   Shield,
-  CreditCard,
-  Box,
 } from 'lucide-react';
 
-type ThemeMode = 'dark' | 'light';
-type PlanTier = 'Free' | 'Pro';
-
-function fmtDate(iso?: string) {
-  if (!iso) return '—';
-  try {
-    return new Date(iso).toLocaleString();
-  } catch {
-    return iso;
-  }
-}
-
 export default function AccountPage() {
-  // Loader
-  const [booting, setBooting] = useState(true);
-
-  // User
+  const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [userId, setUserId] = useState<string | null>(null);
-  const [userEmail, setUserEmail] = useState<string | null>(null);
-  const [userName, setUserName] = useState<string | null>(null);
-  const [userCreated, setUserCreated] = useState<string | null>(null);
-  const [userUpdated, setUserUpdated] = useState<string | null>(null);
+  const [darkMode, setDarkMode] = useState(false);
+  const [showBilling, setShowBilling] = useState(false);
+  const [showSecurity, setShowSecurity] = useState(false);
 
-  // Providers
-  const [providers, setProviders] = useState<string[]>([]);
-  const [passwordEnabled, setPasswordEnabled] = useState<boolean>(false);
-  const hasEmailPassword = providers.includes('email') || passwordEnabled;
-  const hasGoogle = providers.includes('google');
+  // password state
+  const [newPassword, setNewPassword] = useState('');
+  const [updating, setUpdating] = useState(false);
+  const [updateMessage, setUpdateMessage] = useState<string | null>(null);
 
-  // Plan + usage
-  const [plan, setPlan] = useState<PlanTier>('Free');
-  const [usage, setUsage] = useState({ requests: 0, limit: 10000 });
+  // 2FA state
+  const [enrolling2FA, setEnrolling2FA] = useState(false);
+  const [qrCode, setQrCode] = useState<string | null>(null);
+  const [otpCode, setOtpCode] = useState('');
+  const [mfaError, setMfaError] = useState<string | null>(null);
+  const [mfaEnabled, setMfaEnabled] = useState(false);
 
-  // Theme
-  const [theme, setTheme] = useState<ThemeMode>('dark');
-  const [savingTheme, setSavingTheme] = useState(false);
-  const [saveMsg, setSaveMsg] = useState<'idle' | 'ok' | 'err'>('idle');
-
-  // Password flows
-  const [resetLoading, setResetLoading] = useState(false);
-  const [resetMsg, setResetMsg] = useState<'idle' | 'sent' | 'err'>('idle');
-  const [createPwLoading, setCreatePwLoading] = useState(false);
-  const [createPwMsg, setCreatePwMsg] = useState<'idle' | 'ok' | 'err'>('idle');
-  const [pw1, setPw1] = useState('');
-  const [pw2, setPw2] = useState('');
-
-  // Strength meter
-  const pwStrength = useMemo(() => {
-    let s = 0;
-    if (pw1.length >= 8) s++;
-    if (/[A-Z]/.test(pw1)) s++;
-    if (/[0-9]/.test(pw1)) s++;
-    if (/[^A-Za-z0-9]/.test(pw1)) s++;
-    return s; // 0..4
-  }, [pw1]);
-
-  // Fetch user
   useEffect(() => {
-    let unsub: any;
-    (async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-
-      setUserId(user?.id ?? null);
-      setUserEmail(user?.email ?? null);
-      setUserName(
-        (user?.user_metadata as any)?.full_name ??
-          user?.user_metadata?.name ??
-          null
-      );
-      setUserCreated(user?.created_at ?? null);
-      setUserUpdated(user?.updated_at ?? null);
-
-      const ids = (user as any)?.identities || [];
-      const provs = Array.from(
-        new Set(ids.map((i: any) => i?.provider).filter(Boolean))
-      );
-      setProviders(provs);
-
-      const pwdMeta = (user?.user_metadata as any)?.password_enabled;
-      setPasswordEnabled(Boolean(pwdMeta));
-
-      const p = (user?.user_metadata as any)?.plan_tier as PlanTier | undefined;
-      if (p && (p === 'Free' || p === 'Pro')) setPlan(p);
-
-      const u = (user?.user_metadata as any)?.requests_used;
-      setUsage({ requests: typeof u === 'number' ? u : 0, limit: 10000 });
-
+    const getUser = async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      setUser(user);
       setLoading(false);
-      setTimeout(() => setBooting(false), 420);
+    };
+    getUser();
 
-      unsub = supabase.auth.onAuthStateChange((_e, session) => {
-        const u2 = session?.user;
-        setUserId(u2?.id ?? null);
-        setUserEmail(u2?.email ?? null);
-        setUserName(
-          (u2?.user_metadata as any)?.full_name ??
-            u2?.user_metadata?.name ??
-            null
-        );
-        setUserCreated(u2?.created_at ?? null);
-        setUserUpdated(u2?.updated_at ?? null);
-
-        const ids2 = (u2 as any)?.identities || [];
-        const provs2 = Array.from(
-          new Set(ids2.map((i: any) => i?.provider).filter(Boolean))
-        );
-        setProviders(provs2);
-
-        const pwdMeta2 = (u2?.user_metadata as any)?.password_enabled;
-        setPasswordEnabled(Boolean(pwdMeta2));
-
-        const pt = (u2?.user_metadata as any)?.plan_tier as PlanTier | undefined;
-        if (pt && (pt === 'Free' || pt === 'Pro')) setPlan(pt);
-      });
-    })();
-    return () => unsub?.data?.subscription?.unsubscribe?.();
+    if (localStorage.getItem('theme') === 'dark') {
+      setDarkMode(true);
+      document.documentElement.classList.add('dark');
+    }
   }, []);
 
-  // Theme init
-  useEffect(() => {
-    try {
-      const ls = (localStorage.getItem('ui:theme') as ThemeMode) || 'dark';
-      setTheme(ls === 'light' ? 'light' : 'dark');
-      document.documentElement.dataset.theme =
-        ls === 'light' ? 'light' : 'dark';
-    } catch {}
-
-    try {
-      const owner = localStorage.getItem('workspace:owner');
-      if (userId && owner && owner !== userId) localStorage.clear();
-      if (userId) localStorage.setItem('workspace:owner', userId);
-    } catch {}
-  }, [userId]);
-
-  const displayName = useMemo(() => {
-    if (userName && userName.trim()) return userName.trim();
-    if (userEmail && userEmail.includes('@'))
-      return userEmail.split('@')[0];
-    return 'Account';
-  }, [userName, userEmail]);
-
-  const saveTheme = async () => {
-    setSavingTheme(true);
-    setSaveMsg('idle');
-    try {
-      document.documentElement.dataset.theme = theme;
-      localStorage.setItem('ui:theme', theme);
-      const { error } = await supabase.auth.updateUser({
-        data: { ui_theme: theme },
-      });
-      if (error) throw error;
-      setSaveMsg('ok');
-    } catch {
-      setSaveMsg('err');
-    } finally {
-      setSavingTheme(false);
-      setTimeout(() => setSaveMsg('idle'), 1800);
+  const toggleDark = () => {
+    const newMode = !darkMode;
+    setDarkMode(newMode);
+    if (newMode) {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem('theme', 'dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem('theme', 'light');
     }
   };
 
-  const sendReset = async () => {
-    if (!userEmail) return;
-    setResetLoading(true);
-    setResetMsg('idle');
-    try {
-      const { error } = await supabase.auth.resetPasswordForEmail(
-        userEmail,
-        { redirectTo: `${window.location.origin}/auth/callback` }
-      );
-      if (error) throw error;
-      setResetMsg('sent');
-    } catch {
-      setResetMsg('err');
-    } finally {
-      setResetLoading(false);
-      setTimeout(() => setResetMsg('idle'), 3200);
+  const handlePasswordUpdate = async () => {
+    if (!newPassword) return;
+    setUpdating(true);
+    setUpdateMessage(null);
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    if (error) {
+      setUpdateMessage(`Error: ${error.message}`);
+    } else {
+      setUpdateMessage('✅ Password updated successfully!');
+      setNewPassword('');
     }
+    setUpdating(false);
   };
 
-  const refreshProviders = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    const ids = (user as any)?.identities || [];
-    const provs = Array.from(
-      new Set(ids.map((i: any) => i?.provider).filter(Boolean))
-    );
-    setProviders(provs);
-    const pwdMeta = (user?.user_metadata as any)?.password_enabled;
-    setPasswordEnabled(Boolean(pwdMeta));
-  };
+  const handleEnable2FA = async () => {
+    setEnrolling2FA(true);
+    setMfaError(null);
 
-  const createPassword = async () => {
-    if (!pw1 || pw1 !== pw2) {
-      setCreatePwMsg('err');
-      setTimeout(() => setCreatePwMsg('idle'), 2000);
+    const { data, error } = await supabase.auth.mfa.enroll({ factorType: 'totp' });
+    if (error) {
+      setMfaError(error.message);
+      setEnrolling2FA(false);
       return;
     }
-    setCreatePwLoading(true);
-    setCreatePwMsg('idle');
-    try {
-      const { error } = await supabase.auth.updateUser({ password: pw1 });
-      if (error) throw error;
-      await supabase.auth.updateUser({ data: { password_enabled: true } });
-      setPasswordEnabled(true);
-      await refreshProviders();
-      setCreatePwMsg('ok');
-      setPw1('');
-      setPw2('');
-    } catch {
-      setCreatePwMsg('err');
-    } finally {
-      setCreatePwLoading(false);
-      setTimeout(() => setCreatePwMsg('idle'), 2800);
+    if (data?.totp?.uri) {
+      // generate QR code via Google Charts API
+      setQrCode(`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(data.totp.uri)}`);
     }
   };
 
-  const signOut = async () => {
-    try {
-      await supabase.auth.signOut();
-    } catch {}
+  const handleVerify2FA = async () => {
+    if (!otpCode) return;
+    const { error } = await supabase.auth.mfa.challengeAndVerify({ factorType: 'totp', code: otpCode });
+    if (error) {
+      setMfaError(error.message);
+    } else {
+      setMfaEnabled(true);
+      setQrCode(null);
+      setOtpCode('');
+    }
   };
+
+  if (loading) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-white dark:bg-[#0b0c10]">
+        <Loader2 className="h-8 w-8 animate-spin text-[#00ffc2]" />
+      </div>
+    );
+  }
 
   return (
     <>
       <Head>
-        <title>Account • Reduc AI</title>
+        <title>Account – Reduc AI</title>
       </Head>
 
-      {/* Loader */}
-      <AnimatePresence>
-        {(booting || loading) && (
-          <motion.div
-            key="boot"
-            className="fixed inset-0 z-50 flex items-center justify-center"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            style={{
-              background: 'var(--bg)',
-              backdropFilter: 'blur(2px)',
-            }}
-          >
-            <motion.div
-              initial={{ scale: 0.96, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              className="card px-6 py-5 rounded-2xl"
+      <div className="min-h-screen bg-white text-black dark:bg-[#0b0c10] dark:text-white transition-colors">
+        <div className="mx-auto max-w-4xl px-6 py-10">
+          {/* Header */}
+          <div className="flex items-center justify-between mb-10">
+            <h1 className="text-3xl font-bold">Account</h1>
+            <button
+              onClick={toggleDark}
+              className="flex items-center gap-2 rounded-md border border-[#00ffc2] px-4 py-2 text-sm font-medium text-[#00ffc2] hover:bg-[#00ffc2] hover:text-black transition-colors"
             >
+              {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+              {darkMode ? 'Light Mode' : 'Dark Mode'}
+            </button>
+          </div>
+
+          {/* User Info */}
+          <div className="space-y-6">
+            <div className="rounded-lg border border-[#00ffc2]/40 bg-white p-6 shadow dark:bg-[#0d0f11]">
               <div className="flex items-center gap-3">
-                <Loader2 className="w-5 h-5 animate-spin" />
-                <div className="text-sm">Loading your settings…</div>
+                <UserIcon className="h-5 w-5 text-[#00ffc2]" />
+                <div>
+                  <p className="text-sm font-medium">Name</p>
+                  <p className="text-lg">{user?.user_metadata?.full_name || 'No name set'}</p>
+                </div>
               </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            </div>
 
-      {/* Page */}
-      <div className="min-h-screen" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
-        <main className="w-full max-w-[1100px] mx-auto px-6 pt-10 pb-24 grid grid-cols-1 md:grid-cols-[260px,1fr] gap-8">
-          {/* Left nav */}
-          <aside className="md:sticky md:top-10 h-fit">
-            <div className="text-xl font-semibold mb-4">Settings</div>
-            <nav className="space-y-2">
-              <SettingsLink icon={<UserIcon className="w-4 h-4" />} label="Profile" href="#profile" />
-              <SettingsLink icon={<CreditCard className="w-4 h-4" />} label="Plan & Billing" href="#billing" />
-            </nav>
-          </aside>
+            <div className="rounded-lg border border-[#00ffc2]/40 bg-white p-6 shadow dark:bg-[#0d0f11]">
+              <div className="flex items-center gap-3">
+                <Mail className="h-5 w-5 text-[#00ffc2]" />
+                <div>
+                  <p className="text-sm font-medium">Email</p>
+                  <p className="text-lg">{user?.email}</p>
+                </div>
+              </div>
+            </div>
 
-          {/* Right content */}
-          <section className="space-y-10">
-            {/* Profile */}
-            <div id="profile" className="scroll-mt-16">
-              <Header
-                icon={<UserIcon className="w-5 h-5" />}
-                title="Profile"
-                subtitle="Manage your account info, theme, and security"
-              />
+            <div className="rounded-lg border border-[#00ffc2]/40 bg-white p-6 shadow dark:bg-[#0d0f11]">
+              <div className="flex items-center gap-3">
+                <Calendar className="h-5 w-5 text-[#00ffc2]" />
+                <div>
+                  <p className="text-sm font-medium">Joined</p>
+                  <p className="text-lg">
+                    {user?.created_at ? new Date(user.created_at).toLocaleDateString() : '—'}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
 
-              <Card>
-                <motion.div
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.25 }}
+          {/* Billing & Security */}
+          <div className="mt-10 space-y-6">
+            <button
+              onClick={() => setShowBilling(true)}
+              className="w-full flex items-center justify-between rounded-lg border border-[#00ffc2] px-6 py-4 text-left text-[#00ffc2] hover:bg-[#00ffc2] hover:text-black transition-colors"
+            >
+              <span className="flex items-center gap-3">
+                <CreditCard className="h-5 w-5" />
+                Billing
+              </span>
+              <span>→</span>
+            </button>
+
+            <button
+              onClick={() => setShowSecurity(true)}
+              className="w-full flex items-center justify-between rounded-lg border border-[#00ffc2] px-6 py-4 text-left text-[#00ffc2] hover:bg-[#00ffc2] hover:text-black transition-colors"
+            >
+              <span className="flex items-center gap-3">
+                <ShieldCheck className="h-5 w-5" />
+                Security
+              </span>
+              <span>→</span>
+            </button>
+
+            <button
+              onClick={() => supabase.auth.signOut()}
+              className="w-full flex items-center justify-between rounded-lg border border-red-500 px-6 py-4 text-left text-red-500 hover:bg-red-500 hover:text-white transition-colors"
+            >
+              <span className="flex items-center gap-3">
+                <LogOut className="h-5 w-5" />
+                Log out
+              </span>
+              <span>→</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Billing Modal */}
+      {showBilling && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+          <div className="w-full max-w-md rounded-lg border border-[#00ffc2] bg-white p-6 dark:bg-[#0d0f11] dark:text-white shadow-lg relative">
+            <button
+              onClick={() => setShowBilling(false)}
+              className="absolute right-4 top-4 text-gray-600 hover:text-black dark:text-gray-400 dark:hover:text-white"
+            >
+              <X className="h-5 w-5" />
+            </button>
+            <h2 className="mb-4 text-xl font-bold text-center">Billing</h2>
+            <p className="mb-6 text-center text-sm text-gray-600 dark:text-gray-400">
+              Manage your subscription and payment details below.
+            </p>
+            <a
+              href="https://buy.stripe.com/3cI7sLgWz0zb0uT5hrgUM00"
+              target="_blank"
+              rel="noreferrer"
+              className="block w-full rounded-md bg-[#00ffc2] px-4 py-3 text-center font-medium text-black hover:bg-[#00e6ad] transition-colors"
+            >
+              Upgrade to Pro – €19.99/month
+            </a>
+          </div>
+        </div>
+      )}
+
+      {/* Security Modal */}
+      {showSecurity && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+          <div className="w-full max-w-md rounded-lg border border-[#00ffc2] bg-white p-6 dark:bg-[#0d0f11] dark:text-white shadow-lg relative">
+            <button
+              onClick={() => setShowSecurity(false)}
+              className="absolute right-4 top-4 text-gray-600 hover:text-black dark:text-gray-400 dark:hover:text-white"
+            >
+              <X className="h-5 w-5" />
+            </button>
+            <h2 className="mb-4 text-xl font-bold text-center">Security Settings</h2>
+            <div className="space-y-6">
+              {/* Change Password */}
+              <div>
+                <label className="block mb-2 text-sm font-medium">Change Password</label>
+                <input
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="New password"
+                  className="w-full rounded-md border border-[#00ffc2]/50 bg-transparent px-3 py-2 text-sm outline-none focus:border-[#00ffc2]"
+                />
+                <button
+                  onClick={handlePasswordUpdate}
+                  disabled={updating}
+                  className="mt-3 w-full rounded-md bg-[#00ffc2] px-4 py-2 text-black font-medium hover:bg-[#00e6ad] transition-colors disabled:opacity-60"
                 >
-                  <div className="flex items-center gap-4 mb-6">
-                    <div className="w-12 h-12 rounded-full flex items-center justify-center bg-[var(--brand-weak)]">
-                      <UserIcon className="w-6 h-6 text-black/80" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-lg font-semibold truncate">
-                        {loading ? (
-                          <span className="inline-block h-5 w-40 bg-white/10 rounded animate-pulse" />
-                        ) : (
-                          displayName
-                        )}
-                      </div>
-                      <div className="text-sm text-[color:var(--text-muted)] truncate">
-                        {loading ? (
-                          <span className="inline-block h-4 w-56 bg-white/5 rounded animate-pulse" />
-                        ) : (
-                          userEmail || '—'
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="grid sm:grid-cols-3 gap-3 text-sm">
-                    <InfoRow icon={<Mail className="w-4 h-4" />} label="Email" value={userEmail || '—'} />
-                    <InfoRow icon={<Calendar className="w-4 h-4" />} label="Created" value={fmtDate(userCreated || undefined)} />
-                    <InfoRow icon={<Calendar className="w-4 h-4" />} label="Updated" value={fmtDate(userUpdated || undefined)} />
-                  </div>
+                  {updating ? 'Updating…' : 'Update Password'}
+                </button>
+                {updateMessage && (
+                  <p className="mt-2 text-sm text-center text-gray-600 dark:text-gray-400">
+                    {updateMessage}
+                  </p>
+                )}
+              </div>
 
-                  <div className="mt-6 flex flex-wrap gap-3">
+              {/* 2FA */}
+              <div className="border-t border-[#00ffc2]/30 pt-4">
+                <span className="flex items-center gap-2 text-sm font-medium mb-2">
+                  <Shield className="h-4 w-4 text-[#00ffc2]" />
+                  Two-Factor Authentication
+                </span>
+                {!mfaEnabled && !qrCode && (
+                  <button
+                    onClick={handleEnable2FA}
+                    className="w-full rounded-md bg-[#00ffc2] px-4 py-2 text-black font-medium hover:bg-[#00e6ad] transition-colors"
+                  >
+                    Enable 2FA
+                  </button>
+                )}
+
+                {qrCode && (
+                  <div className="space-y-3">
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      Scan this QR code with Google Authenticator or Authy:
+                    </p>
+                    <img src={qrCode} alt="2FA QR" className="mx-auto" />
+                    <input
+                      type="text"
+                      value={otpCode}
+                      onChange={(e) => setOtpCode(e.target.value)}
+                      placeholder="Enter 6-digit code"
+                      className="w-full rounded-md border border-[#00ffc2]/50 bg-transparent px-3 py-2 text-sm outline-none focus:border-[#00ffc2]"
+                    />
                     <button
-                      onClick={signOut}
-                      className="inline-flex items-center gap-2 px-4 py-2 rounded-[10px] border transition hover:translate-y-[-1px]"
-                      style={{ borderColor: 'var(--border)', background: 'var(--panel)', color: 'var(--text)' }}
+                      onClick={handleVerify2FA}
+                      className="w-full rounded-md bg-[#00ffc2] px-4 py-2 text-black font-medium hover:bg-[#00e6ad] transition-colors"
                     >
-                      <LogOut className="w-4 h-4" />
-                      Sign out
+                      Verify & Enable
                     </button>
                   </div>
-                </motion.div>
-              </Card>
+                )}
 
-              {/* Appearance */}
-              <SubHeader icon={<Palette className="w-4 h-4" />} title="Appearance" subtitle="Customize how the app looks" />
-              <Card>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <ThemeTile label="Dark" active={theme === 'dark'} icon={<Moon className="w-4 h-4" />} onClick={() => setTheme('dark')} />
-                  <ThemeTile label="Light" active={theme === 'light'} icon={<Sun className="w-4 h-4" />} onClick={() => setTheme('light')} />
-                </div>
+                {mfaEnabled && (
+                  <p className="text-sm text-green-500">✅ 2FA is enabled on your account</p>
+                )}
 
-                <div className="mt-6 flex items-center gap-3">
-                  <button
-                    onClick={saveTheme}
-                    disabled={savingTheme}
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-[10px] border transition hover:translate-y-[-1px] disabled:opacity-60"
-                    style={{ borderColor: 'var(--border)', background: 'var(--panel)', color: 'var(--text)' }}
-                  >
-                    {savingTheme ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                    Save theme
-                  </button>
-
-                  <AnimatePresence mode="popLayout">
-                    {saveMsg === 'ok' && (
-                      <motion.span className="inline-flex items-center gap-1 text-[var(--brand)]">
-                        <CheckCircle2 className="w-4 h-4" /> Saved
-                      </motion.span>
-                    )}
-                    {saveMsg === 'err' && (
-                      <motion.span className="inline-flex items-center gap-1 text-red-400">
-                        <AlertCircle className="w-4 h-4" /> Failed
-                      </motion.span>
-                    )}
-                  </AnimatePresence>
-                </div>
-              </Card>
-
-              {/* Account & Security */}
-              <SubHeader icon={<Shield className="w-4 h-4" />} title="Account & Security" subtitle="Sign-in methods and password" />
-              <Card>
-                <div className="grid gap-4">
-                  {/* Sign-in methods */}
-                  <Band>
-                    <div className="text-sm font-semibold mb-2">Sign-in methods</div>
-                    <div className="flex flex-wrap items-center gap-2 text-xs text-[color:var(--text-muted)]">
-                      {hasEmailPassword ? (
-                        <Badge>EMAIL & PASSWORD</Badge>
-                      ) : (
-                        <BadgeMuted>
-                          EMAIL & PASSWORD <span className="ml-1 px-1 rounded bg-red-500 text-white">NOT SET</span>
-                        </BadgeMuted>
-                      )}
-                      {hasGoogle && <Badge>GOOGLE</Badge>}
-                    </div>
-                  </Band>
-
-                  {/* Create password */}
-                  {!hasEmailPassword && (
-                    <Band accent>
-                      <div className="flex items-center gap-2 mb-2">
-                        <LockKeyhole className="w-4 h-4" />
-                        <div className="text-sm font-semibold">Create a password</div>
-                      </div>
-                      <p className="text-xs text-[color:var(--text-muted)] mb-3">Add a password so you can also sign in with email + password.</p>
-
-                      <div className="grid gap-3">
-                        <input type="password" className="w-full rounded-[10px] px-3 py-2 bg-[var(--card)] border border-[var(--border)] outline-none" placeholder="New password" value={pw1} onChange={(e) => setPw1(e.target.value)} />
-                        <input type="password" className="w-full rounded-[10px] px-3 py-2 bg-[var(--card)] border border-[var(--border)] outline-none" placeholder="Confirm password" value={pw2} onChange={(e) => setPw2(e.target.value)} />
-
-                        <div className="h-1 w-full bg-[var(--border)] rounded overflow-hidden">
-                          <div className="h-full" style={{ width: `${(pwStrength / 4) * 100}%`, background: 'linear-gradient(90deg,#40f3c9,#7bf7d8)', transition: 'width 220ms ease' }} />
-                        </div>
-
-                        <div className="flex items-center gap-3">
-                          <button
-                            onClick={createPassword}
-                            disabled={createPwLoading}
-                            className="inline-flex items-center gap-2 px-4 py-2 rounded-[10px] border transition hover:translate-y-[-1px] disabled:opacity-60"
-                            style={{ borderColor: 'var(--border)', background: 'var(--panel)', color: 'var(--text)' }}
-                          >
-                            {createPwLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
-                            Create password
-                          </button>
-
-                          <AnimatePresence>
-                            {createPwMsg === 'ok' && (
-                              <motion.span className="inline-flex items-center gap-1 text-[var(--brand)]">
-                                <CheckCircle2 className="w-4 h-4" /> Saved
-                              </motion.span>
-                            )}
-                            {createPwMsg === 'err' && (
-                              <motion.span className="inline-flex items-center gap-1 text-red-400">
-                                <ShieldAlert className="w-4 h-4" /> Check passwords
-                              </motion.span>
-                            )}
-                          </AnimatePresence>
-                        </div>
-                      </div>
-                    </Band>
-                  )}
-
-                  {/* Change password */}
-                  {hasEmailPassword && (
-                    <Band>
-                      <div className="flex items-center gap-2 mb-1">
-                        <LockKeyhole className="w-4 h-4" />
-                        <div className="text-sm font-semibold">Change password</div>
-                      </div>
-                      <p className="text-xs text-[color:var(--text-muted)] mb-3">We’ll send a secure link to your email to update your password.</p>
-                      <div className="flex items-center gap-3">
-                        <button
-                          onClick={sendReset}
-                          disabled={!userEmail || resetLoading}
-                          className="inline-flex items-center gap-2 px-4 py-2 rounded-[10px] border transition hover:translate-y-[-1px] disabled:opacity-60"
-                          style={{ borderColor: 'var(--border)', background: 'var(--panel)', color: 'var(--text)' }}
-                        >
-                          {resetLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
-                          Send reset link
-                        </button>
-
-                        <AnimatePresence>
-                          {resetMsg === 'sent' && (
-                            <motion.span className="inline-flex items-center gap-1 text-[var(--brand)]">
-                              <CheckCircle2 className="w-4 h-4" /> Sent
-                            </motion.span>
-                          )}
-                          {resetMsg === 'err' && (
-                            <motion.span className="inline-flex items-center gap-1 text-red-400">
-                              <AlertCircle className="w-4 h-4" /> Failed
-                            </motion.span>
-                          )}
-                        </AnimatePresence>
-                      </div>
-                    </Band>
-                  )}
-                </div>
-              </Card>
+                {mfaError && (
+                  <p className="text-sm text-red-500 mt-2">Error: {mfaError}</p>
+                )}
+              </div>
             </div>
-
-            {/* Plan & Billing */}
-            <div id="billing" className="scroll-mt-16">
-              <Header icon={<Box className="w-5 h-5" />} title="Current Plan" subtitle="Your current subscription plan" />
-              <Card>
-                <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-[var(--brand-weak)]">
-                      <Crown className="w-5 h-5 text-[var(--brand)]" />
-                    </div>
-                    <div>
-                      <div className="text-lg font-semibold">Plan & Billing</div>
-                      <div className="text-sm text-[color:var(--text-muted)]">Current plan: <span className="font-semibold">{plan}</span></div>
-                    </div>
-                  </div>
-
-                  <div className="text-xs text-[color:var(--text-muted)] mb-4">
-                    Usage: {usage.requests.toLocaleString()} / {usage.limit.toLocaleString()} requests
-                  </div>
-
-                  <div className="text-xs text-[color:var(--text-muted)] mb-6 flex items-center gap-2">
-                    <ShieldCheck className="w-4 h-4" /> Free is demo-only. Upgrade to Pro for full features.
-                  </div>
-
-                  <div className="flex flex-wrap gap-3">
-                    <Link
-                      href="/account/pricing"
-                      className="inline-flex items-center gap-2 px-5 py-2 rounded-[10px] border transition hover:translate-y-[-1px]"
-                      style={{ borderColor: 'var(--border)', background: 'var(--panel)', color: 'var(--text)' }}
-                    >
-                      View pricing <ChevronRight className="w-4 h-4" />
-                    </Link>
-
-                    {plan !== 'Pro' && (
-                      <a
-                        href="https://buy.stripe.com/3cI7sLgWz0zb0uT5hrgUM00"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-2 px-5 py-2 rounded-[10px] border font-semibold transition hover:translate-y-[-1px]"
-                        style={{ borderColor: 'var(--brand-weak)', background: 'var(--brand-weak)', color: '#000' }}
-                      >
-                        <Zap className="w-4 h-4" /> Upgrade to Pro (€19.99/mo)
-                      </a>
-                    )}
-                  </div>
-                </motion.div>
-              </Card>
-            </div>
-          </section>
-        </main>
-      </div>
-    </>
-  );
-}
-
-/* ---------- small building blocks ---------- */
-
-function Header({ icon, title, subtitle }:{ icon: React.ReactNode; title: string; subtitle?: string }) {
-  return (
-    <div className="mb-3">
-      <div className="flex items-center gap-2 text-[17px] font-semibold">
-        <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg border bg-[var(--brand-weak)] border-[var(--brand-weak)]">
-          {icon}
-        </span>
-        <span>{title}</span>
-      </div>
-      {subtitle && <div className="text-sm text-[color:var(--text-muted)] ml-10 -mt-1">{subtitle}</div>}
-    </div>
-  );
-}
-
-function SubHeader({ icon, title, subtitle }:{ icon: React.ReactNode; title: string; subtitle?: string }) {
-  return (
-    <div className="mt-8 mb-3">
-      <div className="flex items-center gap-2 text-sm font-semibold">
-        <span className="inline-flex items-center justify-center w-6 h-6 rounded-md border bg-[var(--panel)] border-[var(--border)]">
-          {icon}
-        </span>
-        <span>{title}</span>
-      </div>
-      {subtitle && <div className="text-xs text-[color:var(--text-muted)] ml-8 mt-1">{subtitle}</div>}
-    </div>
-  );
-}
-
-function Card({ children }: { children: React.ReactNode }) {
-  return (
-    <motion.section initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.28 }} className="card p-6">
-      {children}
-    </motion.section>
-  );
-}
-
-function Band({ children, accent = false }:{ children: React.ReactNode; accent?: boolean }) {
-  return (
-    <div className={`rounded-[12px] p-4 ${accent ? 'ring-1 ring-[var(--brand-weak)]' : ''}`} style={{ background: 'var(--panel)', border: '1px solid var(--border)' }}>
-      {children}
-    </div>
-  );
-}
-
-function InfoRow({ icon, label, value }: { icon: React.ReactNode; label: string; value: React.ReactNode }) {
-  return (
-    <div className="flex items-center gap-2 text-sm">
-      {icon}
-      <span className="w-28 shrink-0 text-[color:var(--text-muted)]">{label}</span>
-      <span className="truncate">{value}</span>
-    </div>
-  );
-}
-
-function ThemeTile({ label, active, onClick, icon }: { label: string; active: boolean; onClick: () => void; icon: React.ReactNode; }) {
-  return (
-    <motion.button whileHover={{ y: -1 }} whileTap={{ scale: 0.98 }} onClick={onClick} className={`card p-4 text-left transition-all ${active ? 'ring-1 ring-[var(--brand-weak)]' : ''}`}>
-      <div className="flex items-center gap-2">
-        <div className="w-8 h-8 rounded-[10px] flex items-center justify-center bg-[var(--panel)] border border-[var(--border)]">
-          {icon}
+          </div>
         </div>
-        <div className="font-semibold">{label}</div>
-      </div>
-      <div className="text-xs text-[color:var(--text-muted)] mt-2">
-        {label === 'Light' ? 'Bright backgrounds and dark text.' : 'Dim backgrounds and light text.'}
-      </div>
-    </motion.button>
-  );
-}
-
-function SettingsLink({ icon, label, href }: { icon: React.ReactNode; label: string; href: string; }) {
-  return (
-    <a href={href} className="panel flex items-center justify-between rounded-[12px] px-3 py-2 transition hover:translate-y-[-1px]" style={{ color: 'var(--text)' }}>
-      <span className="flex items-center gap-2 text-sm">{icon}{label}</span>
-      <ChevronRight className="w-4 h-4 text-[color:var(--text-muted)]" />
-    </a>
-  );
-}
-
-function Badge({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="px-2.5 py-1 rounded-md border text-[11px] uppercase tracking-wide" style={{ borderColor: 'var(--brand-weak)', background: 'var(--brand-weak)', color: '#000' }}>
-      {children}
-    </span>
-  );
-}
-
-function BadgeMuted({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="px-2.5 py-1 rounded-md border text-[11px] uppercase tracking-wide text-[color:var(--text-muted)]" style={{ borderColor: 'var(--border)', background: 'var(--card)' }}>
-      {children}
-    </span>
+      )}
+    </>
   );
 }
