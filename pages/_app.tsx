@@ -4,10 +4,12 @@ import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { SessionProvider } from 'next-auth/react';
 import Sidebar from '../components/ui/Sidebar';
-import AuthGate from '../components/auth/AuthGate';
 import '../styles/globals.css';
 
-export default function MyApp({ Component, pageProps: { session, ...pageProps } }: AppProps) {
+export default function MyApp({
+  Component,
+  pageProps: { session, ...pageProps },
+}: AppProps) {
   const router = useRouter();
   const hideSidebar = router.pathname === '/' || router.pathname.startsWith('/auth');
 
@@ -27,12 +29,9 @@ export default function MyApp({ Component, pageProps: { session, ...pageProps } 
             padding: 20,
           }}
         >
-          <AuthGate>
-            <Component {...pageProps} />
-          </AuthGate>
+          <Component {...pageProps} />
         </main>
       </div>
     </SessionProvider>
   );
 }
-ss
