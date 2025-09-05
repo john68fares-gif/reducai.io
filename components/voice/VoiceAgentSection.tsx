@@ -4,20 +4,19 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, Bot as BotIcon, Phone, Trash2, ArrowRight, X, Search } from 'lucide-react';
 
-// Wizard steps you already have
 import StepProgress from '@/components/builder/StepProgress';
 import StepV1Basics from '@/components/voice/steps/StepV1Basics';
 import StepV2Telephony from '@/components/voice/steps/StepV2Telephony';
 import StepV3PromptA from '@/components/voice/steps/StepV3PromptA';
 import StepV4Overview from '@/components/voice/steps/StepV4Overview';
-
-// NEW: the full-page editor step
 import VoiceAssistantEditor from '@/components/voice/VoiceAssistantEditor';
+
+import { scopedStorage, migrateLegacyKeysToUser } from '@/utils/scoped-storage';
 
 type Agent = {
   id: string;
   name: string;
-  type?: string;           // "voice" is what we want here
+  type?: string;           // "voice"
   language?: string;
   fromE164?: string;
   updatedAt?: string;
@@ -25,9 +24,9 @@ type Agent = {
 };
 
 const UI = {
-  cardBg: 'rgba(13,15,17,0.92)',
-  border: '1px solid rgba(106,247,209,0.18)',
-  cardShadow: 'inset 0 0 18px rgba(0,0,0,0.28), 0 0 12px rgba(106,247,209,0.06)',
+  cardBg: 'var(--card)',
+  border: '1px solid var(--border)',
+  cardShadow: 'var(--shadow-card)',
 };
 
 const nowISO = () => new Date().toISOString();
@@ -44,15 +43,18 @@ export default function VoiceAgentSection() {
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [editingId, setEditingId] = useState<string>('');
 
-  // ====== GALLERY DATA (localStorage.chatbots → only voice) ======
+  // ====== GALLERY DATA (per-account storage) ======
   const [query, setQuery] = useState('');
   const [agents, setAgents] = useState<Agent[]>([]);
 
   useEffect(() => {
-    const read = () => {
-      try {
-        const raw = localStorage.getItem('chatbots');
-        const arr = raw ? JSON.parse(raw) : [];
+    (async () => {
+      const ss = await scopedStorage();
+      await ss.ensureOwnerGuard();
+      await migrateLegacyKeysToUser();
+
+      const read = async () => {
+        const arr = await ss.getJSON<any[]>('chatbots', []);
         const onlyVoice = Array.isArray(arr)
           ? arr.filter((b: any) => (b?.type || 'voice') === 'voice')
           : [];
@@ -69,12 +71,13 @@ export default function VoiceAgentSection() {
             }))
             .sort((a, b) => Date.parse(b.updatedAt!) - Date.parse(a.updatedAt!))
         );
-      } catch {}
-    };
-    read();
-    const onStorage = (e: StorageEvent) => e.key === 'chatbots' && read();
-    window.addEventListener('storage', onStorage);
-    return () => window.removeEventListener('storage', onStorage);
+      };
+
+      await read();
+      const onStorage = (e: StorageEvent) => e.key?.endsWith(':chatbots') && read();
+      window.addEventListener('storage', onStorage);
+      return () => window.removeEventListener('storage', onStorage);
+    })();
   }, []);
 
   const filtered = useMemo(() => {
@@ -87,14 +90,12 @@ export default function VoiceAgentSection() {
     );
   }, [agents, query]);
 
-  const del = (id: string) => {
-    try {
-      const raw = localStorage.getItem('chatbots');
-      const arr = raw ? JSON.parse(raw) : [];
-      const next = arr.filter((b: any) => b.id !== id);
-      localStorage.setItem('chatbots', JSON.stringify(next));
-      setAgents((p) => p.filter((a) => a.id !== id));
-    } catch {}
+  const del = async (id: string) => {
+    const ss = await scopedStorage();
+    const arr = await ss.getJSON<any[]>('chatbots', []);
+    const next = arr.filter((b: any) => b.id !== id);
+    await ss.setJSON('chatbots', next);
+    setAgents((p) => p.filter((a) => a.id !== id));
   };
 
   // ====== NAV ======
@@ -112,28 +113,25 @@ export default function VoiceAgentSection() {
       <VoiceAssistantEditor
         id={editingId}
         onExit={exitEditor}
-        onSaved={() => {
-          // refresh gallery timestamps/names etc.
-          try {
-            const raw = localStorage.getItem('chatbots');
-            const arr = raw ? JSON.parse(raw) : [];
-            const onlyVoice = Array.isArray(arr)
-              ? arr.filter((b: any) => (b?.type || 'voice') === 'voice')
-              : [];
-            setAgents(
-              onlyVoice
-                .map((b: any) => ({
-                  id: b.id,
-                  name: b.name || 'Untitled',
-                  type: b.type || 'voice',
-                  language: b.language,
-                  fromE164: b.fromE164,
-                  updatedAt: b.updatedAt || b.createdAt || nowISO(),
-                  createdAt: b.createdAt || nowISO(),
-                }))
-                .sort((a, b) => Date.parse(b.updatedAt!) - Date.parse(a.updatedAt!))
-            );
-          } catch {}
+        onSaved={async () => {
+          const ss = await scopedStorage();
+          const arr = await ss.getJSON<any[]>('chatbots', []);
+          const onlyVoice = Array.isArray(arr)
+            ? arr.filter((b: any) => (b?.type || 'voice') === 'voice')
+            : [];
+          setAgents(
+            onlyVoice
+              .map((b: any) => ({
+                id: b.id,
+                name: b.name || 'Untitled',
+                type: b.type || 'voice',
+                language: b.language,
+                fromE164: b.fromE164,
+                updatedAt: b.updatedAt || b.createdAt || nowISO(),
+                createdAt: b.createdAt || nowISO(),
+              }))
+              .sort((a, b) => Date.parse(b.updatedAt!) - Date.parse(a.updatedAt!))
+          );
         }}
       />
     );
@@ -142,13 +140,14 @@ export default function VoiceAgentSection() {
   // ====== WIZARD ======
   if (mode === 'wizard') {
     return (
-      <section className="w-full">
+      <section className="w-full" style={{ color: 'var(--text)' }}>
         <div className="w-full max-w-[1840px] mx-auto px-6 2xl:px-12 pt-8 pb-24">
           <div className="flex items-center justify-between mb-6">
             <h1 className="text-2xl md:text-3xl font-semibold">Create Voice Agent</h1>
             <button
               onClick={exitWizard}
-              className="inline-flex items-center gap-2 rounded-[12px] border border-white/15 px-4 py-2 hover:bg-white/10 transition"
+              className="inline-flex items-center gap-2 rounded-[12px] px-4 py-2 btn-ghost hover:translate-y-[-1px] transition"
+              style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
             >
               <X className="w-4 h-4" /> Exit setup
             </button>
@@ -185,13 +184,13 @@ export default function VoiceAgentSection() {
 
   // ====== GALLERY ======
   return (
-    <section className="w-full">
+    <section className="w-full" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
       <div className="w-full max-w-[1640px] mx-auto px-6 2xl:px-12 pt-8 pb-24">
         <motion.div {...fadeUp} className="flex items-center justify-between mb-7">
           <h1 className="text-2xl md:text-3xl font-semibold">Voice Agents</h1>
           <button
             onClick={startWizard}
-            className="px-4 py-2 rounded-[10px] bg-[#00ffc2] text-black font-semibold shadow-[0_0_10px_rgba(106,247,209,0.28)] hover:brightness-110 transition"
+            className="px-4 py-2 rounded-[10px] btn-brand font-semibold shadow-[0_0_10px_var(--ring)] hover:brightness-110 transition"
           >
             Create Voice Agent
           </button>
@@ -203,9 +202,10 @@ export default function VoiceAgentSection() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search voice agents…"
-              className="w-full rounded-[10px] bg-[#101314] text-white/95 border border-[#13312b] px-5 py-4 text-[15px] outline-none focus:border-[#00ffc2]"
+              className="w-full rounded-[10px] input px-5 py-4 text-[15px] outline-none focus:ring-2"
+              style={{ boxShadow: 'none' }}
             />
-            <Search className="w-4 h-4 absolute right-4 top-1/2 -translate-y-1/2 text-white/60" />
+            <Search className="w-4 h-4 absolute right-4 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
           </div>
         </motion.div>
 
@@ -223,8 +223,8 @@ export default function VoiceAgentSection() {
         </motion.div>
 
         {filtered.length === 0 && (
-          <motion.div {...fadeUp} className="mt-12 text-center text-white/60">
-            No voice agents yet. Click <span className="text-[#00ffc2]">Create Voice Agent</span> to get started.
+          <motion.div {...fadeUp} className="mt-12 text-center" style={{ color: 'var(--text-muted)' }}>
+            No voice agents yet. Click <span style={{ color: 'var(--brand)' }}>Create Voice Agent</span> to get started.
           </motion.div>
         )}
       </div>
@@ -244,32 +244,28 @@ function CreateCard({ onClick }: { onClick: () => void }) {
       <div
         className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
         style={{
-          background:
-            'radial-gradient(circle, rgba(106,247,209,0.12) 0%, transparent 70%)',
+          background: 'radial-gradient(circle, var(--brand-weak) 0%, transparent 70%)',
           filter: 'blur(36px)',
         }}
       />
       <div
         className="w-20 h-20 rounded-full flex items-center justify-center mb-5"
         style={{
-          background: 'rgba(0,0,0,0.18)',
-          border: '1px dashed rgba(106,247,209,0.35)',
-          boxShadow:
-            'inset 0 0 18px rgba(0,0,0,0.45), inset 0 0 6px rgba(106,247,209,0.06)',
+          background: 'var(--panel)',
+          border: '1px dashed var(--brand-weak)',
+          boxShadow: 'var(--shadow-soft)',
         }}
       >
-        <Plus className="w-10 h-10" style={{ color: '#6af7d1', opacity: 0.9 }} />
+        <Plus className="w-10 h-10" style={{ color: 'var(--brand)' }} />
       </div>
       <div className="text-[18px]">Create Voice Agent</div>
-      <div className="text-[13px] text-white/65 mt-2">Start a new call agent</div>
+      <div className="text-[13px]" style={{ color: 'var(--text-muted)', marginTop: 8 }}>Start a new call agent</div>
     </button>
   );
 }
 
 function AgentCard({
-  agent,
-  onDelete,
-  onOpen,
+  agent, onDelete, onOpen,
 }: {
   agent: Agent;
   onDelete: () => void;
@@ -282,43 +278,43 @@ function AgentCard({
     >
       <div
         className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
-        style={{ background: 'radial-gradient(circle, rgba(106,247,209,0.10) 0%, transparent 70%)', filter: 'blur(36px)' }}
+        style={{ background: 'radial-gradient(circle, var(--brand-weak) 0%, transparent 70%)', filter: 'blur(36px)' }}
       />
 
       <div className="flex items-center gap-3">
         <div
           className="w-10 h-10 rounded-[10px] flex items-center justify-center"
-          style={{ background: 'rgba(0,0,0,0.15)', border: '1px solid rgba(106,247,209,0.28)' }}
+          style={{ background: 'var(--panel)', border: '1px solid var(--brand-weak)' }}
         >
           <BotIcon className="w-5 h-5" />
         </div>
         <div className="min-w-0">
           <div className="font-semibold truncate">{agent.name}</div>
-          <div className="text-[12px] text-white/60 truncate">
+          <div className="text-[12px] truncate" style={{ color: 'var(--text-muted)' }}>
             {[agent.language, agent.fromE164].filter(Boolean).join(' · ') || '—'}
           </div>
         </div>
-        <button onClick={onDelete} className="ml-auto p-1.5 rounded-md hover:bg-[#ff4d4d14]" title="Delete">
-          <Trash2 className="w-4 h-4 text-white/70 hover:text-[#ff7a7a]" />
+        <button onClick={onDelete} className="ml-auto p-1.5 rounded-md hover:opacity-80" title="Delete">
+          <Trash2 className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
         </button>
       </div>
 
       <div className="flex items-center justify-between">
-        <div className="text-[12px] text-white/50">Updated {fmt(agent.updatedAt)}</div>
+        <div className="text-[12px]" style={{ color: 'var(--text-muted)' }}>Updated {fmt(agent.updatedAt)}</div>
         <div className="flex items-center gap-2">
           {agent.fromE164 && (
             <a
               href={`tel:${agent.fromE164}`}
-              className="inline-flex items-center gap-2 px-3 py-2 rounded-[10px] text-sm border"
-              style={{ borderColor: 'rgba(106,247,209,0.28)', background: 'rgba(0,255,194,0.06)' }}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-[10px] text-sm"
+              style={{ border: '1px solid var(--brand-weak)', background: 'var(--card)' }}
             >
               <Phone className="w-4 h-4" /> Test
             </a>
           )}
           <button
             onClick={onOpen}
-            className="inline-flex items-center gap-2 px-3 py-2 rounded-[10px] text-sm border hover:translate-y-[-1px] transition"
-            style={{ borderColor: 'rgba(106,247,209,0.28)', background: 'rgba(16,19,20,0.90)' }}
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-[10px] text-sm hover:translate-y-[-1px] transition"
+            style={{ border: '1px solid var(--brand-weak)', background: 'var(--panel)' }}
           >
             Open <ArrowRight className="w-4 h-4" />
           </button>
