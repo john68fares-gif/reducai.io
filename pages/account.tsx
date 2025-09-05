@@ -355,57 +355,59 @@ export default function AccountPage() {
               </Card>
 
               {/* Appearance */}
-              <SubHeader icon={<Palette className="w-4 h-4" />} title="Appearance" subtitle="Customize how the app looks" />
-              <Card>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <ThemeTile label="Dark" active={theme === 'dark'} icon={<Moon className="w-4 h-4" />} onClick={() => setTheme('dark')} />
-                  <ThemeTile label="Light" active={theme === 'light'} icon={<Sun className="w-4 h-4" />} onClick={() => setTheme('light')} />
-                </div>
+<SubHeader
+  icon={<Palette className="w-4 h-4" />}
+  title="Appearance"
+  subtitle="Customize how the app looks"
+/>
+<Card>
+  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <ThemeTile
+      label="Dark"
+      active={theme === 'dark'}
+      icon={<Moon className="w-4 h-4" />}
+      onClick={() => {
+        setTheme('dark');
+        document.documentElement.dataset.theme = 'dark'; // 🔥 apply instantly
+      }}
+    />
+    <ThemeTile
+      label="Light"
+      active={theme === 'light'}
+      icon={<Sun className="w-4 h-4" />}
+      onClick={() => {
+        setTheme('light');
+        document.documentElement.dataset.theme = 'light'; // 🔥 apply instantly
+      }}
+    />
+  </div>
 
-                <div className="mt-6 flex items-center gap-3">
-                  <button
-                    onClick={saveTheme}
-                    disabled={savingTheme}
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-[10px] border transition hover:translate-y-[-1px] disabled:opacity-60"
-                    style={{ borderColor: 'var(--border)', background: 'var(--btn-bg)', color: 'var(--btn-text)' }}
-                  >
-                    {savingTheme ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                    Save theme
-                  </button>
+  <div className="mt-6 flex items-center gap-3">
+    <button
+      onClick={saveTheme}
+      disabled={savingTheme}
+      className="inline-flex items-center gap-2 px-4 py-2 rounded-[10px] border transition hover:translate-y-[-1px] disabled:opacity-60"
+      style={{ borderColor: 'var(--border)', background: 'var(--btn-bg)', color: 'var(--btn-text)' }}
+    >
+      {savingTheme ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+      Save theme
+    </button>
 
-                  <AnimatePresence mode="popLayout">
-                    {saveMsg === 'ok' && (
-                      <motion.span className="inline-flex items-center gap-1 text-[var(--brand)]">
-                        <CheckCircle2 className="w-4 h-4" /> Saved
-                      </motion.span>
-                    )}
-                    {saveMsg === 'err' && (
-                      <motion.span className="inline-flex items-center gap-1 text-red-400">
-                        <AlertCircle className="w-4 h-4" /> Failed
-                      </motion.span>
-                    )}
-                  </AnimatePresence>
-                </div>
-              </Card>
+    <AnimatePresence mode="popLayout">
+      {saveMsg === 'ok' && (
+        <motion.span className="inline-flex items-center gap-1 text-[var(--brand)]">
+          <CheckCircle2 className="w-4 h-4" /> Saved
+        </motion.span>
+      )}
+      {saveMsg === 'err' && (
+        <motion.span className="inline-flex items-center gap-1 text-red-400">
+          <AlertCircle className="w-4 h-4" /> Failed
+        </motion.span>
+      )}
+    </AnimatePresence>
+  </div>
+</Card>
 
-              {/* Account & Security */}
-              <SubHeader icon={<Shield className="w-4 h-4" />} title="Account & Security" subtitle="Sign-in methods and password" />
-              <Card>
-                <div className="grid gap-4">
-                  {/* Sign-in methods */}
-                  <Band>
-                    <div className="text-sm font-semibold mb-2">Sign-in methods</div>
-                    <div className="flex flex-wrap items-center gap-2 text-xs text-[color:var(--text-muted)]">
-                      {hasEmailPassword ? (
-                        <Badge>EMAIL & PASSWORD</Badge>
-                      ) : (
-                        <BadgeMuted>
-                          EMAIL & PASSWORD <span className="ml-1 px-1 rounded bg-red-500 text-white">NOT SET</span>
-                        </BadgeMuted>
-                      )}
-                      {hasGoogle && <Badge>GOOGLE</Badge>}
-                    </div>
-                  </Band>
 
                   {/* Create password */}
                   {!hasEmailPassword && (
