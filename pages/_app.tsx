@@ -1,3 +1,4 @@
+// /pages/_app.tsx
 import type { AppProps } from 'next/app';
 import '@/styles/globals.css';
 import { useEffect, useMemo, useState } from 'react';
@@ -67,10 +68,43 @@ export default function App({ Component, pageProps }: AppProps) {
 
   if (!authed) return null;
 
+  /**
+   * Grid layout:
+   * - col 1: sidebar
+   * - col 2: centered main content (max width)
+   */
   return (
-    <div className="min-h-screen w-full text-white" style={{ background: BG }}>
-      <Sidebar />
-      <Component {...pageProps} />
+    <div className="min-h-screen w-full text-white relative" style={{ background: BG }}>
+      <div
+        className="
+          grid
+          grid-cols-[72px_1fr]
+          sm:grid-cols-[200px_1fr]
+          md:grid-cols-[220px_1fr]
+          lg:grid-cols-[240px_1fr]
+          xl:grid-cols-[260px_1fr]
+        "
+      >
+        {/* Sidebar (sticky, responsive width) */}
+        <aside className="relative">
+          <div className="sticky top-0 h-screen overflow-y-auto">
+            <Sidebar />
+          </div>
+          {/* soft edge highlight to separate from content */}
+          <div className="pointer-events-none absolute top-0 right-0 h-full w-px bg-white/5" />
+          <div
+            className="pointer-events-none absolute top-0 right-0 h-full w-24 hidden md:block"
+            style={{ background: 'linear-gradient(90deg, rgba(0,0,0,0), rgba(0,0,0,0.18))' }}
+          />
+        </aside>
+
+        {/* Main content (centered, capped width) */}
+        <main className="min-w-0 px-4 sm:px-6 lg:px-8 py-8">
+          <div className="mx-auto w-full max-w-[1200px]">
+            <Component {...pageProps} />
+          </div>
+        </main>
+      </div>
     </div>
   );
 }
