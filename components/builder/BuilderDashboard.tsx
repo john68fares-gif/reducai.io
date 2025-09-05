@@ -1,4 +1,4 @@
-// BuilderDashboard.tsx (fixed step + updated colors)
+// pages/builder/BuilderDashboard.tsx
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
@@ -6,16 +6,15 @@ import { useRouter } from 'next/router';
 import dynamic from 'next/dynamic';
 import {
   Plus, Bot as BotIcon, ArrowRight, Trash2, SlidersHorizontal, X, Copy, Download as DownloadIcon,
-  FileText, Settings, MessageSquareText, Landmark, ListChecks,
 } from 'lucide-react';
 import CustomizeModal from './CustomizeModal';
 import Step1AIType from './Step1AIType';
 import Step2ModelSettings from './Step2ModelSettings';
 import Step3PromptEditor from './Step3PromptEditor';
 import Step4Overview from './Step4Overview';
-import { s } from '@/utils/safe';
 import { supabase } from '@/lib/supabase-client';
 import { scopedStorage, migrateLegacyKeysToUser } from '@/utils/scoped-storage';
+import { s } from '@/utils/safe';
 
 const OnboardingOverlay = dynamic(() => import('../ui/OnboardingOverlay'), { ssr: false, loading: () => null });
 const Bot3D = dynamic(() => import('./Bot3D.client'), {
@@ -23,21 +22,65 @@ const Bot3D = dynamic(() => import('./Bot3D.client'), {
   loading: () => <div className="h-full w-full bg-gray-100 dark:bg-[#0d0f11]" />,
 });
 
-// ---------- helpers ----------
-const palette = ['#00ffc2', '#7cc3ff', '#b28bff', '#ffd68a', '#ff9db1'];
-const accentFor = (id: string) =>
-  palette[Math.abs([...id].reduce((h, c) => h + c.charCodeAt(0), 0)) % palette.length];
+// ---------- Error boundary ----------
+class ErrorBoundary extends React.Component<{ fallback?: React.ReactNode }, { hasError: boolean }> {
+  constructor(props: any) { super(props); this.state = { hasError: false }; }
+  static getDerivedStateFromError() { return { hasError: true }; }
+  componentDidCatch() {}
+  render() { return this.state.hasError ? (this.props.fallback ?? null) : (this.props.children as any); }
+}
 
+type Bot = {
+  id: string;
+  name: string;
+  industry?: string;
+  language?: string;
+  model?: string;
+  description?: string;
+  prompt?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  appearance?: any;
+};
+
+const SAVE_KEY = 'chatbots';
+const nowISO = () => new Date().toISOString();
 const fmtDate = (iso?: string) => (iso ? new Date(iso).toLocaleDateString() : '');
+const sortByNewest = (arr: Bot[]) =>
+  arr.slice().sort((a, b) =>
+    Date.parse(b.updatedAt || b.createdAt || '0') - Date.parse(a.updatedAt || a.createdAt || '0')
+  );
+
+async function loadBots(): Promise<Bot[]> {
+  const ss = await scopedStorage();
+  await ss.ensureOwnerGuard();
+  await migrateLegacyKeysToUser();
+  const arr = await ss.getJSON<any[]>(SAVE_KEY, []);
+  if (!Array.isArray(arr)) return [];
+  return sortByNewest(arr.map((b: any) => ({
+    id: b?.id ?? crypto.randomUUID(),
+    name: s(b?.name, 'Untitled Bot'),
+    industry: s(b?.industry),
+    language: s(b?.language),
+    model: s(b?.model, 'gpt-4o-mini'),
+    description: s(b?.description),
+    prompt: s(b?.prompt),
+    createdAt: b?.createdAt ?? nowISO(),
+    updatedAt: b?.updatedAt ?? b?.createdAt ?? nowISO(),
+    appearance: b?.appearance,
+  })));
+}
+
+async function saveBots(bots: Bot[]) {
+  const ss = await scopedStorage();
+  await ss.setJSON(SAVE_KEY, bots);
+}
 
 export default function BuilderDashboard() {
   const router = useRouter();
 
-  // 🔹 restore step logic
-  const search = useMemo(
-    () => new URLSearchParams((router.asPath.split('?')[1] ?? '')),
-    [router.asPath]
-  );
+  // ---- URL params (step, mode, etc.) ----
+  const search = useMemo(() => new URLSearchParams((router.asPath.split('?')[1] ?? '')), [router.asPath]);
   const pathname = router.pathname;
 
   const rawStep = search.get('step');
@@ -49,8 +92,45 @@ export default function BuilderDashboard() {
     router.replace(`${pathname}?${usp.toString()}`, undefined, { shallow: true });
   };
 
-  // … your state hooks here (bots, query, etc.) …
+  // ---- Auth ----
+  const [userId, setUserId] = useState<string>('');
+  useEffect(() => {
+    let unsub: any;
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      setUserId(user?.id || '');
+      unsub = supabase.auth.onAuthStateChange((_e, session) => setUserId(session?.user?.id || ''));
+    })();
+    return () => unsub?.data?.subscription?.unsubscribe?.();
+  }, []);
 
+  // ---- Bots ----
+  const [bots, setBots] = useState<Bot[]>([]);
+  const [query, setQuery] = useState('');
+  const [customizingId, setCustomizingId] = useState<string | null>(null);
+  const [viewId, setViewId] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      setBots(await loadBots());
+      const onStorage = async (e: StorageEvent) => {
+        if (e.key?.endsWith(`:${SAVE_KEY}`)) setBots(await loadBots());
+      };
+      window.addEventListener('storage', onStorage);
+      return () => window.removeEventListener('storage', onStorage);
+    })();
+  }, []);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return bots;
+    return bots.filter((b) => b.name.toLowerCase().includes(q));
+  }, [bots, query]);
+
+  const selectedBot = useMemo(() => bots.find((b) => b.id === customizingId), [bots, customizingId]);
+  const viewedBot = useMemo(() => bots.find((b) => b.id === viewId), [bots, viewId]);
+
+  // ---- If in builder step flow ----
   if (step) {
     return (
       <div className="min-h-screen w-full bg-white text-black dark:bg-[#0b0c10] dark:text-white">
@@ -64,6 +144,7 @@ export default function BuilderDashboard() {
     );
   }
 
+  // ---- Main builds dashboard ----
   return (
     <div className="min-h-screen w-full bg-white text-black dark:bg-[#0b0c10] dark:text-white">
       <main className="flex-1 w-full px-4 sm:px-6 pt-10 pb-24">
@@ -92,7 +173,7 @@ export default function BuilderDashboard() {
             <BuildCard
               key={bot.id}
               bot={bot}
-              accent={bot.appearance?.accent || accentFor(bot.id)}
+              accent={bot.appearance?.accent || '#00ffc2'}
               onOpen={() => setViewId(bot.id)}
               onDelete={async () => {
                 const next = bots.filter((b) => b.id !== bot.id);
@@ -112,10 +193,9 @@ export default function BuilderDashboard() {
         )}
       </main>
 
-      {/* Customize + PromptOverlay unchanged */}
-      {selectedBot && <CustomizeModal /* … */ />}
-      {viewedBot && <PromptOverlay bot={viewedBot} onClose={() => setViewId(null)} />}
-      <OnboardingOverlay open={welcomeOpen} mode={mode} userId={userId} onDone={closeWelcome} />
+      {selectedBot && <CustomizeModal bot={selectedBot} onClose={() => setCustomizingId(null)} />}
+      {viewedBot && <div>{/* PromptOverlay goes here */}</div>}
+      <OnboardingOverlay open={false} mode="signup" userId={userId} onDone={() => {}} />
     </div>
   );
 }
