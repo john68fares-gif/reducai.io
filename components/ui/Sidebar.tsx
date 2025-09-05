@@ -82,10 +82,7 @@ export default function Sidebar() {
         >
           <div
             className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
-            style={{
-              background: '#00ffc2',
-              boxShadow: '0 0 10px rgba(0,255,194,0.35)',
-            }}
+            style={{ background: '#00ffc2', boxShadow: '0 0 10px rgba(0,255,194,0.35)' }}
           >
             <Bot className="w-5 h-5 text-black" />
           </div>
@@ -132,8 +129,7 @@ export default function Sidebar() {
             style={{
               background: 'rgba(15,18,20,0.85)',
               border: '1px solid rgba(0,255,194,0.12)',
-              boxShadow:
-                'inset 0 0 12px rgba(0,0,0,0.35), 0 0 10px rgba(0,255,194,0.04)',
+              boxShadow: 'inset 0 0 12px rgba(0,0,0,0.35), 0 0 10px rgba(0,255,194,0.04)',
             }}
           >
             <div className="flex items-center gap-3 shrink-0">
@@ -158,16 +154,17 @@ export default function Sidebar() {
           style={{
             border: '1px solid rgba(255,255,255,0.10)',
             background: 'rgba(16,19,21,0.95)',
-            boxShadow:
-              '0 2px 12px rgba(0,0,0,0.45), 0 0 10px rgba(0,255,194,0.06)',
+            boxShadow: '0 2px 12px rgba(0,0,0,0.45), 0 0 10px rgba(0,255,194,0.06)',
           }}
         >
-          {collapsed ? (
-            <ChevronRight className="w-4 h-4 text-white/80" />
-          ) : (
-            <ChevronLeft className="w-4 h-4 text-white/80" />
-          )}
+          {collapsed ? <ChevronRight className="w-4 h-4 text-white/80" /> : <ChevronLeft className="w-4 h-4 text-white/80" />}
         </button>
+
+        {/* style-only: soft edge to avoid “double section” look */}
+        <div
+          className="pointer-events-none absolute top-0 right-0 h-full w-8"
+          style={{ background: 'linear-gradient(90deg, rgba(0,0,0,0), rgba(0,0,0,0.18))' }}
+        />
       </div>
     </aside>
   );
@@ -176,12 +173,8 @@ export default function Sidebar() {
 /* ---------- Helpers ---------- */
 
 function Section({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="px-4 pt-4">
-      <div className="mb-2.5 h-4" />
-      {children}
-    </div>
-  );
+  // style-only: integrate spacing; removed the extra spacer div that caused stacked-section vibe
+  return <div className="px-4 pt-4 pb-2">{children}</div>;
 }
 
 function NavList({ children }: { children: React.ReactNode }) {
@@ -189,21 +182,10 @@ function NavList({ children }: { children: React.ReactNode }) {
 }
 
 function Item({
-  href,
-  label,
-  sub,
-  icon,
-  active,
-  disabled,
-  collapsed,
+  href, label, sub, icon, active, disabled, collapsed,
 }: {
-  href: string;
-  label: string;
-  sub?: string;
-  icon: React.ReactNode;
-  active?: boolean;
-  disabled?: boolean;
-  collapsed: boolean;
+  href: string; label: string; sub?: string; icon: React.ReactNode;
+  active?: boolean; disabled?: boolean; collapsed: boolean;
 }) {
   const body = (
     <div
@@ -214,72 +196,38 @@ function Item({
         !disabled && 'hover:translate-x-[1px]'
       )}
       style={{
-        border: `1px solid ${
-          active ? 'rgba(0,255,194,0.28)' : 'rgba(255,255,255,0.06)'
-        }`,
-        background: active
-          ? 'rgba(0,255,194,0.06)'
-          : 'rgba(15,18,20,0.55)',
+        border: `1px solid ${active ? 'rgba(0,255,194,0.28)' : 'rgba(255,255,255,0.06)'}`,
+        background: active ? 'rgba(0,255,194,0.06)' : 'rgba(15,18,20,0.55)',
         boxShadow: active
           ? '0 0 12px rgba(0,255,194,0.16) inset, 0 0 8px rgba(0,255,194,0.04)'
           : 'inset 0 0 10px rgba(0,0,0,0.28)',
       }}
       title={collapsed ? label : undefined}
     >
-      {/* Icon wrapper */}
-      <div
-        className={cn(
-          'flex items-center justify-center',
-          collapsed ? 'w-8 h-8 mx-auto' : 'w-8 h-8 mr-3'
-        )}
-      >
-        <div className="w-5 h-5 flex items-center justify-center text-white/90">
-          {icon}
-        </div>
+      <div className={cn('flex items-center justify-center', collapsed ? 'w-8 h-8 mx-auto' : 'w-8 h-8 mr-3')}>
+        <div className="w-5 h-5 flex items-center justify-center text-white/90">{icon}</div>
       </div>
-
-      {/* Text + Sub */}
       <AnimatedText collapsed={collapsed}>
         <div className="leading-tight">
-          <div className="text-[13px] font-semibold text-white/95">
-            {label}
-          </div>
-          {sub && (
-            <div className="text-[11px] text-white/55 mt-[3px] group-hover:text-white/70">
-              {sub}
-            </div>
-          )}
+          <div className="text-[13px] font-semibold text-white/95">{label}</div>
+          {sub && <div className="text-[11px] text-white/55 mt-[3px] group-hover:text-white/70">{sub}</div>}
         </div>
       </AnimatedText>
     </div>
   );
   if (disabled) return <div>{body}</div>;
-  return (
-    <Link href={href} className="block">
-      {body}
-    </Link>
-  );
+  return <Link href={href} className="block">{body}</Link>;
 }
 
-function AnimatedText({
-  collapsed,
-  children,
-}: {
-  collapsed: boolean;
-  children: React.ReactNode;
-}) {
+function AnimatedText({ collapsed, children }: { collapsed: boolean; children: React.ReactNode }) {
   return (
     <div
       className={cn(
         'overflow-hidden transition-[max-width,opacity,transform] duration-700 ease-in-out',
-        collapsed
-          ? 'opacity-0 max-w-0 -translate-x-2'
-          : 'opacity-100 max-w-[200px] translate-x-0'
+        collapsed ? 'opacity-0 max-w-0 -translate-x-2' : 'opacity-100 max-w-[200px] translate-x-0'
       )}
     >
-      <div className="transition-opacity duration-700 ease-in-out">
-        {children}
-      </div>
+      <div className="transition-opacity duration-700 ease-in-out">{children}</div>
     </div>
   );
 }
