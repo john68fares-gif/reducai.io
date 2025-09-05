@@ -23,7 +23,6 @@ export default function Step2ModelSettings({ onNext, onBack }: Props) {
   const [model, setModel] = useState('gpt-4o');
   const [temperature, setTemperature] = useState(0.7);
   const [apiKeyId, setApiKeyId] = useState('');
-
   const [keys, setKeys] = useState<{ id: string; name: string }[]>([]);
   const [valid, setValid] = useState(false);
 
@@ -46,28 +45,26 @@ export default function Step2ModelSettings({ onNext, onBack }: Props) {
   }, [name, industry, language, apiKeyId]);
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-[#0b0c10] relative">
-      <div className="w-full max-w-2xl bg-[#0d0f11] border border-[#00ffc220] rounded-2xl shadow-[0_0_25px_rgba(0,255,194,0.15)] p-8 space-y-6">
-        <h2 className="text-2xl font-bold text-white mb-2 text-center">Step 2: Model Settings</h2>
+    <div className="flex flex-col items-center justify-center min-h-screen bg-[#0b0c10]">
+      <div className="w-full max-w-2xl bg-[#0d0f11] border border-[#00ffc220] rounded-2xl p-8 space-y-6">
+        <h2 className="text-2xl font-bold text-white text-center">Step 2: Model Settings</h2>
         <p className="text-gray-400 text-center mb-6">Define your AI agent’s identity and configuration</p>
 
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-sm text-gray-300 mb-1">AI Name</label>
             <input
-              className="w-full bg-[#0b0c10] border border-[#00ffc2] rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-[#00ffc2]"
+              className="w-full bg-[#0b0c10] border border-[#00ffc2] rounded-lg px-3 py-2 text-white focus:outline-none"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Dental Assistant"
             />
           </div>
           <div>
             <label className="block text-sm text-gray-300 mb-1">Industry</label>
             <input
-              className="w-full bg-[#0b0c10] border border-[#00ffc2] rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-[#00ffc2]"
+              className="w-full bg-[#0b0c10] border border-[#00ffc2] rounded-lg px-3 py-2 text-white focus:outline-none"
               value={industry}
               onChange={(e) => setIndustry(e.target.value)}
-              placeholder="e.g. Healthcare"
             />
           </div>
         </div>
@@ -75,17 +72,16 @@ export default function Step2ModelSettings({ onNext, onBack }: Props) {
         <div>
           <label className="block text-sm text-gray-300 mb-1">Language</label>
           <input
-            className="w-full bg-[#0b0c10] border border-[#00ffc2] rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-[#00ffc2]"
+            className="w-full bg-[#0b0c10] border border-[#00ffc2] rounded-lg px-3 py-2 text-white focus:outline-none"
             value={language}
             onChange={(e) => setLanguage(e.target.value)}
-            placeholder="e.g. English"
           />
         </div>
 
         <div>
           <label className="block text-sm text-gray-300 mb-1">Model</label>
           <select
-            className="w-full bg-[#0b0c10] border border-[#00ffc2] rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-[#00ffc2]"
+            className="w-full bg-[#0b0c10] border border-[#00ffc2] rounded-lg px-3 py-2 text-white focus:outline-none"
             value={model}
             onChange={(e) => setModel(e.target.value)}
           >
@@ -106,45 +102,4 @@ export default function Step2ModelSettings({ onNext, onBack }: Props) {
             onChange={(e) => setTemperature(parseFloat(e.target.value))}
             className="w-full accent-[#00ffc2]"
           />
-          <div className="text-sm text-gray-400 mt-1">Creativity: {temperature}</div>
-        </div>
-
-        <div>
-          <label className="block text-sm text-gray-300 mb-1">API Key</label>
-          <select
-            className="w-full bg-[#0b0c10] border border-[#00ffc2] rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-[#00ffc2]"
-            value={apiKeyId}
-            onChange={(e) => setApiKeyId(e.target.value)}
-          >
-            <option value="">Select a saved key</option>
-            {keys.map((k) => (
-              <option key={k.id} value={k.id}>
-                {k.name}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="flex justify-between mt-6">
-          <button
-            onClick={onBack}
-            className="flex items-center gap-2 px-4 py-2 bg-[#0b0c10] border border-gray-600 rounded-lg text-gray-300 hover:bg-gray-800 transition"
-          >
-            <ArrowLeft size={16} /> Back
-          </button>
-          <button
-            disabled={!valid}
-            onClick={() => onNext({ name, industry, language, model, temperature, apiKeyId })}
-            className={`flex items-center gap-2 px-6 py-2 rounded-lg transition ${
-              valid
-                ? 'bg-[#00ffc2] text-black hover:bg-[#00e6b0]'
-                : 'bg-gray-700 text-gray-400 cursor-not-allowed'
-            }`}
-          >
-            Next <ArrowRight size={16} />
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
+          <div className="text-sm
