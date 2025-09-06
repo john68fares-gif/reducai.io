@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Cpu, Bolt, Rocket, Gauge, KeyRound, ArrowLeft, ArrowRight } from 'lucide-react';
 import StepProgress from './StepProgress';
-import { scopedStorage, migrateLegacyKeysToUser } from '@/utils/scoped-storage';
+import { scopedStorage } from '@/utils/scoped-storage';
 
 type Props = {
   onBack: () => void;
@@ -21,51 +21,10 @@ const MODEL_OPTIONS = [
   { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo',  icon: Cpu },
 ];
 
-/* === EXACT same button colors as Step1 === */
+/* === Same button colors as your Step1 === */
 const BTN_GREEN = '#59d9b3';
 const BTN_GREEN_HOVER = '#54cfa9';
 const BTN_DISABLED = '#2e6f63';
-
-/**
- * Create an OpenAI Assistant using the user's scoped Step 2 selections + API key.
- * (Keeps your original behavior, but now reads via scopedStorage per-account.)
- */
-export async function createOpenAIAssistantFromLocalSelections(opts?: {
-  nameOverride?: string;
-  instructionsOverride?: string;
-}) {
-  const ss = await scopedStorage();
-  await ss.ensureOwnerGuard();
-
-  const s2 = (await ss.getJSON<{ model: string; apiKeyId: string } | null>('builder:step2', null));
-  if (!s2?.model || !s2?.apiKeyId) throw new Error('Missing step 2 selections.');
-
-  // Per-account API keys
-  const keys = (await ss.getJSON<ApiKey[]>('apiKeys', [])) || [];
-  const found = keys.find((k) => k.id === s2.apiKeyId);
-  if (!found?.key) throw new Error('Selected API key not found.');
-  const apiKey = found.key;
-
-  // Optional Step 1 context (still local/scoped)
-  const s1 = (await ss.getJSON<{ name?: string; industry?: string; language?: string } | null>('builder:step1', null));
-
-  const name =
-    opts?.nameOverride ||
-    s1?.name ||
-    'My AI Assistant';
-
-  const instructions =
-    opts?.instructionsOverride ||
-    `You are a helpful assistant for ${s1?.industry || 'a business'}. Reply in ${s1?.language || 'English'}.`;
-
-  const res = await fetch('https://api.openai.com/v1/assistants', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, model: s2.model, instructions }),
-  });
-  if (!res.ok) throw new Error(`OpenAI error (${res.status}): ${await res.text()}`);
-  return res.json();
-}
 
 export default function Step2ModelSettings({ onBack, onNext }: Props) {
   const [model, setModel] = useState<string>('gpt-4o');
@@ -73,20 +32,23 @@ export default function Step2ModelSettings({ onBack, onNext }: Props) {
   const [apiKeyId, setApiKeyId] = useState<string>('');
   const [loading, setLoading] = useState(true);
 
-  // Load per-user data (apiKeys + prior step2 choice)
   useEffect(() => {
     (async () => {
       const ss = await scopedStorage();
       await ss.ensureOwnerGuard();
-      // one-time migration of legacy localStorage -> scoped (if needed)
-      await migrateLegacyKeysToUser();
 
+      // Load per-user API keys ONLY from scoped storage
+      const keys = await ss.getJSON<ApiKey[]>('apiKeys', []);
+      setApiKeys(Array.isArray(keys) ? keys : []);
+
+      // Restore step2 (scoped) or pick first available key
       const saved = await ss.getJSON<{ model?: string; apiKeyId?: string } | null>('builder:step2', null);
       if (saved?.model) setModel(String(saved.model));
-      if (saved?.apiKeyId) setApiKeyId(String(saved.apiKeyId));
-
-      const stored = await ss.getJSON<ApiKey[]>('apiKeys', []);
-      if (Array.isArray(stored)) setApiKeys(stored);
+      if (saved?.apiKeyId && keys.some(k => k.id === saved.apiKeyId)) {
+        setApiKeyId(saved.apiKeyId);
+      } else if (keys[0]) {
+        setApiKeyId(keys[0].id);
+      }
 
       setLoading(false);
     })();
@@ -142,7 +104,6 @@ export default function Step2ModelSettings({ onBack, onNext }: Props) {
           />
 
           {loading ? (
-            // Subtle skeleton so it feels "real" before keys arrive
             <div className="grid grid-cols-1 md:grid-cols-2 gap-7">
               {[0, 1].map((i) => (
                 <div key={i}>
@@ -177,7 +138,7 @@ export default function Step2ModelSettings({ onBack, onNext }: Props) {
                 <div className="mt-2 text-xs text-white/60">Your assistant will actually use this model.</div>
               </div>
 
-              {/* API key */}
+              {/* API key (per-user scoped) */}
               <div>
                 <label className="block mb-2 text-[13px] font-medium text-white/85 tracking-wide">
                   API Key
@@ -190,12 +151,16 @@ export default function Step2ModelSettings({ onBack, onNext }: Props) {
                   >
                     <option value="">Select an API key…</option>
                     {apiKeys.map((k) => (
-                      <option key={k.id} value={k.id}>{k.name}</option>
+                      <option key={k.id} value={k.id}>
+                        {k.name} {(k.key || '').slice(-4).toUpperCase()}
+                      </option>
                     ))}
                   </select>
                   <KeyRound className="w-4 h-4 absolute right-3 top-3.5 opacity-70" />
                 </div>
-                <div className="mt-2 text-xs text-white/60">Must be one you created in the API Keys section.</div>
+                <div className="mt-2 text-xs text-white/60">
+                  Keys are per-account via scoped storage. Add keys in the API Keys page.
+                </div>
               </div>
             </div>
           )}
@@ -209,7 +174,6 @@ export default function Step2ModelSettings({ onBack, onNext }: Props) {
               Previous
             </button>
 
-            {/* === EXACT COPY OF STEP 1 NEXT BUTTON === */}
             <button
               disabled={!canContinue || loading}
               onClick={handleNext}
