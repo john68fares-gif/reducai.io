@@ -2,21 +2,24 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { usePathname, useSearchParams } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import { createPortal } from 'react-dom';
 
 /**
- * ABSOLUTE TOP HEADER (PORTALED TO <body>)
+ * ABSOLUTE TOP HEADER — touches the sidebar
  * -------------------------------------------------
- * - Renders into document.body via a portal so it is NEVER trapped
- *   by any transformed/animated parent (that was causing it to sit
- *   in the middle of the page).
- * - Fixed at the very top of the viewport, from the sidebar’s edge
- *   to the right side. Uses your CSS tokens for light/dark.
- * - Ships a spacer div so page content starts below it.
+ * - Renders into <body> so it can’t be “trapped” in the middle.
+ * - Stretches FULL width (left:0; right:0), then pads itself from the
+ *   sidebar using calc(var(--sidebar-w) + padding). This guarantees it
+ *   visually *touches* the sidebar edge, even while collapsing.
+ * - Uses theme tokens (light/dark) you already have.
+ * - Spacer below keeps page content from hiding under it.
+ *
+ * If you still don’t see it, the temporary DEBUG outline will make it obvious.
+ * You can remove the outline after verifying.
  */
 
-const RAIL_H = 64; // px
+const RAIL_H = 72; // a bit taller so you can clearly see it
 
 const TITLE_MAP: Array<{ test: (p: string) => boolean; title: string }> = [
   { test: (p) => p === '/' || p.startsWith('/builder'), title: 'Builder Dashboard' },
@@ -30,7 +33,6 @@ const TITLE_MAP: Array<{ test: (p: string) => boolean; title: string }> = [
 
 export default function HeaderRail() {
   const pathname = usePathname() || '/';
-  const step = useSearchParams()?.get('step'); // kept if you need later
   const [mounted, setMounted] = useState(false);
 
   const title = useMemo(() => {
@@ -40,40 +42,44 @@ export default function HeaderRail() {
 
   useEffect(() => {
     setMounted(true);
-    // expose height for layouts that want to read it
     document.documentElement.style.setProperty('--rail-h', `${RAIL_H}px`);
   }, []);
 
   const header = (
     <div
       className="z-[1000] backdrop-blur-[2px]"
+      // FULL-WIDTH fixed bar at the VERY top, then we push content to the right
+      // by padding-left = sidebar width + 18px.
       style={{
         position: 'fixed',
         top: 0,
-        left: 'var(--sidebar-w, 260px)', // snaps to your fixed sidebar
-        right: 0,                        // stretch to right edge
+        left: 0,
+        right: 0,
         height: RAIL_H,
         display: 'flex',
         alignItems: 'center',
-        padding: '0 18px',
+        // 👇 this makes the header visually “touch” the sidebar while respecting its width
+        paddingLeft: 'calc(var(--sidebar-w, 260px) + 18px)',
+        paddingRight: 18,
         background:
-          'linear-gradient(180deg, color-mix(in oklab, var(--panel) 92%, transparent) 0%, var(--panel) 100%)',
+          'linear-gradient(180deg, color-mix(in oklab, var(--panel) 95%, transparent) 0%, var(--panel) 100%)',
         borderBottom: '1px solid var(--border)',
         boxShadow:
-          '0 10px 28px rgba(0,0,0,.25), 0 0 0 1px color-mix(in oklab, var(--border) 60%, transparent)',
-        // guard against any accidental parent effects (just in case)
-        transform: 'none',
-        willChange: 'auto',
-        pointerEvents: 'auto',
+          '0 12px 30px rgba(0,0,0,.28), 0 0 0 1px color-mix(in oklab, var(--border) 60%, transparent)',
+        // DEBUG: outline so you can’t miss it (remove after you confirm)
+        outline: '1px dashed color-mix(in oklab, var(--brand) 55%, var(--border))',
+        outlineOffset: -1,
       }}
     >
+      {/* Left pill title */}
       <div
-        className="inline-flex items-center gap-2 rounded-full px-10 py-2"
+        className="inline-flex items-center gap-2 rounded-full px-12 py-2.5"
         style={{
           background:
             'linear-gradient(180deg, color-mix(in oklab, var(--brand) 18%, transparent) 0%, transparent 100%)',
           border: '1px solid color-mix(in oklab, var(--brand) 35%, var(--border))',
-          boxShadow: '0 8px 22px color-mix(in oklab, var(--brand) 20%, transparent)',
+          boxShadow:
+            '0 10px 24px color-mix(in oklab, var(--brand) 24%, transparent), inset 0 0 0 1px color-mix(in oklab, var(--brand) 10%, transparent)',
         }}
       >
         <span
@@ -90,7 +96,7 @@ export default function HeaderRail() {
         </span>
       </div>
 
-      {/* right slot (empty for now) */}
+      {/* Right-side slot (empty for now) */}
       <div style={{ marginLeft: 'auto', display: 'flex', gap: 12 }} />
     </div>
   );
@@ -99,7 +105,7 @@ export default function HeaderRail() {
     <>
       {/* Spacer so content starts BELOW the fixed rail */}
       <div aria-hidden style={{ height: RAIL_H }} />
-      {/* Render the actual header at the VERY TOP of the page */}
+      {/* Render the actual header on <body> so it's ALWAYS at the very top */}
       {mounted ? createPortal(header, document.body) : null}
     </>
   );
