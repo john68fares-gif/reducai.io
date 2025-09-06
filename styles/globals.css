@@ -11,7 +11,7 @@
   font-display:swap;
 }
 
-/* ---------------- Theme tokens ---------------- */
+/* ---------------- Theme tokens (LIGHT) ---------------- */
 :root{
   /* Brand */
   --brand:#00ffc2;
@@ -32,11 +32,16 @@
   --shadow-soft:0 14px 34px rgba(15,23,42,.10);
   --shadow-card:0 1px 0 rgba(0,0,0,.04), 0 10px 26px rgba(0,0,0,.07);
 
-  /* Sidebar — LIGHT now (you asked for this) */
+  /* Sidebar — LIGHT */
   --sidebar-bg:#ffffff;
   --sidebar-border:rgba(11,12,16,.10);
   --sidebar-text:#0b0c10;
   --sidebar-muted:rgba(11,12,16,.55);
+
+  /* Subtle right-edge rim that separates the sidebar from content (light) */
+  --sidebar-sep:
+    8px 0 24px -8px rgba(0,0,0,.06),      /* outward */
+    inset -1px 0 0 rgba(11,12,16,.06);    /* inner line */
 
   /* Motion */
   --ease:cubic-bezier(.22,.61,.36,1);
@@ -44,23 +49,34 @@
   --dur:260ms;
 }
 
+/* ---------------- Opposite (DARK) theme ---------------- */
 [data-theme="dark"]{
+  /* Text */
   --text:#ffffff;
   --text-muted:rgba(255,255,255,.70);
+
+  /* Surfaces (inverse of light) */
   --bg:#0b0c10;
   --panel:#0f1214;
   --card:#101314;
-  --border:rgba(255,255,255,.09);
+  --border:rgba(255,255,255,.10);
   --ring:rgba(0,255,194,.10);
 
+  /* Shadows (dark) */
   --shadow-soft:0 12px 36px rgba(0,0,0,.45);
   --shadow-card:inset 0 0 22px rgba(0,0,0,.28), 0 0 20px rgba(0,255,194,.06);
 
-  /* Sidebar dark */
+  /* Sidebar — DARK (inverse of light) */
   --sidebar-bg:#0f1214;
-  --sidebar-border:rgba(255,255,255,.06);
+  --sidebar-border:rgba(255,255,255,.10);
   --sidebar-text:#ffffff;
   --sidebar-muted:rgba(255,255,255,.60);
+
+  /* Stronger right-edge rim to clearly separate from dark content */
+  --sidebar-sep:
+    10px 0 32px -10px rgba(0,0,0,.55),
+    inset -1px 0 0 rgba(255,255,255,.06),
+    0 0 0 1px rgba(0,255,194,.03);
 }
 
 /* ---------------- Base & shell ---------------- */
@@ -103,17 +119,34 @@ a{ color:inherit; text-decoration:none; }
   background:var(--sidebar-bg);
   color:var(--sidebar-text);
   border-right:1px solid var(--sidebar-border);
+  /* soft glow / separator so the sidebar is visually split from the page */
+  box-shadow:var(--sidebar-sep);
 }
 .sidebar .muted{ color:var(--sidebar-muted); }
+
+/* “Ghost” nav chips that you style in the component */
 .sidebar .nav-item{
   border:1px solid var(--border);
   background:var(--card);
   box-shadow:var(--shadow-card);
-  transition:background var(--dur-quick) var(--ease), border-color var(--dur-quick) var(--ease);
+  transition:
+    background var(--dur-quick) var(--ease),
+    border-color var(--dur-quick) var(--ease),
+    box-shadow var(--dur-quick) var(--ease);
+}
+.sidebar .nav-item:hover{
+  /* faint glow pass that feels like a 30% translucent panel */
+  box-shadow:0 0 0 1px var(--border), 0 10px 24px rgba(0,0,0,.10);
 }
 .sidebar .nav-item.active{
   border-color:var(--brand-weak);
-  box-shadow:var(--shadow-soft);
+  box-shadow:0 0 0 1px rgba(0,255,194,.08), var(--shadow-soft);
+}
+
+/* Clean underline “beam” you trigger from the component (active/hover) */
+.sidebar .beam{
+  height:2px; border-radius:9999px;
+  background:linear-gradient(90deg, transparent, rgba(16,185,129,.35), transparent);
 }
 
 /* ---------------- Inputs & buttons ---------------- */
@@ -148,13 +181,15 @@ a{ color:inherit; text-decoration:none; }
   to{ opacity:1; transform:translateY(0); }
 }
 
-.sheen{
-  position:relative; overflow:hidden;
-}
+.sheen{ position:relative; overflow:hidden; }
 .sheen::after{
   content:""; position:absolute; inset:0; translate:-120% 0;
   background:linear-gradient(110deg, transparent 0%, rgba(255,255,255,.08) 45%, rgba(255,255,255,.18) 50%, transparent 55%);
   animation:sheen 900ms var(--ease) forwards;
+}
+/* Dark-mode sheen flips to a subtle black pass so it’s visible on dark */
+[data-theme="dark"] .sheen::after{
+  background:linear-gradient(110deg, transparent 0%, rgba(0,0,0,.18) 45%, rgba(0,0,0,.26) 50%, transparent 55%);
 }
 @keyframes sheen{ to{ translate:120% 0; } }
 
@@ -166,7 +201,21 @@ a{ color:inherit; text-decoration:none; }
   border:1px solid var(--border);
   box-shadow:var(--shadow-card);
 }
+/* Dark-mode skeleton brightens instead of darkening so it reads */
+[data-theme="dark"] .skeleton{
+  background:linear-gradient(90deg, rgba(255,255,255,.05) 25%, rgba(255,255,255,.03) 37%, rgba(255,255,255,.05) 63%);
+  border:1px solid rgba(255,255,255,.08);
+  box-shadow:inset 0 0 18px rgba(0,0,0,.25), 0 12px 24px rgba(0,0,0,.40);
+}
 @keyframes shimmer{ from{ background-position:-200% 0; } to{ background-position:200% 0; } }
 
 /* ---------------- Overlay ---------------- */
 .backdrop{ background:rgba(0,0,0,.55); }
+
+/* ---------------- Small helpers for your sidebar component ---------------- */
+/* Smooth width animation when you toggle collapsed/expanded */
+:root{ --sidebar-w:260px; }             /* default; JS updates this var on toggle */
+.sidebar{ transition: width var(--dur) var(--ease); }
+
+/* When the sidebar collapses, keep the separator visible */
+[data-theme="dark"] .sidebar{ box-shadow:var(--sidebar-sep); }
