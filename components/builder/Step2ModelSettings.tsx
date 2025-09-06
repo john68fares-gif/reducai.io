@@ -21,7 +21,6 @@ const MODEL_OPTIONS = [
   { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo', icon: Cpu },
 ];
 
-/* Same green as API Keys page */
 const BTN_GREEN = '#10b981';
 const BTN_GREEN_HOVER = '#0ea473';
 const BTN_DISABLED = 'color-mix(in oklab, var(--text) 14%, transparent)';
@@ -76,6 +75,9 @@ export default function Step2ModelSettings({ onBack, onNext }: Props) {
 
         setApiKeyId(chosen);
 
+        // ✅ NEW: also persist the chosen selection globally so Step 4 can fall back to it
+        if (chosen) await ss.setJSON(LS_SELECTED, chosen);
+
         // Optional: mirror any existing saved Step2 to localStorage so Step 4 sees it even before clicking Next again
         if (saved) {
           try { localStorage.setItem('builder:step2', JSON.stringify({ model: saved.model || model, apiKeyId: chosen })); } catch {}
@@ -107,8 +109,9 @@ export default function Step2ModelSettings({ onBack, onNext }: Props) {
       const ss = await scopedStorage();
       await ss.ensureOwnerGuard();
       await ss.setJSON('builder:step2', payload);
+      await ss.setJSON(LS_SELECTED, apiKeyId); // ✅ keep global selection in sync
 
-      // 🔑 CRUCIAL: mirror to localStorage so Step 4 can enable “Generate AI”
+      // mirror to localStorage so Step 4 can enable “Generate AI”
       try { localStorage.setItem('builder:step2', JSON.stringify(payload)); } catch {}
 
       onNext(payload);
@@ -203,7 +206,16 @@ export default function Step2ModelSettings({ onBack, onNext }: Props) {
                   <div className="relative">
                     <select
                       value={apiKeyId}
-                      onChange={(e) => setApiKeyId(e.target.value)}
+                      onChange={async (e) => {
+                        const val = e.target.value;
+                        setApiKeyId(val);
+                        // ✅ save global selected id right when user changes it
+                        try {
+                          const ss = await scopedStorage();
+                          await ss.ensureOwnerGuard();
+                          await ss.setJSON(LS_SELECTED, val);
+                        } catch {}
+                      }}
                       className="w-full rounded-2xl px-4 py-3.5 text-[15px] outline-none"
                       style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }}
                     >
