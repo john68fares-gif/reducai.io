@@ -11,7 +11,7 @@
   font-display:swap;
 }
 
-/* ---------------- Theme tokens (LIGHT stays the same) ---------------- */
+/* ---------------- Theme tokens ---------------- */
 :root{
   /* Brand */
   --brand:#00ffc2;
@@ -32,7 +32,7 @@
   --shadow-soft:0 14px 34px rgba(15,23,42,.10);
   --shadow-card:0 1px 0 rgba(0,0,0,.04), 0 10px 26px rgba(0,0,0,.07);
 
-  /* Sidebar — LIGHT */
+  /* Sidebar — LIGHT now (you asked for this) */
   --sidebar-bg:#ffffff;
   --sidebar-border:rgba(11,12,16,.10);
   --sidebar-text:#0b0c10;
@@ -44,42 +44,23 @@
   --dur:260ms;
 }
 
-/* ---------------- DARK THEME (modern blue/green charcoal) ---------------- */
 [data-theme="dark"]{
-  /* Text */
-  --text:#eaf2ef;
-  --text-muted:rgba(234,242,239,.72);
+  --text:#ffffff;
+  --text-muted:rgba(255,255,255,.70);
+  --bg:#0b0c10;
+  --panel:#0f1214;
+  --card:#101314;
+  --border:rgba(255,255,255,.09);
+  --ring:rgba(0,255,194,.10);
 
-  /* Surfaces: cards slightly lighter than panels; both lighter than bg */
-  --bg:#0b1214;          /* deep blue-green charcoal */
-  --panel:#10181b;       /* shell */
-  --card:#121e22;        /* card surface */
-  --border:rgba(255,255,255,.10);
-  --ring:rgba(0,255,194,.12);
+  --shadow-soft:0 12px 36px rgba(0,0,0,.45);
+  --shadow-card:inset 0 0 22px rgba(0,0,0,.28), 0 0 20px rgba(0,255,194,.06);
 
-  /* Brand */
-  --brand:#00ffc2;
-  --brand-weak:rgba(0,255,194,.22);
-
-  /* Shadows (no neon glow) */
-  --shadow-soft:0 14px 34px rgba(0,0,0,.46);
-  --shadow-card:
-    0 1px 0 rgba(0,0,0,.30),
-    0 10px 24px rgba(0,0,0,.38);
-
-  /* Sidebar */
-  --sidebar-bg:#0f1619;
-  --sidebar-border:rgba(255,255,255,.08);
-  --sidebar-text:#eaf2ef;
-  --sidebar-muted:rgba(234,242,239,.60);
-}
-
-/* subtle modern gradient background for DARK only (keeps light untouched) */
-[data-theme="dark"] .page-shell{
-  background:
-    radial-gradient(1200px 600px at 20% -10%, rgba(0,255,194,.08), transparent 60%),
-    radial-gradient(1400px 700px at 110% 10%, rgba(34,139,230,.10), transparent 65%),
-    var(--bg);
+  /* Sidebar dark */
+  --sidebar-bg:#0f1214;
+  --sidebar-border:rgba(255,255,255,.06);
+  --sidebar-text:#ffffff;
+  --sidebar-muted:rgba(255,255,255,.60);
 }
 
 /* ---------------- Base & shell ---------------- */
@@ -91,9 +72,10 @@ html,body{
   -moz-osx-font-smoothing:grayscale;
   min-height:100%;
 }
+
 .page-shell{
   min-height:100vh;
-  background:var(--bg);
+  background:var(--bg); /* fixes any “dark halo” */
 }
 
 a{ color:inherit; text-decoration:none; }
@@ -115,10 +97,6 @@ a{ color:inherit; text-decoration:none; }
   transition:transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
 }
 .card-hover:hover{ transform:translateY(-2px); }
-
-/* Dark: ensure inner surfaces are lighter than the shell for contrast */
-[data-theme="dark"] .panel{ background:var(--panel); }
-[data-theme="dark"] .card{ background:var(--card); }
 
 /* ---------------- Sidebar ---------------- */
 .sidebar{
@@ -163,14 +141,6 @@ a{ color:inherit; text-decoration:none; }
 .btn-brand:hover{ filter:brightness(1.06); }
 .btn-ghost{ background:var(--card); color:var(--text); border:1px solid var(--border); }
 
-/* tweak ghost buttons/inputs specifically in dark for clarity */
-[data-theme="dark"] .btn-ghost,
-[data-theme="dark"] .input{
-  background:var(--card);
-  border:1px solid var(--border);
-  color:var(--text);
-}
-
 /* ---------------- Animation helpers ---------------- */
 .fade-up{ animation:fadeUp var(--dur) var(--ease) both; }
 @keyframes fadeUp{
@@ -200,3 +170,5 @@ a{ color:inherit; text-decoration:none; }
 
 /* ---------------- Overlay ---------------- */
 .backdrop{ background:rgba(0,0,0,.55); }
+
+And give me full code I can just copy paste
