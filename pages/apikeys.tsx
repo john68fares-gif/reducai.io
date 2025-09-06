@@ -10,7 +10,7 @@ import { scopedStorage, migrateLegacyKeysToUser } from '@/utils/scoped-storage';
 
 /* ------------------------------- Types & keys ------------------------------- */
 type StoredKey = { id: string; name: string; key: string; createdAt: number };
-const LS_KEYS = 'apiKeys.v1';          // cache for Step 2 (scopedStorage)
+const LS_KEYS = 'apiKeys.v1';
 const LS_SELECTED = 'apiKeys.selectedId';
 const isBrowser = typeof window !== 'undefined';
 
@@ -18,72 +18,29 @@ const isBrowser = typeof window !== 'undefined';
 const BTN_GREEN = '#10b981';
 const BTN_GREEN_HOVER = '#0ea473';
 
+/** NOTE:
+ * We keep your light-mode look exactly the same by using your existing CSS vars.
+ * For dark mode we override *on this page only* via CSS below (see .apikey-panel rules).
+ */
 const FRAME: React.CSSProperties = {
-  background: 'var(--panel)',
+  background: 'var(--frame-bg, var(--panel))',
   border: '1px solid var(--border)',
-  boxShadow: '0 1px 0 rgba(0,0,0,0.22), 0 20px 60px rgba(0,0,0,0.42), 0 85px 220px rgba(0,255,194,0.08)',
+  // stronger outer shadow in dark; in light it falls back to your soft shadow
+  boxShadow: 'var(--frame-shadow, var(--shadow-soft))',
   borderRadius: 30,
 };
 const CARD: React.CSSProperties = {
-  background: 'var(--card)',
+  background: 'var(--card-bg, var(--card))',
   border: '1px solid var(--border)',
+  // subtle inner glow + lift in dark; falls back to your normal card shadow in light
+  boxShadow: 'var(--card-shadow, var(--shadow-card))',
   borderRadius: 20,
-  boxShadow: 'var(--shadow-card)',
 };
-
-/** Extra visuals used ONLY in dark mode (outer shadow + subtle inner lift) */
-const OUTER_SHADOW_DARK: React.CSSProperties = {
-  // soft lift around the box so it separates from the dark bg
-  boxShadow:
-    '0 8px 20px rgba(0,0,0,.28), ' +        // main soft shadow
-    '0 22px 58px rgba(0,0,0,.32), ' +       // longer feather
-    '0 0 0 1px var(--border), ' +           // crisp edge
-    '0 18px 48px rgba(0,255,194,.06)',      // very subtle green ambience
-};
-
-const INNER_LIFT_DARK: React.CSSProperties = {
-  // a touch lighter inside than outside
-  backgroundImage: 'linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,0))',
-  backgroundBlendMode: 'overlay',
-};
-
-/* Small hook: are we in dark mode? (respects data-theme="dark" and system setting) */
-function useIsDark(): boolean {
-  const [dark, setDark] = useState<boolean>(() => {
-    if (!isBrowser) return false;
-    const attr = document.documentElement?.getAttribute('data-theme');
-    if (attr) return attr === 'dark';
-    return window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false;
-  });
-
-  useEffect(() => {
-    if (!isBrowser) return;
-    // watch system preference
-    const mq = window.matchMedia?.('(prefers-color-scheme: dark)');
-    const onChange = () => {
-      const attr = document.documentElement?.getAttribute('data-theme');
-      setDark(attr ? attr === 'dark' : !!mq?.matches);
-    };
-    mq?.addEventListener?.('change', onChange);
-
-    // watch attribute changes (if your app toggles data-theme)
-    const obs = new MutationObserver(onChange);
-    obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-
-    return () => {
-      mq?.removeEventListener?.('change', onChange);
-      obs.disconnect();
-    };
-  }, []);
-
-  return dark;
-}
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const looksLikeOpenAIKey = (v: string) => !!v && v.trim().startsWith('sk-') && v.trim().length >= 12;
 
 /* ------------------------------- Crypto utils ------------------------------- */
-/** We store a per-user 32B random base64 key in user_secrets.enc_key (RLS). */
 async function getOrCreateUserSecret(): Promise<ArrayBuffer> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not signed in');
@@ -97,11 +54,9 @@ async function getOrCreateUserSecret(): Promise<ArrayBuffer> {
   if (data?.enc_key) {
     return base64ToBuf(data.enc_key);
   }
-  // create one
   const raw = new Uint8Array(32);
   crypto.getRandomValues(raw);
   const enc_key = bufToBase64(raw.buffer);
-  // ✅ include user_id to satisfy RLS
   const { error: insErr } = await supabase.from('user_secrets').insert({ user_id: user.id, enc_key });
   if (insErr) throw insErr;
   return raw.buffer;
@@ -124,7 +79,6 @@ async function encryptString(aesKey: CryptoKey, plaintext: string): Promise<stri
   crypto.getRandomValues(iv);
   const enc = new TextEncoder().encode(plaintext);
   const cipher = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, enc);
-  // store base64(iv || cipher)
   const joined = new Uint8Array(iv.byteLength + (cipher as ArrayBuffer).byteLength);
   joined.set(iv, 0);
   joined.set(new Uint8Array(cipher as ArrayBuffer), iv.byteLength);
@@ -173,7 +127,7 @@ function InlineSelect({
         ref={btnRef}
         onClick={() => setOpen((v) => !v)}
         className="w-full flex items-center justify-between gap-3 px-4 h-[46px] rounded-[14px] text-sm outline-none transition hover:-translate-y-[1px]"
-        style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }}
+        style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)', boxShadow: 'var(--chip-shadow, none)' }}
       >
         <span className="flex items-center gap-2 truncate">
           <KeyRound className="w-4 h-4" style={{ color: 'var(--brand)' }} />
@@ -323,14 +277,6 @@ export default function ApiKeysPage() {
   const [toast, setToast] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState(true);
 
-  const isDark = useIsDark();
-
-  // convenience: style objects for the two inner cards (dark-only enhancements)
-  const innerCardStyle: React.CSSProperties = isDark
-    ? { ...CARD, ...OUTER_SHADOW_DARK, ...INNER_LIFT_DARK }
-    : CARD;
-
-  // load from Supabase (and cache)
   useEffect(() => {
     (async () => {
       await migrateLegacyKeysToUser();
@@ -338,7 +284,6 @@ export default function ApiKeysPage() {
       await ss.ensureOwnerGuard();
 
       try {
-        // Optimistic: show cached immediately if present
         const cached = await ss.getJSON<StoredKey[]>(LS_KEYS, []);
         if (cached.length) setList(cached);
 
@@ -357,7 +302,7 @@ export default function ApiKeysPage() {
           try {
             const key = await decryptString(aesKey, row.ciphertext);
             decrypted.push({ id: row.id, name: row.name, key, createdAt: Date.parse(row.created_at) || Date.now() });
-          } catch { /* skip bad rows */ }
+          } catch {}
         }
         setList(decrypted);
         await ss.setJSON(LS_KEYS, decrypted);
@@ -372,7 +317,6 @@ export default function ApiKeysPage() {
     })();
   }, []);
 
-  // persist selected id (scoped)
   useEffect(() => {
     (async () => {
       if (!isBrowser) return;
@@ -389,7 +333,6 @@ export default function ApiKeysPage() {
   const selectedKey = list.find((k) => k.id === selected) || null;
 
   async function refreshFromServer() {
-    // small helper if you want a Refresh button later
     setLoading(true);
     const raw = await getOrCreateUserSecret();
     const aesKey = await importAesKey(raw);
@@ -409,7 +352,6 @@ export default function ApiKeysPage() {
   }
 
   async function addKey(name: string, key: string) {
-    // ✅ include user_id so RLS insert passes
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('Not signed in');
 
@@ -457,14 +399,23 @@ export default function ApiKeysPage() {
 
   return (
     <div className="px-6 py-10" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
-      <div className="mx-auto w-full max-w-[980px]">
+      {/* small section label above the panel (like the reference shot) */}
+      <div className="mx-auto w-full max-w-[980px] mb-3">
+        <div className="text-xs font-semibold tracking-[.12em] opacity-70"
+             style={{ color: 'var(--text-muted)' }}>
+          API KEYS
+        </div>
+      </div>
+
+      <div className="mx-auto w-full max-w-[980px] apikey-panel">
         <div className="relative" style={FRAME}>
           <div className="flex items-start justify-between px-6 lg:px-8 py-6">
             <div>
               <h1 className="text-2xl font-semibold">API Keys</h1>
               <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>Manage your OpenAI API keys for different projects</p>
             </div>
-            <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background: 'var(--brand-weak)' }}>
+            <div className="w-10 h-10 rounded-2xl flex items-center justify-center"
+                 style={{ background: 'var(--brand-weak)', boxShadow: 'var(--chip-shadow, none)' }}>
               <KeyRound className="w-5 h-5" style={{ color: 'var(--brand)' }} />
             </div>
           </div>
@@ -472,15 +423,11 @@ export default function ApiKeysPage() {
           <div className="px-6 lg:px-8 pb-8 space-y-5">
             {loading ? (
               <div className="space-y-4">
-                <div className="h-[46px] rounded-[14px] animate-pulse"
-                     style={{ ...CARD, background: 'linear-gradient(90deg, var(--card) 25%, var(--panel) 37%, var(--card) 63%)', backgroundSize: '200% 100%' }} />
-                <div className="h-[74px] rounded-[14px] animate-pulse"
-                     style={{ ...CARD, background: 'linear-gradient(90deg, var(--card) 25%, var(--panel) 37%, var(--card) 63%)', backgroundSize: '200% 100%' }} />
+                <div className="h-[46px] rounded-[14px] skeleton" />
+                <div className="h-[74px] rounded-[14px] skeleton" />
                 <div className="flex gap-4">
-                  <div className="h-[46px] flex-1 rounded-[14px] animate-pulse"
-                       style={{ ...CARD, background: 'linear-gradient(90deg, var(--card) 25%, var(--panel) 37%, var(--card) 63%)', backgroundSize: '200% 100%' }} />
-                  <div className="h-[46px] w-[220px] rounded-[18px] animate-pulse"
-                       style={{ ...CARD, background: 'linear-gradient(90deg, var(--card) 25%, var(--panel) 37%, var(--card) 63%)', backgroundSize: '200% 100%' }} />
+                  <div className="h-[46px] flex-1 rounded-[14px] skeleton" />
+                  <div className="h-[46px] w-[220px] rounded-[18px] skeleton" />
                 </div>
               </div>
             ) : list.length === 0 ? (
@@ -501,17 +448,16 @@ export default function ApiKeysPage() {
               </div>
             ) : (
               <>
-                {/* Select API Key box — now pops in dark mode */}
-                <div style={innerCardStyle} className="p-4">
+                <div style={CARD} className="p-4">
                   <label className="block text-xs mb-2" style={{ color: 'var(--text-muted)' }}>Select API Key</label>
                   <InlineSelect id="apikey-select" value={selected} onChange={setSelected} options={opts} placeholder="No API Keys" />
                 </div>
 
-                {/* Selected key / list item — also pops in dark mode */}
-                <div style={innerCardStyle} className="p-4">
+                <div style={CARD} className="p-4">
                   {selectedKey ? (
                     <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: 'var(--brand-weak)' }}>
+                      <div className="w-9 h-9 rounded-xl flex items-center justify-center"
+                           style={{ background: 'var(--brand-weak)' }}>
                         <CheckCircle2 className="w-4 h-4" style={{ color: 'var(--brand)' }} />
                       </div>
                       <div className="min-w-0 flex-1">
@@ -554,9 +500,33 @@ export default function ApiKeysPage() {
       {toast && <Toast text={toast} onClose={() => setToast(undefined)} />}
 
       <style jsx global>{`
-        @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
-        @keyframes popIn { 0% { opacity: 0; transform: translateY(8px) scale(.98) }
-                           100% { opacity: 1; transform: translateY(0) scale(1) } }
+        /* ---- Page-scoped dark-mode cosmetics for the panel & cards ---- */
+        [data-theme="dark"] .apikey-panel{
+          /* Slight green-tinted deep panel and a clear drop shadow around the whole box */
+          --frame-bg: radial-gradient(120% 180% at 50% -40%, rgba(0,255,194,.06) 0%, rgba(12,16,18,1) 42%)
+                       , linear-gradient(180deg, #0e1213 0%, #0c1012 100%);
+          --frame-shadow:
+            0 26px 70px rgba(0,0,0,.60),
+            0 8px 24px rgba(0,0,0,.45),
+            0 0 0 1px rgba(0,255,194,.06); /* faint neon ring */
+          /* Slight lift on “chips” like the select control button */
+          --chip-shadow: 0 4px 14px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.05);
+        }
+        [data-theme="dark"] .apikey-panel .skeleton{
+          background: linear-gradient(90deg, rgba(255,255,255,.04) 25%, rgba(255,255,255,.02) 37%, rgba(255,255,255,.04) 63%);
+          border: 1px solid rgba(255,255,255,.06);
+          box-shadow: 0 12px 30px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.04);
+        }
+        [data-theme="dark"] .apikey-panel .card,
+        [data-theme="dark"] .apikey-panel .p-4{
+          /* Inner cards: a touch lighter than the panel + inner glow */
+          --card-bg: linear-gradient(180deg, rgba(24,32,31,.86) 0%, rgba(16,22,21,.86) 100%);
+          --card-shadow:
+            0 16px 36px rgba(0,0,0,.55),
+            0 2px 8px rgba(0,0,0,.35),
+            inset 0 1px 0 rgba(255,255,255,.07),
+            0 0 0 1px rgba(0,255,194,.05);
+        }
       `}</style>
     </div>
   );
