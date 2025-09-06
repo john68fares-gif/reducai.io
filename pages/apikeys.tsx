@@ -18,17 +18,24 @@ const isBrowser = typeof window !== 'undefined';
 const BTN_GREEN = '#10b981';
 const BTN_GREEN_HOVER = '#0ea473';
 
+/* Shell panel: subtle inner-light + soft drop shadow */
 const FRAME: React.CSSProperties = {
-  background: 'var(--panel)',
+  background:
+    'radial-gradient(140% 120% at 50% -20%, rgba(255,255,255,.10), rgba(255,255,255,0) 55%), var(--panel)',
   border: '1px solid var(--border)',
-  boxShadow: '0 1px 0 rgba(0,0,0,0.22), 0 20px 60px rgba(0,0,0,0.42), 0 85px 220px rgba(0,255,194,0.08)',
+  boxShadow:
+    'inset 0 1px 0 rgba(255,255,255,.06), 0 8px 22px rgba(0,0,0,.16), 0 32px 70px rgba(0,0,0,.26)',
   borderRadius: 30,
 };
+
+/* Cards: lighter center + tiny inner glow + soft drop shadow */
 const CARD: React.CSSProperties = {
-  background: 'var(--card)',
+  background:
+    'radial-gradient(120% 130% at 50% -30%, rgba(255,255,255,.12), rgba(255,255,255,0) 60%), var(--card)',
   border: '1px solid var(--border)',
   borderRadius: 20,
-  boxShadow: 'var(--shadow-card)',
+  boxShadow:
+    'inset 0 1px 0 rgba(255,255,255,.06), 0 2px 6px rgba(0,0,0,.12), 0 16px 36px rgba(0,0,0,.20)',
 };
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
