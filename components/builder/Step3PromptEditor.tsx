@@ -15,19 +15,12 @@ import {
   Plus,
   Edit3,
   Sparkles,
-  CircleHelp
+  CircleHelp,
 } from 'lucide-react';
 import { st } from '@/utils/safe';
+import { scopedStorage } from '@/utils/scoped-storage';
 
-/* ----------------------------- local helpers ----------------------------- */
-function jget<T>(key: string, fallback: T): T {
-  try {
-    const raw = typeof window !== 'undefined' ? localStorage.getItem(key) : null;
-    return raw ? (JSON.parse(raw) as T) : fallback;
-  } catch {
-    return fallback;
-  }
-}
+/* ──────────────────────────── Constants / styles ─────────────────────────── */
 
 type Props = { onNext?: () => void; onBack?: () => void };
 type AIKind = 'sales' | 'support' | 'blank';
@@ -55,33 +48,125 @@ type SavedStep3 = {
   company: string;
 };
 
-/* ------------------------------- shared UI ------------------------------- */
+const BTN_GREEN = '#10b981';       // same as API Keys page
+const BTN_GREEN_HOVER = '#0ea473'; // same hover
+const BTN_DISABLED = 'color-mix(in oklab, var(--text) 14%, transparent)';
+
 const FRAME_STYLE: React.CSSProperties = {
-  background: 'rgba(13,15,17,0.95)',
-  border: '2px dashed rgba(106,247,209,0.30)',
-  boxShadow: '0 0 40px rgba(0,0,0,0.7)',
+  background: 'var(--panel)',
+  border: '1px solid var(--border)',
+  boxShadow: 'var(--shadow-soft)',
   borderRadius: 30,
 };
-const HEADER_BORDER = { borderBottom: '1px solid rgba(255,255,255,0.4)' };
+const HEADER_BORDER = { borderBottom: '1px solid var(--border)' };
 const CARD_STYLE: React.CSSProperties = {
-  background: '#101314',
-  border: '1px solid rgba(255,255,255,0.30)',
+  background: 'var(--card)',
+  border: '1px solid var(--border)',
   borderRadius: 20,
+  boxShadow: 'var(--shadow-card)',
 };
 
-/* === Same green as Step 2 === */
-const BTN_GREEN = '#59d9b3';
-const BTN_GREEN_HOVER = '#54cfa9';
-const BTN_DISABLED = '#2e6f63';
-
-/* === Shorter preview heights === */
 const PREVIEW_LANG_H = 'h-[110px]';
 const PREVIEW_STD_H = 'h-[160px]';
+
+/* ───────────────────────────── Utilities / state ─────────────────────────── */
+
+function buildSections(kind: AIKind, rawIndustry: string, rawLanguage: string): Section[] {
+  const IN = st(rawIndustry, 'your industry');
+  const LANG = st(rawLanguage, 'English');
+
+  const LANG_TEXT =
+    `The AI should speak ${LANG}. The prompt should be written in ${LANG}. ` +
+    `AI should speak informal and friendly tone. Like 2 friends texting on SMS. ` +
+    `Grade 3 according to the Hemingway app.`;
+
+  const SALES_FLOW = `ALWAYS answer any questions and objections first. Start with a brief, friendly greeting, then ask this as your first question:
+
+1. What’s the main challenge you’re trying to solve right now in your ${IN}?
+   Then, it should ask each of these questions 1 by 1 to go through the rest of the conversation flow:
+3. What’s your budget range for getting this solved?
+4. Who else, if anyone, will be involved in the decision-making process?
+5. Would mornings or afternoons usually work best for a quick phone call?`;
+
+  const SUPPORT_DESC =
+    `Create an AI that works as a support agent for a company in ${IN}. ` +
+    `Be friendly, engaging, and empathetic while resolving issues and providing accurate information.`;
+
+  const SUPPORT_RULES = `1. Handle questions with empathy and understanding.
+2. Don’t just repeat the customer's question.
+3. Use exclamation points sparingly.
+4. Emojis are okay occasionally 🙂 if it feels natural for ${IN}.`;
+
+  const SUPPORT_FLOW =
+    `Answer the user’s question completely. If they have objections, address them calmly and clearly.
+Then ask: “Is there anything else I can help you with today?” If the issue requires escalation, explain the next step in ${IN}.`;
+
+  const SALES_SECTIONS: Section[] = [
+    { key: 'language', title: 'Language Instructions Preview', subtitle: 'Template-generated language instructions for your AI', icon: <BrainCircuit className="w-4 h-4" style={{ color: 'var(--brand)' }} />, defaultText: LANG_TEXT, wide: true },
+    { key: 'description', title: 'AI Description', subtitle: 'Define what your AI should do and how it should behave', icon: <FileText className="w-4 h-4" style={{ color: 'var(--brand)' }} />, defaultText: `You are a receptionist / lead-qualifying AI for a company in ${IN}.
+Be friendly, concise, and helpful. Qualify inquiries, answer questions, and offer to schedule a call/meeting.` },
+    { key: 'rules', title: 'Rules & Guidelines', subtitle: 'Set important rules and constraints for your AI’s behavior', icon: <Settings className="w-4 h-4" style={{ color: 'var(--brand)' }} />, defaultText: `1) Ask one question at a time.
+2) Don’t promise exact quotes; set expectations appropriate to ${IN}.
+3) Keep messages under 2–3 short sentences.
+4) After a brief greeting, immediately ask the first qualifying question.
+5) If policy/compliance topics appear, advise checking relevant regulations for ${IN}.` },
+    { key: 'flow', title: 'Conversation Flow (first message + sequence)', subtitle: 'Exact flow you want followed', icon: <MessageSquareText className="w-4 h-4" style={{ color: 'var(--brand)' }} />, defaultText: SALES_FLOW },
+    { key: 'company', title: 'Company Information', subtitle: 'Docs, FAQs, policies, links', icon: <Landmark className="w-4 h-4" style={{ color: 'var(--brand)' }} />, defaultText: '' },
+  ];
+
+  const SUPPORT_SECTIONS: Section[] = [
+    { key: 'language', title: 'Language Instructions Preview', subtitle: 'Template-generated language instructions for your AI', icon: <BrainCircuit className="w-4 h-4" style={{ color: 'var(--brand)' }} />, defaultText: LANG_TEXT, wide: true },
+    { key: 'description', title: 'AI Description', subtitle: 'Define what your AI should do and how it should behave', icon: <FileText className="w-4 h-4" style={{ color: 'var(--brand)' }} />, defaultText: SUPPORT_DESC },
+    { key: 'rules', title: 'Rules & Guidelines', subtitle: 'Set important rules and constraints for your AI’s behavior', icon: <Settings className="w-4 h-4" style={{ color: 'var(--brand)' }} />, defaultText: SUPPORT_RULES },
+    { key: 'flow', title: 'Conversation Flow (first message + sequence)', subtitle: 'Write the step-by-step flow', icon: <MessageSquareText className="w-4 h-4" style={{ color: 'var(--brand)' }} />, defaultText: SUPPORT_FLOW },
+    { key: 'company', title: 'Company Information', subtitle: 'Docs, FAQs, policies, links', icon: <Landmark className="w-4 h-4" style={{ color: 'var(--brand)' }} />, defaultText: '' },
+  ];
+
+  if (kind === 'support') return SUPPORT_SECTIONS;
+  if (kind === 'blank') {
+    return [
+      { key: 'language', title: 'Language Instructions Preview', subtitle: 'Write your own tone & style from scratch', icon: <BrainCircuit className="w-4 h-4" style={{ color: 'var(--brand)' }} />, defaultText: LANG_TEXT, wide: true },
+      { key: 'description', title: 'AI Description', subtitle: 'Tell the AI what it should do', icon: <FileText className="w-4 h-4" style={{ color: 'var(--brand)' }} />, defaultText: '' },
+      { key: 'rules', title: 'Rules & Guidelines', subtitle: 'Add any hard rules or boundaries', icon: <Settings className="w-4 h-4" style={{ color: 'var(--brand)' }} />, defaultText: '' },
+      { key: 'flow', title: 'Conversation Flow (first message + sequence)', subtitle: 'Write the step-by-step flow', icon: <MessageSquareText className="w-4 h-4" style={{ color: 'var(--brand)' }} />, defaultText: '' },
+      { key: 'company', title: 'Company Information', subtitle: 'Docs, FAQs, policies, links', icon: <Landmark className="w-4 h-4" style={{ color: 'var(--brand)' }} />, defaultText: '' },
+    ];
+  }
+  return SALES_SECTIONS;
+}
+
+/** assemble a single prompt string with stable section headers */
+function assembleCompiledPrompt(p: SavedStep3) {
+  const lines = [
+    `AI TYPE: ${p.kind.toUpperCase()}`,
+    `INDUSTRY: ${p.industry || '—'}`,
+    `LANGUAGE: ${p.language || 'English'}`,
+    '',
+    'DESCRIPTION:',
+    p.description || '',
+    '',
+    'RULES AND GUIDELINES:',
+    p.rules || '',
+    '',
+    'QUESTION FLOW:',
+    p.flow || '',
+    '',
+    'COMPANY FAQ:',
+    p.company || '',
+    '',
+    'LANGUAGE INSTRUCTIONS:',
+    p.languageText || '',
+  ];
+  return lines.join('\n');
+}
+
+/* ─────────────────────────────── Component ──────────────────────────────── */
 
 export default function Step3PromptEditor({ onNext, onBack }: Props) {
   const [kind, setKind] = useState<AIKind>('sales');
   const [industry, setIndustry] = useState<string>('');
   const [language, setLanguage] = useState<string>('');
+
   const [defs, setDefs] = useState<Section[]>([]);
   const [values, setValues] = useState<string[]>([]);
   const [editIdx, setEditIdx] = useState<number | null>(null);
@@ -90,114 +175,91 @@ export default function Step3PromptEditor({ onNext, onBack }: Props) {
   const [importOpen, setImportOpen] = useState(false);
   const [urls, setUrls] = useState<string[]>(['']);
 
+  const [loading, setLoading] = useState(true);
+
   const companyIdx = useMemo(() => defs.findIndex((d) => d.key === 'company'), [defs]);
+  const validUrls = useMemo(() => urls.map((u) => st(u)).filter(Boolean), [urls]);
 
-  function buildSections(kind: AIKind, rawIndustry: string, rawLanguage: string): Section[] {
-    const IN = st(rawIndustry, 'your industry');
-    const LANG = st(rawLanguage, 'English');
-
-    const LANG_TEXT =
-      `The AI should speak ${LANG}. The prompt should be written in ${LANG}. ` +
-      `AI should speak informal and friendly tone. Like 2 friends texting on SMS. ` +
-      `Grade 3 according to the Hemingway app.`;
-
-    const SALES_FLOW = `ALWAYS answer any questions and objections first. Start with a brief, friendly greeting, then ask this as your first question:
-
-1. What’s the main challenge you’re trying to solve right now in your ${IN}?
-   Then, it should ask each of these questions 1 by 1 to go through the rest of the conversation flow:
-3. What’s your budget range for getting this solved?
-4. Who else, if anyone, will be involved in the decision-making process?
-5. Would mornings or afternoons usually work best for a quick phone call?`;
-
-    const SUPPORT_DESC =
-      `Create an AI that works as a support agent for a company in ${IN}. ` +
-      `Be friendly, engaging, and empathetic while resolving issues and providing accurate information.`;
-
-    const SUPPORT_RULES = `1. Handle questions with empathy and understanding.
-2. Don’t just repeat the customer's question.
-3. Use exclamation points sparingly.
-4. Emojis are okay occasionally 🙂 if it feels natural for ${IN}.`;
-
-    const SUPPORT_FLOW =
-      `Answer the user’s question completely. If they have objections, address them calmly and clearly.
-Then ask: “Is there anything else I can help you with today?” If the issue requires escalation, explain the next step in ${IN}.`;
-
-    const SALES_SECTIONS: Section[] = [
-      { key: 'language', title: 'Language Instructions Preview', subtitle: 'Template-generated language instructions for your AI', icon: <BrainCircuit className="w-4 h-4 text-[#6af7d1]" />, defaultText: LANG_TEXT, wide: true },
-      { key: 'description', title: 'AI Description', subtitle: 'Define what your AI should do and how it should behave', icon: <FileText className="w-4 h-4 text-[#6af7d1]" />, defaultText: `You are a receptionist / lead-qualifying AI for a company in ${IN}.
-Be friendly, concise, and helpful. Qualify inquiries, answer questions, and offer to schedule a call/meeting.` },
-      { key: 'rules', title: 'Rules & Guidelines', subtitle: 'Set important rules and constraints for your AI’s behavior', icon: <Settings className="w-4 h-4 text-[#6af7d1]" />, defaultText: `1) Ask one question at a time.
-2) Don’t promise exact quotes; set expectations appropriate to ${IN}.
-3) Keep messages under 2–3 short sentences.
-4) After a brief greeting, immediately ask the first qualifying question.
-5) If policy/compliance topics appear, advise checking relevant regulations for ${IN}.` },
-      { key: 'flow', title: 'Conversation Flow (first message + sequence)', subtitle: 'Exact flow you want followed', icon: <MessageSquareText className="w-4 h-4 text-[#6af7d1]" />, defaultText: SALES_FLOW },
-      { key: 'company', title: 'Company Information', subtitle: 'Docs, FAQs, policies, links', icon: <Landmark className="w-4 h-4 text-[#6af7d1]" />, defaultText: '' },
-    ];
-
-    const SUPPORT_SECTIONS: Section[] = [
-      { key: 'language', title: 'Language Instructions Preview', subtitle: 'Template-generated language instructions for your AI', icon: <BrainCircuit className="w-4 h-4 text-[#6af7d1]" />, defaultText: LANG_TEXT, wide: true },
-      { key: 'description', title: 'AI Description', subtitle: 'Define what your AI should do and how it should behave', icon: <FileText className="w-4 h-4 text-[#6af7d1]" />, defaultText: SUPPORT_DESC },
-      { key: 'rules', title: 'Rules & Guidelines', subtitle: 'Set important rules and constraints for your AI’s behavior', icon: <Settings className="w-4 h-4 text-[#6af7d1]" />, defaultText: SUPPORT_RULES },
-      { key: 'flow', title: 'Conversation Flow (first message + sequence)', subtitle: 'Exact flow you want followed', icon: <MessageSquareText className="w-4 h-4 text-[#6af7d1]" />, defaultText: SUPPORT_FLOW },
-      { key: 'company', title: 'Company Information', subtitle: 'Docs, FAQs, policies, links', icon: <Landmark className="w-4 h-4 text-[#6af7d1]" />, defaultText: '' },
-    ];
-
-    if (kind === 'support') return SUPPORT_SECTIONS;
-    if (kind === 'blank') {
-      return [
-        { key: 'language', title: 'Language Instructions Preview', subtitle: 'Write your own tone & style from scratch', icon: <BrainCircuit className="w-4 h-4 text-[#6af7d1]" />, defaultText: LANG_TEXT, wide: true },
-        { key: 'description', title: 'AI Description', subtitle: 'Tell the AI what it should do', icon: <FileText className="w-4 h-4 text-[#6af7d1]" />, defaultText: '' },
-        { key: 'rules', title: 'Rules & Guidelines', subtitle: 'Add any hard rules or boundaries', icon: <Settings className="w-4 h-4 text-[#6af7d1]" />, defaultText: '' },
-        { key: 'flow', title: 'Conversation Flow (first message + sequence)', subtitle: 'Write the step-by-step flow', icon: <MessageSquareText className="w-4 h-4 text-[#6af7d1]" />, defaultText: '' },
-        { key: 'company', title: 'Company Information', subtitle: 'Docs, FAQs, policies, links', icon: <Landmark className="w-4 h-4 text-[#6af7d1]" />, defaultText: '' },
-      ];
-    }
-    return SALES_SECTIONS;
-  }
-
-  /* ----------------------------- load & hydrate ---------------------------- */
+  /* Load step1 basics + saved step3 (from scopedStorage; fallback to localStorage) */
   useEffect(() => {
-    const s1 = jget<any>('builder:step1', {});
-    const detected: string = s1?.type ?? s1?.botType ?? s1?.mode ?? s1?.aiType ?? s1?.selectedType ?? 'sales';
-    const t: AIKind = (['sales', 'support', 'blank'].includes(detected) ? detected : 'sales') as AIKind;
+    let mounted = true;
+    (async () => {
+      setLoading(true);
+      try {
+        // Step 1 is stored in localStorage in your current setup
+        const s1Raw = typeof window !== 'undefined' ? localStorage.getItem('builder:step1') : null;
+        const s1 = s1Raw ? JSON.parse(s1Raw) : {};
+        const detected: string = s1?.type ?? s1?.botType ?? s1?.mode ?? s1?.aiType ?? s1?.selectedType ?? 'sales';
+        const t: AIKind = (['sales', 'support', 'blank'].includes(detected) ? detected : 'sales') as AIKind;
 
-    const ind = st(s1?.industry);
-    const lang = st(s1?.language);
+        const ind = st(s1?.industry);
+        const lang = st(s1?.language);
 
-    setKind(t);
-    setIndustry(ind);
-    setLanguage(lang);
+        if (!mounted) return;
+        setKind(t);
+        setIndustry(ind);
+        setLanguage(lang);
 
-    const sdefs = buildSections(t, ind, lang);
-    setDefs(sdefs);
+        const newDefs = buildSections(t, ind, lang);
+        setDefs(newDefs);
 
-    const saved = jget<SavedStep3 | null>('builder:step3', null);
+        const ss = await scopedStorage();
+        await ss.ensureOwnerGuard();
 
-    if (!saved || saved.boundIndustry !== ind || saved.boundLanguage !== lang) {
-      setValues(sdefs.map((s) => s.defaultText));
-      const payload: SavedStep3 = {
-        kind: t,
-        industry: ind,
-        language: lang,
-        boundIndustry: ind,
-        boundLanguage: lang,
-        languageText: sdefs[0].defaultText,
-        description: sdefs[1].defaultText,
-        rules: sdefs[2].defaultText,
-        flow: sdefs[3].defaultText,
-        company: sdefs[4].defaultText,
-      };
-      localStorage.setItem('builder:step3', JSON.stringify(payload));
-    } else {
-      setValues([
-        saved.languageText ?? sdefs[0].defaultText,
-        saved.description ?? sdefs[1].defaultText,
-        saved.rules ?? sdefs[2].defaultText,
-        saved.flow ?? sdefs[3].defaultText,
-        saved.company ?? sdefs[4].defaultText,
-      ]);
-    }
+        // Prefer scoped storage
+        const savedScoped = await ss.getJSON<SavedStep3 | null>('builder:step3', null);
+
+        // Fallback to localStorage (legacy)
+        const savedLocal =
+          !savedScoped && typeof window !== 'undefined'
+            ? (JSON.parse(localStorage.getItem('builder:step3') || 'null') as SavedStep3 | null)
+            : null;
+
+        const saved = savedScoped || savedLocal;
+
+        if (!saved || saved.boundIndustry !== ind || saved.boundLanguage !== lang) {
+          const nextVals = newDefs.map((s) => s.defaultText);
+          if (!mounted) return;
+          setValues(nextVals);
+
+          const payload: SavedStep3 = {
+            kind: t,
+            industry: ind,
+            language: lang,
+            boundIndustry: ind,
+            boundLanguage: lang,
+            languageText: nextVals[0] ?? '',
+            description: nextVals[1] ?? '',
+            rules: nextVals[2] ?? '',
+            flow: nextVals[3] ?? '',
+            company: nextVals[4] ?? '',
+          };
+
+          await ss.setJSON('builder:step3', payload);
+          if (typeof window !== 'undefined') localStorage.setItem('builder:step3', JSON.stringify(payload));
+
+          // pre-assemble prompt
+          const compiled = assembleCompiledPrompt(payload);
+          await ss.setJSON('builder:compiledPrompt', compiled);
+          if (typeof window !== 'undefined') localStorage.setItem('builder:compiledPrompt', JSON.stringify(compiled));
+        } else {
+          const nextVals = [
+            saved.languageText ?? newDefs[0].defaultText,
+            saved.description ?? newDefs[1].defaultText,
+            saved.rules ?? newDefs[2].defaultText,
+            saved.flow ?? newDefs[3].defaultText,
+            saved.company ?? newDefs[4].defaultText,
+          ];
+          if (!mounted) return;
+          setValues(nextVals);
+        }
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   const setValue = (i: number, v: string) =>
@@ -207,7 +269,7 @@ Be friendly, concise, and helpful. Qualify inquiries, answer questions, and offe
       return n;
     });
 
-  const persistNow = () => {
+  async function persistNow() {
     const idx = (k: SectionKey) => defs.findIndex((d) => d.key === k);
     const payload: SavedStep3 = {
       kind,
@@ -221,27 +283,32 @@ Be friendly, concise, and helpful. Qualify inquiries, answer questions, and offe
       flow: values[idx('flow')] ?? '',
       company: values[idx('company')] ?? '',
     };
-    try {
-      localStorage.setItem('builder:step3', JSON.stringify(payload));
-    } catch {}
-  };
 
-  const handleNext = () => {
-    persistNow();
-    onNext?.();
-  };
+    const ss = await scopedStorage();
+    await ss.ensureOwnerGuard();
+    await ss.setJSON('builder:step3', payload);
 
-  const totalChars = useMemo(
-    () => values.reduce((n, v) => n + (v ? v.length : 0), 0),
-    [values]
-  );
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('builder:step3', JSON.stringify(payload));
+      } catch {}
+    }
 
-  /* ------------------------- Import Websites (multi) ------------------------ */
-  const validUrls = useMemo(() => urls.map((u) => st(u)).filter(Boolean), [urls]);
+    // Also assemble and store a compiled single prompt for Step 4 “Generate AI”
+    const compiled = assembleCompiledPrompt(payload);
+    await ss.setJSON('builder:compiledPrompt', compiled);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('builder:compiledPrompt', JSON.stringify(compiled));
+      } catch {}
+    }
+  }
 
+  const totalChars = useMemo(() => values.reduce((n, v) => n + (v ? v.length : 0), 0), [values]);
+
+  /* Import Websites (multi-URL) -> appends to Company Information */
   async function importWebsites() {
-    if (!validUrls.length) return;
-
+    if (!validUrls.length || companyIdx < 0) return;
     try {
       const out: string[] = [];
       for (let i = 0; i < validUrls.length; i++) {
@@ -256,14 +323,21 @@ Be friendly, concise, and helpful. Qualify inquiries, answer questions, and offe
       setValue(companyIdx, [existing, compiled].filter(Boolean).join('\n\n'));
       setImportOpen(false);
       setUrls(['']);
-      setTimeout(persistNow, 0);
+      setTimeout(() => void persistNow(), 0);
     } catch {
       alert('Fetch blocked or site returned an error. Paste text manually.');
     }
   }
 
+  const handleNext = async () => {
+    await persistNow();
+    onNext?.();
+  };
+
+  /* ─────────────────────────────── Render ──────────────────────────────── */
+
   return (
-    <div className="min-h-screen w-full bg-[#0b0c10] text-white font-movatif">
+    <div className="min-h-screen w-full font-movatif" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
       <div className="w-full max-w-7xl mx-auto px-6 md:px-8 pt-10 pb-24">
         <StepProgress current={3} />
 
@@ -272,30 +346,48 @@ Be friendly, concise, and helpful. Qualify inquiries, answer questions, and offe
             <h2 className="text-3xl md:text-4xl font-semibold tracking-tight">
               Personality & Knowledge{industry ? ` — ${industry}` : ''}
             </h2>
-            <div className="text-white/70 mt-1 text-sm">Define your AI’s behavior, rules, and knowledge base</div>
+            <div className="mt-1 text-sm" style={{ color: 'var(--text-muted)' }}>
+              Define your AI’s behavior, rules, and knowledge base
+            </div>
           </div>
-          <div className="text-sm text-white/60 hidden md:block">Step 3 of 4</div>
+          {!loading && (
+            <div className="text-sm" style={{ color: 'var(--text-muted)' }}>
+              Step 3 of 4
+            </div>
+          )}
         </div>
 
         {/* Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {defs.map((d, i) => {
-            const isCompany = d.key === 'company';
+          {(loading ? Array.from({ length: 4 }) : defs).map((d, i) => {
+            if (loading) {
+              return (
+                <div key={i} className="rounded-3xl p-6" style={CARD_STYLE}>
+                  <div className="h-4 w-40 rounded mb-3" style={{ background: 'color-mix(in oklab, var(--text) 10%, transparent)' }} />
+                  <div className="h-24 md:h-40 rounded-2xl" style={{ background: 'var(--panel)', border: '1px solid var(--border)' }} />
+                </div>
+              );
+            }
 
+            const isCompany = d.key === 'company';
             return (
               <div
                 key={d.key}
                 className={`${d.wide ? 'md:col-span-2' : ''} relative rounded-3xl p-6`}
                 style={{
-                  background: 'rgba(13,15,17,0.92)',
-                  border: '1px solid rgba(106,247,209,0.18)',
-                  boxShadow: 'inset 0 0 22px rgba(0,0,0,0.28), 0 0 18px rgba(106,247,209,0.05)',
+                  background: 'var(--panel)',
+                  border: '1px solid var(--border)',
+                  boxShadow: 'var(--shadow-soft)',
                 }}
               >
+                {/* ambient brand glow */}
                 <div
                   aria-hidden
                   className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
-                  style={{ background: 'radial-gradient(circle, rgba(106,247,209,0.10) 0%, transparent 70%)', filter: 'blur(38px)' }}
+                  style={{
+                    background: 'radial-gradient(circle, color-mix(in oklab, var(--brand) 14%, transparent) 0%, transparent 70%)',
+                    filter: 'blur(38px)',
+                  }}
                 />
 
                 {/* Edit button */}
@@ -303,38 +395,32 @@ Be friendly, concise, and helpful. Qualify inquiries, answer questions, and offe
                   onClick={() => setEditIdx(i)}
                   className="absolute top-3.5 right-3.5 text-xs px-3 py-1.5 rounded-2xl border inline-flex items-center gap-1.5"
                   style={{
-                    background: 'rgba(16,19,20,0.88)',
-                    border: '1px solid rgba(255,255,255,0.16)',
-                    boxShadow: '0 0 12px rgba(0,0,0,0.25)',
+                    background: 'var(--card)',
+                    border: '1px solid var(--border)',
+                    color: 'var(--text)',
+                    boxShadow: 'var(--shadow-soft)',
                   }}
                 >
-                  <Edit3 className="w-3.5 h-3.5 text-white/80" />
-                  <span className="text-white/90">Edit</span>
+                  <Edit3 className="w-3.5 h-3.5" />
+                  <span>Edit</span>
                 </button>
 
-                <h3 className="text-[13px] font-semibold mb-1.5 flex items-center gap-2">
+                <h3 className="text-[13px] font-semibold mb-1.5 flex items-center gap-2" style={{ color: 'var(--text)' }}>
                   {d.icon}
-                  <span className="text-white/90">{d.title}</span>
-                  {d.key !== 'language' && <span className="text-red-400">*</span>}
+                  <span>{d.title}</span>
+                  {d.key !== 'language' && <span style={{ color: 'tomato' }}>*</span>}
                 </h3>
-                <p className="text-[12px] text-white/55 mb-2">{d.subtitle}</p>
+                <p className="text-[12px] mb-2" style={{ color: 'var(--text-muted)' }}>
+                  {d.subtitle}
+                </p>
 
-                {/* Company actions — no preview box here; compact buttons */}
+                {/* Company actions */}
                 {isCompany ? (
                   <div className="space-y-2">
                     <button
                       onClick={() => setEditIdx(i)}
                       className="w-full inline-flex items-center justify-center gap-2 py-2.5 rounded-2xl text-sm"
-                      style={{
-                        ...CARD_STYLE,
-                        boxShadow: 'inset 0 0 12px rgba(0,0,0,0.38)',
-                      }}
-                      onMouseEnter={(e) => {
-                        (e.currentTarget as HTMLButtonElement).style.border = '1px solid rgba(0,255,194,0.55)';
-                      }}
-                      onMouseLeave={(e) => {
-                        (e.currentTarget as HTMLButtonElement).style.border = '1px solid rgba(255,255,255,0.30)';
-                      }}
+                      style={CARD_STYLE}
                     >
                       <Sparkles className="w-4 h-4" />
                       Add Company Information
@@ -344,16 +430,7 @@ Be friendly, concise, and helpful. Qualify inquiries, answer questions, and offe
                       <button
                         onClick={() => setImportOpen(true)}
                         className="w-full inline-flex items-center justify-center gap-2 py-2.5 rounded-2xl text-sm"
-                        style={{
-                          ...CARD_STYLE,
-                          boxShadow: 'inset 0 0 12px rgba(0,0,0,0.38)',
-                        }}
-                        onMouseEnter={(e) => {
-                          (e.currentTarget as HTMLButtonElement).style.border = '1px solid rgba(0,255,194,0.55)';
-                        }}
-                        onMouseLeave={(e) => {
-                          (e.currentTarget as HTMLButtonElement).style.border = '1px solid rgba(255,255,255,0.30)';
-                        }}
+                        style={CARD_STYLE}
                       >
                         <Globe className="w-4 h-4" />
                         Import Website
@@ -361,11 +438,9 @@ Be friendly, concise, and helpful. Qualify inquiries, answer questions, and offe
 
                       <button
                         disabled
-                        className="w-full inline-flex items-center justify-center gap-2 py-2.5 rounded-2xl text-sm opacity-50 cursor-not-allowed"
-                        style={{
-                          ...CARD_STYLE,
-                          boxShadow: 'inset 0 0 12px rgba(0,0,0,0.38)',
-                        }}
+                        className="w-full inline-flex items-center justify-center gap-2 py-2.5 rounded-2xl text-sm opacity-60 cursor-not-allowed"
+                        style={CARD_STYLE}
+                        title="Coming soon"
                       >
                         <CircleHelp className="w-4 h-4" />
                         Generate FAQ
@@ -373,38 +448,35 @@ Be friendly, concise, and helpful. Qualify inquiries, answer questions, and offe
                     </div>
                   </div>
                 ) : (
-                  // Preview boxes shortened
                   <div
                     role="button"
                     tabIndex={0}
                     onClick={() => setEditIdx(i)}
                     onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && setEditIdx(i)}
-                    className={`text-sm ${
-                      d.key === 'language' ? PREVIEW_LANG_H : PREVIEW_STD_H
-                    } overflow-y-auto whitespace-pre-wrap rounded-2xl px-4 py-3 cursor-pointer`}
+                    className={`text-sm ${d.key === 'language' ? PREVIEW_LANG_H : PREVIEW_STD_H} overflow-y-auto whitespace-pre-wrap rounded-2xl px-4 py-3 cursor-pointer`}
                     style={{
                       background: CARD_STYLE.background as string,
                       border: CARD_STYLE.border as string,
-                      boxShadow: 'inset 0 0 12px rgba(0,0,0,0.38)',
-                      color: '#ffffff',
+                      boxShadow: 'inset 0 0 12px rgba(0,0,0,0.18)',
+                      color: 'var(--text)',
                     }}
                   >
-                    {values[i] || <span className="text-white/40 italic">(Not set yet)</span>}
+                    {values[i] || <span className="italic" style={{ color: 'var(--text-muted)' }}>(Not set yet)</span>}
                   </div>
                 )}
 
                 {/* Modal editor */}
                 {editIdx === i && (
-                  <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: 'rgba(0,0,0,0.5)' }}>
-                    <div className="relative w-full max-w-[980px] max-h-[88vh] flex flex-col text-white font-movatif" style={FRAME_STYLE}>
+                  <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: 'rgba(0,0,0,0.50)' }}>
+                    <div className="relative w-full max-w-[980px] max-h-[88vh] flex flex-col" style={FRAME_STYLE}>
                       {/* Header */}
                       <div className="flex items-center justify-between px-6 py-4 rounded-t-[30px]" style={HEADER_BORDER}>
                         <div className="min-w-0">
-                          <h4 className="text-white text-lg font-semibold truncate">{d.title}</h4>
-                          <div className="text-white/80 text-xs truncate">{d.subtitle}</div>
+                          <h4 className="text-lg font-semibold truncate" style={{ color: 'var(--text)' }}>{d.title}</h4>
+                          <div className="text-xs truncate" style={{ color: 'var(--text-muted)' }}>{d.subtitle}</div>
                         </div>
-                        <button onClick={() => setEditIdx(null)} className="p-2 rounded-full hover:bg-white/10" aria-label="Close">
-                          <X className="w-5 h-5 text-white" />
+                        <button onClick={() => setEditIdx(null)} className="p-2 rounded-full hover:opacity-75" aria-label="Close" title="Close">
+                          <X className="w-5 h-5" style={{ color: 'var(--text)' }} />
                         </button>
                       </div>
 
@@ -414,11 +486,11 @@ Be friendly, concise, and helpful. Qualify inquiries, answer questions, and offe
                           <textarea
                             value={values[i]}
                             onChange={(e) => setValue(i, e.target.value)}
-                            className="w-full h-[26rem] bg-transparent outline-none resize-none text-sm leading-6 placeholder-white/40"
+                            className="w-full h-[26rem] bg-transparent outline-none resize-none text-sm leading-6"
                             placeholder="Start typing…"
-                            style={{ color: '#ffffff' }}
+                            style={{ color: 'var(--text)' }}
                           />
-                          <div className="mt-3 text-xs text-white/70 flex items-center justify-between">
+                          <div className="mt-3 text-xs flex items-center justify-between" style={{ color: 'var(--text-muted)' }}>
                             <span>Character count: {(values[i] || '').length.toLocaleString()}</span>
                             <span>Total: {totalChars.toLocaleString()} / 32,000</span>
                           </div>
@@ -426,19 +498,22 @@ Be friendly, concise, and helpful. Qualify inquiries, answer questions, and offe
                       </div>
 
                       {/* Footer */}
-                      <div className="px-6 py-4 rounded-b-[30px]" style={{ borderTop: '1px solid rgba(255,255,255,0.3)', background: '#101314' }}>
-                        <div className="flex justify-end">
+                      <div className="px-6 py-4 rounded-b-[30px]" style={{ borderTop: '1px solid var(--border)', background: 'var(--card)' }}>
+                        <div className="flex justify-end gap-2">
                           <button
-                            onClick={() => {
+                            onClick={() => setEditIdx(null)}
+                            className="px-5 py-2 rounded-[14px]"
+                            style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            onClick={async () => {
                               setEditIdx(null);
-                              persistNow();
+                              await persistNow();
                             }}
-                            className="inline-flex items-center gap-2 px-8 py-2.5 rounded-[24px] font-semibold select-none transition-colors duration-150"
-                            style={{
-                              background: BTN_GREEN,
-                              color: '#ffffff',
-                              boxShadow: '0 1px 0 rgba(0,0,0,0.18)',
-                            }}
+                            className="px-6 py-2 rounded-[18px] font-semibold"
+                            style={{ background: BTN_GREEN, color: '#fff', boxShadow: '0 10px 24px rgba(16,185,129,.25)' }}
                             onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER)}
                             onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN)}
                           >
@@ -457,29 +532,24 @@ Be friendly, concise, and helpful. Qualify inquiries, answer questions, and offe
         {/* Import Websites modal */}
         {importOpen && (
           <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center px-4">
-            <div
-              className="w-full max-w-3xl rounded-3xl p-6 font-movatif"
-              style={{
-                background: 'linear-gradient(180deg, rgba(22,24,27,0.98) 0%, rgba(14,16,18,0.98) 100%)',
-                border: '1px solid rgba(0,255,194,0.25)',
-                boxShadow: '0 0 24px rgba(0,255,194,0.10), inset 0 0 18px rgba(0,0,0,0.40)',
-              }}
-            >
+            <div className="w-full max-w-3xl rounded-3xl p-6 font-movatif" style={FRAME_STYLE}>
               {/* Header */}
               <div className="flex items-start justify-between">
                 <div>
-                  <h4 className="text-lg font-semibold">Import Website Content</h4>
-                  <p className="text-sm text-white/70 mt-1">Import content from up to 10 websites to enrich your AI’s knowledge base</p>
+                  <h4 className="text-lg font-semibold" style={{ color: 'var(--text)' }}>Import Website Content</h4>
+                  <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
+                    Import content from up to 10 websites to enrich your AI’s knowledge base
+                  </p>
                 </div>
-                <button className="p-1 rounded-2xl border border-white/15" onClick={() => setImportOpen(false)}>
+                <button className="p-1 rounded-2xl border" style={{ borderColor: 'var(--border)', color: 'var(--text)' }} onClick={() => setImportOpen(false)}>
                   <X className="w-4 h-4" />
                 </button>
               </div>
 
               {/* URLs label + counter */}
               <div className="flex items-center justify-between mt-6 mb-2">
-                <label className="text-sm text-white/80">Website URLs</label>
-                <div className="text-xs text-white/50">{Math.max(1, urls.length)} / 10 URLs</div>
+                <label className="text-sm" style={{ color: 'var(--text)' }}>Website URLs</label>
+                <div className="text-xs" style={{ color: 'var(--text-muted)' }}>{Math.max(1, urls.length)} / 10 URLs</div>
               </div>
 
               {/* First URL input */}
@@ -491,7 +561,8 @@ Be friendly, concise, and helpful. Qualify inquiries, answer questions, and offe
                   setUrls(arr);
                 }}
                 placeholder="https://example.com"
-                className="w-full rounded-2xl bg-[#0b0e0f] text-white border border-white/15 px-3 py-3 outline-none text-sm"
+                className="w-full rounded-2xl px-3 py-3 outline-none text-sm"
+                style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }}
               />
 
               {/* Additional URL inputs */}
@@ -505,7 +576,8 @@ Be friendly, concise, and helpful. Qualify inquiries, answer questions, and offe
                     setUrls(arr);
                   }}
                   placeholder="https://another-site.com"
-                  className="w-full rounded-2xl bg-[#0b0e0f] text-white border border-white/15 px-3 py-3 outline-none mt-3 text-sm"
+                  className="w-full rounded-2xl px-3 py-3 outline-none mt-3 text-sm"
+                  style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }}
                 />
               ))}
 
@@ -514,30 +586,34 @@ Be friendly, concise, and helpful. Qualify inquiries, answer questions, and offe
                 <button
                   onClick={() => setUrls((p) => [...p, ''])}
                   className="w-full mt-3 rounded-2xl px-3 py-3 text-sm flex items-center justify-center gap-2 border border-dashed"
-                  style={{ borderColor: 'rgba(255,255,255,0.20)', background: 'rgba(255,255,255,0.04)' }}
+                  style={{ borderColor: 'var(--border)', background: 'var(--panel)', color: 'var(--text)' }}
                 >
                   <Plus className="w-4 h-4" /> Add Another URL
                 </button>
               )}
 
-              <p className="text-sm text-white/60 mt-4">
-                All website content will be combined and appended to your existing company information
+              <p className="text-sm mt-4" style={{ color: 'var(--text-muted)' }}>
+                All website content will be combined and appended to your existing company information.
               </p>
 
               {/* Footer buttons */}
               <div className="flex justify-end gap-2 mt-6">
-                <button onClick={() => setImportOpen(false)} className="px-5 py-2 text-sm rounded-2xl border border-white/15">
+                <button
+                  onClick={() => setImportOpen(false)}
+                  className="px-5 py-2 text-sm rounded-2xl"
+                  style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }}
+                >
                   Cancel
                 </button>
 
                 <button
                   onClick={importWebsites}
                   disabled={!validUrls.length}
-                  className="inline-flex items-center gap-2 px-8 py-2.5 rounded-[24px] font-semibold select-none transition-colors duration-150 disabled:cursor-not-allowed"
+                  className="inline-flex items-center gap-2 px-8 py-2.5 rounded-[18px] font-semibold select-none disabled:cursor-not-allowed"
                   style={{
                     background: validUrls.length ? BTN_GREEN : BTN_DISABLED,
                     color: '#ffffff',
-                    boxShadow: validUrls.length ? '0 1px 0 rgba(0,0,0,0.18)' : 'none',
+                    boxShadow: validUrls.length ? '0 10px 24px rgba(16,185,129,.25)' : 'none',
                   }}
                   onMouseEnter={(e) => {
                     if (!validUrls.length) return;
@@ -555,11 +631,12 @@ Be friendly, concise, and helpful. Qualify inquiries, answer questions, and offe
           </div>
         )}
 
-        {/* Footer buttons (Step 2 style) */}
+        {/* Footer buttons */}
         <div className="mt-8 flex items-center justify-between">
           <button
             onClick={onBack}
-            className="inline-flex items-center gap-2 rounded-[24px] border border-white/15 bg-transparent px-4 py-2 text-white hover:bg-white/10 transition"
+            className="inline-flex items-center gap-2 rounded-[18px] px-4 py-2 text-sm transition"
+            style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)', boxShadow: 'var(--shadow-soft)' }}
           >
             <ArrowLeft className="w-4 h-4" />
             Previous
@@ -567,12 +644,8 @@ Be friendly, concise, and helpful. Qualify inquiries, answer questions, and offe
 
           <button
             onClick={handleNext}
-            className="inline-flex items-center gap-2 px-8 py-2.5 rounded-[24px] font-semibold select-none transition-colors duration-150"
-            style={{
-              background: BTN_GREEN,
-              color: '#ffffff',
-              boxShadow: '0 1px 0 rgba(0,0,0,0.18)',
-            }}
+            className="inline-flex items-center gap-2 px-8 h-[42px] rounded-[18px] font-semibold select-none"
+            style={{ background: BTN_GREEN, color: '#ffffff', boxShadow: '0 10px 24px rgba(16,185,129,.25)' }}
             onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER)}
             onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN)}
           >
