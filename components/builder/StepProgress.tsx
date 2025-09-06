@@ -1,3 +1,4 @@
+// components/builder/StepProgress.tsx
 'use client';
 
 import dynamic from 'next/dynamic';
@@ -5,11 +6,13 @@ import React from 'react';
 
 const Bot3D = dynamic(() => import('./Bot3D.client'), { ssr: false });
 
-function DotDivider() {
+type StageNum = 1 | 2 | 3 | 4;
+
+function Divider() {
   return (
     <div
       className="flex-1 mx-2 h-px rounded-full"
-      style={{ background: 'linear-gradient(90deg, transparent, rgba(106,247,209,0.25), transparent)' }}
+      style={{ background: 'linear-gradient(90deg, transparent, var(--brand-weak), transparent)' }}
     />
   );
 }
@@ -18,12 +21,13 @@ function Stage({
   active,
   label,
   stage,
+  dim,
 }: {
   active: boolean;
   label: string;
-  stage: 1 | 2 | 3 | 4;
+  stage: StageNum;
+  dim?: boolean; // used in loading skeleton
 }) {
-  // Gray palette (not black)
   const ap = {
     accent: '#6af7d1',
     shellColor: '#3a4044',
@@ -41,9 +45,10 @@ function Stage({
       <div
         className="w-12 h-12 rounded-2xl flex items-center justify-center"
         style={{
-          background: active ? 'rgba(0,255,194,0.15)' : 'rgba(255,255,255,0.05)',
-          border: `1px solid ${active ? 'rgba(0,255,194,0.38)' : 'rgba(255,255,255,0.10)'}`,
-          boxShadow: active ? '0 0 16px rgba(0,255,194,0.25)' : undefined,
+          background: active ? 'rgba(0,255,194,0.15)' : 'var(--card)',
+          border: `1px solid ${active ? 'rgba(0,255,194,0.38)' : 'var(--border)'}`,
+          boxShadow: active ? '0 0 16px rgba(0,255,194,0.25), var(--shadow-card)' : 'var(--shadow-card)',
+          filter: dim ? 'opacity(.55)' : undefined,
         }}
       >
         {/* @ts-ignore */}
@@ -64,35 +69,70 @@ function Stage({
           idle={false}
         />
       </div>
-      <div className={`text-xs truncate ${active ? 'text-white' : 'text-white/70'}`}>{label}</div>
+      <div
+        className="text-xs truncate"
+        style={{ color: active ? 'var(--text)' : 'var(--text-muted)', filter: dim ? 'opacity(.55)' : undefined }}
+      >
+        {label}
+      </div>
     </div>
   );
 }
 
-export default function StepProgress({ current }: { current: 1 | 2 | 3 | 4 }) {
+/**
+ * StepProgress
+ * - light/dark via CSS vars
+ * - short labels
+ * - optional loading skeleton (show while data booting)
+ */
+export default function StepProgress({
+  current,
+  loading = false,
+  labels = ['AI Type', 'Model', 'Prompt', 'Overview'],
+}: {
+  current: StageNum;
+  loading?: boolean;
+  labels?: [string, string, string, string] | string[];
+}) {
+  const L = labels as string[];
+
   return (
     <div
       className="w-full mb-7 rounded-[28px] px-4 py-3 flex items-center"
       style={{
-        background: 'rgba(13,15,17,0.92)',
-        border: '1px solid rgba(106,247,209,0.32)',
-        boxShadow: 'inset 0 0 22px rgba(0,0,0,0.28), 0 0 18px rgba(106,247,209,0.06)',
+        background: 'var(--card)',
+        border: '1px solid var(--border)',
+        boxShadow: 'var(--shadow-card)',
       }}
     >
-      <Stage active={current === 1} label="AI Type & Basics" stage={1} />
-      <DotDivider />
-      <Stage active={current === 2} label="Model Settings" stage={2} />
-      <DotDivider />
-      <Stage active={current === 3} label="Personality & Knowledge" stage={3} />
-      <DotDivider />
-      <Stage active={current === 4} label="Final Review" stage={4} />
-
-      <div
-        className="ml-auto text-white/75 text-xs rounded-xl px-2 py-1 border"
-        style={{ borderColor: 'rgba(255,255,255,0.16)', background: 'rgba(255,255,255,0.05)' }}
-      >
-        {current} / 4
-      </div>
+      {loading ? (
+        <>
+          <Stage active={false} label={L[0]} stage={1} dim />
+          <Divider />
+          <Stage active={false} label={L[1]} stage={2} dim />
+          <Divider />
+          <Stage active={false} label={L[2]} stage={3} dim />
+          <Divider />
+          <Stage active={false} label={L[3]} stage={4} dim />
+          <div className="ml-auto text-xs rounded-xl px-2 py-1 border skeleton-chip" />
+        </>
+      ) : (
+        <>
+          <Stage active={current === 1} label={L[0]} stage={1} />
+          <Divider />
+          <Stage active={current === 2} label={L[1]} stage={2} />
+          <Divider />
+          <Stage active={current === 3} label={L[2]} stage={3} />
+          <Divider />
+          <Stage active={current === 4} label={L[3]} stage={4} />
+          <div
+            className="ml-auto text-xs rounded-xl px-2 py-1 border"
+            style={{ borderColor: 'var(--border)', background: 'var(--panel)', color: 'var(--text-muted)' }}
+          >
+            {current} / 4
+          </div>
+        </>
+      )}
     </div>
   );
 }
