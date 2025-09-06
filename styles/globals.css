@@ -44,23 +44,30 @@
   --dur:260ms;
 }
 
+/* =========================
+   DARK MODE — only changed
+   ========================= */
 [data-theme="dark"]{
-  --text:#ffffff;
-  --text-muted:rgba(255,255,255,.70);
-  --bg:#0b0c10;
-  --panel:#0f1214;
-  --card:#101314;
-  --border:rgba(255,255,255,.09);
-  --ring:rgba(0,255,194,.10);
+  /* Text */
+  --text:#e6edf7;
+  --text-muted:rgba(230,237,247,.66);
 
-  --shadow-soft:0 12px 36px rgba(0,0,0,.45);
-  --shadow-card:inset 0 0 22px rgba(0,0,0,.28), 0 0 20px rgba(0,255,194,.06);
+  /* Surfaces (inner lighter than outer) */
+  --bg:#0b1220;            /* deep blue */
+  --panel:#0f1b2e;         /* a bit lighter than bg */
+  --card:#13223a;          /* lighter card for contrast */
+  --border:rgba(230,237,247,.12);
+  --ring:rgba(16,185,129,.18); /* emerald glow */
+
+  /* Shadows (dark) */
+  --shadow-soft:0 18px 40px rgba(2,8,23,.55);
+  --shadow-card:0 1px 0 rgba(255,255,255,.04), 0 14px 36px rgba(3,8,20,.45);
 
   /* Sidebar dark */
-  --sidebar-bg:#0f1214;
-  --sidebar-border:rgba(255,255,255,.06);
-  --sidebar-text:#ffffff;
-  --sidebar-muted:rgba(255,255,255,.60);
+  --sidebar-bg:#0f1b2e;
+  --sidebar-border:rgba(230,237,247,.10);
+  --sidebar-text:#e6edf7;
+  --sidebar-muted:rgba(230,237,247,.60);
 }
 
 /* ---------------- Base & shell ---------------- */
