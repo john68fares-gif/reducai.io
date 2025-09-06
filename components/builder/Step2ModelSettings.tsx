@@ -1,55 +1,81 @@
 // components/builder/Step2ModelSettings.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { Cpu, Bolt, Rocket, Gauge, KeyRound, ArrowLeft, ArrowRight } from 'lucide-react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
+import { Cpu, Bolt, Rocket, Gauge, KeyRound, ArrowLeft, ArrowRight, Link as LinkIcon } from 'lucide-react';
 import StepProgress from './StepProgress';
 import { scopedStorage } from '@/utils/scoped-storage';
+
+/**
+ * Step 2 — Model & API Key
+ * - Light + Dark mode via CSS vars (same palette used in Step 1 + API Keys page)
+ * - “Next” button = EXACT green style from API Keys page (#10b981 / #0ea473)
+ * - Pulls API keys from the same scoped storage keys used by the API Keys page:
+ *     LS_KEYS      = 'apiKeys.v1'
+ *     LS_SELECTED  = 'apiKeys.selectedId'
+ * - Adds gentle loading skeletons and polished cards
+ */
 
 type Props = {
   onBack: () => void;
   onNext: (data: { model: string; apiKeyId: string }) => void;
 };
 
-type ApiKey = { id: string; name: string; key: string };
+type StoredKey = { id: string; name: string; key: string; createdAt?: number };
 
+// Models (icons only for description pill)
 const MODEL_OPTIONS = [
-  { value: 'gpt-4o',        label: 'GPT-4o',         icon: Bolt },
-  { value: 'gpt-4o-mini',   label: 'GPT-4o mini',    icon: Rocket },
-  { value: 'gpt-4.1',       label: 'GPT-4.1',        icon: Cpu },
-  { value: 'gpt-4.1-mini',  label: 'GPT-4.1 mini',   icon: Gauge },
-  { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo',  icon: Cpu },
+  { value: 'gpt-4o',        label: 'GPT-4o',        icon: Bolt },
+  { value: 'gpt-4o-mini',   label: 'GPT-4o mini',   icon: Rocket },
+  { value: 'gpt-4.1',       label: 'GPT-4.1',       icon: Cpu },
+  { value: 'gpt-4.1-mini',  label: 'GPT-4.1 mini',  icon: Gauge },
+  { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo', icon: Cpu },
 ];
 
-/* === Same button colors as your Step1 === */
-const BTN_GREEN = '#59d9b3';
-const BTN_GREEN_HOVER = '#54cfa9';
-const BTN_DISABLED = '#2e6f63';
+// EXACT same green used on API Keys page
+const BTN_GREEN = '#10b981';
+const BTN_GREEN_HOVER = '#0ea473';
+
+// Shared card styling (matches Step 1 + API Keys)
+const CARD: React.CSSProperties = {
+  background: 'var(--card)',
+  border: '1px solid var(--border)',
+  boxShadow: 'var(--shadow-card)',
+  borderRadius: 20,
+};
+
+const LS_KEYS = 'apiKeys.v1';
+const LS_SELECTED = 'apiKeys.selectedId';
 
 export default function Step2ModelSettings({ onBack, onNext }: Props) {
   const [model, setModel] = useState<string>('gpt-4o');
-  const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
+  const [apiKeys, setApiKeys] = useState<StoredKey[]>([]);
   const [apiKeyId, setApiKeyId] = useState<string>('');
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
+  // Load keys from the SAME place as the API Keys page
   useEffect(() => {
     (async () => {
       const ss = await scopedStorage();
       await ss.ensureOwnerGuard();
 
-      // Load per-user API keys ONLY from scoped storage
-      const keys = await ss.getJSON<ApiKey[]>('apiKeys', []);
+      const keys = await ss.getJSON<StoredKey[]>(LS_KEYS, []);
       setApiKeys(Array.isArray(keys) ? keys : []);
 
-      // Restore step2 (scoped) or pick first available key
+      // restore previous choice if any
       const saved = await ss.getJSON<{ model?: string; apiKeyId?: string } | null>('builder:step2', null);
-      if (saved?.model) setModel(String(saved.model));
-      if (saved?.apiKeyId && keys.some(k => k.id === saved.apiKeyId)) {
-        setApiKeyId(saved.apiKeyId);
-      } else if (keys[0]) {
-        setApiKeyId(keys[0].id);
-      }
+      const rememberedId = await ss.getJSON<string>(LS_SELECTED, '');
 
+      if (saved?.model) setModel(String(saved.model));
+
+      // prefer: saved.apiKeyId → LS_SELECTED → first key
+      const pick =
+        (saved?.apiKeyId && (keys || []).some(k => k.id === saved.apiKeyId) ? saved.apiKeyId : '') ||
+        (rememberedId && (keys || []).some(k => k.id === rememberedId) ? rememberedId : '') ||
+        (keys && keys[0]?.id) || '';
+
+      setApiKeyId(pick);
       setLoading(false);
     })();
   }, []);
@@ -60,144 +86,168 @@ export default function Step2ModelSettings({ onBack, onNext }: Props) {
   );
 
   const canContinue = useMemo(
-    () => !!model && !!apiKeyId && apiKeys.some((k) => k.id === apiKeyId && k.key),
+    () => !!model && !!apiKeyId && apiKeys.some((k) => k.id === apiKeyId && !!k.key),
     [model, apiKeyId, apiKeys]
   );
 
-  const handleNext = () => {
-    if (!canContinue) return;
-    const payload = { model, apiKeyId };
-    (async () => {
-      const ss = await scopedStorage();
-      await ss.ensureOwnerGuard();
-      await ss.setJSON('builder:step2', payload);
-      onNext(payload);
-    })();
-  };
+  const persistAndNext = useCallback(async () => {
+    if (!canContinue || saving) return;
+    setSaving(true);
+    const ss = await scopedStorage();
+    await ss.ensureOwnerGuard();
+    await ss.setJSON('builder:step2', { model, apiKeyId });
+    // gentle pause for UX parity with Step 1
+    await new Promise((r) => setTimeout(r, 280));
+    onNext({ model, apiKeyId });
+    setSaving(false);
+  }, [canContinue, saving, model, apiKeyId, onNext]);
 
   return (
-    <div className="min-h-screen w-full text-white font-movatif" style={{ background: '#0b0c10' }}>
-      <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 pt-8 pb-24">
+    <main className="min-h-screen w-full font-movatif" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
+      <div className="w-full max-w-5xl mx-auto px-4 sm:px-6 pt-8 pb-24">
+        {/* Step label lives INSIDE this progress (no extra title above, per your request) */}
         <StepProgress current={2} />
 
-        <div className="flex items-center justify-between mb-7">
-          <h1 className="text-2xl md:text-3xl font-semibold">Model Settings</h1>
+        {/* Panel */}
+        <section className="relative p-6 sm:p-7" style={CARD}>
+          {/* subtle emerald glow, same vibe as Step 1 */}
           <div
-            className="text-sm px-3 py-1 rounded-[20px] border"
-            style={{ borderColor: 'rgba(106,247,209,0.35)', background: 'rgba(16,19,20,0.7)' }}
-          >
-            Choose your model & key
-          </div>
-        </div>
-
-        <div
-          className="relative rounded-[28px] p-7 transition-all"
-          style={{
-            background: 'rgba(13,15,17,0.92)',
-            border: '2px solid rgba(106,247,209,0.32)',
-            boxShadow: 'inset 0 0 22px rgba(0,0,0,0.28), 0 0 20px rgba(106,247,209,0.06)',
-          }}
-        >
-          <div
+            aria-hidden
             className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
-            style={{ background: 'radial-gradient(circle, rgba(106,247,209,0.12) 0%, transparent 70%)', filter: 'blur(38px)' }}
+            style={{
+              background: 'radial-gradient(circle, color-mix(in oklab, var(--brand) 14%, transparent) 0%, transparent 70%)',
+              filter: 'blur(38px)',
+            }}
           />
 
           {loading ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-7">
               {[0, 1].map((i) => (
                 <div key={i}>
-                  <div className="h-4 w-40 bg-white/10 rounded mb-3" />
-                  <div className="h-12 rounded-2xl bg-[#101314] border border-[#13312b]" />
-                  <div className="mt-2 h-3 w-48 bg-white/10 rounded" />
+                  <div className="h-4 w-32 rounded mb-3" style={{ background: 'color-mix(in oklab, var(--text) 8%, transparent)' }} />
+                  <div className="h-[46px] rounded-2xl" style={{ background: 'color-mix(in oklab, var(--text) 6%, transparent)' }} />
+                  <div className="mt-2 h-3 w-40 rounded" style={{ background: 'color-mix(in oklab, var(--text) 6%, transparent)' }} />
                 </div>
               ))}
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-7">
-              {/* Model */}
+              {/* Model select */}
               <div>
-                <label className="block mb-2 text-[13px] font-medium text-white/85 tracking-wide">
+                <label className="block mb-2 text-[13px] font-medium" style={{ color: 'var(--text)' }}>
                   ChatGPT Model
                 </label>
                 <div className="relative">
                   <select
                     value={model}
                     onChange={(e) => setModel(e.target.value)}
-                    className="w-full rounded-2xl bg-[#101314] text-white/95 border border-[#13312b] px-4 py-3.5 text-[15px] outline-none focus:border-[#00ffc2]"
+                    className="w-full rounded-2xl px-4 h-[46px] text-[15px] outline-none"
+                    style={{
+                      background: 'var(--panel)',
+                      border: '1px solid var(--border)',
+                      color: 'var(--text)',
+                      boxShadow: 'var(--shadow-soft)',
+                    }}
                   >
                     {MODEL_OPTIONS.map((m) => (
-                      <option key={m.value} value={m.value}>{m.label}</option>
+                      <option key={m.value} value={m.value}>
+                        {m.label}
+                      </option>
                     ))}
                   </select>
-                  <div className="flex items-center gap-2 mt-2 text-xs text-white/70">
+                  <div className="flex items-center gap-2 mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
                     {selectedMeta.icon ? <selectedMeta.icon className="w-4 h-4" /> : <Cpu className="w-4 h-4" />}
                     <span>{selectedMeta.label}</span>
                   </div>
                 </div>
-                <div className="mt-2 text-xs text-white/60">Your assistant will actually use this model.</div>
+                <div className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
+                  Your assistant will actually use this model.
+                </div>
               </div>
 
-              {/* API key (per-user scoped) */}
+              {/* API Key select (reads same storage as API Keys page) */}
               <div>
-                <label className="block mb-2 text-[13px] font-medium text-white/85 tracking-wide">
+                <label className="block mb-2 text-[13px] font-medium" style={{ color: 'var(--text)' }}>
                   API Key
                 </label>
                 <div className="relative">
                   <select
                     value={apiKeyId}
                     onChange={(e) => setApiKeyId(e.target.value)}
-                    className="w-full rounded-2xl bg-[#101314] text-white/95 border border-[#13312b] px-4 py-3.5 text-[15px] outline-none focus:border-[#00ffc2]"
+                    className="w-full rounded-2xl pl-10 pr-4 h-[46px] text-[15px] outline-none appearance-none"
+                    style={{
+                      background: 'var(--panel)',
+                      border: '1px solid var(--border)',
+                      color: 'var(--text)',
+                      boxShadow: 'var(--shadow-soft)',
+                    }}
                   >
                     <option value="">Select an API key…</option>
                     {apiKeys.map((k) => (
                       <option key={k.id} value={k.id}>
-                        {k.name} {(k.key || '').slice(-4).toUpperCase()}
+                        {k.name} ••••{(k.key || '').slice(-4).toUpperCase()}
                       </option>
                     ))}
                   </select>
-                  <KeyRound className="w-4 h-4 absolute right-3 top-3.5 opacity-70" />
+                  <KeyRound className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 opacity-80" style={{ color: 'var(--brand)' }} />
                 </div>
-                <div className="mt-2 text-xs text-white/60">
-                  Keys are per-account via scoped storage. Add keys in the API Keys page.
+                <div className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
+                  Keys are saved per account. Manage them in <a href="/api-keys" className="underline">API Keys</a>.
                 </div>
               </div>
             </div>
           )}
 
+          {/* Actions */}
           <div className="mt-8 flex items-center justify-between">
             <button
               onClick={onBack}
-              className="inline-flex items-center gap-2 rounded-[24px] border border-white/15 bg-transparent px-4 py-2 text-white hover:bg-white/10 transition"
+              className="inline-flex items-center gap-2 rounded-[14px] px-4 h-[42px] transition hover:-translate-y-[1px]"
+              style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }}
             >
               <ArrowLeft className="w-4 h-4" />
               Previous
             </button>
 
-            <button
-              disabled={!canContinue || loading}
-              onClick={handleNext}
-              className="inline-flex items-center gap-2 px-8 py-2.5 rounded-[24px] font-semibold select-none transition-colors duration-150 disabled:cursor-not-allowed"
-              style={{
-                background: !loading && canContinue ? BTN_GREEN : BTN_DISABLED,
-                color: '#ffffff',
-                boxShadow: !loading && canContinue ? '0 1px 0 rgba(0,0,0,0.18)' : 'none',
-                filter: !loading && canContinue ? 'none' : 'saturate(85%) opacity(0.9)',
-              }}
-              onMouseEnter={(e) => {
-                if (loading || !canContinue) return;
-                (e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER;
-              }}
-              onMouseLeave={(e) => {
-                if (loading || !canContinue) return;
-                (e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN;
-              }}
-            >
-              Next <ArrowRight className="w-4 h-4" />
-            </button>
+            <div className="flex items-center gap-3">
+              <a
+                href="/api-keys"
+                className="hidden sm:inline-flex items-center gap-2 rounded-[14px] px-4 h-[42px] transition hover:-translate-y-[1px]"
+                style={{ background: 'var(--panel)', border: '1px solid var(--border)', color: 'var(--text)', boxShadow: 'var(--shadow-soft)' }}
+              >
+                <LinkIcon className="w-4 h-4" />
+                Open API Keys
+              </a>
+
+              <button
+                disabled={!canContinue || loading || saving}
+                onClick={persistAndNext}
+                className="inline-flex items-center justify-center gap-2 px-6 h-[46px] rounded-[18px] font-semibold disabled:opacity-60 disabled:cursor-not-allowed transition will-change-transform"
+                style={{ background: BTN_GREEN, color: '#fff' }}
+                onMouseEnter={(e) => {
+                  if (!canContinue || loading || saving) return;
+                  (e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER;
+                }}
+                onMouseLeave={(e) => {
+                  if (!canContinue || loading || saving) return;
+                  (e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN;
+                }}
+              >
+                {saving ? (
+                  <>
+                    <span className="w-4 h-4 rounded-full border-2 border-white/60 border-t-transparent animate-spin" />
+                    Next
+                  </>
+                ) : (
+                  <>
+                    Next <ArrowRight className="w-4 h-4" />
+                  </>
+                )}
+              </button>
+            </div>
           </div>
-        </div>
+        </section>
       </div>
-    </div>
+    </main>
   );
 }
