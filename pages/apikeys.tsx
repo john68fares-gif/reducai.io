@@ -22,17 +22,16 @@ const LS_SELECTED = 'apiKeys.selectedId';
 const isBrowser = typeof window !== 'undefined';
 
 /* --------------------------------- Styling ---------------------------------- */
-// darker, readable green (not too shiny)
+// darker green so text stays readable
 const BTN_GREEN = '#10b981';
 const BTN_GREEN_HOVER = '#0ea473';
-const BTN_GREEN_DIM = '#0a6e52';
 
 const FRAME: React.CSSProperties = {
-  background: 'var(--panel)',
+  background: 'var(--panel)', // solid surface
   border: '1px solid var(--border)',
-  // card drop shadow + subtle green glow to separate from background
+  // strong separation from the bg
   boxShadow:
-    '0 1px 0 rgba(0,0,0,0.25), 0 18px 55px rgba(0,0,0,0.45), 0 60px 180px rgba(0,255,194,0.08)',
+    '0 1px 0 rgba(0,0,0,0.22), 0 20px 60px rgba(0,0,0,0.42), 0 85px 220px rgba(0,255,194,0.08)',
   borderRadius: 30,
 };
 const CARD: React.CSSProperties = {
@@ -45,12 +44,12 @@ const CARD: React.CSSProperties = {
 /* --------------------------------- Helpers ---------------------------------- */
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Basic OpenAI key format check (client-side; CORS blocks live pings) */
+/** Relaxed OpenAI key check (client-side only). */
 function looksLikeOpenAIKey(v: string) {
   if (!v) return false;
   const s = v.trim();
-  if (!/^sk-[A-Za-z0-9]{24,}$/.test(s)) return false;
-  return true;
+  // Most live keys are at least ~35 chars after sk- and alphanumeric; allow longer.
+  return /^sk-[A-Za-z0-9]{20,}$/.test(s);
 }
 
 /* ------------------------------ InlineSelect ------------------------------ */
@@ -191,12 +190,7 @@ function AddKeyModal({
     >
       <div
         className="w-full max-w-[740px] rounded-[24px] overflow-hidden animate-[popIn_140ms_ease]"
-        style={{
-          ...FRAME,
-          // stronger card separation
-          boxShadow:
-            '0 1px 0 rgba(0,0,0,0.25), 0 24px 70px rgba(0,0,0,0.55), 0 80px 220px rgba(0,255,194,0.10)',
-        }}
+        style={FRAME}
       >
         {/* header */}
         <div
@@ -215,8 +209,7 @@ function AddKeyModal({
                 Add New Project API Key
               </div>
               <div className="text-sm" style={{ color: 'var(--text-muted)' }}>
-                Provide a project name and your OpenAI API key. Your key is stored only for your
-                account (scoped).
+                Stored only in your browser, scoped to your account.
               </div>
             </div>
           </div>
@@ -256,7 +249,7 @@ function AddKeyModal({
             />
             <div className="mt-2 text-xs flex items-center gap-2" style={{ color: 'var(--text-muted)' }}>
               <ShieldCheck className="w-4 h-4" style={{ color: 'var(--brand)' }} />
-              Your key never leaves your browser except when you call OpenAI.
+              We only check the format (CORS prevents live pinging OpenAI in-browser).
             </div>
             {error && <div className="mt-2 text-xs text-red-400">{error}</div>}
           </div>
@@ -280,7 +273,6 @@ function AddKeyModal({
                 return;
               }
               setSaving(true);
-              // micro "realistic" saving delay
               await sleep(420 + Math.random() * 280);
               try {
                 await onSave(name.trim(), val.trim());
@@ -354,7 +346,7 @@ export default function ApiKeysPage() {
   const [toast, setToast] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState(true);
 
-  // First mount: ensure per-user guard + migrate legacy keys (once)
+  // Load (scoped, per-user) + migrate legacy once
   useEffect(() => {
     (async () => {
       await migrateLegacyKeysToUser();
@@ -368,7 +360,6 @@ export default function ApiKeysPage() {
       if (chosen && saved.find((k) => k.id === chosen)) setSelected(chosen);
       else if (saved[0]) setSelected(saved[0].id);
 
-      // small delay to allow entrance animation
       await sleep(180);
       setLoading(false);
     })();
@@ -402,9 +393,7 @@ export default function ApiKeysPage() {
   }
 
   async function addKey(name: string, key: string) {
-    // final guard
     if (!looksLikeOpenAIKey(key)) throw new Error('Invalid API key format (must start with sk-).');
-
     const next: StoredKey = { id: String(Date.now()), name, key, createdAt: Date.now() };
     const updated = [next, ...list];
     await saveList(updated);
@@ -416,10 +405,7 @@ export default function ApiKeysPage() {
   async function removeKey(id: string) {
     const updated = list.filter((k) => k.id !== id);
     await saveList(updated);
-    if (selected === id) {
-      const fallback = updated[0]?.id || '';
-      setSelected(fallback);
-    }
+    if (selected === id) setSelected(updated[0]?.id || '');
     const removedName = list.find((k) => k.id === id)?.name || 'project';
     setToast(`API Key for “${removedName}” removed`);
   }
@@ -430,20 +416,11 @@ export default function ApiKeysPage() {
   }
 
   return (
-    <div className="px-6 py-10 md:pl-[260px]" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
+    <div className="px-6 py-10" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
+      {/* Centered container relative to the content area */}
       <div className="mx-auto w-full max-w-[980px]">
-        {/* Main frame (single card) */}
         <div className="relative" style={FRAME}>
-          {/* soft spotlight for separation */}
-          <div
-            aria-hidden
-            className="pointer-events-none absolute -top-[28%] -left-[20%] w-[70%] h-[70%] rounded-full"
-            style={{
-              background: 'radial-gradient(circle, rgba(0,255,194,0.10) 0%, transparent 70%)',
-              filter: 'blur(40px)',
-            }}
-          />
-
+          {/* header */}
           <div className="flex items-start justify-between px-6 lg:px-8 py-6">
             <div>
               <h1 className="text-2xl font-semibold">API Keys</h1>
@@ -460,33 +437,55 @@ export default function ApiKeysPage() {
           </div>
 
           <div className="px-6 lg:px-8 pb-8 space-y-5">
-            {/* Loading skeleton */}
+            {/* Loading skeletons */}
             {loading ? (
               <div className="space-y-4">
                 <div
                   className="h-[46px] rounded-[14px] animate-pulse"
-                  style={{ ...CARD, background: 'linear-gradient(90deg, var(--card) 25%, var(--panel) 37%, var(--card) 63%)', backgroundSize: '200% 100%' }}
+                  style={{
+                    ...CARD,
+                    background:
+                      'linear-gradient(90deg, var(--card) 25%, var(--panel) 37%, var(--card) 63%)',
+                    backgroundSize: '200% 100%',
+                  }}
                 />
                 <div
                   className="h-[74px] rounded-[14px] animate-pulse"
-                  style={{ ...CARD, background: 'linear-gradient(90deg, var(--card) 25%, var(--panel) 37%, var(--card) 63%)', backgroundSize: '200% 100%' }}
+                  style={{
+                    ...CARD,
+                    background:
+                      'linear-gradient(90deg, var(--card) 25%, var(--panel) 37%, var(--card) 63%)',
+                    backgroundSize: '200% 100%',
+                  }}
                 />
                 <div className="flex gap-4">
                   <div
                     className="h-[46px] flex-1 rounded-[14px] animate-pulse"
-                    style={{ ...CARD, background: 'linear-gradient(90deg, var(--card) 25%, var(--panel) 37%, var(--card) 63%)', backgroundSize: '200% 100%' }}
+                    style={{
+                      ...CARD,
+                      background:
+                        'linear-gradient(90deg, var(--card) 25%, var(--panel) 37%, var(--card) 63%)',
+                      backgroundSize: '200% 100%',
+                    }}
                   />
                   <div
                     className="h-[46px] w-[220px] rounded-[18px] animate-pulse"
-                    style={{ ...CARD, background: 'linear-gradient(90deg, var(--card) 25%, var(--panel) 37%, var(--card) 63%)', backgroundSize: '200% 100%' }}
+                    style={{
+                      ...CARD,
+                      background:
+                        'linear-gradient(90deg, var(--card) 25%, var(--panel) 37%, var(--card) 63%)',
+                      backgroundSize: '200% 100%',
+                    }}
                   />
                 </div>
               </div>
             ) : list.length === 0 ? (
-              // Empty state (single, centered)
-              <div style={CARD} className="p-8 text-center">
-                <div className="mx-auto mb-4 w-16 h-16 rounded-full grid place-items-center border-2 border-dashed"
-                  style={{ borderColor: 'rgba(0,255,194,0.35)', background: 'rgba(0,255,194,0.04)' }}>
+              // EMPTY STATE — single area (no inner card)
+              <div className="text-center py-10">
+                <div
+                  className="mx-auto mb-4 w-16 h-16 rounded-full grid place-items-center border-2 border-dashed"
+                  style={{ borderColor: 'rgba(0,255,194,0.35)', background: 'rgba(0,255,194,0.04)' }}
+                >
                   <KeyRound className="w-6 h-6 animate-pulse" style={{ color: 'var(--brand)' }} />
                 </div>
                 <div className="text-lg font-medium">No API Keys Found</div>
@@ -587,7 +586,7 @@ export default function ApiKeysPage() {
       <AddKeyModal open={showAdd} onClose={() => setShowAdd(false)} onSave={addKey} />
       {toast && <Toast text={toast} onClose={() => setToast(undefined)} />}
 
-      {/* tiny keyframes */}
+      {/* keyframes */}
       <style jsx global>{`
         @keyframes fadeIn {
           from { opacity: 0 }
