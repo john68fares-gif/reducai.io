@@ -15,21 +15,18 @@ import {
 } from 'lucide-react';
 import { scopedStorage, migrateLegacyKeysToUser } from '@/utils/scoped-storage';
 
-/* ------------------------------ Types & storage ------------------------------ */
 type StoredKey = { id: string; name: string; key: string; createdAt: number };
 const LS_KEYS = 'apiKeys.v1';
 const LS_SELECTED = 'apiKeys.selectedId';
 const isBrowser = typeof window !== 'undefined';
 
-/* --------------------------------- Styling ---------------------------------- */
-// darker green so text stays readable
+// darker green so text is readable
 const BTN_GREEN = '#10b981';
 const BTN_GREEN_HOVER = '#0ea473';
 
 const FRAME: React.CSSProperties = {
-  background: 'var(--panel)', // solid surface
+  background: 'var(--panel)',
   border: '1px solid var(--border)',
-  // strong separation from the bg
   boxShadow:
     '0 1px 0 rgba(0,0,0,0.22), 0 20px 60px rgba(0,0,0,0.42), 0 85px 220px rgba(0,255,194,0.08)',
   borderRadius: 30,
@@ -41,18 +38,19 @@ const CARD: React.CSSProperties = {
   boxShadow: 'var(--shadow-card)',
 };
 
-/* --------------------------------- Helpers ---------------------------------- */
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Relaxed OpenAI key check (client-side only). */
+/** Super-relaxed client-side check:
+ *  - trims whitespace
+ *  - requires it to start with "sk-" and be at least 12 chars total
+ *  This avoids blocking real keys with changing formats.
+ */
 function looksLikeOpenAIKey(v: string) {
   if (!v) return false;
   const s = v.trim();
-  // Most live keys are at least ~35 chars after sk- and alphanumeric; allow longer.
-  return /^sk-[A-Za-z0-9]{20,}$/.test(s);
+  return s.startsWith('sk-') && s.length >= 12;
 }
 
-/* ------------------------------ InlineSelect ------------------------------ */
 type Opt = { value: string; label: string; sub?: string };
 function InlineSelect({
   id,
@@ -103,15 +101,17 @@ function InlineSelect({
       >
         <span className="flex items-center gap-2 truncate">
           <KeyRound className="w-4 h-4" style={{ color: 'var(--brand)' }} />
+        </span>
+        <span className="flex-1 text-left truncate">
           {sel ? (
-            <span className="truncate">
+            <>
               {sel.label}
               {sel.sub ? (
                 <span style={{ color: 'var(--text-muted)' }} className="ml-2">
                   ••••{sel.sub}
                 </span>
               ) : null}
-            </span>
+            </>
           ) : (
             <span style={{ color: 'var(--text-muted)' }}>{placeholder}</span>
           )}
@@ -155,7 +155,6 @@ function InlineSelect({
   );
 }
 
-/* ---------------------------------- Modal ---------------------------------- */
 function AddKeyModal({
   open,
   onClose,
@@ -181,7 +180,8 @@ function AddKeyModal({
 
   if (!open) return null;
 
-  const canSave = name.trim().length > 1 && looksLikeOpenAIKey(val);
+  const trimmed = val.trim();
+  const canSave = name.trim().length > 1 && looksLikeOpenAIKey(trimmed);
 
   return (
     <div
@@ -192,7 +192,6 @@ function AddKeyModal({
         className="w-full max-w-[740px] rounded-[24px] overflow-hidden animate-[popIn_140ms_ease]"
         style={FRAME}
       >
-        {/* header */}
         <div
           className="flex items-center justify-between px-7 py-6"
           style={{ borderBottom: '1px solid var(--border)' }}
@@ -218,7 +217,6 @@ function AddKeyModal({
           </button>
         </div>
 
-        {/* body */}
         <div className="px-7 py-6 space-y-5">
           <div>
             <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>
@@ -243,7 +241,7 @@ function AddKeyModal({
                 setVal(e.target.value);
                 setError('');
               }}
-              placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+              placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
               className="w-full rounded-[14px] border px-4 h-[46px] text-sm outline-none"
               style={{ background: 'var(--card)', borderColor: 'var(--border)', color: 'var(--text)' }}
             />
@@ -255,7 +253,6 @@ function AddKeyModal({
           </div>
         </div>
 
-        {/* footer */}
         <div className="px-7 pb-7 flex gap-3">
           <button
             onClick={onClose}
@@ -269,13 +266,13 @@ function AddKeyModal({
             disabled={!canSave || saving}
             onClick={async () => {
               if (!canSave) {
-                setError('Please enter a project name and a valid API key that begins with sk-');
+                setError('Please enter a project name and a key that starts with sk-');
                 return;
               }
               setSaving(true);
               await sleep(420 + Math.random() * 280);
               try {
-                await onSave(name.trim(), val.trim());
+                await onSave(name.trim(), trimmed);
               } catch (e: any) {
                 setError(e?.message || 'Failed to save');
               } finally {
@@ -305,7 +302,6 @@ function AddKeyModal({
   );
 }
 
-/* ----------------------------------- Toast ---------------------------------- */
 function Toast({ text, onClose }: { text: string; onClose: () => void }) {
   useEffect(() => {
     const t = setTimeout(onClose, 2400);
@@ -338,7 +334,6 @@ function Toast({ text, onClose }: { text: string; onClose: () => void }) {
   );
 }
 
-/* ----------------------------------- Page ----------------------------------- */
 export default function ApiKeysPage() {
   const [list, setList] = useState<StoredKey[]>([]);
   const [selected, setSelected] = useState<string>('');
@@ -346,7 +341,6 @@ export default function ApiKeysPage() {
   const [toast, setToast] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState(true);
 
-  // Load (scoped, per-user) + migrate legacy once
   useEffect(() => {
     (async () => {
       await migrateLegacyKeysToUser();
@@ -365,7 +359,6 @@ export default function ApiKeysPage() {
     })();
   }, []);
 
-  // Persist selection
   useEffect(() => {
     (async () => {
       if (!isBrowser) return;
@@ -393,7 +386,6 @@ export default function ApiKeysPage() {
   }
 
   async function addKey(name: string, key: string) {
-    if (!looksLikeOpenAIKey(key)) throw new Error('Invalid API key format (must start with sk-).');
     const next: StoredKey = { id: String(Date.now()), name, key, createdAt: Date.now() };
     const updated = [next, ...list];
     await saveList(updated);
@@ -417,10 +409,8 @@ export default function ApiKeysPage() {
 
   return (
     <div className="px-6 py-10" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
-      {/* Centered container relative to the content area */}
       <div className="mx-auto w-full max-w-[980px]">
         <div className="relative" style={FRAME}>
-          {/* header */}
           <div className="flex items-start justify-between px-6 lg:px-8 py-6">
             <div>
               <h1 className="text-2xl font-semibold">API Keys</h1>
@@ -437,7 +427,6 @@ export default function ApiKeysPage() {
           </div>
 
           <div className="px-6 lg:px-8 pb-8 space-y-5">
-            {/* Loading skeletons */}
             {loading ? (
               <div className="space-y-4">
                 <div
@@ -480,7 +469,6 @@ export default function ApiKeysPage() {
                 </div>
               </div>
             ) : list.length === 0 ? (
-              // EMPTY STATE — single area (no inner card)
               <div className="text-center py-10">
                 <div
                   className="mx-auto mb-4 w-16 h-16 rounded-full grid place-items-center border-2 border-dashed"
@@ -508,7 +496,6 @@ export default function ApiKeysPage() {
               </div>
             ) : (
               <>
-                {/* Select */}
                 <div style={CARD} className="p-4">
                   <label className="block text-xs mb-2" style={{ color: 'var(--text-muted)' }}>
                     Select API Key
@@ -522,7 +509,6 @@ export default function ApiKeysPage() {
                   />
                 </div>
 
-                {/* Selected card */}
                 <div style={CARD} className="p-4">
                   {selectedKey ? (
                     <div className="flex items-center gap-3">
@@ -551,7 +537,6 @@ export default function ApiKeysPage() {
                   )}
                 </div>
 
-                {/* Actions */}
                 <div className="flex items-center gap-4">
                   <button
                     onClick={() => setShowAdd(true)}
@@ -586,7 +571,6 @@ export default function ApiKeysPage() {
       <AddKeyModal open={showAdd} onClose={() => setShowAdd(false)} onSave={addKey} />
       {toast && <Toast text={toast} onClose={() => setToast(undefined)} />}
 
-      {/* keyframes */}
       <style jsx global>{`
         @keyframes fadeIn {
           from { opacity: 0 }
