@@ -61,7 +61,7 @@ export default function Sidebar() {
     document.documentElement.style.setProperty('--sidebar-w', `${collapsed ? W_COLLAPSED : W_EXPANDED}px`);
   }, [collapsed]);
 
-  // user (unchanged)
+  // user
   const [userLoading, setUserLoading] = useState(true);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [userName, setUserName] = useState<string | null>(null);
@@ -91,14 +91,13 @@ export default function Sidebar() {
 
   const isWorkspace = (id: string) => NAV.find(n => n.id === id)?.group === 'workspace';
 
-  // ensure lucide icons are centered & identical size
+  // center/size lucide icons
   const renderIcon = (node: JSX.Element) =>
     cloneElement(node, { className: 'w-[18px] h-[18px] shrink-0', strokeWidth: 2 });
 
   const Item = ({ item, active }: { item: NavItem; active: boolean }) => {
     const green = isWorkspace(item.id);
 
-    // when collapsed + active → stronger “lit” state
     const bg = collapsed && active ? 'rgba(16,185,129,.14)' : 'var(--sb-icon-bg)';
     const border = collapsed && active ? 'rgba(16,185,129,.45)' : 'var(--sb-icon-border)';
     const halo = active
@@ -149,7 +148,6 @@ export default function Sidebar() {
           </div>
         </div>
 
-        {/* soft underline (unchanged) */}
         <div
           className="h-[2px] rounded-full"
           style={{
@@ -180,7 +178,7 @@ export default function Sidebar() {
       aria-label="Primary"
     >
       <div className="relative h-full flex flex-col">
-        {/* Header */}
+        {/* Header — ONLY logo + name (subtitle removed) */}
         <div className="px-4 pt-5 pb-4">
           <div className="flex items-center gap-3">
             <div
@@ -201,19 +199,16 @@ export default function Sidebar() {
               <div className="text-[17px] font-semibold tracking-wide" style={{ color: 'var(--sidebar-text)' }}>
                 reduc<span style={{ color: BRAND }}>ai.io</span>
               </div>
-              <div className="text-[11px]" style={{ color: 'var(--sidebar-muted)' }}>
-                Builder Workspace
-              </div>
             </div>
           </div>
         </div>
 
-        {/* ==== NEW: rail-aligned divider line (matches top header bottom edge) ==== */}
+        {/* Rail-aligned divider under the header */}
         <div
           aria-hidden
           className="pointer-events-none absolute left-0 right-0"
           style={{
-            top: 'var(--rail-h,56px)',                 // uses the CSS var set in _app.tsx
+            top: 'var(--rail-h,56px)',
             borderTop: '1px solid var(--sidebar-border)',
             boxShadow: '0 1px 0 rgba(0,0,0,.04)',
           }}
@@ -248,7 +243,7 @@ export default function Sidebar() {
           </nav>
         </div>
 
-        {/* Account — links to /account in both states */}
+        {/* Account */}
         <div className="px-3 pb-4">
           {!collapsed ? (
             <Link
@@ -304,7 +299,6 @@ export default function Sidebar() {
         </button>
       </div>
 
-      {/* theme tweaks only; your global tokens remain intact */}
       <style jsx>{`
         :global(:root:not([data-theme="dark"])) .fixed.left-0 {
           --sb-icon-bg: var(--card);
@@ -320,7 +314,6 @@ export default function Sidebar() {
           --acct-bg: rgba(15,18,20,.85);
           --acct-border: rgba(255,255,255,.10);
           --sb-tag-bg: rgba(255,255,255,.03);
-          /* soft separation at right edge */
           --sb-shell-shadow: inset 0 0 18px rgba(0,0,0,.28), 14px 0 28px rgba(0,0,0,.42);
         }
       `}</style>
