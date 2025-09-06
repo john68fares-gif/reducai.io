@@ -1,8 +1,7 @@
-// pages/improve.tsx
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Bot, Save, MessageSquare, Settings2 } from 'lucide-react';
+import { Save, MessageSquare, Settings2 } from 'lucide-react';
 
 type Agent = {
   id: string;
@@ -52,24 +51,42 @@ export default function ImprovePage() {
     setInput('');
     // mock reply for now
     setTimeout(() => {
-      setMessages((prev) => [...prev, { role: 'assistant', text: `(${model}, temp ${temperature}) → response to "${value}"` }]);
+      setMessages((prev) => [
+        ...prev,
+        { role: 'assistant', text: `(${model}, temp ${temperature}) → response to "${value}"` },
+      ]);
     }, 600);
   };
 
   return (
-    <div className="min-h-screen bg-white text-black dark:bg-[#0b0c10] dark:text-white px-6 py-10 md:pl-[260px]">
+    <div
+      className="min-h-screen px-6 py-10 md:pl-[260px]"
+      style={{ background: 'var(--bg)', color: 'var(--text)' }}
+    >
       <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-8">
         {/* Left: Prompt Editor */}
-        <div className="space-y-6">
+        <div
+          className="space-y-6 p-6 rounded-2xl"
+          style={{
+            background: 'var(--card)',
+            border: '1px solid var(--border)',
+            boxShadow: 'var(--shadow-card)',
+          }}
+        >
           <h1 className="text-2xl font-semibold flex items-center gap-2">
-            <Settings2 className="w-5 h-5" /> Improve Agent
+            <Settings2 className="w-5 h-5" style={{ color: 'var(--brand)' }} /> Improve Agent
           </h1>
 
           {/* Agent selector */}
           <select
             value={selectedId || ''}
             onChange={(e) => setSelectedId(e.target.value)}
-            className="w-full p-2 rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#0d0f11] text-black dark:text-white"
+            className="w-full p-2 rounded-md text-sm outline-none"
+            style={{
+              background: 'var(--panel)',
+              border: '1px solid var(--border)',
+              color: 'var(--text)',
+            }}
           >
             <option value="">Select an agent…</option>
             {agents.map((a) => (
@@ -84,35 +101,57 @@ export default function ImprovePage() {
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             placeholder="Edit your agent’s prompt here…"
-            className="w-full h-[400px] p-3 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#0d0f11] text-sm text-black dark:text-white outline-none"
+            className="w-full h-[400px] p-3 rounded-lg text-sm outline-none resize-none"
+            style={{
+              background: 'var(--panel)',
+              border: '1px solid var(--border)',
+              color: 'var(--text)',
+            }}
           />
 
           <button
             onClick={saveChanges}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-md font-semibold bg-green-400 text-black hover:bg-green-300 dark:bg-emerald-900/30 dark:text-emerald-100 dark:hover:bg-emerald-800/50"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-md font-semibold"
+            style={{
+              background: 'var(--brand)',
+              color: '#fff',
+              boxShadow: '0 0 10px var(--brand)',
+            }}
           >
             <Save className="w-4 h-4" /> Save Changes
           </button>
         </div>
 
         {/* Right: Test Lab */}
-        <div className="space-y-6">
+        <div
+          className="space-y-6 p-6 rounded-2xl"
+          style={{
+            background: 'var(--card)',
+            border: '1px solid var(--border)',
+            boxShadow: 'var(--shadow-card)',
+          }}
+        >
           <h2 className="text-xl font-semibold flex items-center gap-2">
-            <MessageSquare className="w-5 h-5" /> Test Lab
+            <MessageSquare className="w-5 h-5" style={{ color: 'var(--brand)' }} /> Test Lab
           </h2>
 
           <div className="flex items-center gap-3">
             <select
               value={model}
               onChange={(e) => setModel(e.target.value)}
-              className="flex-1 p-2 rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#0d0f11] text-black dark:text-white"
+              className="flex-1 p-2 rounded-md text-sm outline-none"
+              style={{
+                background: 'var(--panel)',
+                border: '1px solid var(--border)',
+                color: 'var(--text)',
+              }}
             >
               <option value="gpt-4o-mini">GPT-4o Mini</option>
               <option value="gpt-4o">GPT-4o</option>
               <option value="gpt-3.5">GPT-3.5</option>
             </select>
             <div className="flex items-center gap-2 text-sm">
-              <span>Temp:</span>
+              <span style={{ color: 'var(--text-muted)' }}>Temp:</span>
               <input
                 type="range"
                 min={0}
@@ -126,15 +165,25 @@ export default function ImprovePage() {
           </div>
 
           {/* Chat window */}
-          <div className="h-[400px] overflow-y-auto rounded-lg border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-[#0d0f11] p-4 space-y-3">
+          <div
+            className="h-[400px] overflow-y-auto rounded-lg p-4 space-y-3"
+            style={{
+              background: 'var(--panel)',
+              border: '1px solid var(--border)',
+            }}
+          >
             {messages.map((m, i) => (
               <div
                 key={i}
-                className={`p-2 rounded-md max-w-[80%] ${
-                  m.role === 'user'
-                    ? 'ml-auto bg-green-100 dark:bg-emerald-900/30'
-                    : 'bg-gray-200 dark:bg-[#1a1d21]'
-                }`}
+                className="p-2 rounded-md max-w-[80%]"
+                style={{
+                  background:
+                    m.role === 'user'
+                      ? 'rgba(0,255,194,0.15)'
+                      : 'rgba(255,255,255,0.08)',
+                  color: 'var(--text)',
+                  marginLeft: m.role === 'user' ? 'auto' : undefined,
+                }}
               >
                 {m.text}
               </div>
@@ -148,11 +197,21 @@ export default function ImprovePage() {
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && send()}
               placeholder="Type a message…"
-              className="flex-1 p-2 rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#0d0f11] text-black dark:text-white"
+              className="flex-1 p-2 rounded-md text-sm outline-none"
+              style={{
+                background: 'var(--panel)',
+                border: '1px solid var(--border)',
+                color: 'var(--text)',
+              }}
             />
             <button
               onClick={send}
-              className="px-4 py-2 rounded-md bg-green-400 text-black font-semibold hover:bg-green-300 dark:bg-emerald-900/30 dark:text-emerald-100 dark:hover:bg-emerald-800/50"
+              className="px-4 py-2 rounded-md font-semibold"
+              style={{
+                background: 'var(--brand)',
+                color: '#fff',
+                boxShadow: '0 0 10px var(--brand)',
+              }}
             >
               Send
             </button>
