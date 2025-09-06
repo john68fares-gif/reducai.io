@@ -8,74 +8,87 @@ import {
 } from 'lucide-react';
 import StepProgress from './StepProgress';
 import { s, st } from '@/utils/safe';
-import { scopedStorage } from '@/utils/scoped-storage';
+import { supabase } from '@/lib/supabase-client';
 
-type Props = { onBack?: () => void; onFinish?: () => void };
-
-/* ---- Visuals match Step 1/2/3 ---- */
+/** ----------- Buttons: same palette as your API Keys page ----------- */
 const BTN_GREEN = '#10b981';
 const BTN_GREEN_HOVER = '#0ea473';
-const BTN_DISABLED = 'color-mix(in oklab, var(--text) 14%, transparent)';
+const BTN_DISABLED = 'color-mix(in oklab, var(--text) 18%, transparent)';
 
-const FRAME: React.CSSProperties = {
+/** ----------- Cards & surfaces use your theme tokens ----------- */
+const CARD_OUTER: React.CSSProperties = {
   background: 'var(--panel)',
   border: '1px solid var(--border)',
-  boxShadow: '0 18px 48px rgba(0,0,0,.18), var(--shadow-soft)',
+  boxShadow: 'var(--shadow-soft)',
   borderRadius: 28,
 };
-const CARD: React.CSSProperties = {
+const CARD_INNER: React.CSSProperties = {
   background: 'var(--card)',
   border: '1px solid var(--border)',
   borderRadius: 20,
-  boxShadow: 'inset 0 1px 0 rgba(255,255,255,.04), var(--shadow-card)',
+  boxShadow: 'var(--shadow-card)',
+};
+const ORB_STYLE: React.CSSProperties = {
+  background: 'radial-gradient(circle, color-mix(in oklab, var(--brand) 16%, transparent) 0%, transparent 70%)',
+  filter: 'blur(38px)',
 };
 
-function getStep1() { try { return JSON.parse(localStorage.getItem('builder:step1') || 'null') || {}; } catch { return {}; } }
-function getStep2() { try { return JSON.parse(localStorage.getItem('builder:step2') || 'null') || {}; } catch { return {}; } }
-function getStep3() { try { return JSON.parse(localStorage.getItem('builder:step3') || 'null') || {}; } catch { return {}; } }
+/** ----------- Pull prior steps from localStorage (your app’s pattern) ----------- */
+function getStep1() {
+  try { return JSON.parse(localStorage.getItem('builder:step1') || 'null') || {}; } catch { return {}; }
+}
+function getStep2() {
+  try { return JSON.parse(localStorage.getItem('builder:step2') || 'null') || {}; } catch { return {}; }
+}
+function getStep3() {
+  try { return JSON.parse(localStorage.getItem('builder:step3') || 'null') || {}; } catch { return {}; }
+}
 
-/** Fallback prompt compiler (Step 3 already stores compiledPrompt; we keep this as backup) */
-function assembleFallbackPrompt() {
+/** ----------- Build a single compiled prompt (stable section headers) ----------- */
+function mergePrompt(): string {
   const s1 = getStep1();
   const s3 = getStep3();
+
   const header = [st(s1?.name), st(s1?.industry), st(s1?.language)].filter(Boolean).join('\n');
+  const industry = st(s1?.industry, 'your industry');
+  const language = st(s1?.language, 'English');
+  const faqBody = (s(s3?.company) || '').trim();
+
   const sections = [
     header,
-    '**DESCRIPTION:**\n' + (s(s3?.description) || ''),
-    '**RULES AND GUIDELINES:**\n' + (s(s3?.rules) || ''),
-    '**QUESTION FLOW:**\n' + (s(s3?.flow) || ''),
-    '**COMPANY FAQ:**\n' + ((s(s3?.company) || '') || ''),
+`**DESCRIPTION:**
+
+- **Language of prompt:** ${language}
+- **Communication Level:** Informal and friendly tone, like two friends texting (Hemingway Grade 3).
+- **Core identity and personality of the AI:** Friendly, concise, helpful.
+- **Primary purpose and expertise:** Assist clients in their ${industry} journey, answer questions, and qualify leads.`,
+`**AI Description:**
+${s(s3?.description)}`,
+`**RULES AND GUIDELINES:**
+${s(s3?.rules)}`,
+`**QUESTION FLOW:**
+${s(s3?.flow)}`,
+`**COMPANY FAQ:**
+${faqBody}`,
   ];
+
   return sections.filter(Boolean).join('\n\n').trim();
 }
+
+type Props = { onBack?: () => void; onFinish?: () => void };
 
 export default function Step4Overview({ onBack, onFinish }: Props) {
   const s1 = useMemo(getStep1, []);
   const s2 = useMemo(getStep2, []);
   const s3 = useMemo(getStep3, []);
-
-  const [compiledPrompt, setCompiledPrompt] = useState<string>('');
-  const [loading, setLoading] = useState(false);
-  const [loadingMsg, setLoadingMsg] = useState('Generating AI…');
-  const [done, setDone] = useState(false);
-
-  // load compiled prompt from scopedStorage (preferred), then fallback to localStorage, then builder
-  useEffect(() => {
-    (async () => {
-      const ss = await scopedStorage();
-      await ss.ensureOwnerGuard();
-      const fromScoped = await ss.getJSON<string>('builder:compiledPrompt', '');
-      if (fromScoped) { setCompiledPrompt(fromScoped); return; }
-      const fromLS = (() => {
-        try { const raw = localStorage.getItem('builder:compiledPrompt'); return raw ? JSON.parse(raw) : ''; } catch { return ''; }
-      })();
-      setCompiledPrompt(fromLS || assembleFallbackPrompt());
-    })();
-  }, []);
-
-  const chars = compiledPrompt.length;
+  const finalPrompt = useMemo(mergePrompt, []);
+  const chars = finalPrompt.length;
   const maxChars = 32000;
+
   const estTokens = Math.max(1, Math.round(chars / 4));
+  // Display-only; adjust to your pricing sheet if you want
+  const inputCostPerMTok = 2.5;
+  const outputCostPerMTok = 10.0;
 
   const checks = {
     name: !!st(s1?.name),
@@ -83,13 +96,17 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
     language: !!st(s1?.language),
     template: !!(s1?.type || s1?.botType || s1?.aiType),
     model: !!s2?.model,
-    apiKey: !!s2?.apiKeyId || !!s2?.openaiKey, // apiKeyId is the one we expect from Step 2 scoped storage
+    apiKey: !!s2?.apiKeyId || !!s2?.openaiKey, // you store apiKeyId in step 2
     description: !!st(s3?.description),
     flow: !!st(s3?.flow),
     rules: !!st(s3?.rules),
-    company: true,
+    company: true, // optional but we keep the header
   };
   const ready = Object.values(checks).every(Boolean);
+
+  const [loading, setLoading] = useState(false);
+  const [loadingMsg, setLoadingMsg] = useState('Compiling…');
+  const [done, setDone] = useState(false);
 
   useEffect(() => {
     if (!loading) return;
@@ -106,63 +123,67 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
     return () => clearInterval(id);
   }, [loading]);
 
-  function validate(): string | null {
+  const validate = () => {
     if (!checks.name) return 'Please set an AI Name in Step 1.';
     if (!checks.industry) return 'Please set an industry in Step 1.';
     if (!checks.language) return 'Please choose a language in Step 1.';
     if (!checks.model) return 'Please pick a model in Step 2.';
-    if (!checks.apiKey) return 'Please add an API key in Step 2.';
+    if (!checks.apiKey) return 'Please add/select an API key in Step 2.';
     if (!checks.description || !checks.rules || !checks.flow)
       return 'Please complete Description, Rules, and Conversation Flow in Step 3.';
-    if (!compiledPrompt) return 'Prompt not ready. Go back to Step 3 and save.';
+    if (chars > maxChars) return 'Your compiled prompt is too long. Trim Step 3 content.';
     return null;
-  }
+  };
 
   async function handleGenerate() {
     const err = validate();
     if (err) { alert(err); return; }
 
-    setLoading(true);
-    setDone(false);
+    setLoading(true); setDone(false);
 
     try {
-      // Call our server to create an Assistant in the user’s OpenAI account using the selected API Key
+      // 1) get user access token (no helpers; works in browser)
+      const { data: { session } } = await supabase.auth.getSession();
+      const accessToken = session?.access_token;
+      if (!accessToken) throw new Error('Not signed in');
+
+      // 2) collect payload
+      const name = st(s1?.name, 'Assistant');
+      const model = st(s2?.model, 'gpt-4o-mini');
+      const apiKeyId = s2?.apiKeyId; // Step 2 stored selection
+      if (!apiKeyId) throw new Error('No API key selected');
+
+      // 3) call our server route that creates the Assistant in the user's OpenAI
       const res = await fetch('/api/assistants/create', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          apiKeyId: s2?.apiKeyId,               // from Step 2 (scoped)
-          name: st(s1?.name, 'Untitled Bot'),
-          model: st(s2?.model, 'gpt-4o-mini'),
-          instructions: compiledPrompt,         // already compiled in Step 3
-        }),
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`, // let the route act as this user
+        },
+        body: JSON.stringify({ apiKeyId, model, name, instructions: finalPrompt }),
       });
 
-      if (!res.ok) {
-        const j = await res.json().catch(() => null);
-        throw new Error(j?.error || `Failed to create assistant (${res.status})`);
-      }
-      const { assistantId } = await res.json();
+      const body = await res.json();
+      if (!res.ok) throw new Error(body?.error || 'Failed to create assistant');
 
-      // Save build into dashboard storage with linkages
+      const assistantId: string = body.assistantId;
+
+      // 4) Save to your Builder Dashboard storage (keeps wiring for tests)
       const bots = JSON.parse(localStorage.getItem('chatbots') || '[]') as any[];
       const build = {
         id: crypto?.randomUUID?.() || String(Date.now()),
-        name: st(s1?.name, 'Untitled Bot'),
-        type: st(s1?.type || s1?.botType || s1?.aiType, 'ai automation'),
+        name,
         industry: st(s1?.industry),
         language: st(s1?.language, 'English'),
-        model: st(s2?.model, 'gpt-4o-mini'),
-        prompt: compiledPrompt,
-        assistantId,         // <- OpenAI Assistant we just created
-        apiKeyId: s2?.apiKeyId, // <- which key to use for runtime calls
+        model,
+        prompt: finalPrompt,
+        assistantId,   // needed for chat/test later
+        apiKeyId,      // which key this build uses
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
       bots.unshift(build);
       localStorage.setItem('chatbots', JSON.stringify(bots));
-
-      // signal the builder to clear step caches like before
       localStorage.setItem('builder:cleanup', '1');
 
       setLoading(false);
@@ -170,7 +191,7 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
       onFinish?.();
     } catch (e: any) {
       setLoading(false);
-      alert(e?.message || 'Failed to generate the AI. Please try again.');
+      alert(e?.message || 'Failed to generate the AI.');
     }
   }
 
@@ -193,8 +214,9 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
           {/* Left column */}
           <div className="lg:col-span-2 space-y-6">
             {/* AI Configuration */}
-            <div style={FRAME} className="p-6 relative rounded-[28px]">
-              <div className="flex items-center gap-2 mb-4 font-semibold">
+            <div style={CARD_OUTER} className="p-6 rounded-[28px] relative">
+              <div aria-hidden className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full" style={ORB_STYLE} />
+              <div className="flex items-center gap-2 mb-4 font-semibold" style={{ color: 'var(--text)' }}>
                 <Settings2 className="w-4 h-4" style={{ color: 'var(--brand)' }} /> AI Configuration
               </div>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
@@ -206,17 +228,15 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
             </div>
 
             {/* Content Length */}
-            <div style={FRAME} className="p-6 rounded-[28px]">
-              <div className="flex items-center gap-2 mb-4 font-semibold">
+            <div style={CARD_OUTER} className="p-6 rounded-[28px] relative">
+              <div aria-hidden className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full" style={ORB_STYLE} />
+              <div className="flex items-center gap-2 mb-4 font-semibold" style={{ color: 'var(--text)' }}>
                 <FileText className="w-4 h-4" style={{ color: 'var(--brand)' }} /> Content Length
               </div>
-              <div style={CARD} className="p-4 rounded-2xl">
-                <div className="text-sm" style={{ color: 'var(--text)' }}>Characters</div>
+              <div style={CARD_INNER} className="p-4 rounded-2xl">
+                <div className="text-sm" style={{ color: 'var(--text-muted)' }}>Characters</div>
                 <div className="w-full h-2 rounded-full overflow-hidden" style={{ background: 'color-mix(in oklab, var(--text) 10%, transparent)' }}>
-                  <div
-                    className="h-2 rounded-full"
-                    style={{ background: 'var(--brand)', width: `${Math.min(100, (chars / maxChars) * 100)}%` }}
-                  />
+                  <div className="h-2 rounded-full" style={{ background: 'var(--brand)', width: `${Math.min(100, (chars / maxChars) * 100)}%` }} />
                 </div>
                 <div className="text-xs mt-2" style={{ color: 'var(--text-muted)' }}>
                   {chars.toLocaleString()} / {maxChars.toLocaleString()}
@@ -224,19 +244,27 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
               </div>
             </div>
 
-            {/* API Costs (static info placeholder) */}
-            <div style={FRAME} className="p-6 rounded-[28px]">
-              <div className="flex items-center gap-2 mb-4 font-semibold">
+            {/* API Costs (display-only) */}
+            <div style={CARD_OUTER} className="p-6 rounded-[28px] relative">
+              <div aria-hidden className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full" style={ORB_STYLE} />
+              <div className="flex items-center gap-2 mb-4 font-semibold" style={{ color: 'var(--text)' }}>
                 <KeyRound className="w-4 h-4" style={{ color: 'var(--brand)' }} /> API Configuration
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                <div style={CARD} className="p-4 rounded-2xl">
+                <div style={CARD_INNER} className="p-4 rounded-2xl">
                   <div style={{ color: 'var(--text-muted)' }}>Input Cost</div>
-                  <div style={{ color: 'var(--text)' }} className="mt-1">$2.50 <span style={{ color: 'var(--text-muted)' }}>/ 1M tokens</span></div>
+                  <div style={{ color: 'var(--text)' }} className="mt-1">
+                    ${inputCostPerMTok.toFixed(2)} <span style={{ color: 'var(--text-muted)' }}>/ 1M tokens</span>
+                  </div>
+                  <div className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+                    Est. tokens: {estTokens.toLocaleString()}
+                  </div>
                 </div>
-                <div style={CARD} className="p-4 rounded-2xl">
+                <div style={CARD_INNER} className="p-4 rounded-2xl">
                   <div style={{ color: 'var(--text-muted)' }}>Output Cost</div>
-                  <div style={{ color: 'var(--text)' }} className="mt-1">$10.00 <span style={{ color: 'var(--text-muted)' }}>/ 1M tokens</span></div>
+                  <div style={{ color: 'var(--text)' }} className="mt-1">
+                    ${outputCostPerMTok.toFixed(2)} <span style={{ color: 'var(--text-muted)' }}>/ 1M tokens</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -244,12 +272,13 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
 
           {/* Right column */}
           <div className="space-y-6">
-            <div style={FRAME} className="p-6 rounded-[28px]">
-              <div className="flex items-center gap-2 mb-4 font-semibold">
+            <div style={CARD_OUTER} className="p-6 rounded-[28px] relative">
+              <div aria-hidden className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full" style={ORB_STYLE} />
+              <div className="flex items-center gap-2 mb-4 font-semibold" style={{ color: 'var(--text)' }}>
                 <ChecklistIcon /> Requirements
               </div>
 
-              <div style={CARD} className="p-4 rounded-2xl mb-4">
+              <div style={CARD_INNER} className="p-4 rounded-2xl mb-4">
                 <Req ok={checks.name} label="AI Name" />
                 <Req ok={checks.industry} label="Industry" />
                 <Req ok={checks.language} label="Language" />
@@ -262,8 +291,8 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
                 <Req ok={checks.company} label="Company Info" />
               </div>
 
-              <div style={{ ...CARD, border: '1px solid var(--border)' }} className="rounded-2xl p-4">
-                <div className="flex items-center gap-2" style={{ color: 'var(--brand)' }}>
+              <div className="rounded-2xl p-4" style={{ ...CARD_INNER }}>
+                <div className="flex items-center gap-2 font-semibold" style={{ color: 'var(--brand)' }}>
                   <Sparkles className="w-4 h-4" />
                   {ready ? 'Ready to Generate' : 'Missing Requirements'}
                 </div>
@@ -272,9 +301,9 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
                     ? 'Your AI assistant will be created in your OpenAI account.'
                     : 'Please complete the missing items above.'}
                 </div>
-                <div className="text-xs mt-3 flex items-center gap-2" style={{ color: 'color-mix(in oklab, var(--text) 75%, #facc15)' }}>
+                <div className="text-xs mt-3 flex items-center gap-2" style={{ color: 'color-mix(in oklab, var(--text) 80%, #fcd34d)' }}>
                   <AlertCircle className="w-3.5 h-3.5" />
-                  You’re using your own API key.
+                  You’re using your own OpenAI API key.
                 </div>
               </div>
             </div>
@@ -288,26 +317,17 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
             className="inline-flex items-center gap-2 rounded-[18px] px-4 py-2 text-sm transition"
             style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)', boxShadow: 'var(--shadow-soft)' }}
           >
-            <ArrowLeft className="w-4 h-4" /> Previous
+            <ArrowLeft className="w-4 h-4" />
+            Previous
           </button>
 
           <button
             onClick={handleGenerate}
             disabled={!ready}
             className="inline-flex items-center gap-2 px-8 h-[42px] rounded-[18px] font-semibold select-none disabled:cursor-not-allowed"
-            style={{
-              background: ready ? BTN_GREEN : BTN_DISABLED,
-              color: '#ffffff',
-              boxShadow: ready ? '0 10px 24px rgba(16,185,129,.25)' : 'none',
-            }}
-            onMouseEnter={(e) => {
-              if (!ready) return;
-              (e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER;
-            }}
-            onMouseLeave={(e) => {
-              if (!ready) return;
-              (e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN;
-            }}
+            style={{ background: ready ? BTN_GREEN : BTN_DISABLED, color: '#ffffff', boxShadow: ready ? '0 10px 24px rgba(16,185,129,.25)' : 'none' }}
+            onMouseEnter={(e) => { if (ready) (e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER; }}
+            onMouseLeave={(e) => { if (ready) (e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN; }}
           >
             <Sparkles className="w-4 h-4" /> Generate AI
           </button>
@@ -316,15 +336,24 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
 
       {/* Loading overlay */}
       {loading && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center px-4">
-          <div className="w-full max-w-md rounded-[28px] p-6 text-center relative overflow-hidden"
-               style={{ background:'linear-gradient(180deg, rgba(22,24,27,0.98) 0%, rgba(14,16,18,0.98) 100%)', border:'2px dashed rgba(0,255,194,0.30)', boxShadow:'0 0 24px rgba(0,255,194,0.12), inset 0 0 18px rgba(0,0,0,0.40)' }}>
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center px-4">
+          <div
+            className="w-full max-w-md rounded-[28px] p-6 text-center relative overflow-hidden"
+            style={{ ...CARD_OUTER, borderRadius: 28 }}
+          >
+            <div
+              aria-hidden
+              className="pointer-events-none absolute -top-[35%] -left-[35%] w-[90%] h-[90%] rounded-full"
+              style={ORB_STYLE}
+            />
             <Loader2 className="w-7 h-7 mx-auto animate-spin mb-3" style={{ color: 'var(--brand)' }} />
             <div className="text-lg font-semibold" style={{ color: 'var(--text)' }}>Generating AI…</div>
             <div className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>{loadingMsg}</div>
-            <div className="mt-4 w-full h-2 rounded-full overflow-hidden" style={{ background:'rgba(255,255,255,.10)' }}>
-              <div className="h-full w-1/2 animate-pulse rounded-full"
-                   style={{ background:'linear-gradient(90deg, transparent, color-mix(in oklab, var(--brand) 85%, transparent), transparent)' }} />
+            <div className="mt-4 w-full h-2 rounded-full overflow-hidden" style={{ background: 'color-mix(in oklab, var(--text) 10%, transparent)' }}>
+              <div
+                className="h-full w-1/2 animate-pulse rounded-full"
+                style={{ background: 'linear-gradient(90deg, transparent, var(--brand), transparent)' }}
+              />
             </div>
           </div>
         </div>
@@ -332,9 +361,11 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
 
       {/* Done toast */}
       {done && (
-        <div className="fixed bottom-6 right-6 z-50 rounded-[16px] px-4 py-3"
-             style={{ background:'var(--panel)', border:'1px solid var(--border)', boxShadow:'0 0 14px color-mix(in oklab, var(--brand) 18%, transparent)' }}>
-          <div className="flex items-center gap-2" style={{ color: 'var(--text)' }}>
+        <div
+          className="fixed bottom-6 right-6 z-50 rounded-[16px] px-4 py-3"
+          style={{ background: 'var(--panel)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-soft)', color: 'var(--text)' }}
+        >
+          <div className="flex items-center gap-2">
             <Check className="w-4 h-4" style={{ color: 'var(--brand)' }} />
             <div className="text-sm">AI generated and saved to your Builds.</div>
           </div>
@@ -344,25 +375,27 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
   );
 }
 
+/* ------------------------------- tiny helpers ------------------------------ */
 function Info({ label, value, icon }: { label: string; value: string; icon?: React.ReactNode }) {
   return (
-    <div style={CARD} className="p-3 rounded-2xl">
-      <div className="text-xs flex items-center gap-1.5" style={{ color: 'var(--text-muted)' }}>
-        {icon}{label}
-      </div>
+    <div style={CARD_INNER} className="p-3 rounded-2xl">
+      <div className="text-xs flex items-center gap-1.5" style={{ color: 'var(--text-muted)' }}>{icon}{label}</div>
       <div className="mt-0.5 truncate" style={{ color: 'var(--text)' }}>{value || '—'}</div>
     </div>
   );
 }
 function Req({ ok, label }: { ok: boolean; label: string }) {
+  const okBg = 'color-mix(in oklab, var(--brand) 16%, transparent)';
+  const okBr = 'color-mix(in oklab, var(--brand) 52%, transparent)';
+  const noBg = 'color-mix(in oklab, crimson 16%, transparent)';
+  const noBr = 'color-mix(in oklab, crimson 52%, transparent)';
   return (
     <div className="flex items-center gap-2 py-1.5 text-sm">
-      <span className="inline-flex items-center justify-center w-4 h-4 rounded-[6px]"
-            style={{
-              background: ok ? 'color-mix(in oklab, var(--brand) 18%, transparent)' : 'rgba(255,120,120,0.12)',
-              border: `1px solid ${ok ? 'color-mix(in oklab, var(--brand) 55%, transparent)' : 'rgba(255,120,120,0.4)'}`
-            }}>
-        {ok ? <Check className="w-3 h-3" style={{ color: 'var(--brand)' }} /> : <AlertCircle className="w-3 h-3" style={{ color: '#ff8a8a' }} />}
+      <span
+        className="inline-flex items-center justify-center w-4 h-4 rounded-[6px]"
+        style={{ background: ok ? okBg : noBg, border: `1px solid ${ok ? okBr : noBr}` }}
+      >
+        {ok ? <Check className="w-3 h-3" style={{ color: 'var(--brand)' }} /> : <AlertCircle className="w-3 h-3" style={{ color: 'crimson' }} />}
       </span>
       <span style={{ color: ok ? 'var(--text)' : 'var(--text-muted)' }}>{label}</span>
     </div>
@@ -370,8 +403,12 @@ function Req({ ok, label }: { ok: boolean; label: string }) {
 }
 function ChecklistIcon() {
   return (
-    <div className="w-4 h-4 rounded-[6px] flex items-center justify-center"
-         style={{ border: '1px solid var(--brand)', color: 'var(--brand)' }}>✓</div>
+    <div
+      className="w-4 h-4 rounded-[6px] flex items-center justify-center"
+      style={{ border: '1px solid var(--brand)', color: 'var(--brand)' }}
+    >
+      ✓
+    </div>
   );
 }
 function cap(sv: string) { return sv ? sv[0].toUpperCase() + sv.slice(1) : sv; }
