@@ -1,84 +1,164 @@
 // pages/api-keys.tsx
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import Head from 'next/head';
+import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
 import {
   KeyRound,
   Plus,
+  ChevronDown,
   Trash2,
-  ShieldCheck,
-  Loader2,
-  X,
-  Lock,
   CheckCircle2,
+  Zap,
+  X,
+  Key as KeyIcon,
+  ShieldCheck,
 } from 'lucide-react';
-import dynamic from 'next/dynamic';
-import { scopedStorage } from '@/utils/scoped-storage';
+import { scopedStorage, migrateLegacyKeysToUser } from '@/utils/scoped-storage';
 
-/* ------------------------------ Types / keys ------------------------------ */
-type StoredKey = {
-  id: string;
-  name: string;
-  keyTail: string;        // last 4 chars only (for display / dedupe)
-  org?: string | null;    // if OpenAI returns an org header / id
-  createdAt: number;
-};
-
-const STORE_KEY = 'apiKeys';            // per-user via scopedStorage()
-const SELECTED_KEY = 'apiKeys:selected'; // per-user via scopedStorage()
-
-/* ------------------------------ Design tokens ----------------------------- */
-const FRAME_STYLE: React.CSSProperties = {
-  background: 'var(--panel)',
-  border: '1px solid var(--border)',
-  borderRadius: 24,
-  boxShadow:
-    '0 1px 0 rgba(0,0,0,0.08), 0 8px 22px rgba(0,0,0,0.12), 0 0 180px 30px rgba(0,255,194,0.06)',
-};
-const CARD_STYLE: React.CSSProperties = {
-  background: 'var(--card)',
-  border: '1px solid var(--border)',
-  borderRadius: 18,
-  boxShadow: 'var(--shadow-card)',
-};
-
-const BTN_GREEN = '#2bbf9c';
-const BTN_GREEN_HOVER = '#25b191';
-const BTN_GREEN_DARK = '#1fa584';
-
-/* -------------------------------- Helpers -------------------------------- */
+type StoredKey = { id: string; name: string; key: string; createdAt: number };
+const LS_KEYS = 'apiKeys.v1';
+const LS_SELECTED = 'apiKeys.selectedId';
 const isBrowser = typeof window !== 'undefined';
-const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const tail4 = (s: string) => (s || '').slice(-4).toUpperCase();
-const looksLikeOpenAI = (s: string) => /^sk-[-_A-Za-z0-9]{20,}$/.test(s.trim());
 
-/** Call OpenAI `/v1/models` to verify the key actually works. */
-async function verifyOpenAIKey(apiKey: string): Promise<{ ok: boolean; org?: string | null; error?: string }> {
-  try {
-    const res = await fetch('https://api.openai.com/v1/models', {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-    });
-    if (res.ok) {
-      // Some deployments include org info in headers (not guaranteed)
-      const org =
-        res.headers.get('openai-organization') ||
-        res.headers.get('x-openai-organization') ||
-        null;
-      return { ok: true, org };
-    }
-    const text = await res.text();
-    return { ok: false, error: `OpenAI error ${res.status}: ${text}` };
-  } catch (e: any) {
-    return { ok: false, error: e?.message || 'Network error' };
-  }
+/* --- palette tweaks (darker green so label text stays readable) --- */
+const BTN_GREEN = '#10b981';
+const BTN_GREEN_HOVER = '#0ea473';
+
+/* --- theme-aware containers (borders visible in light & dark) --- */
+const FRAME: React.CSSProperties = {
+  background: 'var(--panel)',
+  border: '1px solid var(--border-strong, var(--border))',
+  boxShadow:
+    '0 1px 0 rgba(0,0,0,0.22), 0 24px 60px rgba(0,0,0,0.20), 0 120px 240px rgba(0,255,194,0.08)',
+  borderRadius: 30,
+};
+const CARD: React.CSSProperties = {
+  background: 'var(--card)',
+  border: '1px solid var(--border-strong, var(--border))',
+  borderRadius: 20,
+  boxShadow: 'var(--shadow-card, 0 8px 24px rgba(0,0,0,0.10))',
+};
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** super-relaxed client check (format only – CORS blocks live verify) */
+function looksLikeOpenAIKey(v: string) {
+  if (!v) return false;
+  const s = v.trim();
+  return s.startsWith('sk-') && s.length >= 12;
 }
 
-/* ------------------------------ Modal (Add) ------------------------------- */
+/* ----------------------------- InlineSelect ----------------------------- */
+type Opt = { value: string; label: string; sub?: string };
+
+function InlineSelect({
+  id,
+  value,
+  onChange,
+  options,
+  placeholder = 'No API Keys',
+}: {
+  id?: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: Opt[];
+  placeholder?: string;
+}) {
+  const btnRef = useRef<HTMLButtonElement | null>(null);
+  const portalRef = useRef<HTMLDivElement | null>(null);
+  const [open, setOpen] = useState(false);
+  const [rect, setRect] =
+    useState<{ top: number; left: number; width: number } | null>(null);
+
+  const sel = useMemo(
+    () => options.find((o) => o.value === value) || null,
+    [options, value]
+  );
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    const r = btnRef.current?.getBoundingClientRect();
+    if (!r) return;
+    setRect({ top: r.bottom + 8, left: r.left, width: r.width });
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (e: MouseEvent) => {
+      if (btnRef.current?.contains(e.target as Node)) return;
+      if (portalRef.current?.contains(e.target as Node)) return;
+      setOpen(false);
+    };
+    window.addEventListener('mousedown', onClick);
+    return () => window.removeEventListener('mousedown', onClick);
+  }, [open]);
+
+  return (
+    <>
+      <button
+        id={id}
+        ref={btnRef}
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between gap-3 px-4 h-[46px] rounded-[14px] text-sm outline-none transition hover:-translate-y-[1px]"
+        style={{ background: 'var(--card)', border: '1px solid var(--border-strong, var(--border))', color: 'var(--text)' }}
+      >
+        <span className="flex items-center gap-2 truncate">
+          <KeyRound className="w-4 h-4" style={{ color: 'var(--brand)' }} />
+        </span>
+        <span className="flex-1 text-left truncate">
+          {sel ? (
+            <>
+              {sel.label}
+              {sel.sub ? (
+                <span style={{ color: 'var(--text-muted)' }} className="ml-2">
+                  ••••{sel.sub}
+                </span>
+              ) : null}
+            </>
+          ) : (
+            <span style={{ color: 'var(--text-muted)' }}>{placeholder}</span>
+          )}
+        </span>
+        <ChevronDown className="w-4 h-4 opacity-80" style={{ color: 'var(--text-muted)' }} />
+      </button>
+
+      {open && rect && (
+        <div
+          ref={portalRef}
+          className="fixed z-[9999] p-2 animate-[fadeIn_120ms_ease-out]"
+          style={{ ...CARD, left: rect.left, top: rect.top, width: rect.width }}
+        >
+          {options.length === 0 && (
+            <div className="px-3 py-2 text-sm" style={{ color: 'var(--text-muted)' }}>
+              No items.
+            </div>
+          )}
+          {options.map((o) => (
+            <button
+              key={o.value}
+              onClick={() => {
+                onChange(o.value);
+                setOpen(false);
+              }}
+              className="w-full text-left px-3 py-2 rounded-[10px] flex items-center gap-2 hover:bg-[rgba(0,0,0,0.04)] transition"
+              style={{ color: 'var(--text)' }}
+            >
+              <KeyRound className="w-4 h-4" style={{ color: 'var(--brand)' }} />
+              <span className="flex-1 truncate">{o.label}</span>
+              {o.sub && (
+                <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                  ••••{o.sub}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+/* ------------------------------ AddKeyModal ------------------------------ */
 function AddKeyModal({
   open,
   onClose,
@@ -86,84 +166,61 @@ function AddKeyModal({
 }: {
   open: boolean;
   onClose: () => void;
-  onSave: (name: string, apiKey: string, org?: string | null) => void;
+  onSave: (name: string, key: string) => Promise<void> | void;
 }) {
   const [name, setName] = useState('');
-  const [raw, setRaw] = useState('');
-  const [checking, setChecking] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  const [val, setVal] = useState('');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (open) {
       setName('');
-      setRaw('');
-      setErr(null);
-      setChecking(false);
+      setVal('');
+      setError('');
+      setSaving(false);
     }
   }, [open]);
 
   if (!open) return null;
 
-  const canSubmit = name.trim().length > 1 && looksLikeOpenAI(raw);
-
-  async function handleSave() {
-    if (!canSubmit || checking) return;
-    setChecking(true);
-    setErr(null);
-
-    // Small UX delay so the spinner feels intentional
-    await wait(250);
-
-    // Validate with OpenAI
-    const check = await verifyOpenAIKey(raw.trim());
-    if (!check.ok) {
-      setChecking(false);
-      setErr(
-        check.error ||
-          'Could not validate this API key. Make sure it is active and belongs to your OpenAI account.',
-      );
-      return;
-    }
-
-    onSave(name.trim(), raw.trim(), check.org ?? null);
-  }
+  const trimmed = val.trim();
+  const canSave = name.trim().length > 1 && looksLikeOpenAIKey(trimmed);
 
   return (
-    <div className="fixed inset-0 z-[1000] flex items-center justify-center px-4"
-         style={{ background: 'rgba(0,0,0,0.50)', backdropFilter: 'blur(2px)' }}>
+    <div
+      className="fixed inset-0 z-[9998] flex items-center justify-center px-4 animate-[fadeIn_140ms_ease]"
+      style={{ background: 'rgba(0,0,0,0.60)' }}
+    >
       <div
-        className="w-full max-w-[680px] animate-[modalIn_180ms_ease-out]"
-        style={{
-          ...FRAME_STYLE,
-          borderRadius: 28,
-          boxShadow:
-            '0 8px 32px rgba(0,0,0,0.28), 0 0 90px rgba(0,255,194,0.08)',
-        }}
+        className="w-full max-w-[740px] rounded-[24px] overflow-hidden animate-[popIn_140ms_ease]"
+        style={FRAME}
       >
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-5"
-             style={{ borderBottom: '1px solid var(--border)' }}>
+        {/* header */}
+        <div
+          className="flex items-center justify-between px-7 py-6"
+          style={{ borderBottom: '1px solid var(--border-strong, var(--border))' }}
+        >
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-2xl grid place-items-center"
-                 style={{ background: 'var(--brand-weak)' }}>
-              <KeyRound className="w-6 h-6" style={{ color: 'var(--brand)' }} />
+            <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: 'var(--brand-weak)' }}>
+              <KeyIcon className="w-6 h-6" style={{ color: 'var(--brand)' }} />
             </div>
             <div className="min-w-0">
-              <h3 className="text-xl font-semibold" style={{ color: 'var(--text)' }}>
+              <div className="text-2xl font-semibold" style={{ color: 'var(--text)' }}>
                 Add New Project API Key
-              </h3>
-              <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-                Provide a project name and your OpenAI API key. It’s validated and stored per-account.
-              </p>
+              </div>
+              <div className="text-sm" style={{ color: 'var(--text-muted)' }}>
+                Stored only in your browser, scoped to your account.
+              </div>
             </div>
           </div>
-          <button onClick={onClose} className="p-2 rounded-full hover:opacity-80">
-            <X className="w-5 h-5" style={{ color: 'var(--text-muted)' }} />
+          <button onClick={onClose} className="p-2 rounded-full hover:opacity-70">
+            <X className="w-5 h-5" style={{ color: 'var(--text)' }} />
           </button>
         </div>
 
-        {/* Body */}
-        <div className="px-6 py-5 space-y-4">
+        {/* body */}
+        <div className="px-7 py-6 space-y-5">
           <div>
             <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>
               Project Name <span style={{ color: 'var(--brand)' }}>*</span>
@@ -172,279 +229,354 @@ function AddKeyModal({
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g., My Main Project, Test Environment"
-              className="w-full h-11 rounded-[14px] px-3 outline-none"
-              style={{
-                background: 'var(--card)',
-                border: '1px solid var(--border)',
-                color: 'var(--text)',
-              }}
+              className="w-full rounded-[14px] border px-4 h-[46px] text-sm outline-none"
+              style={{ background: 'var(--card)', borderColor: 'var(--border-strong, var(--border))', color: 'var(--text)' }}
             />
           </div>
-
           <div>
             <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>
               OpenAI API Key <span style={{ color: 'var(--brand)' }}>*</span>
             </label>
-            <div className="relative">
-              <input
-                type="password"
-                value={raw}
-                onChange={(e) => setRaw(e.target.value)}
-                placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-                className="w-full h-11 rounded-[14px] pl-10 pr-3 outline-none"
-                style={{
-                  background: 'var(--card)',
-                  border: `1px solid ${err ? 'crimson' : 'var(--border)'}`,
-                  color: 'var(--text)',
-                }}
-              />
-              <Lock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2"
-                    style={{ color: 'var(--text-muted)' }} />
+            <input
+              type="password"
+              value={val}
+              onChange={(e) => {
+                setVal(e.target.value);
+                setError('');
+              }}
+              placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+              className="w-full rounded-[14px] border px-4 h-[46px] text-sm outline-none"
+              style={{ background: 'var(--card)', borderColor: 'var(--border-strong, var(--border))', color: 'var(--text)' }}
+            />
+            <div className="mt-2 text-xs flex items-center gap-2" style={{ color: 'var(--text-muted)' }}>
+              <ShieldCheck className="w-4 h-4" style={{ color: 'var(--brand)' }} />
+              We only check the format (CORS prevents live pinging OpenAI in-browser).
             </div>
-            <div className="mt-2 text-xs flex items-center gap-2"
-                 style={{ color: err ? 'crimson' : 'var(--text-muted)' }}>
-              {err ? (
-                <X className="w-3.5 h-3.5" />
-              ) : (
-                <ShieldCheck className="w-3.5 h-3.5" style={{ color: 'var(--brand)' }} />
-              )}
-              {err ? err : 'Your key is verified against OpenAI before being saved.'}
-            </div>
+            {error && <div className="mt-2 text-xs text-red-500">{error}</div>}
           </div>
         </div>
 
-        {/* Footer */}
-        <div className="px-6 pb-6 flex gap-3">
+        {/* footer */}
+        <div className="px-7 pb-7 flex gap-3">
           <button
             onClick={onClose}
-            className="w-full h-11 rounded-[16px] font-semibold"
-            style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }}
+            className="w-full h-[46px] rounded-[18px] font-semibold"
+            style={{ background: 'var(--card)', border: '1px solid var(--border-strong, var(--border))', color: 'var(--text)' }}
           >
             Cancel
           </button>
+
           <button
-            disabled={!canSubmit || checking}
-            onClick={handleSave}
-            className="w-full h-11 rounded-[16px] font-semibold flex items-center justify-center gap-2 disabled:opacity-70"
-            style={{ background: BTN_GREEN_DARK, color: '#fff' }}
+            disabled={!canSave || saving}
+            onClick={async () => {
+              if (!canSave) {
+                setError('Please enter a project name and a key that starts with sk-');
+                return;
+              }
+              setSaving(true);
+              await sleep(420 + Math.random() * 280);
+              try {
+                await onSave(name.trim(), trimmed);
+              } catch (e: any) {
+                setError(e?.message || 'Failed to save');
+              } finally {
+                setSaving(false);
+              }
+            }}
+            className="w-full h-[46px] rounded-[18px] font-semibold flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+            style={{ background: BTN_GREEN, color: '#fff' }}
             onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER)}
-            onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_DARK)}
+            onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN)}
           >
-            {checking ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
-            {checking ? 'Verifying…' : 'Save API Key'}
+            {saving ? (
+              <>
+                <span className="w-4 h-4 rounded-full border-2 border-white/50 border-t-transparent animate-spin" />
+                Saving…
+              </>
+            ) : (
+              <>
+                <KeyRound className="w-4 h-4" />
+                Save API Key
+              </>
+            )}
           </button>
         </div>
       </div>
-
-      <style jsx global>{`
-        @keyframes modalIn { from { transform: translateY(8px); opacity: 0 } to { transform: translateY(0); opacity: 1 } }
-      `}</style>
     </div>
   );
 }
 
-/* --------------------------------- Screen --------------------------------- */
-function ApiKeysScreen() {
-  const [loading, setLoading] = useState(true);
+/* ---------------------------------- Toast --------------------------------- */
+function Toast({ text, onClose }: { text: string; onClose: () => void }) {
+  useEffect(() => {
+    const t = setTimeout(onClose, 2400);
+    return () => clearTimeout(t);
+  }, [onClose]);
+  return (
+    <div className="fixed inset-0 z-[9997] pointer-events-none flex items-center justify-center">
+      <div
+        className="pointer-events-auto flex items-center gap-4 px-6 py-4 rounded-2xl animate-[popIn_120ms_ease]"
+        style={{
+          ...CARD,
+          border: '1px solid var(--brand)',
+          background: 'var(--panel)',
+          color: 'var(--text)',
+          boxShadow: '0 18px 60px rgba(0,0,0,0.25)',
+        }}
+      >
+        <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ background: 'var(--brand-weak)' }}>
+          <CheckCircle2 className="w-5 h-5" style={{ color: 'var(--brand)' }} />
+        </div>
+        <div className="text-sm">{text}</div>
+        <button onClick={onClose} className="ml-2 p-1 rounded hover:opacity-70">
+          <X className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ----------------------------------- Page ---------------------------------- */
+export default function ApiKeysPage() {
   const [list, setList] = useState<StoredKey[]>([]);
   const [selected, setSelected] = useState<string>('');
-  const [open, setOpen] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
+  const [toast, setToast] = useState<string | undefined>(undefined);
+  const [loading, setLoading] = useState(true);
 
-  // Load from scoped storage
   useEffect(() => {
     (async () => {
+      await migrateLegacyKeysToUser();
       const ss = await scopedStorage();
       await ss.ensureOwnerGuard();
-      const saved = await ss.getJSON<StoredKey[]>(STORE_KEY, []);
-      setList(Array.isArray(saved) ? saved : []);
-      const sel = await ss.getJSON<string | null>(SELECTED_KEY, null);
-      if (sel && saved.find((k) => k.id === sel)) setSelected(sel);
+
+      const saved = await ss.getJSON<StoredKey[]>(LS_KEYS, []);
+      setList(saved);
+
+      const chosen = await ss.getJSON<string>(LS_SELECTED, '');
+      if (chosen && saved.find((k) => k.id === chosen)) setSelected(chosen);
+      else if (saved[0]) setSelected(saved[0].id);
+
+      await sleep(180);
       setLoading(false);
     })();
   }, []);
 
-  // Persist selection
   useEffect(() => {
     (async () => {
+      if (!isBrowser) return;
       const ss = await scopedStorage();
-      if (selected) await ss.setJSON(SELECTED_KEY, selected);
+      if (selected) await ss.setJSON(LS_SELECTED, selected);
+      else await ss.remove(LS_SELECTED);
     })();
   }, [selected]);
 
-  function addKey(name: string, apiKey: string, org?: string | null) {
-    const tail = tail4(apiKey);
-    // Prevent duplicates for this user (same tail + same org if present)
-    if (list.some((k) => k.keyTail === tail && (k.org || null) === (org || null))) {
-      alert('This API key (or an identical one) is already saved.');
-      return;
-    }
-    const newKey: StoredKey = {
-      id: String(Date.now()),
-      name,
-      keyTail: tail,
-      org: org || null,
-      createdAt: Date.now(),
-    };
-    (async () => {
-      const ss = await scopedStorage();
-      const next = [newKey, ...list];
-      await ss.setJSON(STORE_KEY, next);
-      setList(next);
-      setSelected(newKey.id);
-      setOpen(false);
-    })();
+  const opts: Opt[] = useMemo(
+    () =>
+      list.map((k) => {
+        const tail = (k.key || '').slice(-4).toUpperCase();
+        return { value: k.id, label: k.name, sub: tail || undefined };
+      }),
+    [list]
+  );
+
+  const selectedKey = list.find((k) => k.id === selected) || null;
+
+  async function saveList(next: StoredKey[]) {
+    const ss = await scopedStorage();
+    await ss.setJSON(LS_KEYS, next);
+    setList(next);
   }
 
-  function removeKey(id: string) {
-    (async () => {
-      const ss = await scopedStorage();
-      const next = list.filter((k) => k.id !== id);
-      await ss.setJSON(STORE_KEY, next);
-      setList(next);
-      if (selected === id) setSelected(next[0]?.id || '');
-    })();
+  async function addKey(name: string, key: string) {
+    const next: StoredKey = { id: String(Date.now()), name, key, createdAt: Date.now() };
+    const updated = [next, ...list];
+    await saveList(updated);
+    setSelected(next.id);
+    setShowAdd(false);
+    setToast(`API Key “${name}” saved`);
   }
 
-  const selectedKey = useMemo(() => list.find((k) => k.id === selected) || null, [list, selected]);
+  async function removeKey(id: string) {
+    const updated = list.filter((k) => k.id !== id);
+    await saveList(updated);
+    if (selected === id) setSelected(updated[0]?.id || '');
+    const removedName = list.find((k) => k.id === id)?.name || 'project';
+    setToast(`API Key for “${removedName}” removed`);
+  }
+
+  function testKey() {
+    const ok = !!selectedKey?.key;
+    setToast(ok ? 'API Key looks set. You can use it in Step 2.' : 'No API Key selected.');
+  }
 
   return (
-    <>
-      <Head><title>API Keys</title></Head>
-
-      <div className="min-h-screen w-full" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
-        <div className="max-w-5xl mx-auto px-6 py-10">
-          {/* Header w/ single frame card */}
-          <div className="mx-auto" style={FRAME_STYLE}>
-            <div className="flex items-center justify-between px-6 py-5">
-              <div>
-                <h1 className="text-2xl md:text-3xl font-semibold">API Keys</h1>
-                <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
-                  Manage your OpenAI API keys for different projects
-                </p>
-              </div>
-              <button
-                onClick={() => setOpen(true)}
-                className="w-10 h-10 rounded-2xl grid place-items-center"
-                style={{ background: 'var(--brand-weak)' }}
-                title="Add New API Key"
-              >
-                <KeyRound className="w-5 h-5" style={{ color: 'var(--brand)' }} />
-              </button>
+    <div className="px-6 py-10" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
+      <div className="mx-auto w-full max-w-[980px]">
+        <div className="relative" style={FRAME}>
+          {/* header */}
+          <div className="flex items-start justify-between px-6 lg:px-8 py-6">
+            <div>
+              <h1 className="text-2xl font-semibold">API Keys</h1>
+              <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
+                Manage your OpenAI API keys for different projects
+              </p>
             </div>
-
-            {/* Body card */}
-            <div className="px-6 pb-6">
-              <div style={{ ...CARD_STYLE, padding: '20px' }}>
-                {/* Loading state */}
-                {loading ? (
-                  <div className="grid place-items-center py-16">
-                    <div className="animate-pulse text-sm" style={{ color: 'var(--text-muted)' }}>
-                      Loading your keys…
-                    </div>
-                  </div>
-                ) : list.length === 0 ? (
-                  // Empty state (single inner content, not another frame)
-                  <div className="grid place-items-center text-center py-16 relative">
-                    <div
-                      className="absolute inset-x-10 bottom-4 h-28 blur-3xl rounded-full opacity-70"
-                      style={{ background: 'radial-gradient(ellipse at center, rgba(0,255,194,0.10), transparent 70%)' }}
-                    />
-                    <div className="w-14 h-14 rounded-full grid place-items-center mb-4 border border-dashed"
-                         style={{ borderColor: 'var(--border)' }}>
-                      <KeyRound className="w-6 h-6" style={{ color: 'var(--brand)' }} />
-                    </div>
-                    <div className="font-semibold">No API Keys Found</div>
-                    <div className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
-                      Add your first API key to get started
-                    </div>
-                    <button
-                      onClick={() => setOpen(true)}
-                      className="mt-5 inline-flex items-center gap-2 px-4 h-10 rounded-[16px] font-semibold"
-                      style={{ background: BTN_GREEN, color: '#fff' }}
-                      onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER)}
-                      onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN)}
-                    >
-                      <Plus className="w-4 h-4" />
-                      Add New API Key
-                    </button>
-                  </div>
-                ) : (
-                  // List & selection
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                      {list.map((k) => (
-                        <button
-                          key={k.id}
-                          onClick={() => setSelected(k.id)}
-                          className={`text-left p-4 rounded-[14px] transition-all ${
-                            selected === k.id ? 'ring-2' : 'ring-0'
-                          } hover:-translate-y-[1px]`}
-                          style={{
-                            ...CARD_STYLE,
-                            boxShadow: selected === k.id ? '0 0 0 2px var(--brand-weak) inset, var(--shadow-card)' : CARD_STYLE.boxShadow,
-                          }}
-                        >
-                          <div className="flex items-center gap-3">
-                            <div className="w-9 h-9 rounded-xl grid place-items-center"
-                                 style={{ background: 'var(--brand-weak)' }}>
-                              <CheckCircle2 className="w-5 h-5" style={{ color: 'var(--brand)' }} />
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <div className="truncate font-medium">{k.name}</div>
-                              <div className="text-xs truncate" style={{ color: 'var(--text-muted)' }}>
-                                Key ending in {k.keyTail}
-                                {k.org ? ` • Org ${k.org}` : ''}
-                              </div>
-                            </div>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                removeKey(k.id);
-                              }}
-                              className="p-2 rounded-md hover:opacity-80"
-                              title="Delete"
-                            >
-                              <Trash2 className="w-4 h-4 text-red-400" />
-                            </button>
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-
-                    {/* Selected summary */}
-                    {selectedKey && (
-                      <div className="p-4 rounded-[14px]" style={CARD_STYLE}>
-                        <div className="text-sm" style={{ color: 'var(--text-muted)' }}>
-                          Selected: <span style={{ color: 'var(--text)' }}>{selectedKey.name}</span> (…{selectedKey.keyTail})
-                          {selectedKey.org ? ` — Org ${selectedKey.org}` : ''}
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="pt-2 flex justify-end">
-                      <button
-                        onClick={() => setOpen(true)}
-                        className="inline-flex items-center gap-2 px-4 h-10 rounded-[16px] font-semibold"
-                        style={{ background: BTN_GREEN_DARK, color: '#fff' }}
-                        onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER)}
-                        onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_DARK)}
-                      >
-                        <Plus className="w-4 h-4" />
-                        Add New API Key
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
+            <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background: 'var(--brand-weak)' }}>
+              <KeyRound className="w-5 h-5" style={{ color: 'var(--brand)' }} />
             </div>
           </div>
-        </div>
 
-        <AddKeyModal open={open} onClose={() => setOpen(false)} onSave={addKey} />
+          {/* body */}
+          <div className="px-6 lg:px-8 pb-8 space-y-5">
+            {loading ? (
+              <div className="space-y-4">
+                <div
+                  className="h-[46px] rounded-[14px] animate-pulse"
+                  style={{
+                    ...CARD,
+                    background:
+                      'linear-gradient(90deg, var(--card) 25%, var(--panel) 37%, var(--card) 63%)',
+                    backgroundSize: '200% 100%',
+                  }}
+                />
+                <div
+                  className="h-[74px] rounded-[14px] animate-pulse"
+                  style={{
+                    ...CARD,
+                    background:
+                      'linear-gradient(90deg, var(--card) 25%, var(--panel) 37%, var(--card) 63%)',
+                    backgroundSize: '200% 100%',
+                  }}
+                />
+                <div className="flex gap-4">
+                  <div
+                    className="h-[46px] flex-1 rounded-[14px] animate-pulse"
+                    style={{
+                      ...CARD,
+                      background:
+                        'linear-gradient(90deg, var(--card) 25%, var(--panel) 37%, var(--card) 63%)',
+                      backgroundSize: '200% 100%',
+                    }}
+                  />
+                  <div
+                    className="h-[46px] w-[220px] rounded-[18px] animate-pulse"
+                    style={{
+                      ...CARD,
+                      background:
+                        'linear-gradient(90deg, var(--card) 25%, var(--panel) 37%, var(--card) 63%)',
+                      backgroundSize: '200% 100%',
+                    }}
+                  />
+                </div>
+              </div>
+            ) : list.length === 0 ? (
+              <div className="text-center py-10">
+                <div
+                  className="mx-auto mb-4 w-16 h-16 rounded-full grid place-items-center border-2 border-dashed"
+                  style={{ borderColor: 'rgba(0,255,194,0.35)', background: 'rgba(0,255,194,0.06)' }}
+                >
+                  <KeyRound className="w-6 h-6 animate-pulse" style={{ color: 'var(--brand)' }} />
+                </div>
+                <div className="text-lg font-medium">No API Keys Found</div>
+                <div className="text-sm mt-1 mb-6" style={{ color: 'var(--text-muted)' }}>
+                  Add your first API key to get started
+                </div>
+                <button
+                  onClick={() => setShowAdd(true)}
+                  className="inline-flex items-center gap-2 px-5 h-[46px] rounded-[18px] font-semibold"
+                  style={{ background: BTN_GREEN, color: '#fff' }}
+                  onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER)}
+                  onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN)}
+                >
+                  <Plus className="w-4 h-4" /> Add New API Key
+                </button>
+              </div>
+            ) : (
+              <>
+                <div style={CARD} className="p-4">
+                  <label className="block text-xs mb-2" style={{ color: 'var(--text-muted)' }}>
+                    Select API Key
+                  </label>
+                  <InlineSelect
+                    id="apikey-select"
+                    value={selected}
+                    onChange={setSelected}
+                    options={opts}
+                    placeholder="No API Keys"
+                  />
+                </div>
+
+                <div style={CARD} className="p-4">
+                  {selectedKey ? (
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: 'var(--brand-weak)' }}>
+                        <CheckCircle2 className="w-4 h-4" style={{ color: 'var(--brand)' }} />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="font-medium">{selectedKey.name}</div>
+                        <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                          Key ending in ••••{(selectedKey.key || '').slice(-4).toUpperCase()}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => removeKey(selectedKey.id)}
+                        className="p-2 rounded-lg hover:opacity-80"
+                        aria-label="Delete"
+                      >
+                        <Trash2 className="w-4 h-4 text-red-500" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={{ color: 'var(--text-muted)' }}>No API Keys Found</div>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-4">
+                  <button
+                    onClick={() => setShowAdd(true)}
+                    className="inline-flex items-center gap-2 px-4 h-[46px] rounded-[14px] font-semibold transition hover:-translate-y-[1px]"
+                    style={{ background: 'var(--card)', border: '1px solid var(--border-strong, var(--border))', color: 'var(--text)' }}
+                  >
+                    <Plus className="w-4 h-4" />
+                    Add New API Key
+                  </button>
+
+                  <button
+                    onClick={testKey}
+                    className="flex-1 h-[46px] rounded-[18px] font-semibold flex items-center justify-center gap-2"
+                    style={{ background: BTN_GREEN, color: '#fff' }}
+                    onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER)}
+                    onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN)}
+                  >
+                    <Zap className="w-4 h-4" />
+                    Test API Key
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       </div>
-    </>
+
+      <AddKeyModal open={showAdd} onClose={() => setShowAdd(false)} onSave={addKey} />
+      {toast && <Toast text={toast} onClose={() => setToast(undefined)} />}
+
+      {/* animations + light-mode border/shadow helpers */}
+      <style jsx global>{`
+        @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
+        @keyframes popIn { 0% { opacity: 0; transform: translateY(8px) scale(.98) } 100% { opacity: 1; transform: translateY(0) scale(1) } }
+
+        /* Make borders strong & visible in light theme too */
+        :root[data-theme='light'] {
+          --border-strong: rgba(0,0,0,0.10);
+          --shadow-card: 0 10px 30px rgba(0,0,0,0.08);
+        }
+        :root:not([data-theme='light']) {
+          --border-strong: rgba(255,255,255,0.12);
+          --shadow-card: 0 12px 36px rgba(0,0,0,0.22);
+        }
+      `}</style>
+    </div>
   );
 }
-
-/* Export without SSR to keep storage purely client-side */
-export default dynamic(() => Promise.resolve(ApiKeysScreen), { ssr: false });
