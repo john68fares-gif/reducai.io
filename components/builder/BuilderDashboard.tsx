@@ -1,3 +1,4 @@
+// components/builder/BuilderDashboard.tsx
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
@@ -5,6 +6,7 @@ import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import {
   Plus,
+  Bot as BotIcon,
   ArrowRight,
   Trash2,
   SlidersHorizontal,
@@ -16,7 +18,6 @@ import {
   MessageSquareText,
   Landmark,
   ListChecks,
-  Search
 } from 'lucide-react';
 import CustomizeModal from './CustomizeModal';
 import Step1AIType from './Step1AIType';
@@ -24,17 +25,15 @@ import Step2ModelSettings from './Step2ModelSettings';
 import Step3PromptEditor from './Step3PromptEditor';
 import Step4Overview from './Step4Overview';
 import { s } from '@/utils/safe';
+import HeaderRail from './HeaderRail';
 
 const Bot3D = dynamic(() => import('./Bot3D.client'), {
   ssr: false,
   loading: () => (
-    <div className="h-full w-full" style={{ background:'linear-gradient(180deg, rgba(106,247,209,0.10), rgba(16,19,20,0.6))' }} />
+    <div className="h-full w-full" style={{ background: 'linear-gradient(180deg, rgba(106,247,209,0.10), rgba(16,19,20,0.6))' }} />
   ),
 });
 
-/* =====================================================
-   TYPES
-   ===================================================== */
 type Appearance = {
   accent?: string;
   shellColor?: string;
@@ -59,15 +58,12 @@ type Bot = {
   language?: string;
   model?: string;
   description?: string;
-  prompt?: string; // Step 3 raw
+  prompt?: string;
   createdAt?: string;
   updatedAt?: string;
   appearance?: Appearance;
 };
 
-/* =====================================================
-   STORAGE HELPERS
-   ===================================================== */
 const STORAGE_KEYS = ['chatbots', 'agents', 'builds'];
 const SAVE_KEY = 'chatbots';
 const nowISO = () => new Date().toISOString();
@@ -110,12 +106,12 @@ function loadBots(): Bot[] {
 }
 
 function saveBots(bots: Bot[]) {
-  try { localStorage.setItem(SAVE_KEY, JSON.stringify(bots)); } catch {}
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify(bots));
+  } catch {}
 }
 
-/* =====================================================
-   STEP 3 SPLITTER (unchanged logic)
-   ===================================================== */
+/* ---------- Step 3 splitter ---------- */
 type PromptSectionKey =
   | 'DESCRIPTION'
   | 'AI DESCRIPTION'
@@ -127,7 +123,7 @@ type PromptSectionKey =
 type SplitSection = {
   key: PromptSectionKey;
   title: string;
-  text: string; // exact slice from Step 3
+  text: string;
 };
 
 const DISPLAY_TITLES: Record<PromptSectionKey, string> = {
@@ -140,12 +136,12 @@ const DISPLAY_TITLES: Record<PromptSectionKey, string> = {
 };
 
 const ICONS: Record<PromptSectionKey, JSX.Element> = {
-  'DESCRIPTION': <FileText className="w-4 h-4" style={{ color:'var(--brand)' }} />,
-  'AI DESCRIPTION': <FileText className="w-4 h-4" style={{ color:'var(--brand)' }} />,
-  'RULES AND GUIDELINES': <Settings className="w-4 h-4" style={{ color:'var(--brand)' }} />,
-  'AI RULES': <ListChecks className="w-4 h-4" style={{ color:'var(--brand)' }} />,
-  'QUESTION FLOW': <MessageSquareText className="w-4 h-4" style={{ color:'var(--brand)' }} />,
-  'COMPANY FAQ': <Landmark className="w-4 h-4" style={{ color:'var(--brand)' }} />,
+  'DESCRIPTION': <FileText className="w-4 h-4" style={{ color: 'var(--brand)' }} />,
+  'AI DESCRIPTION': <FileText className="w-4 h-4" style={{ color: 'var(--brand)' }} />,
+  'RULES AND GUIDELINES': <Settings className="w-4 h-4" style={{ color: 'var(--brand)' }} />,
+  'AI RULES': <ListChecks className="w-4 h-4" style={{ color: 'var(--brand)' }} />,
+  'QUESTION FLOW': <MessageSquareText className="w-4 h-4" style={{ color: 'var(--brand)' }} />,
+  'COMPANY FAQ': <Landmark className="w-4 h-4" style={{ color: 'var(--brand)' }} />,
 };
 
 const HEADING_REGEX =
@@ -182,16 +178,8 @@ function splitStep3IntoSections(step3Raw?: string): SplitSection[] | null {
   return out;
 }
 
-/* =====================================================
-   ACCENT PICKER
-   ===================================================== */
-const palette = ['#6af7d1', '#7cc3ff', '#b28bff', '#ffd68a', '#ff9db1'];
-const accentFor = (id: string) =>
-  palette[Math.abs([...id].reduce((h, c) => h + c.charCodeAt(0), 0)) % palette.length];
+/* ----------------------------------- UI ----------------------------------- */
 
-/* =====================================================
-   MAIN
-   ===================================================== */
 export default function BuilderDashboard() {
   const router = useRouter();
   const pathname = usePathname();
@@ -205,7 +193,6 @@ export default function BuilderDashboard() {
   const [customizingId, setCustomizingId] = useState<string | null>(null);
   const [viewId, setViewId] = useState<string | null>(null);
 
-  /* housekeeping (unchanged) */
   useEffect(() => {
     try {
       if (localStorage.getItem('builder:cleanup') === '1') {
@@ -214,6 +201,7 @@ export default function BuilderDashboard() {
       }
     } catch {}
   }, []);
+
   useEffect(() => {
     try {
       const normalize = (k: string) => {
@@ -230,6 +218,7 @@ export default function BuilderDashboard() {
       ['builder:step1', 'builder:step2', 'builder:step3'].forEach(normalize);
     } catch {}
   }, []);
+
   useEffect(() => {
     setBots(loadBots());
     const onStorage = (e: StorageEvent) => {
@@ -257,10 +246,10 @@ export default function BuilderDashboard() {
     router.replace(`${pathname}?${usp.toString()}`, { scroll: false });
   };
 
-  /* Wizard steps container */
   if (step) {
     return (
-      <div className="min-h-screen w-full font-movatif" style={{ background:'var(--bg)', color:'var(--text)' }}>
+      <div className="min-h-screen w-full font-movatif" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
+        <HeaderRail />{/* title derives from route */}
         <main className="w-full min-h-screen">
           {step === '1' && <Step1AIType onNext={() => setStep('2')} />}
           {step === '2' && <Step2ModelSettings onBack={() => setStep('1')} onNext={() => setStep('3')} />}
@@ -271,61 +260,60 @@ export default function BuilderDashboard() {
     );
   }
 
-  /* Dashboard */
   return (
-    <div className="min-h-screen w-full font-movatif" style={{ background:'var(--bg)', color:'var(--text)' }}>
-      <main className="flex-1 w-full px-4 sm:px-6 pt-8 pb-24">
+    <div className="min-h-screen w-full font-movatif" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
+      {/* Top rail that spans from sidebar to right edge */}
+      <HeaderRail />
 
-        {/* SECTION BAR (slim top bar like your reference) */}
-        <div className="section-bar">
-          <span className="section-pill">
-            <span className="w-2.5 h-2.5 rounded-full" style={{ background:'var(--brand)' }} />
-            Builder Dashboard
-          </span>
+      <main className="flex-1 w-full px-4 sm:px-6 pt-6 pb-24">
+        {/* Search */}
+        <div className="mb-6">
+          <div
+            className="flex items-center gap-2 w-full rounded-[14px] px-4 py-3 text-[15px]"
+            style={{
+              background: 'var(--card)',
+              color: 'var(--text-muted)',
+              border: '1px solid var(--border)',
+              boxShadow: 'var(--shadow-card)',
+            }}
+          >
+            <span className="opacity-70">🔎</span>
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search projects and builds…"
+              className="w-full bg-transparent outline-none"
+              style={{ color: 'var(--text)' }}
+            />
+          </div>
         </div>
 
-        {/* BODY (no giant white box; cards flow on the page) */}
-        <div className="section-body">
-          {/* search */}
-          <div className="mb-6">
-            <div className="builder-input flex items-center gap-2 px-4 py-3">
-              <Search className="w-4 h-4" style={{ color:'var(--text-muted)' }} />
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search projects and builds…"
-                className="w-full bg-transparent outline-none text-[15px]"
-                style={{ color:'var(--text)' }}
-              />
-            </div>
-          </div>
+        {/* Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-7">
+          <CreateCard onClick={() => router.push('/builder?step=1')} />
 
-          {/* grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-7">
-            <CreateCard onClick={() => router.push('/builder?step=1')} />
-            {filtered.map((bot) => (
-              <BuildCard
-                key={bot.id}
-                bot={bot}
-                accent={bot.appearance?.accent || accentFor(bot.id)}
-                onOpen={() => setViewId(bot.id)}
-                onDelete={() => {
-                  const next = bots.filter((b) => b.id !== bot.id);
-                  const sorted = sortByNewest(next);
-                  setBots(sorted);
-                  saveBots(sorted);
-                }}
-                onCustomize={() => setCustomizingId(bot.id)}
-              />
-            ))}
-          </div>
-
-          {filtered.length === 0 && (
-            <div className="mt-10 text-sm" style={{ color:'var(--text-muted)' }}>
-              No builds found. Click <span style={{ color:'var(--brand)' }}>Create a Build</span> to get started.
-            </div>
-          )}
+          {filtered.map((bot) => (
+            <BuildCard
+              key={bot.id}
+              bot={bot}
+              accent={accentFor(bot.id)}
+              onOpen={() => setViewId(bot.id)}
+              onDelete={() => {
+                const next = bots.filter((b) => b.id !== bot.id);
+                const sorted = sortByNewest(next);
+                setBots(sorted);
+                saveBots(sorted);
+              }}
+              onCustomize={() => setCustomizingId(bot.id)}
+            />
+          ))}
         </div>
+
+        {filtered.length === 0 && (
+          <div className="mt-12 text-center" style={{ color: 'var(--text-muted)' }}>
+            No builds found. Click <span style={{ color: 'var(--brand)' }}>Create a Build</span> to get started.
+          </div>
+        )}
       </main>
 
       {selectedBot && (
@@ -370,9 +358,7 @@ export default function BuilderDashboard() {
   );
 }
 
-/* =====================================================
-   PROMPT OVERLAY
-   ===================================================== */
+/* --------------------------- Prompt Overlay --------------------------- */
 function buildRawStep1PlusStep3(bot: Bot): string {
   const head = [bot.name, bot.industry, bot.language].filter(Boolean).join('\n');
   const step3 = bot.prompt ?? '';
@@ -388,78 +374,94 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
   const downloadTxt = () => {
     const blob = new Blob([rawOut], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url;
+    const a = document.createElement('a');
+    a.href = url;
     a.download = `${(bot.name || 'prompt').replace(/[^\w\-]+/g, '_')}.txt`;
-    a.click(); URL.revokeObjectURL(url);
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
-  const FRAME: React.CSSProperties = {
-    background:'rgba(13,15,17,0.95)',
-    border:'2px dashed rgba(106,247,209,0.3)',
-    boxShadow:'0 0 40px rgba(0,0,0,0.7)',
-    borderRadius:30
+  const FRAME_STYLE: React.CSSProperties = {
+    background: 'var(--panel)',
+    border: '2px dashed var(--brand-weak)',
+    boxShadow: 'var(--shadow-soft)',
+    borderRadius: 30,
   };
-  const HEADER_BORDER = { borderBottom:'1px solid rgba(255,255,255,0.4)' };
-  const CARD: React.CSSProperties = {
-    background:'#101314',
-    border:'1px solid rgba(255,255,255,0.3)',
-    borderRadius:20
+  const HEADER_BORDER = { borderBottom: '1px solid var(--border)' };
+  const CARD_STYLE: React.CSSProperties = {
+    background: 'var(--card)',
+    border: '1px solid var(--border)',
+    borderRadius: 20,
+    boxShadow: 'var(--shadow-card)',
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background:'rgba(0,0,0,0.5)' }}>
-      <div className="relative w-full max-w-[1280px] max-h-[88vh] flex flex-col" style={FRAME}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: 'rgba(0,0,0,0.45)' }}>
+      <div className="relative w-full max-w-[1280px] max-h-[88vh] flex flex-col" style={FRAME_STYLE}>
         <div className="flex items-center justify-between px-6 py-4 rounded-t-[30px]" style={HEADER_BORDER}>
           <div className="min-w-0">
-            <h2 className="text-white text-xl font-semibold truncate">Prompt</h2>
-            <div className="text-white/90 text-xs md:text-sm truncate">
+            <h2 className="text-xl font-semibold truncate" style={{ color: 'var(--text)' }}>Prompt</h2>
+            <div className="text-xs md:text-sm truncate" style={{ color: 'var(--text-muted)' }}>
               {[bot.name, bot.industry, bot.language].filter(Boolean).join(' · ') || '—'}
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={copyAll} className="inline-flex items-center gap-2 rounded-[14px] px-3 py-2 text-xs border"
-                    style={{ background:'#0d0f11', borderColor:'rgba(255,255,255,0.3)', color:'white' }}>
-              <Copy className="w-3.5 h-3.5" /> Copy
+            <button
+              onClick={copyAll}
+              className="inline-flex items-center gap-2 rounded-[14px] px-3 py-2 text-xs border"
+              style={{ background: 'var(--card)', borderColor: 'var(--border)', color: 'var(--text)' }}
+              title="Copy"
+            >
+              <Copy className="w-3.5 h-3.5" />
+              Copy
             </button>
-            <button onClick={downloadTxt} className="inline-flex items-center gap-2 rounded-[14px] px-3 py-2 text-xs border"
-                    style={{ background:'#0d0f11', borderColor:'rgba(255,255,255,0.3)', color:'white' }}>
-              <DownloadIcon className="w-3.5 h-3.5" /> Download
+            <button
+              onClick={downloadTxt}
+              className="inline-flex items-center gap-2 rounded-[14px] px-3 py-2 text-xs border"
+              style={{ background: 'var(--card)', borderColor: 'var(--border)', color: 'var(--text)' }}
+              title="Download"
+            >
+              <DownloadIcon className="w-3.5 h-3.5" />
+              Download
             </button>
-            <button onClick={onClose} className="p-2 rounded-full hover:bg-white/10" aria-label="Close">
-              <X className="w-5 h-5 text-white" />
+            <button onClick={onClose} className="p-2 rounded-full" title="Close" aria-label="Close" style={{ color: 'var(--text)' }}>
+              <X className="w-5 h-5" />
             </button>
           </div>
         </div>
 
         <div className="flex-1 overflow-y-auto p-6">
           {!bot.prompt ? (
-            <div className="p-5 text-white/80" style={CARD}>(No Step 3 prompt yet)</div>
+            <div className="p-5" style={CARD_STYLE}> (No Step 3 prompt yet) </div>
           ) : sections ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {sections.map((sec, i) => (
-                <div key={i} style={CARD} className="overflow-hidden">
+                <div key={i} style={CARD_STYLE} className="overflow-hidden">
                   <div className="px-5 pt-4 pb-3">
-                    <div className="flex items-center gap-2 text-white font-semibold text-sm">
+                    <div className="flex items-center gap-2 font-semibold text-sm" style={{ color: 'var(--text)' }}>
                       {ICONS[sec.key]} {sec.title}
                     </div>
                   </div>
                   <div className="px-5 pb-5">
-                    <pre className="whitespace-pre-wrap text-sm leading-6 text-white">{sec.text}</pre>
+                    <pre className="whitespace-pre-wrap text-sm leading-6" style={{ color: 'var(--text)' }}>{sec.text}</pre>
                   </div>
                 </div>
               ))}
             </div>
           ) : (
-            <div style={CARD} className="p-5">
-              <pre className="whitespace-pre-wrap text-sm leading-6 text-white">{bot.prompt}</pre>
+            <div style={CARD_STYLE} className="p-5">
+              <pre className="whitespace-pre-wrap text-sm leading-6" style={{ color: 'var(--text)' }}>{bot.prompt}</pre>
             </div>
           )}
         </div>
 
-        <div className="px-6 py-4 rounded-b-[30px]" style={{ borderTop:'1px solid rgba(255,255,255,0.3)', background:'#101314' }}>
+        <div className="px-6 py-4 rounded-b-[30px]" style={{ borderTop: '1px solid var(--border)', background: 'var(--card)' }}>
           <div className="flex justify-end">
-            <button onClick={onClose} className="px-5 py-2 rounded-[14px] font-semibold"
-                    style={{ background:'rgba(0,120,90,1)', color:'white' }}>
+            <button
+              onClick={onClose}
+              className="px-5 py-2 rounded-[14px] font-semibold"
+              style={{ background: 'var(--brand)', color: '#fff', boxShadow: '0 0 18px rgba(0,255,194,.20)' }}
+            >
               Close
             </button>
           </div>
@@ -469,55 +471,81 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
   );
 }
 
-/* =====================================================
-   CARDS
-   ===================================================== */
+/* --------------------------------- Cards --------------------------------- */
+
 function CreateCard({ onClick }: { onClick: () => void }) {
   const [hover, setHover] = useState(false);
   return (
     <button
       onClick={onClick}
-      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
-      className="builder-card dashed relative h-[380px] rounded-[16px] p-7 flex flex-col items-center justify-center active:scale-[0.995]"
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      className="group relative h-[360px] rounded-[16px] p-7 flex flex-col items-center justify-center transition-all active:scale-[0.995]"
+      style={{
+        background: 'var(--card)',
+        border: '2px dashed var(--brand-weak)',
+        boxShadow: 'var(--shadow-card)',
+      }}
     >
-      <div className="absolute -top-[28%] -left-[28%] w-[70%] h-[70%] builder-spot" />
       <div
-        className="pointer-events-none absolute top-0 bottom-0 w-[55%] rounded-[16px]"
-        style={{
-          left: hover ? '120%' : '-120%',
-          background:'linear-gradient(110deg, transparent 0%, rgba(255,255,255,.08) 40%, rgba(255,255,255,.16) 50%, rgba(255,255,255,.08) 60%, transparent 100%)',
-          transition:'left 420ms var(--ease)'
-        }}
+        className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
+        style={{ background: 'radial-gradient(circle, rgba(0,255,194,0.14) 0%, transparent 70%)', filter: 'blur(38px)' }}
       />
-      <div className="w-20 h-20 rounded-full flex items-center justify-center mb-5"
-           style={{ background:'rgba(0,0,0,.06)', border:'2px dashed var(--brand-weak)' }}>
-        <Plus className="w-10 h-10" style={{ color:'var(--brand)' }} />
+      {hover && (
+        <div
+          className="pointer-events-none absolute inset-0 rounded-[16px]"
+          style={{ boxShadow: '0 0 34px 10px rgba(0,255,194,0.18), inset 0 0 14px rgba(0,255,194,0.14)' }}
+        />
+      )}
+      <div
+        className="w-20 h-20 rounded-full flex items-center justify-center mb-5"
+        style={{
+          background: 'transparent',
+          border: '2px dashed var(--brand-weak)',
+          boxShadow: 'inset 0 0 6px rgba(0,0,0,0.06)',
+          color: 'var(--brand)',
+        }}
+      >
+        <Plus className="w-10 h-10" />
       </div>
-      <div className="text-[20px]" style={{ color:'var(--text)' }}>Create a Build</div>
-      <div className="text-[13px] mt-2" style={{ color:'var(--text-muted)' }}>
-        Start building your AI assistant
-      </div>
+      <div className="text-[20px] font-semibold" style={{ color: 'var(--text)' }}>Create a Build</div>
+      <div className="text-[13px] mt-2" style={{ color: 'var(--text-muted)' }}>Start building your AI assistant</div>
     </button>
   );
 }
 
+const palette = ['#00ffc2', '#7cc3ff', '#b28bff', '#ffd68a', '#ff9db1'];
+const accentFor = (id: string) =>
+  palette[Math.abs([...id].reduce((h, c) => h + c.charCodeAt(0), 0)) % palette.length];
+
 function BuildCard({
-  bot, accent, onOpen, onDelete, onCustomize,
+  bot,
+  accent,
+  onOpen,
+  onDelete,
+  onCustomize,
 }: {
-  bot: Bot; accent: string; onOpen: () => void; onDelete: () => void; onCustomize: () => void;
+  bot: Bot;
+  accent: string;
+  onOpen: () => void;
+  onDelete: () => void;
+  onCustomize: () => void;
 }) {
-  const [hover, setHover] = useState(false);
   const ap = bot.appearance || {};
   return (
-    <div className="builder-card relative h-[380px] rounded-[16px] p-0 flex flex-col justify-between"
-         onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
-      <div className="absolute -top-[28%] -left-[28%] w-[70%] h-[70%] builder-spot" />
-
-      <div className="h-48 border-b" style={{ borderColor:'var(--border)' }}>
+    <div
+      className="relative h-[360px] rounded-[16px] p-0 flex flex-col justify-between group transition-all"
+      style={{
+        background: 'var(--card)',
+        border: '1px solid var(--border)',
+        boxShadow: 'var(--shadow-card)',
+      }}
+    >
+      <div className="h-44 border-b" style={{ borderColor: 'var(--border)' }}>
         <button
           onClick={onCustomize}
-          className="absolute right-3 top-3 z-10 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-[10px] text-xs"
-          style={{ background:'var(--panel)', border:'1px solid var(--border)', color:'var(--text)' }}
+          className="absolute right-3 top-3 z-10 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-[10px] text-xs transition"
+          style={{ background: 'var(--panel)', border: '1px solid var(--border)', color: 'var(--text)', boxShadow: 'var(--shadow-soft)' }}
         >
           <SlidersHorizontal className="w-3.5 h-3.5" />
           Customize
@@ -538,36 +566,33 @@ function BuildCard({
           legs={ap.legs ?? 'capsule'}
           antenna={ap.hasOwnProperty('antenna') ? Boolean((ap as any).antenna) : true}
           withBody={ap.hasOwnProperty('withBody') ? Boolean(ap.withBody) : true}
-          idle={ap.hasOwnProperty('idle') ? Boolean(ap.idle) : hover}
+          idle
         />
       </div>
-
       <div className="p-6 flex-1 flex flex-col justify-between">
         <div className="flex items-center gap-3">
-          <div className="w-11 h-11 rounded-[10px] flex items-center justify-center"
-               style={{ background:'rgba(0,0,0,.06)', border:'1px solid var(--border)' }}>
-            <Plus className="w-5 h-5 rotate-45" style={{ color: accent }} />
+          <div
+            className="w-11 h-11 rounded-[10px] flex items-center justify-center"
+            style={{ background: 'transparent', border: '2px solid var(--brand-weak)' }}
+          >
+            <BotIcon className="w-5 h-5" style={{ color: accent }} />
           </div>
           <div className="min-w-0">
-            <div className="font-semibold truncate" style={{ color:'var(--text)' }}>{bot.name}</div>
-            <div className="text-[12px] truncate" style={{ color:'var(--text-muted)' }}>
+            <div className="font-semibold truncate" style={{ color: 'var(--text)' }}>{bot.name}</div>
+            <div className="text-[12px] truncate" style={{ color: 'var(--text-muted)' }}>
               {(bot.industry || '—') + (bot.language ? ` · ${bot.language}` : '')}
             </div>
           </div>
-          <button onClick={onDelete} className="ml-auto p-1.5 rounded-md" title="Delete build"
-                  style={{ color:'var(--text-muted)' }}>
+          <button onClick={onDelete} className="ml-auto p-1.5 rounded-md transition" title="Delete build" style={{ color: 'var(--text-muted)' }}>
             <Trash2 className="w-4 h-4" />
           </button>
         </div>
-
         <div className="mt-4 flex items-end justify-between">
-          <div className="text-[12px]" style={{ color:'var(--text-muted)' }}>
-            Updated {fmtDate(bot.updatedAt || bot.createdAt)}
-          </div>
+          <div className="text-[12px]" style={{ color: 'var(--text-muted)' }}>Updated {fmtDate(bot.updatedAt || bot.createdAt)}</div>
           <button
             onClick={onOpen}
-            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-[10px] text-sm"
-            style={{ background:'var(--panel)', border:'1px solid var(--border)', color:'var(--text)' }}
+            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-[10px] text-sm transition"
+            style={{ background: 'var(--panel)', border: '1px solid var(--border)', color: 'var(--text)', boxShadow: 'var(--shadow-soft)' }}
           >
             Open <ArrowRight className="w-4 h-4" />
           </button>
