@@ -30,7 +30,10 @@ import HeaderRail from './HeaderRail';
 const Bot3D = dynamic(() => import('./Bot3D.client'), {
   ssr: false,
   loading: () => (
-    <div className="h-full w-full" style={{ background: 'linear-gradient(180deg, rgba(106,247,209,0.10), rgba(16,19,20,0.6))' }} />
+    <div
+      className="h-full w-full"
+      style={{ background: 'linear-gradient(180deg, rgba(106,247,209,0.10), rgba(16,19,20,0.6))' }}
+    />
   ),
 });
 
@@ -127,7 +130,7 @@ type SplitSection = {
 };
 
 const DISPLAY_TITLES: Record<PromptSectionKey, string> = {
-  'DESCRIPTION': 'DESCRIPTION',
+  DESCRIPTION: 'DESCRIPTION',
   'AI DESCRIPTION': 'AI Description',
   'RULES AND GUIDELINES': 'RULES AND GUIDELINES',
   'AI RULES': 'AI Rules',
@@ -136,7 +139,7 @@ const DISPLAY_TITLES: Record<PromptSectionKey, string> = {
 };
 
 const ICONS: Record<PromptSectionKey, JSX.Element> = {
-  'DESCRIPTION': <FileText className="w-4 h-4" style={{ color: 'var(--brand)' }} />,
+  DESCRIPTION: <FileText className="w-4 h-4" style={{ color: 'var(--brand)' }} />,
   'AI DESCRIPTION': <FileText className="w-4 h-4" style={{ color: 'var(--brand)' }} />,
   'RULES AND GUIDELINES': <Settings className="w-4 h-4" style={{ color: 'var(--brand)' }} />,
   'AI RULES': <ListChecks className="w-4 h-4" style={{ color: 'var(--brand)' }} />,
@@ -145,7 +148,7 @@ const ICONS: Record<PromptSectionKey, JSX.Element> = {
 };
 
 const HEADING_REGEX =
-  /^(?:\s*(?:[#>*-]|\d+\.)\s*)?(?:\*\*)?\s*(DESCRIPTION|AI\s*DESCRIPTION|RULES\s*(?:AND|&)\s*GUIDELINES|AI\s*RULES|QUESTION\s*FLOW|COMPANY\s*FAQ)\s*(?:\*\*)?\s*:?\s*$/gmi;
+  /^(?:\s*(?:[#>*-]|\d+\.)\s*)?(?:\*\*)?\s*(DESCRIPTION|AI\s*DESCRIPTION|RULES\s*(?:AND|&)\s*GUIDELINES|AI\s*RULES|QUESTION\s*FLOW|COMPANY\s*FAQ)\s*(?:\*\*)?\s*:?\s*$/gim;
 
 function splitStep3IntoSections(step3Raw?: string): SplitSection[] | null {
   if (!step3Raw) return null;
@@ -249,7 +252,8 @@ export default function BuilderDashboard() {
   if (step) {
     return (
       <div className="min-h-screen w-full font-movatif" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
-        <HeaderRail />{/* title derives from route */}
+        {/* Always mount the rail at the very top */}
+        <HeaderRail />
         <main className="w-full min-h-screen">
           {step === '1' && <Step1AIType onNext={() => setStep('2')} />}
           {step === '2' && <Step2ModelSettings onBack={() => setStep('1')} onNext={() => setStep('3')} />}
@@ -262,7 +266,7 @@ export default function BuilderDashboard() {
 
   return (
     <div className="min-h-screen w-full font-movatif" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
-      {/* Top rail that spans from sidebar to right edge */}
+      {/* Top rail that spans from sidebar to right edge (title comes from route inside HeaderRail) */}
       <HeaderRail />
 
       <main className="flex-1 w-full px-4 sm:px-6 pt-6 pb-24">
@@ -370,7 +374,11 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
   const rawOut = buildRawStep1PlusStep3(bot);
   const sections = splitStep3IntoSections(bot.prompt);
 
-  const copyAll = async () => { try { await navigator.clipboard.writeText(rawOut); } catch {} };
+  const copyAll = async () => {
+    try {
+      await navigator.clipboard.writeText(rawOut);
+    } catch {}
+  };
   const downloadTxt = () => {
     const blob = new Blob([rawOut], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -398,6 +406,7 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: 'rgba(0,0,0,0.45)' }}>
       <div className="relative w-full max-w-[1280px] max-h-[88vh] flex flex-col" style={FRAME_STYLE}>
+        {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 rounded-t-[30px]" style={HEADER_BORDER}>
           <div className="min-w-0">
             <h2 className="text-xl font-semibold truncate" style={{ color: 'var(--text)' }}>Prompt</h2>
@@ -405,6 +414,7 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
               {[bot.name, bot.industry, bot.language].filter(Boolean).join(' · ') || '—'}
             </div>
           </div>
+
           <div className="flex items-center gap-2">
             <button
               onClick={copyAll}
@@ -424,15 +434,24 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
               <DownloadIcon className="w-3.5 h-3.5" />
               Download
             </button>
-            <button onClick={onClose} className="p-2 rounded-full" title="Close" aria-label="Close" style={{ color: 'var(--text)' }}>
+            <button
+              onClick={onClose}
+              className="p-2 rounded-full"
+              title="Close"
+              aria-label="Close"
+              style={{ color: 'var(--text)' }}
+            >
               <X className="w-5 h-5" />
             </button>
           </div>
         </div>
 
+        {/* Body */}
         <div className="flex-1 overflow-y-auto p-6">
           {!bot.prompt ? (
-            <div className="p-5" style={CARD_STYLE}> (No Step 3 prompt yet) </div>
+            <div className="p-5" style={CARD_STYLE}>
+              (No Step 3 prompt yet)
+            </div>
           ) : sections ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {sections.map((sec, i) => (
@@ -443,18 +462,23 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
                     </div>
                   </div>
                   <div className="px-5 pb-5">
-                    <pre className="whitespace-pre-wrap text-sm leading-6" style={{ color: 'var(--text)' }}>{sec.text}</pre>
+                    <pre className="whitespace-pre-wrap text-sm leading-6" style={{ color: 'var(--text)' }}>
+                      {sec.text}
+                    </pre>
                   </div>
                 </div>
               ))}
             </div>
           ) : (
             <div style={CARD_STYLE} className="p-5">
-              <pre className="whitespace-pre-wrap text-sm leading-6" style={{ color: 'var(--text)' }}>{bot.prompt}</pre>
+              <pre className="whitespace-pre-wrap text-sm leading-6" style={{ color: 'var(--text)' }}>
+                {bot.prompt}
+              </pre>
             </div>
           )}
         </div>
 
+        {/* Footer */}
         <div className="px-6 py-4 rounded-b-[30px]" style={{ borderTop: '1px solid var(--border)', background: 'var(--card)' }}>
           <div className="flex justify-end">
             <button
@@ -487,14 +511,18 @@ function CreateCard({ onClick }: { onClick: () => void }) {
         boxShadow: 'var(--shadow-card)',
       }}
     >
+      {/* subtle glow */}
       <div
         className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
-        style={{ background: 'radial-gradient(circle, rgba(0,255,194,0.14) 0%, transparent 70%)', filter: 'blur(38px)' }}
+        style={{
+          background: 'radial-gradient(circle, color-mix(in oklab, var(--brand) 20%, transparent) 0%, transparent 70%)',
+          filter: 'blur(38px)',
+        }}
       />
       {hover && (
         <div
           className="pointer-events-none absolute inset-0 rounded-[16px]"
-          style={{ boxShadow: '0 0 34px 10px rgba(0,255,194,0.18), inset 0 0 14px rgba(0,255,194,0.14)' }}
+          style={{ boxShadow: '0 0 34px 10px color-mix(in oklab, var(--brand) 18%, transparent), inset 0 0 14px color-mix(in oklab, var(--brand) 14%, transparent)' }}
         />
       )}
       <div
@@ -508,8 +536,12 @@ function CreateCard({ onClick }: { onClick: () => void }) {
       >
         <Plus className="w-10 h-10" />
       </div>
-      <div className="text-[20px] font-semibold" style={{ color: 'var(--text)' }}>Create a Build</div>
-      <div className="text-[13px] mt-2" style={{ color: 'var(--text-muted)' }}>Start building your AI assistant</div>
+      <div className="text-[20px] font-semibold" style={{ color: 'var(--text)' }}>
+        Create a Build
+      </div>
+      <div className="text-[13px] mt-2" style={{ color: 'var(--text-muted)' }}>
+        Start building your AI assistant
+      </div>
     </button>
   );
 }
@@ -545,7 +577,12 @@ function BuildCard({
         <button
           onClick={onCustomize}
           className="absolute right-3 top-3 z-10 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-[10px] text-xs transition"
-          style={{ background: 'var(--panel)', border: '1px solid var(--border)', color: 'var(--text)', boxShadow: 'var(--shadow-soft)' }}
+          style={{
+            background: 'var(--panel)',
+            border: '1px solid var(--border)',
+            color: 'var(--text)',
+            boxShadow: 'var(--shadow-soft)',
+          }}
         >
           <SlidersHorizontal className="w-3.5 h-3.5" />
           Customize
@@ -578,21 +615,35 @@ function BuildCard({
             <BotIcon className="w-5 h-5" style={{ color: accent }} />
           </div>
           <div className="min-w-0">
-            <div className="font-semibold truncate" style={{ color: 'var(--text)' }}>{bot.name}</div>
+            <div className="font-semibold truncate" style={{ color: 'var(--text)' }}>
+              {bot.name}
+            </div>
             <div className="text-[12px] truncate" style={{ color: 'var(--text-muted)' }}>
               {(bot.industry || '—') + (bot.language ? ` · ${bot.language}` : '')}
             </div>
           </div>
-          <button onClick={onDelete} className="ml-auto p-1.5 rounded-md transition" title="Delete build" style={{ color: 'var(--text-muted)' }}>
+          <button
+            onClick={onDelete}
+            className="ml-auto p-1.5 rounded-md transition"
+            title="Delete build"
+            style={{ color: 'var(--text-muted)' }}
+          >
             <Trash2 className="w-4 h-4" />
           </button>
         </div>
         <div className="mt-4 flex items-end justify-between">
-          <div className="text-[12px]" style={{ color: 'var(--text-muted)' }}>Updated {fmtDate(bot.updatedAt || bot.createdAt)}</div>
+          <div className="text-[12px]" style={{ color: 'var(--text-muted)' }}>
+            Updated {fmtDate(bot.updatedAt || bot.createdAt)}
+          </div>
           <button
             onClick={onOpen}
             className="inline-flex items-center gap-2 px-3.5 py-2 rounded-[10px] text-sm transition"
-            style={{ background: 'var(--panel)', border: '1px solid var(--border)', color: 'var(--text)', boxShadow: 'var(--shadow-soft)' }}
+            style={{
+              background: 'var(--panel)',
+              border: '1px solid var(--border)',
+              color: 'var(--text)',
+              boxShadow: 'var(--shadow-soft)',
+            }}
           >
             Open <ArrowRight className="w-4 h-4" />
           </button>
