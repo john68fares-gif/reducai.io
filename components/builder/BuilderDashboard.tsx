@@ -25,7 +25,8 @@ import Step2ModelSettings from './Step2ModelSettings';
 import Step3PromptEditor from './Step3PromptEditor';
 import Step4Overview from './Step4Overview';
 import { s } from '@/utils/safe';
-import HeaderRail from './HeaderRail';
+
+// NOTE: Removed HeaderRail import/usage per your request
 
 const Bot3D = dynamic(() => import('./Bot3D.client'), {
   ssr: false,
@@ -249,11 +250,10 @@ export default function BuilderDashboard() {
     router.replace(`${pathname}?${usp.toString()}`, { scroll: false });
   };
 
+  // ---------- Wizard (unchanged logic, rail removed) ----------
   if (step) {
     return (
       <div className="min-h-screen w-full font-movatif" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
-        {/* Always mount the rail at the very top */}
-        <HeaderRail />
         <main className="w-full min-h-screen">
           {step === '1' && <Step1AIType onNext={() => setStep('2')} />}
           {step === '2' && <Step2ModelSettings onBack={() => setStep('1')} onNext={() => setStep('3')} />}
@@ -264,11 +264,9 @@ export default function BuilderDashboard() {
     );
   }
 
+  // ---------- Dashboard ----------
   return (
     <div className="min-h-screen w-full font-movatif" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
-      {/* Top rail that spans from sidebar to right edge (title comes from route inside HeaderRail) */}
-      <HeaderRail />
-
       <main className="flex-1 w-full px-4 sm:px-6 pt-6 pb-24">
         {/* Search */}
         <div className="mb-6">
@@ -292,12 +290,12 @@ export default function BuilderDashboard() {
           </div>
         </div>
 
-        {/* Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-7">
-          <CreateCard onClick={() => router.push('/builder?step=1')} />
+        {/* HORIZONTAL LIST (wide rectangles stacked vertically) */}
+        <div className="space-y-6">
+          <CreateRow onClick={() => router.push('/builder?step=1')} />
 
           {filtered.map((bot) => (
-            <BuildCard
+            <BuildRow
               key={bot.id}
               bot={bot}
               accent={accentFor(bot.id)}
@@ -495,52 +493,75 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
   );
 }
 
-/* --------------------------------- Cards --------------------------------- */
+/* --------------------------------- HORIZONTAL ROWS --------------------------------- */
 
-function CreateCard({ onClick }: { onClick: () => void }) {
-  const [hover, setHover] = useState(false);
+function CreateRow({ onClick }: { onClick: () => void }) {
   return (
     <button
       onClick={onClick}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      className="group relative h-[360px] rounded-[16px] p-7 flex flex-col items-center justify-center transition-all active:scale-[0.995]"
+      className="group w-full rounded-[16px] overflow-hidden text-left transition-transform active:scale-[0.996]"
       style={{
         background: 'var(--card)',
-        border: '2px dashed var(--brand-weak)',
+        border: '1px dashed var(--brand-weak)',
         boxShadow: 'var(--shadow-card)',
       }}
     >
-      {/* subtle glow */}
-      <div
-        className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
-        style={{
-          background: 'radial-gradient(circle, color-mix(in oklab, var(--brand) 20%, transparent) 0%, transparent 70%)',
-          filter: 'blur(38px)',
-        }}
-      />
-      {hover && (
+      <div className="flex items-stretch">
+        {/* Left accent / icon zone */}
         <div
-          className="pointer-events-none absolute inset-0 rounded-[16px]"
-          style={{ boxShadow: '0 0 34px 10px color-mix(in oklab, var(--brand) 18%, transparent), inset 0 0 14px color-mix(in oklab, var(--brand) 14%, transparent)' }}
-        />
-      )}
-      <div
-        className="w-20 h-20 rounded-full flex items-center justify-center mb-5"
-        style={{
-          background: 'transparent',
-          border: '2px dashed var(--brand-weak)',
-          boxShadow: 'inset 0 0 6px rgba(0,0,0,0.06)',
-          color: 'var(--brand)',
-        }}
-      >
-        <Plus className="w-10 h-10" />
-      </div>
-      <div className="text-[20px] font-semibold" style={{ color: 'var(--text)' }}>
-        Create a Build
-      </div>
-      <div className="text-[13px] mt-2" style={{ color: 'var(--text-muted)' }}>
-        Start building your AI assistant
+          className="hidden sm:flex items-center justify-center w-[220px] min-h-[160px]"
+          style={{
+            background: 'linear-gradient(180deg, color-mix(in oklab, var(--brand) 14%, transparent), transparent)',
+            borderRight: '1px dashed var(--brand-weak)',
+          }}
+        >
+          <div
+            className="w-16 h-16 rounded-full grid place-items-center"
+            style={{
+              border: '2px dashed var(--brand-weak)',
+              color: 'var(--brand)',
+              boxShadow: 'inset 0 0 10px rgba(0,0,0,.08)',
+            }}
+          >
+            <Plus className="w-9 h-9" />
+          </div>
+        </div>
+
+        {/* Right content */}
+        <div className="flex-1 p-5 sm:p-6">
+          <div className="flex items-center gap-3">
+            <span
+              className="px-2 py-1 rounded-full text-xs"
+              style={{
+                background: 'color-mix(in oklab, var(--brand) 12%, var(--panel))',
+                color: 'var(--text)',
+                border: '1px solid var(--border)',
+              }}
+            >
+              New
+            </span>
+            <div className="text-lg font-semibold" style={{ color: 'var(--text)' }}>
+              Create a Build
+            </div>
+          </div>
+          <div className="mt-1 text-sm" style={{ color: 'var(--text-muted)' }}>
+            Start building your AI assistant.
+          </div>
+
+          <div className="mt-4">
+            <span
+              className="inline-flex items-center gap-2 rounded-[10px] px-3 py-2 text-sm transition"
+              style={{
+                background: 'var(--panel)',
+                border: '1px solid var(--border)',
+                color: 'var(--text)',
+                boxShadow: 'var(--shadow-soft)',
+              }}
+            >
+              Continue <ArrowRight className="w-4 h-4" />
+            </span>
+          </div>
+        </div>
       </div>
     </button>
   );
@@ -550,7 +571,7 @@ const palette = ['#00ffc2', '#7cc3ff', '#b28bff', '#ffd68a', '#ff9db1'];
 const accentFor = (id: string) =>
   palette[Math.abs([...id].reduce((h, c) => h + c.charCodeAt(0), 0)) % palette.length];
 
-function BuildCard({
+function BuildRow({
   bot,
   accent,
   onOpen,
@@ -566,78 +587,19 @@ function BuildCard({
   const ap = bot.appearance || {};
   return (
     <div
-      className="relative h-[360px] rounded-[16px] p-0 flex flex-col justify-between group transition-all"
+      className="w-full rounded-[16px] overflow-hidden transition"
       style={{
         background: 'var(--card)',
         border: '1px solid var(--border)',
         boxShadow: 'var(--shadow-card)',
       }}
     >
-      <div className="h-44 border-b" style={{ borderColor: 'var(--border)' }}>
-        <button
-          onClick={onCustomize}
-          className="absolute right-3 top-3 z-10 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-[10px] text-xs transition"
-          style={{
-            background: 'var(--panel)',
-            border: '1px solid var(--border)',
-            color: 'var(--text)',
-            boxShadow: 'var(--shadow-soft)',
-          }}
-        >
-          <SlidersHorizontal className="w-3.5 h-3.5" />
-          Customize
-        </button>
-        {/* @ts-ignore */}
-        <Bot3D
-          className="h-full"
-          accent={ap.accent || accent}
-          shellColor={ap.shellColor}
-          bodyColor={ap.bodyColor}
-          trimColor={ap.trimColor}
-          faceColor={ap.faceColor}
-          variant={ap.variant || 'silver'}
-          eyes={ap.eyes || 'ovals'}
-          head={ap.head || 'rounded'}
-          torso={ap.torso || 'box'}
-          arms={ap.arms ?? 'capsule'}
-          legs={ap.legs ?? 'capsule'}
-          antenna={ap.hasOwnProperty('antenna') ? Boolean((ap as any).antenna) : true}
-          withBody={ap.hasOwnProperty('withBody') ? Boolean(ap.withBody) : true}
-          idle
-        />
-      </div>
-      <div className="p-6 flex-1 flex flex-col justify-between">
-        <div className="flex items-center gap-3">
-          <div
-            className="w-11 h-11 rounded-[10px] flex items-center justify-center"
-            style={{ background: 'transparent', border: '2px solid var(--brand-weak)' }}
-          >
-            <BotIcon className="w-5 h-5" style={{ color: accent }} />
-          </div>
-          <div className="min-w-0">
-            <div className="font-semibold truncate" style={{ color: 'var(--text)' }}>
-              {bot.name}
-            </div>
-            <div className="text-[12px] truncate" style={{ color: 'var(--text-muted)' }}>
-              {(bot.industry || '—') + (bot.language ? ` · ${bot.language}` : '')}
-            </div>
-          </div>
+      <div className="flex items-stretch">
+        {/* Preview (left) */}
+        <div className="relative w-[320px] min-h-[180px] hidden md:block" style={{ borderRight: '1px solid var(--border)' }}>
           <button
-            onClick={onDelete}
-            className="ml-auto p-1.5 rounded-md transition"
-            title="Delete build"
-            style={{ color: 'var(--text-muted)' }}
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
-        </div>
-        <div className="mt-4 flex items-end justify-between">
-          <div className="text-[12px]" style={{ color: 'var(--text-muted)' }}>
-            Updated {fmtDate(bot.updatedAt || bot.createdAt)}
-          </div>
-          <button
-            onClick={onOpen}
-            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-[10px] text-sm transition"
+            onClick={onCustomize}
+            className="absolute right-3 top-3 z-10 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-[10px] text-xs transition"
             style={{
               background: 'var(--panel)',
               border: '1px solid var(--border)',
@@ -645,10 +607,92 @@ function BuildCard({
               boxShadow: 'var(--shadow-soft)',
             }}
           >
-            Open <ArrowRight className="w-4 h-4" />
+            <SlidersHorizontal className="w-3.5 h-3.5" />
+            Customize
           </button>
+          {/* @ts-ignore */}
+          <Bot3D
+            className="h-full"
+            accent={ap.accent || accent}
+            shellColor={ap.shellColor}
+            bodyColor={ap.bodyColor}
+            trimColor={ap.trimColor}
+            faceColor={ap.faceColor}
+            variant={ap.variant || 'silver'}
+            eyes={ap.eyes || 'ovals'}
+            head={ap.head || 'rounded'}
+            torso={ap.torso || 'box'}
+            arms={ap.arms ?? 'capsule'}
+            legs={ap.legs ?? 'capsule'}
+            antenna={ap.hasOwnProperty('antenna') ? Boolean((ap as any).antenna) : true}
+            withBody={ap.hasOwnProperty('withBody') ? Boolean(ap.withBody) : true}
+            idle
+          />
+        </div>
+
+        {/* Info (right) */}
+        <div className="flex-1 p-5 sm:p-6">
+          <div className="flex items-center gap-3">
+            <div
+              className="w-11 h-11 rounded-[10px] flex items-center justify-center"
+              style={{ background: 'transparent', border: '2px solid var(--brand-weak)' }}
+            >
+              <BotIcon className="w-5 h-5" style={{ color: accent }} />
+            </div>
+            <div className="min-w-0">
+              <div className="font-semibold truncate" style={{ color: 'var(--text)' }}>
+                {bot.name}
+              </div>
+              <div className="text-[12px] truncate" style={{ color: 'var(--text-muted)' }}>
+                {(bot.industry || '—') + (bot.language ? ` · ${bot.language}` : '')}
+              </div>
+            </div>
+            <button
+              onClick={onDelete}
+              className="ml-auto p-1.5 rounded-md transition"
+              title="Delete build"
+              style={{ color: 'var(--text-muted)' }}
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="mt-4 grid gap-2 md:grid-cols-3">
+            <RowStat label="Model" value={bot.model || '—'} />
+            <RowStat label="Updated" value={fmtDate(bot.updatedAt || bot.createdAt)} />
+            <RowStat label="ID" value={bot.id.slice(0, 8) + '…'} />
+          </div>
+
+          <div className="mt-5 flex flex-wrap items-center gap-3">
+            <button
+              onClick={onOpen}
+              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-[10px] text-sm transition"
+              style={{
+                background: 'var(--panel)',
+                border: '1px solid var(--border)',
+                color: 'var(--text)',
+                boxShadow: 'var(--shadow-soft)',
+              }}
+            >
+              Open <ArrowRight className="w-4 h-4" />
+            </button>
+            <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              Tip: Use “Customize” to change the bot’s look.
+            </span>
+          </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function RowStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="text-sm">
+      <div className="text-[11px] uppercase tracking-wide mb-0.5" style={{ color: 'var(--text-muted)' }}>
+        {label}
+      </div>
+      <div style={{ color: 'var(--text)' }}>{value}</div>
     </div>
   );
 }
