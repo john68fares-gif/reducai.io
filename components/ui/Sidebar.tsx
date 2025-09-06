@@ -1,3 +1,4 @@
+// components/ui/Sidebar.tsx
 'use client';
 
 import { useEffect, useState, useMemo } from 'react';
@@ -5,33 +6,29 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
-  Bot,
+  Wand2 as CreateIcon,
+  SlidersHorizontal as TuneIcon,
+  Mic,
+  Rocket,
+  Phone,
+  Key,
+  HelpCircle,
   ChevronLeft,
   ChevronRight,
-  Hammer,
-  HelpCircle,
-  Key,
-  LogOut,
-  Mic,
-  Phone,
-  Rocket,
-  Settings as SettingsIcon,
   User as UserIcon,
-  Wand2,
-  Home,
-  MessageSquare,
-  PlayCircle,
-  Store,
+  Bot,
+  Settings as SettingsIcon,
+  LogOut,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase-client';
 
-const W_EXPANDED = 260;
-const W_COLLAPSED = 72;
-const LS_COLLAPSED = 'ui:sidebarCollapsed';
+const W_EXPANDED = 256;
+const W_COLLAPSED = 68;
+const LS_COLLAPSED = 'ui:sidebarCollapsed:v2';
 
-const palette = ['#6af7d1', '#7cc3ff', '#b28bff', '#ffd68a', '#ff9db1'];
-const accentFor = (seed: string) =>
-  palette[Math.abs([...seed].reduce((h, c) => h + c.charCodeAt(0), 0)) % palette.length];
+function cx(...c: (string | false | null | undefined)[]) {
+  return c.filter(Boolean).join(' ');
+}
 
 function getDisplayName(name?: string | null, email?: string | null) {
   if (name && name.trim()) return name.trim();
@@ -39,20 +36,10 @@ function getDisplayName(name?: string | null, email?: string | null) {
   return 'Account';
 }
 
-type NavItem = {
-  href: string;
-  label: string;
-  sub?: string;
-  icon: React.ReactNode;
-  section: 'WORKSPACE' | 'RESOURCES';
-  activeTest: (path: string | null) => boolean;
-  disabled?: boolean;
-};
-
 export default function Sidebar() {
   const pathname = usePathname();
 
-  // collapse state (persist + update CSS var used by the layout)
+  // collapse (persist)
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     try {
       const raw = localStorage.getItem(LS_COLLAPSED);
@@ -65,10 +52,8 @@ export default function Sidebar() {
     try {
       localStorage.setItem(LS_COLLAPSED, JSON.stringify(collapsed));
     } catch {}
-    document.documentElement.style.setProperty(
-      '--sidebar-w',
-      `${collapsed ? W_COLLAPSED : W_EXPANDED}px`,
-    );
+    // avoid a lingering background when collapsed
+    document.documentElement.style.setProperty('--sidebar-w', `${collapsed ? W_COLLAPSED : W_EXPANDED}px`);
   }, [collapsed]);
 
   // user
@@ -96,232 +81,123 @@ export default function Sidebar() {
   useEffect(() => setAcctOpen(false), [pathname]);
 
   const onSignOut = async () => {
-    try {
-      await supabase.auth.signOut();
-      setAcctOpen(false);
-    } catch {}
+    try { await supabase.auth.signOut(); setAcctOpen(false); } catch {}
   };
 
-  // nav structure (renamed a bit so it feels like your identity)
-  const items: NavItem[] = useMemo(
-    () => [
-      // Workspace
-      { href: '/builder',      label: 'Create',     sub: 'Design your agent',       icon: <Wand2 />,        section: 'WORKSPACE', activeTest: (p) => p?.startsWith('/builder') ?? false },
-      { href: '/tuning',       label: 'Tuning',     sub: 'Integrate & optimize',    icon: <Hammer />,       section: 'WORKSPACE', activeTest: (p) => p?.startsWith('/tuning') ?? false },
-      { href: '/voice-studio', label: 'Voice Studio', sub: 'Calls & persona',       icon: <Mic />,          section: 'WORKSPACE', activeTest: (p) => p?.startsWith('/voice-studio') ?? false },
-      { href: '/launchpad',    label: 'Launchpad',  sub: 'Go live',                 icon: <Rocket />,       section: 'WORKSPACE', activeTest: (p) => p === '/launchpad' },
+  type ItemT = { href: string; label: string; sub?: string; Icon: any; active: boolean };
+  const workspace: ItemT[] = useMemo(() => ([
+    { href: '/builder',      label: 'Create',      sub: 'Design your agent',   Icon: CreateIcon, active: pathname?.startsWith('/builder') || pathname === '/' },
+    { href: '/improve',      label: 'Tuning',      sub: 'Integrate & optimize',Icon: TuneIcon,   active: pathname?.startsWith('/improve') },
+    { href: '/voice-agent',  label: 'Voice Studio',sub: 'Calls & persona',     Icon: Mic,        active: pathname?.startsWith('/voice-agent') },
+    { href: '/launch',       label: 'Launchpad',   sub: 'Go live',             Icon: Rocket,     active: pathname === '/launch' },
+  ]), [pathname]);
 
-      // Resources
-      { href: '/phone-numbers', label: 'Numbers',   sub: 'Twilio & BYO',            icon: <Phone />,        section: 'RESOURCES', activeTest: (p) => p?.startsWith('/phone-numbers') ?? false },
-      { href: '/apikeys',       label: 'API Keys',  sub: 'Models & access',         icon: <Key />,          section: 'RESOURCES', activeTest: (p) => p?.startsWith('/apikeys') ?? false },
-      { href: '/mentor',        label: 'AI Mentor', sub: 'Guidance',                icon: <MessageSquare />,section: 'RESOURCES', activeTest: (p) => p?.startsWith('/mentor') ?? false, disabled: true },
-      { href: '/market',        label: 'Marketplace', sub: 'Templates',              icon: <Store />,        section: 'RESOURCES', activeTest: (p) => p?.startsWith('/market') ?? false, disabled: true },
-      { href: '/support',       label: 'Help',      sub: 'Guides & FAQ',            icon: <HelpCircle />,   section: 'RESOURCES', activeTest: (p) => p === '/support' },
-    ],
-    [],
-  );
+  const resources: ItemT[] = useMemo(() => ([
+    { href: '/phone-numbers', label: 'Numbers', sub: 'Twilio & BYO', Icon: Phone, active: pathname?.startsWith('/phone-numbers') },
+    { href: '/apikeys',       label: 'API Keys', sub: 'Models & access', Icon: Key, active: pathname?.startsWith('/apikeys') },
+    { href: '/support',       label: 'Help', sub: 'Guides & FAQ', Icon: HelpCircle, active: pathname === '/support' },
+  ]), [pathname]);
 
-  // split sections for spacing + headers
-  const workspace = items.filter((i) => i.section === 'WORKSPACE');
-  const resources = items.filter((i) => i.section === 'RESOURCES');
-
-  // compact icon chip (same language as API Keys/Numbers cards)
-  const IconChip = ({ children }: { children: React.ReactNode }) => (
-    <div
-      className="grid place-items-center rounded-[10px]"
-      style={{
-        width: 28, height: 28,
-        background: 'var(--card)',
-        border: '1px solid var(--border)',
-        boxShadow: 'var(--shadow-card)',
-      }}
-    >
-      <div style={{ width: 18, height: 18, color: 'var(--brand)' }}>{children}</div>
-    </div>
-  );
-
-  const NavRow = ({
-    href, label, sub, icon, active, disabled,
-  }: {
-    href: string; label: string; sub?: string; icon: React.ReactNode; active?: boolean; disabled?: boolean;
-  }) => {
-    const body = (
+  const Item = ({ href, label, sub, Icon, active }: ItemT) => {
+    const content = (
       <div
-        className={[
-          'group rounded-xl flex items-center h-[44px] transition-all duration-160',
+        className={cx(
+          'sidebar-item group rounded-xl flex items-center h-11 transition-all duration-200',
           collapsed ? 'justify-center' : 'px-3',
-          disabled ? 'opacity-55 cursor-not-allowed' : 'hover:-translate-y-[1px]',
-        ].join(' ')}
-        style={{
-          border: `1px solid ${active ? 'rgba(0,255,194,0.28)' : 'var(--sidebar-border)'} `,
-          background: active ? 'rgba(0,255,194,0.06)' : 'var(--card)',
-          boxShadow: active ? '0 0 0 1px rgba(0,255,194,.05), 0 8px 20px rgba(0,0,0,.18) inset' : 'var(--shadow-card)',
-          color: 'var(--sidebar-text)',
-        }}
+          active && 'is-active'
+        )}
         title={collapsed ? label : undefined}
       >
-        <div className={collapsed ? 'mx-auto' : 'mr-3'}>
-          <IconChip>{icon}</IconChip>
+        <div className={cx(collapsed ? 'w-9 h-9 mx-auto' : 'w-9 h-9 mr-3', 'shrink-0 rounded-lg grid place-items-center icon-chip')}>
+          <Icon className="w-[18px] h-[18px]" />
         </div>
-
-        {/* label/sub hidden when collapsed */}
-        <div
-          className={[
-            'overflow-hidden transition-[max-width,opacity,transform] duration-300 ease-out',
-            collapsed ? 'opacity-0 max-w-0 -translate-x-2' : 'opacity-100 max-w-[200px] translate-x-0',
-          ].join(' ')}
-        >
+        {/* label/sub hide when collapsed */}
+        <div className={cx(
+          'overflow-hidden transition-[max-width,opacity,transform] duration-300 ease-out',
+          collapsed ? 'opacity-0 max-w-0 -translate-x-2' : 'opacity-100 max-w-[200px] translate-x-0'
+        )}>
           <div className="leading-tight">
-            <div className="text-[13px] font-semibold" style={{ color: 'var(--sidebar-text)' }}>{label}</div>
-            {sub && (
-              <div className="text-[11px] mt-[3px]" style={{ color: 'var(--sidebar-muted)' }}>
-                {sub}
-              </div>
-            )}
+            <div className="text-[13px] font-semibold sidebar-text">{label}</div>
+            {sub && <div className="text-[11px] mt-[3px] sidebar-muted">{sub}</div>}
           </div>
         </div>
       </div>
     );
-    return disabled ? <div>{body}</div> : <Link href={href} className="block">{body}</Link>;
+    return <Link href={href} className="block">{content}</Link>;
   };
 
   return (
     <aside
-      className="fixed left-0 top-0 h-screen z-50 transition-[width] duration-300 ease-out"
+      className={cx(
+        'sidebar-modern fixed left-0 top-0 h-screen z-50 transition-[width] duration-300 ease-out',
+      )}
       style={{
         width: collapsed ? W_COLLAPSED : W_EXPANDED,
-        background: 'var(--sidebar-bg)',
-        color: 'var(--sidebar-text)',
-        borderRight: `1px solid var(--sidebar-border)`,
-        boxShadow: collapsed ? 'none' : '0 12px 36px rgba(0,0,0,.18), inset 0 0 0 1px rgba(0,0,0,.04)',
       }}
       aria-label="Primary"
     >
       <div className="relative h-full flex flex-col">
         {/* Header */}
-        <div className="px-4 py-4 border-b" style={{ borderColor: 'var(--sidebar-border)' }}>
-          <div className="flex items-center gap-3">
-            <div
-              className="grid place-items-center rounded-xl shrink-0"
-              style={{
-                width: 34, height: 34, background: 'var(--brand)',
-                boxShadow: '0 0 12px rgba(0,255,194,.35)',
-              }}
-            >
-              <Bot className="w-[18px] h-[18px]" color="#0b0c10" />
-            </div>
-            <div
-              className={[
-                'overflow-hidden transition-[max-width,opacity,transform] duration-300 ease-out',
-                collapsed ? 'opacity-0 max-w-0 -translate-x-2' : 'opacity-100 max-w-[200px] translate-x-0',
-              ].join(' ')}
-            >
-              <div className="leading-tight">
-                <div className="text-[16px] font-semibold" style={{ color: 'var(--sidebar-text)' }}>
-                  reduc<span style={{ color: 'var(--brand)' }}>ai.io</span>
-                </div>
-                <div className="text-[11px]" style={{ color: 'var(--sidebar-muted)' }}>Builder Workspace</div>
+        <div className="sidebar-header border-b px-4 py-4 flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl grid place-items-center shrink-0 brand-chip">
+            <Bot className="w-5 h-5 brand-chip-icon" />
+          </div>
+          <div className={cx(
+            'overflow-hidden transition-[max-width,opacity,transform] duration-300 ease-out',
+            collapsed ? 'opacity-0 max-w-0 -translate-x-2' : 'opacity-100 max-w-[200px] translate-x-0'
+          )}>
+            <div className="leading-tight">
+              <div className="text-[17px] font-semibold tracking-wide">
+                reduc<span className="brand-accent">ai.io</span>
               </div>
+              <div className="text-[11px] sidebar-muted">Builder Workspace</div>
             </div>
           </div>
         </div>
 
         {/* Scrollable nav */}
-        <div className="flex-1 min-h-0 overflow-y-auto px-4 pt-4 pb-3">
+        <div className="flex-1 min-h-0 overflow-y-auto px-3 pt-4 pb-3">
           {/* Workspace */}
-          <div
-            className={[
-              'overflow-hidden transition-[max-height,opacity] duration-300',
-              collapsed ? 'max-h-[18px]' : 'max-h-[48px]',
-            ].join(' ')}
-          >
-            <div className="text-[10px] tracking-[.18em] mb-2" style={{ color: 'var(--sidebar-muted)' }}>
-              WORKSPACE
-            </div>
-          </div>
-          <nav className="space-y-3.5">
-            {workspace.map((i) => (
-              <NavRow
-                key={i.href}
-                href={i.href}
-                label={i.label}
-                sub={i.sub}
-                icon={i.icon}
-                active={i.activeTest(pathname)}
-                disabled={i.disabled}
-              />
-            ))}
+          <div className={cx('section-label', collapsed && 'sr-only')}>WORKSPACE</div>
+          <nav className="space-y-2.5 mb-4">
+            {workspace.map((it) => <Item key={it.href} {...it} />)}
           </nav>
 
           {/* Divider */}
-          <div className="my-4 border-t" style={{ borderColor: 'var(--sidebar-border)' }} />
+          <div className="divider" />
 
           {/* Resources */}
-          <div
-            className={[
-              'overflow-hidden transition-[max-height,opacity] duration-300',
-              collapsed ? 'max-h-[18px]' : 'max-h-[48px]',
-            ].join(' ')}
-          >
-            <div className="text-[10px] tracking-[.18em] mb-2" style={{ color: 'var(--sidebar-muted)' }}>
-              RESOURCES
-            </div>
-          </div>
-          <nav className="space-y-3.5">
-            {resources.map((i) => (
-              <NavRow
-                key={i.href}
-                href={i.href}
-                label={i.label}
-                sub={i.sub}
-                icon={i.icon}
-                active={i.activeTest(pathname)}
-                disabled={i.disabled}
-              />
-            ))}
+          <div className={cx('section-label mt-4', collapsed && 'sr-only')}>RESOURCES</div>
+          <nav className="space-y-2.5">
+            {resources.map((it) => <Item key={it.href} {...it} />)}
           </nav>
         </div>
 
         {/* Account chip */}
-        <div className="px-4 pb-5">
+        <div className="px-3 pb-4">
           <button
             onClick={() => setAcctOpen((v) => !v)}
             aria-expanded={acctOpen}
             aria-haspopup="true"
-            className="w-full rounded-2xl px-3 py-3 flex items-center gap-3 text-left transition-colors duration-150"
-            style={{
-              background: 'var(--card)',
-              border: '1px solid var(--border)',
-              boxShadow: 'var(--shadow-card)',
-              color: 'var(--sidebar-text)',
-            }}
+            className="acct-chip w-full rounded-2xl px-3 py-3.5 flex items-center gap-3 text-left transition-colors duration-200"
           >
-            <div
-              className="grid place-items-center rounded-full"
-              style={{
-                width: 30, height: 30,
-                background: accentFor(userEmail || 'x'),
-                boxShadow: '0 0 8px rgba(0,0,0,.18)',
-              }}
-            >
-              <UserIcon className="w-[16px] h-[16px]" color="#0b0c10" />
+            <div className="w-8 h-8 rounded-full grid place-items-center avatar">
+              <UserIcon className="w-4 h-4 avatar-icon" />
             </div>
-
-            <div
-              className={[
-                'overflow-hidden transition-[max-width,opacity,transform] duration-300 ease-out',
-                collapsed ? 'opacity-0 max-w-0 -translate-x-2' : 'opacity-100 max-w-[200px] translate-x-0',
-              ].join(' ')}
-            >
+            <div className={cx(
+              'overflow-hidden transition-[max-width,opacity,transform] duration-300 ease-out',
+              collapsed ? 'opacity-0 max-w-0 -translate-x-2' : 'opacity-100 max-w-[200px] translate-x-0'
+            )}>
               <div className="leading-tight min-w-0">
-                <div className="text-sm font-semibold truncate">{userLoading ? 'Loading…' : getDisplayName(userName, userEmail)}</div>
-                <div className="text-[11px] truncate" style={{ color: 'var(--sidebar-muted)' }}>
-                  {userLoading ? ' ' : (userEmail || 'Signed in')}
+                <div className="text-sm font-semibold sidebar-text truncate">
+                  {userLoading ? 'Account' : getDisplayName(userName, userEmail)}
+                </div>
+                <div className="text-[11px] sidebar-muted truncate">
+                  {userLoading ? 'Loading…' : (userEmail || 'Signed in')}
                 </div>
               </div>
             </div>
-
-            {!collapsed && <span className="ml-auto text-xs" style={{ color: 'var(--sidebar-muted)' }}>{acctOpen ? '▲' : '▼'}</span>}
+            {!collapsed && <span className="ml-auto sidebar-muted text-xs">{acctOpen ? '▲' : '▼'}</span>}
           </button>
 
           {/* Desktop dropdown */}
@@ -335,20 +211,13 @@ export default function Sidebar() {
                 transition={{ duration: 0.16 }}
                 className="relative hidden md:block"
               >
-                <div
-                  className="mt-2 rounded-xl overflow-hidden"
-                  style={{
-                    background: 'var(--panel)',
-                    border: '1px solid var(--border)',
-                    boxShadow: 'var(--shadow-soft)',
-                  }}
-                >
-                  <Link href="/account" onClick={() => setAcctOpen(false)} className="w-full flex items-center gap-2 px-4 py-3 text-left hover:opacity-90">
-                    <SettingsIcon className="w-4 h-4" style={{ color: 'var(--text)' }} />
+                <div className="acct-menu mt-2 rounded-xl overflow-hidden">
+                  <Link href="/account" onClick={() => setAcctOpen(false)} className="acct-row">
+                    <SettingsIcon className="w-4 h-4" />
                     <span>Settings</span>
                   </Link>
-                  <button onClick={onSignOut} className="w-full flex items-center gap-2 px-4 py-3 text-left hover:opacity-90">
-                    <LogOut className="w-4 h-4" style={{ color: 'var(--text)' }} />
+                  <button onClick={onSignOut} className="acct-row">
+                    <LogOut className="w-4 h-4" />
                     <span>Sign out</span>
                   </button>
                 </div>
@@ -360,15 +229,8 @@ export default function Sidebar() {
         {/* Collapse handle */}
         <button
           onClick={() => setCollapsed((c) => !c)}
-          className="absolute top-1/2 -right-3 translate-y-[-50%] rounded-full p-1.5 transition-colors duration-150"
-          style={{
-            border: '1px solid var(--border)',
-            background: 'var(--card)',
-            boxShadow: 'var(--shadow-card)',
-            color: 'var(--sidebar-text)',
-          }}
+          className="collapse-handle absolute top-1/2 -right-3 translate-y-[-50%] rounded-full p-1.5 transition-colors duration-200"
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          title={collapsed ? 'Expand' : 'Collapse'}
         >
           {collapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
         </button>
@@ -391,24 +253,18 @@ export default function Sidebar() {
               animate={{ y: 0 }}
               exit={{ y: 32 }}
               transition={{ duration: 0.18 }}
-              className="w-full rounded-t-2xl overflow-hidden"
+              className="w-full rounded-t-2xl overflow-hidden acct-sheet"
               onClick={(e) => e.stopPropagation()}
-              style={{
-                background: 'var(--panel)',
-                borderTop: '1px solid var(--border)',
-                boxShadow: 'var(--shadow-soft)',
-                color: 'var(--text)',
-              }}
             >
-              <div className="px-5 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
-                <div className="font-semibold">{getDisplayName(userName, userEmail)}</div>
-                <div className="text-sm" style={{ color: 'var(--text-muted)' }}>{userEmail}</div>
+              <div className="px-5 py-4 border-b sidebar-border">
+                <div className="font-semibold sidebar-text">{getDisplayName(userName, userEmail)}</div>
+                <div className="sidebar-muted text-sm">{userEmail}</div>
               </div>
-              <Link href="/account" onClick={() => setAcctOpen(false)} className="w-full flex items-center gap-2 px-5 py-4 text-left border-b" style={{ borderColor: 'var(--border)' }}>
+              <Link href="/account" onClick={() => setAcctOpen(false)} className="acct-row border-b sidebar-border">
                 <SettingsIcon className="w-4 h-4" />
                 <span>Settings</span>
               </Link>
-              <button onClick={() => { setAcctOpen(false); onSignOut(); }} className="w-full flex items-center gap-2 px-5 py-4 text-left">
+              <button onClick={() => { setAcctOpen(false); onSignOut(); }} className="acct-row">
                 <LogOut className="w-4 h-4" />
                 <span>Sign out</span>
               </button>
@@ -416,6 +272,128 @@ export default function Sidebar() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Scoped styles (uses your CSS tokens) */}
+      <style jsx global>{`
+        /* Base rail uses your sidebar tokens so light mode stays 1:1 with globals.css */
+        .sidebar-modern{
+          background: var(--sidebar-bg);
+          color: var(--sidebar-text);
+          border-right: 1px solid var(--sidebar-border);
+          box-shadow: none;
+        }
+        /* When collapsed, remove big panel feel */
+        .sidebar-modern{
+          overflow: hidden;
+        }
+        .sidebar-modern .sidebar-header{
+          border-color: var(--sidebar-border);
+        }
+        .sidebar-modern .brand-accent{ color: var(--brand); }
+        .sidebar-modern .sidebar-text{ color: var(--sidebar-text); }
+        .sidebar-modern .sidebar-muted{ color: var(--sidebar-muted); }
+
+        .sidebar-modern .brand-chip{
+          background: var(--brand);
+          box-shadow: 0 0 10px rgba(0,255,194,.35);
+        }
+        .sidebar-modern .brand-chip-icon{ color:#000; }
+
+        .sidebar-modern .icon-chip{
+          background: var(--card);
+          border: 1px solid var(--border);
+          box-shadow: var(--shadow-card);
+          color: var(--text);
+        }
+        .sidebar-modern .sidebar-item{
+          background: var(--card);
+          border: 1px solid var(--border);
+          box-shadow: var(--shadow-card);
+          transition: transform var(--dur-quick) var(--ease), box-shadow var(--dur-quick) var(--ease), border-color var(--dur-quick) var(--ease);
+        }
+        .sidebar-modern .sidebar-item:hover{
+          transform: translateX(1px);
+        }
+        .sidebar-modern .sidebar-item.is-active{
+          border-color: var(--brand-weak);
+          box-shadow: 0 10px 26px rgba(0,0,0,.18), 0 0 0 1px rgba(0,255,194,.10) inset;
+        }
+
+        .sidebar-modern .divider{
+          height:1px; margin:10px 0; background: var(--sidebar-border);
+        }
+        .sidebar-modern .section-label{
+          font-size:10px; letter-spacing:.14em; font-weight:700; color: var(--sidebar-muted);
+          margin: 0 6px 8px;
+        }
+
+        .sidebar-modern .acct-chip{
+          background: var(--card);
+          border: 1px solid var(--border);
+          box-shadow: var(--shadow-card);
+        }
+        .sidebar-modern .avatar{
+          background: var(--brand);
+        }
+        .sidebar-modern .avatar-icon{ color:#000; }
+
+        .sidebar-modern .acct-menu{
+          background: var(--panel);
+          border: 1px solid var(--border);
+          box-shadow: var(--shadow-soft);
+        }
+        .sidebar-modern .acct-row{
+          display:flex; align-items:center; gap:.5rem; padding:.75rem 1rem; width:100%;
+          color: var(--text);
+        }
+        .sidebar-modern .acct-row:hover{
+          background: color-mix(in oklab, var(--card) 90%, var(--brand) 10%);
+        }
+
+        .sidebar-modern .collapse-handle{
+          border: 1px solid var(--border);
+          background: var(--card);
+          box-shadow: var(--shadow-card);
+          color: var(--text);
+        }
+
+        /* Dark-only refinements to match your panel glow/green tint */
+        [data-theme="dark"] .sidebar-modern{
+          /* slim, glassy rail — no big halo when collapsed */
+          background: linear-gradient(180deg, rgba(14,18,20,.96), rgba(12,16,18,.96));
+          box-shadow: inset 0 0 14px rgba(0,0,0,.35);
+        }
+        [data-theme="dark"] .sidebar-modern .sidebar-item{
+          background: linear-gradient(180deg, rgba(24,32,31,.86), rgba(16,22,21,.86));
+          border-color: rgba(255,255,255,.06);
+          box-shadow: 0 12px 30px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.04);
+        }
+        [data-theme="dark"] .sidebar-modern .sidebar-item.is-active{
+          border-color: rgba(0,255,194,.22);
+          box-shadow: 0 16px 34px rgba(0,0,0,.55), 0 0 0 1px rgba(0,255,194,.10) inset, 0 0 20px rgba(0,255,194,.06);
+        }
+        [data-theme="dark"] .sidebar-modern .icon-chip{
+          background: rgba(18,22,23,.92);
+          border-color: rgba(255,255,255,.06);
+          box-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 6px 14px rgba(0,0,0,.35);
+          color: rgba(255,255,255,.9);
+        }
+        [data-theme="dark"] .sidebar-modern .acct-chip{
+          background: linear-gradient(180deg, rgba(22,27,28,.9), rgba(16,20,21,.9));
+          border-color: rgba(255,255,255,.08);
+        }
+        [data-theme="dark"] .sidebar-modern .acct-menu{
+          background: rgba(13,15,17,.97);
+          border-color: rgba(255,255,255,.10);
+          box-shadow: 0 12px 24px rgba(0,0,0,.45);
+        }
+        [data-theme="dark"] .sidebar-modern .collapse-handle{
+          background: rgba(16,19,21,.95);
+          border-color: rgba(255,255,255,.10);
+          box-shadow: 0 2px 12px rgba(0,0,0,.45), 0 0 10px rgba(0,255,194,.06);
+          color: rgba(255,255,255,.8);
+        }
+      `}</style>
     </aside>
   );
 }
