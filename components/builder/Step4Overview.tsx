@@ -10,47 +10,74 @@ import StepProgress from './StepProgress';
 import { s, st } from '@/utils/safe';
 import { scopedStorage } from '@/utils/scoped-storage';
 
-/* ─────────────────────────── Types / helpers ─────────────────────────── */
-
-type Props = { onBack?: () => void; onFinish?: () => void };
-
-const CARD_OUTER: React.CSSProperties = {
-  background: 'var(--panel)',
-  border: '1px solid var(--border)',
-  boxShadow: 'var(--shadow-soft)',
-  borderRadius: 28,
-};
-const CARD_INNER: React.CSSProperties = {
-  background: 'var(--card)',
-  border: '1px solid var(--border)',
-  borderRadius: 20,
-  boxShadow: 'var(--shadow-card)',
-};
+/* ─────────────────────────── Shared visuals (same as Step 1) ─────────────────────────── */
 
 const BTN_GREEN = '#10b981';
 const BTN_GREEN_HOVER = '#0ea473';
 const BTN_DISABLED = 'color-mix(in oklab, var(--text) 14%, transparent)';
 
+const CARD: React.CSSProperties = {
+  background: 'var(--card)',
+  border: '1px solid var(--border)',
+  boxShadow: 'var(--shadow-card)',
+  borderRadius: 20,
+};
+
+const PANEL: React.CSSProperties = {
+  background: 'var(--panel)',
+  border: '1px solid var(--border)',
+  boxShadow: 'var(--shadow-soft)',
+  borderRadius: 28,
+};
+
+function Orb() {
+  return (
+    <div
+      aria-hidden
+      className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
+      style={{
+        background:
+          'radial-gradient(circle, color-mix(in oklab, var(--brand) 14%, transparent) 0%, transparent 70%)',
+        filter: 'blur(38px)',
+      }}
+    />
+  );
+}
+
+function SubtleGrid() {
+  return (
+    <div
+      aria-hidden
+      className="pointer-events-none absolute inset-0 opacity-[.07]"
+      style={{
+        background:
+          'linear-gradient(transparent 31px, color-mix(in oklab, var(--text) 7%, transparent) 32px), linear-gradient(90deg, transparent 31px, color-mix(in oklab, var(--text) 7%, transparent) 32px)',
+        backgroundSize: '32px 32px',
+        maskImage: 'radial-gradient(circle at 30% 20%, black, transparent 70%)',
+      }}
+    />
+  );
+}
+
+/* ───────────────────────────── Data helpers ───────────────────────────── */
+
+type Props = { onBack?: () => void; onFinish?: () => void };
+
 function getLS<T = any>(k: string, fb?: T): T {
   try { const v = localStorage.getItem(k); return (v ? JSON.parse(v) : fb) as T; } catch { return fb as T; }
 }
 
-/** Assemble a single prompt (5 sections to match Step 3 UI exactly) */
 function buildFinalPrompt() {
   const s1 = getLS<any>('builder:step1', {});
   const s3 = getLS<any>('builder:step3', {});
 
-  const name = st(s1?.name);
-  const industry = st(s1?.industry, 'your industry');
-  const language = st(s1?.language, 'English');
+  const header = [st(s1?.name), st(s1?.industry), st(s1?.language)].filter(Boolean).join('\n');
 
-  const languageText = s3?.languageText || s3?.language || ''; // Step 3 stores languageText
+  const languageText = s3?.languageText || s3?.language || '';
   const description = s(s3?.description) || '';
   const rules = s(s3?.rules) || '';
   const flow = s(s3?.flow) || '';
   const company = (s(s3?.company) || '').trim();
-
-  const header = [name, industry, language].filter(Boolean).join('\n');
 
   const blocks = [
     header,
@@ -61,10 +88,9 @@ function buildFinalPrompt() {
     '**COMPANY INFORMATION (FAQ / Docs / Policies):**', company,
   ];
 
-  // squeeze extra blank lines & trim
   return blocks
     .map((b) => (b ?? '').toString().trim())
-    .filter((b) => b.length)
+    .filter(Boolean)
     .join('\n\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
@@ -77,7 +103,6 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
   const [loadingMsg, setLoadingMsg] = useState('Generating AI…');
   const [done, setDone] = useState(false);
 
-  // Load all steps once (we also refresh Step 2 from scopedStorage below)
   const [s1] = useState<any>(getLS('builder:step1', {}));
   const [s3] = useState<any>(getLS('builder:step3', {}));
   const [s2, setS2] = useState<any>(getLS('builder:step2', {}));
@@ -89,7 +114,6 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
   const inputCostPerMTok = 2.5;
   const outputCostPerMTok = 10.0;
 
-  // ensure Step 2 (model + apiKeyId) is up-to-date from scopedStorage
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -127,16 +151,15 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
     language: !!st(s1?.language),
     template: !!(s1?.type || s1?.botType || s1?.aiType),
     model: !!s2?.model,
-    apiKey: !!s2?.apiKeyId, // presence of a selected id
+    apiKey: !!s2?.apiKeyId,
     description: !!st(s3?.description),
     flow: !!st(s3?.flow),
     rules: !!st(s3?.rules),
-    company: true, // optional but we keep a card
+    company: true,
     languageText: !!st(s3?.languageText || s3?.language),
   };
   const ready = Object.values(checks).every(Boolean);
 
-  /** Create assistant via /api/assistants/create using the user's selected key */
   async function handleGenerate() {
     if (!ready) return;
 
@@ -144,9 +167,8 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
     setDone(false);
 
     try {
-      // 1) Read the actual plaintext API key that corresponds to s2.apiKeyId
       let apiKeyPlain = '';
-      let selectedModel = s2?.model || 'gpt-4o-mini';
+      const selectedModel = s2?.model || 'gpt-4o-mini';
 
       try {
         const ss = await scopedStorage();
@@ -154,11 +176,8 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
         const keys = await ss.getJSON<any[]>('apiKeys.v1', []);
         const sel = (keys || []).find(k => k.id === s2?.apiKeyId);
         apiKeyPlain = sel?.key || '';
-      } catch {
-        // ignore; server may fall back to OPENAI_API_KEY
-      }
+      } catch {}
 
-      // 2) Create assistant (server route does the REST API call)
       const resp = await fetch('/api/assistants/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -166,7 +185,7 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
           name: st(s1?.name, 'Untitled Assistant'),
           model: selectedModel,
           prompt: finalPrompt,
-          apiKeyPlain, // if present, assistant is created in that OpenAI account
+          apiKeyPlain,
         }),
       });
 
@@ -175,11 +194,10 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
         throw new Error(data?.error || 'Failed to create assistant');
       }
 
-      // 3) Save a real build record locally (with the true assistant id)
       const bots = getLS<any[]>('chatbots', []);
       const build = {
-        id: data.assistant.id,                 // use real id
-        assistantId: data.assistant.id,        // explicit alias for later
+        id: data.assistant.id,
+        assistantId: data.assistant.id,
         name: st(s1?.name, 'Untitled Assistant'),
         type: s1?.type || s1?.botType || s1?.aiType || 'ai automation',
         industry: st(s1?.industry),
@@ -202,33 +220,36 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
     }
   }
 
-  /* ─────────────────────────────── Render ─────────────────────────────── */
-
   return (
-    <div className="min-h-screen font-movatif" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
-      <div className="max-w-6xl mx-auto px-6 md:px-8 pt-10 pb-24">
+    <div className="min-h-screen w-full font-movatif" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
+      <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 pt-8 pb-24">
         <StepProgress current={4} />
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
+        {/* Top summary card */}
+        <section className="relative p-6 md:p-7 mb-8" style={PANEL}>
+          <Orb /><SubtleGrid />
+          <div className="flex items-center gap-2 mb-5 font-semibold">
+            <Settings2 className="w-4 h-4" style={{ color: 'var(--brand)' }} />
+            Final Review
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <Info label="AI Name" value={s1?.name || '—'} icon={<FileText className="w-3.5 h-3.5" />} />
+            <Info label="Industry" value={s1?.industry || '—'} icon={<Library className="w-3.5 h-3.5" />} />
+            <Info label="Template" value={s1?.type || s1?.botType || s1?.aiType || '—'} icon={<BookText className="w-3.5 h-3.5" />} />
+            <Info label="Model" value={s2?.model || '—'} icon={<Cpu className="w-3.5 h-3.5" />} />
+          </div>
+        </section>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left column */}
           <div className="lg:col-span-2 space-y-6">
-            <div style={CARD_OUTER} className="p-6 rounded-[28px]">
-              <div className="flex items-center gap-2 mb-4 font-semibold">
-                <Settings2 className="w-4 h-4" style={{ color: 'var(--brand)' }} /> AI Configuration
-              </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                <Info label="AI Name" value={s1?.name || '—'} icon={<FileText className="w-3.5 h-3.5" />} />
-                <Info label="Industry" value={s1?.industry || '—'} icon={<Library className="w-3.5 h-3.5" />} />
-                <Info label="Template" value={(s1?.type || s1?.botType || s1?.aiType || '—')} icon={<BookText className="w-3.5 h-3.5" />} />
-                <Info label="Model" value={s2?.model || '—'} icon={<Cpu className="w-3.5 h-3.5" />} />
-              </div>
-            </div>
-
-            <div style={CARD_OUTER} className="p-6 rounded-[28px]">
+            <div style={PANEL} className="relative p-6 rounded-[28px]">
+              <Orb />
               <div className="flex items-center gap-2 mb-4 font-semibold">
                 <FileText className="w-4 h-4" style={{ color: 'var(--brand)' }} /> Content Length
               </div>
-              <div style={CARD_INNER} className="p-4 rounded-2xl">
+              <div style={CARD} className="p-4 rounded-2xl">
                 <div className="text-sm mb-2" style={{ color: 'var(--text)' }}>Characters</div>
                 <div className="w-full h-2 rounded-full" style={{ background: 'color-mix(in oklab, var(--text) 10%, transparent)' }}>
                   <div className="h-2 rounded-full" style={{ background: 'var(--brand)', width: `${Math.min(100, (chars / maxChars) * 100)}%` }} />
@@ -237,19 +258,20 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
               </div>
             </div>
 
-            <div style={CARD_OUTER} className="p-6 rounded-[28px]">
+            <div style={PANEL} className="relative p-6 rounded-[28px]">
+              <Orb />
               <div className="flex items-center gap-2 mb-4 font-semibold">
                 <KeyRound className="w-4 h-4" style={{ color: 'var(--brand)' }} /> API Configuration
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                <div style={CARD_INNER} className="p-4 rounded-2xl">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div style={CARD} className="p-4 rounded-2xl">
                   <div style={{ color: 'var(--text-muted)' }}>Input Cost</div>
                   <div style={{ color: 'var(--text)' }} className="mt-1">
                     ${inputCostPerMTok.toFixed(2)} <span style={{ color: 'var(--text-muted)' }}>/ 1M tokens</span>
                   </div>
                   <div className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>Est. tokens: {estTokens.toLocaleString()}</div>
                 </div>
-                <div style={CARD_INNER} className="p-4 rounded-2xl">
+                <div style={CARD} className="p-4 rounded-2xl">
                   <div style={{ color: 'var(--text-muted)' }}>Output Cost</div>
                   <div style={{ color: 'var(--text)' }} className="mt-1">
                     ${outputCostPerMTok.toFixed(2)} <span style={{ color: 'var(--text-muted)' }}>/ 1M tokens</span>
@@ -261,13 +283,14 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
 
           {/* Right column */}
           <div className="space-y-6">
-            <div style={CARD_OUTER} className="p-6 rounded-[28px]">
+            <div style={PANEL} className="relative p-6 rounded-[28px]">
+              <Orb />
               <div className="flex items-center gap-2 mb-4 font-semibold">
                 <div className="w-4 h-4 rounded-[6px] border flex items-center justify-center" style={{ borderColor: 'var(--brand)', color: 'var(--brand)' }}>✓</div>
                 Requirements
               </div>
 
-              <div style={CARD_INNER} className="p-4 rounded-2xl mb-4">
+              <div style={CARD} className="p-4 rounded-2xl mb-4">
                 <Req ok={!!checks.name} label="AI Name" />
                 <Req ok={!!checks.industry} label="Industry" />
                 <Req ok={!!checks.language} label="Language" />
@@ -281,7 +304,7 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
                 <Req ok={!!checks.company} label="Company Info" />
               </div>
 
-              <div className="rounded-2xl p-4" style={{ ...CARD_INNER }}>
+              <div className="rounded-2xl p-4" style={{ ...CARD }}>
                 <div className="flex items-center gap-2 font-semibold" style={{ color: 'var(--brand)' }}>
                   <Sparkles className="w-4 h-4" />
                   {ready ? 'Ready to Generate' : 'Missing Requirements'}
@@ -307,13 +330,8 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
           <button
             onClick={handleGenerate}
             disabled={!ready || loading}
-            className="inline-flex items-center gap-2 px-8 h-[42px] rounded-[18px] font-semibold select-none disabled:cursor-not-allowed"
-            style={{
-              background: ready && !loading ? BTN_GREEN : BTN_DISABLED,
-              color: '#fff',
-              boxShadow: ready && !loading ? '0 10px 24px rgba(16,185,129,.25)' : 'none',
-              transition: 'background .15s ease',
-            }}
+            className="inline-flex items-center gap-2 px-8 h-[46px] rounded-[18px] font-semibold select-none disabled:cursor-not-allowed"
+            style={{ background: ready && !loading ? BTN_GREEN : BTN_DISABLED, color: '#fff' }}
             onMouseEnter={(e) => {
               if (!ready || loading) return;
               (e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER;
@@ -354,11 +372,11 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
   );
 }
 
-/* ──────────────────────────── tiny UI helpers ─────────────────────────── */
+/* ─────────────────────────── UI bits ─────────────────────────── */
 
 function Info({ label, value, icon }: { label: string; value: string; icon?: React.ReactNode }) {
   return (
-    <div style={CARD_INNER} className="p-3 rounded-2xl">
+    <div style={CARD} className="p-3 rounded-2xl">
       <div className="text-xs flex items-center gap-1.5" style={{ color: 'var(--text-muted)' }}>{icon}{label}</div>
       <div className="mt-0.5 truncate" style={{ color: 'var(--text)' }}>{value || '—'}</div>
     </div>
