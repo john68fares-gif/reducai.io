@@ -1,3 +1,4 @@
+// components/builder/Step4Overview.tsx
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
@@ -31,11 +32,19 @@ function getLS(key: string) {
   try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch { return null; }
 }
 
+/** Build the final prompt with **five** sections, including Language Instructions. */
 function mergePrompt(): string {
   const s1 = getLS('builder:step1') || {};
   const s3 = getLS('builder:step3') || {};
 
   const header = [st(s1?.name), st(s1?.industry), st(s1?.language)].filter(Boolean).join('\n');
+
+  const languageInstructions =
+    s(s3?.languageText) ||
+    `The AI should speak ${st(s1?.language, 'English')}. The prompt should be written in ${st(s1?.language, 'English')}.
+AI should speak informal and friendly tone. Like 2 friends texting on SMS.
+Grade 3 according to the Hemingway app.`;
+
   const sections = [
     header,
     '**DESCRIPTION:**',
@@ -49,7 +58,11 @@ function mergePrompt(): string {
     '',
     '**COMPANY FAQ:**',
     (s(s3?.company) || '').trim(),
+    '',
+    '**LANGUAGE INSTRUCTIONS:**',
+    languageInstructions.trim(),
   ];
+
   return sections.filter(Boolean).join('\n\n').trim();
 }
 
@@ -58,9 +71,9 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
   const [loadingMsg, setLoadingMsg] = useState('Generating AI…');
   const [done, setDone] = useState(false);
 
-  // state loaded from storage
+  // load from storage
   const [s1, setS1] = useState<any>(getLS('builder:step1') || {});
-  const [s2, setS2] = useState<any>(getLS('builder:step2') || {}); // may be empty — we refresh from scoped
+  const [s2, setS2] = useState<any>(getLS('builder:step2') || {}); // refreshed from scoped storage
   const [s3] = useState<any>(getLS('builder:step3') || {});
   const finalPrompt = useMemo(mergePrompt, []);
   const chars = finalPrompt.length;
@@ -69,7 +82,7 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
   const inputCostPerMTok = 2.5;
   const outputCostPerMTok = 10.0;
 
-  // Load Step 2 from scoped storage (source of truth)
+  // Step 2 (model/key choice) is sourced from scopedStorage
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -119,34 +132,49 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
     setDone(false);
 
     try {
-      // If you store user key in scopedStorage (API Keys page), you can read it here:
-      // (We use local copy saved by that page into 'apiKeys.v1' to find the selected key.)
-      let apiKeyPlain = '';
+      // 1) Find the **plain** OpenAI key for the selected record
+      let apiKeyPlain = s2?.apiKeyPlain || s2?.openaiKey || '';
       try {
         const ss = await scopedStorage();
         await ss.ensureOwnerGuard();
-        const keys = await ss.getJSON<any[]>('apiKeys.v1', []);
-        const sel = (keys || []).find(k => k.id === s2?.apiKeyId);
-        apiKeyPlain = sel?.key || '';
+        // Prefer new bucket 'apiKeys.v1', fallback to legacy 'apiKeys'
+        const v1 = await ss.getJSON<any[]>('apiKeys.v1', []);
+        const legacy = await ss.getJSON<any[]>('apiKeys', []);
+        const all = (Array.isArray(v1) && v1.length ? v1 : legacy) || [];
+        const sel = (all || []).find((k) => k.id === s2?.apiKeyId);
+        if (sel?.key) apiKeyPlain = sel.key;
       } catch {}
 
+      // 2) Create Assistant (in the user's OpenAI account) via our API route
       const res = await fetch('/api/assistants/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: st(s1?.name, 'Untitled Bot'),
+          // send both names for compatibility with either route version you have
+          apiKey: apiKeyPlain,
+          apiKeyPlain,
           model: st(s2?.model, 'gpt-4o-mini'),
+          name: st(s1?.name, 'Assistant'),
+          instructions: finalPrompt,
+          // if your route expects "prompt" instead of "instructions", it can read it too:
           prompt: finalPrompt,
-          apiKeyPlain, // can be empty; server may fall back to OPENAI_API_KEY
         }),
       });
 
-      const data = await res.json();
-      if (!res.ok || !data?.ok) {
-        throw new Error(data?.error || 'Failed to create');
+      const data = await res.json().catch(() => ({} as any));
+      if (!res.ok || (!data?.id && !data?.ok)) {
+        const msg =
+          data?.error?.error?.message ||
+          data?.error?.message ||
+          data?.message ||
+          JSON.stringify(data);
+        throw new Error('OpenAI create failed: ' + msg);
       }
 
-      // Persist build locally so it shows in the dashboard immediately
+      // normalize assistant id from either shape {id} or {ok, id}
+      const assistantId = data?.id || data?.assistantId || data?.result?.id || '';
+
+      // 3) Save to your dashboard (localStorage) so it appears immediately
       const bots = JSON.parse(localStorage.getItem('chatbots') || '[]') as any[];
       const build = {
         id: crypto?.randomUUID?.() || String(Date.now()),
@@ -156,17 +184,22 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
         language: st(s1?.language, 'English'),
         model: st(s2?.model, 'gpt-4o-mini'),
         prompt: finalPrompt,
+        assistantId,        // <-- OpenAI Assistant id
+        apiKeyId: s2?.apiKeyId, // <-- which user key we linked
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
       bots.unshift(build);
       localStorage.setItem('chatbots', JSON.stringify(bots));
+
+      // Clear step buffers (same behavior you used)
       localStorage.setItem('builder:cleanup', '1');
 
       setLoading(false);
       setDone(true);
       onFinish?.();
     } catch (e: any) {
+      console.error(e);
       setLoading(false);
       alert(e?.message || 'Failed to generate the AI.');
     }
@@ -201,7 +234,9 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
                 <div className="w-full h-2 rounded-full" style={{ background: 'color-mix(in oklab, var(--text) 10%, transparent)' }}>
                   <div className="h-2 rounded-full" style={{ background: 'var(--brand)', width: `${Math.min(100, (chars / maxChars) * 100)}%` }} />
                 </div>
-                <div className="text-xs mt-2" style={{ color: 'var(--text-muted)' }}>{chars.toLocaleString()} / {maxChars.toLocaleString()}</div>
+                <div className="text-xs mt-2" style={{ color: 'var(--text-muted)' }}>
+                  {chars.toLocaleString()} / {maxChars.toLocaleString()}
+                </div>
               </div>
             </div>
 
@@ -215,7 +250,9 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
                   <div style={{ color: 'var(--text)' }} className="mt-1">
                     ${inputCostPerMTok.toFixed(2)} <span style={{ color: 'var(--text-muted)' }}>/ 1M tokens</span>
                   </div>
-                  <div className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>Est. tokens: {estTokens.toLocaleString()}</div>
+                  <div className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+                    Est. tokens: {estTokens.toLocaleString()}
+                  </div>
                 </div>
                 <div style={CARD_INNER} className="p-4 rounded-2xl">
                   <div style={{ color: 'var(--text-muted)' }}>Output Cost</div>
@@ -231,7 +268,8 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
           <div className="space-y-6">
             <div style={CARD_OUTER} className="p-6 rounded-[28px]">
               <div className="flex items-center gap-2 mb-4 font-semibold">
-                <div className="w-4 h-4 rounded-[6px] border flex items-center justify-center" style={{ borderColor: 'var(--brand)', color: 'var(--brand)' }}>✓</div>
+                <div className="w-4 h-4 rounded-[6px] border flex items-center justify-center"
+                     style={{ borderColor: 'var(--brand)', color: 'var(--brand)' }}>✓</div>
                 Requirements
               </div>
 
@@ -298,7 +336,8 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
       {/* Loading overlay */}
       {loading && (
         <div className="fixed inset-0 z-50 bg-black/70 grid place-items-center px-4">
-          <div className="w-full max-w-md rounded-[24px] p-6 text-center" style={{ background: 'var(--panel)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-soft)' }}>
+          <div className="w-full max-w-md rounded-[24px] p-6 text-center"
+               style={{ background: 'var(--panel)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-soft)' }}>
             <Loader2 className="w-7 h-7 mx-auto animate-spin mb-3" style={{ color: 'var(--brand)' }} />
             <div className="text-lg font-semibold" style={{ color: 'var(--text)' }}>Generating AI…</div>
             <div className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>{loadingMsg}</div>
