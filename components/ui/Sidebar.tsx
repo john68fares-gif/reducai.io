@@ -1,3 +1,4 @@
+// components/ui/Sidebar.tsx
 'use client';
 
 import { useEffect, useState, cloneElement } from 'react';
@@ -206,6 +207,17 @@ export default function Sidebar() {
             </div>
           </div>
         </div>
+
+        {/* ==== NEW: rail-aligned divider line (matches top header bottom edge) ==== */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute left-0 right-0"
+          style={{
+            top: 'var(--rail-h,56px)',                 // uses the CSS var set in _app.tsx
+            borderTop: '1px solid var(--sidebar-border)',
+            boxShadow: '0 1px 0 rgba(0,0,0,.04)',
+          }}
+        />
 
         {/* Groups */}
         <div className="flex-1 min-h-0 overflow-y-auto px-3 pb-6">
