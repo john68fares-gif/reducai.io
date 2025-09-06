@@ -6,15 +6,6 @@ import { Cpu, Bolt, Rocket, Gauge, KeyRound, ArrowLeft, ArrowRight } from 'lucid
 import StepProgress from './StepProgress';
 import { scopedStorage } from '@/utils/scoped-storage';
 
-/**
- * What changed & why:
- * - Keys source: reads BOTH 'apiKeys.v1' (new) and 'apiKeys' (legacy) so Step 2 never crashes/empties.
- * - Robust load: wrapped in try/catch + an error state; shows UI instead of a blank page.
- * - Button style: same green as API Keys page (#10b981 hover #0ea473), white text in light+dark.
- * - Light/Dark: all surfaces/colors come from your CSS vars (var(--bg), --panel, --card, --border, --text, etc).
- * - Skeletons + inline hints to match the vibe of Step 1/API Keys.
- */
-
 type Props = {
   onBack: () => void;
   onNext: (data: { model: string; apiKeyId: string }) => void;
@@ -35,6 +26,10 @@ const BTN_GREEN = '#10b981';
 const BTN_GREEN_HOVER = '#0ea473';
 const BTN_DISABLED = 'color-mix(in oklab, var(--text) 14%, transparent)';
 
+// shared keys used across the app
+const LS_KEYS = 'apiKeys.v1';
+const LS_SELECTED = 'apiKeys.selectedId';
+
 export default function Step2ModelSettings({ onBack, onNext }: Props) {
   const [model, setModel] = useState<string>('gpt-4o');
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
@@ -51,34 +46,39 @@ export default function Step2ModelSettings({ onBack, onNext }: Props) {
         const ss = await scopedStorage();
         await ss.ensureOwnerGuard();
 
-        // Read BOTH new and legacy buckets, prefer new
-        const v1 = await ss.getJSON<ApiKey[]>('apiKeys.v1', []);
+        // Prefer new bucket; fallback to legacy
+        const v1 = await ss.getJSON<ApiKey[]>(LS_KEYS, []);
         const legacy = await ss.getJSON<ApiKey[]>('apiKeys', []);
-        const merged = Array.isArray(v1) && v1.length ? v1
-                     : Array.isArray(legacy) ? legacy
-                     : [];
+        const merged = Array.isArray(v1) && v1.length ? v1 : Array.isArray(legacy) ? legacy : [];
 
-        // Defensive normalize
         const cleaned = merged
           .filter(Boolean)
-          .map((k) => ({
-            id: String((k as any).id || ''),
-            name: String((k as any).name || ''),
-            key: String((k as any).key || ''),
+          .map((k: any) => ({
+            id: String(k?.id || ''),
+            name: String(k?.name || ''),
+            key: String(k?.key || ''),
           }))
           .filter((k) => k.id && k.name);
 
         if (!mounted) return;
-
         setApiKeys(cleaned);
 
-        // Restore previous choice
+        // Restore previous Step2 selection (scoped)
         const saved = await ss.getJSON<{ model?: string; apiKeyId?: string } | null>('builder:step2', null);
         if (saved?.model) setModel(String(saved.model));
-        if (saved?.apiKeyId && cleaned.some((k) => k.id === saved.apiKeyId)) {
-          setApiKeyId(saved.apiKeyId);
-        } else if (cleaned[0]) {
-          setApiKeyId(cleaned[0].id);
+
+        // Default order: saved apiKeyId -> globally selected -> first key
+        const globalSelected = await ss.getJSON<string>(LS_SELECTED, '');
+        const chosen =
+          (saved?.apiKeyId && cleaned.some((k) => k.id === saved.apiKeyId)) ? saved.apiKeyId :
+          (globalSelected && cleaned.some((k) => k.id === globalSelected)) ? globalSelected :
+          (cleaned[0]?.id || '');
+
+        setApiKeyId(chosen);
+
+        // Optional: mirror any existing saved Step2 to localStorage so Step 4 sees it even before clicking Next again
+        if (saved) {
+          try { localStorage.setItem('builder:step2', JSON.stringify({ model: saved.model || model, apiKeyId: chosen })); } catch {}
         }
       } catch (e: any) {
         if (!mounted) return;
@@ -107,6 +107,10 @@ export default function Step2ModelSettings({ onBack, onNext }: Props) {
       const ss = await scopedStorage();
       await ss.ensureOwnerGuard();
       await ss.setJSON('builder:step2', payload);
+
+      // 🔑 CRUCIAL: mirror to localStorage so Step 4 can enable “Generate AI”
+      try { localStorage.setItem('builder:step2', JSON.stringify(payload)); } catch {}
+
       onNext(payload);
     })();
   };
@@ -114,19 +118,12 @@ export default function Step2ModelSettings({ onBack, onNext }: Props) {
   return (
     <div className="min-h-screen w-full font-movatif" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
       <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 pt-8 pb-24">
-        {/* Progress only (title lives in the global chip/header) */}
         <StepProgress current={2} />
 
-        {/* Frame card */}
         <section
           className="relative rounded-[28px] p-7 md:p-8"
-          style={{
-            background: 'var(--panel)',
-            border: '1px solid var(--border)',
-            boxShadow: 'var(--shadow-soft)',
-          }}
+          style={{ background: 'var(--panel)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-soft)' }}
         >
-          {/* soft ambient grid/glow like Step 1 / API Keys */}
           <div
             aria-hidden
             className="pointer-events-none absolute -top-[26%] -left-[28%] w-[70%] h-[70%] rounded-full"
@@ -137,8 +134,10 @@ export default function Step2ModelSettings({ onBack, onNext }: Props) {
           />
 
           <header className="mb-6">
-            <div className="inline-flex items-center gap-2 text-xs tracking-wide px-3 py-1.5 rounded-[20px] border"
-                 style={{ borderColor: 'var(--border)', background: 'color-mix(in oklab, var(--brand) 10%, var(--card))' }}>
+            <div
+              className="inline-flex items-center gap-2 text-xs tracking-wide px-3 py-1.5 rounded-[20px] border"
+              style={{ borderColor: 'var(--border)', background: 'color-mix(in oklab, var(--brand) 10%, var(--card))' }}
+            >
               <KeyRound className="w-3.5 h-3.5" style={{ color: 'var(--brand)' }} />
               Choose your model & key
             </div>
@@ -152,20 +151,19 @@ export default function Step2ModelSettings({ onBack, onNext }: Props) {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-7">
               {[0, 1].map((i) => (
                 <div key={i}>
-                  <div className="h-4 w-40 rounded mb-3"
-                       style={{ background: 'color-mix(in oklab, var(--text) 10%, transparent)' }} />
-                  <div className="h-12 rounded-2xl"
-                       style={{ background: 'var(--card)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card)' }} />
-                  <div className="mt-2 h-3 w-48 rounded"
-                       style={{ background: 'color-mix(in oklab, var(--text) 8%, transparent)' }} />
+                  <div className="h-4 w-40 rounded mb-3" style={{ background: 'color-mix(in oklab, var(--text) 10%, transparent)' }} />
+                  <div className="h-12 rounded-2xl" style={{ background: 'var(--card)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card)' }} />
+                  <div className="mt-2 h-3 w-48 rounded" style={{ background: 'color-mix(in oklab, var(--text) 8%, transparent)' }} />
                 </div>
               ))}
             </div>
           ) : (
             <>
               {err && (
-                <div className="mb-5 rounded-[14px] px-4 py-3 text-sm"
-                     style={{ background: 'color-mix(in oklab, red 6%, var(--card))', border: '1px solid color-mix(in oklab, red 20%, var(--border))', color: 'var(--text)' }}>
+                <div
+                  className="mb-5 rounded-[14px] px-4 py-3 text-sm"
+                  style={{ background: 'color-mix(in oklab, red 6%, var(--card))', border: '1px solid color-mix(in oklab, red 20%, var(--border))', color: 'var(--text)' }}
+                >
                   {err}
                 </div>
               )}
@@ -181,11 +179,7 @@ export default function Step2ModelSettings({ onBack, onNext }: Props) {
                       value={model}
                       onChange={(e) => setModel(e.target.value)}
                       className="w-full rounded-2xl px-4 py-3.5 text-[15px] outline-none"
-                      style={{
-                        background: 'var(--card)',
-                        border: '1px solid var(--border)',
-                        color: 'var(--text)',
-                      }}
+                      style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }}
                     >
                       {MODEL_OPTIONS.map((m) => (
                         <option key={m.value} value={m.value}>{m.label}</option>
@@ -201,7 +195,7 @@ export default function Step2ModelSettings({ onBack, onNext }: Props) {
                   </div>
                 </div>
 
-                {/* API key (per-user scoped) */}
+                {/* API key */}
                 <div>
                   <label className="block mb-2 text-[13px] font-medium" style={{ color: 'var(--text)' }}>
                     API Key
@@ -211,11 +205,7 @@ export default function Step2ModelSettings({ onBack, onNext }: Props) {
                       value={apiKeyId}
                       onChange={(e) => setApiKeyId(e.target.value)}
                       className="w-full rounded-2xl px-4 py-3.5 text-[15px] outline-none"
-                      style={{
-                        background: 'var(--card)',
-                        border: '1px solid var(--border)',
-                        color: 'var(--text)',
-                      }}
+                      style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }}
                     >
                       <option value="">Select an API key…</option>
                       {apiKeys.map((k) => (
@@ -239,12 +229,7 @@ export default function Step2ModelSettings({ onBack, onNext }: Props) {
             <button
               onClick={onBack}
               className="inline-flex items-center gap-2 rounded-[18px] px-4 py-2 text-sm transition"
-              style={{
-                background: 'var(--card)',
-                border: '1px solid var(--border)',
-                color: 'var(--text)',
-                boxShadow: 'var(--shadow-soft)',
-              }}
+              style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)', boxShadow: 'var(--shadow-soft)' }}
             >
               <ArrowLeft className="w-4 h-4" />
               Previous
@@ -256,7 +241,7 @@ export default function Step2ModelSettings({ onBack, onNext }: Props) {
               className="inline-flex items-center gap-2 px-8 h-[42px] rounded-[18px] font-semibold select-none disabled:cursor-not-allowed"
               style={{
                 background: canContinue && !loading ? BTN_GREEN : BTN_DISABLED,
-                color: '#ffffff', // ALWAYS white label (light + dark)
+                color: '#ffffff',
                 boxShadow: canContinue && !loading ? '0 10px 24px rgba(16,185,129,.25)' : 'none',
                 transition: 'transform .15s ease, box-shadow .15s ease, background .15s ease',
               }}
