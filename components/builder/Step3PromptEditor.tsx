@@ -10,7 +10,7 @@ import {
 import { st } from '@/utils/safe';
 import { scopedStorage } from '@/utils/scoped-storage';
 
-/* ─────────── Types & constants (visuals unchanged; small polish only) ─────────── */
+/* ───────────────────────── Types ───────────────────────── */
 
 type Props = { onNext?: () => void; onBack?: () => void };
 type AIKind = 'sales' | 'support' | 'blank';
@@ -38,6 +38,8 @@ type SavedStep3 = {
   company: string;
 };
 
+/* ─────────────────────── Visual constants (match Step 1) ─────────────────────── */
+
 const BTN_GREEN = '#10b981';
 const BTN_GREEN_HOVER = '#0ea473';
 const BTN_DISABLED = 'color-mix(in oklab, var(--text) 14%, transparent)';
@@ -45,23 +47,52 @@ const BTN_DISABLED = 'color-mix(in oklab, var(--text) 14%, transparent)';
 const FRAME_STYLE: React.CSSProperties = {
   background: 'var(--panel)',
   border: '1px solid var(--border)',
-  // slightly stronger shadow so panels “sit” like API Keys page
-  boxShadow: '0 18px 48px rgba(0,0,0,.20), var(--shadow-soft)',
-  borderRadius: 30,
+  boxShadow: 'var(--shadow-soft)',
+  borderRadius: 28,
 };
+
 const HEADER_BORDER = { borderBottom: '1px solid var(--border)' };
+
 const CARD_STYLE: React.CSSProperties = {
   background: 'var(--card)',
   border: '1px solid var(--border)',
   borderRadius: 20,
-  // a touch of inner lift
-  boxShadow: 'inset 0 1px 0 rgba(255,255,255,.04), var(--shadow-card)',
+  boxShadow: 'var(--shadow-card)',
 };
+
+function Orb() {
+  return (
+    <div
+      aria-hidden
+      className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
+      style={{
+        background:
+          'radial-gradient(circle, color-mix(in oklab, var(--brand) 14%, transparent) 0%, transparent 70%)',
+        filter: 'blur(38px)',
+      }}
+    />
+  );
+}
+
+function SubtleGrid() {
+  return (
+    <div
+      aria-hidden
+      className="pointer-events-none absolute inset-0 opacity-[.07]"
+      style={{
+        background:
+          'linear-gradient(transparent 31px, color-mix(in oklab, var(--text) 7%, transparent) 32px), linear-gradient(90deg, transparent 31px, color-mix(in oklab, var(--text) 7%, transparent) 32px)',
+        backgroundSize: '32px 32px',
+        maskImage: 'radial-gradient(circle at 30% 20%, black, transparent 70%)',
+      }}
+    />
+  );
+}
 
 const PREVIEW_LANG_H = 'h-[110px]';
 const PREVIEW_STD_H = 'h-[160px]';
 
-/* ───────────── Helpers ───────────── */
+/* ───────────────────────── Helpers ───────────────────────── */
 
 function buildSections(kind: AIKind, rawIndustry: string, rawLanguage: string): Section[] {
   const IN = st(rawIndustry, 'your industry');
@@ -150,17 +181,19 @@ function assembleCompiledPrompt(p: SavedStep3) {
   ].join('\n');
 }
 
-/** Clean any HTML to plain text (last-resort client fallback) */
+/** Convert any HTML-ish response to plain text (client fallback) */
 function stripHtml(htmlOrText: string) {
   if (!htmlOrText) return '';
   const div = document.createElement('div');
   div.innerHTML = htmlOrText;
-  const text = (div.textContent || div.innerText || '').replace(/\s+\n/g, '\n').replace(/\n{3,}/g, '\n\n');
+  const text = (div.textContent || div.innerText || '')
+    .replace(/\s+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n');
   div.remove();
   return text.trim();
 }
 
-/* ───────────── Component ───────────── */
+/* ───────────────────────── Component ───────────────────────── */
 
 export default function Step3PromptEditor({ onNext, onBack }: Props) {
   const [kind, setKind] = useState<AIKind>('sales');
@@ -180,6 +213,7 @@ export default function Step3PromptEditor({ onNext, onBack }: Props) {
   const companyIdx = useMemo(() => defs.findIndex((d) => d.key === 'company'), [defs]);
   const validUrls = useMemo(() => urls.map((u) => st(u)).filter(Boolean), [urls]);
 
+  /* Load from Step 1 + restore Step 3 */
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -288,17 +322,13 @@ export default function Step3PromptEditor({ onNext, onBack }: Props) {
     if (typeof window !== 'undefined') localStorage.setItem('builder:compiledPrompt', JSON.stringify(compiled));
   }
 
-  /* ───────────── Import Websites (robust, plain-text, capped) ─────────────
-     - Accepts either { ok: true, text: "..." } JSON or raw text.
-     - Client-side strips any accidental HTML.
-     - Caps per-site and total sizes to prevent crashes.
-  ------------------------------------------------------------------------- */
+  /* Import Websites (plain-text, safe caps) */
   async function importWebsites() {
     if (!validUrls.length || companyIdx < 0) return;
 
-    const PER_SITE_CAP = 12_000;   // ~12k chars from each site
-    const TOTAL_CAP    = 32_000;   // overall cap added this import
-    const FIELD_CAP    = 64_000;   // max for the whole Company field
+    const PER_SITE_CAP = 12_000;   // ~12k chars per site
+    const TOTAL_CAP    = 32_000;   // cap added this import
+    const FIELD_CAP    = 64_000;   // max size of Company field
 
     try {
       const chunks: string[] = [];
@@ -317,17 +347,15 @@ export default function Step3PromptEditor({ onNext, onBack }: Props) {
           raw = await res.text();
         }
 
-        // Ensure plain text (strip any HTML) and cap
+        // Ensure plain text and cap
         let clean = stripHtml(raw);
         if (clean.length > PER_SITE_CAP) clean = clean.slice(0, PER_SITE_CAP) + '\n[…truncated]';
-
-        // Skip empty garbage
         if (!clean) continue;
 
         chunks.push(`From ${url}:\n${clean}`);
       }
 
-      // Join and overall cap
+      // Overall cap for this import
       let compiled = chunks.join('\n\n').trim();
       if (compiled.length > TOTAL_CAP) compiled = compiled.slice(0, TOTAL_CAP) + '\n[…overall import truncated]';
 
@@ -351,7 +379,7 @@ export default function Step3PromptEditor({ onNext, onBack }: Props) {
     onNext?.();
   };
 
-  /* ───────────── UI ───────────── */
+  /* ───────────────────────── UI ───────────────────────── */
 
   return (
     <div className="min-h-screen w-full font-movatif" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
@@ -374,8 +402,10 @@ export default function Step3PromptEditor({ onNext, onBack }: Props) {
           )}
         </div>
 
-        {/* Content frame (same layout, just tidier borders/shadow) */}
-        <div style={FRAME_STYLE} className="p-6 md:p-7">
+        {/* Frame matches Step 1: panel + orb + subtle grid */}
+        <section className="relative p-6 md:p-7" style={FRAME_STYLE}>
+          <Orb /><SubtleGrid />
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {(loading ? Array.from({ length: 4 }) : defs).map((d, i) => {
               if (loading) {
@@ -388,6 +418,7 @@ export default function Step3PromptEditor({ onNext, onBack }: Props) {
               }
 
               const isCompany = d.key === 'company';
+
               return (
                 <div key={d.key} className={`${d.wide ? 'md:col-span-2' : ''} relative`} style={CARD_STYLE}>
                   {/* header */}
@@ -496,6 +527,7 @@ export default function Step3PromptEditor({ onNext, onBack }: Props) {
                               onChange={(e) => setValue(i, e.target.value)}
                               className="w-full h-[26rem] bg-transparent outline-none resize-none text-sm leading-6"
                               placeholder="Start typing…"
+                              style={{ color: 'var(--text)' }}
                             />
                             <div className="mt-3 text-xs flex items-center justify-between" style={{ color: 'var(--text-muted)' }}>
                               <span>Character count: {(values[i] || '').length.toLocaleString()}</span>
@@ -535,12 +567,13 @@ export default function Step3PromptEditor({ onNext, onBack }: Props) {
               );
             })}
           </div>
-        </div>
+        </section>
 
         {/* Import Websites modal */}
         {importOpen && (
           <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center px-4">
-            <div className="w-full max-w-3xl rounded-3xl p-6 font-movatif" style={FRAME_STYLE}>
+            <div className="w-full max-w-3xl rounded-3xl p-6 font-movatif relative" style={FRAME_STYLE}>
+              <Orb /><SubtleGrid />
               {/* Header */}
               <div className="flex items-start justify-between">
                 <div>
