@@ -1,21 +1,39 @@
-// components/ui/Sidebar.tsx
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { AnimatePresence, motion } from 'framer-motion';
 import {
-  Home, Hammer, Mic, Rocket,
-  Phone, Key, HelpCircle,
-  ChevronLeft, ChevronRight, Settings as SettingsIcon,
-  LogOut, User as UserIcon, Bot
+  LayoutGrid as CreateIcon,
+  Wrench as TuningIcon,
+  Mic,
+  Rocket,
+  Phone,
+  Key,
+  HelpCircle,
+  ChevronLeft,
+  ChevronRight,
+  User as UserIcon,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase-client';
 
+/* Sizes & persistence */
 const W_EXPANDED = 260;
 const W_COLLAPSED = 72;
 const LS_COLLAPSED = 'ui:sidebarCollapsed';
+
+const DARK_GREEN = '#10b981';       // same darker green you liked on buttons
+const NEUTRAL_ICON = 'rgba(255,255,255,.85)';
+
+function brandMark() {
+  return (
+    <div className="w-9 h-9 rounded-xl grid place-items-center shrink-0"
+         style={{ background: 'var(--brand,#00ffc2)', boxShadow: '0 0 10px rgba(0,255,194,.35)' }}>
+      {/* simple logo dot */}
+      <div className="w-3 h-3 rounded-full bg-black/85" />
+    </div>
+  );
+}
 
 function getDisplayName(name?: string | null, email?: string | null) {
   if (name && name.trim()) return name.trim();
@@ -26,291 +44,215 @@ function getDisplayName(name?: string | null, email?: string | null) {
 export default function Sidebar() {
   const pathname = usePathname();
 
-  // collapsed state (persist) + expose --sidebar-w for your layout
+  /* collapse state (persist + set CSS var to kill ghost space) */
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     try { return JSON.parse(localStorage.getItem(LS_COLLAPSED) || 'false'); } catch { return false; }
   });
   useEffect(() => {
     try { localStorage.setItem(LS_COLLAPSED, JSON.stringify(collapsed)); } catch {}
+    // drives layout column in _app.tsx
     document.documentElement.style.setProperty('--sidebar-w', `${collapsed ? W_COLLAPSED : W_EXPANDED}px`);
   }, [collapsed]);
 
-  // user
-  const [userLoading, setUserLoading] = useState(true);
+  /* auth snippet for avatar */
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [userName, setUserName] = useState<string | null>(null);
-  const [acctOpen, setAcctOpen] = useState(false);
   useEffect(() => {
-    let sub: any;
+    let unsub: any;
     (async () => {
       const { data: { user } } = await supabase.auth.getUser();
       setUserEmail(user?.email ?? null);
       setUserName((user?.user_metadata as any)?.full_name ?? user?.user_metadata?.name ?? null);
-      setUserLoading(false);
-      sub = supabase.auth.onAuthStateChange((_e, s) => {
-        const u = s?.user;
+      unsub = supabase.auth.onAuthStateChange((_e, session) => {
+        const u = session?.user;
         setUserEmail(u?.email ?? null);
         setUserName((u?.user_metadata as any)?.full_name ?? u?.user_metadata?.name ?? null);
-        setUserLoading(false);
       });
     })();
-    return () => sub?.data?.subscription?.unsubscribe?.();
+    return () => unsub?.data?.subscription?.unsubscribe?.();
   }, []);
-  useEffect(() => setAcctOpen(false), [pathname]);
 
-  const onSignOut = async () => { try { await supabase.auth.signOut(); } catch {} };
-
-  // routes (only the ones you want)
-  const items = useMemo(() => ([
-    { href: '/builder',      label: 'Create',     sub: 'Design your agent',     icon: Home,    bucket: 'primary' },
-    { href: '/improve',      label: 'Tuning',     sub: 'Integrate & optimize',  icon: Hammer,  bucket: 'primary' },
-    { href: '/voice-agent',  label: 'Voice Studio', sub: 'Calls & persona',     icon: Mic,     bucket: 'primary' },
-    { href: '/launch',       label: 'Launchpad',  sub: 'Go live',               icon: Rocket,  bucket: 'primary' },
-
-    { href: '/phone-numbers',label: 'Numbers',    sub: 'Twilio & BYO',          icon: Phone,   bucket: 'secondary' },
-    { href: '/apikeys',      label: 'API Keys',   sub: 'Models & access',       icon: Key,     bucket: 'secondary' },
-    { href: '/support',      label: 'Help',       sub: 'Guides & FAQ',          icon: HelpCircle, bucket: 'secondary' },
+  /* groups */
+  const top = useMemo(() => ([
+    { href: '/builder',     label: 'Create',      sub: 'Design your agent',  icon: <CreateIcon />  },
+    { href: '/improve',     label: 'Tuning',      sub: 'Integrate & optimize', icon: <TuningIcon /> },
+    { href: '/voice-agent', label: 'Voice Studio',sub: 'Calls & persona',    icon: <Mic />         },
+    { href: '/launch',      label: 'Launchpad',   sub: 'Go live',            icon: <Rocket />      },
   ]), []);
 
-  // helper
+  const bottom = useMemo(() => ([
+    { href: '/phone-numbers', label: 'Numbers', sub: 'Twilio & BYO', icon: <Phone /> },
+    { href: '/apikeys',       label: 'API Keys', sub: 'Models & access', icon: <Key /> },
+    { href: '/support',       label: 'Help',   sub: 'Guides & FAQ', icon: <HelpCircle /> },
+  ]), []);
+
   const isActive = (href: string) =>
-    href === '/'
-      ? pathname === '/'
-      : pathname?.startsWith(href);
+    pathname === href || pathname?.startsWith(`${href}/`);
+
+  /* Item renderer
+     - Expanded: no pill/box, just icon + labels, ample spacing
+     - Collapsed: single rounded pill with subtle bg/border (ONE box only)
+  */
+  function Item({
+    href, label, sub, icon, tint = 'green',
+  }: { href: string; label: string; sub?: string; icon: React.ReactNode; tint?: 'green'|'neutral' }) {
+    const active = isActive(href);
+
+    if (collapsed) {
+      return (
+        <Link href={href} className="block">
+          <div
+            className="group w-12 h-12 mx-auto mb-2 rounded-xl grid place-items-center transition-transform"
+            title={label}
+            style={{
+              background: active ? 'rgba(16,185,129,.22)' : 'rgba(15,18,20,.85)',
+              border: `1px solid ${active ? 'rgba(16,185,129,.45)' : 'rgba(255,255,255,.08)'}`,
+              boxShadow: active ? '0 0 14px rgba(16,185,129,.22) inset, 0 6px 18px rgba(0,0,0,.35)'
+                                : 'inset 0 0 10px rgba(0,0,0,.28)',
+            }}
+          >
+            <div style={{ color: tint === 'green' ? DARK_GREEN : NEUTRAL_ICON }}>
+              {icon}
+            </div>
+          </div>
+        </Link>
+      );
+    }
+
+    return (
+      <Link href={href} className="block">
+        <div
+          className="h-12 flex items-center gap-3 px-1 rounded-lg"
+          style={{ transition: 'color var(--dur-quick) var(--ease), transform var(--dur-quick) var(--ease)' }}
+        >
+          <div className="w-5 h-5 grid place-items-center"
+               style={{ color: tint === 'green' ? DARK_GREEN : 'var(--sidebar-muted)' }}>
+            {icon}
+          </div>
+          <div className="leading-tight">
+            <div className="text-sm font-semibold"
+                 style={{ color: active ? 'var(--sidebar-text)' : 'var(--sidebar-text)' }}>
+              {label}
+            </div>
+            {sub && (
+              <div className="text-[11px]" style={{ color: 'var(--sidebar-muted)' }}>
+                {sub}
+              </div>
+            )}
+          </div>
+        </div>
+      </Link>
+    );
+  }
 
   return (
     <aside
-      className="fixed left-0 top-0 h-screen z-50 transition-[width] duration-300 ease-out"
+      className="fixed left-0 top-0 h-screen z-50"
       style={{
         width: collapsed ? W_COLLAPSED : W_EXPANDED,
-        // Expanded: full sidebar surface; Collapsed: slim rail with transparent bg (no wide panel look)
-        background: collapsed ? 'transparent' : 'var(--sidebar-bg)',
-        borderRight: collapsed ? '1px solid rgba(255,255,255,0.06)' : '1px solid var(--sidebar-border)',
-        boxShadow: collapsed ? 'none' : 'inset 0 0 18px rgba(0,0,0,0.35)',
-        color: 'var(--sidebar-text)'
+        background: 'var(--sidebar-bg)',
+        borderRight: `1px solid var(--sidebar-border)`,
+        transition: 'width var(--dur) var(--ease)',
+        boxShadow: 'inset 0 0 18px rgba(0,0,0,.35)',
       }}
       aria-label="Primary"
     >
       <div className="relative h-full flex flex-col">
-        {/* Header */}
-        <div
-          className={collapsed ? 'px-3 py-4' : 'px-4 py-5'}
-          style={{ borderBottom: collapsed ? 'none' : '1px solid var(--sidebar-border)' }}
-        >
+        {/* Brand header */}
+        <div className="px-4 py-4 border-b" style={{ borderColor: 'var(--sidebar-border)' }}>
           <div className="flex items-center gap-3">
-            <div
-              className="w-9 h-9 rounded-xl grid place-items-center shrink-0"
-              style={{ background: 'var(--brand)', boxShadow: '0 0 10px rgba(0,255,194,.35)' }}
-            >
-              <Bot className="w-5 h-5 text-black" />
-            </div>
+            {brandMark()}
             {!collapsed && (
-              <div className="leading-tight min-w-0">
-                <div className="text-[17px] font-semibold tracking-wide">
+              <div className="leading-tight">
+                <div className="text-[17px] font-semibold" style={{ color: 'var(--sidebar-text)' }}>
                   reduc<span style={{ color: 'var(--brand)' }}>ai.io</span>
                 </div>
-                <div className="text-[11px]" style={{ color: 'var(--sidebar-muted)' }}>Builder Workspace</div>
+                <div className="text-[11px]" style={{ color: 'var(--sidebar-muted)' }}>
+                  Builder Workspace
+                </div>
               </div>
             )}
           </div>
         </div>
 
         {/* Nav */}
-        <div className={collapsed ? 'px-2 pt-3 pb-2 flex-1 overflow-y-auto' : 'px-4 pt-4 pb-3 flex-1 overflow-y-auto'}>
-          {!collapsed ? (
-            <nav className="space-y-6">
-              <div className="space-y-1">
-                {items.filter(i => i.bucket === 'primary').map(({ href, label, sub, icon: I }) => (
-                  <Link key={href} href={href} className="block group">
-                    <div className="flex items-center h-10">
-                      <I
-                        className="w-5 h-5 mr-3"
-                        style={{ color: isActive(href) ? 'var(--accent-green)' : 'var(--sidebar-muted)' }}
-                      />
-                      <div className="min-w-0">
-                        <div className="text-[13px] font-semibold" style={{ color: isActive(href) ? 'var(--text)' : 'var(--sidebar-text)' }}>
-                          {label}
-                        </div>
-                        <div className="text-[11px]" style={{ color: 'var(--sidebar-muted)' }}>{sub}</div>
-                      </div>
-                    </div>
-                  </Link>
-                ))}
-              </div>
-
-              <div className="space-y-1">
-                {items.filter(i => i.bucket === 'secondary').map(({ href, label, sub, icon: I }) => (
-                  <Link key={href} href={href} className="block group">
-                    <div className="flex items-center h-10">
-                      <I
-                        className="w-5 h-5 mr-3"
-                        style={{ color: isActive(href) ? 'var(--accent-green)' : 'var(--sidebar-muted)' }}
-                      />
-                      <div className="min-w-0">
-                        <div className="text-[13px] font-semibold" style={{ color: isActive(href) ? 'var(--text)' : 'var(--sidebar-text)' }}>
-                          {label}
-                        </div>
-                        <div className="text-[11px]" style={{ color: 'var(--sidebar-muted)' }}>{sub}</div>
-                      </div>
-                    </div>
-                  </Link>
-                ))}
-              </div>
-            </nav>
-          ) : (
-            // Collapsed rail: ONE box per icon (no double outlines)
-            <nav className="grid gap-2">
-              {items.map(({ href, icon: I }, idx) => {
-                const active = isActive(href);
-                const inPrimary = idx < 4;
-                return (
-                  <Link key={href} href={href} className="block">
-                    <div
-                      className="w-10 h-10 rounded-xl grid place-items-center mx-auto transition-transform hover:-translate-y-[1px]"
-                      style={{
-                        background: active ? 'rgba(0,255,194,.10)' : 'rgba(255,255,255,.06)',
-                        border: active ? '1px solid rgba(0,255,194,.28)' : '1px solid rgba(255,255,255,.08)',
-                        boxShadow: active ? '0 0 10px rgba(0,255,194,.12) inset' : 'inset 0 0 10px rgba(0,0,0,.28)'
-                      }}
-                      title=""
-                    >
-                      <I
-                        className="w-5 h-5"
-                        style={{ color: inPrimary ? 'var(--accent-green)' : 'rgba(255,255,255,.85)' }}
-                      />
-                    </div>
-                  </Link>
-                );
-              })}
-            </nav>
-          )}
-        </div>
-
-        {/* Account chip (kept minimal, no rectangles when expanded) */}
-        <div className={collapsed ? 'px-2 pb-4' : 'px-4 pb-5'}>
-          {!collapsed ? (
-            <button
-              onClick={() => setAcctOpen(v => !v)}
-              className="w-full rounded-2xl px-4 py-3 flex items-center gap-3 text-left transition hover:bg-white/5"
-              style={{ border: '1px solid var(--sidebar-border)', background: 'transparent' }}
-            >
-              <div className="w-8 h-8 rounded-full grid place-items-center"
-                   style={{ background: 'var(--brand)', boxShadow: '0 0 8px rgba(0,0,0,.25)' }}>
-                <UserIcon className="w-4 h-4 text-black/80" />
-              </div>
-              <div className="leading-tight min-w-0">
-                <div className="text-sm font-semibold truncate" style={{ color: 'var(--sidebar-text)' }}>
-                  {userLoading ? 'Account' : getDisplayName(userName, userEmail)}
-                </div>
-                <div className="text-[11px] truncate" style={{ color: 'var(--sidebar-muted)' }}>
-                  {userLoading ? 'Loading…' : (userEmail || 'Signed in')}
-                </div>
-              </div>
-              <span className="ml-auto text-xs" style={{ color: 'var(--sidebar-muted)' }}>{acctOpen ? '▲' : '▼'}</span>
-            </button>
-          ) : (
-            <div
-              className="w-10 h-10 rounded-xl grid place-items-center mx-auto"
-              style={{ border: '1px solid rgba(255,255,255,.08)', background: 'rgba(255,255,255,.06)' }}
-              title="Account"
-            >
-              <UserIcon className="w-5 h-5" style={{ color: 'rgba(255,255,255,.85)' }} />
+        <div className="flex-1 min-h-0 overflow-y-auto px-3 py-3">
+          {/* WORKSPACE label */}
+          {!collapsed && (
+            <div className="px-1 text-[11px] mb-2 tracking-[.14em]"
+                 style={{ color: 'var(--sidebar-muted)' }}>
+              WORKSPACE
             </div>
           )}
+          <nav className={collapsed ? 'grid gap-2' : 'grid gap-1.5'}>
+            {top.map((i) => (
+              <Item key={i.href} {...i} tint="green" />
+            ))}
+          </nav>
 
-          {/* Desktop dropdown */}
-          <AnimatePresence>
-            {!collapsed && acctOpen && (
-              <motion.div
-                key="acct-dd"
-                initial={{ opacity: 0, y: -6 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -6 }}
-                transition={{ duration: 0.16 }}
-                className="relative hidden md:block"
-              >
-                <div
-                  className="mt-2 rounded-xl overflow-hidden border"
-                  style={{ borderColor: 'var(--sidebar-border)', background: 'var(--sidebar-bg)', boxShadow: '0 12px 24px rgba(0,0,0,.35)' }}
-                >
-                  <Link href="/account" onClick={() => setAcctOpen(false)} className="w-full flex items-center gap-2 px-4 py-3 text-left hover:bg-white/5">
-                    <SettingsIcon className="w-4 h-4" style={{ color: 'var(--sidebar-text)' }} />
-                    <span>Settings</span>
-                  </Link>
-                  <button onClick={onSignOut} className="w-full flex items-center gap-2 px-4 py-3 text-left hover:bg-white/5">
-                    <LogOut className="w-4 h-4" style={{ color: 'var(--sidebar-text)' }} />
-                    <span>Sign out</span>
-                  </button>
+          {/* divider spacing */}
+          <div className="my-3" />
+
+          {/* RESOURCES label */}
+          {!collapsed && (
+            <div className="px-1 text-[11px] mb-2 tracking-[.14em]"
+                 style={{ color: 'var(--sidebar-muted)' }}>
+              RESOURCES
+            </div>
+          )}
+          <nav className={collapsed ? 'grid gap-2' : 'grid gap-1.5'}>
+            {bottom.map((i) => (
+              <Item key={i.href} {...i} tint="neutral" />
+            ))}
+          </nav>
+        </div>
+
+        {/* Account (always visible) */}
+        <div className="px-3 pb-4">
+          <Link href="/account" title="Account" className="block">
+            <div
+              className="w-full flex items-center gap-3 rounded-2xl"
+              style={{
+                background: collapsed ? 'transparent' : 'rgba(15,18,20,.85)',
+                border: collapsed ? '0' : '1px solid rgba(255,255,255,.08)',
+                padding: collapsed ? 6 : 12,
+              }}
+            >
+              <div className="w-8 h-8 rounded-full grid place-items-center"
+                   style={{ background: 'color-mix(in oklab, var(--brand) 65%, #0b0c10)', boxShadow: '0 0 8px rgba(0,0,0,.25)' }}>
+                <UserIcon className="w-4 h-4 text-black/80" />
+              </div>
+              {!collapsed && (
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold truncate" style={{ color: 'var(--sidebar-text)' }}>
+                    {getDisplayName(userName, userEmail)}
+                  </div>
+                  <div className="text-[11px] truncate" style={{ color: 'var(--sidebar-muted)' }}>
+                    {userEmail || 'Signed in'}
+                  </div>
                 </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+              )}
+            </div>
+          </Link>
         </div>
 
         {/* Collapse handle */}
         <button
-          onClick={() => setCollapsed(c => !c)}
-          className="absolute top-1/2 -right-3 -translate-y-1/2 rounded-full p-1.5 transition hover:bg-white/5"
-          style={{ border: '1px solid var(--sidebar-border)', boxShadow: '0 2px 12px rgba(0,0,0,.25)' }}
+          onClick={() => setCollapsed((c) => !c)}
+          className="absolute top-1/2 -right-3 -translate-y-1/2 rounded-full p-1.5"
+          style={{
+            border: '1px solid var(--sidebar-border)',
+            background: 'var(--sidebar-bg)',
+            boxShadow: '0 6px 16px rgba(0,0,0,.35)',
+            transition: 'transform var(--dur) var(--ease), opacity var(--dur-quick) var(--ease)',
+          }}
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
-          {collapsed ? <ChevronRight className="w-4 h-4" style={{ color: 'var(--sidebar-text)' }} />
-                    : <ChevronLeft className="w-4 h-4" style={{ color: 'var(--sidebar-text)' }} />}
+          {collapsed
+            ? <ChevronRight className="w-4 h-4" style={{ color: 'var(--sidebar-text)' }} />
+            : <ChevronLeft  className="w-4 h-4" style={{ color: 'var(--sidebar-text)' }} />}
         </button>
       </div>
-
-      {/* Mobile account sheet */}
-      <AnimatePresence>
-        {acctOpen && (
-          <motion.div
-            key="acct-sheet"
-            className="md:hidden fixed inset-0 z-[60] flex items-end"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={() => setAcctOpen(false)}
-            style={{ background: 'rgba(0,0,0,0.5)' }}
-          >
-            <motion.div
-              initial={{ y: 32 }}
-              animate={{ y: 0 }}
-              exit={{ y: 32 }}
-              transition={{ duration: 0.18 }}
-              className="w-full rounded-t-2xl overflow-hidden"
-              onClick={(e) => e.stopPropagation()}
-              style={{ background: 'var(--sidebar-bg)', borderTop: '1px solid var(--sidebar-border)' }}
-            >
-              <div className="px-5 py-4" style={{ borderBottom: '1px solid var(--sidebar-border)' }}>
-                <div className="font-semibold" style={{ color: 'var(--sidebar-text)' }}>{getDisplayName(userName, userEmail)}</div>
-                <div className="text-sm" style={{ color: 'var(--sidebar-muted)' }}>{userEmail}</div>
-              </div>
-              <Link href="/account" onClick={() => setAcctOpen(false)} className="w-full flex items-center gap-2 px-5 py-4 text-left" style={{ borderBottom: '1px solid var(--sidebar-border)' }}>
-                <SettingsIcon className="w-4 h-4" style={{ color: 'var(--sidebar-text)' }} />
-                <span>Settings</span>
-              </Link>
-              <button onClick={() => { setAcctOpen(false); onSignOut(); }} className="w-full flex items-center gap-2 px-5 py-4 text-left">
-                <LogOut className="w-4 h-4" style={{ color: 'var(--sidebar-text)' }} />
-                <span>Sign out</span>
-              </button>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Page-scoped vars for icon color & light/dark tweaks */}
-      <style jsx global>{`
-        :root {
-          --accent-green: #0ea473; /* the darker green you liked */
-        }
-        /* Light mode rail look */
-        :root .fixed[left="0"][aria-label="Primary"] {
-          /* no-op, uses your tokens */
-        }
-        /* Dark mode small polishing for the collapsed rail */
-        [data-theme="dark"] aside[aria-label="Primary"] {
-          /* nothing heavy; we already use your sidebar tokens */
-        }
-      `}</style>
     </aside>
   );
 }
