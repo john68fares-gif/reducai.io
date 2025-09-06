@@ -18,25 +18,66 @@ const isBrowser = typeof window !== 'undefined';
 const BTN_GREEN = '#10b981';
 const BTN_GREEN_HOVER = '#0ea473';
 
-/* Shell panel: subtle inner-light + soft drop shadow */
 const FRAME: React.CSSProperties = {
-  background:
-    'radial-gradient(140% 120% at 50% -20%, rgba(255,255,255,.10), rgba(255,255,255,0) 55%), var(--panel)',
+  background: 'var(--panel)',
   border: '1px solid var(--border)',
-  boxShadow:
-    'inset 0 1px 0 rgba(255,255,255,.06), 0 8px 22px rgba(0,0,0,.16), 0 32px 70px rgba(0,0,0,.26)',
+  boxShadow: '0 1px 0 rgba(0,0,0,0.22), 0 20px 60px rgba(0,0,0,0.42), 0 85px 220px rgba(0,255,194,0.08)',
   borderRadius: 30,
 };
-
-/* Cards: lighter center + tiny inner glow + soft drop shadow */
 const CARD: React.CSSProperties = {
-  background:
-    'radial-gradient(120% 130% at 50% -30%, rgba(255,255,255,.12), rgba(255,255,255,0) 60%), var(--card)',
+  background: 'var(--card)',
   border: '1px solid var(--border)',
   borderRadius: 20,
-  boxShadow:
-    'inset 0 1px 0 rgba(255,255,255,.06), 0 2px 6px rgba(0,0,0,.12), 0 16px 36px rgba(0,0,0,.20)',
+  boxShadow: 'var(--shadow-card)',
 };
+
+/** Extra visuals used ONLY in dark mode (outer shadow + subtle inner lift) */
+const OUTER_SHADOW_DARK: React.CSSProperties = {
+  // soft lift around the box so it separates from the dark bg
+  boxShadow:
+    '0 8px 20px rgba(0,0,0,.28), ' +        // main soft shadow
+    '0 22px 58px rgba(0,0,0,.32), ' +       // longer feather
+    '0 0 0 1px var(--border), ' +           // crisp edge
+    '0 18px 48px rgba(0,255,194,.06)',      // very subtle green ambience
+};
+
+const INNER_LIFT_DARK: React.CSSProperties = {
+  // a touch lighter inside than outside
+  backgroundImage: 'linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,0))',
+  backgroundBlendMode: 'overlay',
+};
+
+/* Small hook: are we in dark mode? (respects data-theme="dark" and system setting) */
+function useIsDark(): boolean {
+  const [dark, setDark] = useState<boolean>(() => {
+    if (!isBrowser) return false;
+    const attr = document.documentElement?.getAttribute('data-theme');
+    if (attr) return attr === 'dark';
+    return window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false;
+  });
+
+  useEffect(() => {
+    if (!isBrowser) return;
+    // watch system preference
+    const mq = window.matchMedia?.('(prefers-color-scheme: dark)');
+    const onChange = () => {
+      const attr = document.documentElement?.getAttribute('data-theme');
+      setDark(attr ? attr === 'dark' : !!mq?.matches);
+    };
+    mq?.addEventListener?.('change', onChange);
+
+    // watch attribute changes (if your app toggles data-theme)
+    const obs = new MutationObserver(onChange);
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+    return () => {
+      mq?.removeEventListener?.('change', onChange);
+      obs.disconnect();
+    };
+  }, []);
+
+  return dark;
+}
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const looksLikeOpenAIKey = (v: string) => !!v && v.trim().startsWith('sk-') && v.trim().length >= 12;
@@ -282,6 +323,13 @@ export default function ApiKeysPage() {
   const [toast, setToast] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState(true);
 
+  const isDark = useIsDark();
+
+  // convenience: style objects for the two inner cards (dark-only enhancements)
+  const innerCardStyle: React.CSSProperties = isDark
+    ? { ...CARD, ...OUTER_SHADOW_DARK, ...INNER_LIFT_DARK }
+    : CARD;
+
   // load from Supabase (and cache)
   useEffect(() => {
     (async () => {
@@ -453,12 +501,14 @@ export default function ApiKeysPage() {
               </div>
             ) : (
               <>
-                <div style={CARD} className="p-4">
+                {/* Select API Key box — now pops in dark mode */}
+                <div style={innerCardStyle} className="p-4">
                   <label className="block text-xs mb-2" style={{ color: 'var(--text-muted)' }}>Select API Key</label>
                   <InlineSelect id="apikey-select" value={selected} onChange={setSelected} options={opts} placeholder="No API Keys" />
                 </div>
 
-                <div style={CARD} className="p-4">
+                {/* Selected key / list item — also pops in dark mode */}
+                <div style={innerCardStyle} className="p-4">
                   {selectedKey ? (
                     <div className="flex items-center gap-3">
                       <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: 'var(--brand-weak)' }}>
