@@ -4,21 +4,12 @@
 import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
 import dynamic from 'next/dynamic';
 import {
-  KeyRound,
-  Plus,
-  ChevronDown,
-  Trash2,
-  CheckCircle2,
-  Zap,
-  X,
-  Key as KeyIcon,
-  ShieldCheck,
+  KeyRound, Plus, ChevronDown, Trash2, CheckCircle2, Zap, X, Key as KeyIcon, ShieldCheck,
 } from 'lucide-react';
 import { scopedStorage, migrateLegacyKeysToUser } from '@/utils/scoped-storage';
 
 /* =============================== Storage keys =============================== */
 type StoredKey = { id: string; name: string; key: string; createdAt: number };
-
 const KEYS_KEY = 'apiKeys.v1';
 const SELECTED_KEY = 'apiKeys.selectedId';
 
@@ -26,14 +17,16 @@ const SELECTED_KEY = 'apiKeys.selectedId';
 const FRAME: React.CSSProperties = {
   background: 'var(--panel)',
   border: '1px solid var(--border)',
-  boxShadow: 'var(--shadow-soft)',
+  // stronger separation from background
+  boxShadow: '0 28px 80px rgba(0,0,0,0.35), var(--shadow-soft)',
   borderRadius: 30,
 };
 const CARD: React.CSSProperties = {
   background: 'var(--card)',
   border: '1px solid var(--border)',
   borderRadius: 20,
-  boxShadow: 'var(--shadow-card)',
+  // nice card lift
+  boxShadow: '0 22px 60px rgba(0,0,0,0.28), var(--shadow-card)',
 };
 const BTN = { background: 'var(--brand)', color: '#fff' as const };
 
@@ -41,18 +34,8 @@ const BTN = { background: 'var(--brand)', color: '#fff' as const };
 type Opt = { value: string; label: string; sub?: string };
 
 function InlineSelect({
-  id,
-  value,
-  onChange,
-  options,
-  placeholder = 'No API Keys',
-}: {
-  id?: string;
-  value: string;
-  onChange: (v: string) => void;
-  options: Opt[];
-  placeholder?: string;
-}) {
+  id, value, onChange, options, placeholder = 'No API Keys',
+}: { id?: string; value: string; onChange: (v: string) => void; options: Opt[]; placeholder?: string }) {
   const btnRef = useRef<HTMLButtonElement | null>(null);
   const portalRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
@@ -112,10 +95,7 @@ function InlineSelect({
           {options.map((o) => (
             <button
               key={o.value}
-              onClick={() => {
-                onChange(o.value);
-                setOpen(false);
-              }}
+              onClick={() => { onChange(o.value); setOpen(false); }}
               className="w-full text-left px-3 py-2 rounded-[10px] flex items-center gap-2 hover:bg-black/5 transition"
               style={{ color: 'var(--text)' }}
             >
@@ -132,16 +112,8 @@ function InlineSelect({
 
 /* ================================== Modal ================================== */
 function AddKeyModal({
-  open,
-  onClose,
-  onSave,
-  busy,
-}: {
-  open: boolean;
-  onClose: () => void;
-  onSave: (name: string, key: string) => void;
-  busy: boolean;
-}) {
+  open, onClose, onSave, busy,
+}: { open: boolean; onClose: () => void; onSave: (name: string, key: string) => void; busy: boolean }) {
   const [name, setName] = useState('');
   const [val, setVal] = useState('');
 
@@ -149,11 +121,20 @@ function AddKeyModal({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[9998] flex items-center justify-center px-4 backdrop-blur-[2px]" style={{ background: 'rgba(0,0,0,0.55)' }}>
-      <div className="w-full max-w-[660px] relative overflow-hidden" style={{ ...FRAME, boxShadow: '0 18px 80px rgba(0,0,0,0.45)' }}>
-        {/* Glow */}
-        <div className="pointer-events-none absolute -top-24 -left-24 w-64 h-64 rounded-full blur-3xl"
-             style={{ background: 'radial-gradient(circle, var(--brand-weak) 0%, transparent 60%)' }} />
+    <div
+      className="fixed inset-0 z-[9998] flex items-center justify-center px-4"
+      style={{ background: 'rgba(0,0,0,0.62)' }}
+    >
+      <div
+        className="w-full animate-in fade-in-50 zoom-in-95"
+        style={{
+          ...FRAME,
+          maxWidth: 620,               // narrower
+          maxHeight: '92vh',           // taller
+          overflow: 'hidden',
+          boxShadow: '0 28px 110px rgba(0,0,0,0.5)',
+        }}
+      >
         {/* header */}
         <div className="flex items-center justify-between px-7 py-6 rounded-t-[30px]" style={{ borderBottom: '1px solid var(--border)' }}>
           <div className="flex items-center gap-3">
@@ -163,7 +144,7 @@ function AddKeyModal({
             <div className="min-w-0">
               <div className="text-2xl font-semibold" style={{ color: 'var(--text)' }}>Add New Project API Key</div>
               <div className="text-sm" style={{ color: 'var(--text-muted)' }}>
-                Provide a project name and your OpenAI API key. Your key is stored per-account.
+                Provide a project name and your OpenAI API key. Your key is stored per account.
               </div>
             </div>
           </div>
@@ -335,7 +316,7 @@ function ApiKeysScreen() {
   if (list === null) {
     return (
       <div className="px-6 py-12" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
-        <div className="mx-auto w-full max-w-[980px] p-6" style={{ ...FRAME }}>
+        <div className="mx-auto w-full max-w-[980px] p-6" style={FRAME}>
           <div className="h-6 w-40 rounded-lg animate-pulse" style={{ background: 'var(--ring)' }} />
           <div className="mt-6 grid gap-4">
             {[...Array(3)].map((_, i) => (
@@ -350,7 +331,7 @@ function ApiKeysScreen() {
   /* --------------------------------- Render --------------------------------- */
   return (
     <div className="px-6 py-10" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
-      <div className="mx-auto w-full max-w-[980px] relative" style={{ ...FRAME, boxShadow: '0 30px 80px rgba(0,0,0,0.25)' }}>
+      <div className="mx-auto w-full max-w-[980px] relative" style={{ ...FRAME }}>
         {/* header */}
         <div className="flex items-start justify-between px-6 pt-6 pb-4">
           <div>
@@ -364,41 +345,41 @@ function ApiKeysScreen() {
           </div>
         </div>
 
-        <div className="px-6 pb-6 space-y-5">
+        <div className="px-6 pb-8 space-y-5">
           {list.length === 0 ? (
-            /* ---------------------------- Empty state card ---------------------------- */
-            <div className="p-10 text-center relative overflow-hidden"
-                 style={{ ...CARD, boxShadow: '0 22px 50px rgba(0,0,0,0.28), var(--shadow-card)' }}>
-              <div className="absolute inset-0 pointer-events-none"
-                   style={{ background: 'radial-gradient(800px 200px at 50% 120%, var(--brand-weak), transparent 60%)' }} />
-              <div className="mx-auto w-24 h-24 rounded-full border-2 border-dashed flex items-center justify-center mb-4"
-                   style={{ borderColor: 'var(--brand-weak)' }}>
-                <KeyRound className="w-7 h-7" style={{ color: 'var(--brand)' }} />
+            /* ---------------------------- Empty state box ---------------------------- */
+            <div className="relative">
+              <div className="mx-auto w-full max-w-[820px] p-10 text-center relative overflow-hidden rounded-[20px]"
+                   style={{ ...CARD }}>
+                {/* Interior subtle border for that inset look */}
+                <div className="absolute inset-0 rounded-[20px] pointer-events-none"
+                     style={{ boxShadow: 'inset 0 0 0 1px var(--border)' }} />
+                {/* Bottom glow to separate from background */}
+                <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 w-[70%] h-16 blur-2xl opacity-70 pointer-events-none"
+                     style={{ background: 'radial-gradient(60% 100% at 50% 0%, var(--brand-weak), transparent 70%)' }} />
+                <div className="mx-auto w-24 h-24 rounded-full border-2 border-dashed flex items-center justify-center mb-4"
+                     style={{ borderColor: 'var(--brand-weak)' }}>
+                  <KeyRound className="w-7 h-7" style={{ color: 'var(--brand)' }} />
+                </div>
+                <div className="text-lg font-semibold mb-1">No API Keys Found</div>
+                <div className="text-sm mb-6" style={{ color: 'var(--text-muted)' }}>
+                  Add your first API key to get started
+                </div>
+                <button
+                  onClick={() => setShowAdd(true)}
+                  className="inline-flex items-center gap-2 px-5 h-[44px] rounded-[16px] font-semibold transition hover:brightness-95"
+                  style={BTN}
+                >
+                  <Plus className="w-4 h-4" /> Add New API Key
+                </button>
               </div>
-              <div className="text-lg font-semibold mb-1">No API Keys Found</div>
-              <div className="text-sm mb-6" style={{ color: 'var(--text-muted)' }}>
-                Add your first API key to get started
-              </div>
-              <button
-                onClick={() => setShowAdd(true)}
-                className="inline-flex items-center gap-2 px-5 h-[44px] rounded-[16px] font-semibold transition hover:brightness-95"
-                style={BTN}
-              >
-                <Plus className="w-4 h-4" /> Add New API Key
-              </button>
             </div>
           ) : (
             <>
               {/* Select */}
               <div style={CARD} className="p-4">
                 <label className="block text-xs mb-2" style={{ color: 'var(--text-muted)' }}>Select API Key</label>
-                <InlineSelect
-                  id="apikey-select"
-                  value={selected}
-                  onChange={setSelected}
-                  options={opts}
-                  placeholder="No API Keys"
-                />
+                <InlineSelect id="apikey-select" value={selected} onChange={setSelected} options={opts} placeholder="No API Keys" />
               </div>
 
               {/* Selected card */}
@@ -414,11 +395,7 @@ function ApiKeysScreen() {
                         Key ending in: {(selectedKey.key || '').slice(-4).toUpperCase()}
                       </div>
                     </div>
-                    <button
-                      onClick={() => removeKey(selectedKey.id)}
-                      className="p-2 rounded-lg hover:bg-black/5 transition"
-                      aria-label="Delete"
-                    >
+                    <button onClick={() => removeKey(selectedKey.id)} className="p-2 rounded-lg hover:bg-black/5 transition" aria-label="Delete">
                       <Trash2 className="w-4 h-4 text-red-400" />
                     </button>
                   </div>
