@@ -53,6 +53,7 @@ async function getOrCreateUserSecret(): Promise<ArrayBuffer> {
   const raw = new Uint8Array(32);
   crypto.getRandomValues(raw);
   const enc_key = bufToBase64(raw.buffer);
+  // ✅ include user_id to satisfy RLS
   const { error: insErr } = await supabase.from('user_secrets').insert({ user_id: user.id, enc_key });
   if (insErr) throw insErr;
   return raw.buffer;
@@ -353,10 +354,20 @@ export default function ApiKeysPage() {
   }
 
   async function addKey(name: string, key: string) {
+    // ✅ include user_id so RLS insert passes
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('Not signed in');
+
     const raw = await getOrCreateUserSecret();
     const aesKey = await importAesKey(raw);
     const ciphertext = await encryptString(aesKey, key);
-    const { data, error } = await supabase.from('user_api_keys').insert({ name, ciphertext }).select('id,created_at').single();
+
+    const { data, error } = await supabase
+      .from('user_api_keys')
+      .insert({ user_id: user.id, name, ciphertext })
+      .select('id,created_at')
+      .single();
+
     if (error) throw error;
 
     const next: StoredKey = { id: data.id, name, key, createdAt: Date.parse(data.created_at) || Date.now() };
