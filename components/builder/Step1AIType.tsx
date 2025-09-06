@@ -9,37 +9,9 @@ import { s } from '@/utils/safe';
 
 const Bot3D = dynamic(() => import('./Bot3D.client'), { ssr: false });
 
-/**
- * Matches the “green button” vibe you use on API Keys / Phone Numbers:
- * - Always white text (both light & dark)
- * - Brand-tinted surface with subtle glow and border
- * - Hover/active states and disabled style
- *
- * Relies on your global CSS variables: --brand, --brand-weak, --panel, --border, --text, --text-muted, --card, --shadow-card, --shadow-soft, --bg
- */
-const BTN_STYLE: React.CSSProperties = {
-  background:
-    'linear-gradient(180deg, color-mix(in oklab, var(--brand) 28%, var(--panel)) 0%, color-mix(in oklab, var(--brand) 18%, var(--panel)) 100%)',
-  color: '#fff',
-  border: '1px solid color-mix(in oklab, var(--brand) 55%, var(--border))',
-  boxShadow:
-    '0 6px 22px color-mix(in oklab, var(--brand) 20%, transparent), inset 0 0 0 1px color-mix(in oklab, #fff 6%, transparent)',
-};
-
-const BTN_HOVER: React.CSSProperties = {
-  background:
-    'linear-gradient(180deg, color-mix(in oklab, var(--brand) 36%, var(--panel)) 0%, color-mix(in oklab, var(--brand) 26%, var(--panel)) 100%)',
-  boxShadow:
-    '0 10px 28px color-mix(in oklab, var(--brand) 28%, transparent), inset 0 0 0 1px color-mix(in oklab, #fff 7%, transparent)',
-};
-
-const BTN_DISABLED: React.CSSProperties = {
-  background: 'color-mix(in oklab, var(--brand) 10%, var(--panel))',
-  color: 'rgba(255,255,255,.85)',
-  border: '1px solid color-mix(in oklab, var(--brand) 22%, var(--border))',
-  boxShadow: 'none',
-  filter: 'saturate(85%) opacity(.85)',
-};
+/* --- EXACT same “green button” spec as API Keys / Phone Numbers --- */
+const BTN_GREEN = '#10b981';
+const BTN_GREEN_HOVER = '#0ea473';
 
 const CARD: React.CSSProperties = {
   background: 'var(--card)',
@@ -55,7 +27,6 @@ export default function Step1AIType({ onNext }: { onNext?: () => void }) {
   const [booting, setBooting] = useState(true);
   const [nextLoading, setNextLoading] = useState(false);
 
-  // Load saved
   useEffect(() => {
     try {
       const saved = JSON.parse(localStorage.getItem('builder:step1') || 'null');
@@ -65,7 +36,7 @@ export default function Step1AIType({ onNext }: { onNext?: () => void }) {
         setLanguage(s(saved.language));
       }
     } catch {}
-    const t = setTimeout(() => setBooting(false), 280);
+    const t = setTimeout(() => setBooting(false), 240);
     return () => clearTimeout(t);
   }, []);
 
@@ -89,11 +60,10 @@ export default function Step1AIType({ onNext }: { onNext?: () => void }) {
     if (!canContinue || nextLoading) return;
     setNextLoading(true);
     persist();
-    // tiny staged delay for “loading phase” feedback
-    await new Promise((r) => setTimeout(r, 420));
+    await new Promise((r) => setTimeout(r, 380)); // tiny loading phase
     onNext?.();
     setNextLoading(false);
-  }, [canContinue, nextLoading, persist, onNext]);
+  }, [canContinue, nextLoading, onNext, persist]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -108,12 +78,11 @@ export default function Step1AIType({ onNext }: { onNext?: () => void }) {
   return (
     <main className="min-h-screen w-full font-movatif" style={{ background: 'var(--bg)', color: 'var(--text)' }} onKeyDown={handleKeyDown}>
       <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 pt-8 pb-24">
-        {/* StepProgress only (removed the extra “Step 1 …” header per your ask) */}
+        {/* Keep step name INSIDE StepProgress only (as you asked) */}
         <StepProgress current={1} />
 
-        {/* HERO / INFO CARD */}
+        {/* HERO */}
         <section className="relative overflow-hidden p-6 md:p-7 mb-8" style={CARD}>
-          {/* soft brand grid + glow */}
           <div
             aria-hidden
             className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
@@ -178,7 +147,7 @@ export default function Step1AIType({ onNext }: { onNext?: () => void }) {
           </div>
         </section>
 
-        {/* FORM CARD */}
+        {/* FORM */}
         <section className="relative p-6 sm:p-7" style={CARD}>
           <div
             aria-hidden
@@ -231,27 +200,32 @@ export default function Step1AIType({ onNext }: { onNext?: () => void }) {
             />
           </div>
 
-          {/* NEXT button (API-keys/Numbers green style) */}
+          {/* NEXT button — EXACT API-keys styling, white text in light+dark */}
           <div className="mt-8 flex justify-end">
             <button
               disabled={!canContinue || nextLoading}
               onClick={persistAndNext}
-              className="inline-flex items-center gap-2 px-7 py-2.5 rounded-[12px] font-semibold select-none transition-all duration-150 disabled:cursor-not-allowed"
-              style={{
-                ...(canContinue && !nextLoading ? BTN_STYLE : BTN_DISABLED),
-                transform: nextLoading ? 'translateY(0)' : 'translateY(0)',
-              }}
+              className="inline-flex items-center justify-center gap-2 px-6 h-[46px] rounded-[18px] font-semibold disabled:opacity-60 disabled:cursor-not-allowed transition will-change-transform"
+              style={{ background: BTN_GREEN, color: '#fff' }}
               onMouseEnter={(e) => {
                 if (!canContinue || nextLoading) return;
-                Object.assign((e.currentTarget as HTMLButtonElement).style, BTN_HOVER);
+                (e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER;
               }}
               onMouseLeave={(e) => {
                 if (!canContinue || nextLoading) return;
-                Object.assign((e.currentTarget as HTMLButtonElement).style, BTN_STYLE);
+                (e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN;
               }}
             >
-              {nextLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Next'}
-              {!nextLoading && <ArrowRight className="w-4 h-4" />}
+              {nextLoading ? (
+                <>
+                  <span className="w-4 h-4 rounded-full border-2 border-white/60 border-t-transparent animate-spin" />
+                  Next
+                </>
+              ) : (
+                <>
+                  Next <ArrowRight className="w-4 h-4" />
+                </>
+              )}
             </button>
           </div>
         </section>
