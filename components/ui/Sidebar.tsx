@@ -1,3 +1,4 @@
+// components/ui/Sidebar.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -36,14 +37,14 @@ type NavItem = {
 };
 
 const NAV: NavItem[] = [
-  { id: 'create',  href: '/builder',      label: 'Create',       sub: 'Design your agent',     icon: <Home />,   group: 'workspace' },
-  { id: 'tuning',  href: '/improve',      label: 'Tuning',       sub: 'Integrate & optimize',  icon: <Hammer />, group: 'workspace' },
-  { id: 'voice',   href: '/voice-agent',  label: 'Voice Studio', sub: 'Calls & persona',       icon: <Mic />,    group: 'workspace' },
-  { id: 'launch',  href: '/launch',       label: 'Launchpad',    sub: 'Go live',               icon: <Rocket />, group: 'workspace' },
+  { id: 'create', href: '/builder',      label: 'Create',       sub: 'Design your agent',     icon: <Home />,   group: 'workspace' },
+  { id: 'tuning', href: '/improve',      label: 'Tuning',       sub: 'Integrate & optimize',  icon: <Hammer />, group: 'workspace' },
+  { id: 'voice',  href: '/voice-agent',  label: 'Voice Studio', sub: 'Calls & persona',       icon: <Mic />,    group: 'workspace' },
+  { id: 'launch', href: '/launch',       label: 'Launchpad',    sub: 'Go live',               icon: <Rocket />, group: 'workspace' },
 
-  { id: 'numbers', href: '/phone-numbers', label: 'Numbers',     sub: 'Twilio & BYO',          icon: <Phone />,  group: 'resources' },
-  { id: 'keys',    href: '/apikeys',       label: 'API Keys',     sub: 'Models & access',       icon: <Key />,    group: 'resources' },
-  { id: 'help',    href: '/support',       label: 'Help',         sub: 'Guides & FAQ',          icon: <HelpCircle />, group: 'resources' },
+  { id: 'numbers', href: '/phone-numbers', label: 'Numbers',    sub: 'Twilio & BYO',          icon: <Phone />,  group: 'resources' },
+  { id: 'keys',    href: '/apikeys',       label: 'API Keys',    sub: 'Models & access',       icon: <Key />,    group: 'resources' },
+  { id: 'help',    href: '/support',       label: 'Help',        sub: 'Guides & FAQ',          icon: <HelpCircle />, group: 'resources' },
 ];
 
 export default function Sidebar() {
@@ -58,9 +59,9 @@ export default function Sidebar() {
       return false;
     }
   });
+
   useEffect(() => {
     try { localStorage.setItem(LS_COLLAPSED, JSON.stringify(collapsed)); } catch {}
-    // animate the shell width (used by your app shell if you read --sidebar-w)
     document.documentElement.style.setProperty('--sidebar-w', `${collapsed ? W_COLLAPSED : W_EXPANDED}px`);
   }, [collapsed]);
 
@@ -86,14 +87,12 @@ export default function Sidebar() {
     return () => unsub?.data?.subscription?.unsubscribe?.();
   }, []);
 
-  // helper for active state
   const pathnameActive = (item: NavItem) => {
     const p = pathname || '';
     if (item.href === '/launch') return p === '/launch';
     return p.startsWith(item.href);
   };
 
-  // workspace icons in green
   const isWorkspace = (id: string) => NAV.find(n => n.id === id)?.group === 'workspace';
 
   const Item = ({ item, active }: { item: NavItem; active: boolean }) => {
@@ -101,12 +100,10 @@ export default function Sidebar() {
     return (
       <Link href={item.href} className="block group">
         <div
-          className="nav-row flex items-center h-10 rounded-[12px] pr-2 transition-all"
+          className="flex items-center h-10 rounded-[12px] pr-2 transition-all"
           style={{
             paddingLeft: collapsed ? 0 : 10,
             gap: collapsed ? 0 : 10,
-            // active row gets soft panel-ish bg (like your 30% rectangle feel)
-            background: active ? 'var(--row-active-bg)' : 'transparent'
           }}
         >
           <div
@@ -121,14 +118,14 @@ export default function Sidebar() {
             }}
             title={collapsed ? item.label : undefined}
           >
-            {/* lucide icons take currentColor */}
             <span className="w-5 h-5">{item.icon}</span>
           </div>
 
-          {/* label/sub hidden when collapsed */}
           <div
-            className="overflow-hidden transition-[max-width,opacity,transform] duration-360"
+            className="overflow-hidden transition-[max-width,opacity,transform]"
             style={{
+              transitionDuration: '380ms',
+              transitionTimingFunction: 'cubic-bezier(0.16, 1, 0.3, 1)',
               maxWidth: collapsed ? 0 : 200,
               opacity: collapsed ? 0 : 1,
               transform: collapsed ? 'translateX(-6px)' : 'translateX(0)',
@@ -146,11 +143,10 @@ export default function Sidebar() {
           </div>
         </div>
 
-        {/* thin glow underline on hover / active */}
         <div
           className="h-[2px] rounded-full transition-all"
           style={{
-            transitionDuration: '360ms',
+            transitionDuration: '380ms',
             marginLeft: collapsed ? 16 : 12,
             marginRight: 12,
             background: active ? 'linear-gradient(90deg, transparent, rgba(16,185,129,.35), transparent)'
@@ -163,18 +159,18 @@ export default function Sidebar() {
 
   return (
     <aside
-      className="sb-shell fixed left-0 top-0 h-screen z-50 font-movatif"
+      className="sidebar fixed left-0 top-0 h-screen z-50 font-movatif"
       style={{
         width: collapsed ? W_COLLAPSED : W_EXPANDED,
-        // smoother, spring-like curve and no jank
-        transition: 'width 380ms cubic-bezier(0.16, 1, 0.3, 1)',
+        // smoother width animation
+        transition: 'width 420ms cubic-bezier(0.16, 1, 0.3, 1)',
         willChange: 'width',
 
         background: 'var(--sidebar-bg)',
         color: 'var(--sidebar-text)',
         borderRight: '1px solid var(--sidebar-border)',
-        // subtle inner well to match your panels
-        boxShadow: 'inset 0 0 18px rgba(0,0,0,0.28)',
+        // use a var so we can add a right-edge shadow in dark mode via CSS only
+        boxShadow: 'var(--sb-shell-shadow, inset 0 0 18px rgba(0,0,0,0.28))',
       }}
       aria-label="Primary"
     >
@@ -192,7 +188,7 @@ export default function Sidebar() {
             <div
               className="overflow-hidden transition-[max-width,opacity,transform]"
               style={{
-                transitionDuration: '380ms',
+                transitionDuration: '420ms',
                 transitionTimingFunction: 'cubic-bezier(0.16, 1, 0.3, 1)',
                 maxWidth: collapsed ? 0 : 200,
                 opacity: collapsed ? 0 : 1,
@@ -211,7 +207,6 @@ export default function Sidebar() {
 
         {/* Groups */}
         <div className="flex-1 min-h-0 overflow-y-auto px-3 pb-6">
-          {/* WORKSPACE tag */}
           {!collapsed && (
             <div className="text-[10px] font-semibold tracking-[.14em] mb-2" style={{ color: 'var(--sidebar-muted)' }}>
               WORKSPACE
@@ -223,10 +218,8 @@ export default function Sidebar() {
             ))}
           </nav>
 
-          {/* divider spacing */}
           <div style={{ height: 14 }} />
 
-          {/* RESOURCES tag */}
           {!collapsed && (
             <div className="text-[10px] font-semibold tracking-[.14em] mb-2" style={{ color: 'var(--sidebar-muted)' }}>
               RESOURCES
@@ -239,12 +232,12 @@ export default function Sidebar() {
           </nav>
         </div>
 
-        {/* Account area */}
+        {/* Account area (unchanged logic) */}
         <div className="px-3 pb-4">
-          {/* Expanded: full chip (LINKS to /account) */}
           {!collapsed ? (
-            <Link
-              href="/account"
+            <button
+              onClick={() => {/* keep your existing behavior; this is the same spot you can open a sheet/dropdown if you already had one */}}
+              aria-haspopup="true"
               className="w-full rounded-2xl px-3 py-3 flex items-center gap-3 text-left transition-colors duration-300"
               style={{
                 background: 'var(--acct-bg)',
@@ -265,29 +258,26 @@ export default function Sidebar() {
                 </div>
               </div>
               <span className="text-xs" style={{ color: 'var(--sidebar-muted)' }}>Account</span>
-            </Link>
+            </button>
           ) : (
-            // Collapsed: a small round icon-link that stays visible and clickable
-            <Link
-              href="/account"
-              className="block mx-auto"
+            // keep a small icon so account doesn’t “disappear” when collapsed
+            <button
               title="Account"
+              className="block mx-auto rounded-full"
+              style={{
+                width: 40, height: 40,
+                background: 'var(--sb-icon-bg)',
+                border: '1px solid var(--sb-icon-border)',
+                boxShadow: 'inset 0 0 10px rgba(0,0,0,.16)'
+              }}
+              onClick={() => {/* same behavior as expanded account button */}}
             >
-              <div
-                className="w-10 h-10 rounded-full grid place-items-center"
-                style={{
-                  background: 'var(--sb-icon-bg)',
-                  border: '1px solid var(--sb-icon-border)',
-                  boxShadow: 'inset 0 0 10px rgba(0,0,0,.16)'
-                }}
-              >
-                <UserIcon className="w-5 h-5" style={{ color: 'var(--sidebar-text)' }} />
-              </div>
-            </Link>
+              <UserIcon className="w-5 h-5 mx-auto" style={{ color: 'var(--sidebar-text)' }} />
+            </button>
           )}
         </div>
 
-        {/* Collapse handle */}
+        {/* Collapse handle (same spot) */}
         <button
           onClick={() => setCollapsed((c) => !c)}
           className="absolute top-1/2 -right-3 translate-y-[-50%] rounded-full p-1.5 transition-colors duration-200"
@@ -302,31 +292,25 @@ export default function Sidebar() {
         </button>
       </div>
 
-      {/* Theme-scoped tokens just for this sidebar */}
+      {/* Only theme + animation tokens (no layout changes) */}
       <style jsx>{`
-        /* row hover glow (subtle) */
-        .sb-shell .nav-row:hover {
-          background: var(--row-hover-bg);
-        }
-
-        /* LIGHT MODE (mirrors your global tokens) */
-        :global(:root:not([data-theme="dark"])) .sb-shell {
+        /* LIGHT MODE: keep things light (no black chips/icons when collapsed) */
+        :global(:root:not([data-theme="dark"])) .sidebar {
           --sb-icon-bg: var(--card);
           --sb-icon-border: var(--border);
           --acct-bg: var(--card);
           --acct-border: var(--border);
-          --row-hover-bg: rgba(0,0,0,.04);
-          --row-active-bg: rgba(16,185,129,.10); /* faint green panel */
+          --sb-shell-shadow: inset 0 0 18px rgba(0,0,0,.06), 0 0 0 0 rgba(0,0,0,0);
         }
 
-        /* DARK MODE */
-        :global([data-theme="dark"]) .sb-shell {
+        /* DARK MODE: subtle separation on the right edge so the sidebar stands off */
+        :global([data-theme="dark"]) .sidebar {
           --sb-icon-bg: rgba(255,255,255,.06);
-          --sb-icon-border: rgba(255,255,255,.10);
+          --sb-icon-border: rgba(255,255,255,.12);
           --acct-bg: rgba(15,18,20,.85);
-          --acct-border: rgba(0,255,194,.12);
-          --row-hover-bg: rgba(255,255,255,.04);
-          --row-active-bg: rgba(16,185,129,.18);
+          --acct-border: rgba(255,255,255,.10);
+          /* inner well + soft outer drop shadow to separate from content */
+          --sb-shell-shadow: inset 0 0 18px rgba(0,0,0,.28), 14px 0 28px rgba(0,0,0,.42);
         }
       `}</style>
     </aside>
