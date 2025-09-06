@@ -1,314 +1,288 @@
-// components/ui/Sidebar.tsx
+// components/builder/Step2ModelSettings.tsx
 'use client';
 
-import { useEffect, useState, cloneElement } from 'react';
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import {
-  Home, Hammer, Mic, Rocket,
-  Phone, Key, HelpCircle,
-  ChevronLeft, ChevronRight,
-  User as UserIcon, Bot
-} from 'lucide-react';
-import { supabase } from '@/lib/supabase-client';
+import { useEffect, useMemo, useState } from 'react';
+import { Cpu, Bolt, Rocket, Gauge, KeyRound, ArrowLeft, ArrowRight } from 'lucide-react';
+import StepProgress from './StepProgress';
+import { scopedStorage } from '@/utils/scoped-storage';
 
-const W_EXPANDED = 260;
-const W_COLLAPSED = 68;
-const LS_COLLAPSED = 'ui:sidebarCollapsed';
+/**
+ * What changed & why:
+ * - Keys source: reads BOTH 'apiKeys.v1' (new) and 'apiKeys' (legacy) so Step 2 never crashes/empties.
+ * - Robust load: wrapped in try/catch + an error state; shows UI instead of a blank page.
+ * - Button style: same green as API Keys page (#10b981 hover #0ea473), white text in light+dark.
+ * - Light/Dark: all surfaces/colors come from your CSS vars (var(--bg), --panel, --card, --border, --text, etc).
+ * - Skeletons + inline hints to match the vibe of Step 1/API Keys.
+ */
 
-// brand
-const BRAND = '#10b981';
-const BRAND_DEEP = '#12a989';
-const BRAND_WEAK = 'rgba(0,255,194,.10)';
-
-function getDisplayName(name?: string | null, email?: string | null) {
-  if (name && name.trim()) return name.trim();
-  if (email && email.includes('@')) return email.split('@')[0];
-  return 'Account';
-}
-
-type NavItem = {
-  href: string;
-  label: string;
-  sub?: string;
-  icon: JSX.Element;
-  group: 'workspace' | 'resources';
-  id: string;
+type Props = {
+  onBack: () => void;
+  onNext: (data: { model: string; apiKeyId: string }) => void;
 };
 
-const NAV: NavItem[] = [
-  { id: 'create',  href: '/builder',      label: 'Create',       sub: 'Design your agent',     icon: <Home />,   group: 'workspace' },
-  { id: 'tuning',  href: '/improve',      label: 'Tuning',       sub: 'Integrate & optimize',  icon: <Hammer />, group: 'workspace' },
-  { id: 'voice',   href: '/voice-agent',  label: 'Voice Studio', sub: 'Calls & persona',       icon: <Mic />,    group: 'workspace' },
-  { id: 'launch',  href: '/launch',       label: 'Launchpad',    sub: 'Go live',               icon: <Rocket />, group: 'workspace' },
+type ApiKey = { id: string; name: string; key: string };
 
-  { id: 'numbers', href: '/phone-numbers', label: 'Numbers',     sub: 'Twilio & BYO',          icon: <Phone />,  group: 'resources' },
-  // 🔧 FIX: use /api-keys (with hyphen) to match pages/api-keys.tsx
-  { id: 'keys',    href: '/api-keys',      label: 'API Keys',     sub: 'Models & access',       icon: <Key />,    group: 'resources' },
-  { id: 'help',    href: '/support',       label: 'Help',         sub: 'Guides & FAQ',          icon: <HelpCircle />, group: 'resources' },
+const MODEL_OPTIONS = [
+  { value: 'gpt-4o',        label: 'GPT-4o',        icon: Bolt },
+  { value: 'gpt-4o-mini',   label: 'GPT-4o mini',   icon: Rocket },
+  { value: 'gpt-4.1',       label: 'GPT-4.1',       icon: Cpu },
+  { value: 'gpt-4.1-mini',  label: 'GPT-4.1 mini',  icon: Gauge },
+  { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo', icon: Cpu },
 ];
 
-export default function Sidebar() {
-  const pathname = usePathname();
+/* Same green as API Keys page */
+const BTN_GREEN = '#10b981';
+const BTN_GREEN_HOVER = '#0ea473';
+const BTN_DISABLED = 'color-mix(in oklab, var(--text) 14%, transparent)';
 
-  const [collapsed, setCollapsed] = useState<boolean>(() => {
-    try {
-      const raw = localStorage.getItem(LS_COLLAPSED);
-      return raw ? JSON.parse(raw) : false;
-    } catch { return false; }
-  });
-  useEffect(() => {
-    try { localStorage.setItem(LS_COLLAPSED, JSON.stringify(collapsed)); } catch {}
-    document.documentElement.style.setProperty('--sidebar-w', `${collapsed ? W_COLLAPSED : W_EXPANDED}px`);
-  }, [collapsed]);
-
-  // user (unchanged)
-  const [userLoading, setUserLoading] = useState(true);
-  const [userEmail, setUserEmail] = useState<string | null>(null);
-  const [userName, setUserName] = useState<string | null>(null);
+export default function Step2ModelSettings({ onBack, onNext }: Props) {
+  const [model, setModel] = useState<string>('gpt-4o');
+  const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
+  const [apiKeyId, setApiKeyId] = useState<string>('');
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string>('');
 
   useEffect(() => {
-    let unsub: any;
+    let mounted = true;
     (async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      setUserEmail(user?.email ?? null);
-      setUserName((user?.user_metadata as any)?.full_name ?? user?.user_metadata?.name ?? null);
-      setUserLoading(false);
-      unsub = supabase.auth.onAuthStateChange((_e, session) => {
-        const u = session?.user;
-        setUserEmail(u?.email ?? null);
-        setUserName((u?.user_metadata as any)?.full_name ?? u?.user_metadata?.name ?? null);
-        setUserLoading(false);
-      });
+      setLoading(true);
+      setErr('');
+      try {
+        const ss = await scopedStorage();
+        await ss.ensureOwnerGuard();
+
+        // Read BOTH new and legacy buckets, prefer new
+        const v1 = await ss.getJSON<ApiKey[]>('apiKeys.v1', []);
+        const legacy = await ss.getJSON<ApiKey[]>('apiKeys', []);
+        const merged = Array.isArray(v1) && v1.length ? v1
+                     : Array.isArray(legacy) ? legacy
+                     : [];
+
+        // Defensive normalize
+        const cleaned = merged
+          .filter(Boolean)
+          .map((k) => ({
+            id: String((k as any).id || ''),
+            name: String((k as any).name || ''),
+            key: String((k as any).key || ''),
+          }))
+          .filter((k) => k.id && k.name);
+
+        if (!mounted) return;
+
+        setApiKeys(cleaned);
+
+        // Restore previous choice
+        const saved = await ss.getJSON<{ model?: string; apiKeyId?: string } | null>('builder:step2', null);
+        if (saved?.model) setModel(String(saved.model));
+        if (saved?.apiKeyId && cleaned.some((k) => k.id === saved.apiKeyId)) {
+          setApiKeyId(saved.apiKeyId);
+        } else if (cleaned[0]) {
+          setApiKeyId(cleaned[0].id);
+        }
+      } catch (e: any) {
+        if (!mounted) return;
+        setErr(e?.message || 'Failed to load settings');
+      } finally {
+        if (mounted) setLoading(false);
+      }
     })();
-    return () => unsub?.data?.subscription?.unsubscribe?.();
+    return () => { mounted = false; };
   }, []);
 
-  const pathnameActive = (item: NavItem) => {
-    const p = pathname || '';
-    if (item.href === '/launch') return p === '/launch';
-    return p.startsWith(item.href);
-  };
+  const selectedMeta = useMemo(
+    () => MODEL_OPTIONS.find((m) => m.value === model) || MODEL_OPTIONS[0],
+    [model]
+  );
 
-  const isWorkspace = (id: string) => NAV.find(n => n.id === id)?.group === 'workspace';
+  const canContinue = useMemo(
+    () => !!model && !!apiKeyId && apiKeys.some((k) => k.id === apiKeyId && k.key),
+    [model, apiKeyId, apiKeys]
+  );
 
-  // ensure lucide icons are centered & identical size
-  const renderIcon = (node: JSX.Element) =>
-    cloneElement(node, { className: 'w-[18px] h-[18px] shrink-0', strokeWidth: 2 });
-
-  const Item = ({ item, active }: { item: NavItem; active: boolean }) => {
-    const green = isWorkspace(item.id);
-
-    // when collapsed + active → stronger “lit” state
-    const bg = collapsed && active ? 'rgba(16,185,129,.14)' : 'var(--sb-icon-bg)';
-    const border = collapsed && active ? 'rgba(16,185,129,.45)' : 'var(--sb-icon-border)';
-    const halo = active
-      ? `0 0 0 1px ${BRAND_WEAK}, 0 8px 18px rgba(0,0,0,.22), 0 0 18px rgba(16,185,129,.25)`
-      : 'inset 0 0 10px rgba(0,0,0,.16)';
-
-    return (
-      <Link href={item.href} className="block group">
-        <div
-          className="flex items-center h-10 rounded-[12px] pr-2"
-          style={{
-            transition: 'gap 380ms cubic-bezier(0.16,1,0.3,1), padding 380ms cubic-bezier(0.16,1,0.3,1)',
-            paddingLeft: collapsed ? 0 : 10,
-            gap: collapsed ? 0 : 10,
-          }}
-        >
-          <div
-            className="w-10 h-10 rounded-[12px] grid place-items-center"
-            style={{
-              background: bg,
-              border: `1px solid ${border}`,
-              boxShadow: halo,
-              color: green ? BRAND_DEEP : 'var(--sidebar-text)',
-            }}
-            title={collapsed ? item.label : undefined}
-          >
-            {renderIcon(item.icon)}
-          </div>
-
-          <div
-            className="overflow-hidden"
-            style={{
-              transition: 'max-width 380ms cubic-bezier(0.16,1,0.3,1), opacity 380ms cubic-bezier(0.16,1,0.3,1), transform 380ms cubic-bezier(0.16,1,0.3,1)',
-              maxWidth: collapsed ? 0 : 200,
-              opacity: collapsed ? 0 : 1,
-              transform: collapsed ? 'translateX(-6px)' : 'translateX(0)',
-              lineHeight: 1.1,
-            }}
-          >
-            <div className="text-[13px] font-semibold" style={{ color: 'var(--sidebar-text)' }}>
-              {item.label}
-            </div>
-            {item.sub && (
-              <div className="text-[11px]" style={{ color: 'var(--sidebar-muted)', marginTop: 3 }}>
-                {item.sub}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* soft underline (unchanged) */}
-        <div
-          className="h-[2px] rounded-full"
-          style={{
-            transition: 'background 380ms cubic-bezier(0.16,1,0.3,1), margin 380ms cubic-bezier(0.16,1,0.3,1)',
-            marginLeft: collapsed ? 16 : 12,
-            marginRight: 12,
-            background: pathnameActive(item)
-              ? 'linear-gradient(90deg, transparent, rgba(16,185,129,.35), transparent)'
-              : 'linear-gradient(90deg, transparent, rgba(16,185,129,.0), transparent)',
-          }}
-        />
-      </Link>
-    );
+  const handleNext = () => {
+    if (!canContinue) return;
+    const payload = { model, apiKeyId };
+    (async () => {
+      const ss = await scopedStorage();
+      await ss.ensureOwnerGuard();
+      await ss.setJSON('builder:step2', payload);
+      onNext(payload);
+    })();
   };
 
   return (
-    <aside
-      className="fixed left-0 top-0 h-screen z-50 font-movatif"
-      style={{
-        width: collapsed ? W_COLLAPSED : W_EXPANDED,
-        transition: 'width 420ms cubic-bezier(0.16, 1, 0.3, 1)',
-        willChange: 'width',
-        background: 'var(--sidebar-bg)',
-        color: 'var(--sidebar-text)',
-        borderRight: '1px solid var(--sidebar-border)',
-        boxShadow: 'var(--sb-shell-shadow, inset 0 0 18px rgba(0,0,0,0.28))',
-      }}
-      aria-label="Primary"
-    >
-      <div className="relative h-full flex flex-col">
-        {/* Header */}
-        <div className="px-4 pt-5 pb-4">
-          <div className="flex items-center gap-3">
-            <div
-              className="w-9 h-9 rounded-xl grid place-items-center shrink-0"
-              style={{ background: BRAND, boxShadow: '0 0 10px rgba(0,255,194,0.35)' }}
-            >
-              <Bot className="w-5 h-5 text-black" />
-            </div>
-            <div
-              className="overflow-hidden"
-              style={{
-                transition: 'max-width 420ms cubic-bezier(0.16,1,0.3,1), opacity 420ms cubic-bezier(0.16,1,0.3,1), transform 420ms cubic-bezier(0.16,1,0.3,1)',
-                maxWidth: collapsed ? 0 : 200,
-                opacity: collapsed ? 0 : 1,
-                transform: collapsed ? 'translateX(-6px)' : 'translateX(0)',
-              }}
-            >
-              <div className="text-[17px] font-semibold tracking-wide" style={{ color: 'var(--sidebar-text)' }}>
-                reduc<span style={{ color: BRAND }}>ai.io</span>
-              </div>
-            </div>
-          </div>
-        </div>
+    <div className="min-h-screen w-full font-movatif" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
+      <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 pt-8 pb-24">
+        {/* Progress only (title lives in the global chip/header) */}
+        <StepProgress current={2} />
 
-        {/* Groups */}
-        <div className="flex-1 min-h-0 overflow-y-auto px-3 pb-6">
-          {!collapsed && (
-            <div className="inline-flex items-center h-6 px-2 rounded-full border text-[10px] font-semibold tracking-[.14em] mb-2"
-                 style={{ color: 'var(--sidebar-muted)', borderColor: 'var(--sidebar-border)', background: 'var(--sb-tag-bg)' }}>
-              WORKSPACE
-            </div>
-          )}
-          <nav className="space-y-[6px]">
-            {NAV.filter(n => n.group === 'workspace').map(item => (
-              <Item key={item.id} item={item} active={pathnameActive(item)} />
-            ))}
-          </nav>
-
-          <div style={{ height: 14 }} />
-
-          {!collapsed && (
-            <div className="inline-flex items-center h-6 px-2 rounded-full border text-[10px] font-semibold tracking-[.14em] mb-2"
-                 style={{ color: 'var(--sidebar-muted)', borderColor: 'var(--sidebar-border)', background: 'var(--sb-tag-bg)' }}>
-              RESOURCES
-            </div>
-          )}
-          <nav className="space-y-[6px]">
-            {NAV.filter(n => n.group === 'resources').map(item => (
-              <Item key={item.id} item={item} active={pathnameActive(item)} />
-            ))}
-          </nav>
-        </div>
-
-        {/* Account */}
-        <div className="px-3 pb-4">
-          {!collapsed ? (
-            <Link
-              href="/account"
-              className="w-full rounded-2xl px-3 py-3 flex items-center gap-3 text-left transition-colors duration-300"
-              style={{ background: 'var(--acct-bg)', border: '1px solid var(--acct-border)', boxShadow: 'inset 0 0 10px rgba(0,0,0,.18)', color: 'var(--sidebar-text)' }}
-            >
-              <div className="w-8 h-8 rounded-full grid place-items-center" style={{ background: BRAND, boxShadow: '0 0 8px rgba(0,0,0,.25)' }}>
-                <UserIcon className="w-4 h-4 text-black/80" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="text-sm font-semibold truncate">
-                  {userLoading ? 'Loading…' : getDisplayName(userName, userEmail)}
-                </div>
-                <div className="text-[11px] truncate" style={{ color: 'var(--sidebar-muted)' }}>
-                  {userEmail || ''}
-                </div>
-              </div>
-              <span className="text-xs" style={{ color: 'var(--sidebar-muted)' }}>Account</span>
-            </Link>
-          ) : (
-            <Link
-              href="/account"
-              title="Account"
-              className="block mx-auto rounded-full"
-              style={{
-                width: 40, height: 40,
-                background: 'var(--sb-icon-bg)',
-                border: '1px solid var(--sb-icon-border)',
-                boxShadow: 'inset 0 0 10px rgba(0,0,0,.16)'
-              }}
-            >
-              <div className="w-full h-full grid place-items-center">
-                <UserIcon className="w-5 h-5" style={{ color: 'var(--sidebar-text)' }} />
-              </div>
-            </Link>
-          )}
-        </div>
-
-        {/* Collapse handle */}
-        <button
-          onClick={() => setCollapsed((c) => !c)}
-          className="absolute top-1/2 -right-3 translate-y-[-50%] rounded-full p-1.5 transition-colors duration-200"
+        {/* Frame card */}
+        <section
+          className="relative rounded-[28px] p-7 md:p-8"
           style={{
-            border: '1px solid var(--sidebar-border)',
-            background: 'var(--acct-bg)',
-            boxShadow: '0 2px 12px rgba(0,0,0,0.18), 0 0 10px rgba(0,255,194,0.06)',
+            background: 'var(--panel)',
+            border: '1px solid var(--border)',
+            boxShadow: 'var(--shadow-soft)',
           }}
-          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
-          {collapsed ? <ChevronRight className="w-4 h-4" style={{ color: 'var(--sidebar-text)' }} />
-                     : <ChevronLeft className="w-4 h-4"  style={{ color: 'var(--sidebar-text)' }} />}
-        </button>
-      </div>
+          {/* soft ambient grid/glow like Step 1 / API Keys */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -top-[26%] -left-[28%] w-[70%] h-[70%] rounded-full"
+            style={{
+              background: 'radial-gradient(circle, color-mix(in oklab, var(--brand) 18%, transparent) 0%, transparent 70%)',
+              filter: 'blur(38px)',
+            }}
+          />
 
-      <style jsx>{`
-        :global(:root:not([data-theme="dark"])) .fixed.left-0 {
-          --sb-icon-bg: var(--card);
-          --sb-icon-border: var(--border);
-          --acct-bg: var(--card);
-          --acct-border: var(--border);
-          --sb-tag-bg: var(--panel);
-          --sb-shell-shadow: inset 0 0 18px rgba(0,0,0,.06);
-        }
-        :global([data-theme="dark"]) .fixed.left-0 {
-          --sb-icon-bg: rgba(255,255,255,.06);
-          --sb-icon-border: rgba(255,255,255,.12);
-          --acct-bg: rgba(15,18,20,.85);
-          --acct-border: rgba(255,255,255,.10);
-          --sb-tag-bg: rgba(255,255,255,.03);
-          --sb-shell-shadow: inset 0 0 18px rgba(0,0,0,.28), 14px 0 28px rgba(0,0,0,.42);
-        }
-      `}</style>
-    </aside>
+          <header className="mb-6">
+            <div className="inline-flex items-center gap-2 text-xs tracking-wide px-3 py-1.5 rounded-[20px] border"
+                 style={{ borderColor: 'var(--border)', background: 'color-mix(in oklab, var(--brand) 10%, var(--card))' }}>
+              <KeyRound className="w-3.5 h-3.5" style={{ color: 'var(--brand)' }} />
+              Choose your model & key
+            </div>
+            <h2 className="mt-3 text-2xl md:text-3xl font-semibold">Model Settings</h2>
+            <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
+              We’ll use your selected model and the API key you added in the API Keys page.
+            </p>
+          </header>
+
+          {loading ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-7">
+              {[0, 1].map((i) => (
+                <div key={i}>
+                  <div className="h-4 w-40 rounded mb-3"
+                       style={{ background: 'color-mix(in oklab, var(--text) 10%, transparent)' }} />
+                  <div className="h-12 rounded-2xl"
+                       style={{ background: 'var(--card)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card)' }} />
+                  <div className="mt-2 h-3 w-48 rounded"
+                       style={{ background: 'color-mix(in oklab, var(--text) 8%, transparent)' }} />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <>
+              {err && (
+                <div className="mb-5 rounded-[14px] px-4 py-3 text-sm"
+                     style={{ background: 'color-mix(in oklab, red 6%, var(--card))', border: '1px solid color-mix(in oklab, red 20%, var(--border))', color: 'var(--text)' }}>
+                  {err}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-7">
+                {/* Model */}
+                <div>
+                  <label className="block mb-2 text-[13px] font-medium" style={{ color: 'var(--text)' }}>
+                    ChatGPT Model
+                  </label>
+                  <div className="relative">
+                    <select
+                      value={model}
+                      onChange={(e) => setModel(e.target.value)}
+                      className="w-full rounded-2xl px-4 py-3.5 text-[15px] outline-none"
+                      style={{
+                        background: 'var(--card)',
+                        border: '1px solid var(--border)',
+                        color: 'var(--text)',
+                      }}
+                    >
+                      {MODEL_OPTIONS.map((m) => (
+                        <option key={m.value} value={m.value}>{m.label}</option>
+                      ))}
+                    </select>
+                    <div className="flex items-center gap-2 mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
+                      {selectedMeta?.icon ? <selectedMeta.icon className="w-4 h-4" /> : <Cpu className="w-4 h-4" />}
+                      <span>{selectedMeta?.label}</span>
+                    </div>
+                  </div>
+                  <div className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
+                    Your assistant will actually use this model.
+                  </div>
+                </div>
+
+                {/* API key (per-user scoped) */}
+                <div>
+                  <label className="block mb-2 text-[13px] font-medium" style={{ color: 'var(--text)' }}>
+                    API Key
+                  </label>
+                  <div className="relative">
+                    <select
+                      value={apiKeyId}
+                      onChange={(e) => setApiKeyId(e.target.value)}
+                      className="w-full rounded-2xl px-4 py-3.5 text-[15px] outline-none"
+                      style={{
+                        background: 'var(--card)',
+                        border: '1px solid var(--border)',
+                        color: 'var(--text)',
+                      }}
+                    >
+                      <option value="">Select an API key…</option>
+                      {apiKeys.map((k) => (
+                        <option key={k.id} value={k.id}>
+                          {k.name} ••••{(k.key || '').slice(-4).toUpperCase()}
+                        </option>
+                      ))}
+                    </select>
+                    <KeyRound className="w-4 h-4 absolute right-3 top-3.5 opacity-70" style={{ color: 'var(--text-muted)' }} />
+                  </div>
+                  <div className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
+                    Keys are per-account via scoped storage. Add/manage them on the API Keys page.
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* Actions */}
+          <div className="mt-8 flex items-center justify-between">
+            <button
+              onClick={onBack}
+              className="inline-flex items-center gap-2 rounded-[18px] px-4 py-2 text-sm transition"
+              style={{
+                background: 'var(--card)',
+                border: '1px solid var(--border)',
+                color: 'var(--text)',
+                boxShadow: 'var(--shadow-soft)',
+              }}
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Previous
+            </button>
+
+            <button
+              disabled={!canContinue || loading}
+              onClick={handleNext}
+              className="inline-flex items-center gap-2 px-8 h-[42px] rounded-[18px] font-semibold select-none disabled:cursor-not-allowed"
+              style={{
+                background: canContinue && !loading ? BTN_GREEN : BTN_DISABLED,
+                color: '#ffffff', // ALWAYS white label (light + dark)
+                boxShadow: canContinue && !loading ? '0 10px 24px rgba(16,185,129,.25)' : 'none',
+                transition: 'transform .15s ease, box-shadow .15s ease, background .15s ease',
+              }}
+              onMouseEnter={(e) => {
+                if (!canContinue || loading) return;
+                (e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER;
+              }}
+              onMouseLeave={(e) => {
+                if (!canContinue || loading) return;
+                (e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN;
+              }}
+            >
+              {loading ? (
+                <>
+                  <span className="w-4 h-4 rounded-full border-2 border-white/60 border-t-transparent animate-spin" />
+                  Loading…
+                </>
+              ) : (
+                <>
+                  Next <ArrowRight className="w-4 h-4" />
+                </>
+              )}
+            </button>
+          </div>
+        </section>
+      </div>
+    </div>
   );
 }
