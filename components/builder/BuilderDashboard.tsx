@@ -6,14 +6,14 @@ import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import {
   Plus, Bot as BotIcon, ArrowRight, Trash2, SlidersHorizontal, X, Copy,
-  Download as DownloadIcon, FileText, Settings, MessageSquareText, Landmark, ListChecks,
+  Download as DownloadIcon, FileText, Settings, MessageSquareText, Landmark, ListChecks, RefreshCw,
 } from 'lucide-react';
 import CustomizeModal from './CustomizeModal';
 import Step1AIType from './Step1AIType';
 import Step2ModelSettings from './Step2ModelSettings';
 import Step3PromptEditor from './Step3PromptEditor';
 import Step4Overview from './Step4Overview';
-import { s } from '@/utils/safe';
+import { s, st } from '@/utils/safe';
 import { scopedStorage } from '@/utils/scoped-storage';
 
 const Bot3D = dynamic(() => import('./Bot3D.client'), {
@@ -75,15 +75,12 @@ function normalize(b: any): Bot {
     appearance: b?.appearance ?? undefined,
   };
 }
-
 const sortByNewest = (arr: Bot[]) =>
-  arr
-    .slice()
-    .sort(
-      (a, b) =>
-        Date.parse(b.updatedAt || b.createdAt || '0') -
-        Date.parse(a.updatedAt || a.createdAt || '0')
-    );
+  arr.slice().sort(
+    (a, b) =>
+      Date.parse(b.updatedAt || b.createdAt || '0') -
+      Date.parse(a.updatedAt || a.createdAt || '0')
+  );
 
 function mergeByAssistantId(a: Bot[], b: Bot[]): Bot[] {
   const map = new Map<string, Bot>();
@@ -105,7 +102,6 @@ function mergeByAssistantId(a: Bot[], b: Bot[]): Bot[] {
 
 function readLocal(): Bot[] {
   if (typeof window === 'undefined') return [];
-  // Try current
   try {
     const raw = localStorage.getItem('chatbots');
     if (raw) {
@@ -113,7 +109,6 @@ function readLocal(): Bot[] {
       if (Array.isArray(arr)) return sortByNewest(arr.map(normalize));
     }
   } catch {}
-  // Try legacy buckets
   for (const k of STORAGE_KEYS) {
     try {
       const raw = localStorage.getItem(k);
@@ -141,6 +136,31 @@ async function readCloud(): Promise<Bot[]> {
   }
 }
 
+async function saveBuildEverywhere(build: Bot) {
+  // cloud
+  try {
+    const ss = await scopedStorage();
+    await ss.ensureOwnerGuard();
+    const cloud = await ss.getJSON<any[]>('chatbots.v1', []);
+    const arr = Array.isArray(cloud) ? cloud : [];
+    const key = build.assistantId || build.id;
+    const i = arr.findIndex((b) => (b.assistantId || b.id) === key);
+    if (i >= 0) arr[i] = build; else arr.unshift(build);
+    await ss.setJSON('chatbots.v1', arr);
+  } catch {}
+  // local
+  try {
+    const local = readLocal();
+    const key = build.assistantId || build.id;
+    const i = local.findIndex((b) => (b.assistantId || b.id) === key);
+    if (i >= 0) local[i] = build; else local.unshift(build);
+    writeLocal(local);
+  } catch {}
+  try { window.dispatchEvent(new Event('builds:updated')); } catch {}
+}
+
+/* ----------------------------------- UI ----------------------------------- */
+
 export default function BuilderDashboard() {
   const router = useRouter();
   const pathname = usePathname();
@@ -153,8 +173,10 @@ export default function BuilderDashboard() {
   const [bots, setBots] = useState<Bot[]>([]);
   const [customizingId, setCustomizingId] = useState<string | null>(null);
   const [viewId, setViewId] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState('');
 
-  // clean builder temp on signal
+  // cleanup signal
   useEffect(() => {
     try {
       if (localStorage.getItem('builder:cleanup') === '1') {
@@ -164,7 +186,7 @@ export default function BuilderDashboard() {
     } catch {}
   }, []);
 
-  // Ensure step objects are sane strings
+  // enforce sane strings
   useEffect(() => {
     try {
       const normalize = (k: string) => {
@@ -182,18 +204,19 @@ export default function BuilderDashboard() {
     } catch {}
   }, []);
 
-  // Initial load + live refresh on custom events / storage changes
+  // initial load + live refresh
   useEffect(() => {
     let alive = true;
     (async () => {
       const local = readLocal();
       const cloud = await readCloud();
-      // Optional DB merge (only if helper exists)
       let merged = mergeByAssistantId(local, cloud);
+
+      // optional DB layer
       try {
         const { fetchBuildsFromSupabase } = await import('@/utils/builds-store');
-        const dbRows = await fetchBuildsFromSupabase();
-        const dbBots = (dbRows || []).map((r: any) =>
+        const rows = await fetchBuildsFromSupabase();
+        const dbBots = (rows || []).map((r: any) =>
           normalize({
             id: r.id,
             assistantId: r.assistant_id,
@@ -204,20 +227,17 @@ export default function BuilderDashboard() {
           })
         );
         merged = mergeByAssistantId(merged, dbBots);
-      } catch {
-        // DB layer optional
-      }
+      } catch {}
+
       if (alive) {
         setBots(merged);
-        writeLocal(merged); // keep local hot cache in sync
+        writeLocal(merged);
       }
     })();
 
     const onStorage = (e: StorageEvent) => {
       if (!e.key) return;
       if (['chatbots', 'agents', 'builds'].includes(e.key)) {
-        setBots(readLocal()); // quick refresh from local
-        // and silently try to merge cloud as well
         (async () => {
           const merged = mergeByAssistantId(readLocal(), await readCloud());
           setBots(merged);
@@ -226,7 +246,6 @@ export default function BuilderDashboard() {
       }
     };
     const onSignal = () => {
-      // generated from Step4 -> saveBuildEverywhere()
       (async () => {
         const merged = mergeByAssistantId(readLocal(), await readCloud());
         setBots(merged);
@@ -263,6 +282,70 @@ export default function BuilderDashboard() {
     router.replace(`${pathname}?${usp.toString()}`, { scroll: false });
   };
 
+  async function syncFromOpenAI() {
+    if (syncing) return;
+    setSyncing(true);
+    setSyncMsg('Preparing…');
+
+    try {
+      // find a key to use: prefer selected in step2, else first in apiKeys.v1
+      let apiKeyPlain = '';
+      const ss = await scopedStorage();
+      await ss.ensureOwnerGuard();
+
+      const step2 = await ss.getJSON<any>('builder:step2', null);
+      const keys = await ss.getJSON<any[]>('apiKeys.v1', []);
+      const cleaned = (Array.isArray(keys) ? keys : []).filter(Boolean);
+
+      if (step2?.apiKeyId) {
+        const sel = cleaned.find((k) => k.id === step2.apiKeyId);
+        apiKeyPlain = sel?.key || '';
+      }
+      if (!apiKeyPlain && cleaned.length) apiKeyPlain = cleaned[0]?.key || '';
+
+      setSyncMsg('Contacting OpenAI…');
+      const resp = await fetch('/api/assistants/list', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKeyPlain, limit: 50 }),
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data?.ok) throw new Error(data?.error || 'Failed to list assistants');
+
+      const items: any[] = data.items || [];
+      setSyncMsg(`Fetched ${items.length} assistants. Saving…`);
+
+      // Map OpenAI assistants -> Bot shape, save both storages
+      for (const a of items) {
+        const build: Bot = normalize({
+          id: a.id,
+          assistantId: a.id,
+          name: a.name || 'Untitled Assistant',
+          model: a.model || 'gpt-4o-mini',
+          prompt: a.instructions || '',
+          industry: '', // unknown from OpenAI list
+          language: '', // unknown from OpenAI list
+          type: 'ai automation',
+          createdAt: a.created_at || nowISO(),
+          updatedAt: a.updated_at || a.created_at || nowISO(),
+        });
+        await saveBuildEverywhere(build);
+      }
+
+      // reload merged view
+      const merged = mergeByAssistantId(readLocal(), await readCloud());
+      setBots(merged);
+      writeLocal(merged);
+      setSyncMsg('Done.');
+    } catch (e: any) {
+      setSyncMsg(e?.message || 'Sync failed.');
+      alert(e?.message || 'Sync from OpenAI failed.');
+    } finally {
+      setSyncing(false);
+      setTimeout(() => setSyncMsg(''), 1200);
+    }
+  }
+
   // ---------- Wizard ----------
   if (step) {
     return (
@@ -281,16 +364,12 @@ export default function BuilderDashboard() {
   return (
     <div className="min-h-screen w-full font-movatif" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
       <main className="flex-1 w-full px-4 sm:px-6 pt-6 pb-24">
-        {/* Search */}
-        <div className="mb-6">
+        {/* Actions Row */}
+        <div className="mb-6 flex flex-wrap items-center gap-3">
+          {/* Search */}
           <div
-            className="flex items-center gap-2 w-full rounded-[14px] px-4 py-3 text-[15px]"
-            style={{
-              background: 'var(--card)',
-              color: 'var(--text-muted)',
-              border: '1px solid var(--border)',
-              boxShadow: 'var(--shadow-card)',
-            }}
+            className="flex items-center gap-2 rounded-[14px] px-4 py-3 text-[15px] flex-1 min-w-[260px]"
+            style={{ background: 'var(--card)', color: 'var(--text-muted)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card)' }}
           >
             <span className="opacity-70">🔎</span>
             <input
@@ -301,6 +380,18 @@ export default function BuilderDashboard() {
               style={{ color: 'var(--text)' }}
             />
           </div>
+
+          {/* Sync from OpenAI */}
+          <button
+            onClick={syncFromOpenAI}
+            disabled={syncing}
+            className="inline-flex items-center gap-2 rounded-[14px] px-4 py-3 text-sm"
+            style={{ background: 'var(--panel)', border: '1px solid var(--border)', color: 'var(--text)', boxShadow: 'var(--shadow-soft)' }}
+            title="Fetch assistants from your OpenAI account and save them locally/cloud"
+          >
+            <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
+            {syncing ? (syncMsg || 'Syncing…') : 'Sync from OpenAI'}
+          </button>
         </div>
 
         {/* HORIZONTAL LIST */}
@@ -318,7 +409,6 @@ export default function BuilderDashboard() {
                 const sorted = sortByNewest(next);
                 setBots(sorted);
                 writeLocal(sorted);
-                // also delete in cloud bucket
                 (async () => {
                   try {
                     const ss = await scopedStorage();
@@ -338,8 +428,11 @@ export default function BuilderDashboard() {
         </div>
 
         {filtered.length === 0 && (
-          <div className="mt-12 text-center" style={{ color: 'var(--text-muted)' }}>
-            No builds found. Click <span style={{ color: 'var(--brand)' }}>Create a Build</span> to get started.
+          <div className="mt-12 space-y-8">
+            <div className="text-center" style={{ color: 'var(--text-muted)' }}>
+              No builds found. Create one or use “Sync from OpenAI.”
+            </div>
+            <BuildsInspector />
           </div>
         )}
       </main>
@@ -439,7 +532,6 @@ const DISPLAY_TITLES: Record<PromptSectionKey, string> = {
   'QUESTION FLOW': 'QUESTION FLOW',
   'COMPANY FAQ': 'COMPANY FAQ',
 };
-
 const ICONS: Record<PromptSectionKey, JSX.Element> = {
   DESCRIPTION: <FileText className="w-4 h-4" style={{ color: 'var(--brand)' }} />,
   'AI DESCRIPTION': <FileText className="w-4 h-4" style={{ color: 'var(--brand)' }} />,
@@ -448,7 +540,6 @@ const ICONS: Record<PromptSectionKey, JSX.Element> = {
   'QUESTION FLOW': <MessageSquareText className="w-4 h-4" style={{ color: 'var(--brand)' }} />,
   'COMPANY FAQ': <Landmark className="w-4 h-4" style={{ color: 'var(--brand)' }} />,
 };
-
 const HEADING_REGEX =
   /^(?:\s*(?:[#>*-]|\d+\.)\s*)?(?:\*\*)?\s*(DESCRIPTION|AI\s*DESCRIPTION|RULES\s*(?:AND|&)\s*GUIDELINES|AI\s*RULES|QUESTION\s*FLOW|COMPANY\s*FAQ)\s*(?:\*\*)?\s*:?\s*$/gim;
 
@@ -467,18 +558,13 @@ function splitStep3IntoSections(step3Raw?: string): SplitSection[] | null {
     const label = rawLabel === 'AI  DESCRIPTION' ? ('AI DESCRIPTION' as PromptSectionKey) : rawLabel;
     matches.push({ start: m.index, end: HEADING_REGEX.lastIndex, label });
   }
-
   if (matches.length === 0) return null;
 
   const out: SplitSection[] = [];
   for (let i = 0; i < matches.length; i++) {
     const h = matches[i];
     const nextStart = i + 1 < matches.length ? matches[i + 1].start : step3Raw.length;
-    out.push({
-      key: h.label,
-      title: DISPLAY_TITLES[h.label] || h.label,
-      text: step3Raw.slice(h.end, nextStart),
-    });
+    out.push({ key: h.label, title: DISPLAY_TITLES[h.label] || h.label, text: step3Raw.slice(h.end, nextStart) });
   }
   return out;
 }
@@ -494,9 +580,7 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
   const rawOut = buildRawStep1PlusStep3(bot);
   const sections = splitStep3IntoSections(bot.prompt);
 
-  const copyAll = async () => {
-    try { await navigator.clipboard.writeText(rawOut); } catch {}
-  };
+  const copyAll = async () => { try { await navigator.clipboard.writeText(rawOut); } catch {} };
   const downloadTxt = () => {
     const blob = new Blob([rawOut], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -531,33 +615,16 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
               {[bot.name, bot.industry, bot.language].filter(Boolean).join(' · ') || '—'}
             </div>
           </div>
-
           <div className="flex items-center gap-2">
-            <button
-              onClick={copyAll}
-              className="inline-flex items-center gap-2 rounded-[14px] px-3 py-2 text-xs border"
-              style={{ background: 'var(--card)', borderColor: 'var(--border)', color: 'var(--text)' }}
-              title="Copy"
-            >
-              <Copy className="w-3.5 h-3.5" />
-              Copy
+            <button onClick={copyAll} className="inline-flex items-center gap-2 rounded-[14px] px-3 py-2 text-xs border"
+                    style={{ background: 'var(--card)', borderColor: 'var(--border)', color: 'var(--text)' }}>
+              <Copy className="w-3.5 h-3.5" /> Copy
             </button>
-            <button
-              onClick={downloadTxt}
-              className="inline-flex items-center gap-2 rounded-[14px] px-3 py-2 text-xs border"
-              style={{ background: 'var(--card)', borderColor: 'var(--border)', color: 'var(--text)' }}
-              title="Download"
-            >
-              <DownloadIcon className="w-3.5 h-3.5" />
-              Download
+            <button onClick={downloadTxt} className="inline-flex items-center gap-2 rounded-[14px] px-3 py-2 text-xs border"
+                    style={{ background: 'var(--card)', borderColor: 'var(--border)', color: 'var(--text)' }}>
+              <DownloadIcon className="w-3.5 h-3.5" /> Download
             </button>
-            <button
-              onClick={onClose}
-              className="p-2 rounded-full"
-              title="Close"
-              aria-label="Close"
-              style={{ color: 'var(--text)' }}
-            >
+            <button onClick={onClose} className="p-2 rounded-full" title="Close" aria-label="Close" style={{ color: 'var(--text)' }}>
               <X className="w-5 h-5" />
             </button>
           </div>
@@ -565,9 +632,7 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
 
         <div className="flex-1 overflow-y-auto p-6">
           {!bot.prompt ? (
-            <div className="p-5" style={CARD_STYLE}>
-              (No Step 3 prompt yet)
-            </div>
+            <div className="p-5" style={CARD_STYLE}>(No Step 3 prompt yet)</div>
           ) : sections ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {sections.map((sec, i) => (
@@ -596,11 +661,8 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
 
         <div className="px-6 py-4 rounded-b-[30px]" style={{ borderTop: '1px solid var(--border)', background: 'var(--card)' }}>
           <div className="flex justify-end">
-            <button
-              onClick={onClose}
-              className="px-5 py-2 rounded-[14px] font-semibold"
-              style={{ background: 'var(--brand)', color: '#fff', boxShadow: '0 0 18px rgba(0,255,194,.20)' }}
-            >
+            <button onClick={onClose} className="px-5 py-2 rounded-[14px] font-semibold"
+                    style={{ background: 'var(--brand)', color: '#fff', boxShadow: '0 0 18px rgba(0,255,194,.20)' }}>
               Close
             </button>
           </div>
@@ -617,48 +679,28 @@ function CreateRow({ onClick }: { onClick: () => void }) {
     <button
       onClick={onClick}
       className="group w-full rounded-[16px] overflow-hidden text-left transition-transform active:scale-[0.996]"
-      style={{
-        background: 'var(--card)',
-        border: '1px dashed var(--brand-weak)',
-        boxShadow: 'var(--shadow-card)',
-      }}
+      style={{ background: 'var(--card)', border: '1px dashed var(--brand-weak)', boxShadow: 'var(--shadow-card)' }}
     >
       <div className="flex items-stretch">
-        <div
-          className="hidden sm:flex items-center justify-center w-[220px] min-h-[160px]"
-          style={{
-            background: 'linear-gradient(180deg, color-mix(in oklab, var(--brand) 14%, transparent), transparent)',
-            borderRight: '1px dashed var(--brand-weak)',
-          }}
-        >
-          <div
-            className="w-16 h-16 rounded-full grid place-items-center"
-            style={{ border: '2px dashed var(--brand-weak)', color: 'var(--brand)', boxShadow: 'inset 0 0 10px rgba(0,0,0,.08)' }}
-          >
+        <div className="hidden sm:flex items-center justify-center w-[220px] min-h-[160px]"
+             style={{ background: 'linear-gradient(180deg, color-mix(in oklab, var(--brand) 14%, transparent), transparent)', borderRight: '1px dashed var(--brand-weak)' }}>
+          <div className="w-16 h-16 rounded-full grid place-items-center" style={{ border: '2px dashed var(--brand-weak)', color: 'var(--brand)', boxShadow: 'inset 0 0 10px rgba(0,0,0,.08)' }}>
             <Plus className="w-9 h-9" />
           </div>
         </div>
 
         <div className="flex-1 p-5 sm:p-6">
           <div className="flex items-center gap-3">
-            <span
-              className="px-2 py-1 rounded-full text-xs"
-              style={{ background: 'color-mix(in oklab, var(--brand) 12%, var(--panel))', color: 'var(--text)', border: '1px solid var(--border)' }}
-            >
+            <span className="px-2 py-1 rounded-full text-xs"
+                  style={{ background: 'color-mix(in oklab, var(--brand) 12%, var(--panel))', color: 'var(--text)', border: '1px solid var(--border)' }}>
               New
             </span>
-            <div className="text-lg font-semibold" style={{ color: 'var(--text)' }}>
-              Create a Build
-            </div>
+            <div className="text-lg font-semibold" style={{ color: 'var(--text)' }}>Create a Build</div>
           </div>
-          <div className="mt-1 text-sm" style={{ color: 'var(--text-muted)' }}>
-            Start building your AI assistant.
-          </div>
+          <div className="mt-1 text-sm" style={{ color: 'var(--text-muted)' }}>Start building your AI assistant.</div>
           <div className="mt-4">
-            <span
-              className="inline-flex items-center gap-2 rounded-[10px] px-3 py-2 text-sm transition"
-              style={{ background: 'var(--panel)', border: '1px solid var(--border)', color: 'var(--text)', boxShadow: 'var(--shadow-soft)' }}
-            >
+            <span className="inline-flex items-center gap-2 rounded-[10px] px-3 py-2 text-sm transition"
+                  style={{ background: 'var(--panel)', border: '1px solid var(--border)', color: 'var(--text)', boxShadow: 'var(--shadow-soft)' }}>
               Continue <ArrowRight className="w-4 h-4" />
             </span>
           </div>
@@ -679,32 +721,27 @@ function BuildRow({
     <div className="w-full rounded-[16px] overflow-hidden transition" style={{ background: 'var(--card)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card)' }}>
       <div className="flex items-stretch">
         <div className="relative w-[320px] min-h-[180px] hidden md:block" style={{ borderRight: '1px solid var(--border)' }}>
-          <button
-            onClick={onCustomize}
-            className="absolute right-3 top-3 z-10 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-[10px] text-xs transition"
-            style={{ background: 'var(--panel)', border: '1px solid var(--border)', color: 'var(--text)', boxShadow: 'var(--shadow-soft)' }}
-          >
-            <SlidersHorizontal className="w-3.5 h-3.5" />
-            Customize
+          <button onClick={onCustomize}
+                  className="absolute right-3 top-3 z-10 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-[10px] text-xs transition"
+                  style={{ background: 'var(--panel)', border: '1px solid var(--border)', color: 'var(--text)', boxShadow: 'var(--shadow-soft)' }}>
+            <SlidersHorizontal className="w-3.5 h-3.5" /> Customize
           </button>
           {/* @ts-ignore */}
-          <Bot3D
-            className="h-full"
-            accent={ap.accent || accent}
-            shellColor={ap.shellColor}
-            bodyColor={ap.bodyColor}
-            trimColor={ap.trimColor}
-            faceColor={ap.faceColor}
-            variant={ap.variant || 'silver'}
-            eyes={ap.eyes || 'ovals'}
-            head={ap.head || 'rounded'}
-            torso={ap.torso || 'box'}
-            arms={ap.arms ?? 'capsule'}
-            legs={ap.legs ?? 'capsule'}
-            antenna={ap.hasOwnProperty('antenna') ? Boolean((ap as any).antenna) : true}
-            withBody={ap.hasOwnProperty('withBody') ? Boolean(ap.withBody) : true}
-            idle
-          />
+          <Bot3D className="h-full"
+                 accent={ap.accent || accent}
+                 shellColor={ap.shellColor}
+                 bodyColor={ap.bodyColor}
+                 trimColor={ap.trimColor}
+                 faceColor={ap.faceColor}
+                 variant={ap.variant || 'silver'}
+                 eyes={ap.eyes || 'ovals'}
+                 head={ap.head || 'rounded'}
+                 torso={ap.torso || 'box'}
+                 arms={ap.arms ?? 'capsule'}
+                 legs={ap.legs ?? 'capsule'}
+                 antenna={ap.hasOwnProperty('antenna') ? Boolean((ap as any).antenna) : true}
+                 withBody={ap.hasOwnProperty('withBody') ? Boolean(ap.withBody) : true}
+                 idle />
         </div>
 
         <div className="flex-1 p-5 sm:p-6">
@@ -713,19 +750,12 @@ function BuildRow({
               <BotIcon className="w-5 h-5" style={{ color: accent }} />
             </div>
             <div className="min-w-0">
-              <div className="font-semibold truncate" style={{ color: 'var(--text)' }}>
-                {bot.name}
-              </div>
+              <div className="font-semibold truncate" style={{ color: 'var(--text)' }}>{bot.name}</div>
               <div className="text-[12px] truncate" style={{ color: 'var(--text-muted)' }}>
                 {(bot.industry || '—') + (bot.language ? ` · ${bot.language}` : '')}
               </div>
             </div>
-            <button
-              onClick={onDelete}
-              className="ml-auto p-1.5 rounded-md transition"
-              title="Delete build"
-              style={{ color: 'var(--text-muted)' }}
-            >
+            <button onClick={onDelete} className="ml-auto p-1.5 rounded-md transition" title="Delete build" style={{ color: 'var(--text-muted)' }}>
               <Trash2 className="w-4 h-4" />
             </button>
           </div>
@@ -737,11 +767,9 @@ function BuildRow({
           </div>
 
           <div className="mt-5 flex flex-wrap items-center gap-3">
-            <button
-              onClick={onOpen}
-              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-[10px] text-sm transition"
-              style={{ background: 'var(--panel)', border: '1px solid var(--border)', color: 'var(--text)', boxShadow: 'var(--shadow-soft)' }}
-            >
+            <button onClick={onOpen}
+                    className="inline-flex items-center gap-2 px-3.5 py-2 rounded-[10px] text-sm transition"
+                    style={{ background: 'var(--panel)', border: '1px solid var(--border)', color: 'var(--text)', boxShadow: 'var(--shadow-soft)' }}>
               Open <ArrowRight className="w-4 h-4" />
             </button>
             <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
@@ -757,10 +785,69 @@ function BuildRow({
 function RowStat({ label, value }: { label: string; value: string }) {
   return (
     <div className="text-sm">
-      <div className="text-[11px] uppercase tracking-wide mb-0.5" style={{ color: 'var(--text-muted)' }}>
-        {label}
-      </div>
+      <div className="text-[11px] uppercase tracking-wide mb-0.5" style={{ color: 'var(--text-muted)' }}>{label}</div>
       <div style={{ color: 'var(--text)' }}>{value}</div>
+    </div>
+  );
+}
+
+/* --------------------------- Inspector (helps debug storage) --------------------------- */
+function BuildsInspector() {
+  const [local, setLocal] = useState<any[]>([]);
+  const [cloud, setCloud] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      // local
+      try {
+        const raw = localStorage.getItem('chatbots') || '[]';
+        setLocal(JSON.parse(raw));
+      } catch { setLocal([]); }
+
+      // cloud
+      try {
+        const ss = await scopedStorage();
+        await ss.ensureOwnerGuard();
+        const arr = await ss.getJSON<any[]>('chatbots.v1', []);
+        setCloud(Array.isArray(arr) ? arr : []);
+      } catch { setCloud([]); }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  return (
+    <div className="rounded-[16px] p-4" style={{ background: 'var(--panel)', border: '1px solid var(--border)' }}>
+      <div className="flex items-center justify-between mb-3">
+        <div className="font-semibold">Builds Inspector</div>
+        <button onClick={load} className="inline-flex items-center gap-2 px-3 py-2 rounded-[10px] text-sm"
+                style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
+          {loading ? 'Refreshing…' : 'Refresh'}
+        </button>
+      </div>
+      <div className="grid md:grid-cols-2 gap-4 text-sm">
+        <div>
+          <div className="font-medium mb-1">localStorage: <code>chatbots</code></div>
+          <pre className="max-h-[300px] overflow-auto rounded-[10px] p-2"
+               style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
+            {JSON.stringify(local, null, 2)}
+          </pre>
+        </div>
+        <div>
+          <div className="font-medium mb-1">scopedStorage: <code>chatbots.v1</code></div>
+          <pre className="max-h-[300px] overflow-auto rounded-[10px] p-2"
+               style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
+            {JSON.stringify(cloud, null, 2)}
+          </pre>
+        </div>
+      </div>
+      <div className="mt-3 text-xs" style={{ color: 'var(--text-muted)' }}>
+        If both are empty, click “Sync from OpenAI” above — it will pull your assistants and store them here.
+      </div>
     </div>
   );
 }
