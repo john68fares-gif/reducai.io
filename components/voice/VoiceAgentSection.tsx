@@ -1,12 +1,12 @@
 // components/voice/VoiceAgentSection.tsx
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   Bot, Check, ChevronDown, ChevronRight, Copy, Edit3, FileText, Folder,
   FolderOpen, Mic2, PanelLeft, Plus, RefreshCw, Search, SlidersHorizontal,
-  Sparkles, Trash2, UploadCloud, X
+  Sparkles, Trash2, UploadCloud, X, Pencil
 } from 'lucide-react';
 
 /* ==============================  THEME  ==================================== */
@@ -15,7 +15,6 @@ const ACCENT = '#10b981';
 const ACCENT_HOVER = '#0ea473';
 const BTN_SHADOW = '0 14px 30px rgba(16,185,129,.22)';
 
-/* OpenAI glyph */
 const OpenAIIcon = () => (
   <svg width="16" height="16" viewBox="0 0 256 256" aria-hidden>
     <path fill="currentColor" d="M214.7 111.7c1.9-7.6 1.5-15.7-1.2-23.3-7.6-21.3-28.6-35.2-51.4-33.6-12.1-19.9-36.5-29-59-21.2-22.1 7.6-36.7 28.6-35.4 51.5-19.9 12.1-29 36.5-21.2 59 7.6 22.1 28.6 36.7 51.5 35.4 12.1 19.9 36.5 29 59 21.2 22.1-7.6 36.7-28.6 35.4-51.5 8.7-5.5 15.5-13.9 18.9-24.1ZM156 193.2c-9.2 3.2-19.2 2.7-28-1.4l17.4-30.1c4.8-0.7 9.2-3.8 11.6-8.4c1.2-2.4 1.8-5 1.8-7.6v-40l27 15.6v28.6c0 17.1-10.7 32.8-29.8 43.3Zm-76.9-8.7c-9.2-5.2-16-13.2-19.6-23c-3.6-10-3-20.4 1.2-29.7l27 15.6v16.1c0 4.9 2.6 9.4 6.7 11.9l31 17.9c-15.1 2.8-31-0.1-46.3-8.8ZM62.8 92.5c5.2-9.2 13.2-16 23-19.6c10-3.6 20.4-3 29.7 1.2l-15.6 27h-16.1c-4.9 0-9.4 2.6-11.9 6.7l-17.9 31c-2.8-15.1 0.1-31 8.8-46.3Zm118.4 5.1l-31-17.9c-3.6-2.1-7.8-2.5-11.7-1.4c-3.8 1.1-7 3.6-9.1 7.1l-17.5 30.3l-27-15.6l16.6-28.7c9.7-16.7 31.1-22.4 48-12.7c0.6 0.3 1.1 0.7 1.7 1l30 17.3c-0.7 7.4-0.8 13.4 0 20.6Z"/>
@@ -73,48 +72,56 @@ You are an intelligent and responsive assistant designed to help users with a wi
 - If a user's request is unclear or you encounter difficulty understanding, ask for clarification politely.
 - If a task cannot be completed, inform the user empathetically and suggest alternative solutions or resources.`.trim();
 
-/* helper: apply a refinement */
+/* helpers */
 const applyRefinement = (base: string, add: string) => {
-  const clean = add.trim();
-  return clean ? `${base}\n\n[Refinements]\n- ${clean.replace(/\n+/g,' ').replace(/\s{2,}/g,' ').trim()}` : base;
+  const clean = (add || '').trim();
+  return clean ? `${base || ''}\n\n[Refinements]\n- ${clean.replace(/\n+/g,' ').replace(/\s{2,}/g,' ').trim()}` : (base || '');
 };
 
-/* small diff: marks inserts/deletes for preview */
-function diffText(oldStr: string, newStr: string) {
-  const o = oldStr.split(/\s+/); const n = newStr.split(/\s+/);
-  const dp: number[][] = Array(o.length + 1).fill(0).map(()=>Array(n.length + 1).fill(0));
-  for (let i=o.length-1;i>=0;i--) for (let j=n.length-1;j>=0;j--) dp[i][j] = o[i]===n[j] ? 1+dp[i+1][j+1] : Math.max(dp[i+1][j], dp[i][j+1]);
-  const out:string[] = []; let i=0, j=0;
-  while (i<o.length && j<n.length) {
-    if (o[i]===n[j]) { out.push(o[i++]); j++; }
-    else if (dp[i+1][j] >= dp[i][j+1]) out.push(`<del>${o[i++]}</del>`);
-    else out.push(`<ins>${n[j++]}</ins>`);
+/* word-safe diff with <ins>/<del> marks */
+function diffHTML(oldStr: string, newStr: string) {
+  const o = oldStr.split(/\s+/), n = newStr.split(/\s+/);
+  const dp: number[][] = Array(o.length+1).fill(0).map(()=>Array(n.length+1).fill(0));
+  for (let i=o.length-1;i>=0;i--) for (let j=n.length-1;j>=0;j--) dp[i][j]=o[i]===n[j]?1+dp[i+1][j+1]:Math.max(dp[i+1][j],dp[i][j+1]);
+  const out:string[]=[]; let i=0,j=0;
+  while(i<o.length && j<n.length){
+    if(o[i]===n[j]){ out.push(o[i]); i++; j++; }
+    else if(dp[i+1][j]>=dp[i][j+1]){ out.push(`<del>${escapeHtml(o[i])}</del>`); i++; }
+    else{ out.push(`<ins>${escapeHtml(n[j])}</ins>`); j++; }
   }
-  while (i<o.length) out.push(`<del>${o[i++]}</del>`);
-  while (j<n.length) out.push(`<ins>${n[j++]}</ins>`);
+  while(i<o.length){ out.push(`<del>${escapeHtml(o[i++])}</del>`); }
+  while(j<n.length){ out.push(`<ins>${escapeHtml(n[j++])}</ins>`); }
   return out.join(' ');
+}
+function escapeHtml(s: string){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+/* tokenizes HTML into safe chunks for typing reveal */
+function tokenizeForTyping(html: string){
+  return html.split(/(<[^>]+>|\s+)/g).filter(Boolean);
 }
 
 /* ==============================  PAGE  ===================================== */
 export default function VoiceAgentSection() {
-  /* assistants */
   const [assistants, setAssistants] = useState<Assistant[]>([]);
   const [activeId, setActiveId] = useState('');
   const active = useMemo(() => activeId ? readLS<Assistant>(ak(activeId)) : null, [activeId]);
 
-  /* rail search */
   const [query, setQuery] = useState('');
-
-  /* create + delete modals */
   const [creating, setCreating] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
-  /* prompt generate overlay */
-  const [genOpen, setGenOpen] = useState(false);
-  const [genText, setGenText] = useState('');
-  const [pending, setPending] = useState<{ preview: string; html: string } | null>(null);
+  /* rename inline in rail */
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameVal, setRenameVal] = useState('');
 
-  /* init from LS or seed */
+  /* prompt typing-diff mode */
+  const [promptMode, setPromptMode] = useState<'edit' | 'typing'>('edit');
+  const typingRef = useRef<HTMLDivElement | null>(null);
+  const typingTokens = useRef<string[]>([]);
+  const typingIndex = useRef(0);
+  const typingTimer = useRef<number | null>(null);
+
+  /* init */
   useEffect(() => {
     const list = readLS<Assistant[]>(LS_LIST) || [];
     if (!list.length) {
@@ -139,13 +146,14 @@ export default function VoiceAgentSection() {
   }, []);
 
   /* helpers */
+  const writeListAndTouch = (list: Assistant[]) => { writeLS(LS_LIST, list); setAssistants(list); };
+
   const updateActive = (mut: (a: Assistant)=>Assistant) => {
     if (!active) return;
     const next = mut(active);
     writeLS(ak(next.id), next);
     const list = (readLS<Assistant[]>(LS_LIST) || []).map(x => x.id===next.id ? { ...x, name: next.name, folder: next.folder, updatedAt: Date.now() } : x);
-    writeLS(LS_LIST, list);
-    setAssistants(list);
+    writeListAndTouch(list);
   };
 
   const visible = useMemo(
@@ -153,10 +161,9 @@ export default function VoiceAgentSection() {
     [assistants, query]
   );
 
-  /* create flow (with loading) */
   const createAssistant = async () => {
     setCreating(true);
-    await new Promise(r => setTimeout(r, 550)); // tasteful loading
+    await new Promise(r => setTimeout(r, 550));
     const id = `ag_${Math.random().toString(36).slice(2,8)}`;
     const blank: Assistant = {
       id, name: 'New Assistant', updatedAt: Date.now(),
@@ -169,38 +176,52 @@ export default function VoiceAgentSection() {
     };
     writeLS(ak(id), blank);
     const list = [...assistants, blank];
-    writeLS(LS_LIST, list);
-    setAssistants(list);
+    writeListAndTouch(list);
     setActiveId(id);
     setCreating(false);
+    // start rename flow automatically on create
+    setRenamingId(id);
+    setRenameVal('New Assistant');
   };
 
-  /* delete (overlay) */
   const confirmDelete = () => {
     if (!deleteId) return;
     const list = assistants.filter(a => a.id !== deleteId);
-    writeLS(LS_LIST, list);
+    writeListAndTouch(list);
     localStorage.removeItem(ak(deleteId));
-    setAssistants(list);
     if (activeId === deleteId) setActiveId(list[0]?.id || '');
     setDeleteId(null);
   };
 
-  /* generate / edit: we keep overlay + diff; “works” without backend */
-  const openGenerate = () => { setGenOpen(true); setGenText(''); };
-  const submitGenerate = async () => {
-    if (!active) return;
-    const preview = applyRefinement(
-      active.config.model.systemPrompt || '',
-      genText || 'Tighten the tone, keep answers brief and ask one clarifying question before giving steps.'
-    );
-    setPending({ preview, html: diffText(active.config.model.systemPrompt || '', preview) });
-    setGenOpen(false);
+  /* --------- Generate / Edit => updates prompt + highlight with typing --------- */
+  const runTypingDiff = (oldText: string, newText: string) => {
+    const html = diffHTML(oldText, newText);
+    const tokens = tokenizeForTyping(html);
+    typingTokens.current = tokens;
+    typingIndex.current = 0;
+    setPromptMode('typing');
+    if (typingRef.current) typingRef.current.innerHTML = '';
+
+    const step = () => {
+      if (!typingRef.current) return;
+      const chunkCount = Math.max(1, Math.round(tokens.length / 120)); // ~120 frames
+      typingIndex.current = Math.min(tokens.length, typingIndex.current + chunkCount);
+      typingRef.current.innerHTML = tokens.slice(0, typingIndex.current).join('');
+      if (typingIndex.current < tokens.length) {
+        typingTimer.current = window.setTimeout(step, 12);
+      } else {
+        // after finish, switch to edit mode w/ new text applied
+        updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, systemPrompt: newText }}}));
+        setPromptMode('edit');
+      }
+    };
+    step();
   };
-  const acceptChanges = () => {
-    if (!active || !pending) return;
-    updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, systemPrompt: pending.preview }}}));
-    setPending(null);
+
+  const onGenerate = (addText: string) => {
+    if (!active) return;
+    const next = applyRefinement(active.config.model.systemPrompt, addText);
+    runTypingDiff(active.config.model.systemPrompt || '', next);
   };
 
   /* voices */
@@ -226,7 +247,7 @@ export default function VoiceAgentSection() {
           position:'fixed',
           top:'var(--app-header-h, 64px)',
           left:'var(--app-sidebar-w, 248px)',
-          width:'var(--va-rail-w, 312px)',
+          width:'var(--va-rail-w)',
           height:'calc(100vh - var(--app-header-h, 64px))',
           background:'var(--va-rail-bg)',
           borderRight:'1px solid var(--va-border)',
@@ -246,7 +267,6 @@ export default function VoiceAgentSection() {
           </button>
         </div>
 
-        {/* rail body never scrolls; only this list region does */}
         <div className="p-3 flex-1 min-h-0 overflow-hidden flex flex-col">
           <div className="flex items-center gap-2 rounded-lg px-2.5 py-2 mb-2"
                style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)' }}>
@@ -268,26 +288,79 @@ export default function VoiceAgentSection() {
           </button>
 
           <div className="mt-3 overflow-y-auto pr-1" style={{ scrollbarWidth:'thin' }}>
-            {visible.map(a => (
-              <button
-                key={a.id}
-                onClick={()=> setActiveId(a.id)}
-                className="w-full text-left rounded-xl p-3 flex items-center justify-between mb-2"
-                style={{
-                  background: a.id===activeId ? 'color-mix(in oklab, var(--accent) 10%, transparent)' : 'var(--va-card)',
-                  border: `1px solid ${a.id===activeId ? 'color-mix(in oklab, var(--accent) 35%, var(--va-border))' : 'var(--va-border)'}`,
-                  boxShadow:'var(--va-shadow-sm)'
-                }}
-              >
-                <div className="min-w-0">
-                  <div className="font-medium truncate flex items-center gap-2">
-                    <Bot className="w-4 h-4 icon" /><span className="truncate">{a.name}</span>
-                  </div>
-                  <div className="text-[11px] mt-0.5 opacity-70 truncate">{a.folder || 'Unfiled'} • {new Date(a.updatedAt).toLocaleDateString()}</div>
+            {visible.map(a => {
+              const isActive = a.id === activeId;
+              const isRenaming = renamingId === a.id;
+
+              return (
+                <div
+                  key={a.id}
+                  className="w-full text-left rounded-xl p-3 mb-2 flex items-center gap-3"
+                  style={{
+                    background: isActive ? 'color-mix(in oklab, var(--accent) 10%, transparent)' : 'var(--va-card)',
+                    border: `1px solid ${isActive ? 'color-mix(in oklab, var(--accent) 35%, var(--va-border))' : 'var(--va-border)'}`,
+                    boxShadow:'var(--va-shadow-sm)'
+                  }}
+                >
+                  <button
+                    onClick={()=> setActiveId(a.id)}
+                    className="min-w-0 flex-1 text-left"
+                  >
+                    <div className="font-medium truncate flex items-center gap-2">
+                      <Bot className="w-4 h-4 icon" />
+                      {isRenaming ? (
+                        <input
+                          value={renameVal}
+                          onChange={(e)=> setRenameVal(e.target.value)}
+                          onKeyDown={(e)=> {
+                            if (e.key === 'Enter') {
+                              setRenamingId(null);
+                              updateActive(x => x.id === a.id ? { ...x, name: renameVal } : x);
+                            }
+                            if (e.key === 'Escape') setRenamingId(null);
+                          }}
+                          onBlur={()=> { setRenamingId(null); updateActive(x => x.id === a.id ? { ...x, name: renameVal } : x); }}
+                          autoFocus
+                          className="bg-transparent outline-none border border-[var(--va-border)] rounded-md px-2 py-1 text-sm w-full"
+                          style={{ color:'var(--text)' }}
+                        />
+                      ) : (
+                        <span className="truncate">{a.name}</span>
+                      )}
+                    </div>
+                    <div className="text-[11px] mt-0.5 opacity-70 truncate">
+                      {a.folder || 'Unfiled'} • {new Date(a.updatedAt).toLocaleDateString()}
+                    </div>
+                  </button>
+
+                  {isActive && !isRenaming && (
+                    <>
+                      <button
+                        className="p-2 rounded-md hover:bg-white/5"
+                        title="Rename"
+                        onClick={() => { setRenamingId(a.id); setRenameVal(a.name); }}
+                      >
+                        <Pencil className="w-4 h-4 icon" />
+                      </button>
+                      <button
+                        className="p-2 rounded-md hover:bg-white/5"
+                        title="Delete"
+                        onClick={() => setDeleteId(a.id)}
+                      >
+                        <Trash2 className="w-4 h-4" style={{ color:'#fca5a5' }} />
+                      </button>
+                      <button
+                        className="p-2 rounded-md hover:bg-white/5"
+                        title="Activate"
+                        onClick={()=> setActiveId(a.id)}
+                      >
+                        <Check className="w-4 h-4 icon" />
+                      </button>
+                    </>
+                  )}
                 </div>
-                {a.id===activeId ? <Check className="w-4 h-4 icon" /> : null}
-              </button>
-            ))}
+              );
+            })}
           </div>
         </div>
       </aside>
@@ -296,22 +369,19 @@ export default function VoiceAgentSection() {
       <div
         className="va-main"
         style={{
-          paddingLeft:'calc(var(--app-sidebar-w, 248px) + var(--va-rail-w, 312px))',
-          paddingRight:'24px',
+          paddingLeft:'calc(var(--app-sidebar-w, 248px) + var(--va-rail-w))',
+          paddingRight:'clamp(12px, 3vw, 24px)',
           paddingTop:'calc(var(--app-header-h, 64px) + 12px)',
-          paddingBottom:'48px'
+          paddingBottom:'56px'
         }}
       >
-        {/* top actions bar */}
+        {/* top actions bar (read-only name; rename happens in rail) */}
         <div className="sticky top-[var(--app-header-h,64px)] z-[5] bg-[var(--va-topbar)] border-b border-[var(--va-border)] flex items-center justify-between px-4 py-3 rounded-xl mb-6">
           <div className="flex items-center gap-3 min-w-0">
             <Bot className="w-5 h-5 icon" />
-            <input
-              value={active.name}
-              onChange={(e)=> updateActive(a => ({ ...a, name: e.target.value }))}
-              className="text-[15px] font-semibold bg-transparent outline-none rounded-lg px-2 py-1 min-w-[140px] max-w-[420px]"
-              style={{ border:'1px solid var(--va-border)', background:'var(--va-chip)', color:'var(--text)' }}
-            />
+            <div className="text-[15px] font-semibold truncate" style={{ color:'var(--text)' }}>
+              {active.name}
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -326,7 +396,6 @@ export default function VoiceAgentSection() {
           </div>
         </div>
 
-        {/* sections */}
         <div className="max-w-[1600px] mx-auto grid grid-cols-12 gap-8">
           <Section title="Model" icon={<FileText className="w-4 h-4 icon" />}>
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
@@ -374,23 +443,35 @@ export default function VoiceAgentSection() {
                     onClick={()=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, systemPrompt: BASE_PROMPT } } }))}
                     className="btn--ghost"
                   ><RefreshCw className="w-4 h-4 icon" /> Reset</button>
-                  <button onClick={openGenerate} className="btn--green">
-                    <Sparkles className="w-4 h-4 text-white" /> <span className="text-white">Generate / Edit</span>
-                  </button>
+                  <GenerateButton onSubmit={(text)=> onGenerate(text)} />
                 </div>
               </div>
 
-              <textarea
-                rows={18}
-                value={active.config.model.systemPrompt}
-                onChange={(e)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, systemPrompt: e.target.value } } }))}
-                className="w-full rounded-xl px-3 py-3 text-[14px] leading-6 outline-none"
-                style={{
-                  background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)',
-                  boxShadow:'var(--va-shadow), inset 0 1px 0 rgba(255,255,255,.03)', color:'var(--text)',
-                  fontFamily:'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace'
-                }}
-              />
+              {/* Prompt editor or Typing Diff */}
+              {promptMode === 'edit' ? (
+                <textarea
+                  rows={18}
+                  value={active.config.model.systemPrompt}
+                  onChange={(e)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, systemPrompt: e.target.value } } }))}
+                  className="w-full rounded-xl px-3 py-3 text-[14px] leading-6 outline-none"
+                  style={{
+                    background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)',
+                    boxShadow:'var(--va-shadow), inset 0 1px 0 rgba(255,255,255,.03)', color:'var(--text)',
+                    fontFamily:'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace'
+                  }}
+                />
+              ) : (
+                <div
+                  ref={typingRef}
+                  className="w-full rounded-xl px-3 py-3 text-[14px] leading-6"
+                  style={{
+                    background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)',
+                    boxShadow:'var(--va-shadow), inset 0 1px 0 rgba(255,255,255,.03)', color:'var(--text)',
+                    fontFamily:'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+                    minHeight: '360px', overflowY:'auto'
+                  }}
+                />
+              )}
             </div>
           </Section>
 
@@ -430,9 +511,9 @@ export default function VoiceAgentSection() {
             </div>
           </Section>
 
-          <Section title="Transcriber" icon={<SlidersHorizontal className="w-4 h-4 icon" />}>
+          <Section title="Transcriber & Tools" icon={<SlidersHorizontal className="w-4 h-4 icon" />}>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <Field label="Provider">
+              <Field label="Transcriber Provider">
                 <Select
                   value={active.config.transcriber.provider}
                   onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, transcriber:{ ...a.config.transcriber, provider: v as any } } }))}
@@ -483,56 +564,6 @@ export default function VoiceAgentSection() {
         </div>
       </div>
 
-      {/* ====== Generate overlay ====== */}
-      <AnimatePresence>
-        {genOpen && (
-          <motion.div className="fixed inset-0 z-[999] flex items-center justify-center p-4"
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            style={{ background:'rgba(0,0,0,.45)' }}>
-            <motion.div initial={{ y:10, opacity:0, scale:.98 }} animate={{ y:0, opacity:1, scale:1 }} exit={{ y:8, opacity:0, scale:.985 }}
-              className="w-full max-w-xl rounded-2xl" style={{ background:'var(--va-card)', border:'1px solid var(--va-border)', boxShadow:'var(--va-shadow-lg)' }}>
-              <div className="px-5 py-4 flex items-center justify-between" style={{ borderBottom:'1px solid var(--va-border)' }}>
-                <div className="flex items-center gap-2 text-sm font-semibold"><Edit3 className="w-4 h-4 icon" /> Edit Prompt</div>
-                <button className="p-2 rounded-lg hover:opacity-70" onClick={()=> setGenOpen(false)}><X className="w-4 h-4" /></button>
-              </div>
-              <div className="p-5">
-                <input
-                  value={genText}
-                  onChange={(e)=> setGenText(e.target.value)}
-                  placeholder="Describe how you'd like to edit the prompt…"
-                  className="w-full rounded-[14px] px-3 py-3 text-sm outline-none"
-                  style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)', color:'var(--text)' }}
-                />
-                <div className="mt-4 flex items-center justify-end gap-2">
-                  <button onClick={()=> setGenOpen(false)} className="btn--ghost">Cancel</button>
-                  <button onClick={submitGenerate} className="btn--green"><span className="text-white">Submit Edit</span></button>
-                </div>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* ====== Accept / Discard tray ====== */}
-      <AnimatePresence>
-        {pending && (
-          <motion.div
-            initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 8 }}
-            className="fixed right-6 bottom-6 z-[998] rounded-2xl p-4 w-[min(680px,calc(100vw-24px))]"
-            style={{ background:'var(--va-card)', border:'1px solid var(--va-border)', boxShadow:'var(--va-shadow-lg)' }}
-          >
-            <div className="text-sm font-semibold mb-2" style={{ color:'var(--text)' }}>Proposed Changes</div>
-            <div className="rounded-[12px] p-3 mb-3 text-[13px] leading-6 overflow-y-auto max-h-[280px]"
-                 style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)', color:'var(--text)' }}
-                 dangerouslySetInnerHTML={{ __html: pending.html }} />
-            <div className="flex gap-2">
-              <button onClick={()=> setPending(null)} className="btn--ghost">✕ Discard Changes</button>
-              <button onClick={acceptChanges} className="btn--green"><span className="text-white">Accept Changes ✓</span></button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       {/* ====== Delete modal ====== */}
       <AnimatePresence>
         {deleteId && (
@@ -549,7 +580,7 @@ export default function VoiceAgentSection() {
                 <div className="text-lg font-semibold">Delete assistant?</div>
               </div>
               <div className="px-5 py-4 text-sm" style={{ color:'var(--text-muted)' }}>
-                This action removes the assistant and its configuration from this browser.
+                This removes the assistant and its configuration from this browser.
               </div>
               <div className="px-5 pb-5 flex gap-2 justify-end">
                 <button className="btn--ghost" onClick={()=> setDeleteId(null)}>Cancel</button>
@@ -596,7 +627,7 @@ function Section({ title, icon, children }:{ title: string; icon: React.ReactNod
   );
 }
 
-/* basic select (portal-less, consistent) */
+/* select */
 type Opt = { value: string; label: string; icon?: React.ReactNode };
 function Select({ value, items, onChange }: { value: string; items: Opt[]; onChange: (v: string)=>void }) {
   const [open, setOpen] = useState(false);
@@ -646,19 +677,61 @@ function Select({ value, items, onChange }: { value: string; items: Opt[]; onCha
   );
 }
 
+/* Generate button with overlay input */
+function GenerateButton({ onSubmit }: { onSubmit: (text: string)=>void }) {
+  const [open, setOpen] = useState(false);
+  const [val, setVal] = useState('');
+  return (
+    <>
+      <button onClick={()=> { setOpen(true); setVal(''); }} className="btn--green">
+        <Sparkles className="w-4 h-4 text-white" /> <span className="text-white">Generate / Edit</span>
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div className="fixed inset-0 z-[999] flex items-center justify-center p-4"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            style={{ background:'rgba(0,0,0,.45)' }}>
+            <motion.div initial={{ y:10, opacity:0, scale:.98 }} animate={{ y:0, opacity:1, scale:1 }} exit={{ y:8, opacity:0, scale:.985 }}
+              className="w-full max-w-xl rounded-2xl" style={{ background:'var(--va-card)', border:'1px solid var(--va-border)', boxShadow:'var(--va-shadow-lg)' }}>
+              <div className="px-5 py-4 flex items-center justify-between" style={{ borderBottom:'1px solid var(--va-border)' }}>
+                <div className="flex items-center gap-2 text-sm font-semibold"><Edit3 className="w-4 h-4 icon" /> Edit Prompt</div>
+                <button className="p-2 rounded-lg hover:opacity-70" onClick={()=> setOpen(false)}><X className="w-4 h-4" /></button>
+              </div>
+              <div className="p-5">
+                <input
+                  value={val}
+                  onChange={(e)=> setVal(e.target.value)}
+                  placeholder="Describe your changes…"
+                  className="w-full rounded-[14px] px-3 py-3 text-sm outline-none"
+                  style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)', color:'var(--text)' }}
+                />
+                <div className="mt-4 flex items-center justify-end gap-2">
+                  <button onClick={()=> setOpen(false)} className="btn--ghost">Cancel</button>
+                  <button onClick={()=> { setOpen(false); onSubmit(val); }} className="btn--green"><span className="text-white">Apply</span></button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>
+  );
+}
+
 /* ============================  SCOPED STYLES  ============================== */
 function RailStyles() {
   return (
     <style jsx global>{`
       .${SCOPE}{
         --accent:${ACCENT};
-        --va-rail-w:312px;
+        /* Responsive rail width (great on iPad + desktop) */
+        --va-rail-w: clamp(260px, 28vw, 312px);
 
         /* fallbacks if your layout doesn't set them */
         --app-header-h: var(--app-header-h, 64px);
         --app-sidebar-w: var(--app-sidebar-w, 248px);
 
-        /* dark palette (matches your app) */
+        /* dark palette */
         --text:#eef2f5;
         --text-muted:rgba(255,255,255,.70);
         --va-card:#0f1315;
@@ -694,9 +767,13 @@ function RailStyles() {
         --va-shadow-sm:0 12px 26px rgba(0,0,0,.10);
         --va-rail-shadow:8px 0 26px rgba(0,0,0,.08);
       }
+      /* iPad polish: keep content readable when viewport is tight */
+      @media (max-width: 1024px){
+        .${SCOPE} .va-main{ padding-right: 12px !important; }
+      }
+
       .${SCOPE} .icon{ color: var(--accent); }
 
-      /* API-keys-like buttons */
       .${SCOPE} .btn--green{
         display:inline-flex; align-items:center; gap:.5rem;
         border-radius:14px; padding:.6rem .9rem;
@@ -721,9 +798,10 @@ function RailStyles() {
       }
 
       .${SCOPE} .va-range{ -webkit-appearance:none; height:4px; background:color-mix(in oklab, var(--accent) 24%, #0000); border-radius:999px; outline:none; }
-      .${SCOPE} .va-range::-webkit-slider-thumb{ -webkit-appearance:none; width:14px;height:14px;border-radius:50%;background:var(--accent); border:2px solid #fff; box-shadow:0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent); }
-      .${SCOPE} .va-range::-moz-range-thumb{ width:14px;height:14px;border:0;border-radius:50%;background:var(--accent); box-shadow:0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent); }
+      .${SCOPE} .va-range::-webkit-slider-thumb{ -webkit-appearance:none; width:16px;height:16px;border-radius:50%;background:var(--accent); border:2px solid #fff; box-shadow:0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent); }
+      .${SCOPE} .va-range::-moz-range-thumb{ width:16px;height:16px;border:0;border-radius:50%;background:var(--accent); box-shadow:0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent); }
 
+      /* Diff colors */
       .${SCOPE} ins{ background:rgba(16,185,129,.18); color:var(--text); text-decoration:none; padding:1px 2px; border-radius:4px; }
       .${SCOPE} del{ background:rgba(239,68,68,.18); color:#fca5a5; text-decoration:line-through; padding:1px 2px; border-radius:4px; }
     `}</style>
