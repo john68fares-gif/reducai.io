@@ -131,12 +131,12 @@ export default function StepV1Basics({ onNext }: Props) {
             </div>
           </FieldShell>
 
-          {/* Language (styled portal dropdown) */}
+          {/* Language (keep as-is; DO NOT CHANGE) */}
           <FieldShell label="Language" error={errors.language}>
             <LanguageSelect value={language} onChange={setLanguage} />
           </FieldShell>
 
-          {/* Dialect / Accent (country ISO2) */}
+          {/* Dialect / Accent (country ISO2) — themed for light + dark */}
           <FieldShell
             label={
               <>
@@ -146,9 +146,12 @@ export default function StepV1Basics({ onNext }: Props) {
             error={errors.accent}
           >
             <CountryDialSelect
+              id="voice-accent"
               value={accentIso2}
               onChange={(iso2 /* , dial */) => setAccentIso2(iso2.toUpperCase())}
-              id="voice-accent"
+              /* IMPORTANT: prefix & portal so we can theme the portaled menu */
+              classNamePrefix="accent"
+              menuPortalTarget={typeof document !== 'undefined' ? document.body : undefined}
             />
           </FieldShell>
         </div>
@@ -180,7 +183,7 @@ export default function StepV1Basics({ onNext }: Props) {
         </div>
       </div>
 
-      {/* Scoped theme vars + animations for Step 1 */}
+      {/* Scoped theme vars + menu styles ONLY for the accent dropdown */}
       <style jsx global>{`
         @keyframes popIn { 0% { opacity: 0; transform: scale(.985); } 100% { opacity: 1; transform: scale(1); } }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
@@ -198,6 +201,13 @@ export default function StepV1Basics({ onNext }: Props) {
 
           --vs-chip-bg: rgba(0,255,194,.10);
           --vs-chip-border: rgba(0,255,194,.30);
+
+          /* ACCENT MENU (react-select) */
+          --vs-menu-bg: #ffffff;
+          --vs-menu-border: rgba(0,0,0,.10);
+          --vs-menu-shadow: 0 28px 70px rgba(0,0,0,.12), 0 12px 28px rgba(0,0,0,.10), 0 0 0 1px rgba(0,0,0,.02);
+          --vs-option-hover: rgba(0,255,194,.08);
+          --vs-option-border: rgba(0,255,194,.32);
         }
 
         /* DARK */
@@ -215,7 +225,60 @@ export default function StepV1Basics({ onNext }: Props) {
 
           --vs-chip-bg: rgba(0,255,194,.10);
           --vs-chip-border: rgba(0,255,194,.28);
+
+          /* ACCENT MENU (react-select) */
+          --vs-menu-bg: #101314;
+          --vs-menu-border: rgba(255,255,255,.16);
+          --vs-menu-shadow: 0 36px 90px rgba(0,0,0,.60), 0 14px 34px rgba(0,0,0,.45), 0 0 0 1px rgba(0,255,194,.08);
+          --vs-option-hover: rgba(0,255,194,.10);
+          --vs-option-border: rgba(0,255,194,.35);
         }
+
+        /* ===== CountryDialSelect (react-select style) — accent dropdown only =====
+           We rely on classNamePrefix="accent" so the generated nodes get .accent__* classes.
+           These rules style the control and the MENU even when it is portaled to <body>.
+        */
+        .accent__control{
+          background: var(--vs-input-bg) !important;
+          border: 1px solid var(--vs-input-border) !important;
+          box-shadow: var(--vs-input-shadow) !important;
+          min-height: 42px;
+          border-radius: 14px !important;
+          color: var(--text) !important;
+        }
+        .accent__single-value,
+        .accent__input-container,
+        .accent__placeholder{ color: var(--text) !important; opacity:.92; }
+
+        .accent__menu{
+          background: var(--vs-menu-bg) !important;
+          border: 1px solid var(--vs-menu-border) !important;
+          box-shadow: var(--vs-menu-shadow) !important;
+          border-radius: 16px !important;
+          overflow: hidden;
+          z-index: 9999; /* ensure above panel */
+        }
+        .accent__menu-list{
+          padding: 6px !important;
+          max-height: 420px !important;
+        }
+        .accent__option{
+          color: var(--text) !important;
+          border: 1px solid transparent;
+          border-radius: 10px;
+          margin: 2px;
+        }
+        .accent__option--is-focused{
+          background: var(--vs-option-hover) !important;
+          border-color: var(--vs-option-border) !important;
+        }
+        .accent__option--is-selected{
+          background: var(--vs-option-hover) !important;
+          border-color: var(--vs-option-border) !important;
+        }
+        .accent__indicator,
+        .accent__dropdown-indicator,
+        .accent__clear-indicator{ color: var(--text-muted) !important; }
       `}</style>
     </section>
   );
@@ -254,7 +317,7 @@ function FieldShell({
   );
 }
 
-/* ---------------------------- Styled LanguageSelect ---------------------------- */
+/* ---------------------------- LanguageSelect (UNCHANGED) ---------------------------- */
 function LanguageSelect({
   value,
   onChange,
@@ -333,21 +396,12 @@ function LanguageSelect({
                 left: rect.left,
                 width: rect.width,
                 transform: rect.openUp ? 'translateY(-100%)' : 'none',
-                background: 'var(--vs-menu-bg, #ffffff)',
-                border: '1px solid var(--vs-menu-border, rgba(0,0,0,.10))',
+                background: 'var(--vs-menu-bg)',
+                border: '1px solid var(--vs-menu-border)',
                 borderRadius: 20,
-                boxShadow:
-                  '0 28px 70px rgba(0,0,0,.12), 0 10px 26px rgba(0,0,0,.08), 0 0 0 1px rgba(0,0,0,.02)',
+                boxShadow: 'var(--vs-menu-shadow)',
               }}
             >
-              <style jsx global>{`
-                /* menu theming for dark */
-                [data-theme="dark"] .voice-step-scope ~ .fixed {
-                  --vs-menu-bg: #101314;
-                  --vs-menu-border: rgba(255,255,255,.16);
-                }
-              `}</style>
-
               <div
                 className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[12px]"
                 style={{
@@ -378,8 +432,8 @@ function LanguageSelect({
                     className="w-full flex items-center gap-3 px-3 py-2 rounded-[10px] text-left transition"
                     style={{ background: 'transparent', border: '1px solid transparent', color: 'var(--text)' }}
                     onMouseEnter={(e) => {
-                      (e.currentTarget as HTMLButtonElement).style.background = 'rgba(0,255,194,0.10)';
-                      (e.currentTarget as HTMLButtonElement).style.border = '1px solid rgba(0,255,194,0.35)';
+                      (e.currentTarget as HTMLButtonButtonElement).style.background = 'var(--vs-option-hover)';
+                      (e.currentTarget as HTMLButtonElement).style.border = '1px solid var(--vs-option-border)';
                     }}
                     onMouseLeave={(e) => {
                       (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
