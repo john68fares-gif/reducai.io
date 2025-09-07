@@ -1,553 +1,775 @@
 // components/voice/VoiceAgentSection.tsx
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ChevronDown, ChevronRight, Plus, Check, Edit3, Zap, SlidersHorizontal, Type, Mic2, BookOpen,
+  Settings, Sparkles, Bot, FileText, Trash2, Copy, RefreshCw, PanelLeft, ArrowUpRight
+} from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Bot as BotIcon, Phone, Trash2, ArrowRight, X, Search } from 'lucide-react';
 
-import StepProgress from '@/components/builder/StepProgress';
-import StepV1Basics from '@/components/voice/steps/StepV1Basics';
-import StepV2Telephony from '@/components/voice/steps/StepV2Telephony';
-import StepV3PromptA from '@/components/voice/steps/StepV3PromptA';
-import StepV4Overview from '@/components/voice/steps/StepV4Overview';
-import VoiceAssistantEditor from '@/components/voice/VoiceAssistantEditor';
+/* ============================================================
+   THEME TOKENS (auto switches with [data-theme="dark"])
+============================================================ */
+const SCOPE = 'voice-agent-scope';
+const GREEN = '#59d9b3';
+const GREEN_HOVER = '#54cfa9';
 
-import { scopedStorage, migrateLegacyKeysToUser } from '@/utils/scoped-storage';
+const Card: React.CSSProperties = {
+  borderRadius: 16,
+  background: 'var(--va-card)',
+  border: '1px solid var(--va-border)',
+  boxShadow: 'var(--va-shadow)'
+};
 
-type Agent = {
+/* ============================================================
+   TYPES + STORAGE
+============================================================ */
+type Assistant = {
   id: string;
-  assistantId?: string;
   name: string;
-  type?: string;           // "voice"
-  language?: string;
-  fromE164?: string;
-  updatedAt?: string;
-  createdAt?: string;
+  updatedAt: number;
+  config: VoiceAgentConfig;
 };
 
-const BTN_GREEN = '#10b981';
-const BTN_GREEN_HOVER = '#0ea473';
-
-const fadeUp = {
-  initial: { opacity: 0, y: 12 },
-  animate: { opacity: 1, y: 0 },
-  transition: { duration: 0.22 },
-};
-
-const nowISO = () => new Date().toISOString();
-const fmt = (iso?: string) => (iso ? new Date(iso).toLocaleDateString() : '');
-
-/* -----------------------------------------------------------
-   VoiceAgentSection  (logic unchanged)
------------------------------------------------------------ */
-export default function VoiceAgentSection() {
-  const [mode, setMode] = useState<'gallery' | 'wizard' | 'editor'>('gallery');
-  const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
-  const [editingId, setEditingId] = useState<string>('');
-
-  // ====== GALLERY DATA (merged Local + Cloud, like BuilderDashboard) ======
-  const [query, setQuery] = useState('');
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const [confirmDelId, setConfirmDelId] = useState<string | null>(null);
-
-  useEffect(() => {
-    (async () => {
-      const ss = await scopedStorage();
-      await ss.ensureOwnerGuard();
-      await migrateLegacyKeysToUser();
-
-      const readMerged = async () => {
-        const localArr = (() => {
-          try { return JSON.parse(localStorage.getItem('chatbots') || '[]') || []; }
-          catch { return []; }
-        })();
-        const cloudArr = await ss.getJSON<any[]>('chatbots.v1', []);
-
-        const pick = (arr: any[]) =>
-          (Array.isArray(arr) ? arr : []).filter((b) => (b?.type || 'voice') === 'voice');
-
-        const L = pick(localArr);
-        const C = pick(cloudArr);
-
-        const map = new Map<string, any>();
-        const add = (b: any) => {
-          const key = String(b.assistantId || b.id || '');
-          if (!key) return;
-          const cur = map.get(key);
-          if (!cur) map.set(key, b);
-          else {
-            const tNew = Date.parse(b.updatedAt || b.createdAt || nowISO());
-            const tOld = Date.parse(cur.updatedAt || cur.createdAt || nowISO());
-            if (tNew >= tOld) map.set(key, b);
-          }
-        };
-
-        L.forEach(add);
-        C.forEach(add);
-
-        const merged = Array.from(map.values())
-          .map((b: any) => ({
-            id: b.id || b.assistantId,
-            assistantId: b.assistantId || b.id,
-            name: b.name || 'Untitled',
-            type: b.type || 'voice',
-            language: b.language,
-            fromE164: b.fromE164,
-            updatedAt: b.updatedAt || b.createdAt || nowISO(),
-            createdAt: b.createdAt || nowISO(),
-          }))
-          .sort((a, b) => Date.parse(b.updatedAt!) - Date.parse(a.updatedAt!));
-
-        setAgents(merged);
-      };
-
-      await readMerged();
-
-      const onStorage = (e: StorageEvent) => {
-        if (!e.key) return;
-        if (e.key.endsWith(':chatbots') || e.key === 'chatbots') {
-          readMerged();
-        }
-      };
-      window.addEventListener('storage', onStorage);
-      return () => window.removeEventListener('storage', onStorage);
-    })();
-  }, []);
-
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return agents;
-    return agents.filter(
-      (a) =>
-        a.name.toLowerCase().includes(q) ||
-        (a.fromE164 || '').toLowerCase().includes(q)
-    );
-  }, [agents, query]);
-
-  const delEverywhere = async (assistantId: string) => {
-    const ss = await scopedStorage();
-
-    try {
-      const cloud = await ss.getJSON<any[]>('chatbots.v1', []);
-      await ss.setJSON('chatbots.v1', (Array.isArray(cloud) ? cloud : []).filter((b) => (b.assistantId || b.id) !== assistantId));
-    } catch {}
-
-    try {
-      const local = JSON.parse(localStorage.getItem('chatbots') || '[]') || [];
-      const nextLocal = (Array.isArray(local) ? local : []).filter((b) => (b.assistantId || b.id) !== assistantId);
-      localStorage.setItem('chatbots', JSON.stringify(nextLocal));
-    } catch {}
-
-    setAgents((prev) => prev.filter((a) => (a.assistantId || a.id) !== assistantId));
+type VoiceAgentConfig = {
+  model: {
+    provider: 'openai';
+    model: string;
+    firstMessageMode: 'assistant_first' | 'user_first';
+    firstMessage: string;
+    systemPrompt: string;
   };
+  voice: {
+    provider: 'vapi';
+    voice: string;
+    background: 'default' | 'none';
+  };
+  transcriber: {
+    provider: 'deepgram';
+    model: 'nova-2' | 'nova-3';
+    language: 'en' | 'multi';
+    denoise: boolean;
+    confidenceThreshold: number; // 0..1
+    numerals: boolean;
+  };
+  tools: {
+    enableEndCall: boolean;
+    dialKeypad: boolean;
+  };
+  advanced: {
+    summaryPrompt: string;
+    successEvalPrompt: string;
+  };
+};
 
-  // ====== NAV ======
-  const startWizard = () => { setMode('wizard'); setStep(1); };
-  const next = () => setStep((s) => Math.min(4, (s + 1) as any));
-  const back = () => setStep((s) => Math.max(1, (s - 1) as any));
-  const exitWizard = () => setMode('gallery');
+const LS_KEY = 'voice:assistants.v1';
+const activeKey = (id: string) => `voice:assistant:${id}`;
 
-  const openEditor = (id: string) => { setEditingId(id); setMode('editor'); };
-  const exitEditor  = () => { setEditingId(''); setMode('gallery'); };
+function readLS<T>(k: string): T | null {
+  try { const r = localStorage.getItem(k); return r ? JSON.parse(r) as T : null; } catch { return null; }
+}
+function writeLS<T>(k: string, v: T) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
 
-  // ====== EDITOR ======
-  if (mode === 'editor' && editingId) {
-    return (
-      <VoiceAssistantEditor
-        id={editingId}
-        onExit={exitEditor}
-        onSaved={async () => {
-          const ss = await scopedStorage();
-          const cloudArr = await ss.getJSON<any[]>('chatbots.v1', []);
-          const localArr = (() => {
-            try { return JSON.parse(localStorage.getItem('chatbots') || '[]') || []; } catch { return []; }
-          })();
+/* ============================================================
+   PROMPT: BASE + OPTIONAL “APPT SCHEDULING” EXTENSIONS
+============================================================ */
+const BASE_PROMPT = `[Identity]
+You are an intelligent and responsive assistant designed to help users with a wide range of inquiries and tasks.
 
-          const pick = (arr: any[]) => (Array.isArray(arr) ? arr : []).filter((b) => (b?.type || 'voice') === 'voice');
-          const L = pick(localArr);
-          const C = pick(cloudArr);
+[Style]
+- Maintain a professional and approachable demeanor.
+- Use clear and concise language, avoiding overly technical jargon.
 
-          const map = new Map<string, any>();
-          const add = (b: any) => {
-            const key = String(b.assistantId || b.id || '');
-            if (!key) return;
-            const cur = map.get(key);
-            if (!cur) map.set(key, b);
-            else {
-              const tNew = Date.parse(b.updatedAt || b.createdAt || nowISO());
-              const tOld = Date.parse(cur.updatedAt || cur.createdAt || nowISO());
-              if (tNew >= tOld) map.set(key, b);
-            }
-          };
-          L.forEach(add);
-          C.forEach(add);
+[Response Guidelines]
+- Keep responses short and focused on the user's immediate query.
+- Verify user-provided information before proceeding with further steps.
 
-          const merged = Array.from(map.values())
-            .map((b: any) => ({
-              id: b.id || b.assistantId,
-              assistantId: b.assistantId || b.id,
-              name: b.name || 'Untitled',
-              type: b.type || 'voice',
-              language: b.language,
-              fromE164: b.fromE164,
-              updatedAt: b.updatedAt || b.createdAt || nowISO(),
-              createdAt: b.createdAt || nowISO(),
-            }))
-            .sort((a, b) => Date.parse(b.updatedAt!) - Date.parse(a.updatedAt!));
+[Task & Goals]
+1. Greet the user warmly and inquire about how you can assist them today.
+2. Listen carefully to the user's request or question.
+3. Provide relevant and accurate information based on the user's needs.
+<wait for user response>
+4. If a query requires further action, guide the user through step-by-step instructions.
 
-          setAgents(merged);
-        }}
-      />
-    );
-  }
+[Error Handling / Fallback]
+- If a user's request is unclear or you encounter difficulty understanding, ask for clarification politely.
+- If a task cannot be completed, inform the user empathetically and suggest alternative solutions or resources.`.trim();
 
-  // ====== WIZARD ======
-  if (mode === 'wizard') {
-    return (
-      <section className="w-full voice-scope" style={{ color: 'var(--text)' }}>
-        <div className="w-full max-w-[1840px] mx-auto px-6 2xl:px-12 pt-8 pb-24">
-          <div className="flex items-center justify-between mb-6">
-            <h1 className="text-2xl md:text-3xl font-semibold">Create Voice Agent</h1>
-            <button
-              onClick={exitWizard}
-              className="inline-flex items-center gap-2 rounded-[12px] px-4 py-2 transition hover:-translate-y-[1px]"
-              style={{
-                background: 'var(--va-card-bg)',
-                border: '1px solid var(--va-border)',
-                // EXPLICIT SHADOW
-                boxShadow: 'var(--va-soft-shadow)',
-                color: 'var(--text)',
-              }}
-            >
-              <X className="w-4 h-4" /> Exit setup
-            </button>
-          </div>
+const APPT_SCHEDULING_BLOCK = `# Appointment Scheduling Agent Prompt
 
-          <StepProgress current={step} className="mb-8" />
+## Identity & Purpose
+You are Riley (voice assistant), a voice assistant for Wellness Partners, a multi-specialty health clinic.
+Primary goal: Efficiently schedule, confirm, reschedule, or cancel appointments while informing patients.
 
-          <AnimatePresence mode="wait">
-            {step === 1 && (
-              <motion.div key="s1" initial={{ opacity:0, y:10 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:-10 }} transition={{ duration:0.20 }}>
-                <StepV1Basics onNext={next} />
-              </motion.div>
-            )}
-            {step === 2 && (
-              <motion.div key="s2" initial={{ opacity:0, y:10 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:-10 }} transition={{ duration:0.20 }}>
-                <StepV2Telephony onBack={back} onNext={next} />
-              </motion.div>
-            )}
-            {step === 3 && (
-              <motion.div key="s3" initial={{ opacity:0, y:10 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:-10 }} transition={{ duration:0.20 }}>
-                <StepV3PromptA onBack={back} onNext={next} />
-              </motion.div>
-            )}
-            {step === 4 && (
-              <motion.div key="s4" initial={{ opacity:0, y:10 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:-10 }} transition={{ duration:0.20 }}>
-                <StepV4Overview onBack={back} />
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-      </section>
-    );
-  }
+## Voice & Persona
+### Personality
+- Friendly, organized, efficient
+- warm yet professional
+- clear and patient
 
-  // ====== GALLERY ======
-  return (
-    <section className="w-full voice-scope" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
-      <div className="w-full max-w-[1640px] mx-auto px-6 2xl:px-12 pt-8 pb-24">
-        <motion.div {...fadeUp} className="flex items-center justify-between mb-7">
-          <h1 className="text-2xl md:text-3xl font-semibold">Voice Agents</h1>
-          <button
-            onClick={startWizard}
-            className="px-4 h-[42px] rounded-[12px] font-semibold transition hover:-translate-y-[1px]"
-            style={{ background: BTN_GREEN, color: '#fff' }}
-            onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER)}
-            onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN)}
-          >
-            Create Voice Agent
-          </button>
-        </motion.div>
+### Speech Characteristics
+- Use clear, concise language with natural contractions.
+- Speak at a measured pace when confirming dates and times.
+- Use light fillers only when needed: “Let me check that for you.”
+- Pronounce provider names correctly.
 
-        <motion.div {...fadeUp} className="mb-8">
-          <div className="relative">
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search voice agents…"
-              className="w-full rounded-[12px] px-5 h-[46px] text-[15px] outline-none"
-              style={{
-                background: 'var(--va-input-bg)',
-                border: '1px solid var(--va-border)',
-                color: 'var(--text)',
-                // EXPLICIT INPUT SHADOW
-                boxShadow: 'var(--va-input-shadow)',
-              }}
-            />
-            <Search className="w-4 h-4 absolute right-4 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
-          </div>
-        </motion.div>
+## Conversation Flow
+### Introduction
+Start with: "Thank you for calling Wellness Partners, a multi-specialty health clinic. This is Riley, your scheduling assistant. How may I help you today?"
 
-        <motion.div {...fadeUp} className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-7">
-          <CreateCard onClick={startWizard} />
+### Appointment Type Determination
+1. Ask the appointment type.
+2. Ask for provider preference or first available.
+3. Ask if the caller is new or returning.
+4. Briefly assess urgency (emergency → escalate immediately).
 
-          {filtered.map((a) => (
-            <AgentCard
-              key={a.assistantId || a.id}
-              agent={a}
-              onDelete={() => setConfirmDelId(String(a.assistantId || a.id))}
-              onOpen={() => openEditor(String(a.id))}
-            />
-          ))}
-        </motion.div>
+### Scheduling Process
+1. Collect caller info (name, DOB, callback number).
+2. Offer 2–3 time options that match their preference.
+3. Confirm final selection exactly (day, date, time, provider).
+4. Provide any preparation instructions (arrive early, bring ID/insurance).
 
-        {filtered.length === 0 && (
-          <motion.div {...fadeUp} className="mt-12 text-center" style={{ color: 'var(--text-muted)' }}>
-            No voice agents yet. Click <span style={{ color: 'var(--brand)' }}>Create Voice Agent</span> to get started.
-          </motion.div>
-        )}
-      </div>
+### Confirmation & Wrap-up
+- Summarize the booking exactly.
+- Offer optional reminders (text/call).
+- Close politely and check if anything else is needed.
 
-      <ConfirmDelete
-        open={!!confirmDelId}
-        onCancel={() => setConfirmDelId(null)}
-        onConfirm={async () => {
-          if (confirmDelId) await delEverywhere(confirmDelId);
-          setConfirmDelId(null);
-        }}
-      />
+## Capabilities & Scope
+Handle routine scheduling questions; escalate clinical questions or emergencies to a human.
 
-      {/* THE IMPORTANT PART: real, explicit shadows + glow vars */}
-      <style jsx global>{`
-        /* LIGHT (default) — explicit large soft shadows + brand ring */
-        .voice-scope {
-          --va-card-bg: #ffffff;
-          --va-panel: #ffffff;
-          --va-border: rgba(0,0,0,0.10);
+## Response Guidelines
+Ask one question at a time; confirm names/dates/times explicitly; avoid medical advice; use concise answers; phonetic spell names when needed.
 
-          /* Strong visible drop shadows + faint neon ring */
-          --va-soft-shadow:
-            0 28px 70px rgba(0,0,0,.12),
-            0 10px 26px rgba(0,0,0,.08),
-            0 0 0 1px rgba(0,255,194,.06);
+## Data to Collect
+Full name, date of birth, callback number, appointment type, provider preference, urgency.
 
-          --va-ring: rgba(0,255,194,.12);
+## Example Phrases
+“Let me check availability.” · “I can offer Wednesday 2:30 PM or Friday 10:15 AM—what works?” · “To confirm: Wednesday, February 15th at 2:30 PM with Dr. Chen.”
 
-          --va-input-bg: #ffffff;
-          --va-input-shadow:
-            inset 0 1px 0 rgba(255,255,255,.8),
-            0 10px 22px rgba(0,0,0,.06);
+## Language & Operational Settings
+- Language: English.
+- Ask one question at a time.
+- If you need time, say: “I’m checking availability. One moment please.”
 
-          --va-chip-bg: rgba(0,255,194,0.06);
-          --va-chip-border: rgba(0,255,194,0.18);
-        }
+## Scenario Handling
+- New patients: arrive 20 minutes early for forms; bring ID + insurance.
+- Urgent requests: check same-day slots; true emergencies → route to nurse or nearest ER.
+- Rescheduling: read back current appointment; offer alternatives; cancel old and confirm new.
+- Insurance/payment: provide general coverage info; specifics → refer to insurer; copays at service time.`.trim();
 
-        /* DARK — stronger drops + inner line */
-        [data-theme="dark"] .voice-scope {
-          --va-card-bg:
-            radial-gradient(120% 180% at 50% -40%, rgba(0,255,194,.06) 0%, rgba(12,16,18,1) 42%),
-            linear-gradient(180deg, #0e1213 0%, #0c1012 100%);
-          --va-panel: linear-gradient(180deg, rgba(24,32,31,.86) 0%, rgba(16,22,21,.86) 100%);
-          --va-border: rgba(255,255,255,0.08);
-
-          --va-soft-shadow:
-            0 36px 90px rgba(0,0,0,.60),
-            0 14px 34px rgba(0,0,0,.45),
-            0 0 0 1px rgba(0,255,194,.10);
-
-          --va-ring: rgba(0,255,194,.10);
-
-          --va-input-bg: rgba(255,255,255,.02);
-          --va-input-shadow:
-            inset 0 1px 0 rgba(255,255,255,.04),
-            0 12px 30px rgba(0,0,0,0.38);
-
-          --va-chip-bg: rgba(0,255,194,0.10);
-          --va-chip-border: rgba(0,255,194,0.22);
-        }
-      `}</style>
-    </section>
-  );
+/** Merge logic:
+ * - Start from BASE_PROMPT
+ * - If refinement text includes scheduling-ish keywords, append the APPT block (once).
+ * - Always append “Refinements” as bullet points with user text normalized.
+ */
+function buildPrompt(base: string, refinement: string): string {
+  const wantsAppt =
+    /\b(appoint|schedule|clinic|patient|provider|resched|urgent|dob|insurance)\b/i.test(refinement);
+  const refined = refinement.trim();
+  const bullets = refined
+    ? `\n\n[Refinements]\n- ${refined.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim()}`
+    : '';
+  return [base, wantsAppt ? `\n\n${APPT_SCHEDULING_BLOCK}` : '', bullets].join('');
 }
 
-/* ---------------------------- Cards (with explicit shadows & glow) ---------------------------- */
-
-function CreateCard({ onClick }: { onClick: () => void }) {
+/* ============================================================
+   SMALL UI BITS
+============================================================ */
+function Row({ children }: { children: React.ReactNode }) {
+  return <div className="grid grid-cols-1 md:grid-cols-2 gap-4">{children}</div>;
+}
+function Field({
+  label, children, hint
+}: { label: string; children: React.ReactNode; hint?: string; }) {
   return (
-    <button
-      onClick={onClick}
-      className="group relative h-[320px] rounded-[16px] p-7 flex flex-col items-center justify-center transition-all active:scale-[0.995] hover:-translate-y-[1px]"
+    <div>
+      <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text)' }}>{label}</label>
+      {children}
+      {hint ? <div className="mt-1 text-xs" style={{ color: 'var(--text-muted)' }}>{hint}</div> : null}
+    </div>
+  );
+}
+function Select({
+  value, onChange, children
+}: { value: string; onChange: (v: string) => void; children: React.ReactNode; }) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="w-full rounded-xl px-3 py-2 text-sm outline-none"
       style={{
-        background: 'var(--va-card-bg)',
-        border: '1px solid var(--va-border)',
-        boxShadow: 'var(--va-soft-shadow)',
-        position: 'relative',
-        overflow: 'hidden',
+        background: 'var(--va-input-bg)',
+        color: 'var(--text)',
+        border: '1px solid var(--va-input-border)',
+        boxShadow: 'var(--va-input-shadow)'
       }}
     >
-      {/* radial brand glow */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
-        style={{
-          background: 'radial-gradient(circle, var(--va-ring) 0%, transparent 70%)',
-          filter: 'blur(40px)',
-        }}
-      />
-      <div
-        className="w-20 h-20 rounded-full flex items-center justify-center mb-5"
-        style={{
-          background: 'var(--va-panel)',
-          border: '1px dashed var(--brand-weak)',
-          boxShadow: 'var(--va-soft-shadow)',
-        }}
-      >
-        <Plus className="w-10 h-10" style={{ color: 'var(--brand)' }} />
-      </div>
-      <div className="text-[18px]">Create Voice Agent</div>
-      <div className="text-[13px]" style={{ color: 'var(--text-muted)', marginTop: 8 }}>Start a new call agent</div>
-    </button>
+      {children}
+    </select>
   );
 }
-
-function AgentCard({
-  agent, onDelete, onOpen,
-}: {
-  agent: Agent;
-  onDelete: () => void;
-  onOpen: () => void;
+function Input({ value, onChange, placeholder }:{
+  value: string; onChange: (v: string) => void; placeholder?: string;
 }) {
   return (
-    <div
-      className="relative h-[320px] rounded-[16px] p-6 flex flex-col justify-between hover:-translate-y-[1px] transition"
+    <input
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      className="w-full rounded-xl px-3 py-2 text-sm outline-none"
       style={{
-        background: 'var(--va-card-bg)',
-        border: '1px solid var(--va-border)',
-        // EXPLICIT drop shadow here too
-        boxShadow: 'var(--va-soft-shadow)',
-        position: 'relative',
-        overflow: 'hidden',
+        background: 'var(--va-input-bg)',
+        color: 'var(--text)',
+        border: '1px solid var(--va-input-border)',
+        boxShadow: 'var(--va-input-shadow)'
       }}
-    >
-      {/* radial brand glow */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
-        style={{
-          background: 'radial-gradient(circle, var(--va-ring) 0%, transparent 70%)',
-          filter: 'blur(40px)',
-        }}
-      />
+    />
+  );
+}
+function TextArea({ value, onChange, rows = 10 }:{
+  value: string; onChange: (v: string) => void; rows?: number;
+}) {
+  return (
+    <textarea
+      value={value}
+      rows={rows}
+      onChange={(e) => onChange(e.target.value)}
+      className="w-full rounded-xl px-3 py-2 text-sm outline-none"
+      style={{
+        background: 'var(--va-input-bg)',
+        color: 'var(--text)',
+        border: '1px solid var(--va-input-border)',
+        boxShadow: 'var(--va-input-shadow)',
+        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace'
+      }}
+    />
+  );
+}
 
-      <div className="flex items-center gap-3">
-        <div
-          className="w-10 h-10 rounded-[10px] flex items-center justify-center"
-          style={{ background: 'var(--va-panel)', border: '1px solid var(--brand-weak)', boxShadow: 'var(--va-soft-shadow)' }}
-        >
-          <BotIcon className="w-5 h-5" style={{ color: 'var(--text)' }} />
-        </div>
-        <div className="min-w-0">
-          <div className="font-semibold truncate">{agent.name}</div>
-          <div className="text-[12px] truncate" style={{ color: 'var(--text-muted)' }}>
-            {[agent.language, agent.fromE164].filter(Boolean).join(' · ') || '—'}
-          </div>
-        </div>
-        <button onClick={onDelete} className="ml-auto p-1.5 rounded-md hover:opacity-80" title="Delete" aria-label="Delete">
-          <Trash2 className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
-        </button>
-      </div>
-
-      <div className="flex items-center justify-between">
-        <div className="text-[12px]" style={{ color: 'var(--text-muted)' }}>Updated {fmt(agent.updatedAt)}</div>
-        <div className="flex items-center gap-2">
-          {agent.fromE164 && (
-            <a
-              href={`tel:${agent.fromE164}`}
-              className="inline-flex items-center gap-2 px-3 py-2 rounded-[10px] text-sm"
-              style={{
-                border: '1px solid var(--brand-weak)',
-                background: 'var(--va-card-bg)',
-                boxShadow: 'var(--va-soft-shadow)',
-                color: 'var(--text)',
-              }}
-            >
-              <Phone className="w-4 h-4" /> Test
-            </a>
-          )}
-          <button
-            onClick={onOpen}
-            className="inline-flex items-center gap-2 px-3 py-2 rounded-[10px] text-sm transition hover:-translate-y-[1px]"
-            style={{
-              border: '1px solid var(--brand-weak)',
-              background: 'var(--va-panel)',
-              boxShadow: 'var(--va-soft-shadow)',
-              color: 'var(--text)',
-            }}
+function Section({
+  icon, title, children, defaultOpen = true
+}: { icon: React.ReactNode; title: string; children: React.ReactNode; defaultOpen?: boolean; }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div style={Card}>
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center justify-between px-4 py-3"
+        style={{ color: 'var(--text)' }}
+      >
+        <span className="flex items-center gap-2 text-sm font-semibold">{icon}{title}</span>
+        {open ? <ChevronDown className="w-4 h-4 opacity-70" /> : <ChevronRight className="w-4 h-4 opacity-70" />}
+      </button>
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: .2 }}
+            className="px-4 pb-4"
           >
-            Open <ArrowRight className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
+            <div className="pt-2">{children}</div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
 
-/* ---------------------------- Confirm Delete ---------------------------- */
+/* Typing animation for prompt area */
+function useTypewriter(fullText: string, speed = 10) {
+  const [text, setText] = useState(fullText);
+  const [typing, setTyping] = useState(false);
 
-function ConfirmDelete({
-  open, onCancel, onConfirm,
-}: {
-  open: boolean;
-  onCancel: () => void;
-  onConfirm: () => void | Promise<void>;
-}) {
-  if (!open) return null;
+  const run = (next: string) => {
+    setTyping(true);
+    setText('');
+    let i = 0;
+    const id = setInterval(() => {
+      i += 2; // two chars per tick (a little faster)
+      setText(next.slice(0, i));
+      if (i >= next.length) { clearInterval(id); setTyping(false); }
+    }, speed);
+  };
+
+  useEffect(() => { setText(fullText); }, []); // initialize once
+  return { text, typing, run };
+}
+
+/* ============================================================
+   MAIN
+============================================================ */
+export default function VoiceAgentSection() {
+  const [assistants, setAssistants] = useState<Assistant[]>([]);
+  const [activeId, setActiveId] = useState<string>('');
+
+  // bootstrap
+  useEffect(() => {
+    const list = readLS<Assistant[]>(LS_KEY) || [];
+    // seed one if empty
+    if (list.length === 0) {
+      const seed: Assistant = {
+        id: 'riley',
+        name: 'Riley',
+        updatedAt: Date.now(),
+        config: {
+          model: {
+            provider: 'openai',
+            model: 'gpt-4o',
+            firstMessageMode: 'assistant_first',
+            firstMessage: 'Hello.',
+            systemPrompt: BASE_PROMPT
+          },
+          voice: {
+            provider: 'vapi',
+            voice: 'Elliot',
+            background: 'default'
+          },
+          transcriber: {
+            provider: 'deepgram',
+            model: 'nova-2',
+            language: 'en',
+            denoise: false,
+            confidenceThreshold: 0.4,
+            numerals: false
+          },
+          tools: {
+            enableEndCall: true,
+            dialKeypad: true
+          },
+          advanced: {
+            summaryPrompt:
+              'You are an expert note-taker. Summarize the call in 2–3 sentences, if applicable.',
+            successEvalPrompt:
+              'You are an expert call evaluator. Decide if objectives were met based on the system prompt + transcript.'
+          }
+        }
+      };
+      writeLS(LS_KEY, [seed]);
+      writeLS(activeKey(seed.id), seed);
+      setAssistants([seed]);
+      setActiveId(seed.id);
+    } else {
+      setAssistants(list);
+      setActiveId(list[0].id);
+    }
+  }, []);
+
+  const active = useMemo(() => {
+    if (!activeId) return null;
+    return readLS<Assistant>(activeKey(activeId));
+  }, [activeId]);
+
+  const updateActive = (mut: (a: Assistant) => Assistant) => {
+    if (!active) return;
+    const next = mut(active);
+    writeLS(activeKey(active.id), next);
+    const list = (readLS<Assistant[]>(LS_KEY) || []).map(a => a.id === next.id ? { ...a, name: next.name, updatedAt: Date.now() } : a);
+    writeLS(LS_KEY, list);
+    setAssistants(list);
+  };
+
+  const addAssistant = () => {
+    const id = `agent_${Math.random().toString(36).slice(2, 8)}`;
+    const a: Assistant = {
+      id,
+      name: 'New Assistant',
+      updatedAt: Date.now(),
+      config: active?.config ?? {
+        model: { provider: 'openai', model: 'gpt-4o', firstMessageMode: 'assistant_first', firstMessage: 'Hello.', systemPrompt: BASE_PROMPT },
+        voice: { provider: 'vapi', voice: 'Elliot', background: 'default' },
+        transcriber: { provider: 'deepgram', model: 'nova-2', language: 'en', denoise: false, confidenceThreshold: 0.4, numerals: false },
+        tools: { enableEndCall: true, dialKeypad: true },
+        advanced: { summaryPrompt: 'You are an expert note-taker. Summarize in 2–3 sentences.', successEvalPrompt: 'Evaluate if the call succeeded.' }
+      }
+    };
+    writeLS(activeKey(id), a);
+    const list = [...assistants, a];
+    writeLS(LS_KEY, list);
+    setAssistants(list);
+    setActiveId(id);
+  };
+
+  const removeAssistant = (id: string) => {
+    const list = assistants.filter(a => a.id !== id);
+    writeLS(LS_KEY, list);
+    setAssistants(list);
+    if (activeId === id && list.length) setActiveId(list[0].id);
+  };
+
+  // Prompt typing
+  const { text: typedPrompt, typing, run: runType } = useTypewriter(active?.config.model.systemPrompt || BASE_PROMPT, 6);
+
+  // “Edit Prompt” refinement box
+  const [refineOpen, setRefineOpen] = useState(false);
+  const [refineText, setRefineText] = useState('');
+
+  const applyRefinement = () => {
+    if (!active) return;
+    const nextPrompt = buildPrompt(BASE_PROMPT, refineText);
+    runType(nextPrompt);
+    updateActive(a => ({
+      ...a,
+      config: { ...a.config, model: { ...a.config.model, systemPrompt: nextPrompt } }
+    }));
+    setRefineOpen(false);
+    setRefineText('');
+  };
+
+  if (!active) return null;
+
   return (
-    <div className="fixed inset-0 z-[9998] grid place-items-center px-4" style={{ background: 'rgba(0,0,0,0.55)' }}>
-      <div
-        className="w-full max-w-[560px] rounded-[20px] overflow-hidden animate-[popIn_140ms_ease]"
-        style={{
-          background: 'var(--va-card-bg)',
-          border: '1px solid var(--va-border)',
-          // visible modal shadow
-          boxShadow: '0 32px 90px rgba(0,0,0,.55), 0 12px 28px rgba(0,0,0,.35), 0 0 0 1px rgba(0,255,194,.08)',
-          position: 'relative',
-        }}
-      >
-        {/* subtle ring glow on modal */}
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -top-[30%] -left-[30%] w-[70%] h-[70%] rounded-full"
-          style={{ background: 'radial-gradient(circle, var(--va-ring) 0%, transparent 70%)', filter: 'blur(42px)' }}
-        />
-        <div className="px-6 py-5" style={{ borderBottom: '1px solid var(--va-border)' }}>
-          <div className="text-lg font-semibold" style={{ color: 'var(--text)' }}>Delete Voice Agent?</div>
-          <div className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
-            This will remove the agent from your Local + Cloud workspace storage. Calls or external numbers aren’t affected.
+    <div className={`${SCOPE} w-full`} style={{ background: 'var(--bg)', color: 'var(--text)' }}>
+      <div className="flex">
+        {/* ===== Assistant Sidebar (secondary) ===== */}
+        <aside className="hidden md:flex flex-col shrink-0 w-[220px] p-3 gap-2" style={{ borderRight: '1px solid var(--va-border)' }}>
+          <div className="flex items-center justify-between px-2 py-1">
+            <div className="flex items-center gap-2"><PanelLeft className="w-4 h-4" /><span className="text-sm font-semibold">Assistants</span></div>
+            <button onClick={addAssistant} className="p-2 rounded-full hover:bg-white/10" aria-label="Add"><Plus className="w-4 h-4" /></button>
           </div>
-        </div>
-        <div className="px-6 py-5 flex gap-3">
-          <button
-            onClick={onCancel}
-            className="w-full h-[44px] rounded-[14px] font-semibold"
-            style={{ background: 'var(--va-panel)', border: '1px solid var(--va-border)', color: 'var(--text)' }}
-          >
-            Cancel
-          </button>
-          <button
-            onClick={onConfirm}
-            className="w-full h-[44px] rounded-[14px] font-semibold text-white"
-            style={{ background: BTN_GREEN }}
-            onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER)}
-            onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN)}
-          >
-            Delete
-          </button>
-        </div>
+          <div className="space-y-1">
+            {assistants.map(a => (
+              <button key={a.id} onClick={() => setActiveId(a.id)}
+                className="w-full text-left px-3 py-2 rounded-lg flex items-center justify-between"
+                style={{
+                  background: a.id === activeId ? 'color-mix(in oklab, var(--brand) 10%, transparent)' : 'transparent',
+                  border: `1px solid ${a.id === activeId ? 'color-mix(in oklab, var(--brand) 28%, var(--va-border))' : 'var(--va-border)'}`
+                }}>
+                <span className="truncate">{a.name}</span>
+                {a.id === activeId ? <Check className="w-4 h-4" /> : null}
+              </button>
+            ))}
+          </div>
+        </aside>
+
+        {/* ===== Editor ===== */}
+        <main className="flex-1 p-4 md:p-6 max-w-[1200px] mx-auto">
+          {/* Header */}
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Bot className="w-5 h-5" />
+              <Input value={active.name} onChange={(v) => updateActive(a => ({ ...a, name: v }))} />
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => navigator.clipboard.writeText(active.config.model.systemPrompt).catch(() => {})}
+                className="inline-flex items-center gap-1 rounded-xl px-3 py-2 text-sm"
+                style={{ border: '1px solid var(--va-border)', background: 'var(--va-card)' }}>
+                <Copy className="w-4 h-4" /> Copy Prompt
+              </button>
+              <button
+                onClick={() => removeAssistant(active.id)}
+                className="inline-flex items-center gap-1 rounded-xl px-3 py-2 text-sm"
+                style={{ border: '1px solid var(--va-border)', background: 'var(--va-card)' }}>
+                <Trash2 className="w-4 h-4" /> Delete
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-8">
+            {/* ===== MODEL ===== */}
+            <Section icon={<FileText className="w-4 h-4 text-[var(--brand)]" />} title="Model">
+              <Row>
+                <Field label="Provider">
+                  <Select
+                    value={active.config.model.provider}
+                    onChange={(v) => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, provider: v as any } } }))}
+                  >
+                    <option value="openai">OpenAI</option>
+                  </Select>
+                </Field>
+                <Field label="Model">
+                  <Select
+                    value={active.config.model.model}
+                    onChange={(v) => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, model: v } } }))}>
+                    <option value="gpt-4o">gpt-4o</option>
+                    <option value="gpt-4o-mini">gpt-4o-mini</option>
+                    <option value="gpt-4.1">gpt-4.1</option>
+                    <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
+                  </Select>
+                </Field>
+              </Row>
+
+              <Row>
+                <Field label="First Message Mode" hint="Who speaks first">
+                  <Select
+                    value={active.config.model.firstMessageMode}
+                    onChange={(v) => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, firstMessageMode: v as any } } }))}>
+                    <option value="assistant_first">Assistant speaks first</option>
+                    <option value="user_first">User speaks first</option>
+                  </Select>
+                </Field>
+                <Field label="First Message">
+                  <Input
+                    value={active.config.model.firstMessage}
+                    onChange={(v) => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, firstMessage: v } } }))}
+                  />
+                </Field>
+              </Row>
+
+              {/* Prompt header bar w/ Generate & Edit */}
+              <div className="mt-4 mb-2 flex items-center justify-between">
+                <div className="flex items-center gap-2 text-sm font-semibold" style={{ color: 'var(--text)' }}>
+                  <Type className="w-4 h-4" /> System Prompt
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => { runType(BASE_PROMPT); updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, systemPrompt: BASE_PROMPT } } })); }}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-sm"
+                    style={{ border: '1px solid var(--va-border)', background: 'var(--va-card)' }}
+                  >
+                    <RefreshCw className="w-4 h-4" /> Reset
+                  </button>
+                  <button
+                    onClick={() => setRefineOpen(true)}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-sm"
+                    style={{ background: GREEN, color: '#fff' }}
+                    onMouseEnter={(e) => (e.currentTarget as HTMLButtonElement).style.background = GREEN_HOVER}
+                    onMouseLeave={(e) => (e.currentTarget as HTMLButtonElement).style.background = GREEN}
+                  >
+                    <Sparkles className="w-4 h-4" /> Generate / Edit
+                  </button>
+                </div>
+              </div>
+
+              {/* Typing prompt area */}
+              <div className="rounded-xl overflow-hidden" style={Card}>
+                <div className="p-3 text-xs" style={{ borderBottom: '1px solid var(--va-border)', background: 'var(--va-subtle)' }}>
+                  {typing ? 'Typing…' : 'Ready'}
+                </div>
+                <div className="p-3">
+                  <TextArea
+                    rows={18}
+                    value={typedPrompt}
+                    onChange={(v) => {
+                      // allow manual edits; stop typing animation
+                      updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, systemPrompt: v } } }));
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* EDIT PROMPT modal mimic */}
+              <AnimatePresence>
+                {refineOpen && (
+                  <motion.div
+                    className="fixed inset-0 z-[999] flex items-center justify-center p-4"
+                    initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                    style={{ background: 'rgba(0,0,0,0.45)' }}
+                  >
+                    <motion.div
+                      initial={{ y: 10, opacity: 0, scale: .98 }}
+                      animate={{ y: 0, opacity: 1, scale: 1 }}
+                      exit={{ y: 6, opacity: 0, scale: .985 }}
+                      transition={{ duration: .18 }}
+                      className="w-full max-w-xl"
+                      style={Card}
+                    >
+                      <div className="px-4 py-3" style={{ borderBottom: '1px solid var(--va-border)' }}>
+                        <div className="text-sm font-semibold flex items-center gap-2"><Edit3 className="w-4 h-4" /> Edit Prompt</div>
+                      </div>
+                      <div className="p-4">
+                        <Input
+                          value={refineText}
+                          onChange={setRefineText}
+                          placeholder="Describe how you'd like to edit the prompt"
+                        />
+                        <div className="mt-3 flex items-center justify-end gap-2">
+                          <button
+                            onClick={() => setRefineOpen(false)}
+                            className="px-3 py-2 rounded-xl text-sm"
+                            style={{ border: '1px solid var(--va-border)', background: 'var(--va-card)' }}
+                          >Cancel</button>
+                          <button
+                            onClick={applyRefinement}
+                            className="px-3 py-2 rounded-xl text-sm"
+                            style={{ background: GREEN, color: '#fff' }}
+                            onMouseEnter={(e) => (e.currentTarget as HTMLButtonElement).style.background = GREEN_HOVER}
+                            onMouseLeave={(e) => (e.currentTarget as HTMLButtonElement).style.background = GREEN}
+                          >
+                            Submit Edit <ArrowUpRight className="inline w-4 h-4 ml-1" />
+                          </button>
+                        </div>
+                        <div className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
+                          Tip: If you mention scheduling/clinic needs, the assistant will auto-extend with an appointment scheduling playbook.
+                        </div>
+                      </div>
+                    </motion.div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </Section>
+
+            {/* ===== VOICE ===== */}
+            <Section icon={<Mic2 className="w-4 h-4 text-[var(--brand)]" />} title="Voice">
+              <Row>
+                <Field label="Provider">
+                  <Select
+                    value={active.config.voice.provider}
+                    onChange={(v) => updateActive(a => ({ ...a, config: { ...a.config, voice: { ...a.config.voice, provider: v as any } } }))}
+                  >
+                    <option value="vapi">Vapi</option>
+                  </Select>
+                </Field>
+                <Field label="Voice">
+                  <Select
+                    value={active.config.voice.voice}
+                    onChange={(v) => updateActive(a => ({ ...a, config: { ...a.config, voice: { ...a.config.voice, voice: v } } }))}>
+                    <option>Elliot</option>
+                    <option>Alloy</option>
+                    <option>Amber</option>
+                  </Select>
+                </Field>
+              </Row>
+              <Row>
+                <Field label="Background Sound">
+                  <Select
+                    value={active.config.voice.background}
+                    onChange={(v) => updateActive(a => ({ ...a, config: { ...a.config, voice: { ...a.config.voice, background: v as any } } }))}>
+                    <option value="default">Default</option>
+                    <option value="none">None</option>
+                  </Select>
+                </Field>
+              </Row>
+            </Section>
+
+            {/* ===== TRANSCRIBER ===== */}
+            <Section icon={<BookOpen className="w-4 h-4 text-[var(--brand)]" />} title="Transcriber">
+              <Row>
+                <Field label="Provider">
+                  <Select
+                    value={active.config.transcriber.provider}
+                    onChange={(v) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, provider: v as any } } }))}>
+                    <option value="deepgram">Deepgram</option>
+                  </Select>
+                </Field>
+                <Field label="Model">
+                  <Select
+                    value={active.config.transcriber.model}
+                    onChange={(v) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, model: v as any } } }))}>
+                    <option value="nova-2">Nova 2</option>
+                    <option value="nova-3">Nova 3</option>
+                  </Select>
+                </Field>
+              </Row>
+              <Row>
+                <Field label="Language">
+                  <Select
+                    value={active.config.transcriber.language}
+                    onChange={(v) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, language: v as any } } }))}>
+                    <option value="en">En</option>
+                    <option value="multi">Multi</option>
+                  </Select>
+                </Field>
+                <Field label="Confidence Threshold">
+                  <input
+                    type="range" min={0} max={1} step={0.05}
+                    value={active.config.transcriber.confidenceThreshold}
+                    onChange={(e) => updateActive(a => ({
+                      ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, confidenceThreshold: Number(e.target.value) } }
+                    }))}
+                    className="w-full"
+                  />
+                  <div className="mt-1 text-xs" style={{ color: 'var(--text-muted)' }}>
+                    {active.config.transcriber.confidenceThreshold.toFixed(2)}
+                  </div>
+                </Field>
+              </Row>
+              <Row>
+                <Field label="Denoise">
+                  <Select
+                    value={String(active.config.transcriber.denoise)}
+                    onChange={(v) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, denoise: v === 'true' } } }))}>
+                    <option value="false">Off</option>
+                    <option value="true">On</option>
+                  </Select>
+                </Field>
+                <Field label="Use Numerals">
+                  <Select
+                    value={String(active.config.transcriber.numerals)}
+                    onChange={(v) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, numerals: v === 'true' } } }))}>
+                    <option value="false">No</option>
+                    <option value="true">Yes</option>
+                  </Select>
+                </Field>
+              </Row>
+            </Section>
+
+            {/* ===== TOOLS ===== */}
+            <Section icon={<SlidersHorizontal className="w-4 h-4 text-[var(--brand)]" />} title="Tools">
+              <Row>
+                <Field label="Enable End Call Function">
+                  <Select
+                    value={String(active.config.tools.enableEndCall)}
+                    onChange={(v) => updateActive(a => ({ ...a, config: { ...a.config, tools: { ...a.config.tools, enableEndCall: v === 'true' } } }))}>
+                    <option value="true">Enabled</option>
+                    <option value="false">Disabled</option>
+                  </Select>
+                </Field>
+                <Field label="Dial Keypad">
+                  <Select
+                    value={String(active.config.tools.dialKeypad)}
+                    onChange={(v) => updateActive(a => ({ ...a, config: { ...a.config, tools: { ...a.config.tools, dialKeypad: v === 'true' } } }))}>
+                    <option value="true">Enabled</option>
+                    <option value="false">Disabled</option>
+                  </Select>
+                </Field>
+              </Row>
+            </Section>
+
+            {/* ===== ADVANCED ===== */}
+            <Section icon={<Settings className="w-4 h-4 text-[var(--brand)]" />} title="Advanced">
+              <Field label="Summary Prompt">
+                <TextArea
+                  rows={4}
+                  value={active.config.advanced.summaryPrompt}
+                  onChange={(v) => updateActive(a => ({ ...a, config: { ...a.config, advanced: { ...a.config.advanced, summaryPrompt: v } } }))}
+                />
+              </Field>
+              <div className="mt-3" />
+              <Field label="Success Evaluation Prompt">
+                <TextArea
+                  rows={4}
+                  value={active.config.advanced.successEvalPrompt}
+                  onChange={(v) => updateActive(a => ({ ...a, config: { ...a.config, advanced: { ...a.config.advanced, successEvalPrompt: v } } }))}
+                />
+              </Field>
+            </Section>
+          </div>
+        </main>
       </div>
 
+      {/* Scoped theme */}
       <style jsx global>{`
-        @keyframes popIn { 0% { opacity: 0; transform: scale(.98); } 100% { opacity: 1; transform: scale(1); } }
+        .${SCOPE}{
+          --brand: ${GREEN};
+          --bg: var(--bg, #0b0c10);
+          --text: var(--text, #e7ecef);
+          --text-muted: color-mix(in oklab, var(--text) 70%, transparent);
+
+          --va-card: #ffffff;
+          --va-subtle: #f6f7f9;
+          --va-border: rgba(0,0,0,.10);
+          --va-shadow: 0 28px 70px rgba(0,0,0,.10), 0 10px 26px rgba(0,0,0,.08);
+          --va-input-bg: #ffffff;
+          --va-input-border: rgba(0,0,0,.12);
+          --va-input-shadow: inset 0 1px 0 rgba(255,255,255,.8), 0 10px 22px rgba(0,0,0,.06);
+        }
+        [data-theme="dark"] .${SCOPE}{
+          --bg: #0b0c10;
+          --text: #f1f5f9;
+
+          --va-card: #0f1315;
+          --va-subtle: #0d1113;
+          --va-border: rgba(255,255,255,.10);
+          --va-shadow: 0 36px 90px rgba(0,0,0,.60), 0 14px 34px rgba(0,0,0,.45);
+          --va-input-bg: rgba(255,255,255,.02);
+          --va-input-border: rgba(255,255,255,.14);
+          --va-input-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 12px 30px rgba(0,0,0,.38);
+        }
       `}</style>
     </div>
   );
