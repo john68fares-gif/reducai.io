@@ -14,14 +14,11 @@ import {
   ChevronDown,
 } from 'lucide-react';
 
-/* ---------- shared style (matches your Builder) ---------- */
-const CARD_STYLE: React.CSSProperties = {
-  background: 'rgba(13,15,17,0.92)',
-  border: '2px solid rgba(106,247,209,0.32)',
-  borderRadius: 28,
-  boxShadow:
-    '0 18px 60px rgba(0,0,0,0.50), inset 0 0 22px rgba(0,0,0,0.28), 0 0 20px rgba(106,247,209,0.06)',
-};
+/* ============================ THEME (scoped) ============================ */
+/* We mirror the Step 1 / Step 2 model styling: light by default, dark via [data-theme="dark"] */
+const ScopeClass = 'telephony-step-scope';
+
+/* Brand / buttons */
 const BTN_GREEN = '#59d9b3';
 const BTN_GREEN_HOVER = '#54cfa9';
 const BTN_DISABLED = '#2e6f63';
@@ -32,7 +29,8 @@ type NumberItem = { id: string; e164?: string; label?: string; provider?: string
 const E164 = /^\+[1-9]\d{1,14}$/;
 
 /* =======================================================================
-   STEP 2 — TELEPHONY (Styled “From Number” dropdown; no native <select>)
+   STEP 2 — TELEPHONY
+   (Styled inputs and dropdown with light/dark tokens; no native <select>)
 ======================================================================= */
 export default function StepV2Telephony({ onBack, onNext }: Props) {
   const [sid, setSid] = useState('');
@@ -62,12 +60,15 @@ export default function StepV2Telephony({ onBack, onNext }: Props) {
 
   async function refreshNumbers() {
     try {
+      setLoading(true);
       const r = await fetch('/api/telephony/phone-numbers', { cache: 'no-store' });
       const j = await r.json();
       const list: NumberItem[] = j?.ok ? j.data : j;
       setNumbers(Array.isArray(list) ? list : []);
     } catch {
       setNumbers([]);
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -117,25 +118,32 @@ export default function StepV2Telephony({ onBack, onNext }: Props) {
   );
 
   return (
-    <section>
+    <section className={ScopeClass}>
       {/* Header */}
       <div className="mb-8">
-        <h1 className="text-3xl md:text-4xl font-semibold">Telephony</h1>
+        <h1 className="text-3xl md:text-4xl font-semibold" style={{ color: 'var(--text)' }}>Telephony</h1>
         <div
           className="mt-2 inline-flex items-center gap-2 text-xs tracking-wide px-3 py-1.5 rounded-[20px] border"
-          style={{ borderColor: 'rgba(106,247,209,0.32)', background: 'rgba(16,19,20,0.70)' }}
+          style={{ borderColor: 'var(--ts-chip-border)', background: 'var(--ts-chip-bg)', color: 'var(--text)' }}
         >
           Step 2 of 4
         </div>
       </div>
 
       {/* Card */}
-      <div className="relative p-6 sm:p-8 space-y-6" style={CARD_STYLE}>
+      <div
+        className="relative p-6 sm:p-8 space-y-6 rounded-[28px]"
+        style={{
+          background: 'var(--ts-card)',
+          border: '1px solid var(--ts-border)',
+          boxShadow: 'var(--ts-shadow)',
+        }}
+      >
         {/* glow */}
         <div
           aria-hidden
           className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
-          style={{ background: 'radial-gradient(circle, rgba(106,247,209,0.10) 0%, transparent 70%)', filter: 'blur(38px)' }}
+          style={{ background: 'radial-gradient(circle, var(--ts-ring) 0%, transparent 70%)', filter: 'blur(38px)' }}
         />
 
         {/* creds row */}
@@ -145,7 +153,7 @@ export default function StepV2Telephony({ onBack, onNext }: Props) {
             value={sid}
             onChange={(v) => setSid(v.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
             placeholder="ACXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
-            icon={<KeyRound className="w-4 h-4 text-[#6af7d1]" />}
+            icon={<KeyRound className="w-4 h-4" style={{ color: 'var(--brand)' }} />}
           />
           <LabeledInput
             label="Twilio Auth Token"
@@ -158,8 +166,8 @@ export default function StepV2Telephony({ onBack, onNext }: Props) {
 
         <button
           onClick={saveCreds}
-          className="text-xs rounded-2xl border px-3 py-1"
-          style={{ borderColor: 'rgba(255,255,255,0.16)' }}
+          className="text-xs rounded-2xl px-3 py-1"
+          style={{ border: '1px solid var(--ts-input-border)', background: 'var(--ts-input-bg)', color: 'var(--text)', boxShadow: 'var(--ts-input-shadow)' }}
         >
           Save Credentials (browser only)
         </button>
@@ -167,7 +175,7 @@ export default function StepV2Telephony({ onBack, onNext }: Props) {
         {/* number row */}
         <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 items-end">
           <div>
-            <label className="block mb-2 text-[13px] font-medium text-white/85 tracking-wide">
+            <label className="block mb-2 text-[13px] font-medium" style={{ color: 'var(--text)' }}>
               From Number
             </label>
             <NumberSelect
@@ -175,22 +183,27 @@ export default function StepV2Telephony({ onBack, onNext }: Props) {
               value={fromE164}
               onChange={setFrom}
               options={options}
-              placeholder={numbers.length ? '— Choose —' : 'No numbers imported'}
-              icon={<Phone className="w-4 h-4 text-[#6af7d1]" />}
+              placeholder={numbers.length ? '— Choose —' : (loading ? 'Loading…' : 'No numbers imported')}
+              icon={<Phone className="w-4 h-4" style={{ color: 'var(--brand)' }} />}
             />
           </div>
 
           <button
             onClick={refreshNumbers}
-            className="inline-flex items-center gap-2 rounded-2xl border px-4 py-3 text-sm"
-            style={{ borderColor: 'rgba(255,255,255,0.16)', background: 'rgba(0,0,0,0.25)' }}
+            className="inline-flex items-center gap-2 rounded-2xl px-4 py-3 text-sm transition"
+            style={{
+              border: '1px solid var(--ts-input-border)',
+              background: 'var(--ts-input-bg)',
+              color: 'var(--text)',
+              boxShadow: 'var(--ts-input-shadow)',
+            }}
           >
             <RefreshCw className="w-4 h-4" /> Refresh
           </button>
         </div>
 
-        <div className="opacity-80 text-sm leading-relaxed">
-          <div className="flex items-center gap-2 mb-1">
+        <div className="text-sm leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+          <div className="flex items-center gap-2 mb-1" style={{ color: 'var(--text)' }}>
             <LinkIcon className="w-4 h-4" /> One number → one agent
           </div>
           Numbers are exclusive to a single agent. You can re-attach later, but only one active binding at a time.
@@ -200,7 +213,8 @@ export default function StepV2Telephony({ onBack, onNext }: Props) {
         <div className="flex items-center justify-between pt-2">
           <button
             onClick={onBack}
-            className="inline-flex items-center gap-2 rounded-[24px] border border-white/15 bg-transparent px-4 py-2 text-white hover:bg-white/10 transition"
+            className="inline-flex items-center gap-2 rounded-[24px] px-4 py-2 transition"
+            style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)', boxShadow: 'var(--shadow-soft)' }}
           >
             <ArrowLeft className="w-4 h-4" /> Previous
           </button>
@@ -228,6 +242,41 @@ export default function StepV2Telephony({ onBack, onNext }: Props) {
           </button>
         </div>
       </div>
+
+      {/* Scoped tokens for LIGHT / DARK */}
+      <style jsx global>{`
+        /* Light (default) */
+        .${ScopeClass}{
+          --ts-card: #ffffff;
+          --ts-border: rgba(0,0,0,.10);
+          --ts-shadow: 0 28px 70px rgba(0,0,0,.12), 0 10px 26px rgba(0,0,0,.08), 0 0 0 1px rgba(0,0,0,.02);
+          --ts-ring: rgba(0,255,194,.10);
+
+          --ts-input-bg: #ffffff;
+          --ts-input-border: rgba(0,0,0,.12);
+          --ts-input-shadow: inset 0 1px 0 rgba(255,255,255,.8), 0 10px 22px rgba(0,0,0,.06);
+
+          --ts-chip-bg: rgba(0,255,194,.10);
+          --ts-chip-border: rgba(0,255,194,.30);
+        }
+
+        /* Dark */
+        [data-theme="dark"] .${ScopeClass}{
+          --ts-card:
+            radial-gradient(120% 180% at 50% -40%, rgba(0,255,194,.06) 0%, rgba(12,16,18,1) 42%),
+            linear-gradient(180deg, #0e1213 0%, #0c1012 100%);
+          --ts-border: rgba(255,255,255,.08);
+          --ts-shadow: 0 36px 90px rgba(0,0,0,.60), 0 14px 34px rgba(0,0,0,.45), 0 0 0 1px rgba(0,255,194,.10);
+          --ts-ring: rgba(0,255,194,.12);
+
+          --ts-input-bg: rgba(255,255,255,.02);
+          --ts-input-border: rgba(255,255,255,.14);
+          --ts-input-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 12px 30px rgba(0,0,0,.38);
+
+          --ts-chip-bg: rgba(0,255,194,.10);
+          --ts-chip-border: rgba(0,255,194,.28);
+        }
+      `}</style>
     </section>
   );
 }
@@ -250,10 +299,14 @@ function LabeledInput({
 }) {
   return (
     <div>
-      <label className="block mb-2 text-[13px] font-medium text-white/85 tracking-wide">{label}</label>
+      <label className="block mb-2 text-[13px] font-medium" style={{ color: 'var(--text)' }}>{label}</label>
       <div
-        className="flex items-center gap-2 rounded-2xl bg-[#101314] px-4 py-3.5 border outline-none"
-        style={{ borderColor: '#13312b', boxShadow: '0 8px 34px rgba(0,0,0,0.25)' }}
+        className="flex items-center gap-2 rounded-2xl px-4 py-3.5 border outline-none"
+        style={{
+          background: 'var(--ts-input-bg)',
+          borderColor: 'var(--ts-input-border)',
+          boxShadow: 'var(--ts-input-shadow)',
+        }}
       >
         {icon}
         <input
@@ -261,7 +314,8 @@ function LabeledInput({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
-          className="w-full bg-transparent outline-none text-[15px] text-white/95"
+          className="w-full bg-transparent outline-none text-[15px]"
+          style={{ color: 'var(--text)' }}
         />
       </div>
     </div>
@@ -304,7 +358,7 @@ function NumberSelect({
     const r = btnRef.current?.getBoundingClientRect();
     if (!r) return;
     const viewH = window.innerHeight;
-    const openUp = r.bottom + 320 > viewH;
+    const openUp = r.bottom + 360 > viewH;
     setRect({ top: openUp ? r.top : r.bottom, left: r.left, width: r.width, openUp });
   }, [open]);
 
@@ -327,16 +381,17 @@ function NumberSelect({
         onClick={() => { setOpen((v) => !v); setTimeout(() => searchRef.current?.focus(), 0); }}
         className="w-full flex items-center justify-between gap-3 px-3 py-3 rounded-[14px] text-sm outline-none transition"
         style={{
-          background: 'rgba(0,0,0,0.30)',
-          border: '1px solid rgba(255,255,255,0.20)',
-          boxShadow: '0 8px 34px rgba(0,0,0,0.25)',
+          background: 'var(--ts-input-bg)',
+          border: '1px solid var(--ts-input-border)',
+          boxShadow: 'var(--ts-input-shadow)',
+          color: 'var(--text)',
         }}
       >
         <span className="flex items-center gap-2 truncate">
           {icon}
           <span className="truncate">{current ? current.label : (placeholder || '— Choose —')}</span>
         </span>
-        <ChevronDown className="w-4 h-4 opacity-80" />
+        <ChevronDown className="w-4 h-4 opacity-80" style={{ color: 'var(--text-muted)' }} />
       </button>
 
       {open && rect
@@ -349,29 +404,37 @@ function NumberSelect({
                 left: rect.left,
                 width: rect.width,
                 transform: rect.openUp ? 'translateY(-100%)' : 'none',
-                background: '#101314',
-                border: '1px solid rgba(255,255,255,0.30)',
+                background: 'var(--ts-menu-bg, #ffffff)',
+                border: '1px solid var(--ts-menu-border, rgba(0,0,0,.10))',
                 borderRadius: 20,
-                boxShadow: '0 20px 60px rgba(0,0,0,0.45), 0 0 1px rgba(0,0,0,0.5)',
+                boxShadow: '0 28px 70px rgba(0,0,0,.12), 0 10px 26px rgba(0,0,0,.08), 0 0 0 1px rgba(0,0,0,.02)',
               }}
             >
+              <style jsx global>{`
+                [data-theme="dark"] .${ScopeClass} ~ .fixed {
+                  --ts-menu-bg: #101314;
+                  --ts-menu-border: rgba(255,255,255,.16);
+                }
+              `}</style>
+
               {/* search */}
               <div
                 className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[12px]"
-                style={{ background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.15)' }}
+                style={{ background: 'var(--ts-input-bg)', border: '1px solid var(--ts-input-border)', boxShadow: 'var(--ts-input-shadow)', color: 'var(--text)' }}
               >
-                <Search className="w-4 h-4 text-white/70" />
+                <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
                 <input
                   ref={searchRef}
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Search numbers…"
-                  className="w-full bg-transparent outline-none text-sm text-white placeholder:text-white/60"
+                  className="w-full bg-transparent outline-none text-sm"
+                  style={{ color: 'var(--text)' }}
                 />
               </div>
 
               {/* list */}
-              <div className="max-h-72 overflow-y-auto pr-1" style={{ scrollbarWidth: 'thin' }}>
+              <div className="max-h-80 overflow-y-auto pr-1" style={{ scrollbarWidth: 'thin' }}>
                 {filtered.map((o) => (
                   <button
                     key={o.value || o.label}
@@ -380,7 +443,7 @@ function NumberSelect({
                       setOpen(false);
                     }}
                     className="w-full flex items-center gap-3 px-3 py-2 rounded-[10px] text-left transition"
-                    style={{ background: 'transparent', border: '1px solid transparent' }}
+                    style={{ background: 'transparent', border: '1px solid transparent', color: 'var(--text)' }}
                     onMouseEnter={(e) => {
                       (e.currentTarget as HTMLButtonElement).style.background = 'rgba(0,255,194,0.10)';
                       (e.currentTarget as HTMLButtonElement).style.border = '1px solid rgba(0,255,194,0.35)';
@@ -390,13 +453,15 @@ function NumberSelect({
                       (e.currentTarget as HTMLButtonElement).style.border = '1px solid transparent';
                     }}
                   >
-                    <Phone className="w-4 h-4 text-white/80" />
+                    <Phone className="w-4 h-4" style={{ color: 'var(--brand)' }} />
                     <span className="flex-1 truncate">{o.label}</span>
-                    {o.note ? <span className="text-white/50 text-xs">{o.note}</span> : null}
+                    {o.note ? <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{o.note}</span> : null}
                   </button>
                 ))}
                 {filtered.length === 0 && (
-                  <div className="px-3 py-6 text-sm text-white/70">No numbers found.</div>
+                  <div className="px-3 py-6 text-sm" style={{ color: 'var(--text-muted)' }}>
+                    No numbers found.
+                  </div>
                 )}
               </div>
             </div>,
