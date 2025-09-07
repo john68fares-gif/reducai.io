@@ -1,49 +1,60 @@
-// components/voice/VoiceAgentSection.tsx
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ChevronDown, ChevronRight, Plus, Check, Edit3, Zap, SlidersHorizontal, Type, Mic2, BookOpen,
-  Settings, Sparkles, Bot, FileText, Trash2, Copy, RefreshCw, PanelLeft, ArrowUpRight
-} from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import {
+  Search, Plus, Folder, FolderOpen, Check, Trash2, Copy, Edit3, Sparkles, Type,
+  ChevronDown, ChevronRight, FileText, Mic2, BookOpen, SlidersHorizontal, Settings,
+  RefreshCw, ArrowUpRight, PanelLeft, Bot, UploadCloud
+} from 'lucide-react';
 
-/* ============================================================
-   THEME TOKENS (auto switches with [data-theme="dark"])
-============================================================ */
-const SCOPE = 'voice-agent-scope';
+/* ============================================================================
+   THEME — crisp, minimal, fewer greys; light/dark auto
+============================================================================ */
+const SCOPE = 'va-vapi-like';
+
 const GREEN = '#59d9b3';
 const GREEN_HOVER = '#54cfa9';
 
 const Card: React.CSSProperties = {
-  borderRadius: 16,
   background: 'var(--va-card)',
   border: '1px solid var(--va-border)',
-  boxShadow: 'var(--va-shadow)'
+  borderRadius: 18,
+  boxShadow: 'var(--va-shadow)',
 };
 
-/* ============================================================
-   TYPES + STORAGE
-============================================================ */
+/* ============================================================================
+   TYPES & STORAGE
+============================================================================ */
+type Provider = 'openai';
+type ModelId =
+  | 'gpt-4o'
+  | 'gpt-4o-mini'
+  | 'gpt-4.1'
+  | 'gpt-3.5-turbo';
+
+type VoiceProvider = 'openai' | 'elevenlabs';
+
 type Assistant = {
   id: string;
   name: string;
+  folder?: string;
   updatedAt: number;
   config: VoiceAgentConfig;
 };
 
 type VoiceAgentConfig = {
   model: {
-    provider: 'openai';
-    model: string;
+    provider: Provider;
+    model: ModelId;
     firstMessageMode: 'assistant_first' | 'user_first';
     firstMessage: string;
     systemPrompt: string;
   };
   voice: {
-    provider: 'vapi';
-    voice: string;
-    background: 'default' | 'none';
+    provider: VoiceProvider;
+    voiceId: string;        // the id we’ll send to your TTS
+    voiceLabel: string;     // human-readable
   };
   transcriber: {
     provider: 'deepgram';
@@ -63,17 +74,17 @@ type VoiceAgentConfig = {
   };
 };
 
-const LS_KEY = 'voice:assistants.v1';
-const activeKey = (id: string) => `voice:assistant:${id}`;
+const LS_LIST = 'voice:assistants.v1';
+const ak = (id: string) => `voice:assistant:${id}`;
 
 function readLS<T>(k: string): T | null {
   try { const r = localStorage.getItem(k); return r ? JSON.parse(r) as T : null; } catch { return null; }
 }
 function writeLS<T>(k: string, v: T) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
 
-/* ============================================================
-   PROMPT: BASE + OPTIONAL “APPT SCHEDULING” EXTENSIONS
-============================================================ */
+/* ============================================================================
+   PROMPT BASE + APPOINTMENT ADDITIONS
+============================================================================ */
 const BASE_PROMPT = `[Identity]
 You are an intelligent and responsive assistant designed to help users with a wide range of inquiries and tasks.
 
@@ -96,7 +107,7 @@ You are an intelligent and responsive assistant designed to help users with a wi
 - If a user's request is unclear or you encounter difficulty understanding, ask for clarification politely.
 - If a task cannot be completed, inform the user empathetically and suggest alternative solutions or resources.`.trim();
 
-const APPT_SCHEDULING_BLOCK = `# Appointment Scheduling Agent Prompt
+const APPT = `# Appointment Scheduling Agent Prompt
 
 ## Identity & Purpose
 You are Riley (voice assistant), a voice assistant for Wellness Partners, a multi-specialty health clinic.
@@ -158,198 +169,186 @@ Full name, date of birth, callback number, appointment type, provider preference
 - Rescheduling: read back current appointment; offer alternatives; cancel old and confirm new.
 - Insurance/payment: provide general coverage info; specifics → refer to insurer; copays at service time.`.trim();
 
-/** Merge logic:
- * - Start from BASE_PROMPT
- * - If refinement text includes scheduling-ish keywords, append the APPT block (once).
- * - Always append “Refinements” as bullet points with user text normalized.
- */
-function buildPrompt(base: string, refinement: string): string {
-  const wantsAppt =
-    /\b(appoint|schedule|clinic|patient|provider|resched|urgent|dob|insurance)\b/i.test(refinement);
-  const refined = refinement.trim();
-  const bullets = refined
-    ? `\n\n[Refinements]\n- ${refined.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim()}`
+function buildPrompt(refinement: string) {
+  const wantsAppt = /\b(appoint|schedule|clinic|patient|provider|resched|urgent|dob|insurance)\b/i.test(refinement);
+  const refinements = refinement.trim()
+    ? `\n\n[Refinements]\n- ${refinement.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim()}`
     : '';
-  return [base, wantsAppt ? `\n\n${APPT_SCHEDULING_BLOCK}` : '', bullets].join('');
+  return BASE_PROMPT + (wantsAppt ? `\n\n${APPT}` : '') + refinements;
 }
 
-/* ============================================================
-   SMALL UI BITS
-============================================================ */
-function Row({ children }: { children: React.ReactNode }) {
-  return <div className="grid grid-cols-1 md:grid-cols-2 gap-4">{children}</div>;
-}
-function Field({
-  label, children, hint
-}: { label: string; children: React.ReactNode; hint?: string; }) {
-  return (
-    <div>
-      <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text)' }}>{label}</label>
-      {children}
-      {hint ? <div className="mt-1 text-xs" style={{ color: 'var(--text-muted)' }}>{hint}</div> : null}
-    </div>
-  );
-}
-function Select({
-  value, onChange, children
-}: { value: string; onChange: (v: string) => void; children: React.ReactNode; }) {
-  return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="w-full rounded-xl px-3 py-2 text-sm outline-none"
-      style={{
-        background: 'var(--va-input-bg)',
-        color: 'var(--text)',
-        border: '1px solid var(--va-input-border)',
-        boxShadow: 'var(--va-input-shadow)'
-      }}
-    >
-      {children}
-    </select>
-  );
-}
-function Input({ value, onChange, placeholder }:{
-  value: string; onChange: (v: string) => void; placeholder?: string;
-}) {
-  return (
-    <input
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      placeholder={placeholder}
-      className="w-full rounded-xl px-3 py-2 text-sm outline-none"
-      style={{
-        background: 'var(--va-input-bg)',
-        color: 'var(--text)',
-        border: '1px solid var(--va-input-border)',
-        boxShadow: 'var(--va-input-shadow)'
-      }}
-    />
-  );
-}
-function TextArea({ value, onChange, rows = 10 }:{
-  value: string; onChange: (v: string) => void; rows?: number;
-}) {
-  return (
-    <textarea
-      value={value}
-      rows={rows}
-      onChange={(e) => onChange(e.target.value)}
-      className="w-full rounded-xl px-3 py-2 text-sm outline-none"
-      style={{
-        background: 'var(--va-input-bg)',
-        color: 'var(--text)',
-        border: '1px solid var(--va-input-border)',
-        boxShadow: 'var(--va-input-shadow)',
-        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace'
-      }}
-    />
-  );
+/* ============================================================================
+   Logos (tiny inline SVGs so you don’t need assets)
+============================================================================ */
+const OpenAILogo = () => (
+  <svg width="16" height="16" viewBox="0 0 256 256" aria-hidden><circle cx="128" cy="128" r="120" fill="currentColor" opacity=".1"/><path fill="currentColor" d="M206 110c2-8 1-16-2-24-9-23-33-38-58-35-13-21-39-30-62-22-23 9-38 33-35 58-21 13-30 39-22 62 9 23 33 38 58 35 13 21 39 30 62 22 23-9 38-33 35-58 9-6 16-15 19-26Zm-52 76c-7 3-15 4-23 2l12-21c6-2 10-8 10-14v-35l19 11v31c0 11-7 21-18 26Zm-66-7c-7-3-13-8-17-15c-5-9-6-19-3-28l20 11v17c0 6 4 12 10 14l20 12c-9 2-19 1-28-2Zm-24-93c3-7 8-13 15-17c9-5 19-6 28-3l-11 20h-17c-6 0-12 4-14 10l-12 20c-2-9-1-19 2-28Zm121 12l-20-12l-15-8l-30-17l11-19c9 2 18 1 27-2 7 3 13 8 17 15 5 9 6 19 3 28Z"/></svg>
+);
+
+const ElevenLabsLogo = () => (
+  <svg width="16" height="16" viewBox="0 0 256 256" aria-hidden><rect width="256" height="256" rx="56" fill="currentColor" opacity=".1"/><path fill="currentColor" d="M88 64h80v24H112v24h48v24h-48v56H88z"/></svg>
+);
+
+/* ============================================================================
+   Custom Select (portal) — theme aware
+============================================================================ */
+function usePortalPosition(open: boolean, btnRef: React.RefObject<HTMLElement>) {
+  const [rect, setRect] = useState<{ top: number; left: number; width: number; openUp: boolean } | null>(null);
+  useLayoutEffect(() => {
+    if (!open) return;
+    const r = btnRef.current?.getBoundingClientRect();
+    if (!r) return;
+    const viewH = window.innerHeight;
+    const openUp = r.bottom + 320 > viewH;
+    setRect({ top: openUp ? r.top : r.bottom, left: r.left, width: r.width, openUp });
+  }, [open]);
+  return rect;
 }
 
-function Section({
-  icon, title, children, defaultOpen = true
-}: { icon: React.ReactNode; title: string; children: React.ReactNode; defaultOpen?: boolean; }) {
-  const [open, setOpen] = useState(defaultOpen);
+type Item = { value: string; label: string; icon?: React.ReactNode };
+
+function StyledSelect({
+  value, items, onChange, placeholder, leftIcon
+}: {
+  value: string; items: Item[]; onChange: (v: string) => void; placeholder?: string; leftIcon?: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const btnRef = useRef<HTMLButtonElement | null>(null);
+  const portalRef = useRef<HTMLDivElement | null>(null);
+  const rect = usePortalPosition(open, btnRef);
+  const selected = items.find(i => i.value === value) || null;
+  const filtered = items.filter(i => i.label.toLowerCase().includes(q.trim().toLowerCase()));
+
+  useEffect(() => {
+    if (!open) return;
+    const on = (e: MouseEvent) => {
+      if (btnRef.current?.contains(e.target as Node) || portalRef.current?.contains(e.target as Node)) return;
+      setOpen(false);
+    };
+    window.addEventListener('mousedown', on);
+    return () => window.removeEventListener('mousedown', on);
+  }, [open]);
+
   return (
-    <div style={Card}>
+    <>
       <button
+        ref={btnRef}
         type="button"
         onClick={() => setOpen(v => !v)}
-        className="w-full flex items-center justify-between px-4 py-3"
-        style={{ color: 'var(--text)' }}
+        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm"
+        style={{
+          background: 'var(--va-input-bg)', color: 'var(--text)',
+          border: '1px solid var(--va-input-border)', boxShadow: 'var(--va-input-shadow)'
+        }}
       >
-        <span className="flex items-center gap-2 text-sm font-semibold">{icon}{title}</span>
-        {open ? <ChevronDown className="w-4 h-4 opacity-70" /> : <ChevronRight className="w-4 h-4 opacity-70" />}
+        {leftIcon ? <span className="shrink-0">{leftIcon}</span> : null}
+        {selected
+          ? <span className="flex items-center gap-2 truncate">{selected.icon}{selected.label}</span>
+          : <span className="opacity-70">{placeholder || 'Select…'}</span>}
+        <span className="ml-auto" />
+        <ChevronDown className="w-4 h-4 opacity-70" />
       </button>
-      <AnimatePresence initial={false}>
-        {open && (
+
+      <AnimatePresence>
+        {open && rect && (
           <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: .2 }}
-            className="px-4 pb-4"
+            ref={portalRef}
+            initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 4 }}
+            className="fixed z-[9999] p-3"
+            style={{
+              top: rect.openUp ? rect.top - 8 : rect.top + 8,
+              left: rect.left, width: rect.width,
+              transform: rect.openUp ? 'translateY(-100%)' : 'none',
+              background: 'var(--va-menu-bg)', border: '1px solid var(--va-menu-border)',
+              borderRadius: 16, boxShadow: 'var(--va-shadow)'
+            }}
           >
-            <div className="pt-2">{children}</div>
+            <div className="flex items-center gap-2 mb-3 px-2 py-2 rounded-lg"
+              style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)', boxShadow: 'var(--va-input-shadow)' }}>
+              <Search className="w-4 h-4 opacity-70" />
+              <input
+                value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter…"
+                className="w-full bg-transparent outline-none text-sm" style={{ color: 'var(--text)' }}
+              />
+            </div>
+
+            <div className="max-h-72 overflow-y-auto pr-1" style={{ scrollbarWidth: 'thin' }}>
+              {filtered.map(it => (
+                <button
+                  key={it.value}
+                  onClick={() => { onChange(it.value); setOpen(false); }}
+                  className="w-full flex items-center gap-3 px-3 py-2 rounded-[10px] text-left"
+                  style={{ color: 'var(--text)' }}
+                  onMouseEnter={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.background = 'rgba(0,255,194,0.10)';
+                    (e.currentTarget as HTMLButtonElement).style.border = '1px solid rgba(0,255,194,0.35)';
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
+                    (e.currentTarget as HTMLButtonElement).style.border = '1px solid transparent';
+                  }}
+                >
+                  {it.icon}{it.label}
+                </button>
+              ))}
+              {filtered.length === 0 && <div className="px-3 py-5 text-sm" style={{ color: 'var(--text-muted)' }}>No matches.</div>}
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
-    </div>
+    </>
   );
 }
 
-/* Typing animation for prompt area */
-function useTypewriter(fullText: string, speed = 10) {
-  const [text, setText] = useState(fullText);
+/* ============================================================================
+   Typing effect (prompt)
+============================================================================ */
+function useTypewriter(initial: string, speed = 6) {
+  const [text, setText] = useState(initial);
   const [typing, setTyping] = useState(false);
-
   const run = (next: string) => {
     setTyping(true);
     setText('');
     let i = 0;
     const id = setInterval(() => {
-      i += 2; // two chars per tick (a little faster)
+      i += 2;
       setText(next.slice(0, i));
       if (i >= next.length) { clearInterval(id); setTyping(false); }
     }, speed);
   };
-
-  useEffect(() => { setText(fullText); }, []); // initialize once
-  return { text, typing, run };
+  return { text, typing, run, setText };
 }
 
-/* ============================================================
-   MAIN
-============================================================ */
+/* ============================================================================
+   Page
+============================================================================ */
 export default function VoiceAgentSection() {
   const [assistants, setAssistants] = useState<Assistant[]>([]);
   const [activeId, setActiveId] = useState<string>('');
+  const [query, setQuery] = useState('');
 
-  // bootstrap
+  // boot
   useEffect(() => {
-    const list = readLS<Assistant[]>(LS_KEY) || [];
-    // seed one if empty
+    const list = readLS<Assistant[]>(LS_LIST) || [];
     if (list.length === 0) {
       const seed: Assistant = {
         id: 'riley',
         name: 'Riley',
+        folder: 'Health',
         updatedAt: Date.now(),
         config: {
-          model: {
-            provider: 'openai',
-            model: 'gpt-4o',
-            firstMessageMode: 'assistant_first',
-            firstMessage: 'Hello.',
-            systemPrompt: BASE_PROMPT
-          },
-          voice: {
-            provider: 'vapi',
-            voice: 'Elliot',
-            background: 'default'
-          },
-          transcriber: {
-            provider: 'deepgram',
-            model: 'nova-2',
-            language: 'en',
-            denoise: false,
-            confidenceThreshold: 0.4,
-            numerals: false
-          },
-          tools: {
-            enableEndCall: true,
-            dialKeypad: true
-          },
+          model: { provider: 'openai', model: 'gpt-4o', firstMessageMode: 'assistant_first', firstMessage: 'Hello.', systemPrompt: BASE_PROMPT },
+          voice: { provider: 'openai', voiceId: 'alloy', voiceLabel: 'Alloy (OpenAI)' },
+          transcriber: { provider: 'deepgram', model: 'nova-2', language: 'en', denoise: false, confidenceThreshold: 0.4, numerals: false },
+          tools: { enableEndCall: true, dialKeypad: true },
           advanced: {
-            summaryPrompt:
-              'You are an expert note-taker. Summarize the call in 2–3 sentences, if applicable.',
-            successEvalPrompt:
-              'You are an expert call evaluator. Decide if objectives were met based on the system prompt + transcript.'
+            summaryPrompt: 'You are an expert note-taker. Summarize the call in 2–3 sentences.',
+            successEvalPrompt: 'Evaluate whether the call achieved its stated objectives.'
           }
         }
       };
-      writeLS(LS_KEY, [seed]);
-      writeLS(activeKey(seed.id), seed);
+      writeLS(LS_LIST, [seed]);
+      writeLS(ak(seed.id), seed);
       setAssistants([seed]);
       setActiveId(seed.id);
     } else {
@@ -358,383 +357,451 @@ export default function VoiceAgentSection() {
     }
   }, []);
 
-  const active = useMemo(() => {
-    if (!activeId) return null;
-    return readLS<Assistant>(activeKey(activeId));
-  }, [activeId]);
+  const active = useMemo(() => activeId ? readLS<Assistant>(ak(activeId)) : null, [activeId]);
 
   const updateActive = (mut: (a: Assistant) => Assistant) => {
     if (!active) return;
     const next = mut(active);
-    writeLS(activeKey(active.id), next);
-    const list = (readLS<Assistant[]>(LS_KEY) || []).map(a => a.id === next.id ? { ...a, name: next.name, updatedAt: Date.now() } : a);
-    writeLS(LS_KEY, list);
+    writeLS(ak(active.id), next);
+    const list = (readLS<Assistant[]>(LS_LIST) || []).map(a => a.id === next.id ? { ...a, name: next.name, folder: next.folder, updatedAt: Date.now() } : a);
+    writeLS(LS_LIST, list);
     setAssistants(list);
   };
 
   const addAssistant = () => {
     const id = `agent_${Math.random().toString(36).slice(2, 8)}`;
     const a: Assistant = {
-      id,
-      name: 'New Assistant',
-      updatedAt: Date.now(),
-      config: active?.config ?? {
+      id, name: 'New Assistant', updatedAt: Date.now(),
+      config: active?.config || {
         model: { provider: 'openai', model: 'gpt-4o', firstMessageMode: 'assistant_first', firstMessage: 'Hello.', systemPrompt: BASE_PROMPT },
-        voice: { provider: 'vapi', voice: 'Elliot', background: 'default' },
+        voice: { provider: 'openai', voiceId: 'alloy', voiceLabel: 'Alloy (OpenAI)' },
         transcriber: { provider: 'deepgram', model: 'nova-2', language: 'en', denoise: false, confidenceThreshold: 0.4, numerals: false },
         tools: { enableEndCall: true, dialKeypad: true },
-        advanced: { summaryPrompt: 'You are an expert note-taker. Summarize in 2–3 sentences.', successEvalPrompt: 'Evaluate if the call succeeded.' }
+        advanced: { summaryPrompt: 'Summarize the call in 2–3 sentences.', successEvalPrompt: 'Evaluate success.' }
       }
     };
-    writeLS(activeKey(id), a);
+    writeLS(ak(id), a);
     const list = [...assistants, a];
-    writeLS(LS_KEY, list);
+    writeLS(LS_LIST, list);
     setAssistants(list);
     setActiveId(id);
   };
 
   const removeAssistant = (id: string) => {
     const list = assistants.filter(a => a.id !== id);
-    writeLS(LS_KEY, list);
+    writeLS(LS_LIST, list);
     setAssistants(list);
     if (activeId === id && list.length) setActiveId(list[0].id);
   };
 
   // Prompt typing
-  const { text: typedPrompt, typing, run: runType } = useTypewriter(active?.config.model.systemPrompt || BASE_PROMPT, 6);
+  const { text: typedPrompt, typing, run: runType, setText: setTypedText } = useTypewriter(active?.config.model.systemPrompt || BASE_PROMPT, 5);
 
-  // “Edit Prompt” refinement box
-  const [refineOpen, setRefineOpen] = useState(false);
-  const [refineText, setRefineText] = useState('');
+  useEffect(() => { if (active) setTypedText(active.config.model.systemPrompt); }, [active?.id]); // sync when changing assistant
 
-  const applyRefinement = () => {
+  // Modal for edits
+  const [editOpen, setEditOpen] = useState(false);
+  const [editText, setEditText] = useState('');
+
+  const submitEdit = () => {
     if (!active) return;
-    const nextPrompt = buildPrompt(BASE_PROMPT, refineText);
-    runType(nextPrompt);
-    updateActive(a => ({
-      ...a,
-      config: { ...a.config, model: { ...a.config.model, systemPrompt: nextPrompt } }
-    }));
-    setRefineOpen(false);
-    setRefineText('');
+    const next = buildPrompt(editText);
+    runType(next);
+    updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, systemPrompt: next } } }));
+    setEditOpen(false);
+    setEditText('');
   };
+
+  // Filtered assistants (search + folders)
+  const folders = Array.from(new Set(assistants.map(a => a.folder).filter(Boolean))) as string[];
+  const [openFolders, setOpenFolders] = useState<string[]>([]);
+  const visible = assistants
+    .filter(a => a.name.toLowerCase().includes(query.trim().toLowerCase()));
+
+  // Voice lists (sample; swap with your importer when ready)
+  const openaiVoices: Item[] = [
+    { value: 'alloy', label: 'Alloy (OpenAI)' },
+    { value: 'ember', label: 'Ember (OpenAI)' },
+  ];
+  const elevenLabsVoices: Item[] = [
+    { value: 'rachel', label: 'Rachel (ElevenLabs)' },
+    { value: 'adam', label: 'Adam (ElevenLabs)' },
+    { value: 'bella', label: 'Bella (ElevenLabs)' },
+  ];
 
   if (!active) return null;
 
   return (
     <div className={`${SCOPE} w-full`} style={{ background: 'var(--bg)', color: 'var(--text)' }}>
-      <div className="flex">
-        {/* ===== Assistant Sidebar (secondary) ===== */}
-        <aside className="hidden md:flex flex-col shrink-0 w-[220px] p-3 gap-2" style={{ borderRight: '1px solid var(--va-border)' }}>
-          <div className="flex items-center justify-between px-2 py-1">
-            <div className="flex items-center gap-2"><PanelLeft className="w-4 h-4" /><span className="text-sm font-semibold">Assistants</span></div>
-            <button onClick={addAssistant} className="p-2 rounded-full hover:bg-white/10" aria-label="Add"><Plus className="w-4 h-4" /></button>
+      <div className="flex w-full">
+        {/* ================== FIXED ASSISTANT SIDEBAR ================== */}
+        <aside
+          className="hidden lg:flex shrink-0 w-[280px] px-3 py-4 flex-col gap-3"
+          style={{
+            position: 'sticky', top: 0, height: '100vh',
+            borderRight: '1px solid var(--va-border)', background: 'var(--va-sidebar)'
+          }}
+        >
+          <div className="px-2 flex items-center justify-between">
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <PanelLeft className="w-4 h-4" /> Assistants
+            </div>
+            <button
+              onClick={addAssistant}
+              className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs"
+              style={{ background: GREEN, color: '#fff' }}
+              onMouseEnter={(e)=> (e.currentTarget as HTMLButtonElement).style.background = GREEN_HOVER}
+              onMouseLeave={(e)=> (e.currentTarget as HTMLButtonElement).style.background = GREEN}
+            >
+              <Plus className="w-3.5 h-3.5" /> Create
+            </button>
           </div>
-          <div className="space-y-1">
-            {assistants.map(a => (
-              <button key={a.id} onClick={() => setActiveId(a.id)}
-                className="w-full text-left px-3 py-2 rounded-lg flex items-center justify-between"
-                style={{
-                  background: a.id === activeId ? 'color-mix(in oklab, var(--brand) 10%, transparent)' : 'transparent',
-                  border: `1px solid ${a.id === activeId ? 'color-mix(in oklab, var(--brand) 28%, var(--va-border))' : 'var(--va-border)'}`
-                }}>
-                <span className="truncate">{a.name}</span>
-                {a.id === activeId ? <Check className="w-4 h-4" /> : null}
+
+          {/* Search */}
+          <div className="px-2">
+            <div className="flex items-center gap-2 rounded-lg px-2 py-1.5"
+              style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)', boxShadow: 'var(--va-input-shadow)' }}>
+              <Search className="w-4 h-4 opacity-70" />
+              <input
+                value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search assistants"
+                className="w-full bg-transparent outline-none text-sm" style={{ color: 'var(--text)' }}
+              />
+            </div>
+          </div>
+
+          {/* Folders */}
+          <div className="px-2">
+            <div className="flex items-center gap-2 text-xs font-semibold mb-2" style={{ color: 'var(--text-muted)' }}>
+              <Folder className="w-3.5 h-3.5" /> Folders
+            </div>
+            <div className="space-y-1">
+              <button
+                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/5"
+                onClick={() => setOpenFolders(s => s.includes('__all') ? s.filter(x => x!=='__all') : [...s,'__all'])}
+              >
+                {openFolders.includes('__all') ? <FolderOpen className="w-4 h-4" /> : <Folder className="w-4 h-4" />}
+                All
               </button>
-            ))}
+              {folders.map(f => (
+                <button
+                  key={f}
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/5"
+                  onClick={() => setOpenFolders(s => s.includes(f) ? s.filter(x => x!==f) : [...s,f])}
+                >
+                  {openFolders.includes(f) ? <FolderOpen className="w-4 h-4" /> : <Folder className="w-4 h-4" />}
+                  {f}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Assistants list (bigger tiles) */}
+          <div className="px-2 pt-1 overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
+            <div className="space-y-2">
+              {visible.map(a => (
+                <button
+                  key={a.id}
+                  onClick={() => setActiveId(a.id)}
+                  className="w-full text-left rounded-xl p-3 flex items-center justify-between"
+                  style={{
+                    background: a.id === activeId ? 'color-mix(in oklab, var(--brand) 12%, transparent)' : 'var(--va-card)',
+                    border: `1px solid ${a.id === activeId ? 'color-mix(in oklab, var(--brand) 28%, var(--va-border))' : 'var(--va-border)'}`,
+                    boxShadow: 'var(--va-shadow-sm)'
+                  }}
+                >
+                  <div className="min-w-0">
+                    <div className="font-medium truncate flex items-center gap-2">
+                      <Bot className="w-4 h-4 opacity-80" /><span className="truncate">{a.name}</span>
+                    </div>
+                    <div className="text-[11px] mt-0.5 opacity-70 truncate">{a.folder || 'Unfiled'} • {new Date(a.updatedAt).toLocaleDateString()}</div>
+                  </div>
+                  {a.id === activeId ? <Check className="w-4 h-4" /> : null}
+                </button>
+              ))}
+            </div>
           </div>
         </aside>
 
-        {/* ===== Editor ===== */}
-        <main className="flex-1 p-4 md:p-6 max-w-[1200px] mx-auto">
-          {/* Header */}
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <Bot className="w-5 h-5" />
-              <Input value={active.name} onChange={(v) => updateActive(a => ({ ...a, name: v }))} />
+        {/* ================== EDITOR (WIDER) ================== */}
+        <main className="flex-1 px-5 py-6">
+          {/* Header bar */}
+          <div className="max-w-[1280px] mx-auto mb-5 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Bot className="w-5 h-5 opacity-90" />
+              <input
+                value={active.name}
+                onChange={(e)=> updateActive(a => ({ ...a, name: e.target.value }))}
+                className="text-base font-semibold bg-transparent outline-none rounded-md px-2 py-1"
+                style={{ border: '1px solid var(--va-border)', background: 'var(--va-card)' }}
+              />
             </div>
             <div className="flex items-center gap-2">
               <button
-                onClick={() => navigator.clipboard.writeText(active.config.model.systemPrompt).catch(() => {})}
-                className="inline-flex items-center gap-1 rounded-xl px-3 py-2 text-sm"
-                style={{ border: '1px solid var(--va-border)', background: 'var(--va-card)' }}>
+                onClick={() => navigator.clipboard.writeText(active.config.model.systemPrompt).catch(()=>{})}
+                className="inline-flex items-center gap-1 rounded-lg px-3 py-2 text-sm"
+                style={{ border: '1px solid var(--va-border)', background: 'var(--va-card)' }}
+              >
                 <Copy className="w-4 h-4" /> Copy Prompt
               </button>
               <button
                 onClick={() => removeAssistant(active.id)}
-                className="inline-flex items-center gap-1 rounded-xl px-3 py-2 text-sm"
-                style={{ border: '1px solid var(--va-border)', background: 'var(--va-card)' }}>
+                className="inline-flex items-center gap-1 rounded-lg px-3 py-2 text-sm"
+                style={{ border: '1px solid var(--va-border)', background: 'var(--va-card)' }}
+              >
                 <Trash2 className="w-4 h-4" /> Delete
               </button>
             </div>
           </div>
 
-          <div className="space-y-8">
-            {/* ===== MODEL ===== */}
-            <Section icon={<FileText className="w-4 h-4 text-[var(--brand)]" />} title="Model">
-              <Row>
+          <div className="max-w-[1280px] mx-auto grid grid-cols-12 gap-6">
+            {/* ===== Model ===== */}
+            <Section title="Model" icon={<FileText className="w-4 h-4 text-[var(--brand)]" />}>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <Field label="Provider">
-                  <Select
+                  <StyledSelect
                     value={active.config.model.provider}
-                    onChange={(v) => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, provider: v as any } } }))}
-                  >
-                    <option value="openai">OpenAI</option>
-                  </Select>
-                </Field>
-                <Field label="Model">
-                  <Select
-                    value={active.config.model.model}
-                    onChange={(v) => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, model: v } } }))}>
-                    <option value="gpt-4o">gpt-4o</option>
-                    <option value="gpt-4o-mini">gpt-4o-mini</option>
-                    <option value="gpt-4.1">gpt-4.1</option>
-                    <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
-                  </Select>
-                </Field>
-              </Row>
-
-              <Row>
-                <Field label="First Message Mode" hint="Who speaks first">
-                  <Select
-                    value={active.config.model.firstMessageMode}
-                    onChange={(v) => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, firstMessageMode: v as any } } }))}>
-                    <option value="assistant_first">Assistant speaks first</option>
-                    <option value="user_first">User speaks first</option>
-                  </Select>
-                </Field>
-                <Field label="First Message">
-                  <Input
-                    value={active.config.model.firstMessage}
-                    onChange={(v) => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, firstMessage: v } } }))}
+                    onChange={(v)=> updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, provider: v as Provider } } }))}
+                    items={[
+                      { value: 'openai', label: 'OpenAI', icon: <OpenAILogo /> },
+                    ]}
+                    leftIcon={<OpenAILogo />}
                   />
                 </Field>
-              </Row>
+                <Field label="Model">
+                  <StyledSelect
+                    value={active.config.model.model}
+                    onChange={(v)=> updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, model: v as ModelId } } }))}
+                    items={[
+                      { value: 'gpt-4o', label: 'GPT-4o' },
+                      { value: 'gpt-4o-mini', label: 'GPT-4o mini' },
+                      { value: 'gpt-4.1', label: 'GPT-4.1' },
+                      { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo' },
+                    ]}
+                  />
+                </Field>
 
-              {/* Prompt header bar w/ Generate & Edit */}
-              <div className="mt-4 mb-2 flex items-center justify-between">
-                <div className="flex items-center gap-2 text-sm font-semibold" style={{ color: 'var(--text)' }}>
+                <Field label="First Message Mode">
+                  <StyledSelect
+                    value={active.config.model.firstMessageMode}
+                    onChange={(v)=> updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, firstMessageMode: v as any } } }))}
+                    items={[
+                      { value: 'assistant_first', label: 'Assistant speaks first' },
+                      { value: 'user_first', label: 'User speaks first' },
+                    ]}
+                  />
+                </Field>
+                <Field label="First Message">
+                  <input
+                    value={active.config.model.firstMessage}
+                    onChange={(e)=> updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, firstMessage: e.target.value } } }))}
+                    className="w-full rounded-xl px-3 py-2 text-sm outline-none"
+                    style={{ background:'var(--va-input-bg)', color:'var(--text)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)' }}
+                  />
+                </Field>
+              </div>
+
+              {/* Prompt header actions */}
+              <div className="mt-5 mb-2 flex items-center justify-between">
+                <div className="flex items-center gap-2 text-sm font-semibold">
                   <Type className="w-4 h-4" /> System Prompt
                 </div>
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => { runType(BASE_PROMPT); updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, systemPrompt: BASE_PROMPT } } })); }}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-sm"
-                    style={{ border: '1px solid var(--va-border)', background: 'var(--va-card)' }}
-                  >
-                    <RefreshCw className="w-4 h-4" /> Reset
-                  </button>
+                    className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm"
+                    style={{ border:'1px solid var(--va-border)', background:'var(--va-card)' }}
+                  ><RefreshCw className="w-4 h-4" /> Reset</button>
+
                   <button
-                    onClick={() => setRefineOpen(true)}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-sm"
-                    style={{ background: GREEN, color: '#fff' }}
-                    onMouseEnter={(e) => (e.currentTarget as HTMLButtonElement).style.background = GREEN_HOVER}
-                    onMouseLeave={(e) => (e.currentTarget as HTMLButtonElement).style.background = GREEN}
-                  >
-                    <Sparkles className="w-4 h-4" /> Generate / Edit
-                  </button>
+                    onClick={() => setEditOpen(true)}
+                    className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm"
+                    style={{ background: GREEN, color:'#fff' }}
+                    onMouseEnter={(e)=> (e.currentTarget as HTMLButtonElement).style.background = GREEN_HOVER}
+                    onMouseLeave={(e)=> (e.currentTarget as HTMLButtonElement).style.background = GREEN}
+                  ><Sparkles className="w-4 h-4" /> Generate / Edit</button>
+
+                  <button
+                    onClick={() => {
+                      // fire a custom event you can catch anywhere to run the prompt live
+                      window.dispatchEvent(new CustomEvent('voiceagent:test', { detail: { assistantId: active.id, config: active.config } }));
+                      alert('Hook “voiceagent:test” to your runner to start the agent with this prompt.');
+                    }}
+                    className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm"
+                    style={{ border:'1px solid var(--va-border)', background:'var(--va-card)' }}
+                  ><ArrowUpRight className="w-4 h-4" /> Test Prompt</button>
                 </div>
               </div>
 
-              {/* Typing prompt area */}
+              {/* Prompt body with typewriter */}
               <div className="rounded-xl overflow-hidden" style={Card}>
-                <div className="p-3 text-xs" style={{ borderBottom: '1px solid var(--va-border)', background: 'var(--va-subtle)' }}>
+                <div className="px-3 py-2 text-xs" style={{ borderBottom:'1px solid var(--va-border)', background:'var(--va-subtle)' }}>
                   {typing ? 'Typing…' : 'Ready'}
                 </div>
                 <div className="p-3">
-                  <TextArea
+                  <textarea
                     rows={18}
                     value={typedPrompt}
-                    onChange={(v) => {
-                      // allow manual edits; stop typing animation
-                      updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, systemPrompt: v } } }));
+                    onChange={(e)=> {
+                      setTypedText(e.target.value);
+                      updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, systemPrompt: e.target.value } } }));
+                    }}
+                    className="w-full rounded-xl px-3 py-2 text-sm outline-none"
+                    style={{
+                      background:'var(--va-input-bg)', color:'var(--text)',
+                      border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)',
+                      fontFamily:'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace'
                     }}
                   />
                 </div>
               </div>
-
-              {/* EDIT PROMPT modal mimic */}
-              <AnimatePresence>
-                {refineOpen && (
-                  <motion.div
-                    className="fixed inset-0 z-[999] flex items-center justify-center p-4"
-                    initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                    style={{ background: 'rgba(0,0,0,0.45)' }}
-                  >
-                    <motion.div
-                      initial={{ y: 10, opacity: 0, scale: .98 }}
-                      animate={{ y: 0, opacity: 1, scale: 1 }}
-                      exit={{ y: 6, opacity: 0, scale: .985 }}
-                      transition={{ duration: .18 }}
-                      className="w-full max-w-xl"
-                      style={Card}
-                    >
-                      <div className="px-4 py-3" style={{ borderBottom: '1px solid var(--va-border)' }}>
-                        <div className="text-sm font-semibold flex items-center gap-2"><Edit3 className="w-4 h-4" /> Edit Prompt</div>
-                      </div>
-                      <div className="p-4">
-                        <Input
-                          value={refineText}
-                          onChange={setRefineText}
-                          placeholder="Describe how you'd like to edit the prompt"
-                        />
-                        <div className="mt-3 flex items-center justify-end gap-2">
-                          <button
-                            onClick={() => setRefineOpen(false)}
-                            className="px-3 py-2 rounded-xl text-sm"
-                            style={{ border: '1px solid var(--va-border)', background: 'var(--va-card)' }}
-                          >Cancel</button>
-                          <button
-                            onClick={applyRefinement}
-                            className="px-3 py-2 rounded-xl text-sm"
-                            style={{ background: GREEN, color: '#fff' }}
-                            onMouseEnter={(e) => (e.currentTarget as HTMLButtonElement).style.background = GREEN_HOVER}
-                            onMouseLeave={(e) => (e.currentTarget as HTMLButtonElement).style.background = GREEN}
-                          >
-                            Submit Edit <ArrowUpRight className="inline w-4 h-4 ml-1" />
-                          </button>
-                        </div>
-                        <div className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
-                          Tip: If you mention scheduling/clinic needs, the assistant will auto-extend with an appointment scheduling playbook.
-                        </div>
-                      </div>
-                    </motion.div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
             </Section>
 
-            {/* ===== VOICE ===== */}
-            <Section icon={<Mic2 className="w-4 h-4 text-[var(--brand)]" />} title="Voice">
-              <Row>
+            {/* ===== Voice ===== */}
+            <Section title="Voice" icon={<Mic2 className="w-4 h-4 text-[var(--brand)]" />}>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <Field label="Provider">
-                  <Select
+                  <StyledSelect
                     value={active.config.voice.provider}
-                    onChange={(v) => updateActive(a => ({ ...a, config: { ...a.config, voice: { ...a.config.voice, provider: v as any } } }))}
-                  >
-                    <option value="vapi">Vapi</option>
-                  </Select>
+                    onChange={(v)=> {
+                      // default list on provider switch
+                      const list = v === 'elevenlabs' ? elevenLabsVoices : openaiVoices;
+                      updateActive(a => ({
+                        ...a,
+                        config: { ...a.config, voice: { provider: v as VoiceProvider, voiceId: list[0].value, voiceLabel: list[0].label } }
+                      }));
+                    }}
+                    items={[
+                      { value: 'openai', label: 'OpenAI', icon: <OpenAILogo /> },
+                      { value: 'elevenlabs', label: 'ElevenLabs', icon: <ElevenLabsLogo /> },
+                    ]}
+                    leftIcon={active.config.voice.provider === 'openai' ? <OpenAILogo /> : <ElevenLabsLogo />}
+                  />
                 </Field>
+
                 <Field label="Voice">
-                  <Select
-                    value={active.config.voice.voice}
-                    onChange={(v) => updateActive(a => ({ ...a, config: { ...a.config, voice: { ...a.config.voice, voice: v } } }))}>
-                    <option>Elliot</option>
-                    <option>Alloy</option>
-                    <option>Amber</option>
-                  </Select>
+                  <StyledSelect
+                    value={active.config.voice.voiceId}
+                    onChange={(v)=> {
+                      const list = active.config.voice.provider === 'elevenlabs' ? elevenLabsVoices : openaiVoices;
+                      const found = list.find(x => x.value === v)!;
+                      updateActive(a => ({ ...a, config: { ...a.config, voice: { ...a.config.voice, voiceId: v, voiceLabel: found?.label || v } } }));
+                    }}
+                    items={(active.config.voice.provider === 'elevenlabs' ? elevenLabsVoices : openaiVoices)}
+                  />
                 </Field>
-              </Row>
-              <Row>
-                <Field label="Background Sound">
-                  <Select
-                    value={active.config.voice.background}
-                    onChange={(v) => updateActive(a => ({ ...a, config: { ...a.config, voice: { ...a.config.voice, background: v as any } } }))}>
-                    <option value="default">Default</option>
-                    <option value="none">None</option>
-                  </Select>
-                </Field>
-              </Row>
+              </div>
+
+              <div className="mt-3">
+                <button
+                  onClick={() => {
+                    // Hook this to your import flow
+                    window.dispatchEvent(new CustomEvent('voiceagent:import-11labs'));
+                    alert('Hook “voiceagent:import-11labs” to your ElevenLabs importer.');
+                  }}
+                  className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm"
+                  style={{ border:'1px solid var(--va-border)', background:'var(--va-card)' }}
+                >
+                  <UploadCloud className="w-4 h-4" /> Import from ElevenLabs
+                </button>
+              </div>
             </Section>
 
-            {/* ===== TRANSCRIBER ===== */}
-            <Section icon={<BookOpen className="w-4 h-4 text-[var(--brand)]" />} title="Transcriber">
-              <Row>
+            {/* ===== Transcriber ===== */}
+            <Section title="Transcriber" icon={<BookOpen className="w-4 h-4 text-[var(--brand)]" />}>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <Field label="Provider">
-                  <Select
+                  <StyledSelect
                     value={active.config.transcriber.provider}
-                    onChange={(v) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, provider: v as any } } }))}>
-                    <option value="deepgram">Deepgram</option>
-                  </Select>
+                    onChange={(v)=> updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, provider: v as any } } }))}
+                    items={[{ value:'deepgram', label:'Deepgram' }]}
+                  />
                 </Field>
                 <Field label="Model">
-                  <Select
+                  <StyledSelect
                     value={active.config.transcriber.model}
-                    onChange={(v) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, model: v as any } } }))}>
-                    <option value="nova-2">Nova 2</option>
-                    <option value="nova-3">Nova 3</option>
-                  </Select>
-                </Field>
-              </Row>
-              <Row>
-                <Field label="Language">
-                  <Select
-                    value={active.config.transcriber.language}
-                    onChange={(v) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, language: v as any } } }))}>
-                    <option value="en">En</option>
-                    <option value="multi">Multi</option>
-                  </Select>
-                </Field>
-                <Field label="Confidence Threshold">
-                  <input
-                    type="range" min={0} max={1} step={0.05}
-                    value={active.config.transcriber.confidenceThreshold}
-                    onChange={(e) => updateActive(a => ({
-                      ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, confidenceThreshold: Number(e.target.value) } }
-                    }))}
-                    className="w-full"
+                    onChange={(v)=> updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, model: v as any } } }))}
+                    items={[{ value:'nova-2', label:'Nova 2' }, { value:'nova-3', label:'Nova 3' }]}
                   />
-                  <div className="mt-1 text-xs" style={{ color: 'var(--text-muted)' }}>
-                    {active.config.transcriber.confidenceThreshold.toFixed(2)}
+                </Field>
+
+                <Field label="Language">
+                  <StyledSelect
+                    value={active.config.transcriber.language}
+                    onChange={(v)=> updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, language: v as any } } }))}
+                    items={[{ value:'en', label:'English' }, { value:'multi', label:'Multi' }]}
+                  />
+                </Field>
+
+                <Field label="Confidence Threshold">
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="range" min={0} max={1} step={0.01}
+                      value={active.config.transcriber.confidenceThreshold}
+                      onChange={(e)=> updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, confidenceThreshold: Number(e.target.value) } } }))}
+                      className="va-range w-full"
+                    />
+                    <span className="text-xs" style={{ color:'var(--text-muted)' }}>
+                      {active.config.transcriber.confidenceThreshold.toFixed(2)}
+                    </span>
                   </div>
                 </Field>
-              </Row>
-              <Row>
+
                 <Field label="Denoise">
-                  <Select
+                  <StyledSelect
                     value={String(active.config.transcriber.denoise)}
-                    onChange={(v) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, denoise: v === 'true' } } }))}>
-                    <option value="false">Off</option>
-                    <option value="true">On</option>
-                  </Select>
+                    onChange={(v)=> updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, denoise: v==='true' } } }))}
+                    items={[{ value:'false', label:'Off' }, { value:'true', label:'On' }]}
+                  />
                 </Field>
                 <Field label="Use Numerals">
-                  <Select
+                  <StyledSelect
                     value={String(active.config.transcriber.numerals)}
-                    onChange={(v) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, numerals: v === 'true' } } }))}>
-                    <option value="false">No</option>
-                    <option value="true">Yes</option>
-                  </Select>
+                    onChange={(v)=> updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, numerals: v==='true' } } }))}
+                    items={[{ value:'false', label:'No' }, { value:'true', label:'Yes' }]}
+                  />
                 </Field>
-              </Row>
+              </div>
             </Section>
 
-            {/* ===== TOOLS ===== */}
-            <Section icon={<SlidersHorizontal className="w-4 h-4 text-[var(--brand)]" />} title="Tools">
-              <Row>
+            {/* ===== Tools ===== */}
+            <Section title="Tools" icon={<SlidersHorizontal className="w-4 h-4 text-[var(--brand)]" />}>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <Field label="Enable End Call Function">
-                  <Select
+                  <StyledSelect
                     value={String(active.config.tools.enableEndCall)}
-                    onChange={(v) => updateActive(a => ({ ...a, config: { ...a.config, tools: { ...a.config.tools, enableEndCall: v === 'true' } } }))}>
-                    <option value="true">Enabled</option>
-                    <option value="false">Disabled</option>
-                  </Select>
+                    onChange={(v)=> updateActive(a => ({ ...a, config: { ...a.config, tools: { ...a.config.tools, enableEndCall: v==='true' } } }))}
+                    items={[{ value:'true', label:'Enabled' }, { value:'false', label:'Disabled' }]}
+                  />
                 </Field>
                 <Field label="Dial Keypad">
-                  <Select
+                  <StyledSelect
                     value={String(active.config.tools.dialKeypad)}
-                    onChange={(v) => updateActive(a => ({ ...a, config: { ...a.config, tools: { ...a.config.tools, dialKeypad: v === 'true' } } }))}>
-                    <option value="true">Enabled</option>
-                    <option value="false">Disabled</option>
-                  </Select>
+                    onChange={(v)=> updateActive(a => ({ ...a, config: { ...a.config, tools: { ...a.config.tools, dialKeypad: v==='true' } } }))}
+                    items={[{ value:'true', label:'Enabled' }, { value:'false', label:'Disabled' }]}
+                  />
                 </Field>
-              </Row>
+              </div>
             </Section>
 
-            {/* ===== ADVANCED ===== */}
-            <Section icon={<Settings className="w-4 h-4 text-[var(--brand)]" />} title="Advanced">
+            {/* ===== Advanced ===== */}
+            <Section title="Advanced" icon={<Settings className="w-4 h-4 text-[var(--brand)]" />}>
               <Field label="Summary Prompt">
-                <TextArea
+                <textarea
                   rows={4}
                   value={active.config.advanced.summaryPrompt}
-                  onChange={(v) => updateActive(a => ({ ...a, config: { ...a.config, advanced: { ...a.config.advanced, summaryPrompt: v } } }))}
+                  onChange={(e)=> updateActive(a => ({ ...a, config: { ...a.config, advanced: { ...a.config.advanced, summaryPrompt: e.target.value } } }))}
+                  className="w-full rounded-xl px-3 py-2 text-sm outline-none"
+                  style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)' }}
                 />
               </Field>
-              <div className="mt-3" />
+              <div className="h-3" />
               <Field label="Success Evaluation Prompt">
-                <TextArea
+                <textarea
                   rows={4}
                   value={active.config.advanced.successEvalPrompt}
-                  onChange={(v) => updateActive(a => ({ ...a, config: { ...a.config, advanced: { ...a.config.advanced, successEvalPrompt: v } } }))}
+                  onChange={(e)=> updateActive(a => ({ ...a, config: { ...a.config, advanced: { ...a.config.advanced, successEvalPrompt: e.target.value } } }))}
+                  className="w-full rounded-xl px-3 py-2 text-sm outline-none"
+                  style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)' }}
                 />
               </Field>
             </Section>
@@ -742,35 +809,149 @@ export default function VoiceAgentSection() {
         </main>
       </div>
 
-      {/* Scoped theme */}
+      {/* Edit / Generate modal */}
+      <AnimatePresence>
+        {editOpen && (
+          <motion.div className="fixed inset-0 z-[999] flex items-center justify-center p-4"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            style={{ background:'rgba(0,0,0,.45)' }}>
+            <motion.div
+              initial={{ y: 10, opacity: 0, scale:.98 }} animate={{ y:0, opacity:1, scale:1 }} exit={{ y:8, opacity:0, scale:.985 }}
+              className="w-full max-w-xl" style={Card}
+            >
+              <div className="px-4 py-3" style={{ borderBottom:'1px solid var(--va-border)' }}>
+                <div className="flex items-center gap-2 text-sm font-semibold"><Edit3 className="w-4 h-4" /> Edit Prompt</div>
+              </div>
+              <div className="p-4">
+                <input
+                  value={editText}
+                  onChange={(e)=> setEditText(e.target.value)}
+                  placeholder="Describe how you'd like to edit the prompt"
+                  className="w-full rounded-lg px-3 py-2 text-sm outline-none"
+                  style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)' }}
+                />
+                <div className="mt-3 flex items-center justify-end gap-2">
+                  <button
+                    onClick={()=> setEditOpen(false)}
+                    className="px-3 py-2 rounded-lg text-sm"
+                    style={{ border:'1px solid var(--va-border)', background:'var(--va-card)' }}
+                  >Cancel</button>
+                  <button
+                    onClick={submitEdit}
+                    className="px-3 py-2 rounded-lg text-sm"
+                    style={{ background:GREEN, color:'#fff' }}
+                    onMouseEnter={(e)=> (e.currentTarget as HTMLButtonElement).style.background = GREEN_HOVER}
+                    onMouseLeave={(e)=> (e.currentTarget as HTMLButtonElement).style.background = GREEN}
+                  >Submit Edit <ArrowUpRight className="inline w-4 h-4 ml-1" /></button>
+                </div>
+                <div className="mt-2 text-xs" style={{ color:'var(--text-muted)' }}>
+                  Tip: Mention “schedule / clinic / provider / urgent” to auto-add the appointment scheduling playbook.
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Scoped theme + range styling */}
       <style jsx global>{`
         .${SCOPE}{
           --brand: ${GREEN};
-          --bg: var(--bg, #0b0c10);
-          --text: var(--text, #e7ecef);
-          --text-muted: color-mix(in oklab, var(--text) 70%, transparent);
-
-          --va-card: #ffffff;
-          --va-subtle: #f6f7f9;
-          --va-border: rgba(0,0,0,.10);
-          --va-shadow: 0 28px 70px rgba(0,0,0,.10), 0 10px 26px rgba(0,0,0,.08);
-          --va-input-bg: #ffffff;
-          --va-input-border: rgba(0,0,0,.12);
-          --va-input-shadow: inset 0 1px 0 rgba(255,255,255,.8), 0 10px 22px rgba(0,0,0,.06);
-        }
-        [data-theme="dark"] .${SCOPE}{
           --bg: #0b0c10;
-          --text: #f1f5f9;
+          --text: #eef2f5;
+          --text-muted: color-mix(in oklab, var(--text) 68%, transparent);
 
           --va-card: #0f1315;
           --va-subtle: #0d1113;
           --va-border: rgba(255,255,255,.10);
-          --va-shadow: 0 36px 90px rgba(0,0,0,.60), 0 14px 34px rgba(0,0,0,.45);
-          --va-input-bg: rgba(255,255,255,.02);
+          --va-shadow: 0 24px 60px rgba(0,0,0,.50), 0 10px 28px rgba(0,0,0,.35);
+          --va-shadow-sm: 0 8px 20px rgba(0,0,0,.35);
+
+          --va-input-bg: rgba(255,255,255,.03);
           --va-input-border: rgba(255,255,255,.14);
-          --va-input-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 12px 30px rgba(0,0,0,.38);
+          --va-input-shadow: inset 0 1px 0 rgba(255,255,255,.05);
+
+          --va-menu-bg: #101314;
+          --va-menu-border: rgba(255,255,255,.16);
+
+          --va-sidebar: linear-gradient(180deg, #0d1113 0%, #0b0e10 100%);
+        }
+        :root:not([data-theme="dark"]) .${SCOPE}{
+          --bg: #f7f9fb;
+          --text: #101316;
+          --text-muted: color-mix(in oklab, var(--text) 55%, transparent);
+
+          --va-card: #ffffff;
+          --va-subtle: #f3f6f8;
+          --va-border: rgba(0,0,0,.10);
+          --va-shadow: 0 28px 70px rgba(0,0,0,.10), 0 10px 26px rgba(0,0,0,.08);
+          --va-shadow-sm: 0 10px 24px rgba(0,0,0,.08);
+
+          --va-input-bg: #ffffff;
+          --va-input-border: rgba(0,0,0,.12);
+          --va-input-shadow: inset 0 1px 0 rgba(255,255,255,.8);
+
+          --va-menu-bg: #ffffff;
+          --va-menu-border: rgba(0,0,0,.10);
+
+          --va-sidebar: linear-gradient(180deg, #ffffff 0%, #f7f9fb 100%);
+        }
+
+        /* Green, thin sliders */
+        .${SCOPE} .va-range{
+          -webkit-appearance: none;
+          height: 4px;
+          background: color-mix(in oklab, var(--brand) 26%, #0000);
+          border-radius: 999px;
+          outline: none;
+        }
+        .${SCOPE} .va-range::-webkit-slider-thumb{
+          -webkit-appearance: none;
+          width: 14px; height: 14px; border-radius: 50%;
+          background: var(--brand); border: 2px solid #fff;
+          box-shadow: 0 0 0 3px color-mix(in oklab, var(--brand) 25%, transparent);
+        }
+        .${SCOPE} .va-range::-moz-range-thumb{
+          width: 14px; height: 14px; border: 0; border-radius: 50%;
+          background: var(--brand);
+          box-shadow: 0 0 0 3px color-mix(in oklab, var(--brand) 25%, transparent);
         }
       `}</style>
+    </div>
+  );
+}
+
+/* --- Small atoms --------------------------------------------------------- */
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <div className="mb-1 text-xs font-medium" style={{ color:'var(--text)' }}>{label}</div>
+      {children}
+    </div>
+  );
+}
+
+function Section({ title, icon, children }:{ title: string; icon: React.ReactNode; children: React.ReactNode }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <div className="col-span-12" style={Card}>
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center justify-between px-4 py-3"
+        style={{ color:'var(--text)' }}
+      >
+        <span className="flex items-center gap-2 text-sm font-semibold">{icon}{title}</span>
+        {open ? <ChevronDown className="w-4 h-4 opacity-70" /> : <ChevronRight className="w-4 h-4 opacity-70" />}
+      </button>
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div initial={{ height:0, opacity:0 }} animate={{ height:'auto', opacity:1 }} exit={{ height:0, opacity:0 }}
+            transition={{ duration:.18 }} className="px-4 pb-4">
+            {children}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
