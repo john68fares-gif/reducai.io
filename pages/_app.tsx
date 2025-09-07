@@ -35,18 +35,7 @@ const ACCENTS: Record<string, string> = {
   "/support": "#ff9db1",             // pink
 };
 
-/** NEW: subtitles to extend header vertically (not wider) */
-const SUBTITLES: Record<string, string> = {
-  "/builder": "Create, configure, and manage your AIs",
-  "/improve": "Experiment with prompts and iterate safely",
-  "/voice-agent": "Design and preview voice experiences",
-  "/launch": "Deploy, embed, and connect channels",
-  "/phone-numbers": "Provision numbers and configure routing",
-  "/apikeys": "Manage provider credentials securely",
-  "/support": "Docs, tips, and troubleshooting",
-};
-
-const RAIL_H = 88; // ↑ taller header
+const RAIL_H = 88; // taller header
 
 export default function App({ Component, pageProps }: AppProps) {
   const router = useRouter();
@@ -92,18 +81,17 @@ export default function App({ Component, pageProps }: AppProps) {
     return () => sub.data.subscription.unsubscribe();
   }, [router, isPublic]);
 
-  // compute section title + accent + subtitle from current route
-  const { sectionTitle, accent, subtitle } = useMemo(() => {
+  // compute section title + accent from current route
+  const { sectionTitle, accent } = useMemo(() => {
     const key =
       Object.keys(TITLES).find((k) => pathname === k || pathname.startsWith(`${k}/`)) || "/builder";
     return {
       sectionTitle: TITLES[key],
       accent: ACCENTS[key] || "var(--brand)",
-      subtitle: SUBTITLES[key] || "Overview and quick actions",
     };
   }, [pathname]);
 
-  // expose rail height as a CSS var (so layouts can offset content)
+  // expose rail height as a CSS var
   useEffect(() => {
     if (typeof document !== "undefined") {
       document.documentElement.style.setProperty("--rail-h", `${RAIL_H}px`);
@@ -139,16 +127,13 @@ export default function App({ Component, pageProps }: AppProps) {
       ) : !authed ? null : (
         <div style={{ minHeight: "100vh", background: "var(--bg)", color: "var(--text)" }}>
           {/* Layout grid: sidebar + content */}
-          <div
-            className="min-h-screen grid"
-            style={{ gridTemplateColumns: "var(--sidebar-w,260px) 1fr" }}
-          >
+          <div className="min-h-screen grid" style={{ gridTemplateColumns: "var(--sidebar-w,260px) 1fr" }}>
             <aside className="sidebar">
               <Sidebar />
             </aside>
 
             <div className="min-w-0 relative">
-              {/* ===== TOP RAIL (fixed) ===== */}
+              {/* ===== TOP RAIL (fixed, title only) ===== */}
               <div
                 className="z-40 font-movatif"
                 style={{
@@ -157,22 +142,21 @@ export default function App({ Component, pageProps }: AppProps) {
                   left: "var(--sidebar-w, 260px)",
                   width: "calc(100% - var(--sidebar-w,260px))",
                   height: RAIL_H,
-                  background: "var(--card)",                // match card surface
+                  background: "var(--card)",       // match card surface
                   borderBottom: "1px solid var(--border)",
-                  boxShadow: "var(--shadow-card)",          // same depth as cards
+                  boxShadow: "var(--shadow-card)", // same depth as cards
                 }}
               >
-                {/* subtle accent glow like other sections */}
+                {/* subtle accent glow */}
                 <div
                   aria-hidden
                   className="pointer-events-none absolute -top-[36%] -left-[22%] w-[60%] h-[120%] rounded-full"
                   style={{
-                    background:
-                      `radial-gradient(circle, color-mix(in oklab, ${accent} 14%, transparent) 0%, transparent 70%)`,
+                    background: `radial-gradient(circle, color-mix(in oklab, ${accent} 14%, transparent) 0%, transparent 70%)`,
                     filter: "blur(40px)",
                   }}
                 />
-                {/* header content: stacked (taller), thinner fonts, no extra width */}
+                {/* Title only, thinner font, centered vertically with extra height */}
                 <div className="relative h-full flex items-center px-6">
                   <div className="min-w-0">
                     <div
@@ -181,13 +165,6 @@ export default function App({ Component, pageProps }: AppProps) {
                       title={sectionTitle}
                     >
                       {sectionTitle}
-                    </div>
-                    <div
-                      className="mt-1 text-sm leading-6 whitespace-nowrap overflow-hidden text-ellipsis"
-                      style={{ color: "var(--text-muted)", maxWidth: "min(860px, 100%)" }}
-                      title={subtitle}
-                    >
-                      {subtitle}
                     </div>
                   </div>
                 </div>
