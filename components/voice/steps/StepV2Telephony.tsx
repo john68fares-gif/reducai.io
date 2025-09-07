@@ -16,9 +16,10 @@ import {
 import { scopedStorage } from '@/utils/scoped-storage';
 
 /* ---------------------------------------------------------------------------
-   THEME VARS (same idea as StepV1)
+   THEME VARS (same idea as StepV1 / Step2 model)
 --------------------------------------------------------------------------- */
 const SCOPE_CLASS = 'voice-step2-scope';
+const PORTAL_CLASS = 'voice-step2-portal';
 
 /* Brand button (same green you use elsewhere) */
 const BTN_GREEN = '#59d9b3';
@@ -129,7 +130,6 @@ export default function StepV2Telephony({ onBack, onNext }: Props) {
 
   function persistAndNext() {
     if (!E164.test(fromE164)) {
-      // soft guard
       alert('Choose a valid E.164 number, e.g. +15551234567');
       return;
     }
@@ -201,7 +201,7 @@ export default function StepV2Telephony({ onBack, onNext }: Props) {
                 try {
                   const ss = await scopedStorage();
                   await ss.ensureOwnerGuard();
-                  await ss.setJSON(LS_SELECTED, val); // keep global selection in sync for the account
+                  await ss.setJSON(LS_SELECTED, val);
                 } catch {}
               }}
               className="w-full rounded-2xl px-4 py-3.5 text-[15px] outline-none"
@@ -303,7 +303,7 @@ export default function StepV2Telephony({ onBack, onNext }: Props) {
           </button>
         </div>
 
-        {/* Scoped theme vars for Step 2 */}
+        {/* Scoped theme vars for Step 2 + portal tokens */}
         <style jsx global>{`
           /* LIGHT (default) */
           .${SCOPE_CLASS}{
@@ -329,12 +329,22 @@ export default function StepV2Telephony({ onBack, onNext }: Props) {
             --vs-shadow: 0 36px 90px rgba(0,0,0,.60), 0 14px 34px rgba(0,0,0,.45), 0 0 0 1px rgba(0,255,194,.10);
             --vs-ring: rgba(0,255,194,.12);
 
-            --vs-input-bg: rgba(255,255,255,.02);
+            --vs-input-bg: #101314; /* solid dark */
             --vs-input-border: rgba(255,255,255,.14);
             --vs-input-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 12px 30px rgba(0,0,0,.38);
 
             --vs-chip-bg: rgba(0,255,194,.10);
             --vs-chip-border: rgba(0,255,194,.28);
+          }
+
+          /* Portal (menu) surface — explicit class so dark mode is reliable */
+          .${PORTAL_CLASS}{
+            --vs-menu-bg: #ffffff;
+            --vs-menu-border: rgba(0,0,0,.10);
+          }
+          [data-theme="dark"] .${PORTAL_CLASS}{
+            --vs-menu-bg: #101314;
+            --vs-menu-border: rgba(255,255,255,.16);
           }
         `}</style>
       </div>
@@ -418,26 +428,18 @@ function NumberSelect({
         ? createPortal(
             <div
               ref={portalRef}
-              className="fixed z-[9999] p-3"
+              className={`${PORTAL_CLASS} fixed z-[9999] p-3`}
               style={{
                 top: rect.openUp ? rect.top - 8 : rect.top + 8,
                 left: rect.left,
                 width: rect.width,
                 transform: rect.openUp ? 'translateY(-100%)' : 'none',
-                background: 'var(--vs-menu-bg, #ffffff)',
-                border: '1px solid var(--vs-menu-border, rgba(0,0,0,.10))',
+                background: 'var(--vs-menu-bg)',
+                border: '1px solid var(--vs-menu-border)',
                 borderRadius: 20,
                 boxShadow: '0 28px 70px rgba(0,0,0,.12), 0 10px 26px rgba(0,0,0,.08), 0 0 0 1px rgba(0,0,0,.02)',
               }}
             >
-              {/* make the portal obey dark mode */}
-              <style jsx global>{`
-                [data-theme="dark"] .${SCOPE_CLASS} ~ .fixed {
-                  --vs-menu-bg: #101314;
-                  --vs-menu-border: rgba(255,255,255,.16);
-                }
-              `}</style>
-
               {/* search */}
               <div
                 className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[12px]"
