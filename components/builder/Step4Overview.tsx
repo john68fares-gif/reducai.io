@@ -96,6 +96,9 @@ function buildFinalPrompt() {
     .trim();
 }
 
+/* ────────────── NEW: cloud builds key (keeps all your logic intact) ────────────── */
+const BUILDS_KEY = 'chatbots.v1';
+
 /* ───────────────────────────── Component ───────────────────────────── */
 
 export default function Step4Overview({ onBack, onFinish }: Props) {
@@ -194,6 +197,7 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
         throw new Error(data?.error || 'Failed to create assistant');
       }
 
+      // build object (unchanged)
       const bots = getLS<any[]>('chatbots', []);
       const build = {
         id: data.assistant.id,
@@ -208,8 +212,22 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
         updatedAt: new Date().toISOString(),
       };
       bots.unshift(build);
+
+      // mirror to localStorage (same as before)
       try { localStorage.setItem('chatbots', JSON.stringify(bots)); } catch {}
       try { localStorage.setItem('builder:cleanup', '1'); } catch {}
+
+      /* ────────────── NEW: also persist to scopedStorage for cross-device sync ────────────── */
+      try {
+        const ss = await scopedStorage();
+        await ss.ensureOwnerGuard();
+        const cloud = (await ss.getJSON<any[]>(BUILDS_KEY, [])) || [];
+        const nextCloud = [build, ...cloud].slice(0, 200); // optional cap
+        await ss.setJSON(BUILDS_KEY, nextCloud);
+      } catch (e) {
+        console.warn('Cloud save failed (chatbots.v1). Falling back to local only.', e);
+      }
+      /* ─────────────────────────────────────────────────────────────────────────── */
 
       setLoading(false);
       setDone(true);
@@ -389,7 +407,7 @@ function Req({ ok, label }: { ok: boolean; label: string }) {
       <span className="inline-flex items-center justify-center w-4 h-4 rounded-[6px]"
             style={{
               background: ok ? 'color-mix(in oklab, var(--brand) 15%, transparent)' : 'rgba(255,120,120,0.12)',
-              border: `1px solid ${ok ? 'color-mix(in oklab, var(--brand) 40%, transparent)' : 'rgba(255,120,120,0.4)'}`,
+              border: `1px solid ${ok ? 'color-mix(in oklab, var(--brand) 40%, transparent)' : 'rgba(255,120,120,0.4)'}`
             }}>
         {ok ? <Check className="w-3 h-3" style={{ color: 'var(--brand)' }} /> : <AlertCircle className="w-3 h-3" style={{ color: 'salmon' }} />}
       </span>
