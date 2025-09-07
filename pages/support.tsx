@@ -1,14 +1,19 @@
-// pages/support.tsx — ONLY chat box visuals updated to match the screenshot
+// pages/support.tsx — Chat box matches the reference (bigger, darker, neon border, green buttons)
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
 import ContentWrapper from '@/components/layout/ContentWrapper';
-import { Send, MessageSquareText } from 'lucide-react';
+import { Send, MessageSquareText, Copy, Share2, RotateCcw } from 'lucide-react';
 
 type Msg = { id: string; role: 'user' | 'assistant'; text: string };
 
+// keep your sanitization behavior
 const sanitize = (text: string) =>
   text.replace(/\*\*/g, '').replace(/```[\s\S]*?```/g, '[redacted]').replace(/`([^`]+)`/g, '$1');
+
+// same green spec used in API Keys
+const BTN_GREEN = '#10b981';
+const BTN_GREEN_HOVER = '#0ea473';
 
 export default function SupportPage() {
   const [messages, setMessages] = useState<Msg[]>([
@@ -22,6 +27,7 @@ export default function SupportPage() {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages, loading]);
 
+  // --- logic unchanged ---
   const send = async () => {
     const value = input.trim();
     if (!value || loading) return;
@@ -42,7 +48,6 @@ export default function SupportPage() {
         data?.ok && typeof data?.message === 'string'
           ? data.message
           : 'Sorry, I can’t comply with that request.';
-
       setMessages((prev) => [
         ...prev,
         { id: crypto.randomUUID(), role: 'assistant', text: sanitize(botText) },
@@ -61,131 +66,207 @@ export default function SupportPage() {
     if (e.key === 'Enter') send();
   };
 
+  // --- top-right small buttons (UI-only) ---
+  async function copyTranscript() {
+    const txt = messages.map((m) => `${m.role === 'user' ? 'You' : 'Riley'}: ${m.text}`).join('\n');
+    try {
+      await navigator.clipboard.writeText(txt);
+      flashToast('Copied conversation');
+    } catch {
+      flashToast('Copy failed');
+    }
+  }
+  function clearChat() {
+    setMessages([{ id: crypto.randomUUID(), role: 'assistant', text: 'Hi, please provide a detailed description of your issue' }]);
+  }
+  async function shareTranscript() {
+    const txt = messages.map((m) => `${m.role === 'user' ? 'You' : 'Riley'}: ${m.text}`).join('\n');
+    if ((navigator as any).share) {
+      try { await (navigator as any).share({ title: 'Riley Support', text: txt }); }
+      catch { /* ignore */ }
+    } else {
+      try { await navigator.clipboard.writeText(txt); flashToast('Copied conversation'); }
+      catch { flashToast('Share not available'); }
+    }
+  }
+
+  // tiny toast
+  const [toast, setToast] = useState<string | null>(null);
+  function flashToast(t: string) {
+    setToast(t);
+    setTimeout(() => setToast(null), 1600);
+  }
+
   return (
     <ContentWrapper>
-      {/* Centered “Demo” chat panel like the screenshot */}
       <div className="w-full flex justify-center">
-        <div className="w-full max-w-[980px] px-4">
-          {/* Header row (Demo) */}
-          <div className="flex items-center justify-start py-4">
+        <div className="w-full max-w-[1140px] px-4">
+          {/* Title + actions */}
+          <div className="flex items-center justify-between mt-4 mb-4">
             <h2 className="text-2xl font-semibold" style={{ color: 'var(--text)' }}>Demo</h2>
+            <div className="flex items-center gap-2">
+              <GreenBtn onClick={copyTranscript} icon={<Copy className="w-4 h-4" />}>Copy</GreenBtn>
+              <GreenBtn onClick={clearChat} icon={<RotateCcw className="w-4 h-4" />}>Clear</GreenBtn>
+              <GreenBtn onClick={shareTranscript} icon={<Share2 className="w-4 h-4" />}>Share</GreenBtn>
+            </div>
           </div>
 
-          {/* Chat card */}
+          {/* CHAT BOX — bigger, darker, neon border, deep shadow */}
           <div
-            className="support-chat mx-auto rounded-2xl overflow-hidden"
+            className="rounded-[20px] mx-auto animate-[fadeIn_180ms_ease]"
             style={{
-              background: 'linear-gradient(180deg, rgba(10,13,14,.94) 0%, rgba(9,12,13,.94) 100%)',
-              border: '1px solid rgba(0,255,194,.10)',
+              maxWidth: 1040,
+              background:
+                'radial-gradient(120% 180% at 50% -40%, rgba(0,255,194,.05) 0%, rgba(11,14,15,.96) 42%), linear-gradient(180deg, #0c1012 0%, #0a0d0f 100%)',
+              border: '1px solid rgba(0,255,194,.18)',
               boxShadow:
-                '0 18px 60px rgba(0,0,0,.45), 0 2px 10px rgba(0,0,0,.35), 0 0 0 1px rgba(0,255,194,.04)',
-              maxWidth: 860,
+                '0 28px 80px rgba(0,0,0,.55), 0 10px 26px rgba(0,0,0,.45), 0 0 0 1px rgba(0,255,194,.06)',
             }}
           >
-            {/* Inner container (same padding/spacing as reference) */}
-            <div className="p-4 sm:p-6">
-              {/* Messages area */}
-              <div
-                ref={listRef}
-                className="min-h-[420px] max-h-[60vh] overflow-y-auto"
-              >
-                {/* First assistant bubble shows a tiny icon + compact bubble like the screenshot */}
-                {messages.map((m, idx) => {
-                  const isUser = m.role === 'user';
-                  return (
-                    <div
-                      key={m.id}
-                      className={`mb-3 ${isUser ? 'flex justify-end' : 'flex items-start gap-2'}`}
-                    >
-                      {!isUser && (
+            {/* inner border ring */}
+            <div
+              className="rounded-[20px]"
+              style={{
+                boxShadow: 'inset 0 0 0 1px rgba(0,255,194,.08)',
+              }}
+            >
+              <div className="p-4 sm:p-6">
+                {/* messages area (bigger height) */}
+                <div
+                  ref={listRef}
+                  className="min-h-[520px] max-h-[62vh] overflow-y-auto custom-scroll"
+                >
+                  {messages.map((m) => {
+                    const isUser = m.role === 'user';
+                    return (
+                      <div
+                        key={m.id}
+                        className={`mb-3 ${isUser ? 'flex justify-end' : 'flex items-start gap-2'}`}
+                      >
+                        {!isUser && (
+                          <div
+                            className="mt-0.5 w-7 h-7 rounded-full grid place-items-center shrink-0"
+                            style={{
+                              background: 'rgba(0,255,194,0.08)',
+                              border: '1px solid rgba(0,255,194,0.18)',
+                            }}
+                          >
+                            <MessageSquareText className="w-3.5 h-3.5" style={{ color: 'var(--brand)' }} />
+                          </div>
+                        )}
                         <div
-                          className="mt-0.5 w-7 h-7 rounded-full grid place-items-center shrink-0"
+                          className="px-3 py-2 rounded-lg max-w-[80%] text-sm whitespace-pre-wrap break-words animate-[popIn_140ms_ease]"
                           style={{
-                            background: 'rgba(0,255,194,0.08)',
-                            border: '1px solid rgba(0,255,194,0.14)',
+                            background: isUser ? 'rgba(0,255,194,0.10)' : 'rgba(255,255,255,0.035)',
+                            border: '1px solid rgba(255,255,255,0.08)',
+                            color: 'var(--text)',
+                            boxShadow: 'var(--shadow-soft)',
                           }}
                         >
-                          <MessageSquareText className="w-3.5 h-3.5" style={{ color: 'var(--brand)' }} />
+                          {m.text}
                         </div>
-                      )}
+                      </div>
+                    );
+                  })}
+
+                  {loading && (
+                    <div className="flex items-start gap-2">
                       <div
-                        className="px-3 py-2 rounded-lg max-w-[80%] text-sm whitespace-pre-wrap break-words"
+                        className="mt-0.5 w-7 h-7 rounded-full grid place-items-center shrink-0"
                         style={{
-                          background: isUser ? 'rgba(0,255,194,0.10)' : 'rgba(255,255,255,0.04)',
+                          background: 'rgba(0,255,194,0.08)',
+                          border: '1px solid rgba(0,255,194,0.18)',
+                        }}
+                      >
+                        <MessageSquareText className="w-3.5 h-3.5" style={{ color: 'var(--brand)' }} />
+                      </div>
+                      <div
+                        className="px-3 py-2 rounded-lg max-w-[80%] text-sm"
+                        style={{
+                          background: 'rgba(255,255,255,0.035)',
                           border: '1px solid rgba(255,255,255,0.08)',
                           color: 'var(--text)',
                         }}
                       >
-                        {m.text}
+                        <TypingDots />
                       </div>
                     </div>
-                  );
-                })}
+                  )}
+                </div>
 
-                {loading && (
-                  <div className="flex items-start gap-2">
-                    <div
-                      className="mt-0.5 w-7 h-7 rounded-full grid place-items-center shrink-0"
-                      style={{
-                        background: 'rgba(0,255,194,0.08)',
-                        border: '1px solid rgba(0,255,194,0.14)',
-                      }}
-                    >
-                      <MessageSquareText className="w-3.5 h-3.5" style={{ color: 'var(--brand)' }} />
-                    </div>
-                    <div
-                      className="px-3 py-2 rounded-lg max-w-[80%] text-sm"
-                      style={{
-                        background: 'rgba(255,255,255,0.04)',
-                        border: '1px solid rgba(255,255,255,0.08)',
-                        color: 'var(--text)',
-                      }}
-                    >
-                      <TypingDots />
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Input bar pinned to the card bottom, pill style */}
-              <div className="pt-4">
-                <div
-                  className="flex items-center gap-2 rounded-full pl-4 pr-2 h-[46px] border"
-                  style={{
-                    background: 'rgba(255,255,255,0.02)',
-                    borderColor: 'rgba(255,255,255,0.08)',
-                    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
-                  }}
-                >
-                  <input
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={onKey}
-                    placeholder="Type your message..."
-                    className="flex-1 bg-transparent outline-none text-sm"
-                    style={{ color: 'var(--text)' }}
-                  />
-                  <button
-                    onClick={send}
-                    disabled={loading || !input.trim()}
-                    className="w-9 h-9 rounded-full grid place-items-center disabled:opacity-50"
+                {/* Input bar — pill, same green send button */}
+                <div className="pt-5">
+                  <div
+                    className="flex items-center gap-2 rounded-full pl-4 pr-2 h-[50px] border transition-shadow"
                     style={{
-                      background: 'rgba(0,255,194,0.14)',
-                      border: '1px solid rgba(0,255,194,0.22)',
+                      background: 'rgba(255,255,255,0.02)',
+                      borderColor: 'rgba(0,255,194,0.18)',
+                      boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04), 0 8px 24px rgba(0,0,0,0.28)',
                     }}
-                    aria-label="Send"
                   >
-                    <Send className="w-4 h-4" style={{ color: 'var(--brand)' }} />
-                  </button>
+                    <input
+                      value={input}
+                      onChange={(e) => setInput(e.target.value)}
+                      onKeyDown={onKey}
+                      placeholder="Type your message..."
+                      className="flex-1 bg-transparent outline-none text-sm"
+                      style={{ color: 'var(--text)' }}
+                      onFocus={(e) => ((e.currentTarget.parentElement as HTMLDivElement).style.borderColor = 'rgba(0,255,194,0.36)')}
+                      onBlur={(e) => ((e.currentTarget.parentElement as HTMLDivElement).style.borderColor = 'rgba(0,255,194,0.18)')}
+                    />
+                    <button
+                      onClick={send}
+                      disabled={loading || !input.trim()}
+                      className="w-10 h-10 rounded-full grid place-items-center disabled:opacity-50 transition will-change-transform"
+                      style={{ background: BTN_GREEN, color: '#fff' }}
+                      onMouseEnter={(e) => {
+                        if (loading || !input.trim()) return;
+                        (e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER;
+                      }}
+                      onMouseLeave={(e) => {
+                        if (loading || !input.trim()) return;
+                        (e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN;
+                      }}
+                      aria-label="Send"
+                    >
+                      <Send className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <div className="text-[11px] text-center opacity-70 mt-3" style={{ color: 'var(--text-muted)' }}>
+                    Riley will never reveal or summarize code, file contents, or paths. If asked, Riley will refuse.
+                  </div>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* (Optional) small helper text below the card */}
-          <div className="text-[11px] text-center opacity-70 mt-3" style={{ color: 'var(--text-muted)' }}>
-            Riley will never reveal or summarize code, file contents, or paths. If asked, Riley will refuse.
-          </div>
+          {/* toast */}
+          {toast && (
+            <div className="fixed inset-0 z-[9997] pointer-events-none flex items-end justify-center pb-8">
+              <div
+                className="pointer-events-auto px-4 py-2 rounded-full text-sm animate-[popIn_140ms_ease]"
+                style={{
+                  background: 'rgba(0,0,0,.65)',
+                  color: '#fff',
+                  border: '1px solid rgba(255,255,255,.14)',
+                  boxShadow: '0 16px 36px rgba(0,0,0,.45)',
+                }}
+              >
+                {toast}
+              </div>
+            </div>
+          )}
+
+          {/* animations */}
+          <style jsx global>{`
+            @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+            @keyframes popIn { 0% { opacity: 0; transform: scale(.98); } 100% { opacity: 1; transform: scale(1); } }
+            /* subtle scrollbar */
+            .custom-scroll::-webkit-scrollbar { height: 8px; width: 8px; }
+            .custom-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,.10); border-radius: 999px; }
+            .custom-scroll::-webkit-scrollbar-track { background: transparent; }
+          `}</style>
         </div>
       </div>
     </ContentWrapper>
@@ -199,5 +280,21 @@ function TypingDots() {
       <span className="w-2 h-2 rounded-full animate-bounce" style={{ background: 'var(--text-muted)', animationDelay: '120ms' }} />
       <span className="w-2 h-2 rounded-full animate-bounce" style={{ background: 'var(--text-muted)', animationDelay: '240ms' }} />
     </span>
+  );
+}
+
+/* Small filled green button used for Copy / Clear / Share */
+function GreenBtn({ onClick, icon, children }: { onClick: () => void; icon?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      className="inline-flex items-center gap-2 px-4 h-[36px] rounded-[14px] font-semibold text-sm transition will-change-transform"
+      style={{ background: BTN_GREEN, color: '#fff' }}
+      onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER)}
+      onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN)}
+    >
+      {icon}
+      {children}
+    </button>
   );
 }
