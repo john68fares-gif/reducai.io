@@ -1,4 +1,3 @@
-// components/voice/VoiceAgentSection.tsx
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
@@ -10,12 +9,14 @@ import {
 } from 'lucide-react';
 
 /* ============================================================================
-   THEME — single accent & shared icon color (matches your main sidebar green)
+   THEME — keep one accent color (matches main sidebar green)
 ============================================================================ */
 const SCOPE = 'va-scope';
-const ACCENT = '#10b981';       // same green as your primary sidebar icons
+const ACCENT = '#10b981';          // main green
 const ACCENT_HOVER = '#0fb57a';
-const RAIL_W = 312;             // assistants rail visual width
+const RAIL_W = 312;                 // assistants rail width
+const HDR = 'var(--header-h, 64px)';// header height from shell
+const SBW = 'var(--sidebar-w, 260px)'; // sidebar width from shell
 
 const OpenAIIcon = () => (
   <svg width="16" height="16" viewBox="0 0 256 256" aria-hidden>
@@ -24,7 +25,7 @@ const OpenAIIcon = () => (
 );
 
 /* ============================================================================
-   LOCAL STORAGE + TYPES
+   TYPES + LOCAL STORAGE
 ============================================================================ */
 type Provider = 'openai';
 type ModelId = 'gpt-4o' | 'gpt-4o-mini' | 'gpt-4.1' | 'gpt-3.5-turbo';
@@ -48,46 +49,14 @@ type Assistant = {
     tools: { enableEndCall: boolean; dialKeypad: boolean };
   };
 };
+
 const LS_LIST = 'voice:assistants.v1';
 const ak = (id: string) => `voice:assistant:${id}`;
-
 const readLS = <T,>(k: string): T | null => { try { const r = localStorage.getItem(k); return r ? JSON.parse(r) as T : null; } catch { return null; } };
 const writeLS = <T,>(k: string, v: T) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 
 /* ============================================================================
-   PROMPT BASE
-============================================================================ */
-const BASE_PROMPT = `[Identity]
-You are an intelligent and responsive assistant designed to help users with a wide range of inquiries and tasks.
-
-[Style]
-- Maintain a professional and approachable demeanor.
-- Use clear and concise language, avoiding overly technical jargon.
-
-[Response Guidelines]
-- Keep responses short and focused on the user's immediate query.
-- Verify user-provided information before proceeding with further steps.
-
-[Task & Goals]
-1. Greet the user warmly and inquire about how you can assist them today.
-2. Listen carefully to the user's request or question.
-3. Provide relevant and accurate information based on the user's needs.
-<wait for user response>
-4. If a query requires further action, guide the user through step-by-step instructions.
-
-[Error Handling / Fallback]
-- If a user's request is unclear or you encounter difficulty understanding, ask for clarification politely.
-- If a task cannot be completed, inform the user empathetically and suggest alternative solutions or resources.`.trim();
-
-function buildPrompt(refinement: string) {
-  const add = refinement.trim()
-    ? `\n\n[Refinements]\n- ${refinement.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim()}`
-    : '';
-  return BASE_PROMPT + add;
-}
-
-/* ============================================================================
-   REUSABLE SELECT (Portal)
+   SELECT (portal)
 ============================================================================ */
 type Item = { value: string; label: string; icon?: React.ReactNode };
 
@@ -130,7 +99,7 @@ function Select({ value, items, onChange, placeholder, leftIcon }: {
         ref={btn}
         type="button"
         onClick={() => setOpen(v => !v)}
-        className="w-full flex items-center gap-3 px-3 py-3 rounded-2xl text-[15px]"
+        className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-[15px]"
         style={{ background:'var(--va-input-bg)', color:'var(--text)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)' }}
       >
         {leftIcon ? <span className="shrink-0">{leftIcon}</span> : null}
@@ -144,14 +113,14 @@ function Select({ value, items, onChange, placeholder, leftIcon }: {
           <motion.div
             ref={portal}
             initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 4 }}
-            className="fixed z-[9999] p-3 rounded-2xl"
+            className="fixed z-[9999] p-3 rounded-xl"
             style={{
               top: rect.up ? rect.top - 8 : rect.top + 8,
               left: rect.left, width: rect.width, transform: rect.up ? 'translateY(-100%)' : 'none',
               background:'var(--va-menu-bg)', border:'1px solid var(--va-menu-border)', boxShadow:'var(--va-shadow-lg)'
             }}
           >
-            <div className="flex items-center gap-2 mb-3 px-2 py-2 rounded-xl"
+            <div className="flex items-center gap-2 mb-3 px-2 py-2 rounded-lg"
               style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)' }}>
               <Search className="w-4 h-4 icon" />
               <input value={q} onChange={(e)=> setQ(e.target.value)} placeholder="Filter…" className="w-full bg-transparent outline-none text-sm" style={{ color:'var(--text)' }}/>
@@ -161,7 +130,7 @@ function Select({ value, items, onChange, placeholder, leftIcon }: {
                 <button
                   key={it.value}
                   onClick={() => { onChange(it.value); setOpen(false); }}
-                  className="w-full flex items-center gap-3 px-3 py-2 rounded-[12px] text-left"
+                  className="w-full flex items-center gap-3 px-3 py-2 rounded-[10px] text-left"
                   style={{ color:'var(--text)' }}
                   onMouseEnter={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='rgba(16,185,129,.10)'; (e.currentTarget as HTMLButtonElement).style.border='1px solid rgba(16,185,129,.35)'; }}
                   onMouseLeave={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='transparent'; (e.currentTarget as HTMLButtonElement).style.border='1px solid transparent'; }}
@@ -181,11 +150,20 @@ function Select({ value, items, onChange, placeholder, leftIcon }: {
 /* ============================================================================
    PAGE
 ============================================================================ */
+type ModelDefaults = {
+  provider: Provider;
+  model: ModelId;
+  firstMessageMode: 'assistant_first' | 'user_first';
+  firstMessage: string;
+  systemPrompt: string;
+};
+
 export default function VoiceAgentSection() {
   const [assistants, setAssistants] = useState<Assistant[]>([]);
   const [activeId, setActiveId] = useState('');
   const [query, setQuery] = useState('');
 
+  // First boot: seed with one basic assistant
   useEffect(() => {
     const list = readLS<Assistant[]>(LS_LIST) || [];
     if (!list.length) {
@@ -195,8 +173,8 @@ export default function VoiceAgentSection() {
         folder: 'Health',
         updatedAt: Date.now(),
         config: {
-          model: { provider:'openai', model:'gpt-4o', firstMessageMode:'assistant_first', firstMessage:'Hello.', systemPrompt: BASE_PROMPT },
-          voice: { provider:'openai', voiceId:'alloy', voiceLabel:'Alloy (OpenAI)' },
+          model: { provider:'openai', model:'gpt-4o', firstMessageMode:'assistant_first', firstMessage:'Hello.', systemPrompt: '' },
+          voice: { provider:'openai', voiceId:'', voiceLabel:'' },
           transcriber: { provider:'deepgram', model:'nova-2', language:'en', denoise:false, confidenceThreshold:0.4, numerals:false },
           tools: { enableEndCall:true, dialKeypad:true },
         }
@@ -216,36 +194,47 @@ export default function VoiceAgentSection() {
     const list = (readLS<Assistant[]>(LS_LIST) || []).map(x => x.id === next.id ? { ...x, name: next.name, folder: next.folder, updatedAt: Date.now() } : x);
     writeLS(LS_LIST, list); setAssistants(list);
   };
+
+  // NEW assistant: brand-new/blank (no cloning)
   const addAssistant = () => {
     const id = `agent_${Math.random().toString(36).slice(2, 8)}`;
-    const base = active || (readLS<Assistant[]>(LS_LIST) || [])[0];
-    const a: Assistant = base
-      ? { ...base, id, name: 'New Assistant', updatedAt: Date.now() }
-      : {
-          id, name:'New Assistant', updatedAt:Date.now(),
-          config: {
-            model: { provider:'openai', model:'gpt-4o', firstMessageMode:'assistant_first', firstMessage:'Hello.', systemPrompt: BASE_PROMPT },
-            voice: { provider:'openai', voiceId:'alloy', voiceLabel:'Alloy (OpenAI)' },
-            transcriber: { provider:'deepgram', model:'nova-2', language:'en', denoise:false, confidenceThreshold:0.4, numerals:false },
-            tools: { enableEndCall:true, dialKeypad:true }
-          }
-        };
-    writeLS(ak(id), a);
-    const list = [...assistants, a]; writeLS(LS_LIST, list);
+    const blank: Assistant = {
+      id,
+      name: 'New Assistant',
+      folder: 'Unfiled',
+      updatedAt: Date.now(),
+      config: {
+        model: {
+          provider: 'openai',
+          model: 'gpt-4o',
+          firstMessageMode: 'assistant_first',
+          firstMessage: '',
+          systemPrompt: '' // blank so user uses Generate/Edit
+        },
+        voice: { provider: 'openai', voiceId: '', voiceLabel: '' },
+        transcriber: { provider:'deepgram', model:'nova-2', language:'en', denoise:false, confidenceThreshold:0.4, numerals:false },
+        tools: { enableEndCall: true, dialKeypad: true }
+      }
+    };
+    writeLS(ak(id), blank);
+    const list = [...assistants, blank]; writeLS(LS_LIST, list);
     setAssistants(list); setActiveId(id);
   };
+
   const removeAssistant = (id: string) => {
     const list = assistants.filter(a => a.id !== id);
     writeLS(LS_LIST, list); setAssistants(list);
     if (activeId === id && list.length) setActiveId(list[0].id);
   };
 
-  // Prompt editor pop
+  // Prompt editor
   const [editOpen, setEditOpen] = useState(false);
   const [editText, setEditText] = useState('');
   const submitEdit = () => {
     if (!active) return;
-    updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, systemPrompt: buildPrompt(editText) } } }));
+    const trimmed = editText.trim();
+    const nextPrompt = trimmed ? trimmed : '';
+    updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, systemPrompt: nextPrompt } } }));
     setEditOpen(false); setEditText('');
   };
 
@@ -258,36 +247,36 @@ export default function VoiceAgentSection() {
 
   return (
     <div className={`${SCOPE}`} style={{ background:'var(--bg)', color:'var(--text)' }}>
-      {/* Push whole studio to the right of the main app sidebar */}
-      <div className="flex w-full" style={{ marginLeft: 'var(--sidebar-w)' }}>
-        {/* =================== ASSISTANT SIDEBAR (fixed, touching sidebar & header) =================== */}
+      {/* Keep whole studio right of main app sidebar */}
+      <div className="flex w-full" style={{ marginLeft: SBW }}>
+        {/* =================== ASSISTANTS RAIL (fixed, below header, touching sidebar) =================== */}
         <aside
           className="hidden lg:flex flex-col"
           style={{
             position:'fixed',
-            top: 0,
-            left: 'var(--sidebar-w)',           // hugs the main sidebar
+            top: `calc(${HDR})`,
+            left: SBW,
             width: `${RAIL_W}px`,
-            height: '100vh',
+            height: `calc(100vh - ${HDR})`,
             borderRight:'1px solid var(--va-border)',
             background:'var(--va-sidebar)',
             boxShadow:'var(--va-shadow-side)',
-            zIndex: 41,
-            marginLeft: '-1px'                  // optional 1px overlap if your shell has a border
+            zIndex: 41
           }}
         >
-          {/* header */}
+          {/* rail header */}
           <div className="px-3 py-3 flex items-center justify-between" style={{ borderBottom:'1px solid var(--va-border)' }}>
             <div className="flex items-center gap-2 text-sm font-semibold">
               <PanelLeft className="w-4 h-4 icon" /> Assistants
             </div>
-            <button onClick={addAssistant} className="btn-primary btn-sm">
-              <Plus className="w-3.5 h-3.5 icon--invert" /> Create
+            <button onClick={addAssistant} className="btn-primary btn-xs">
+              <Plus className="w-3.5 h-3.5 text-white" /> Create
             </button>
           </div>
 
-          <div className="p-3">
-            <div className="flex items-center gap-2 rounded-xl px-2.5 py-2"
+          {/* rail content */}
+          <div className="p-3 overflow-hidden flex-1 flex flex-col">
+            <div className="flex items-center gap-2 rounded-lg px-2.5 py-2"
               style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)' }}>
               <Search className="w-4 h-4 icon" />
               <input value={query} onChange={(e)=> setQuery(e.target.value)} placeholder="Search assistants" className="w-full bg-transparent outline-none text-sm" style={{ color:'var(--text)' }}/>
@@ -302,12 +291,12 @@ export default function VoiceAgentSection() {
               </button>
             </div>
 
-            <div className="mt-4 space-y-2 overflow-y-auto" style={{ maxHeight:'calc(100vh - 220px)', scrollbarWidth:'thin' }}>
+            <div className="mt-4 space-y-2 overflow-y-auto" style={{ scrollbarWidth:'thin' }}>
               {visible.map(a => (
                 <button
                   key={a.id}
                   onClick={()=> setActiveId(a.id)}
-                  className="w-full text-left rounded-2xl p-3 flex items-center justify-between"
+                  className="w-full text-left rounded-xl p-3 flex items-center justify-between"
                   style={{
                     background: a.id===activeId ? 'color-mix(in oklab, var(--accent) 10%, transparent)' : 'var(--va-card)',
                     border: `1px solid ${a.id===activeId ? 'color-mix(in oklab, var(--accent) 35%, var(--va-border))' : 'var(--va-border)'}`,
@@ -329,25 +318,24 @@ export default function VoiceAgentSection() {
 
         {/* =================================== EDITOR =================================== */}
         <main className="flex-1" style={{ paddingLeft: `${RAIL_W}px` }}>
+          {/* keep distance from header so we don't sit under it */}
+          <div style={{ height: `calc(${HDR})` }} aria-hidden />
           <div className="px-6 py-4 flex items-center justify-between" style={{ borderBottom:'1px solid var(--va-border)', background:'var(--va-topbar)' }}>
             <div className="flex items-center gap-3">
               <Bot className="w-5 h-5 icon" />
               <input
                 value={active.name}
                 onChange={(e)=> updateActive(a => ({ ...a, name: e.target.value }))}
-                className="text-[15px] font-semibold bg-transparent outline-none rounded-lg px-2 py-1"
+                className="text-[15px] font-semibold bg-transparent outline-none rounded-md px-2 py-1"
                 style={{ border:'1px solid var(--va-border)', background:'var(--va-chip)', color:'var(--text)' }}
               />
             </div>
             <div className="flex items-center gap-2">
               <button onClick={()=> navigator.clipboard.writeText(active.config.model.systemPrompt).catch(()=>{})}
-                className="inline-flex items-center gap-1 rounded-lg px-3 py-2 text-sm"
-                style={{ border:'1px solid var(--va-border)', background:'var(--va-card)', boxShadow:'var(--va-shadow-sm)' }}>
+                className="btn-ghost">
                 <Copy className="w-4 h-4 icon" /> Copy Prompt
               </button>
-              <button onClick={()=> removeAssistant(active.id)}
-                className="inline-flex items-center gap-1 rounded-lg px-3 py-2 text-sm"
-                style={{ border:'1px solid var(--va-border)', background:'var(--va-card)', boxShadow:'var(--va-shadow-sm)' }}>
+              <button onClick={()=> removeAssistant(active.id)} className="btn-ghost">
                 <Trash2 className="w-4 h-4 icon" /> Delete
               </button>
             </div>
@@ -387,21 +375,20 @@ export default function VoiceAgentSection() {
                   <input
                     value={active.config.model.firstMessage}
                     onChange={(e)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, firstMessage: e.target.value } } }))}
-                    className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
+                    className="w-full rounded-lg px-3 py-3 text-[15px] outline-none"
                     style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)', color:'var(--text)' }}
                   />
                 </Field>
               </div>
 
-              {/* System Prompt — clean (label + one box) */}
+              {/* System Prompt — one clean box */}
               <div className="mt-6">
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="w-4 h-4 icon" /> System Prompt</div>
                   <div className="flex items-center gap-2">
                     <button
-                      onClick={()=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, systemPrompt: BASE_PROMPT } } }))}
-                      className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm"
-                      style={{ border:'1px solid var(--va-border)', background:'var(--va-card)' }}
+                      onClick={()=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, systemPrompt: '' } } }))}
+                      className="btn-ghost"
                     ><RefreshCw className="w-4 h-4 icon" /> Reset</button>
                     <button onClick={()=> setEditOpen(true)} className="btn-primary">
                       Generate / Edit
@@ -413,7 +400,7 @@ export default function VoiceAgentSection() {
                   rows={18}
                   value={active.config.model.systemPrompt}
                   onChange={(e)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, systemPrompt: e.target.value } } }))}
-                  className="w-full rounded-2xl px-3 py-3 text-[14px] leading-6 outline-none"
+                  className="w-full rounded-lg px-3 py-3 text-[14px] leading-6 outline-none"
                   style={{
                     background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)',
                     boxShadow:'var(--va-shadow), inset 0 1px 0 rgba(255,255,255,.03)', color:'var(--text)',
@@ -430,7 +417,8 @@ export default function VoiceAgentSection() {
                     value={active.config.voice.provider}
                     onChange={(v)=>{
                       const list = v==='elevenlabs' ? elevenVoices : openaiVoices;
-                      updateActive(a => ({ ...a, config:{ ...a.config, voice:{ provider: v as VoiceProvider, voiceId: list[0].value, voiceLabel: list[0].label } } }));
+                      const first = list[0] || { value:'', label:'' };
+                      updateActive(a => ({ ...a, config:{ ...a.config, voice:{ provider: v as VoiceProvider, voiceId: first.value, voiceLabel: first.label } } }));
                     }}
                     items={[
                       { value:'openai', label:'OpenAI', icon:<OpenAIIcon/> },
@@ -455,8 +443,7 @@ export default function VoiceAgentSection() {
               <div className="mt-3">
                 <button
                   onClick={()=> { window.dispatchEvent(new CustomEvent('voiceagent:import-11labs')); alert('Hook “voiceagent:import-11labs” to your ElevenLabs importer.'); }}
-                  className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm"
-                  style={{ border:'1px solid var(--va-border)', background:'var(--va-card)', boxShadow:'var(--va-shadow-sm)' }}
+                  className="btn-ghost"
                 ><UploadCloud className="w-4 h-4 icon" /> Import from ElevenLabs</button>
               </div>
             </Section>
@@ -541,7 +528,7 @@ export default function VoiceAgentSection() {
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             style={{ background:'rgba(0,0,0,.45)' }}>
             <motion.div initial={{ y:10, opacity:0, scale:.98 }} animate={{ y:0, opacity:1, scale:1 }} exit={{ y:8, opacity:0, scale:.985 }}
-              className="w-full max-w-xl rounded-2xl" style={{ background:'var(--va-card)', border:'1px solid var(--va-border)', boxShadow:'var(--va-shadow-lg)' }}>
+              className="w-full max-w-xl rounded-lg" style={{ background:'var(--va-card)', border:'1px solid var(--va-border)', boxShadow:'var(--va-shadow-lg)' }}>
               <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom:'1px solid var(--va-border)' }}>
                 <div className="flex items-center gap-2 text-sm font-semibold"><Edit3 className="w-4 h-4 icon" /> Edit Prompt</div>
               </div>
@@ -550,11 +537,11 @@ export default function VoiceAgentSection() {
                   value={editText}
                   onChange={(e)=> setEditText(e.target.value)}
                   placeholder="Describe how you'd like to edit the prompt"
-                  className="w-full rounded-xl px-3 py-2 text-sm outline-none"
+                  className="w-full rounded-md px-3 py-2 text-sm outline-none"
                   style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)', color:'var(--text)' }}
                 />
                 <div className="mt-3 flex items-center justify-end gap-2">
-                  <button onClick={()=> setEditOpen(false)} className="px-3 py-2 rounded-lg text-sm" style={{ border:'1px solid var(--va-border)', background:'var(--va-card)' }}>Cancel</button>
+                  <button onClick={()=> setEditOpen(false)} className="btn-ghost">Cancel</button>
                   <button onClick={submitEdit} className="btn-primary">Submit Edit</button>
                 </div>
               </div>
@@ -605,23 +592,31 @@ export default function VoiceAgentSection() {
           --va-shadow-side:8px 0 26px rgba(0,0,0,.08);
         }
 
-        /* One icon color everywhere — matches primary sidebar green */
+        /* Icon color */
         .${SCOPE} .icon{ color: var(--accent); }
-        .${SCOPE} .icon--invert{ color: #00110b; }
 
-        /* Primary button (matches API Keys style) */
+        /* Buttons */
         .${SCOPE} .btn-primary{
           display:inline-flex;align-items:center;gap:.5rem;
-          padding:.5rem .85rem;border-radius:12px;
-          background:var(--accent); color:#00110b;
+          padding:.55rem .9rem;border-radius:12px;
+          background:var(--accent); color:#fff;
           border:1px solid color-mix(in oklab, var(--accent) 38%, transparent);
           box-shadow: 0 10px 24px color-mix(in oklab, var(--accent) 30%, transparent),
-                      inset 0 1px 0 rgba(255,255,255,.25);
+                      inset 0 1px 0 rgba(255,255,255,.18);
           font-weight:600; font-size:14px;
           transition:background .15s ease, transform .15s ease, box-shadow .15s ease;
         }
         .${SCOPE} .btn-primary:hover{ background:${ACCENT_HOVER}; transform: translateY(-1px); }
-        .${SCOPE} .btn-sm{ padding:.40rem .7rem; font-size:12.5px; border-radius:10px; }
+        .${SCOPE} .btn-xs{ padding:.45rem .7rem; font-size:12.5px; border-radius:10px; }
+
+        .${SCOPE} .btn-ghost{
+          display:inline-flex;align-items:center;gap:.5rem;
+          padding:.5rem .85rem;border-radius:10px;
+          background:var(--va-card); color:var(--text);
+          border:1px solid var(--va-border);
+          box-shadow: var(--va-shadow-sm);
+          font-weight:600; font-size:14px;
+        }
 
         /* Thin green sliders */
         .${SCOPE} .va-range{ -webkit-appearance:none; height:4px; background:color-mix(in oklab, var(--accent) 24%, #0000); border-radius:999px; outline:none; }
@@ -647,16 +642,16 @@ function Section({ title, icon, children }:{ title: string; icon: React.ReactNod
   const [open, setOpen] = useState(true);
   return (
     <div
-      className="col-span-12 rounded-2xl relative"
+      className="col-span-12 rounded-[12px] relative"
       style={{
         background:'var(--va-card)',
         border:'1px solid var(--va-border)',
         boxShadow:'var(--va-shadow)',
       }}
     >
-      {/* subtle glow */}
+      {/* soft glow */}
       <div aria-hidden className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
-           style={{ background:'radial-gradient(circle, color-mix(in oklab, var(--accent) 16%, transparent) 0%, transparent 70%)', filter:'blur(38px)' }} />
+           style={{ background:'radial-gradient(circle, color-mix(in oklab, var(--accent) 14%, transparent) 0%, transparent 70%)', filter:'blur(36px)' }} />
       <button type="button" onClick={()=> setOpen(v=>!v)} className="w-full flex items-center justify-between px-5 py-4">
         <span className="flex items-center gap-2 text-sm font-semibold">{icon}{title}</span>
         {open ? <ChevronDown className="w-4 h-4 icon" /> : <ChevronRight className="w-4 h-4 icon" />}
