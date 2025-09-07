@@ -6,27 +6,25 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search, Plus, Folder, FolderOpen, Check, Trash2, Copy, Edit3, Sparkles,
   ChevronDown, ChevronRight, FileText, Mic2, BookOpen, SlidersHorizontal,
-  Settings, RefreshCw, ArrowUpRight, PanelLeft, Bot, UploadCloud
+  PanelLeft, Bot, UploadCloud, RefreshCw
 } from 'lucide-react';
 
-/* =================================== THEME =================================== */
-/* Fewer greys, bigger surfaces, stronger shadows, unified icon color */
+/* ============================================================================
+   THEME — single accent & shared icon color (matches your sidebar green)
+============================================================================ */
 const SCOPE = 'va-scope';
-
-const GREEN = '#59d9b3';
-const GREEN_HOVER = '#54cfa9';
+const ACCENT = '#14e4a3';      // <-- same green as your main sidebar icons
+const ACCENT_HOVER = '#11c892';
 
 const OpenAIIcon = () => (
-  // Official single-color “clover knot” mark
   <svg width="16" height="16" viewBox="0 0 256 256" aria-hidden>
-    <path
-      fill="currentColor"
-      d="M214.7 111.7c1.9-7.6 1.5-15.7-1.2-23.3-7.6-21.3-28.6-35.2-51.4-33.6-12.1-19.9-36.5-29-59-21.2-22.1 7.6-36.7 28.6-35.4 51.5-19.9 12.1-29 36.5-21.2 59 7.6 22.1 28.6 36.7 51.5 35.4 12.1 19.9 36.5 29 59 21.2 22.1-7.6 36.7-28.6 35.4-51.5 8.7-5.5 15.5-13.9 18.9-24.1ZM156 193.2c-9.2 3.2-19.2 2.7-28-1.4l17.4-30.1c4.8-0.7 9.2-3.8 11.6-8.4c1.2-2.4 1.8-5 1.8-7.6v-40l27 15.6v28.6c0 17.1-10.7 32.8-29.8 43.3Zm-76.9-8.7c-9.2-5.2-16-13.2-19.6-23c-3.6-10-3-20.4 1.2-29.7l27 15.6v16.1c0 4.9 2.6 9.4 6.7 11.9l31 17.9c-15.1 2.8-31-0.1-46.3-8.8ZM62.8 92.5c5.2-9.2 13.2-16 23-19.6c10-3.6 20.4-3 29.7 1.2l-15.6 27h-16.1c-4.9 0-9.4 2.6-11.9 6.7l-17.9 31c-2.8-15.1 0.1-31 8.8-46.3Zm118.4 5.1l-31-17.9c-3.6-2.1-7.8-2.5-11.7-1.4c-3.8 1.1-7 3.6-9.1 7.1l-17.5 30.3l-27-15.6l16.6-28.7c9.7-16.7 31.1-22.4 48-12.7c0.6 0.3 1.1 0.7 1.7 1l30 17.3c-0.7 7.4-0.8 13.4 0 20.6Z"
-    />
+    <path fill="currentColor" d="M214.7 111.7c1.9-7.6 1.5-15.7-1.2-23.3-7.6-21.3-28.6-35.2-51.4-33.6-12.1-19.9-36.5-29-59-21.2-22.1 7.6-36.7 28.6-35.4 51.5-19.9 12.1-29 36.5-21.2 59 7.6 22.1 28.6 36.7 51.5 35.4 12.1 19.9 36.5 29 59 21.2 22.1-7.6 36.7-28.6 35.4-51.5 8.7-5.5 15.5-13.9 18.9-24.1ZM156 193.2c-9.2 3.2-19.2 2.7-28-1.4l17.4-30.1c4.8-0.7 9.2-3.8 11.6-8.4c1.2-2.4 1.8-5 1.8-7.6v-40l27 15.6v28.6c0 17.1-10.7 32.8-29.8 43.3Zm-76.9-8.7c-9.2-5.2-16-13.2-19.6-23c-3.6-10-3-20.4 1.2-29.7l27 15.6v16.1c0 4.9 2.6 9.4 6.7 11.9l31 17.9c-15.1 2.8-31-0.1-46.3-8.8ZM62.8 92.5c5.2-9.2 13.2-16 23-19.6c10-3.6 20.4-3 29.7 1.2l-15.6 27h-16.1c-4.9 0-9.4 2.6-11.9 6.7l-17.9 31c-2.8-15.1 0.1-31 8.8-46.3Zm118.4 5.1l-31-17.9c-3.6-2.1-7.8-2.5-11.7-1.4c-3.8 1.1-7 3.6-9.1 7.1l-17.5 30.3l-27-15.6l16.6-28.7c9.7-16.7 31.1-22.4 48-12.7c0.6 0.3 1.1 0.7 1.7 1l30 17.3c-0.7 7.4-0.8 13.4 0 20.6Z"/>
   </svg>
 );
 
-/* ================================== STORAGE ================================== */
+/* ============================================================================
+   LOCAL STORAGE + TYPES
+============================================================================ */
 type Provider = 'openai';
 type ModelId = 'gpt-4o' | 'gpt-4o-mini' | 'gpt-4.1' | 'gpt-3.5-turbo';
 type VoiceProvider = 'openai' | 'elevenlabs';
@@ -49,14 +47,15 @@ type Assistant = {
     tools: { enableEndCall: boolean; dialKeypad: boolean };
   };
 };
-
 const LS_LIST = 'voice:assistants.v1';
 const ak = (id: string) => `voice:assistant:${id}`;
 
-function readLS<T>(k: string): T | null { try { const r = localStorage.getItem(k); return r ? JSON.parse(r) as T : null; } catch { return null; } }
-function writeLS<T>(k: string, v: T) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
+const readLS = <T,>(k: string): T | null => { try { const r = localStorage.getItem(k); return r ? JSON.parse(r) as T : null; } catch { return null; } };
+const writeLS = <T,>(k: string, v: T) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 
-/* ============================== PROMPT BUILDING ============================== */
+/* ============================================================================
+   PROMPT BASE
+============================================================================ */
 const BASE_PROMPT = `[Identity]
 You are an intelligent and responsive assistant designed to help users with a wide range of inquiries and tasks.
 
@@ -79,32 +78,23 @@ You are an intelligent and responsive assistant designed to help users with a wi
 - If a user's request is unclear or you encounter difficulty understanding, ask for clarification politely.
 - If a task cannot be completed, inform the user empathetically and suggest alternative solutions or resources.`.trim();
 
-const APPT = `# Appointment Scheduling Agent Prompt
-## Identity & Purpose
-You are Riley (voice assistant) for Wellness Partners, a multi-specialty health clinic. Your goal is to schedule, confirm, reschedule, or cancel appointments and inform patients clearly.
-## Conversation Flow
-- Intro, determine type/provider/new-vs-returning/urgency
-- Collect name, DOB, callback; offer 2–3 times; confirm exact details; give prep
-## Response Guidelines
-Ask one question at a time; confirm names/dates/times explicitly; avoid medical advice; use concise answers; phonetic spell names when needed.`.trim();
-
 function buildPrompt(refinement: string) {
-  const wantsAppt = /\b(appoint|schedule|clinic|patient|provider|resched|urgent|dob|insurance)\b/i.test(refinement);
-  const added = refinement.trim()
+  const add = refinement.trim()
     ? `\n\n[Refinements]\n- ${refinement.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim()}`
     : '';
-  return BASE_PROMPT + (wantsAppt ? `\n\n${APPT}` : '') + added;
+  return BASE_PROMPT + add;
 }
 
-/* ============================== SELECT (PORTAL) ============================== */
+/* ============================================================================
+   REUSABLE SELECT (Portal)
+============================================================================ */
 type Item = { value: string; label: string; icon?: React.ReactNode };
 
 function usePortalPos(open: boolean, ref: React.RefObject<HTMLElement>) {
   const [rect, setRect] = useState<{ top: number; left: number; width: number; up: boolean } | null>(null);
   useLayoutEffect(() => {
     if (!open) return;
-    const r = ref.current?.getBoundingClientRect();
-    if (!r) return;
+    const r = ref.current?.getBoundingClientRect(); if (!r) return;
     const up = r.bottom + 320 > window.innerHeight;
     setRect({ top: up ? r.top : r.bottom, left: r.left, width: r.width, up });
   }, [open]);
@@ -119,8 +109,6 @@ function Select({ value, items, onChange, placeholder, leftIcon }: {
   const btn = useRef<HTMLButtonElement | null>(null);
   const portal = useRef<HTMLDivElement | null>(null);
   const rect = usePortalPos(open, btn);
-  const sel = items.find(i => i.value === value) || null;
-  const filtered = items.filter(i => i.label.toLowerCase().includes(q.trim().toLowerCase()));
 
   useEffect(() => {
     if (!open) return;
@@ -131,6 +119,9 @@ function Select({ value, items, onChange, placeholder, leftIcon }: {
     window.addEventListener('mousedown', on);
     return () => window.removeEventListener('mousedown', on);
   }, [open]);
+
+  const filtered = items.filter(i => i.label.toLowerCase().includes(q.trim().toLowerCase()));
+  const sel = items.find(i => i.value === value) || null;
 
   return (
     <>
@@ -144,7 +135,7 @@ function Select({ value, items, onChange, placeholder, leftIcon }: {
         {leftIcon ? <span className="shrink-0">{leftIcon}</span> : null}
         {sel ? <span className="flex items-center gap-2 min-w-0">{sel.icon}<span className="truncate">{sel.label}</span></span> : <span className="opacity-70">{placeholder || 'Select…'}</span>}
         <span className="ml-auto" />
-        <ChevronDown className="w-4 h-4 nav-icon" />
+        <ChevronDown className="w-4 h-4 icon" />
       </button>
 
       <AnimatePresence>
@@ -161,7 +152,7 @@ function Select({ value, items, onChange, placeholder, leftIcon }: {
           >
             <div className="flex items-center gap-2 mb-3 px-2 py-2 rounded-xl"
               style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)' }}>
-              <Search className="w-4 h-4 nav-icon" />
+              <Search className="w-4 h-4 icon" />
               <input value={q} onChange={(e)=> setQ(e.target.value)} placeholder="Filter…" className="w-full bg-transparent outline-none text-sm" style={{ color:'var(--text)' }}/>
             </div>
             <div className="max-h-72 overflow-y-auto pr-1" style={{ scrollbarWidth:'thin' }}>
@@ -171,7 +162,7 @@ function Select({ value, items, onChange, placeholder, leftIcon }: {
                   onClick={() => { onChange(it.value); setOpen(false); }}
                   className="w-full flex items-center gap-3 px-3 py-2 rounded-[12px] text-left"
                   style={{ color:'var(--text)' }}
-                  onMouseEnter={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='rgba(0,255,194,0.10)'; (e.currentTarget as HTMLButtonElement).style.border='1px solid rgba(0,255,194,0.35)'; }}
+                  onMouseEnter={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='rgba(20,228,163,.10)'; (e.currentTarget as HTMLButtonElement).style.border='1px solid rgba(20,228,163,.35)'; }}
                   onMouseLeave={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='transparent'; (e.currentTarget as HTMLButtonElement).style.border='1px solid transparent'; }}
                 >
                   {it.icon}{it.label}
@@ -186,30 +177,31 @@ function Select({ value, items, onChange, placeholder, leftIcon }: {
   );
 }
 
-/* ================================ PAGE ===================================== */
+/* ============================================================================
+   PAGE
+============================================================================ */
 export default function VoiceAgentSection() {
   const [assistants, setAssistants] = useState<Assistant[]>([]);
-  const [activeId, setActiveId] = useState<string>('');
+  const [activeId, setActiveId] = useState('');
   const [query, setQuery] = useState('');
 
-  // boot once
   useEffect(() => {
     const list = readLS<Assistant[]>(LS_LIST) || [];
     if (!list.length) {
-      const a: Assistant = {
+      const seed: Assistant = {
         id: 'riley',
         name: 'Riley',
         folder: 'Health',
         updatedAt: Date.now(),
         config: {
-          model: { provider: 'openai', model: 'gpt-4o', firstMessageMode: 'assistant_first', firstMessage: 'Hello.', systemPrompt: BASE_PROMPT },
-          voice: { provider: 'openai', voiceId: 'alloy', voiceLabel: 'Alloy (OpenAI)' },
-          transcriber: { provider: 'deepgram', model: 'nova-2', language: 'en', denoise: false, confidenceThreshold: 0.40, numerals: false },
-          tools: { enableEndCall: true, dialKeypad: true },
+          model: { provider:'openai', model:'gpt-4o', firstMessageMode:'assistant_first', firstMessage:'Hello.', systemPrompt: BASE_PROMPT },
+          voice: { provider:'openai', voiceId:'alloy', voiceLabel:'Alloy (OpenAI)' },
+          transcriber: { provider:'deepgram', model:'nova-2', language:'en', denoise:false, confidenceThreshold:0.4, numerals:false },
+          tools: { enableEndCall:true, dialKeypad:true },
         }
       };
-      writeLS(LS_LIST, [a]); writeLS(ak(a.id), a);
-      setAssistants([a]); setActiveId(a.id);
+      writeLS(ak(seed.id), seed); writeLS(LS_LIST, [seed]);
+      setAssistants([seed]); setActiveId(seed.id);
     } else {
       setAssistants(list); setActiveId(list[0].id);
     }
@@ -223,7 +215,6 @@ export default function VoiceAgentSection() {
     const list = (readLS<Assistant[]>(LS_LIST) || []).map(x => x.id === next.id ? { ...x, name: next.name, folder: next.folder, updatedAt: Date.now() } : x);
     writeLS(LS_LIST, list); setAssistants(list);
   };
-
   const addAssistant = () => {
     const id = `agent_${Math.random().toString(36).slice(2, 8)}`;
     const base = active || (readLS<Assistant[]>(LS_LIST) || [])[0];
@@ -242,67 +233,73 @@ export default function VoiceAgentSection() {
     const list = [...assistants, a]; writeLS(LS_LIST, list);
     setAssistants(list); setActiveId(id);
   };
-
   const removeAssistant = (id: string) => {
     const list = assistants.filter(a => a.id !== id);
     writeLS(LS_LIST, list); setAssistants(list);
     if (activeId === id && list.length) setActiveId(list[0].id);
   };
 
-  // prompt editor modal
+  // Prompt editor pop
   const [editOpen, setEditOpen] = useState(false);
   const [editText, setEditText] = useState('');
   const submitEdit = () => {
     if (!active) return;
-    const next = buildPrompt(editText);
-    updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, systemPrompt: next } } }));
+    updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, systemPrompt: buildPrompt(editText) } } }));
     setEditOpen(false); setEditText('');
   };
 
-  // voices
+  // Voices
   const openaiVoices: Item[] = [{ value:'alloy', label:'Alloy (OpenAI)' }, { value:'ember', label:'Ember (OpenAI)' }];
   const elevenVoices: Item[] = [{ value:'rachel', label:'Rachel (ElevenLabs)' }, { value:'adam', label:'Adam (ElevenLabs)' }, { value:'bella', label:'Bella (ElevenLabs)' }];
 
   if (!active) return null;
-
   const visible = assistants.filter(a => a.name.toLowerCase().includes(query.trim().toLowerCase()));
 
   return (
     <div className={`${SCOPE}`} style={{ background:'var(--bg)', color:'var(--text)' }}>
       <div className="flex w-full">
-        {/* ==================== FIXED ASSISTANT SIDEBAR ==================== */}
+        {/* =================== ASSISTANT SIDEBAR (touches app sidebar & header) =================== */}
         <aside
-          className="hidden lg:flex shrink-0 w-[300px] flex-col"
+          className="hidden lg:flex shrink-0 w-[312px] flex-col"
           style={{
             position:'sticky', top:0, height:'100vh',
-            /* no side padding so it touches your app’s main sidebar */
-            borderRight:'1px solid var(--va-border)', background:'var(--va-sidebar)', boxShadow:'var(--va-shadow-side)'
+            marginLeft:'-1px', /* butt against app sidebar border */
+            borderRight:'1px solid var(--va-border)',
+            background:'var(--va-sidebar)',
+            boxShadow:'var(--va-shadow-side)',
+            zIndex: 1
           }}
         >
-          {/* header: touches app header because aside is sticky at top:0 */}
+          {/* header (touches app header via sticky top:0) */}
           <div className="px-3 py-3 flex items-center justify-between" style={{ borderBottom:'1px solid var(--va-border)' }}>
-            <div className="flex items-center gap-2 text-sm font-semibold"><PanelLeft className="w-4 h-4 nav-icon" /> Assistants</div>
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <PanelLeft className="w-4 h-4 icon" /> Assistants
+            </div>
             <button
               onClick={addAssistant}
               className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs"
-              style={{ background:GREEN, color:'#fff' }}
-              onMouseEnter={(e)=> (e.currentTarget as HTMLButtonElement).style.background = GREEN_HOVER}
-              onMouseLeave={(e)=> (e.currentTarget as HTMLButtonElement).style.background = GREEN}
-            ><Plus className="w-3.5 h-3.5" /> Create</button>
+              style={{ background:ACCENT, color:'#00110b', boxShadow:'0 8px 22px rgba(20,228,163,.25)' }}
+              onMouseEnter={(e)=> (e.currentTarget as HTMLButtonElement).style.background = ACCENT_HOVER}
+              onMouseLeave={(e)=> (e.currentTarget as HTMLButtonElement).style.background = ACCENT}
+            >
+              <Plus className="w-3.5 h-3.5 icon--invert" /> Create
+            </button>
           </div>
 
           <div className="p-3">
             <div className="flex items-center gap-2 rounded-xl px-2.5 py-2"
               style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)' }}>
-              <Search className="w-4 h-4 nav-icon" />
+              <Search className="w-4 h-4 icon" />
               <input value={query} onChange={(e)=> setQuery(e.target.value)} placeholder="Search assistants" className="w-full bg-transparent outline-none text-sm" style={{ color:'var(--text)' }}/>
             </div>
 
             <div className="mt-3 text-xs font-semibold flex items-center gap-2" style={{ color:'var(--text-muted)' }}>
-              <Folder className="w-3.5 h-3.5 nav-icon" /> Folders
+              <Folder className="w-3.5 h-3.5 icon" /> Folders
             </div>
-            <div className="mt-2 space-y-1">
-              <button className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/5"><FolderOpen className="w-4 h-4 nav-icon" /> All</button>
+            <div className="mt-2">
+              <button className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/5">
+                <FolderOpen className="w-4 h-4 icon" /> All
+              </button>
             </div>
 
             <div className="mt-4 space-y-2 overflow-y-auto" style={{ maxHeight:'calc(100vh - 220px)', scrollbarWidth:'thin' }}>
@@ -312,28 +309,29 @@ export default function VoiceAgentSection() {
                   onClick={()=> setActiveId(a.id)}
                   className="w-full text-left rounded-2xl p-3 flex items-center justify-between"
                   style={{
-                    background: a.id===activeId ? 'color-mix(in oklab, var(--brand) 12%, transparent)' : 'var(--va-card)',
-                    border: `1px solid ${a.id===activeId ? 'color-mix(in oklab, var(--brand) 28%, var(--va-border))' : 'var(--va-border)'}`,
+                    background: a.id===activeId ? 'color-mix(in oklab, var(--accent) 10%, transparent)' : 'var(--va-card)',
+                    border: `1px solid ${a.id===activeId ? 'color-mix(in oklab, var(--accent) 35%, var(--va-border))' : 'var(--va-border)'}`,
                     boxShadow:'var(--va-shadow-sm)'
                   }}
                 >
                   <div className="min-w-0">
-                    <div className="font-medium truncate flex items-center gap-2"><Bot className="w-4 h-4 nav-icon" /><span className="truncate">{a.name}</span></div>
+                    <div className="font-medium truncate flex items-center gap-2">
+                      <Bot className="w-4 h-4 icon" /><span className="truncate">{a.name}</span>
+                    </div>
                     <div className="text-[11px] mt-0.5 opacity-70 truncate">{a.folder || 'Unfiled'} • {new Date(a.updatedAt).toLocaleDateString()}</div>
                   </div>
-                  {a.id===activeId ? <Check className="w-4 h-4 nav-icon" /> : null}
+                  {a.id===activeId ? <Check className="w-4 h-4 icon" /> : null}
                 </button>
               ))}
             </div>
           </div>
         </aside>
 
-        {/* ==================== EDITOR (WIDER & CLEAN) ==================== */}
+        {/* =================================== EDITOR =================================== */}
         <main className="flex-1">
-          {/* this top bar touches header because there’s no top margin */}
           <div className="px-6 py-4 flex items-center justify-between" style={{ borderBottom:'1px solid var(--va-border)', background:'var(--va-topbar)' }}>
             <div className="flex items-center gap-3">
-              <Bot className="w-5 h-5 nav-icon" />
+              <Bot className="w-5 h-5 icon" />
               <input
                 value={active.name}
                 onChange={(e)=> updateActive(a => ({ ...a, name: e.target.value }))}
@@ -344,20 +342,19 @@ export default function VoiceAgentSection() {
             <div className="flex items-center gap-2">
               <button onClick={()=> navigator.clipboard.writeText(active.config.model.systemPrompt).catch(()=>{})}
                 className="inline-flex items-center gap-1 rounded-lg px-3 py-2 text-sm"
-                style={{ border:'1px solid var(--va-border)', background:'var(--va-card)' }}>
-                <Copy className="w-4 h-4 nav-icon" /> Copy Prompt
+                style={{ border:'1px solid var(--va-border)', background:'var(--va-card)', boxShadow:'var(--va-shadow-sm)' }}>
+                <Copy className="w-4 h-4 icon" /> Copy Prompt
               </button>
               <button onClick={()=> removeAssistant(active.id)}
                 className="inline-flex items-center gap-1 rounded-lg px-3 py-2 text-sm"
-                style={{ border:'1px solid var(--va-border)', background:'var(--va-card)' }}>
-                <Trash2 className="w-4 h-4 nav-icon" /> Delete
+                style={{ border:'1px solid var(--va-border)', background:'var(--va-card)', boxShadow:'var(--va-shadow-sm)' }}>
+                <Trash2 className="w-4 h-4 icon" /> Delete
               </button>
             </div>
           </div>
 
-          <div className="max-w-[1340px] mx-auto px-6 py-6 grid grid-cols-12 gap-8">
-            {/* ===== Model ===== */}
-            <Section title="Model" icon={<FileText className="w-4 h-4 nav-icon" />}>
+          <div className="max-w-[1440px] mx-auto px-6 py-6 grid grid-cols-12 gap-8">
+            <Section title="Model" icon={<FileText className="w-4 h-4 icon" />}>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <Field label="Provider">
                   <Select
@@ -396,22 +393,22 @@ export default function VoiceAgentSection() {
                 </Field>
               </div>
 
-              {/* System Prompt — ONLY label + one box */}
+              {/* System Prompt — clean (label + one box) */}
               <div className="mt-6">
                 <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="w-4 h-4 nav-icon" /> System Prompt</div>
+                  <div className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="w-4 h-4 icon" /> System Prompt</div>
                   <div className="flex items-center gap-2">
                     <button
                       onClick={()=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, systemPrompt: BASE_PROMPT } } }))}
                       className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm"
                       style={{ border:'1px solid var(--va-border)', background:'var(--va-card)' }}
-                    ><RefreshCw className="w-4 h-4 nav-icon" /> Reset</button>
+                    ><RefreshCw className="w-4 h-4 icon" /> Reset</button>
                     <button
                       onClick={()=> setEditOpen(true)}
                       className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm"
-                      style={{ background:GREEN, color:'#fff' }}
-                      onMouseEnter={(e)=> (e.currentTarget as HTMLButtonElement).style.background=GREEN_HOVER}
-                      onMouseLeave={(e)=> (e.currentTarget as HTMLButtonElement).style.background=GREEN}
+                      style={{ background:ACCENT, color:'#00110b', boxShadow:'0 10px 24px rgba(20,228,163,.24)' }}
+                      onMouseEnter={(e)=> (e.currentTarget as HTMLButtonElement).style.background=ACCENT_HOVER}
+                      onMouseLeave={(e)=> (e.currentTarget as HTMLButtonElement).style.background=ACCENT}
                     >Generate / Edit</button>
                   </div>
                 </div>
@@ -423,15 +420,14 @@ export default function VoiceAgentSection() {
                   className="w-full rounded-2xl px-3 py-3 text-[14px] leading-6 outline-none"
                   style={{
                     background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)',
-                    boxShadow:'var(--va-shadow)', color:'var(--text)',
+                    boxShadow:'var(--va-shadow), inset 0 1px 0 rgba(255,255,255,.03)', color:'var(--text)',
                     fontFamily:'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace'
                   }}
                 />
               </div>
             </Section>
 
-            {/* ===== Voice ===== */}
-            <Section title="Voice" icon={<Mic2 className="w-4 h-4 nav-icon" />}>
+            <Section title="Voice" icon={<Mic2 className="w-4 h-4 icon" />}>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <Field label="Provider">
                   <Select
@@ -464,13 +460,12 @@ export default function VoiceAgentSection() {
                 <button
                   onClick={()=> { window.dispatchEvent(new CustomEvent('voiceagent:import-11labs')); alert('Hook “voiceagent:import-11labs” to your ElevenLabs importer.'); }}
                   className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm"
-                  style={{ border:'1px solid var(--va-border)', background:'var(--va-card)' }}
-                ><UploadCloud className="w-4 h-4 nav-icon" /> Import from ElevenLabs</button>
+                  style={{ border:'1px solid var(--va-border)', background:'var(--va-card)', boxShadow:'var(--va-shadow-sm)' }}
+                ><UploadCloud className="w-4 h-4 icon" /> Import from ElevenLabs</button>
               </div>
             </Section>
 
-            {/* ===== Transcriber ===== */}
-            <Section title="Transcriber" icon={<BookOpen className="w-4 h-4 nav-icon" />}>
+            <Section title="Transcriber" icon={<BookOpen className="w-4 h-4 icon" />}>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <Field label="Provider">
                   <Select
@@ -521,8 +516,7 @@ export default function VoiceAgentSection() {
               </div>
             </Section>
 
-            {/* ===== Tools ===== */}
-            <Section title="Tools" icon={<SlidersHorizontal className="w-4 h-4 nav-icon" />}>
+            <Section title="Tools" icon={<SlidersHorizontal className="w-4 h-4 icon" />}>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <Field label="Enable End Call Function">
                   <Select
@@ -544,7 +538,7 @@ export default function VoiceAgentSection() {
         </main>
       </div>
 
-      {/* Generate/Edit Modal */}
+      {/* Generate/Edit Prompt */}
       <AnimatePresence>
         {editOpen && (
           <motion.div className="fixed inset-0 z-[999] flex items-center justify-center p-4"
@@ -553,7 +547,7 @@ export default function VoiceAgentSection() {
             <motion.div initial={{ y:10, opacity:0, scale:.98 }} animate={{ y:0, opacity:1, scale:1 }} exit={{ y:8, opacity:0, scale:.985 }}
               className="w-full max-w-xl rounded-2xl" style={{ background:'var(--va-card)', border:'1px solid var(--va-border)', boxShadow:'var(--va-shadow-lg)' }}>
               <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom:'1px solid var(--va-border)' }}>
-                <div className="flex items-center gap-2 text-sm font-semibold"><Edit3 className="w-4 h-4 nav-icon" /> Edit Prompt</div>
+                <div className="flex items-center gap-2 text-sm font-semibold"><Edit3 className="w-4 h-4 icon" /> Edit Prompt</div>
               </div>
               <div className="p-4">
                 <input
@@ -568,13 +562,12 @@ export default function VoiceAgentSection() {
                   <button
                     onClick={submitEdit}
                     className="px-3 py-2 rounded-lg text-sm"
-                    style={{ background:GREEN, color:'#fff' }}
-                    onMouseEnter={(e)=> (e.currentTarget as HTMLButtonElement).style.background = GREEN_HOVER}
-                    onMouseLeave={(e)=> (e.currentTarget as HTMLButtonElement).style.background = GREEN}
-                  >Submit Edit <ArrowUpRight className="inline w-4 h-4 ml-1 nav-icon" /></button>
-                </div>
-                <div className="mt-2 text-xs" style={{ color:'var(--text-muted)' }}>
-                  Tip: Include words like “schedule / clinic / provider / urgent” to auto-attach the appointment playbook.
+                    style={{ background:ACCENT, color:'#00110b', boxShadow:'0 10px 24px rgba(20,228,163,.24)' }}
+                    onMouseEnter={(e)=> (e.currentTarget as HTMLButtonElement).style.background = ACCENT_HOVER}
+                    onMouseLeave={(e)=> (e.currentTarget as HTMLButtonElement).style.background = ACCENT}
+                  >
+                    Submit Edit
+                  </button>
                 </div>
               </div>
             </motion.div>
@@ -582,13 +575,13 @@ export default function VoiceAgentSection() {
         )}
       </AnimatePresence>
 
-      {/* Scoped tokens; identical icon color across app; thin green sliders */}
+      {/* ======================== SCOPED TOKENS & COSMETICS ======================== */}
       <style jsx global>{`
         .${SCOPE}{
-          --brand:${GREEN};
+          --accent:${ACCENT};
           --bg:#0b0c10;
           --text:#eef2f5;
-          --text-muted:color-mix(in oklab, var(--text) 68%, transparent);
+          --text-muted:color-mix(in oklab, var(--text) 65%, transparent);
           --va-card:#0f1315;
           --va-topbar:#0e1214;
           --va-sidebar:linear-gradient(180deg,#0d1113 0%,#0b0e10 100%);
@@ -596,13 +589,13 @@ export default function VoiceAgentSection() {
           --va-border:rgba(255,255,255,.10);
           --va-input-bg:rgba(255,255,255,.03);
           --va-input-border:rgba(255,255,255,.14);
-          --va-input-shadow:inset 0 1px 0 rgba(255,255,255,.05);
+          --va-input-shadow:inset 0 1px 0 rgba(255,255,255,.06);
           --va-menu-bg:#101314;
           --va-menu-border:rgba(255,255,255,.16);
-          --va-shadow:0 20px 60px rgba(0,0,0,.48), 0 10px 28px rgba(0,0,0,.35);
-          --va-shadow-lg:0 34px 90px rgba(0,0,0,.6), 0 16px 40px rgba(0,0,0,.45);
-          --va-shadow-sm:0 10px 26px rgba(0,0,0,.35);
-          --va-shadow-side:8px 0 24px rgba(0,0,0,.35);
+          --va-shadow:0 24px 70px rgba(0,0,0,.55), 0 10px 28px rgba(0,0,0,.4);
+          --va-shadow-lg:0 42px 110px rgba(0,0,0,.66), 0 20px 48px rgba(0,0,0,.5);
+          --va-shadow-sm:0 12px 26px rgba(0,0,0,.35);
+          --va-shadow-side:8px 0 28px rgba(0,0,0,.42);
         }
         :root:not([data-theme="dark"]) .${SCOPE}{
           --bg:#f7f9fb;
@@ -615,25 +608,31 @@ export default function VoiceAgentSection() {
           --va-border:rgba(0,0,0,.10);
           --va-input-bg:#ffffff;
           --va-input-border:rgba(0,0,0,.12);
-          --va-input-shadow:inset 0 1px 0 rgba(255,255,255,.8);
+          --va-input-shadow:inset 0 1px 0 rgba(255,255,255,.85);
           --va-menu-bg:#ffffff;
           --va-menu-border:rgba(0,0,0,.10);
-          --va-shadow:0 28px 70px rgba(0,0,0,.12), 0 10px 26px rgba(0,0,0,.08);
-          --va-shadow-lg:0 42px 100px rgba(0,0,0,.16), 0 20px 50px rgba(0,0,0,.10);
-          --va-shadow-sm:0 12px 28px rgba(0,0,0,.10);
+          --va-shadow:0 28px 70px rgba(0,0,0,.12), 0 12px 28px rgba(0,0,0,.08);
+          --va-shadow-lg:0 42px 110px rgba(0,0,0,.16), 0 22px 54px rgba(0,0,0,.10);
+          --va-shadow-sm:0 12px 26px rgba(0,0,0,.10);
           --va-shadow-side:8px 0 26px rgba(0,0,0,.08);
         }
-        .${SCOPE} .nav-icon{ color: var(--text); opacity:.9; }
 
-        .${SCOPE} .va-range{ -webkit-appearance:none; height:4px; background:color-mix(in oklab, var(--brand) 26%, #0000); border-radius:999px; outline:none; }
-        .${SCOPE} .va-range::-webkit-slider-thumb{ -webkit-appearance:none; width:14px;height:14px;border-radius:50%;background:var(--brand);border:2px solid #fff; box-shadow:0 0 0 3px color-mix(in oklab, var(--brand) 25%, transparent); }
-        .${SCOPE} .va-range::-moz-range-thumb{ width:14px;height:14px;border:0;border-radius:50%;background:var(--brand); box-shadow:0 0 0 3px color-mix(in oklab, var(--brand) 25%, transparent); }
+        /* One icon color everywhere — matches sidebar green */
+        .${SCOPE} .icon{ color: var(--accent); }
+        .${SCOPE} .icon--invert{ color: #00110b; }
+
+        /* Thin green sliders */
+        .${SCOPE} .va-range{ -webkit-appearance:none; height:4px; background:color-mix(in oklab, var(--accent) 24%, #0000); border-radius:999px; outline:none; }
+        .${SCOPE} .va-range::-webkit-slider-thumb{ -webkit-appearance:none; width:14px;height:14px;border-radius:50%;background:var(--accent); border:2px solid #fff; box-shadow:0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent); }
+        .${SCOPE} .va-range::-moz-range-thumb{ width:14px;height:14px;border:0;border-radius:50%;background:var(--accent); box-shadow:0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent); }
       `}</style>
     </div>
   );
 }
 
-/* ============= Small atoms ============= */
+/* ============================================================================
+   Atoms
+============================================================================ */
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
@@ -645,10 +644,20 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function Section({ title, icon, children }:{ title: string; icon: React.ReactNode; children: React.ReactNode }) {
   const [open, setOpen] = useState(true);
   return (
-    <div className="col-span-12 rounded-2xl" style={{ background:'var(--va-card)', border:'1px solid var(--va-border)', boxShadow:'var(--va-shadow)' }}>
+    <div
+      className="col-span-12 rounded-2xl relative"
+      style={{
+        background:'var(--va-card)',
+        border:'1px solid var(--va-border)',
+        boxShadow:'var(--va-shadow)',
+      }}
+    >
+      {/* subtle glow */}
+      <div aria-hidden className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
+           style={{ background:'radial-gradient(circle, color-mix(in oklab, var(--accent) 16%, transparent) 0%, transparent 70%)', filter:'blur(38px)' }} />
       <button type="button" onClick={()=> setOpen(v=>!v)} className="w-full flex items-center justify-between px-5 py-4">
         <span className="flex items-center gap-2 text-sm font-semibold">{icon}{title}</span>
-        {open ? <ChevronDown className="w-4 h-4 nav-icon" /> : <ChevronRight className="w-4 h-4 nav-icon" />}
+        {open ? <ChevronDown className="w-4 h-4 icon" /> : <ChevronRight className="w-4 h-4 icon" />}
       </button>
       <AnimatePresence initial={false}>
         {open && (
