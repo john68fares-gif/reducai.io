@@ -12,17 +12,47 @@ import {
    THEME / CONSTANTS
 ============================================================================ */
 const SCOPE = 'va-scope';
-const ACCENT = '#10b981';         // brand green
+const ACCENT = '#10b981';
 const ACCENT_HOVER = '#0fb57a';
-const RAIL_W = 312;               // assistants rail width
-const HDR = 'var(--header-h, 64px)';          // header height from your shell
-const SBW = 'var(--sidebar-w, 260px)';        // primary sidebar width
+const RAIL_W = 312;
 
-const OpenAIIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 256 256" aria-hidden>
-    <path fill="currentColor" d="M214.7 111.7c1.9-7.6 1.5-15.7-1.2-23.3-7.6-21.3-28.6-35.2-51.4-33.6-12.1-19.9-36.5-29-59-21.2-22.1 7.6-36.7 28.6-35.4 51.5-19.9 12.1-29 36.5-21.2 59 7.6 22.1 28.6 36.7 51.5 35.4 12.1 19.9 36.5 29 59 21.2 22.1-7.6 36.7-28.6 35.4-51.5 8.7-5.5 15.5-13.9 18.9-24.1ZM156 193.2c-9.2 3.2-19.2 2.7-28-1.4l17.4-30.1c4.8-0.7 9.2-3.8 11.6-8.4c1.2-2.4 1.8-5 1.8-7.6v-40l27 15.6v28.6c0 17.1-10.7 32.8-29.8 43.3Zm-76.9-8.7c-9.2-5.2-16-13.2-19.6-23c-3.6-10-3-20.4 1.2-29.7l27 15.6v16.1c0 4.9 2.6 9.4 6.7 11.9l31 17.9c-15.1 2.8-31-0.1-46.3-8.8ZM62.8 92.5c5.2-9.2 13.2-16 23-19.6c10-3.6 20.4-3 29.7 1.2l-15.6 27h-16.1c-4.9 0-9.4 2.6-11.9 6.7l-17.9 31c-2.8-15.1 0.1-31 8.8-46.3Zm118.4 5.1l-31-17.9c-3.6-2.1-7.8-2.5-11.7-1.4c-3.8 1.1-7 3.6-9.1 7.1l-17.5 30.3l-27-15.6l16.6-28.7c9.7-16.7 31.1-22.4 48-12.7c0.6 0.3 1.1 0.7 1.7 1l30 17.3c-0.7 7.4-0.8 13.4 0 20.6Z"/>
-  </svg>
-);
+/** Use these CSS variables from your shell.
+ *  --sidebar-w: left app sidebar width
+ *  --header-h : global header height
+ */
+const SBW = 'var(--sidebar-w, 260px)';
+const HDR = 'var(--header-h, 64px)';
+
+/* ============================================================================
+   BASE STRUCTURE — your “main prompt” skeleton
+============================================================================ */
+const BASE_PROMPT = `[Identity]  
+You are an intelligent and responsive assistant designed to help users with a wide range of inquiries and tasks.  
+
+[Style]  
+- Maintain a professional and approachable demeanor.  
+- Use clear and concise language, avoiding overly technical jargon.  
+
+[Response Guidelines]  
+- Keep responses short and focused on the user's immediate query.  
+- Verify user-provided information before proceeding with further steps.  
+
+[Task & Goals]  
+1. Greet the user warmly and inquire about how you can assist them today.  
+2. Listen carefully to the user's request or question.  
+3. Provide relevant and accurate information based on the user's needs.  
+<wait for user response>  
+4. If a query requires further action, guide the user through step-by-step instructions.  
+
+[Error Handling / Fallback]  
+- If a user's request is unclear or you encounter difficulty understanding, ask for clarification politely.  
+- If a task cannot be completed, inform the user empathetically and suggest alternative solutions or resources.  
+
+[Data to Collect]
+- Full Name
+- Phone Number
+- Appointment Date
+`.trim();
 
 /* ============================================================================
    TYPES / LOCAL STORAGE
@@ -56,7 +86,7 @@ const readLS = <T,>(k: string): T | null => { try { const r = localStorage.getIt
 const writeLS = <T,>(k: string, v: T) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 
 /* ============================================================================
-   SELECT (tiny portal select)
+   SELECT (compact portal select)
 ============================================================================ */
 type Item = { value: string; label: string; icon?: React.ReactNode };
 
@@ -148,65 +178,77 @@ function Select({ value, items, onChange, placeholder, leftIcon }: {
 }
 
 /* ============================================================================
-   DIFF + PROMPT GENERATION HELPERS
+   PROMPT GEN HELPERS
 ============================================================================ */
 
-// Ensure [Data to Collect] has Name / Phone / Appointment Date
+/** If prompt doesn't have your sections, start from BASE_PROMPT. */
+function ensureBase(prompt: string) {
+  const hasIdentity = /\[Identity\]/i.test(prompt);
+  const hasStyle = /\[Style\]/i.test(prompt);
+  const hasTasks = /\[Task & Goals\]/i.test(prompt);
+  return (hasIdentity && hasStyle && hasTasks) ? prompt : BASE_PROMPT;
+}
+
+/** Make sure [Data to Collect] lists Name/Phone/Appointment Date. */
 function ensureDataToCollect(prompt: string) {
   const hasBlock = /\[Data to Collect\]/i.test(prompt);
-  const needsName  = !/Name\b/i.test(prompt);
-  const needsPhone = !/(Phone|Phone Number|Callback Number)\b/i.test(prompt);
-  const needsDate  = !/(Appointment Date|Date of Appointment)\b/i.test(prompt);
+  const needsName  = !/Full Name/i.test(prompt);
+  const needsPhone = !/Phone Number/i.test(prompt);
+  const needsDate  = !/Appointment Date/i.test(prompt);
 
-  let addedLines: string[] = [];
-  if (needsName)  addedLines.push('- Full Name');
-  if (needsPhone) addedLines.push('- Phone Number');
-  if (needsDate)  addedLines.push('- Appointment Date');
+  const adds: string[] = [];
+  if (needsName)  adds.push('- Full Name');
+  if (needsPhone) adds.push('- Phone Number');
+  if (needsDate)  adds.push('- Appointment Date');
 
-  if (!addedLines.length) return { next: prompt, additions: addedLines };
+  if (!adds.length) return { next: prompt, additions: adds };
 
   if (hasBlock) {
-    const next = prompt.replace(/\[Data to Collect\][\s\S]*?(?:\n{2,}|$)/i, (m) => {
-      const trimmed = m.trimEnd();
-      const toAdd = addedLines.map(l => `  ${l}`).join('\n');
-      const sep = trimmed.endsWith('\n') ? '' : '\n';
-      return `${trimmed}${sep}${toAdd}\n\n`;
+    const next = prompt.replace(/\[Data to Collect\][\s\S]*?(?=\n{2,}|\s*$)/i, (m) => {
+      const base = m.trimEnd();
+      const toAdd = adds.map(l => `  ${l}`).join('\n');
+      const sep = base.endsWith('\n') ? '' : '\n';
+      return `${base}${sep}${toAdd}`;
     });
-    return { next, additions: addedLines };
+    return { next, additions: adds };
   }
 
-  // Append a new block if it doesn't exist
-  const block = `\n\n[Data to Collect]\n- Full Name\n- Phone Number\n- Appointment Date\n`;
+  const block = `\n\n[Data to Collect]\n- Full Name\n- Phone Number\n- Appointment Date`;
   return { next: prompt + block, additions: ['- Full Name','- Phone Number','- Appointment Date'] };
 }
 
-// Super-simple line diff (for green/red preview)
+/** Insert refinements as a section (non-destructive). */
+function applyRefinement(prompt: string, refinement: string) {
+  const clean = refinement.trim();
+  if (!clean) return prompt;
+  const hasRef = /\[Refinements\]/i.test(prompt);
+  if (hasRef) {
+    return prompt.replace(/\[Refinements\][\s\S]*?(?=\n{2,}|\s*$)/i, (m) => {
+      const base = m.trimEnd();
+      const line = `- ${clean.replace(/\s+/g, ' ')}`;
+      const sep = base.endsWith('\n') ? '' : '\n';
+      return `${base}${sep}${line}`;
+    });
+  }
+  return `${prompt}\n\n[Refinements]\n- ${clean.replace(/\s+/g, ' ')}`;
+}
+
+/** Cosmetic rewrite to feel “fresh”. */
+function rewrite(prompt: string) {
+  return prompt.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/** Very simple diff list (only adds/removals for preview). */
 function diffLines(oldStr: string, newStr: string) {
   const oldLines = oldStr.split('\n');
   const newLines = newStr.split('\n');
   const oldSet = new Set(oldLines);
   const newSet = new Set(newLines);
 
-  const result: { text: string; type: 'same'|'add'|'del' }[] = [];
-  // Mark deletions (old lines missing from new)
-  for (const line of oldLines) {
-    if (!newSet.has(line)) result.push({ text: line, type: 'del' });
-  }
-  // Mark additions (new lines missing from old)
-  for (const line of newLines) {
-    if (!oldSet.has(line)) result.push({ text: line, type: 'add' });
-  }
-  // We don't render "same" lines in the compact diff preview.
-  return result;
-}
-
-// Fake “rewrite” feel by normalizing whitespace & sections
-function rewritePromptFromScratch(source: string) {
-  // Normalize multiple spaces/newlines to make it look freshly regenerated
-  return source
-    .replace(/[ \t]+/g, ' ')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
+  const res: { text: string; type: 'add' | 'del' }[] = [];
+  for (const l of oldLines) if (!newSet.has(l)) res.push({ text: l, type: 'del' });
+  for (const l of newLines) if (!oldSet.has(l)) res.push({ text: l, type: 'add' });
+  return res;
 }
 
 /* ============================================================================
@@ -217,7 +259,6 @@ export default function VoiceAgentSection() {
   const [activeId, setActiveId] = useState('');
   const [query, setQuery] = useState('');
 
-  // First boot
   useEffect(() => {
     const list = readLS<Assistant[]>(LS_LIST) || [];
     if (!list.length) {
@@ -250,19 +291,16 @@ export default function VoiceAgentSection() {
     writeLS(LS_LIST, list); setAssistants(list);
   };
 
-  // New assistant is FRESH (blank)
+  /** Blank new assistant (user said: not cloned). */
   const addAssistant = () => {
     const id = `agent_${Math.random().toString(36).slice(2, 8)}`;
     const blank: Assistant = {
-      id,
-      name: 'New Assistant',
-      folder: 'Unfiled',
-      updatedAt: Date.now(),
+      id, name: 'New Assistant', folder: 'Unfiled', updatedAt: Date.now(),
       config: {
         model: { provider:'openai', model:'gpt-4o', firstMessageMode:'assistant_first', firstMessage:'', systemPrompt:'' },
         voice: { provider:'openai', voiceId:'', voiceLabel:'' },
         transcriber: { provider:'deepgram', model:'nova-2', language:'en', denoise:false, confidenceThreshold:0.4, numerals:false },
-        tools: { enableEndCall:true, dialKeypad:true },
+        tools: { enableEndCall:true, dialKeypad:true }
       }
     };
     writeLS(ak(id), blank);
@@ -273,63 +311,58 @@ export default function VoiceAgentSection() {
   const removeAssistant = (id: string) => {
     const list = assistants.filter(a => a.id !== id);
     writeLS(LS_LIST, list); setAssistants(list);
-    if (activeId === id) {
-      const first = list[0]?.id ?? '';
-      setActiveId(first);
-    }
+    if (activeId === id) setActiveId(list[0]?.id ?? '');
   };
 
-  // Generate/Edit modal state
+  // --- Generate flow state ---
+  const [quickRefine, setQuickRefine] = useState('');       // small inline input by the button
   const [editOpen, setEditOpen] = useState(false);
-  const [editText, setEditText] = useState('');
-  const [previewTyping, setPreviewTyping] = useState('');  // typing animation buffer
-  const [previewFull, setPreviewFull] = useState('');      // final rewritten prompt
+  const [previewTyping, setPreviewTyping] = useState('');
+  const [previewFull, setPreviewFull] = useState('');
   const [diff, setDiff] = useState<{text:string;type:'add'|'del'}[]>([]);
-  const [hasPending, setHasPending] = useState(false);     // whether Accept will apply something
+  const [hasPending, setHasPending] = useState(false);
 
-  // Kick off generation: rewrite + ensure data capture + build diff + animate typing
+  // Run generator with current/quickRefine
   const runGenerate = () => {
     if (!active) return;
-    const current = active.config.model.systemPrompt || '';
 
-    // 1) Combine current prompt with the user instruction minimally (we simply append guidance if provided)
-    const merged = editText.trim()
-      ? `${current ? `${current}\n\n` : ''}${editText.trim()}`
-      : current;
+    // 1) Ensure we start from your structure when empty/invalid
+    const base = ensureBase(active.config.model.systemPrompt || '');
 
-    // 2) Guarantee Name/Phone/Appointment Date present
-    const { next: ensured, additions } = ensureDataToCollect(merged);
+    // 2) Apply quick refinement (what user typed in the small box)
+    const withRef = applyRefinement(base, quickRefine);
 
-    // 3) Rewriting feel
-    const rewritten = rewritePromptFromScratch(ensured);
+    // 3) Guarantee Name / Phone / Appointment Date
+    const ensured = ensureDataToCollect(withRef).next;
 
-    // 4) Diff new vs old
-    const d = diffLines(current, rewritten).filter(x => x.type !== 'same');
+    // 4) Cosmetic rewrite
+    const rewritten = rewrite(ensured);
 
-    // 5) Animate typing of the new prompt
+    // 5) Diff + typing
+    const d = diffLines(active.config.model.systemPrompt || '', rewritten);
+    setDiff(d.filter(x => x.type === 'add' || x.type === 'del'));
     setPreviewFull(rewritten);
+    setHasPending(rewritten !== (active.config.model.systemPrompt || ''));
     setPreviewTyping('');
-    setDiff(d);
-    setHasPending(rewritten !== current);
+    setEditOpen(true);
 
-    // smooth typing
     const chars = [...rewritten];
     let i = 0;
     const step = () => {
-      i += Math.max(1, Math.floor(rewritten.length / 120)); // ~120 frames
+      i += Math.max(1, Math.floor(rewritten.length / 110));
       setPreviewTyping(rewritten.slice(0, Math.min(i, chars.length)));
       if (i < chars.length) requestAnimationFrame(step);
     };
     requestAnimationFrame(step);
   };
 
-  // Accept changes
   const acceptChanges = () => {
-    if (!active || !hasPending) { setEditOpen(false); return; }
+    if (!active) return;
+    if (!hasPending) { setEditOpen(false); return; }
     updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, systemPrompt: previewFull } } }));
     setEditOpen(false);
-    setEditText('');
     setHasPending(false);
+    setQuickRefine('');
   };
 
   const openaiVoices: Item[] = [{ value:'alloy', label:'Alloy (OpenAI)' }, { value:'ember', label:'Ember (OpenAI)' }];
@@ -340,17 +373,18 @@ export default function VoiceAgentSection() {
 
   return (
     <div className={`${SCOPE}`} style={{ background:'var(--bg)', color:'var(--text)' }}>
-      {/* Keep whole studio right of the main sidebar */}
+      {/* Everything sits to the right of the main sidebar */}
       <div className="flex w-full" style={{ marginLeft: SBW }}>
-        {/* =================== ASSISTANTS RAIL (fixed, below header, aligned) =================== */}
+        {/* =================== ASSISTANTS RAIL =================== */}
         <aside
           className="hidden lg:flex flex-col"
           style={{
             position:'fixed',
-            top: `calc(${HDR})`,
             left: SBW,
+            /* IMPORTANT: sit just under the header (not inside it) */
+            top: `calc(${HDR} + 6px)`,
+            height: `calc(100vh - ( ${HDR} + 6px ))`,
             width: `${RAIL_W}px`,
-            height: `calc(100vh - ${HDR})`,
             borderRight:'1px solid var(--va-border)',
             background:'var(--va-sidebar)',
             boxShadow:'var(--va-shadow-side)',
@@ -409,8 +443,8 @@ export default function VoiceAgentSection() {
 
         {/* =================================== EDITOR =================================== */}
         <main className="flex-1" style={{ paddingLeft: `${RAIL_W}px` }}>
-          {/* spacer equal to header so content starts below it */}
-          <div style={{ height: `calc(${HDR})` }} aria-hidden />
+          {/* header spacer to stay under app header + rail offset */}
+          <div style={{ height: `calc(${HDR} + 6px)` }} aria-hidden />
           <div className="px-6 py-4 flex items-center justify-between" style={{ borderBottom:'1px solid var(--va-border)', background:'var(--va-topbar)' }}>
             <div className="flex items-center gap-3">
               <Bot className="w-5 h-5 icon" />
@@ -432,7 +466,7 @@ export default function VoiceAgentSection() {
             </div>
           </div>
 
-          {/* WIDER canvas; small gap to rail */}
+          {/* wider canvas; small gap to rail */}
           <div className="mx-auto px-6 py-6 grid grid-cols-12 gap-7" style={{ maxWidth: '1680px' }}>
             <Section title="Model" icon={<FileText className="w-4 h-4 icon" />}>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
@@ -475,16 +509,24 @@ export default function VoiceAgentSection() {
 
               {/* System Prompt */}
               <div className="mt-6">
-                <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
                   <div className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="w-4 h-4 icon" /> System Prompt</div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {/* small inline refine input */}
+                    <input
+                      value={quickRefine}
+                      onChange={(e)=> setQuickRefine(e.target.value)}
+                      placeholder="Describe changes (e.g., capture name, phone, date)"
+                      className="rounded-md px-3 py-1.5 text-sm outline-none"
+                      style={{ minWidth: 280, background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)', color:'var(--text)' }}
+                    />
+                    <button onClick={()=> { setPreviewTyping(''); setPreviewFull(''); setDiff([]); setHasPending(false); runGenerate(); }} className="btn-primary">
+                      <Sparkles className="w-4 h-4 text-white" /> Generate
+                    </button>
                     <button
                       onClick={()=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, systemPrompt: '' } } }))}
                       className="btn-ghost"
                     ><RefreshCw className="w-4 h-4 icon" /> Reset</button>
-                    <button onClick={()=> { setEditOpen(true); setPreviewTyping(''); setPreviewFull(''); setDiff([]); setHasPending(false); }} className="btn-primary">
-                      Generate / Edit
-                    </button>
                   </div>
                 </div>
 
@@ -613,7 +655,7 @@ export default function VoiceAgentSection() {
         </main>
       </div>
 
-      {/* ======================== Generate / Edit Modal ======================== */}
+      {/* ======================== Generate / Preview Modal ======================== */}
       <AnimatePresence>
         {editOpen && (
           <motion.div className="fixed inset-0 z-[999] flex items-center justify-center p-4"
@@ -622,58 +664,34 @@ export default function VoiceAgentSection() {
             <motion.div initial={{ y:10, opacity:0, scale:.98 }} animate={{ y:0, opacity:1, scale:1 }} exit={{ y:8, opacity:0, scale:.985 }}
               className="w-full max-w-3xl rounded-lg overflow-hidden"
               style={{ background:'var(--va-card)', border:'1px solid var(--va-border)', boxShadow:'var(--va-shadow-lg)' }}>
-              {/* Header */}
               <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom:'1px solid var(--va-border)' }}>
-                <div className="flex items-center gap-2 text-sm font-semibold"><Edit3 className="w-4 h-4 icon" /> Generate Prompt</div>
+                <div className="flex items-center gap-2 text-sm font-semibold"><Edit3 className="w-4 h-4 icon" /> Proposed Prompt</div>
               </div>
 
-              {/* Body */}
               <div className="p-4 grid grid-cols-12 gap-4">
-                {/* Instruction input */}
-                <div className="col-span-12">
-                  <div className="mb-1.5 text-[13px] font-medium" style={{ color:'var(--text)' }}>Describe the change</div>
-                  <input
-                    value={editText}
-                    onChange={(e)=> setEditText(e.target.value)}
-                    placeholder="e.g., Make sure to capture the caller's Name, Phone Number, and Appointment Date."
-                    className="w-full rounded-md px-3 py-2 text-sm outline-none"
-                    style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)', color:'var(--text)' }}
-                  />
-                </div>
-
-                {/* Controls */}
-                <div className="col-span-12 flex items-center gap-2">
-                  <button onClick={runGenerate} className="btn-primary"><Sparkles className="w-4 h-4 text-white" /> Generate</button>
-                  <div className="text-xs" style={{ color:'var(--text-muted)' }}>* The generator rewrites your prompt and guarantees Name / Phone / Appointment Date are collected.</div>
-                </div>
-
-                {/* Typing Preview */}
                 <div className="col-span-12 md:col-span-7">
-                  <div className="mb-1.5 text-[13px] font-medium" style={{ color:'var(--text)' }}>Preview (rewritten)</div>
+                  <div className="mb-1.5 text-[13px] font-medium" style={{ color:'var(--text)' }}>Preview (typing)</div>
                   <pre className="rounded-md p-3 text-[12.5px] leading-5"
                     style={{ minHeight: 220, whiteSpace:'pre-wrap', background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', color:'var(--text)' }}>
 {previewTyping || '—'}
                   </pre>
                 </div>
 
-                {/* Diff Panel */}
                 <div className="col-span-12 md:col-span-5">
                   <div className="mb-1.5 text-[13px] font-medium" style={{ color:'var(--text)' }}>Changes</div>
                   <div className="rounded-md p-3 text-[12.5px] leading-5"
                     style={{ minHeight: 220, background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', color:'var(--text)' }}>
                     {diff.length === 0 ? (
-                      <div style={{ color:'var(--text-muted)' }}>No differences yet. Click <b>Generate</b> to see the proposed change.</div>
+                      <div style={{ color:'var(--text-muted)' }}>No differences (exactly the same).</div>
                     ) : (
                       <div className="space-y-1">
                         {diff.map((d, i) => (
                           <div key={i}
-                               style={{
-                                 background: d.type === 'add' ? 'rgba(16,185,129,.12)' : 'rgba(239,68,68,.12)',
-                                 border: `1px solid ${d.type === 'add' ? 'rgba(16,185,129,.35)' : 'rgba(239,68,68,.35)'}`,
-                                 color: d.type === 'add' ? 'var(--text)' : 'var(--text)',
-                                 borderRadius: 6,
-                                 padding: '6px 8px'
-                               }}>
+                            style={{
+                              background: d.type === 'add' ? 'rgba(16,185,129,.12)' : 'rgba(239,68,68,.12)',
+                              border: `1px solid ${d.type === 'add' ? 'rgba(16,185,129,.35)' : 'rgba(239,68,68,.35)'}`,
+                              borderRadius: 6, padding: '6px 8px'
+                            }}>
                             <span style={{ fontWeight: 700, marginRight: 6, color: d.type === 'add' ? ACCENT : '#ef4444' }}>
                               {d.type === 'add' ? '+' : '−'}
                             </span>{d.text}
@@ -685,9 +703,8 @@ export default function VoiceAgentSection() {
                 </div>
               </div>
 
-              {/* Footer */}
               <div className="px-4 py-3 flex items-center justify-end gap-2" style={{ borderTop:'1px solid var(--va-border)' }}>
-                <button onClick={()=> { setEditOpen(false); setEditText(''); }} className="btn-ghost">Cancel</button>
+                <button onClick={()=> { setEditOpen(false); }} className="btn-ghost">Cancel</button>
                 <button onClick={acceptChanges} disabled={!hasPending} className="btn-primary">
                   {hasPending ? 'Accept Changes' : 'No Changes'}
                 </button>
@@ -741,7 +758,7 @@ export default function VoiceAgentSection() {
 
         .${SCOPE} .icon{ color: var(--accent); }
 
-        /* Buttons = API Keys style (green + white) */
+        /* Buttons styled like API Keys page (green/white) */
         .${SCOPE} .btn-primary{
           display:inline-flex;align-items:center;gap:.5rem;
           padding:.55rem .9rem;border-radius:12px;
@@ -811,3 +828,7 @@ function Section({ title, icon, children }:{ title: string; icon: React.ReactNod
     </div>
   );
 }
+
+/* Voice lists */
+const openaiVoices: Item[] = [{ value:'alloy', label:'Alloy (OpenAI)' }, { value:'ember', label:'Ember (OpenAI)' }];
+const elevenVoices: Item[] = [{ value:'rachel', label:'Rachel (ElevenLabs)' }, { value:'adam', label:'Adam (ElevenLabs)' }, { value:'bella', label:'Bella (ElevenLabs)' }];
