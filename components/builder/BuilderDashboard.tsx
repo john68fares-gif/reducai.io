@@ -288,7 +288,7 @@ export default function BuilderDashboard() {
     setSyncMsg('Preparing…');
 
     try {
-      // find a key to use: prefer selected in step2, else first in apiKeys.v1
+      // find a key to use
       let apiKeyPlain = '';
       const ss = await scopedStorage();
       await ss.ensureOwnerGuard();
@@ -315,7 +315,7 @@ export default function BuilderDashboard() {
       const items: any[] = data.items || [];
       setSyncMsg(`Fetched ${items.length} assistants. Saving…`);
 
-      // Map OpenAI assistants -> Bot shape, save both storages
+      // Map -> Bot and save
       for (const a of items) {
         const build: Bot = normalize({
           id: a.id,
@@ -323,8 +323,8 @@ export default function BuilderDashboard() {
           name: a.name || 'Untitled Assistant',
           model: a.model || 'gpt-4o-mini',
           prompt: a.instructions || '',
-          industry: '', // unknown from OpenAI list
-          language: '', // unknown from OpenAI list
+          industry: '',
+          language: '',
           type: 'ai automation',
           createdAt: a.created_at || nowISO(),
           updatedAt: a.updated_at || a.created_at || nowISO(),
@@ -332,7 +332,6 @@ export default function BuilderDashboard() {
         await saveBuildEverywhere(build);
       }
 
-      // reload merged view
       const merged = mergeByAssistantId(readLocal(), await readCloud());
       setBots(merged);
       writeLocal(merged);
