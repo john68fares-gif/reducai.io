@@ -7,7 +7,7 @@ import {
   Sparkles, Building2, Languages as LangIcon, ChevronDown, Search, ArrowRight,
 } from 'lucide-react';
 
-/* --- Button palette (kept) --- */
+/* Brand button (keep your existing green so we don’t change your palette) */
 const BTN_GREEN = '#59d9b3';
 const BTN_GREEN_HOVER = '#54cfa9';
 const BTN_DISABLED = '#2e6f63';
@@ -15,7 +15,7 @@ const BTN_DISABLED = '#2e6f63';
 type Props = { onNext?: () => void };
 
 /* =================================================================================
-   Step V1 — Voice Basics  (logic unchanged; Accent picker now matches Language UI)
+   Step V1 — Voice Basics  (logic unchanged except: Accent dropdown is custom now)
 ================================================================================= */
 export default function StepV1Basics({ onNext }: Props) {
   const [name, setName] = useState('');
@@ -84,16 +84,25 @@ export default function StepV1Basics({ onNext }: Props) {
 
       {/* Form Card */}
       <div
-        className="relative p-6 sm:p-8 rounded-[28px] animate-[popIn_180ms_var(--ease,_ease-out)_both]"
-        style={{ background: 'var(--vs-card)', border: '1px solid var(--vs-border)', boxShadow: 'var(--vs-shadow)' }}
+        className="relative p-6 sm:p-8 rounded-[28px] animate-[popIn_180ms_var(--ease,_ease-out)_both] glow-spot"
+        style={{
+          background: 'var(--vs-card)',
+          border: '1px solid var(--vs-border)',
+          boxShadow: 'var(--vs-shadow)',
+        }}
       >
+        {/* radial brand glow behind */}
         <div
           aria-hidden
           className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
-          style={{ background: 'radial-gradient(circle, var(--vs-ring) 0%, transparent 70%)', filter: 'blur(38px)' }}
+          style={{
+            background: 'radial-gradient(circle, var(--vs-ring) 0%, transparent 70%)',
+            filter: 'blur(38px)',
+          }}
         />
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Name */}
+          {/* Agent name */}
           <FieldShell label="Agent Name" error={errors.name}>
             <div className="flex items-center gap-2">
               <Sparkles className="w-4 h-4" style={{ color: 'var(--brand)' }} />
@@ -121,12 +130,12 @@ export default function StepV1Basics({ onNext }: Props) {
             </div>
           </FieldShell>
 
-          {/* Language (kept as-is) */}
+          {/* Language */}
           <FieldShell label="Language" error={errors.language}>
             <LanguageSelect value={language} onChange={setLanguage} />
           </FieldShell>
 
-          {/* Accent — now same UI as LanguageSelect */}
+          {/* Dialect / Accent (country ISO2) — now same component style as Language */}
           <FieldShell
             label={
               <>
@@ -135,7 +144,7 @@ export default function StepV1Basics({ onNext }: Props) {
             }
             error={errors.accent}
           >
-            <AccentSelect value={accentIso2} onChange={(v) => setAccentIso2(v.toUpperCase())} />
+            <AccentSelect iso2={accentIso2} onChange={(iso2) => setAccentIso2(iso2.toUpperCase())} />
           </FieldShell>
         </div>
 
@@ -148,7 +157,9 @@ export default function StepV1Basics({ onNext }: Props) {
             style={{
               background: canNext ? BTN_GREEN : BTN_DISABLED,
               color: '#ffffff',
-              boxShadow: canNext ? '0 12px 26px rgba(0,0,0,.18), 0 0 0 1px rgba(255,255,255,.06)' : 'none',
+              boxShadow: canNext
+                ? '0 12px 26px rgba(0,0,0,.18), 0 0 0 1px rgba(255,255,255,.06)'
+                : 'none',
             }}
             onMouseEnter={(e) => {
               if (!canNext) return;
@@ -164,7 +175,7 @@ export default function StepV1Basics({ onNext }: Props) {
         </div>
       </div>
 
-      {/* Step-scoped theme tokens (light + dark) */}
+      {/* Scoped theme vars + animations for Step 1 */}
       <style jsx global>{`
         @keyframes popIn { 0% { opacity: 0; transform: scale(.985); } 100% { opacity: 1; transform: scale(1); } }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
@@ -182,12 +193,6 @@ export default function StepV1Basics({ onNext }: Props) {
 
           --vs-chip-bg: rgba(0,255,194,.10);
           --vs-chip-border: rgba(0,255,194,.30);
-
-          --vs-menu-bg: #ffffff;
-          --vs-menu-border: rgba(0,0,0,.10);
-          --vs-menu-shadow: 0 28px 70px rgba(0,0,0,.12), 0 12px 28px rgba(0,0,0,.10), 0 0 0 1px rgba(0,0,0,.02);
-          --vs-option-hover: rgba(0,255,194,.08);
-          --vs-option-border: rgba(0,255,194,.32);
         }
 
         /* DARK */
@@ -205,12 +210,6 @@ export default function StepV1Basics({ onNext }: Props) {
 
           --vs-chip-bg: rgba(0,255,194,.10);
           --vs-chip-border: rgba(0,255,194,.28);
-
-          --vs-menu-bg: #101314;
-          --vs-menu-border: rgba(255,255,255,.16);
-          --vs-menu-shadow: 0 36px 90px rgba(0,0,0,.60), 0 14px 34px rgba(0,0,0,.45), 0 0 0 1px rgba(0,255,194,.08);
-          --vs-option-hover: rgba(0,255,194,.10);
-          --vs-option-border: rgba(0,255,194,.35);
         }
       `}</style>
     </section>
@@ -250,7 +249,7 @@ function FieldShell({
   );
 }
 
-/* ---------------------------- LanguageSelect (kept) ---------------------------- */
+/* ---------------------------- Styled LanguageSelect ---------------------------- */
 function LanguageSelect({
   value,
   onChange,
@@ -258,7 +257,16 @@ function LanguageSelect({
   value: 'English' | 'Spanish' | 'French' | 'Arabic' | 'German' | 'Portuguese' | 'Chinese' | 'Japanese';
   onChange: (v: any) => void;
 }) {
-  const options = ['English','Spanish','French','Arabic','German','Portuguese','Chinese','Japanese'] as const;
+  const options = [
+    'English',
+    'Spanish',
+    'French',
+    'Arabic',
+    'German',
+    'Portuguese',
+    'Chinese',
+    'Japanese',
+  ] as const;
 
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -289,6 +297,7 @@ function LanguageSelect({
 
   return (
     <>
+      {/* trigger — same size/roundness as accent trigger */}
       <button
         ref={btnRef}
         type="button"
@@ -303,11 +312,12 @@ function LanguageSelect({
       >
         <span className="flex items-center gap-2">
           <LangIcon className="w-4 h-4" style={{ color: 'var(--brand)' }} />
-          <span>{value}</span>
         </span>
+        <span className="flex-1 text-left">{value}</span>
         <ChevronDown className="w-4 h-4 opacity-80" style={{ color: 'var(--text-muted)' }} />
       </button>
 
+      {/* dropdown portal */}
       {open && rect && typeof document !== 'undefined'
         ? createPortal(
             <div
@@ -318,12 +328,21 @@ function LanguageSelect({
                 left: rect.left,
                 width: rect.width,
                 transform: rect.openUp ? 'translateY(-100%)' : 'none',
-                background: 'var(--vs-menu-bg)',
-                border: '1px solid var(--vs-menu-border)',
+                background: 'var(--vs-menu-bg, #ffffff)',
+                border: '1px solid var(--vs-menu-border, rgba(0,0,0,.10))',
                 borderRadius: 20,
-                boxShadow: 'var(--vs-menu-shadow)',
+                boxShadow:
+                  '0 28px 70px rgba(0,0,0,.12), 0 10px 26px rgba(0,0,0,.08), 0 0 0 1px rgba(0,0,0,.02)',
               }}
             >
+              <style jsx global>{`
+                /* menu theming for dark */
+                [data-theme="dark"] .voice-step-scope ~ .fixed {
+                  --vs-menu-bg: #101314;
+                  --vs-menu-border: rgba(255,255,255,.16);
+                }
+              `}</style>
+
               <div
                 className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[12px]"
                 style={{
@@ -347,12 +366,15 @@ function LanguageSelect({
                 {filtered.map((opt) => (
                   <button
                     key={opt}
-                    onClick={() => { onChange(opt); setOpen(false); }}
+                    onClick={() => {
+                      onChange(opt);
+                      setOpen(false);
+                    }}
                     className="w-full flex items-center gap-3 px-3 py-2 rounded-[10px] text-left transition"
                     style={{ background: 'transparent', border: '1px solid transparent', color: 'var(--text)' }}
                     onMouseEnter={(e) => {
-                      (e.currentTarget as HTMLButtonButtonElement).style.background = 'var(--vs-option-hover)';
-                      (e.currentTarget as HTMLButtonElement).style.border = '1px solid var(--vs-option-border)';
+                      (e.currentTarget as HTMLButtonElement).style.background = 'rgba(0,255,194,0.10)';
+                      (e.currentTarget as HTMLButtonElement).style.border = '1px solid rgba(0,255,194,0.35)';
                     }}
                     onMouseLeave={(e) => {
                       (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
@@ -377,7 +399,8 @@ function LanguageSelect({
   );
 }
 
-/* ---------------------------- AccentSelect (NEW) ---------------------------- */
+/* -------------------------- AccentSelect (new) -------------------------- */
+
 type Country = { iso2: string; name: string; dial: string };
 const COUNTRIES: Country[] = [
   { iso2: 'US', name: 'United States', dial: '+1' },
@@ -390,81 +413,36 @@ const COUNTRIES: Country[] = [
   { iso2: 'FR', name: 'France', dial: '+33' },
   { iso2: 'ES', name: 'Spain', dial: '+34' },
   { iso2: 'IT', name: 'Italy', dial: '+39' },
-  { iso2: 'PT', name: 'Portugal', dial: '+351' },
-  { iso2: 'NL', name: 'Netherlands', dial: '+31' },
-  { iso2: 'BE', name: 'Belgium', dial: '+32' },
-  { iso2: 'SE', name: 'Sweden', dial: '+46' },
-  { iso2: 'NO', name: 'Norway', dial: '+47' },
-  { iso2: 'DK', name: 'Denmark', dial: '+45' },
-  { iso2: 'FI', name: 'Finland', dial: '+358' },
-  { iso2: 'CH', name: 'Switzerland', dial: '+41' },
-  { iso2: 'AT', name: 'Austria', dial: '+43' },
-  { iso2: 'PL', name: 'Poland', dial: '+48' },
-  { iso2: 'CZ', name: 'Czechia', dial: '+420' },
-  { iso2: 'HU', name: 'Hungary', dial: '+36' },
-  { iso2: 'RO', name: 'Romania', dial: '+40' },
-  { iso2: 'GR', name: 'Greece', dial: '+30' },
-  { iso2: 'TR', name: 'Türkiye', dial: '+90' },
-  { iso2: 'RU', name: 'Russia', dial: '+7' },
-  { iso2: 'UA', name: 'Ukraine', dial: '+380' },
-  { iso2: 'CN', name: 'China', dial: '+86' },
-  { iso2: 'JP', name: 'Japan', dial: '+81' },
-  { iso2: 'KR', name: 'South Korea', dial: '+82' },
-  { iso2: 'HK', name: 'Hong Kong', dial: '+852' },
-  { iso2: 'TW', name: 'Taiwan', dial: '+886' },
-  { iso2: 'SG', name: 'Singapore', dial: '+65' },
-  { iso2: 'MY', name: 'Malaysia', dial: '+60' },
-  { iso2: 'TH', name: 'Thailand', dial: '+66' },
-  { iso2: 'VN', name: 'Vietnam', dial: '+84' },
-  { iso2: 'PH', name: 'Philippines', dial: '+63' },
   { iso2: 'IN', name: 'India', dial: '+91' },
-  { iso2: 'PK', name: 'Pakistan', dial: '+92' },
-  { iso2: 'BD', name: 'Bangladesh', dial: '+880' },
-  { iso2: 'AE', name: 'United Arab Emirates', dial: '+971' },
-  { iso2: 'SA', name: 'Saudi Arabia', dial: '+966' },
-  { iso2: 'QA', name: 'Qatar', dial: '+974' },
-  { iso2: 'KW', name: 'Kuwait', dial: '+965' },
-  { iso2: 'EG', name: 'Egypt', dial: '+20' },
-  { iso2: 'ZA', name: 'South Africa', dial: '+27' },
-  { iso2: 'NG', name: 'Nigeria', dial: '+234' },
-  { iso2: 'KE', name: 'Kenya', dial: '+254' },
-  { iso2: 'BR', name: 'Brazil', dial: '+55' },
-  { iso2: 'AR', name: 'Argentina', dial: '+54' },
-  { iso2: 'CL', name: 'Chile', dial: '+56' },
-  { iso2: 'CO', name: 'Colombia', dial: '+57' },
-  { iso2: 'MX', name: 'Mexico', dial: '+52' },
-  // (You can extend this list or import a shared country dataset)
+  { iso2: 'SG', name: 'Singapore', dial: '+65' },
 ];
 
 function AccentSelect({
-  value,
+  iso2,
   onChange,
 }: {
-  value: string; // ISO2
+  iso2: string;
   onChange: (iso2: string) => void;
 }) {
-  const current = COUNTRIES.find((c) => c.iso2 === value) || COUNTRIES[0];
-
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const btnRef = useRef<HTMLButtonElement | null>(null);
   const portalRef = useRef<HTMLDivElement | null>(null);
   const [rect, setRect] = useState<{ top: number; left: number; width: number; openUp: boolean } | null>(null);
 
-  const norm = (s: string) => s.toLowerCase();
-  const filtered = COUNTRIES.filter(
-    (c) =>
-      norm(c.name).includes(norm(query)) ||
-      norm(c.iso2).includes(norm(query)) ||
-      c.dial.replace('+', '').startsWith(query.replace('+', ''))
-  );
+  const selected = COUNTRIES.find(c => c.iso2 === (iso2 || '').toUpperCase()) || COUNTRIES[0];
+
+  const filtered = COUNTRIES.filter(c => {
+    const q = query.trim().toLowerCase();
+    return !q || c.name.toLowerCase().includes(q) || c.iso2.toLowerCase().includes(q) || c.dial.includes(q);
+  });
 
   useLayoutEffect(() => {
     if (!open) return;
     const r = btnRef.current?.getBoundingClientRect();
     if (!r) return;
     const viewH = window.innerHeight;
-    const openUp = r.bottom + 420 > viewH;
+    const openUp = r.bottom + 360 > viewH;
     setRect({ top: openUp ? r.top : r.bottom, left: r.left, width: r.width, openUp });
   }, [open]);
 
@@ -480,11 +458,10 @@ function AccentSelect({
 
   return (
     <>
-      {/* trigger — identical to LanguageSelect */}
       <button
         ref={btnRef}
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setOpen(v => !v)}
         className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-[14px] text-sm transition will-change-transform"
         style={{
           background: 'var(--vs-input-bg)',
@@ -496,13 +473,12 @@ function AccentSelect({
         <span className="flex items-center gap-2">
           <LangIcon className="w-4 h-4" style={{ color: 'var(--brand)' }} />
           <span className="truncate">
-            {current?.iso2 || value} {current ? ` ${current.name} (${current.dial})` : ''}
+            {selected.iso2}&nbsp;&nbsp;{selected.name}&nbsp;&nbsp;<span style={{ color: 'var(--text-muted)' }}>{selected.dial}</span>
           </span>
         </span>
         <ChevronDown className="w-4 h-4 opacity-80" style={{ color: 'var(--text-muted)' }} />
       </button>
 
-      {/* dropdown portal — identical shell */}
       {open && rect && typeof document !== 'undefined'
         ? createPortal(
             <div
@@ -513,12 +489,19 @@ function AccentSelect({
                 left: rect.left,
                 width: rect.width,
                 transform: rect.openUp ? 'translateY(-100%)' : 'none',
-                background: 'var(--vs-menu-bg)',
-                border: '1px solid var(--vs-menu-border)',
+                background: 'var(--vs-menu-bg, #ffffff)',
+                border: '1px solid var(--vs-menu-border, rgba(0,0,0,.10))',
                 borderRadius: 20,
-                boxShadow: 'var(--vs-menu-shadow)',
+                boxShadow: '0 28px 70px rgba(0,0,0,.12), 0 10px 26px rgba(0,0,0,.08), 0 0 0 1px rgba(0,0,0,.02)',
               }}
             >
+              <style jsx global>{`
+                [data-theme="dark"] .voice-step-scope ~ .fixed {
+                  --vs-menu-bg: #101314;
+                  --vs-menu-border: rgba(255,255,255,.16);
+                }
+              `}</style>
+
               <div
                 className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[12px]"
                 style={{
@@ -538,7 +521,7 @@ function AccentSelect({
                 />
               </div>
 
-              <div className="max-h-96 overflow-y-auto pr-1" style={{ scrollbarWidth: 'thin' }}>
+              <div className="max-h-80 overflow-y-auto pr-1" style={{ scrollbarWidth: 'thin' }}>
                 {filtered.map((c) => (
                   <button
                     key={c.iso2}
@@ -546,17 +529,17 @@ function AccentSelect({
                     className="w-full flex items-center gap-3 px-3 py-2 rounded-[10px] text-left transition"
                     style={{ background: 'transparent', border: '1px solid transparent', color: 'var(--text)' }}
                     onMouseEnter={(e) => {
-                      (e.currentTarget as HTMLButtonElement).style.background = 'var(--vs-option-hover)';
-                      (e.currentTarget as HTMLButtonElement).style.border = '1px solid var(--vs-option-border)';
+                      (e.currentTarget as HTMLButtonElement).style.background = 'rgba(0,255,194,0.10)';
+                      (e.currentTarget as HTMLButtonElement).style.border = '1px solid rgba(0,255,194,0.35)';
                     }}
                     onMouseLeave={(e) => {
                       (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
                       (e.currentTarget as HTMLButtonElement).style.border = '1px solid transparent';
                     }}
                   >
-                    <span className="w-10 text-xs opacity-80">{c.iso2}</span>
+                    <span className="w-10 shrink-0" style={{ color: 'var(--text-muted)' }}>{c.iso2}</span>
                     <span className="flex-1 truncate">{c.name}</span>
-                    <span className="text-xs opacity-70">{c.dial}</span>
+                    <span style={{ color: 'var(--text-muted)' }}>{c.dial}</span>
                   </button>
                 ))}
                 {filtered.length === 0 && (
