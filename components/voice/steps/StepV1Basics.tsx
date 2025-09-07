@@ -8,16 +8,12 @@ import {
 } from 'lucide-react';
 import CountryDialSelect from '@/components/phone-numbers/CountryDialSelect';
 
-/* Brand button (keep your existing green so we don’t change your palette) */
 const BTN_GREEN = '#59d9b3';
 const BTN_GREEN_HOVER = '#54cfa9';
 const BTN_DISABLED = '#2e6f63';
 
 type Props = { onNext?: () => void };
 
-/* =================================================================================
-   Step V1 — Voice Basics  (logic unchanged)
-================================================================================= */
 export default function StepV1Basics({ onNext }: Props) {
   const [name, setName] = useState('');
   const [industry, setIndustry] = useState('');
@@ -64,6 +60,46 @@ export default function StepV1Basics({ onNext }: Props) {
     onNext?.();
   }
 
+  /* === react-select style override for the ACCENT picker (light + dark) === */
+  const accentStyles: any = {
+    control: (base: any, state: any) => ({
+      ...base,
+      background: 'var(--vs-input-bg)',
+      borderColor: state.isFocused ? 'var(--brand)' : 'var(--vs-input-border)',
+      boxShadow: 'var(--vs-input-shadow)',
+      minHeight: 42,
+      borderRadius: 14,
+      color: 'var(--text)',
+      '&:hover': { borderColor: state.isFocused ? 'var(--brand)' : 'var(--vs-input-border)' },
+    }),
+    singleValue: (base: any) => ({ ...base, color: 'var(--text)' }),
+    placeholder: (base: any) => ({ ...base, color: 'var(--text-muted)' }),
+    input: (base: any) => ({ ...base, color: 'var(--text)' }),
+    valueContainer: (base: any) => ({ ...base, paddingInline: 8 }),
+    indicatorsContainer: (base: any) => ({ ...base, color: 'var(--text-muted)' }),
+    dropdownIndicator: (base: any) => ({ ...base, color: 'var(--text-muted)' }),
+    clearIndicator: (base: any) => ({ ...base, color: 'var(--text-muted)' }),
+    menuPortal: (base: any) => ({ ...base, zIndex: 9999 }),
+    menu: (base: any) => ({
+      ...base,
+      background: 'var(--vs-menu-bg)',
+      border: '1px solid var(--vs-menu-border)',
+      boxShadow: 'var(--vs-menu-shadow)',
+      borderRadius: 16,
+      overflow: 'hidden',
+    }),
+    menuList: (base: any) => ({ ...base, padding: 6, maxHeight: 420 }),
+    option: (base: any, state: any) => ({
+      ...base,
+      color: 'var(--text)',
+      borderRadius: 10,
+      margin: 2,
+      backgroundColor: state.isSelected || state.isFocused ? 'var(--vs-option-hover)' : 'transparent',
+      border: `1px solid ${state.isSelected || state.isFocused ? 'var(--vs-option-border)' : 'transparent'}`,
+      ':active': { backgroundColor: 'var(--vs-option-hover)' },
+    }),
+  };
+
   return (
     <section className="relative voice-step-scope">
       {/* Header */}
@@ -92,18 +128,13 @@ export default function StepV1Basics({ onNext }: Props) {
           boxShadow: 'var(--vs-shadow)',
         }}
       >
-        {/* radial brand glow behind */}
         <div
           aria-hidden
           className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
-          style={{
-            background: 'radial-gradient(circle, var(--vs-ring) 0%, transparent 70%)',
-            filter: 'blur(38px)',
-          }}
+          style={{ background: 'radial-gradient(circle, var(--vs-ring) 0%, transparent 70%)', filter: 'blur(38px)' }}
         />
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Agent name */}
           <FieldShell label="Agent Name" error={errors.name}>
             <div className="flex items-center gap-2">
               <Sparkles className="w-4 h-4" style={{ color: 'var(--brand)' }} />
@@ -117,7 +148,6 @@ export default function StepV1Basics({ onNext }: Props) {
             </div>
           </FieldShell>
 
-          {/* Industry */}
           <FieldShell label="Industry" error={errors.industry}>
             <div className="flex items-center gap-2">
               <Building2 className="w-4 h-4" style={{ color: 'var(--brand)' }} />
@@ -131,32 +161,27 @@ export default function StepV1Basics({ onNext }: Props) {
             </div>
           </FieldShell>
 
-          {/* Language (keep as-is; DO NOT CHANGE) */}
+          {/* Language (unchanged) */}
           <FieldShell label="Language" error={errors.language}>
             <LanguageSelect value={language} onChange={setLanguage} />
           </FieldShell>
 
-          {/* Dialect / Accent (country ISO2) — themed for light + dark */}
+          {/* Accent — SAME look as Language by forcing react-select styles */}
           <FieldShell
-            label={
-              <>
-                Dialect / Accent <span className="text-xs" style={{ color: 'var(--text-muted)' }}>(choose country)</span>
-              </>
-            }
+            label={<>Dialect / Accent <span className="text-xs" style={{ color: 'var(--text-muted)' }}>(choose country)</span></>}
             error={errors.accent}
           >
             <CountryDialSelect
               id="voice-accent"
               value={accentIso2}
               onChange={(iso2 /* , dial */) => setAccentIso2(iso2.toUpperCase())}
-              /* IMPORTANT: prefix & portal so we can theme the portaled menu */
               classNamePrefix="accent"
+              styles={accentStyles}
               menuPortalTarget={typeof document !== 'undefined' ? document.body : undefined}
             />
           </FieldShell>
         </div>
 
-        {/* Actions */}
         <div className="mt-8 flex justify-end">
           <button
             disabled={!canNext}
@@ -165,9 +190,7 @@ export default function StepV1Basics({ onNext }: Props) {
             style={{
               background: canNext ? BTN_GREEN : BTN_DISABLED,
               color: '#ffffff',
-              boxShadow: canNext
-                ? '0 12px 26px rgba(0,0,0,.18), 0 0 0 1px rgba(255,255,255,.06)'
-                : 'none',
+              boxShadow: canNext ? '0 12px 26px rgba(0,0,0,.18), 0 0 0 1px rgba(255,255,255,.06)' : 'none',
             }}
             onMouseEnter={(e) => {
               if (!canNext) return;
@@ -183,7 +206,7 @@ export default function StepV1Basics({ onNext }: Props) {
         </div>
       </div>
 
-      {/* Scoped theme vars + menu styles ONLY for the accent dropdown */}
+      {/* Theme tokens used by both controls */}
       <style jsx global>{`
         @keyframes popIn { 0% { opacity: 0; transform: scale(.985); } 100% { opacity: 1; transform: scale(1); } }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
@@ -202,7 +225,6 @@ export default function StepV1Basics({ onNext }: Props) {
           --vs-chip-bg: rgba(0,255,194,.10);
           --vs-chip-border: rgba(0,255,194,.30);
 
-          /* ACCENT MENU (react-select) */
           --vs-menu-bg: #ffffff;
           --vs-menu-border: rgba(0,0,0,.10);
           --vs-menu-shadow: 0 28px 70px rgba(0,0,0,.12), 0 12px 28px rgba(0,0,0,.10), 0 0 0 1px rgba(0,0,0,.02);
@@ -226,59 +248,12 @@ export default function StepV1Basics({ onNext }: Props) {
           --vs-chip-bg: rgba(0,255,194,.10);
           --vs-chip-border: rgba(0,255,194,.28);
 
-          /* ACCENT MENU (react-select) */
           --vs-menu-bg: #101314;
           --vs-menu-border: rgba(255,255,255,.16);
           --vs-menu-shadow: 0 36px 90px rgba(0,0,0,.60), 0 14px 34px rgba(0,0,0,.45), 0 0 0 1px rgba(0,255,194,.08);
           --vs-option-hover: rgba(0,255,194,.10);
           --vs-option-border: rgba(0,255,194,.35);
         }
-
-        /* ===== CountryDialSelect (react-select style) — accent dropdown only =====
-           We rely on classNamePrefix="accent" so the generated nodes get .accent__* classes.
-           These rules style the control and the MENU even when it is portaled to <body>.
-        */
-        .accent__control{
-          background: var(--vs-input-bg) !important;
-          border: 1px solid var(--vs-input-border) !important;
-          box-shadow: var(--vs-input-shadow) !important;
-          min-height: 42px;
-          border-radius: 14px !important;
-          color: var(--text) !important;
-        }
-        .accent__single-value,
-        .accent__input-container,
-        .accent__placeholder{ color: var(--text) !important; opacity:.92; }
-
-        .accent__menu{
-          background: var(--vs-menu-bg) !important;
-          border: 1px solid var(--vs-menu-border) !important;
-          box-shadow: var(--vs-menu-shadow) !important;
-          border-radius: 16px !important;
-          overflow: hidden;
-          z-index: 9999; /* ensure above panel */
-        }
-        .accent__menu-list{
-          padding: 6px !important;
-          max-height: 420px !important;
-        }
-        .accent__option{
-          color: var(--text) !important;
-          border: 1px solid transparent;
-          border-radius: 10px;
-          margin: 2px;
-        }
-        .accent__option--is-focused{
-          background: var(--vs-option-hover) !important;
-          border-color: var(--vs-option-border) !important;
-        }
-        .accent__option--is-selected{
-          background: var(--vs-option-hover) !important;
-          border-color: var(--vs-option-border) !important;
-        }
-        .accent__indicator,
-        .accent__dropdown-indicator,
-        .accent__clear-indicator{ color: var(--text-muted) !important; }
       `}</style>
     </section>
   );
@@ -317,7 +292,7 @@ function FieldShell({
   );
 }
 
-/* ---------------------------- LanguageSelect (UNCHANGED) ---------------------------- */
+/* ---------------------------- LanguageSelect (unchanged) ---------------------------- */
 function LanguageSelect({
   value,
   onChange,
@@ -365,7 +340,6 @@ function LanguageSelect({
 
   return (
     <>
-      {/* trigger — same size/roundness as accent trigger */}
       <button
         ref={btnRef}
         type="button"
@@ -385,7 +359,6 @@ function LanguageSelect({
         <ChevronDown className="w-4 h-4 opacity-80" style={{ color: 'var(--text-muted)' }} />
       </button>
 
-      {/* dropdown portal */}
       {open && rect && typeof document !== 'undefined'
         ? createPortal(
             <div
@@ -425,14 +398,11 @@ function LanguageSelect({
                 {filtered.map((opt) => (
                   <button
                     key={opt}
-                    onClick={() => {
-                      onChange(opt);
-                      setOpen(false);
-                    }}
+                    onClick={() => { onChange(opt); setOpen(false); }}
                     className="w-full flex items-center gap-3 px-3 py-2 rounded-[10px] text-left transition"
                     style={{ background: 'transparent', border: '1px solid transparent', color: 'var(--text)' }}
                     onMouseEnter={(e) => {
-                      (e.currentTarget as HTMLButtonButtonElement).style.background = 'var(--vs-option-hover)';
+                      (e.currentTarget as HTMLButtonElement).style.background = 'var(--vs-option-hover)';
                       (e.currentTarget as HTMLButtonElement).style.border = '1px solid var(--vs-option-border)';
                     }}
                     onMouseLeave={(e) => {
