@@ -1,3 +1,4 @@
+// components/voice/VoiceAgentSection.tsx
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
@@ -15,6 +16,7 @@ import { scopedStorage, migrateLegacyKeysToUser } from '@/utils/scoped-storage';
 
 type Agent = {
   id: string;
+  assistantId?: string;
   name: string;
   type?: string;           // "voice"
   language?: string;
@@ -23,14 +25,8 @@ type Agent = {
   createdAt?: string;
 };
 
-const UI = {
-  cardBg: 'var(--card)',
-  border: '1px solid var(--border)',
-  cardShadow: 'var(--shadow-card)',
-};
-
-const nowISO = () => new Date().toISOString();
-const fmt = (iso?: string) => (iso ? new Date(iso).toLocaleDateString() : '');
+const BTN_GREEN = '#10b981';
+const BTN_GREEN_HOVER = '#0ea473';
 
 const fadeUp = {
   initial: { opacity: 0, y: 12 },
@@ -38,14 +34,21 @@ const fadeUp = {
   transition: { duration: 0.22 },
 };
 
+const nowISO = () => new Date().toISOString();
+const fmt = (iso?: string) => (iso ? new Date(iso).toLocaleDateString() : '');
+
+/* -----------------------------------------------------------
+   VoiceAgentSection
+----------------------------------------------------------- */
 export default function VoiceAgentSection() {
   const [mode, setMode] = useState<'gallery' | 'wizard' | 'editor'>('gallery');
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [editingId, setEditingId] = useState<string>('');
 
-  // ====== GALLERY DATA (per-account storage) ======
+  // ====== GALLERY DATA (merged Local + Cloud, like BuilderDashboard) ======
   const [query, setQuery] = useState('');
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [confirmDelId, setConfirmDelId] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -53,28 +56,68 @@ export default function VoiceAgentSection() {
       await ss.ensureOwnerGuard();
       await migrateLegacyKeysToUser();
 
-      const read = async () => {
-        const arr = await ss.getJSON<any[]>('chatbots', []);
-        const onlyVoice = Array.isArray(arr)
-          ? arr.filter((b: any) => (b?.type || 'voice') === 'voice')
-          : [];
-        setAgents(
-          onlyVoice
-            .map((b: any) => ({
-              id: b.id,
-              name: b.name || 'Untitled',
-              type: b.type || 'voice',
-              language: b.language,
-              fromE164: b.fromE164,
-              updatedAt: b.updatedAt || b.createdAt || nowISO(),
-              createdAt: b.createdAt || nowISO(),
-            }))
-            .sort((a, b) => Date.parse(b.updatedAt!) - Date.parse(a.updatedAt!))
-        );
+      const readMerged = async () => {
+        // Local (legacy)
+        const localArr = ((): any[] => {
+          try { return JSON.parse(localStorage.getItem('chatbots') || '[]') || []; }
+          catch { return []; }
+        })();
+
+        // Cloud (per-account)
+        const cloudArr = await ss.getJSON<any[]>('chatbots.v1', []);
+
+        // Only voice
+        const pickVoice = (arr: any[]) =>
+          (Array.isArray(arr) ? arr : [])
+            .filter((b) => (b?.type || 'voice') === 'voice');
+
+        const L = pickVoice(localArr);
+        const C = pickVoice(cloudArr);
+
+        // Merge & dedupe by assistantId || id, prefer newest updatedAt
+        const map = new Map<string, any>();
+        const add = (b: any, source: 'local' | 'cloud') => {
+          const key = String(b.assistantId || b.id || '');
+          if (!key) return;
+          const current = map.get(key);
+          if (!current) {
+            map.set(key, { ...b, __source: source });
+          } else {
+            const tNew = Date.parse(b.updatedAt || b.createdAt || nowISO());
+            const tOld = Date.parse(current.updatedAt || current.createdAt || nowISO());
+            if (tNew >= tOld) map.set(key, { ...b, __source: source });
+          }
+        };
+
+        L.forEach((b) => add(b, 'local'));
+        C.forEach((b) => add(b, 'cloud'));
+
+        const merged = Array.from(map.values())
+          .map((b: any) => ({
+            id: b.id || b.assistantId, // keep stable id for UI
+            assistantId: b.assistantId || b.id,
+            name: b.name || 'Untitled',
+            type: b.type || 'voice',
+            language: b.language,
+            fromE164: b.fromE164,
+            updatedAt: b.updatedAt || b.createdAt || nowISO(),
+            createdAt: b.createdAt || nowISO(),
+            __source: b.__source as 'local' | 'cloud',
+          }))
+          .sort((a, b) => Date.parse(b.updatedAt!) - Date.parse(a.updatedAt!));
+
+        setAgents(merged);
       };
 
-      await read();
-      const onStorage = (e: StorageEvent) => e.key?.endsWith(':chatbots') && read();
+      await readMerged();
+
+      // react to cross-tab changes
+      const onStorage = (e: StorageEvent) => {
+        if (!e.key) return;
+        if (e.key.endsWith(':chatbots') || e.key === 'chatbots') {
+          readMerged();
+        }
+      };
       window.addEventListener('storage', onStorage);
       return () => window.removeEventListener('storage', onStorage);
     })();
@@ -90,12 +133,23 @@ export default function VoiceAgentSection() {
     );
   }, [agents, query]);
 
-  const del = async (id: string) => {
+  const delEverywhere = async (assistantId: string) => {
     const ss = await scopedStorage();
-    const arr = await ss.getJSON<any[]>('chatbots', []);
-    const next = arr.filter((b: any) => b.id !== id);
-    await ss.setJSON('chatbots', next);
-    setAgents((p) => p.filter((a) => a.id !== id));
+
+    // Remove from Cloud
+    try {
+      const cloud = await ss.getJSON<any[]>('chatbots.v1', []);
+      await ss.setJSON('chatbots.v1', (Array.isArray(cloud) ? cloud : []).filter((b) => (b.assistantId || b.id) !== assistantId));
+    } catch {}
+
+    // Remove from Local
+    try {
+      const local = JSON.parse(localStorage.getItem('chatbots') || '[]') || [];
+      const nextLocal = (Array.isArray(local) ? local : []).filter((b) => (b.assistantId || b.id) !== assistantId);
+      localStorage.setItem('chatbots', JSON.stringify(nextLocal));
+    } catch {}
+
+    setAgents((prev) => prev.filter((a) => (a.assistantId || a.id) !== assistantId));
   };
 
   // ====== NAV ======
@@ -114,24 +168,46 @@ export default function VoiceAgentSection() {
         id={editingId}
         onExit={exitEditor}
         onSaved={async () => {
+          // Re-read merged to refresh timestamps/order
           const ss = await scopedStorage();
-          const arr = await ss.getJSON<any[]>('chatbots', []);
-          const onlyVoice = Array.isArray(arr)
-            ? arr.filter((b: any) => (b?.type || 'voice') === 'voice')
-            : [];
-          setAgents(
-            onlyVoice
-              .map((b: any) => ({
-                id: b.id,
-                name: b.name || 'Untitled',
-                type: b.type || 'voice',
-                language: b.language,
-                fromE164: b.fromE164,
-                updatedAt: b.updatedAt || b.createdAt || nowISO(),
-                createdAt: b.createdAt || nowISO(),
-              }))
-              .sort((a, b) => Date.parse(b.updatedAt!) - Date.parse(a.updatedAt!))
-          );
+          const cloudArr = await ss.getJSON<any[]>('chatbots.v1', []);
+          const localArr = ((): any[] => {
+            try { return JSON.parse(localStorage.getItem('chatbots') || '[]') || []; } catch { return []; }
+          })();
+
+          const pick = (arr: any[]) => (Array.isArray(arr) ? arr : []).filter((b) => (b?.type || 'voice') === 'voice');
+          const L = pick(localArr);
+          const C = pick(cloudArr);
+
+          const map = new Map<string, any>();
+          const add = (b: any, source: 'local' | 'cloud') => {
+            const key = String(b.assistantId || b.id || '');
+            if (!key) return;
+            const cur = map.get(key);
+            if (!cur) map.set(key, { ...b, __source: source });
+            else {
+              const tNew = Date.parse(b.updatedAt || b.createdAt || nowISO());
+              const tOld = Date.parse(cur.updatedAt || cur.createdAt || nowISO());
+              if (tNew >= tOld) map.set(key, { ...b, __source: source });
+            }
+          };
+          L.forEach((b) => add(b, 'local'));
+          C.forEach((b) => add(b, 'cloud'));
+
+          const merged = Array.from(map.values())
+            .map((b: any) => ({
+              id: b.id || b.assistantId,
+              assistantId: b.assistantId || b.id,
+              name: b.name || 'Untitled',
+              type: b.type || 'voice',
+              language: b.language,
+              fromE164: b.fromE164,
+              updatedAt: b.updatedAt || b.createdAt || nowISO(),
+              createdAt: b.createdAt || nowISO(),
+            }))
+            .sort((a, b) => Date.parse(b.updatedAt!) - Date.parse(a.updatedAt!));
+
+          setAgents(merged);
         }}
       />
     );
@@ -140,14 +216,14 @@ export default function VoiceAgentSection() {
   // ====== WIZARD ======
   if (mode === 'wizard') {
     return (
-      <section className="w-full" style={{ color: 'var(--text)' }}>
+      <section className="w-full voice-scope" style={{ color: 'var(--text)' }}>
         <div className="w-full max-w-[1840px] mx-auto px-6 2xl:px-12 pt-8 pb-24">
           <div className="flex items-center justify-between mb-6">
             <h1 className="text-2xl md:text-3xl font-semibold">Create Voice Agent</h1>
             <button
               onClick={exitWizard}
-              className="inline-flex items-center gap-2 rounded-[12px] px-4 py-2 btn-ghost hover:translate-y-[-1px] transition"
-              style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+              className="inline-flex items-center gap-2 rounded-[12px] px-4 py-2 transition hover:-translate-y-[1px]"
+              style={{ background: 'var(--va-card-bg)', border: '1px solid var(--va-border)', boxShadow: 'var(--va-soft-shadow)', color: 'var(--text)' }}
             >
               <X className="w-4 h-4" /> Exit setup
             </button>
@@ -184,13 +260,16 @@ export default function VoiceAgentSection() {
 
   // ====== GALLERY ======
   return (
-    <section className="w-full" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
+    <section className="w-full voice-scope" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
       <div className="w-full max-w-[1640px] mx-auto px-6 2xl:px-12 pt-8 pb-24">
         <motion.div {...fadeUp} className="flex items-center justify-between mb-7">
           <h1 className="text-2xl md:text-3xl font-semibold">Voice Agents</h1>
           <button
             onClick={startWizard}
-            className="px-4 py-2 rounded-[10px] btn-brand font-semibold shadow-[0_0_10px_var(--ring)] hover:brightness-110 transition"
+            className="px-4 h-[42px] rounded-[12px] font-semibold transition hover:-translate-y-[1px]"
+            style={{ background: BTN_GREEN, color: '#fff' }}
+            onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER)}
+            onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN)}
           >
             Create Voice Agent
           </button>
@@ -202,8 +281,13 @@ export default function VoiceAgentSection() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search voice agents…"
-              className="w-full rounded-[10px] input px-5 py-4 text-[15px] outline-none focus:ring-2"
-              style={{ boxShadow: 'none' }}
+              className="w-full rounded-[12px] px-5 h-[46px] text-[15px] outline-none"
+              style={{
+                background: 'var(--va-input-bg)',
+                border: '1px solid var(--va-border)',
+                color: 'var(--text)',
+                boxShadow: 'var(--va-input-shadow)',
+              }}
             />
             <Search className="w-4 h-4 absolute right-4 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
           </div>
@@ -214,10 +298,10 @@ export default function VoiceAgentSection() {
 
           {filtered.map((a) => (
             <AgentCard
-              key={a.id}
+              key={a.assistantId || a.id}
               agent={a}
-              onDelete={() => del(a.id)}
-              onOpen={() => openEditor(a.id)}
+              onDelete={() => setConfirmDelId(String(a.assistantId || a.id))}
+              onOpen={() => openEditor(String(a.id))}
             />
           ))}
         </motion.div>
@@ -228,6 +312,52 @@ export default function VoiceAgentSection() {
           </motion.div>
         )}
       </div>
+
+      {/* Confirm Delete Modal */}
+      <ConfirmDelete
+        open={!!confirmDelId}
+        onCancel={() => setConfirmDelId(null)}
+        onConfirm={async () => {
+          if (confirmDelId) await delEverywhere(confirmDelId);
+          setConfirmDelId(null);
+        }}
+      />
+
+      {/* Theme-scoped cosmetics */}
+      <style jsx global>{`
+        /* LIGHT (default) */
+        .voice-scope {
+          --va-card-bg: #ffffff;
+          --va-panel: #ffffff;
+          --va-border: rgba(0,0,0,0.10);
+          --va-soft-shadow: 0 18px 60px rgba(0,0,0,.08), 0 8px 24px rgba(0,0,0,.06), 0 0 0 1px rgba(0,255,194,.06);
+          --va-ring: rgba(0,255,194,.10);
+
+          --va-input-bg: #ffffff;
+          --va-input-shadow: inset 0 1px 0 rgba(255,255,255,.8);
+
+          --va-chip-bg: rgba(0,255,194,0.06);
+          --va-chip-border: rgba(0,255,194,0.14);
+        }
+
+        /* DARK overrides */
+        [data-theme="dark"] .voice-scope {
+          --va-card-bg: radial-gradient(120% 180% at 50% -40%, rgba(0,255,194,.06) 0%, rgba(12,16,18,1) 42%), linear-gradient(180deg, #0e1213 0%, #0c1012 100%);
+          --va-panel: linear-gradient(180deg, rgba(24,32,31,.86) 0%, rgba(16,22,21,.86) 100%);
+          --va-border: rgba(255,255,255,0.08);
+          --va-soft-shadow:
+            0 26px 70px rgba(0,0,0,.60),
+            0 8px 24px rgba(0,0,0,.45),
+            0 0 0 1px rgba(0,255,194,.06);
+          --va-ring: rgba(0,255,194,.06);
+
+          --va-input-bg: rgba(255,255,255,.02);
+          --va-input-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 8px 24px rgba(0,0,0,0.28);
+
+          --va-chip-bg: rgba(0,255,194,0.08);
+          --va-chip-border: rgba(0,255,194,0.18);
+        }
+      `}</style>
     </section>
   );
 }
@@ -238,22 +368,22 @@ function CreateCard({ onClick }: { onClick: () => void }) {
   return (
     <button
       onClick={onClick}
-      className="group relative h-[320px] rounded-[16px] p-7 flex flex-col items-center justify-center transition-all active:scale-[0.995]"
-      style={{ background: UI.cardBg, border: UI.border, boxShadow: UI.cardShadow }}
+      className="group relative h-[320px] rounded-[16px] p-7 flex flex-col items-center justify-center transition-all active:scale-[0.995] hover:-translate-y-[1px]"
+      style={{ background: 'var(--va-card-bg)', border: '1px solid var(--va-border)', boxShadow: 'var(--va-soft-shadow)' }}
     >
       <div
         className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
         style={{
-          background: 'radial-gradient(circle, var(--brand-weak) 0%, transparent 70%)',
+          background: 'radial-gradient(circle, var(--va-ring) 0%, transparent 70%)',
           filter: 'blur(36px)',
         }}
       />
       <div
         className="w-20 h-20 rounded-full flex items-center justify-center mb-5"
         style={{
-          background: 'var(--panel)',
+          background: 'var(--va-panel)',
           border: '1px dashed var(--brand-weak)',
-          boxShadow: 'var(--shadow-soft)',
+          boxShadow: 'var(--va-soft-shadow)',
         }}
       >
         <Plus className="w-10 h-10" style={{ color: 'var(--brand)' }} />
@@ -273,20 +403,20 @@ function AgentCard({
 }) {
   return (
     <div
-      className="relative h-[320px] rounded-[16px] p-6 flex flex-col justify-between"
-      style={{ background: UI.cardBg, border: UI.border, boxShadow: UI.cardShadow }}
+      className="relative h-[320px] rounded-[16px] p-6 flex flex-col justify-between hover:-translate-y-[1px] transition"
+      style={{ background: 'var(--va-card-bg)', border: '1px solid var(--va-border)', boxShadow: 'var(--va-soft-shadow)' }}
     >
       <div
         className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
-        style={{ background: 'radial-gradient(circle, var(--brand-weak) 0%, transparent 70%)', filter: 'blur(36px)' }}
+        style={{ background: 'radial-gradient(circle, var(--va-ring) 0%, transparent 70%)', filter: 'blur(36px)' }}
       />
 
       <div className="flex items-center gap-3">
         <div
           className="w-10 h-10 rounded-[10px] flex items-center justify-center"
-          style={{ background: 'var(--panel)', border: '1px solid var(--brand-weak)' }}
+          style={{ background: 'var(--va-panel)', border: '1px solid var(--brand-weak)' }}
         >
-          <BotIcon className="w-5 h-5" />
+          <BotIcon className="w-5 h-5" style={{ color: 'var(--text)' }} />
         </div>
         <div className="min-w-0">
           <div className="font-semibold truncate">{agent.name}</div>
@@ -294,7 +424,7 @@ function AgentCard({
             {[agent.language, agent.fromE164].filter(Boolean).join(' · ') || '—'}
           </div>
         </div>
-        <button onClick={onDelete} className="ml-auto p-1.5 rounded-md hover:opacity-80" title="Delete">
+        <button onClick={onDelete} className="ml-auto p-1.5 rounded-md hover:opacity-80" title="Delete" aria-label="Delete">
           <Trash2 className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
         </button>
       </div>
@@ -306,20 +436,73 @@ function AgentCard({
             <a
               href={`tel:${agent.fromE164}`}
               className="inline-flex items-center gap-2 px-3 py-2 rounded-[10px] text-sm"
-              style={{ border: '1px solid var(--brand-weak)', background: 'var(--card)' }}
+              style={{ border: '1px solid var(--brand-weak)', background: 'var(--va-card-bg)', boxShadow: 'var(--va-soft-shadow)', color: 'var(--text)' }}
             >
               <Phone className="w-4 h-4" /> Test
             </a>
           )}
           <button
             onClick={onOpen}
-            className="inline-flex items-center gap-2 px-3 py-2 rounded-[10px] text-sm hover:translate-y-[-1px] transition"
-            style={{ border: '1px solid var(--brand-weak)', background: 'var(--panel)' }}
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-[10px] text-sm transition hover:-translate-y-[1px]"
+            style={{ border: '1px solid var(--brand-weak)', background: 'var(--va-panel)', boxShadow: 'var(--va-soft-shadow)', color: 'var(--text)' }}
           >
             Open <ArrowRight className="w-4 h-4" />
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ---------------------------- Confirm Delete ---------------------------- */
+
+function ConfirmDelete({
+  open, onCancel, onConfirm,
+}: {
+  open: boolean;
+  onCancel: () => void;
+  onConfirm: () => void | Promise<void>;
+}) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-[9998] grid place-items-center px-4" style={{ background: 'rgba(0,0,0,0.55)' }}>
+      <div
+        className="w-full max-w-[560px] rounded-[20px] overflow-hidden animate-[popIn_140ms_ease]"
+        style={{
+          background: 'var(--va-card-bg)',
+          border: '1px solid var(--va-border)',
+          boxShadow: 'var(--va-soft-shadow)',
+        }}
+      >
+        <div className="px-6 py-5" style={{ borderBottom: '1px solid var(--va-border)' }}>
+          <div className="text-lg font-semibold" style={{ color: 'var(--text)' }}>Delete Voice Agent?</div>
+          <div className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
+            This will remove the agent from your Local + Cloud workspace storage. Calls or external numbers aren’t affected.
+          </div>
+        </div>
+        <div className="px-6 py-5 flex gap-3">
+          <button
+            onClick={onCancel}
+            className="w-full h-[44px] rounded-[14px] font-semibold"
+            style={{ background: 'var(--va-panel)', border: '1px solid var(--va-border)', color: 'var(--text)' }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            className="w-full h-[44px] rounded-[14px] font-semibold text-white"
+            style={{ background: BTN_GREEN }}
+            onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER)}
+            onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN)}
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+
+      <style jsx global>{`
+        @keyframes popIn { 0% { opacity: 0; transform: scale(.98); } 100% { opacity: 1; transform: scale(1); } }
+      `}</style>
     </div>
   );
 }
