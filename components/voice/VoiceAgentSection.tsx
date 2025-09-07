@@ -56,7 +56,7 @@ const readLS = <T,>(k: string): T | null => { try { const r = localStorage.getIt
 const writeLS = <T,>(k: string, v: T) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 
 /* =============================================================================
-   BASE PROMPT + helpers
+   BASE PROMPT + builders
 ============================================================================= */
 const BASE_PROMPT = `[Identity]
 You are an intelligent and responsive assistant designed to help users with a wide range of inquiries and tasks.
@@ -80,15 +80,80 @@ You are an intelligent and responsive assistant designed to help users with a wi
 - If a user's request is unclear or you encounter difficulty understanding, ask for clarification politely.
 - If a task cannot be completed, inform the user empathetically and suggest alternative solutions or resources.`.trim();
 
-function applyRefinement(base: string, addendum: string) {
-  const clean = addendum.trim();
-  if (!clean) return base;
-  const block = `\n\n[Refinements]\n- ${clean.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim()}`;
-  return base + block;
+/** Expand short instructions into a fully structured prompt. */
+function buildStructuredPrompt(input: string): string {
+  const raw = input.trim();
+
+  // If it's super short (e.g., "assistant", "medical intake"), build a full scaffold.
+  const isShort = raw.split(/\s+/).length <= 3;
+
+  // Try to extract a "collect" list if user pasted fields.
+  const collectMatch = raw.match(/collect(?:\s*[:\-])?\s*(.*)$/i);
+  let fields: string[] = [];
+  if (collectMatch) {
+    fields = collectMatch[1]
+      .split(/[,;\n]/).map(s => s.trim()).filter(Boolean)
+      .map(s => s.replace(/^[\-\*\d\.\s]+/, '')); // strip bullets
+  } else {
+    // also detect common nouns in short comma-lists
+    if (/,/.test(raw)) {
+      fields = raw.split(/[,;\n]/).map(s => s.trim()).filter(Boolean);
+    }
+  }
+
+  const title = isShort ? (raw || 'Assistant') : 'Assistant';
+
+  const sections = [
+`[Identity]
+You are a helpful, fast, and accurate ${title.toLowerCase()} that completes tasks and collects information.`,
+
+`[Style]
+- Friendly, to-the-point, concise.
+- Never over-explain; confirm critical details.`,
+
+`[System Behaviors]
+- Ask one targeted question at a time.
+- Confirm understanding and summarize before finalizing.
+- If the user seems unsure, suggest next best actions.`,
+
+`[Task & Goals]
+- Understand the caller's intent.
+- Collect the required details accurately.
+- Provide relevant guidance or next steps.`,
+
+`[Data to Collect]
+${fields.length ? fields.map(f => `- ${toTitle(f)}`).join('\n') : '- Full Name\n- Phone Number\n- Email (if provided)\n- Appointment Date/Time (if applicable)'}
+`,
+
+`[Safety]
+- Do not provide medical, legal, or financial advice beyond high-level information.
+- If the user asks for restricted actions, politely decline and suggest alternatives.`,
+
+`[Handover]
+- When all required info is gathered, summarize the details and provide a clear next step.
+- If needed, hand off to a human agent with the collected summary.`,
+
+`[First Message]
+Hello.`
+  ];
+
+  return sections.join('\n\n').trim();
 }
 
-/** Very light diff: outputs HTML with <ins> additions (green) and <del> deletions (red) */
-function diffText(oldStr: string, newStr: string) {
+function toTitle(s: string) {
+  return s.replace(/\s+/g, ' ')
+    .split(' ')
+    .map(w => (w.length ? w[0].toUpperCase() + w.slice(1) : ''))
+    .join(' ')
+    .replace(/\b(Id|Url|Dob)\b/gi, m => m.toUpperCase());
+}
+
+/* =============================================================================
+   DIFF & TYPING
+============================================================================= */
+
+/** Tokenize by words and mark which are "added" vs old text using LCS. */
+function tokenizeDiff(oldStr: string, newStr: string): { text: string; added: boolean }[] {
   const o = oldStr.split(/\s+/);
   const n = newStr.split(/\s+/);
   const dp: number[][] = Array(o.length + 1).fill(0).map(() => Array(n.length + 1).fill(0));
@@ -97,107 +162,61 @@ function diffText(oldStr: string, newStr: string) {
       dp[i][j] = o[i] === n[j] ? 1 + dp[i + 1][j + 1] : Math.max(dp[i + 1][j], dp[i][j + 1]);
     }
   }
-  const out: string[] = [];
+  const tokens: { text: string; added: boolean }[] = [];
   let i = 0, j = 0;
   while (i < o.length && j < n.length) {
-    if (o[i] === n[j]) { out.push(o[i]); i++; j++; }
-    else if (dp[i + 1][j] >= dp[i][j + 1]) { out.push(`<del>${o[i]}</del>`); i++; }
-    else { out.push(`<ins>${n[j]}</ins>`); j++; }
+    if (o[i] === n[j]) { tokens.push({ text: n[j], added: false }); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { i++; } // deletion (we don't render it)
+    else { tokens.push({ text: n[j], added: true }); j++; }
   }
-  while (i < o.length) { out.push(`<del>${o[i++]}</del>`); }
-  while (j < n.length) { out.push(`<ins>${n[j++]}</ins>`); }
-  return out.join(' ');
+  while (j < n.length) tokens.push({ text: n[j++], added: true }); // remaining are additions
+  return tokens;
 }
 
-/* =============================================================================
-   Reusable Select (portal-positioned)
-============================================================================= */
-type Item = { value: string; label: string; icon?: React.ReactNode };
-
-function usePortalPos(open: boolean, ref: React.RefObject<HTMLElement>) {
-  const [rect, setRect] = useState<{ top: number; left: number; width: number; up: boolean } | null>(null);
-  useLayoutEffect(() => {
-    if (!open) return;
-    const r = ref.current?.getBoundingClientRect(); if (!r) return;
-    const up = r.bottom + 320 > window.innerHeight;
-    setRect({ top: up ? r.top : r.bottom, left: r.left, width: r.width, up });
-  }, [open]);
-  return rect;
-}
-
-function Select({ value, items, onChange, placeholder, leftIcon }: {
-  value: string; items: Item[]; onChange: (v: string) => void; placeholder?: string; leftIcon?: React.ReactNode;
-}) {
-  const [open, setOpen] = useState(false);
-  const [q, setQ] = useState('');
-  const btn = useRef<HTMLButtonElement | null>(null);
-  const portal = useRef<HTMLDivElement | null>(null);
-  const rect = usePortalPos(open, btn);
+/** Renders a "typing" effect with green highlights for tokens marked added */
+function TypingHighlighter({ tokens, onDone }: { tokens: { text: string; added: boolean }[]; onDone: () => void }) {
+  const [idx, setIdx] = useState(0);
+  const boxRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (!open) return;
-    const on = (e: MouseEvent) => {
-      if (btn.current?.contains(e.target as Node) || portal.current?.contains(e.target as Node)) return;
-      setOpen(false);
+    let raf = 0;
+    const step = () => {
+      setIdx(v => {
+        const next = Math.min(v + Math.max(1, Math.floor(tokens.length / 180)), tokens.length);
+        return next;
+      });
+      raf = requestAnimationFrame(step);
     };
-    window.addEventListener('mousedown', on);
-    return () => window.removeEventListener('mousedown', on);
-  }, [open]);
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [tokens.length]);
 
-  const filtered = items.filter(i => i.label.toLowerCase().includes(q.trim().toLowerCase()));
-  const sel = items.find(i => i.value === value) || null;
+  useEffect(() => {
+    // Scroll to bottom as we type
+    if (!boxRef.current) return;
+    boxRef.current.scrollTop = boxRef.current.scrollHeight;
+    if (idx >= tokens.length) onDone();
+  }, [idx, tokens.length, onDone]);
 
+  const toRender = tokens.slice(0, idx);
   return (
-    <>
-      <button
-        ref={btn}
-        type="button"
-        onClick={() => setOpen(v => !v)}
-        className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-[15px]"
-        style={{ background:'var(--va-input-bg)', color:'var(--text)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)' }}
-      >
-        {leftIcon ? <span className="shrink-0">{leftIcon}</span> : null}
-        {sel ? <span className="flex items-center gap-2 min-w-0">{sel.icon}<span className="truncate">{sel.label}</span></span> : <span className="opacity-70">{placeholder || 'Select…'}</span>}
-        <span className="ml-auto" />
-        <ChevronDown className="w-4 h-4 icon" />
-      </button>
-
-      <AnimatePresence>
-        {open && rect && (
-          <motion.div
-            ref={portal}
-            initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 4 }}
-            className="fixed z-[9999] p-3 rounded-xl"
-            style={{
-              top: rect.up ? rect.top - 8 : rect.top + 8,
-              left: rect.left, width: rect.width, transform: rect.up ? 'translateY(-100%)' : 'none',
-              background:'var(--va-menu-bg)', border:'1px solid var(--va-menu-border)', boxShadow:'var(--va-shadow-lg)'
-            }}
-          >
-            <div className="flex items-center gap-2 mb-3 px-2 py-2 rounded-lg"
-              style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)' }}>
-              <Search className="w-4 h-4 icon" />
-              <input value={q} onChange={(e)=> setQ(e.target.value)} placeholder="Filter…" className="w-full bg-transparent outline-none text-sm" style={{ color:'var(--text)' }}/>
-            </div>
-            <div className="max-h-72 overflow-y-auto pr-1" style={{ scrollbarWidth:'thin' }}>
-              {filtered.map(it => (
-                <button
-                  key={it.value}
-                  onClick={() => { onChange(it.value); setOpen(false); }}
-                  className="w-full flex items-center gap-3 px-3 py-2 rounded-[10px] text-left"
-                  style={{ color:'var(--text)' }}
-                  onMouseEnter={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='rgba(16,185,129,.10)'; (e.currentTarget as HTMLButtonElement).style.border='1px solid rgba(16,185,129,.35)'; }}
-                  onMouseLeave={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='transparent'; (e.currentTarget as HTMLButtonElement).style.border='1px solid transparent'; }}
-                >
-                  {it.icon}{it.label}
-                </button>
-              ))}
-              {filtered.length === 0 && <div className="px-3 py-6 text-sm" style={{ color:'var(--text-muted)' }}>No matches.</div>}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </>
+    <div
+      ref={boxRef}
+      className="w-full rounded-xl px-3 py-3 text-[14px] leading-6 outline-none"
+      style={{
+        background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)',
+        boxShadow:'var(--va-shadow), inset 0 1px 0 rgba(255,255,255,.03)', color:'var(--text)',
+        fontFamily:'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+        whiteSpace:'pre-wrap',
+        height: '420px',
+        overflowY:'auto'
+      }}
+    >
+      {toRender.map((t, i) => t.added
+        ? <ins key={i} style={{ background:'rgba(16,185,129,.18)', padding:'1px 2px', borderRadius:4 }}>{t.text}</ins>
+        : <span key={i}>{t.text}</span>
+      ).reduce((acc, el, i) => (i ? acc.concat([' ', el]) : acc.concat([el])), [] as (JSX.Element|string)[]) }
+    </div>
   );
 }
 
@@ -275,8 +294,8 @@ export default function VoiceAgentSection() {
     writeLS(LS_LIST, list); setAssistants(list);
   };
 
+  const [creating, setCreating] = useState(false);
   const addAssistant = async () => {
-    // tiny create loading pulse
     setCreating(true);
     await new Promise(r => setTimeout(r, 420));
     const id = `agent_${Math.random().toString(36).slice(2, 8)}`;
@@ -293,7 +312,6 @@ export default function VoiceAgentSection() {
     const list = [...assistants, a]; writeLS(LS_LIST, list);
     setAssistants(list); setActiveId(id);
     setCreating(false);
-    // immediately open inline rename
     setEditingId(id);
     setTempName('New Assistant');
   };
@@ -306,45 +324,53 @@ export default function VoiceAgentSection() {
     if (!list.length) setActiveId('');
   };
 
-  /* ---------- Prompt generate / accept flow ---------- */
+  /* ---------- Generate: ON-TEXTAREA LIVE TYPIST with green highlights ---------- */
   const [genOpen, setGenOpen] = useState(false);
   const [genText, setGenText] = useState('');
-  const [pending, setPending] = useState<{ preview: string; htmlDiff: string } | null>(null);
-  const [typing, setTyping] = useState('');
-  const [creating, setCreating] = useState(false);
+  const [typingTokens, setTypingTokens] = useState<{ text: string; added: boolean }[] | null>(null);
+  const [isTypingLive, setIsTypingLive] = useState(false);
 
-  const startGenerate = () => setGenOpen(true);
+  function makeNewPromptFrom(input: string, current: string): string {
+    const small = input.trim();
+    if (!small) return current || BASE_PROMPT;
 
-  const submitGenerate = () => {
+    // If very short ("assistant", "medical intake") → structured
+    if (small.split(/\s+/).length <= 3) return buildStructuredPrompt(small);
+
+    // If looks like a list of requirements → build structured and insert those under Data to Collect.
+    if (/collect|fields|capture|gather/i.test(small)) {
+      return buildStructuredPrompt(small);
+    }
+
+    // Otherwise, treat as an addendum to current
+    const block = `\n\n[Refinements]\n- ${small.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim()}`;
+    return (current || BASE_PROMPT) + block;
+  }
+
+  const handleGenerate = () => {
     if (!active) return;
-    const preview = applyRefinement(active.config.model.systemPrompt || '', genText);
-    // typing animation for preview
-    setTyping('');
-    let i = 0;
-    const reveal = () => {
-      i += Math.max(4, Math.floor(preview.length / 120));
-      setTyping(preview.slice(0, i));
-      if (i < preview.length) requestAnimationFrame(reveal);
-    };
-    reveal();
+    const current = active.config.model.systemPrompt || '';
+    const next = makeNewPromptFrom(genText, current);
 
-    const html = diffText(active.config.model.systemPrompt || '', preview);
-    setPending({ preview, htmlDiff: html });
+    // Prepare tokens for typing highlighter (only added words marked)
+    const tokens = tokenizeDiff(current, next);
+    setTypingTokens(tokens);
+    setIsTypingLive(true);
     setGenOpen(false);
-    setGenText('');
   };
 
-  const acceptChanges = () => {
-    if (!active || !pending) return;
-    // update the real prompt box with the preview
-    updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, systemPrompt: pending.preview } } }));
-    setPending(null);
+  const onTypingDone = () => {
+    if (!active || !typingTokens) { setIsTypingLive(false); return; }
+    // Reassemble plain text and set as the real prompt
+    const plain = typingTokens.map(t => t.text).join(' ').replace(/\s+\n/g, '\n').trim();
+    updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, systemPrompt: plain } } }));
+    setIsTypingLive(false);
+    setTypingTokens(null);
   };
-  const discardChanges = () => setPending(null);
 
-  /* ---------- Voices ---------- */
-  const openaiVoices: Item[] = [{ value:'alloy', label:'Alloy (OpenAI)' }, { value:'ember', label:'Ember (OpenAI)' }];
-  const elevenVoices: Item[] = [{ value:'rachel', label:'Rachel (ElevenLabs)' }, { value:'adam', label:'Adam (ElevenLabs)' }, { value:'bella', label:'Bella (ElevenLabs)' }];
+  /* ---------- Voices etc. ---------- */
+  const openaiVoices: { value:string; label:string }[] = [{ value:'alloy', label:'Alloy (OpenAI)' }, { value:'ember', label:'Ember (OpenAI)' }];
+  const elevenVoices: { value:string; label:string }[] = [{ value:'rachel', label:'Rachel (ElevenLabs)' }, { value:'adam', label:'Adam (ElevenLabs)' }, { value:'bella', label:'Bella (ElevenLabs)' }];
 
   if (!active) return (
     <div className={SCOPE} style={{ color:'var(--text)' }}>
@@ -358,10 +384,10 @@ export default function VoiceAgentSection() {
   /* ---------- Inline rename helpers ---------- */
   const beginRename = (a: Assistant) => { setEditingId(a.id); setTempName(a.name); };
   const saveRename = (a: Assistant) => {
-    const name = tempName.trim() || 'Untitled';
-    updateActive(x => x.id === a.id ? { ...x, name } : x);
-    if (a.id !== activeId) {
-      // also persist for non-active
+    const name = (tempName || '').trim() || 'Untitled';
+    if (a.id === activeId) {
+      updateActive(x => ({ ...x, name }));
+    } else {
       const cur = readLS<Assistant>(ak(a.id));
       if (cur) writeLS(ak(a.id), { ...cur, name, updatedAt: Date.now() });
       const list = (readLS<Assistant[]>(LS_LIST) || []).map(x => x.id === a.id ? { ...x, name, updatedAt: Date.now() } : x);
@@ -372,7 +398,7 @@ export default function VoiceAgentSection() {
 
   return (
     <div className={`${SCOPE}`} style={{ background:'var(--bg)', color:'var(--text)' }}>
-      {/* ================= ASSISTANT RAIL (fixed under header, flush to sidebar) ================ */}
+      {/* ================= ASSISTANT RAIL ================= */}
       <aside
         className="hidden lg:flex flex-col"
         style={{
@@ -473,14 +499,13 @@ export default function VoiceAgentSection() {
       <div
         className="va-main"
         style={{
-          /* push the whole editor exactly by main sidebar + rail width */
           marginLeft:'calc(var(--app-sidebar-w, 248px) + var(--va-rail-w, 312px))',
           paddingRight:'clamp(12px, 3vw, 24px)',
           paddingTop:'calc(var(--app-header-h, 64px) + 12px)',
           paddingBottom:'56px'
         }}
       >
-        {/* top action bar (copy / delete) */}
+        {/* top action bar */}
         <div className="px-2 pb-3 flex items-center justify-end sticky"
              style={{ top:'calc(var(--app-header-h, 64px) + 8px)', zIndex:2 }}>
           <div className="flex items-center gap-2">
@@ -544,24 +569,30 @@ export default function VoiceAgentSection() {
                     onClick={()=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, systemPrompt: BASE_PROMPT } } }))}
                     className="btn--ghost"
                   ><RefreshCw className="w-4 h-4 icon" /> Reset</button>
-                  <button onClick={startGenerate} className="btn--green">
+                  <button onClick={()=> setGenOpen(true)} className="btn--green">
                     <Sparkles className="w-4 h-4 text-white" /> <span className="text-white">Generate / Edit</span>
                   </button>
                 </div>
               </div>
 
-              {/* prompt editor */}
-              <textarea
-                rows={18}
-                value={active.config.model.systemPrompt || ''}
-                onChange={(e)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, systemPrompt: e.target.value } } })) }
-                className="w-full rounded-xl px-3 py-3 text-[14px] leading-6 outline-none"
-                style={{
-                  background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)',
-                  boxShadow:'var(--va-shadow), inset 0 1px 0 rgba(255,255,255,.03)', color:'var(--text)',
-                  fontFamily:'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace'
-                }}
-              />
+              {/* ACTUAL PROMPT EDITOR
+                  - While typingLive: show TypingHighlighter (the “re-type from zero” view)
+                  - After done: fallback to the real textarea with new text */}
+              {!isTypingLive ? (
+                <textarea
+                  rows={18}
+                  value={active.config.model.systemPrompt || ''}
+                  onChange={(e)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, systemPrompt: e.target.value } } })) }
+                  className="w-full rounded-xl px-3 py-3 text-[14px] leading-6 outline-none"
+                  style={{
+                    background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)',
+                    boxShadow:'var(--va-shadow), inset 0 1px 0 rgba(255,255,255,.03)', color:'var(--text)',
+                    fontFamily:'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace'
+                  }}
+                />
+              ) : (
+                <TypingHighlighter tokens={typingTokens || []} onDone={onTypingDone} />
+              )}
             </div>
           </Section>
 
@@ -683,48 +714,23 @@ export default function VoiceAgentSection() {
             <motion.div initial={{ y:10, opacity:0, scale:.98 }} animate={{ y:0, opacity:1, scale:1 }} exit={{ y:8, opacity:0, scale:.985 }}
               className="w-full max-w-xl rounded-xl" style={{ background:'var(--va-card)', border:'1px solid var(--va-border)', boxShadow:'var(--va-shadow-lg)' }}>
               <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom:'1px solid var(--va-border)' }}>
-                <div className="flex items-center gap-2 text-sm font-semibold"><Edit3 className="w-4 h-4 icon" /> Edit Prompt</div>
+                <div className="flex items-center gap-2 text-sm font-semibold"><Edit3 className="w-4 h-4 icon" /> Generate / Edit Prompt</div>
                 <button onClick={()=> setGenOpen(false)} className="p-2 rounded-lg hover:opacity-80"><X className="w-4 h-4 icon" /></button>
               </div>
               <div className="p-4">
                 <input
                   value={genText}
                   onChange={(e)=> setGenText(e.target.value)}
-                  placeholder="Describe how to modify the prompt (new rules, fields to collect, etc.)…"
+                  placeholder={`e.g., assistant\nor: collect full name, phone, date\nor: Add a step to verify phone via OTP`}
                   className="w-full rounded-lg px-3 py-2 text-sm outline-none"
                   style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)', color:'var(--text)' }}
                 />
                 <div className="mt-3 flex items-center justify-end gap-2">
                   <button onClick={()=> setGenOpen(false)} className="btn--ghost">Cancel</button>
-                  <button onClick={submitGenerate} className="btn--green"><span className="text-white">Submit Edit</span></button>
+                  <button onClick={handleGenerate} className="btn--green"><span className="text-white">Generate</span></button>
                 </div>
               </div>
             </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* ---------------- Changes tray ---------------- */}
-      <AnimatePresence>
-        {pending && (
-          <motion.div
-            initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 8 }}
-            className="fixed right-6 bottom-6 z-[998] rounded-xl p-4 w-[min(680px,calc(100vw-24px))]"
-            style={{ background:'var(--va-card)', border:'1px solid var(--va-border)', boxShadow:'var(--va-shadow-lg)' }}
-          >
-            <div className="text-sm font-semibold mb-2" style={{ color:'var(--text)' }}>Proposed Changes</div>
-            <div className="rounded-lg p-3 mb-3 text-[13px] leading-6 overflow-y-auto max-h-[280px]"
-                 style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)', color:'var(--text)' }}
-                 dangerouslySetInnerHTML={{ __html: pending.htmlDiff }} />
-            {typing && (
-              <div className="text-[12px] opacity-70 mb-3" style={{ fontFamily:'ui-monospace' }}>
-                {typing}<span className="animate-pulse">▌</span>
-              </div>
-            )}
-            <div className="flex gap-2">
-              <button onClick={discardChanges} className="btn--ghost">✕ Discard</button>
-              <button onClick={acceptChanges} className="btn--green"><span className="text-white">Accept ✓</span></button>
-            </div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -833,13 +839,10 @@ function StyleBlock() {
         --va-shadow-side:8px 0 26px rgba(0,0,0,.08);
       }
 
-      /* globally ensure editor isn't re-centered by parent shells */
       .${SCOPE} .va-main{ max-width: none !important; }
 
-      /* Single icon color everywhere (match brand) */
       .${SCOPE} .icon{ color: var(--accent); }
 
-      /* Green buttons */
       .${SCOPE} .btn--green{
         display:inline-flex; align-items:center; gap:.5rem;
         border-radius:12px; padding:.6rem .9rem;
@@ -863,19 +866,104 @@ function StyleBlock() {
         border:1px solid rgba(220,38,38,.35); box-shadow:0 10px 24px rgba(220,38,38,.15);
       }
 
-      /* Thin green sliders */
       .${SCOPE} .va-range{ -webkit-appearance:none; height:4px; background:color-mix(in oklab, var(--accent) 24%, #0000); border-radius:999px; outline:none; }
       .${SCOPE} .va-range::-webkit-slider-thumb{ -webkit-appearance:none; width:14px;height:14px;border-radius:50%;background:var(--accent); border:2px solid #fff; box-shadow:0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent); }
       .${SCOPE} .va-range::-moz-range-thumb{ width:14px;height:14px;border:0;border-radius:50%;background:var(--accent); box-shadow:0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent); }
 
-      /* Diff colors */
-      .${SCOPE} ins{ background:rgba(16,185,129,.18); color:var(--text); text-decoration:none; padding:1px 2px; border-radius:4px; }
-      .${SCOPE} del{ background:rgba(239,68,68,.18); color:#fca5a5; text-decoration:line-through; padding:1px 2px; border-radius:4px; }
-
-      /* iPad-friendly: give the rail a little more width on medium screens */
+      /* iPad rail width */
       @media (max-width: 1180px){
         .${SCOPE}{ --va-rail-w: 288px; }
       }
     `}</style>
+  );
+}
+
+/* =============================================================================
+   Minimal Select used above
+============================================================================= */
+type Item = { value: string; label: string; icon?: React.ReactNode };
+function usePortalPos(open: boolean, ref: React.RefObject<HTMLElement>) {
+  const [rect, setRect] = useState<{ top: number; left: number; width: number; up: boolean } | null>(null);
+  useLayoutEffect(() => {
+    if (!open) return;
+    const r = ref.current?.getBoundingClientRect(); if (!r) return;
+    const up = r.bottom + 320 > window.innerHeight;
+    setRect({ top: up ? r.top : r.bottom, left: r.left, width: r.width, up });
+  }, [open]);
+  return rect;
+}
+function Select({ value, items, onChange, placeholder, leftIcon }: {
+  value: string; items: Item[]; onChange: (v: string) => void; placeholder?: string; leftIcon?: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const btn = useRef<HTMLButtonElement | null>(null);
+  const portal = useRef<HTMLDivElement | null>(null);
+  const rect = usePortalPos(open, btn);
+
+  useEffect(() => {
+    if (!open) return;
+    const on = (e: MouseEvent) => {
+      if (btn.current?.contains(e.target as Node) || portal.current?.contains(e.target as Node)) return;
+      setOpen(false);
+    };
+    window.addEventListener('mousedown', on);
+    return () => window.removeEventListener('mousedown', on);
+  }, [open]);
+
+  const filtered = items.filter(i => i.label.toLowerCase().includes(q.trim().toLowerCase()));
+  const sel = items.find(i => i.value === value) || null;
+
+  return (
+    <>
+      <button
+        ref={btn}
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-[15px]"
+        style={{ background:'var(--va-input-bg)', color:'var(--text)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)' }}
+      >
+        {leftIcon ? <span className="shrink-0">{leftIcon}</span> : null}
+        {sel ? <span className="flex items-center gap-2 min-w-0">{sel.icon}<span className="truncate">{sel.label}</span></span> : <span className="opacity-70">{placeholder || 'Select…'}</span>}
+        <span className="ml-auto" />
+        <ChevronDown className="w-4 h-4 icon" />
+      </button>
+
+      <AnimatePresence>
+        {open && rect && (
+          <motion.div
+            ref={portal}
+            initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 4 }}
+            className="fixed z-[9999] p-3 rounded-xl"
+            style={{
+              top: rect.up ? rect.top - 8 : rect.top + 8,
+              left: rect.left, width: rect.width, transform: rect.up ? 'translateY(-100%)' : 'none',
+              background:'var(--va-menu-bg)', border:'1px solid var(--va-menu-border)', boxShadow:'var(--va-shadow-lg)'
+            }}
+          >
+            <div className="flex items-center gap-2 mb-3 px-2 py-2 rounded-lg"
+              style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)' }}>
+              <Search className="w-4 h-4 icon" />
+              <input value={q} onChange={(e)=> setQ(e.target.value)} placeholder="Filter…" className="w-full bg-transparent outline-none text-sm" style={{ color:'var(--text)' }}/>
+            </div>
+            <div className="max-h-72 overflow-y-auto pr-1" style={{ scrollbarWidth:'thin' }}>
+              {filtered.map(it => (
+                <button
+                  key={it.value}
+                  onClick={() => { onChange(it.value); setOpen(false); }}
+                  className="w-full flex items-center gap-3 px-3 py-2 rounded-[10px] text-left"
+                  style={{ color:'var(--text)' }}
+                  onMouseEnter={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='rgba(16,185,129,.10)'; (e.currentTarget as HTMLButtonElement).style.border='1px solid rgba(16,185,129,.35)'; }}
+                  onMouseLeave={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='transparent'; (e.currentTarget as HTMLButtonElement).style.border='1px solid transparent'; }}
+                >
+                  {it.icon}{it.label}
+                </button>
+              ))}
+              {filtered.length === 0 && <div className="px-3 py-6 text-sm" style={{ color:'var(--text-muted)' }}>No matches.</div>}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>
   );
 }
