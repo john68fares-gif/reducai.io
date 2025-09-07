@@ -1,32 +1,36 @@
 // components/layout/ContentWrapper.tsx
-'use client';
-
-import React from 'react';
-import { usePathname } from 'next/navigation';
-
 type Props = { children: React.ReactNode };
 
 /**
- * Full-bleed on /voice-agent to let the assistant rail touch the main sidebar + header.
- * Other routes keep the standard page padding.
+ * This wrapper does NOT fight the side rails.
+ * It leaves a left gutter for the main app sidebar (var(--sidebar-w))
+ * and for the Assistant rail (var(--assist-rail)).
+ * It also honors the app header height (var(--app-header-h)).
  */
 export default function ContentWrapper({ children }: Props) {
-  const pathname = usePathname() || '';
-  const isVoiceStudio = pathname.startsWith('/voice-agent');
-
-  if (isVoiceStudio) {
-    // No top/side padding so the Assistants rail can align flush
-    return (
-      <div className="w-full min-h-screen">
-        {children}
-      </div>
-    );
-  }
-
-  // Default (unchanged for the rest of the app)
   return (
-    <div className="w-full min-h-screen px-4 sm:px-6 lg:px-8 py-8">
+    <div
+      style={{
+        // Page header offset
+        paddingTop: 'var(--app-header-h, 64px)',
+        // Leave room for main sidebar + assistant rail so content doesn’t sit behind them
+        paddingLeft:
+          'calc(var(--sidebar-w, 260px) + var(--assist-rail, 340px) + var(--content-gap, 24px))',
+        paddingRight: 'var(--content-pad-r, 24px)',
+        minHeight: '100vh',
+      }}
+      className="content-wrapper"
+    >
       {children}
+      <style jsx global>{`
+        :root {
+          /* Fallbacks if not already defined by your shell layout */
+          --sidebar-w: 260px;
+          --app-header-h: 64px;
+          --assist-rail: 340px;
+          --content-gap: 24px;
+        }
+      `}</style>
     </div>
   );
 }
