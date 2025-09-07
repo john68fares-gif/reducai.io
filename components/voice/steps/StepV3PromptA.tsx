@@ -1,457 +1,386 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ArrowLeft, ArrowRight, ClipboardList, FileText, Settings2, Wand2, Edit3, Eye, Copy, X
-} from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { Plus, Check, X, Loader2 } from 'lucide-react';
 
-/* ────────────────────────────────────────────────────────────────────────────
-   Scoped theme (light / dark)
-──────────────────────────────────────────────────────────────────────────── */
-const SCOPE = 'p3-scope';
-const BRAND = {
-  green: '#59d9b3',
-  greenHover: '#54cfa9',
-  greenDisabled: '#2e6f63',
-};
+/* =============================================================================
+   Theme (auto light/dark via tokens used in your other steps)
+============================================================================= */
+const SCOPE = 'prompt-step-scope';
 
-const cardStyle: React.CSSProperties = {
-  background: 'var(--p3-card)',
-  border: '1px solid var(--p3-border)',
-  borderRadius: 20,
-  boxShadow: 'var(--p3-shadow)',
-};
+/* =============================================================================
+   Base prompt (used when user types only “assistant”, etc.)
+   — this is the default scaffold and is ALWAYS present
+============================================================================= */
+const BASE_PROMPT = `[Identity]  
+You are an intelligent and responsive assistant designed to help users with a wide range of inquiries and tasks.  
 
-const btnPrimary = (enabled: boolean) => ({
-  background: enabled ? BRAND.green : BRAND.greenDisabled,
-  color: '#fff',
-  boxShadow: enabled ? '0 10px 24px rgba(16,185,129,.25)' : 'none',
-});
+[Style]  
+- Maintain a professional and approachable demeanor.  
+- Use clear and concise language, avoiding overly technical jargon.  
 
-/* ────────────────────────────────────────────────────────────────────────────
-   Types + storage helpers
-──────────────────────────────────────────────────────────────────────────── */
-type Step1 = { language?: string; accentIso2?: string; name?: string; industry?: string };
-const LS_STEP1 = 'voicebuilder:step1';
-const LS_STEP3_PROMPT = 'voicebuilder:step3:prompt';
-const LS_STEP3_FORM = 'voicebuilder:step3:form';
+[Response Guidelines]  
+- Keep responses short and focused on the user's immediate query.  
+- Verify user-provided information before proceeding with further steps.  
 
-const read = <T,>(k: string, d: T): T => {
-  try { const s = localStorage.getItem(k); return s ? JSON.parse(s) as T : d; } catch { return d; }
-};
-const write = (k: string, v: any) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+[Task & Goals]  
+1. Greet the user warmly and inquire about how you can assist them today.  
+2. Listen carefully to the user's request or question.  
+3. Provide relevant and accurate information based on the user's needs.  
+<wait for user response>  
+4. If a query requires further action, guide the user through step-by-step instructions.  
 
-/* ────────────────────────────────────────────────────────────────────────────
-   Prompt composer
-──────────────────────────────────────────────────────────────────────────── */
-type Form = {
-  role: string;                    // who the agent is
-  org: string;                     // org / brand
-  purpose: string;                 // main job
-  scope: string;                   // what it can / cannot do
-  tone: string;                    // style/tone
-  constraints: string;             // rules
-  dataNeeded: string;              // info to collect
-  examples: string;                // example phrases
-  extra: string;                   // freeform addendum (edit box)
-};
+[Error Handling / Fallback]  
+- If a user's request is unclear or you encounter difficulty understanding, ask for clarification politely.  
+- If a task cannot be completed, inform the user empathetically and suggest alternative solutions or resources.`;
 
-const DEFAULT_FORM: Form = {
-  role: 'Riley (voice assistant)',
-  org: 'Wellness Partners, a multi-specialty health clinic',
-  purpose: 'Efficiently schedule, confirm, reschedule, or cancel appointments while informing patients.',
-  scope: 'Handle routine scheduling questions; escalate clinical questions or emergencies to a human.',
-  tone: 'Friendly, organized, efficient; warm yet professional; clear and patient.',
-  constraints:
-    'Ask one question at a time; confirm names/dates/times explicitly; avoid medical advice; use concise answers; phonetic spell names when needed.',
-  dataNeeded: 'Full name, date of birth, callback number, appointment type, provider preference, urgency.',
-  examples:
-    '“Let me check availability.” · “I can offer Wednesday 2:30 PM or Friday 10:15 AM—what works?” · “To confirm: Wednesday, February 15th at 2:30 PM with Dr. Chen.”',
-  extra: '',
-};
+/* =============================================================================
+   Small helper: typewriter effect into a textarea
+============================================================================= */
+function typeInto(
+  textarea: HTMLTextAreaElement,
+  next: string,
+  setPrompt: (s: string) => void,
+  { cps = 120 }: { cps?: number } = {}
+) {
+  const current = '';
+  let i = 0;
+  const total = next.length;
+  let raf = 0;
 
-function toBulletBlock(label: string, items: string[]) {
-  const lines = items.filter(Boolean).map(s => `- ${s}`).join('\n');
-  return lines ? `### ${label}\n${lines}\n` : '';
+  const step = () => {
+    i = Math.min(total, i + Math.max(1, Math.round(cps / 30)));
+    const slice = next.slice(0, i);
+    setPrompt(slice);
+    if (textarea) {
+      textarea.scrollTop = textarea.scrollHeight;
+    }
+    if (i < total) {
+      raf = window.requestAnimationFrame(step);
+    }
+  };
+
+  if (raf) cancelAnimationFrame(raf);
+  step();
 }
 
-function composePrompt(form: Form, step1: Step1) {
-  const lang = (step1.language || 'English');
-  const accent = step1.accentIso2 ? ` (accent: ${step1.accentIso2})` : '';
-  const intro = `Thank you for calling ${form.org}. This is ${form.role.split('(')[0].trim()}, your scheduling assistant. How may I help you today?`;
+/* =============================================================================
+   Local fallback “editor”: if you don’t wire a backend yet, this tries to
+   blend the edit instruction into the scaffold without breaking structure.
+   (Very simple rules so you always get *something*.)
+============================================================================= */
+function applyInstructionLocally(current: string, instruction: string): string {
+  const ins = instruction.trim();
+  if (!ins) return current;
 
-  return [
-`# Appointment Scheduling Agent Prompt
+  const add = (heading: string, content: string) =>
+    current.replace(
+      new RegExp(`(\\[${heading}\\][\\s\\S]*?)(?=\\n\\[|$)`),
+      (_m, grp) => `${grp}\n${content.trim()}\n`
+    );
 
-## Identity & Purpose
-You are ${form.role}, a voice assistant for ${form.org}.
-Primary goal: ${form.purpose}
+  let next = current;
 
-## Voice & Persona
-${toBulletBlock('Personality', form.tone.split(/[.;]\s*/))}
-${toBulletBlock('Speech Characteristics', [
-  'Use clear, concise language with natural contractions.',
-  'Speak at a measured pace when confirming dates and times.',
-  'Use light fillers only when needed: “Let me check that for you.”',
-  'Pronounce provider names correctly.',
-])}
+  // Simple intent detection
+  if (/identity|purpose|you are|become|act as/i.test(ins)) {
+    next = add('Identity', `- ${ins}`);
+  } else if (/style|tone|voice|formal|friendly|concise|empath/i.test(ins)) {
+    next = add('Style', `- ${ins}`);
+  } else if (/guideline|response|format|keep|verify|confirm/i.test(ins)) {
+    next = add('Response Guidelines', `- ${ins}`);
+  } else if (/ask|collect|flow|steps|goal|greet|question/i.test(ins)) {
+    // put under Task & Goals
+    // transform sentences to bullets or numbered hints
+    const lines = ins
+      .split(/[.;]\s*/g)
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .map((l) => `- ${l}`)
+      .join('\n');
+    next = add('Task & Goals', lines);
+  } else if (/error|fallback|if.*cannot|unclear|apolog/i.test(ins)) {
+    next = add('Error Handling / Fallback', `- ${ins}`);
+  } else {
+    // Unknown → append as a note under Response Guidelines
+    next = add('Response Guidelines', `- ${ins}`);
+  }
 
-## Conversation Flow
-
-### Introduction
-Start with: "${intro}"
-
-### Appointment Type Determination
-1. Ask the appointment type.
-2. Ask for provider preference or first available.
-3. Ask if the caller is new or returning.
-4. Briefly assess urgency (emergency → escalate immediately).
-
-### Scheduling Process
-1. Collect caller info (name, DOB, callback number).  
-2. Offer 2–3 time options that match their preference.  
-3. Confirm final selection exactly (day, date, time, provider).  
-4. Provide any preparation instructions (arrive early, bring ID/insurance).
-
-### Confirmation & Wrap-up
-- Summarize the booking exactly.  
-- Offer optional reminders (text/call).  
-- Close politely and check if anything else is needed.
-
-## Capabilities & Scope
-${form.scope}
-
-## Response Guidelines
-${form.constraints}
-
-## Data to Collect
-${form.dataNeeded}
-
-## Example Phrases
-${form.examples}
-
-## Language & Operational Settings
-- Language: ${lang}${accent}.
-- Ask one question at a time.
-- If you need time, say: “I’m checking availability. One moment please.”
-
-## Scenario Handling
-- New patients: arrive 20 minutes early for forms; bring ID + insurance.  
-- Urgent requests: check same-day slots; true emergencies → route to nurse or nearest ER.  
-- Rescheduling: read back current appointment; offer alternatives; cancel old and confirm new.  
-- Insurance/payment: provide general coverage info; specifics → refer to insurer; copays at service time.
-
-${form.extra ? `## Additional Instructions\n${form.extra}` : ''}`
-  ].join('\n');
+  return next;
 }
 
-/* ────────────────────────────────────────────────────────────────────────────
+/* =============================================================================
    Component
-──────────────────────────────────────────────────────────────────────────── */
-export default function StepV3PromptMaker({
-  onBack, onNext,
-}: { onBack?: () => void; onNext?: () => void }) {
-  const step1 = read<Step1>(LS_STEP1, { language: 'English', accentIso2: 'US' });
+============================================================================= */
+export default function StepV3Prompt({
+  onNext,
+  onBack,
+  editEndpoint = '/api/prompt/edit', // optional: your server endpoint (POST)
+}: {
+  onNext?: () => void;
+  onBack?: () => void;
+  /** POST {prompt, instruction} -> {prompt: string}  */
+  editEndpoint?: string;
+}) {
+  const [prompt, setPrompt] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem('voicebuilder:step3:prompt');
+      return saved ? JSON.parse(saved) : BASE_PROMPT;
+    } catch {
+      return BASE_PROMPT;
+    }
+  });
 
-  const [form, setForm] = useState<Form>(() => read<Form>(LS_STEP3_FORM, DEFAULT_FORM));
-  const [prompt, setPrompt] = useState<string>(() => read<string>(LS_STEP3_PROMPT, ''));
-  const [isTyping, setIsTyping] = useState(false);
-  const [visible, setVisible] = useState(''); // typing animation text
-  const typerRef = useRef<number | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
+  const [instruction, setInstruction] = useState('');
+  const [busy, setBusy] = useState(false);
+  const taRef = useRef<HTMLTextAreaElement | null>(null);
 
   // persist
-  useEffect(() => { write(LS_STEP3_FORM, form); }, [form]);
-  useEffect(() => { write(LS_STEP3_PROMPT, prompt); }, [prompt]);
+  useEffect(() => {
+    try {
+      localStorage.setItem('voicebuilder:step3:prompt', JSON.stringify(prompt));
+    } catch {}
+  }, [prompt]);
 
-  // typewriter animation
-  const typeTo = (full: string) => {
-    if (typerRef.current) cancelAnimationFrame(typerRef.current);
-    setIsTyping(true);
-    setVisible('');
+  async function submitEdit() {
+    const instr = instruction.trim();
+    if (!instr) {
+      setEditOpen(false);
+      return;
+    }
+    setBusy(true);
 
-    const speedBase = 1 + Math.max(0, Math.min(4, Math.floor(full.length / 1200))); // crude speed normalize
-    let i = 0;
+    // Try backend first
+    try {
+      const res = await fetch(editEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, instruction: instr }),
+      });
 
-    const step = () => {
-      i += Math.max(1, speedBase);
-      setVisible(full.slice(0, i));
-      if (i < full.length) {
-        typerRef.current = requestAnimationFrame(step);
-      } else {
-        setIsTyping(false);
+      if (res.ok) {
+        const data = await res.json();
+        const next = (data?.prompt || '').trim();
+        if (next) {
+          // typing animation
+          if (taRef.current) {
+            typeInto(taRef.current, next, setPrompt, { cps: 180 });
+          } else {
+            setPrompt(next);
+          }
+          setInstruction('');
+          setEditOpen(false);
+          setBusy(false);
+          return;
+        }
       }
-    };
-    typerRef.current = requestAnimationFrame(step);
-  };
+    } catch {
+      // fall through to local
+    }
 
-  const generate = () => {
-    const full = composePrompt(form, step1);
-    setPrompt(full);
-    typeTo(full);
-  };
-
-  const applyQuickEdit = (delta: string) => {
-    if (!delta.trim()) return;
-    const patched = prompt
-      ? `${prompt.trim()}\n\n## Edit Notes\n${delta.trim()}`
-      : composePrompt({ ...form, extra: delta }, step1);
-    setPrompt(patched);
-    typeTo(patched);
-  };
-
-  const copy = () => navigator.clipboard.writeText(prompt).catch(() => {});
-
-  const canNext = prompt.trim().length > 0;
+    // Local fallback merge
+    const next = applyInstructionLocally(prompt, instr);
+    if (taRef.current) {
+      typeInto(taRef.current, next, setPrompt, { cps: 180 });
+    } else {
+      setPrompt(next);
+    }
+    setInstruction('');
+    setEditOpen(false);
+    setBusy(false);
+  }
 
   return (
-    <div className={`${SCOPE} min-h-screen w-full font-movatif`} style={{ background: 'var(--p3-bg)', color: 'var(--p3-text)' }}>
-      <div className="w-full max-w-7xl mx-auto px-5 md:px-8 pt-8 pb-24">
+    <section className={`${SCOPE} font-movatif`}>
+      <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 pt-8 pb-24">
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-2xl md:text-3xl font-semibold" style={{ color: 'var(--p3-text)' }}>
-            Prompt Maker
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-2xl md:text-3xl font-semibold" style={{ color: 'var(--text)' }}>
+            System Prompt
           </h2>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={copy}
-              className="inline-flex items-center gap-2 rounded-[20px] border px-3 py-2 text-sm hover:bg-black/5"
-              style={{ borderColor: 'var(--p3-border)', color: 'var(--p3-text-soft)' }}
-            >
-              <Copy className="w-4 h-4" /> Copy
-            </button>
-          </div>
-        </div>
 
-        {/* Grid: left controls / right preview */}
-        <div className="grid grid-cols-12 gap-6">
-          {/* LEFT: 4 compact cards + quick edit (<= 5 blocks total) */}
-          <div className="col-span-12 lg:col-span-5 space-y-5">
-            {/* Identity */}
-            <div style={cardStyle} className="p-5">
-              <div className="flex items-center gap-2 mb-3">
-                <FileText className="w-4 h-4" style={{ color: 'var(--p3-brand)' }} />
-                <h3 className="text-sm font-semibold" style={{ color: 'var(--p3-text)' }}>Identity</h3>
-              </div>
-              <div className="grid grid-cols-1 gap-3">
-                <Input
-                  label="Agent / Role"
-                  value={form.role}
-                  onChange={(v) => setForm({ ...form, role: v })}
-                />
-                <Input
-                  label="Organization"
-                  value={form.org}
-                  onChange={(v) => setForm({ ...form, org: v })}
-                />
-                <Textarea
-                  label="Purpose"
-                  value={form.purpose}
-                  onChange={(v) => setForm({ ...form, purpose: v })}
-                  rows={2}
-                />
-              </div>
+          {/* Edit Prompt chip (like screenshot) */}
+          <div
+            className="relative"
+            style={{
+              background: 'var(--panel)',
+              border: '1px solid var(--border)',
+              boxShadow: 'var(--shadow-soft)',
+              borderRadius: 14,
+              padding: 10,
+              minWidth: 320,
+            }}
+          >
+            <div className="text-sm font-medium mb-2" style={{ color: 'var(--text)' }}>
+              Edit Prompt
             </div>
+            <input
+              value={instruction}
+              onChange={(e) => setInstruction(e.target.value)}
+              placeholder="Describe how you'd like to edit the prompt"
+              className="w-full text-sm rounded-[10px] px-3 py-2 outline-none"
+              style={{
+                background: 'var(--card)',
+                border: '1px solid var(--border)',
+                color: 'var(--text)',
+              }}
+            />
 
-            {/* Style & Scope */}
-            <div style={cardStyle} className="p-5">
-              <div className="flex items-center gap-2 mb-3">
-                <Settings2 className="w-4 h-4" style={{ color: 'var(--p3-brand)' }} />
-                <h3 className="text-sm font-semibold" style={{ color: 'var(--p3-text)' }}>Style & Scope</h3>
-              </div>
-              <Textarea
-                label="Tone / Style (short bullets or sentences)"
-                value={form.tone}
-                onChange={(v) => setForm({ ...form, tone: v })}
-                rows={3}
-              />
-              <Textarea
-                label="Scope / Limits"
-                value={form.scope}
-                onChange={(v) => setForm({ ...form, scope: v })}
-                rows={3}
-              />
-            </div>
-
-            {/* Constraints & Data */}
-            <div style={cardStyle} className="p-5">
-              <div className="flex items-center gap-2 mb-3">
-                <ClipboardList className="w-4 h-4" style={{ color: 'var(--p3-brand)' }} />
-                <h3 className="text-sm font-semibold" style={{ color: 'var(--p3-text)' }}>Rules & Data</h3>
-              </div>
-              <Textarea
-                label="Response Rules / Constraints"
-                value={form.constraints}
-                onChange={(v) => setForm({ ...form, constraints: v })}
-                rows={3}
-              />
-              <Textarea
-                label="Data to Collect"
-                value={form.dataNeeded}
-                onChange={(v) => setForm({ ...form, dataNeeded: v })}
-                rows={2}
-              />
-              <Textarea
-                label="Example Phrases"
-                value={form.examples}
-                onChange={(v) => setForm({ ...form, examples: v })}
-                rows={2}
-              />
-            </div>
-
-            {/* Quick Edit (like the dialog in your screenshot) */}
-            <div style={cardStyle} className="p-5">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2">
-                  <Edit3 className="w-4 h-4" style={{ color: 'var(--p3-brand)' }} />
-                  <h3 className="text-sm font-semibold" style={{ color: 'var(--p3-text)' }}>Quick Edit</h3>
-                </div>
-                <button
-                  onClick={() => applyQuickEdit(form.extra)}
-                  className="inline-flex items-center gap-2 rounded-[18px] px-3 py-1.5 text-sm"
-                  style={{ border: '1px solid var(--p3-border)', color: 'var(--p3-text-soft)' }}
-                >
-                  Submit Edit
-                </button>
-              </div>
-              <input
-                value={form.extra}
-                onChange={(e) => setForm({ ...form, extra: e.target.value })}
-                placeholder="Describe how you'd like to edit the prompt…"
-                className="w-full rounded-[14px] px-3 py-2 text-sm"
-                style={{ background: 'var(--p3-input-bg)', border: '1px solid var(--p3-input-border)', color: 'var(--p3-text)' }}
-              />
-            </div>
-
-            {/* Generate */}
-            <div className="flex items-center justify-end">
+            <div className="mt-2 flex items-center gap-2 justify-end">
               <button
-                onClick={generate}
-                className="inline-flex items-center gap-2 px-6 py-2.5 rounded-[20px] font-semibold"
-                style={btnPrimary(true)}
-                onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = BRAND.greenHover)}
-                onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = BRAND.green)}
+                disabled={busy}
+                onClick={() => {
+                  setInstruction('');
+                }}
+                className="px-3 py-2 rounded-[10px] text-sm"
+                style={{
+                  background: 'var(--card)',
+                  border: '1px solid var(--border)',
+                  color: 'var(--text)',
+                }}
               >
-                <Wand2 className="w-4 h-4" /> Generate
+                Cancel
+              </button>
+              <button
+                disabled={busy}
+                onClick={submitEdit}
+                className="px-3 py-2 rounded-[10px] text-sm inline-flex items-center gap-2"
+                style={{
+                  background: 'var(--brand)',
+                  border: '1px solid color-mix(in oklab, var(--brand) 60%, black)',
+                  color: '#0c1213',
+                }}
+              >
+                {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                Submit Edit
               </button>
             </div>
           </div>
+        </div>
 
-          {/* RIGHT: Prompt preview with typing animation */}
-          <div className="col-span-12 lg:col-span-7">
-            <div style={cardStyle} className="p-5 md:p-6 h-full">
-              <div className="flex items-center gap-2 mb-3">
-                <Eye className="w-4 h-4" style={{ color: 'var(--p3-brand)' }} />
-                <h3 className="text-sm font-semibold" style={{ color: 'var(--p3-text)' }}>System Prompt</h3>
-              </div>
+        {/* Generate (like the green + button in the screenshot) */}
+        <div className="mb-3">
+          <button
+            onClick={() => setEditOpen((v) => !v)}
+            className="inline-flex items-center gap-2 text-sm rounded-[20px] px-3 py-1.5"
+            style={{
+              background: 'color-mix(in oklab, var(--brand) 14%, var(--card))',
+              border: '1px solid color-mix(in oklab, var(--brand) 30%, var(--border))',
+              color: 'var(--text)',
+            }}
+            title="Generate"
+          >
+            <Plus className="w-4 h-4" />
+            Generate
+          </button>
+        </div>
 
-              {/* typed text layer */}
-              <div className="relative">
-                <textarea
-                  value={isTyping ? visible : prompt}
-                  onChange={(e) => { setPrompt(e.target.value); if (isTyping) setIsTyping(false); }}
-                  className="w-full min-h-[520px] md:min-h-[640px] rounded-[16px] p-4 text-sm leading-6 font-mono"
-                  style={{ background: 'var(--p3-input-bg)', border: '1px solid var(--p3-input-border)', color: 'var(--p3-text)' }}
-                />
-                <AnimatePresence>
-                  {isTyping && (
-                    <motion.div
-                      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                      className="absolute bottom-3 right-3 text-xs px-2 py-1 rounded-[12px]"
-                      style={{ background: 'var(--p3-chip-bg)', border: '1px solid var(--p3-border)', color: 'var(--p3-text-soft)' }}
-                    >
-                      Typing…
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
+        {/* System Prompt textarea */}
+        <div>
+          <textarea
+            ref={taRef}
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            className="w-full min-h-[540px] rounded-[14px] p-3 text-sm leading-6 outline-none"
+            style={{
+              background: 'var(--card)',
+              border: '1px solid var(--border)',
+              color: 'var(--text)',
+              boxShadow: 'var(--shadow-card)',
+              resize: 'vertical',
+            }}
+          />
+          <div className="mt-2 flex items-center justify-between">
+            <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              Tip: type what you want above, then “Submit Edit”.
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(prompt).catch(() => {});
+                }}
+                className="px-3 py-2 rounded-[10px] text-sm"
+                style={{
+                  background: 'var(--card)',
+                  border: '1px solid var(--border)',
+                  color: 'var(--text)',
+                }}
+              >
+                Copy
+              </button>
+              <button
+                onClick={() => {
+                  setPrompt(BASE_PROMPT);
+                }}
+                className="px-3 py-2 rounded-[10px] text-sm inline-flex items-center gap-2"
+                style={{
+                  background: 'var(--card)',
+                  border: '1px solid var(--border)',
+                  color: 'var(--text)',
+                }}
+                title="Reset to base scaffold"
+              >
+                <X className="w-4 h-4" />
+                Reset
+              </button>
             </div>
           </div>
         </div>
 
         {/* Footer actions */}
-        <div className="mt-8 flex items-center justify-between">
+        <div className="mt-8 flex items-center justify-end gap-3">
           <button
             onClick={onBack}
-            className="inline-flex items-center gap-2 rounded-[18px] px-4 py-2 text-sm"
-            style={{ background: 'var(--p3-card)', border: '1px solid var(--p3-border)', color: 'var(--p3-text)' }}
+            className="px-4 py-2 rounded-[12px] text-sm"
+            style={{
+              background: 'var(--card)',
+              border: '1px solid var(--border)',
+              color: 'var(--text)',
+              boxShadow: 'var(--shadow-soft)',
+            }}
           >
-            <ArrowLeft className="w-4 h-4" /> Previous
+            Back
           </button>
-
           <button
-            disabled={!canNext}
-            onClick={() => onNext?.()}
-            className="inline-flex items-center gap-2 px-8 h-[42px] rounded-[18px] font-semibold select-none disabled:cursor-not-allowed"
-            style={btnPrimary(canNext)}
-            onMouseEnter={(e)=>{ if(!canNext) return; (e.currentTarget as HTMLButtonButtonElement).style.background = BRAND.greenHover; }}
-            onMouseLeave={(e)=>{ if(!canNext) return; (e.currentTarget as HTMLButtonElement).style.background = BRAND.green; }}
+            onClick={onNext}
+            className="px-5 py-2 rounded-[12px] text-sm"
+            style={{
+              background: 'var(--brand)',
+              border: '1px solid color-mix(in oklab, var(--brand) 60%, black)',
+              color: '#0c1213',
+              boxShadow: '0 10px 24px rgba(0,0,0,.18)',
+            }}
           >
-            Next <ArrowRight className="w-4 h-4" />
+            Next
           </button>
         </div>
       </div>
 
-      {/* Theme tokens */}
+      {/* Scoped light/dark tokens so the surface matches your other steps */}
       <style jsx global>{`
         .${SCOPE}{
-          --p3-bg: #ffffff;
-          --p3-text: #101213;
-          --p3-text-soft: color-mix(in oklab, var(--p3-text) 65%, transparent);
-          --p3-card: #ffffff;
-          --p3-border: rgba(0,0,0,.10);
-          --p3-shadow: 0 28px 70px rgba(0,0,0,.10), 0 10px 26px rgba(0,0,0,.06);
-          --p3-brand: ${BRAND.green};
-          --p3-input-bg: #ffffff;
-          --p3-input-border: rgba(0,0,0,.12);
-          --p3-chip-bg: rgba(0,0,0,.04);
+          --bg: #ffffff;
+          --text: #0e1213;
+          --text-muted: rgba(0,0,0,.60);
+          --panel: #ffffff;
+          --card: #ffffff;
+          --border: rgba(0,0,0,.12);
+          --shadow-soft: 0 10px 26px rgba(0,0,0,.06);
+          --shadow-card: inset 0 1px 0 rgba(255,255,255,.8), 0 10px 22px rgba(0,0,0,.06);
+          --brand: #59d9b3;
         }
         [data-theme="dark"] .${SCOPE}{
-          --p3-bg: #0b0c10;
-          --p3-text: #ffffff;
-          --p3-text-soft: rgba(255,255,255,.74);
-          --p3-card: rgba(13,15,17,.92);
-          --p3-border: rgba(255,255,255,.12);
-          --p3-shadow: 0 36px 90px rgba(0,0,0,.60), 0 14px 34px rgba(0,0,0,.45);
-          --p3-brand: ${BRAND.green};
-          --p3-input-bg: #0b0e0f;
-          --p3-input-border: rgba(255,255,255,.14);
-          --p3-chip-bg: rgba(255,255,255,.06);
+          --bg: #0b0c10;
+          --text: #e8f1ef;
+          --text-muted: rgba(255,255,255,.65);
+          --panel: rgba(13,15,17,0.92);
+          --card: rgba(255,255,255,.02);
+          --border: rgba(255,255,255,.14);
+          --shadow-soft: 0 14px 34px rgba(0,0,0,.45);
+          --shadow-card: inset 0 1px 0 rgba(255,255,255,.04), 0 12px 30px rgba(0,0,0,.38);
+          --brand: #59d9b3;
         }
       `}</style>
-    </div>
-  );
-}
-
-/* ────────────────────────────────────────────────────────────────────────────
-   Small form atoms
-──────────────────────────────────────────────────────────────────────────── */
-function Input({ label, value, onChange }: { label: string; value: string; onChange: (v: string)=>void }) {
-  return (
-    <label className="block">
-      <div className="mb-1 text-xs" style={{ color: 'var(--p3-text-soft)' }}>{label}</div>
-      <input
-        value={value}
-        onChange={(e)=>onChange(e.target.value)}
-        className="w-full rounded-[14px] px-3 py-2 text-sm"
-        style={{ background: 'var(--p3-input-bg)', border: '1px solid var(--p3-input-border)', color: 'var(--p3-text)' }}
-      />
-    </label>
-  );
-}
-function Textarea({
-  label, value, onChange, rows = 3,
-}: { label: string; value: string; onChange: (v: string)=>void; rows?: number }) {
-  return (
-    <label className="block">
-      <div className="mb-1 text-xs" style={{ color: 'var(--p3-text-soft)' }}>{label}</div>
-      <textarea
-        value={value}
-        rows={rows}
-        onChange={(e)=>onChange(e.target.value)}
-        className="w-full rounded-[14px] px-3 py-2 text-sm leading-6"
-        style={{ background: 'var(--p3-input-bg)', border: '1px solid var(--p3-input-border)', color: 'var(--p3-text)' }}
-      />
-    </label>
+    </section>
   );
 }
