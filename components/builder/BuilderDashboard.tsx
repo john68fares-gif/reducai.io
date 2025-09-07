@@ -27,8 +27,6 @@ import Step4Overview from './Step4Overview';
 import { s } from '@/utils/safe';
 import { scopedStorage } from '@/utils/scoped-storage';
 
-// NOTE: HeaderRail removed per your request
-
 const Bot3D = dynamic(() => import('./Bot3D.client'), {
   ssr: false,
   loading: () => (
@@ -58,6 +56,7 @@ type Appearance = {
 
 type Bot = {
   id: string;
+  assistantId?: string;
   name: string;
   industry?: string;
   language?: string;
@@ -67,11 +66,10 @@ type Bot = {
   createdAt?: string;
   updatedAt?: string;
   appearance?: Appearance;
-  assistantId?: string;
 };
 
-const STORAGE_KEYS = ['chatbots', 'agents', 'builds'];
 const SAVE_KEY = 'chatbots';
+const STORAGE_KEYS = ['chatbots', 'agents', 'builds'];
 const nowISO = () => new Date().toISOString();
 const fmtDate = (iso?: string) => (iso ? new Date(iso).toLocaleDateString() : '');
 
@@ -84,12 +82,10 @@ const sortByNewest = (arr: Bot[]) =>
         Date.parse(a.updatedAt || a.createdAt || '0')
     );
 
-/* ---------- Local + Cloud loaders & merge ---------- */
-
-function normalizeBot(b: any): Bot {
+function normalize(b: any): Bot {
   return {
-    id: b?.id ?? b?.assistantId ?? (typeof crypto !== 'undefined' ? crypto.randomUUID() : String(Date.now())),
-    assistantId: b?.assistantId ?? b?.id,
+    id: String(b?.id ?? b?.assistantId ?? (typeof crypto !== 'undefined' ? crypto.randomUUID() : Date.now().toString())),
+    assistantId: String(b?.assistantId ?? b?.id ?? ''),
     name: s(b?.name, 'Untitled Bot'),
     industry: s(b?.industry),
     language: s(b?.language),
@@ -110,32 +106,24 @@ function loadLocalBots(): Bot[] {
       if (!raw) continue;
       const arr = JSON.parse(raw);
       if (!Array.isArray(arr)) continue;
-      return sortByNewest(arr.map(normalizeBot));
+      const out: Bot[] = arr.map(normalize);
+      if (out.length) return sortByNewest(out);
     } catch {}
   }
   return [];
 }
 
-async function loadCloudBots(): Promise<Bot[]> {
-  try {
-    const ss = await scopedStorage();
-    await ss.ensureOwnerGuard();
-    const arr = (await ss.getJSON<any[]>('chatbots.v1', [])) || [];
-    if (!Array.isArray(arr)) return [];
-    return sortByNewest(arr.map(normalizeBot));
-  } catch {
-    return [];
-  }
+function saveLocalBots(bots: Bot[]) {
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(bots)); } catch {}
 }
 
-function mergeUnique(a: Bot[], b: Bot[]): Bot[] {
+function mergeByAssistantId(a: Bot[], b: Bot[]): Bot[] {
   const map = new Map<string, Bot>();
   const put = (x: Bot) => {
     const key = x.assistantId || x.id;
     const prev = map.get(key);
     if (!prev) map.set(key, x);
     else {
-      // keep the newest updatedAt
       const newer =
         Date.parse(x.updatedAt || x.createdAt || '0') >
         Date.parse(prev.updatedAt || prev.createdAt || '0')
@@ -149,7 +137,237 @@ function mergeUnique(a: Bot[], b: Bot[]): Bot[] {
   return sortByNewest(Array.from(map.values()));
 }
 
-/* ---------- Step 3 splitter ---------- */
+/* ----------------------------------- UI ----------------------------------- */
+
+export default function BuilderDashboard() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  const rawStep = searchParams.get('step');
+  const step = rawStep && ['1', '2', '3', '4'].includes(rawStep) ? rawStep : null;
+
+  const [query, setQuery] = useState('');
+  const [bots, setBots] = useState<Bot[]>([]);
+  const [customizingId, setCustomizingId] = useState<string | null>(null);
+  const [viewId, setViewId] = useState<string | null>(null);
+
+  // clean leftover builder data when a build completes
+  useEffect(() => {
+    try {
+      if (localStorage.getItem('builder:cleanup') === '1') {
+        ['builder:step1', 'builder:step2', 'builder:step3'].forEach((k) => localStorage.removeItem(k));
+        localStorage.removeItem('builder:cleanup');
+      }
+    } catch {}
+  }, []);
+
+  // normalize step data
+  useEffect(() => {
+    try {
+      const normalizeStep = (k: string) => {
+        const raw = localStorage.getItem(k);
+        if (!raw) return;
+        const v = JSON.parse(raw);
+        if (v && typeof v === 'object') {
+          (['name', 'industry', 'language'] as const).forEach((key) => {
+            if (v[key] !== undefined) v[key] = typeof v[key] === 'string' ? v[key] : '';
+          });
+          localStorage.setItem(k, JSON.stringify(v));
+        }
+      };
+      ['builder:step1', 'builder:step2', 'builder:step3'].forEach(normalizeStep);
+    } catch {}
+  }, []);
+
+  // Load local immediately for fast paint
+  useEffect(() => {
+    setBots(loadLocalBots());
+  }, []);
+
+  // Then merge with cloud (scoped storage) and keep in sync
+  async function refreshFromCloud() {
+    try {
+      const ss = await scopedStorage();
+      await ss.ensureOwnerGuard();
+
+      const cloudArr = await ss.getJSON<any[]>('chatbots.v1', []);
+      const cloud = Array.isArray(cloudArr) ? cloudArr.map(normalize) : [];
+
+      const local = loadLocalBots();
+      const merged = mergeByAssistantId(local, cloud);
+
+      setBots(merged);
+      // keep localStorage in sync so offline still works
+      saveLocalBots(merged);
+    } catch {
+      // ignore cloud errors, stay with local
+    }
+  }
+
+  useEffect(() => {
+    refreshFromCloud();
+    // listen for localStorage & custom events to refresh
+    const onStorage = (e: StorageEvent) => {
+      if (STORAGE_KEYS.includes(e.key || '') || e.key === 'chatbots') {
+        setBots(loadLocalBots());
+        refreshFromCloud();
+      }
+    };
+    const onBuildsUpdated = () => refreshFromCloud();
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('storage', onStorage);
+      window.addEventListener('builds:updated', onBuildsUpdated as any);
+    }
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('storage', onStorage);
+        window.removeEventListener('builds:updated', onBuildsUpdated as any);
+      }
+    };
+  }, []);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return bots;
+    return bots.filter((b) => b.name.toLowerCase().includes(q));
+  }, [bots, query]);
+
+  const selectedBot = useMemo(() => bots.find((b) => b.id === customizingId), [bots, customizingId]);
+  const viewedBot = useMemo(() => bots.find((b) => b.id === viewId), [bots, viewId]);
+
+  const setStep = (next: string | null) => {
+    const usp = new URLSearchParams(Array.from(searchParams.entries()));
+    if (next) usp.set('step', next);
+    else usp.delete('step');
+    router.replace(`${pathname}?${usp.toString()}`, { scroll: false });
+  };
+
+  // ---------- Wizard ----------
+  if (step) {
+    return (
+      <div className="min-h-screen w-full font-movatif" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
+        <main className="w-full min-h-screen">
+          {step === '1' && <Step1AIType onNext={() => setStep('2')} />}
+          {step === '2' && <Step2ModelSettings onBack={() => setStep('1')} onNext={() => setStep('3')} />}
+          {step === '3' && <Step3PromptEditor onBack={() => setStep('2')} onNext={() => setStep('4')} />}
+          {step === '4' && <Step4Overview onBack={() => setStep('3')} onFinish={() => setStep(null)} />}
+        </main>
+      </div>
+    );
+  }
+
+  // ---------- Dashboard ----------
+  return (
+    <div className="min-h-screen w-full font-movatif" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
+      <main className="flex-1 w-full px-4 sm:px-6 pt-6 pb-24">
+        {/* Search */}
+        <div className="mb-6">
+          <div
+            className="flex items-center gap-2 w-full rounded-[14px] px-4 py-3 text-[15px]"
+            style={{
+              background: 'var(--card)',
+              color: 'var(--text-muted)',
+              border: '1px solid var(--border)',
+              boxShadow: 'var(--shadow-card)',
+            }}
+          >
+            <span className="opacity-70">🔎</span>
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search projects and builds…"
+              className="w-full bg-transparent outline-none"
+              style={{ color: 'var(--text)' }}
+            />
+          </div>
+        </div>
+
+        {/* Rows */}
+        <div className="space-y-6">
+          <CreateRow onClick={() => router.push('/builder?step=1')} />
+
+          {filtered.map((bot) => (
+            <BuildRow
+              key={bot.id}
+              bot={bot}
+              accent={accentFor(bot.id)}
+              onOpen={() => setViewId(bot.id)}
+              onDelete={async () => {
+                // delete locally…
+                const next = bots.filter((b) => (b.assistantId || b.id) !== (bot.assistantId || bot.id));
+                const sorted = sortByNewest(next);
+                setBots(sorted);
+                saveLocalBots(sorted);
+                // …and in cloud
+                try {
+                  const ss = await scopedStorage();
+                  await ss.ensureOwnerGuard();
+                  const cloudArr = await ss.getJSON<any[]>('chatbots.v1', []);
+                  const cloud = Array.isArray(cloudArr) ? cloudArr : [];
+                  const key = bot.assistantId || bot.id;
+                  const filteredCloud = cloud.filter((c: any) => (c?.assistantId || c?.id) !== key);
+                  await ss.setJSON('chatbots.v1', filteredCloud);
+                  try { window.dispatchEvent(new Event('builds:updated')); } catch {}
+                } catch {}
+              }}
+              onCustomize={() => setCustomizingId(bot.id)}
+            />
+          ))}
+        </div>
+
+        {filtered.length === 0 && (
+          <div className="mt-12 text-center" style={{ color: 'var(--text-muted)' }}>
+            No builds found. Click <span style={{ color: 'var(--brand)' }}>Create a Build</span> to get started.
+          </div>
+        )}
+      </main>
+
+      {selectedBot && (
+        <CustomizeModal
+          bot={selectedBot}
+          onClose={() => setCustomizingId(null)}
+          onApply={(ap) => {
+            if (!customizingId) return;
+            const next = bots.map((b) =>
+              (b.assistantId || b.id) === (selectedBot.assistantId || selectedBot.id)
+                ? { ...b, appearance: { ...(b.appearance ?? {}), ...ap }, updatedAt: nowISO() }
+                : b
+            );
+            const sorted = sortByNewest(next);
+            setBots(sorted);
+            saveLocalBots(sorted);
+          }}
+          onReset={() => {
+            if (!customizingId) return;
+            const next = bots.map((b) =>
+              (b.assistantId || b.id) === (selectedBot.assistantId || selectedBot.id)
+                ? { ...b, appearance: undefined, updatedAt: nowISO() }
+                : b
+            );
+            const sorted = sortByNewest(next);
+            setBots(sorted);
+            saveLocalBots(sorted);
+          }}
+          onSaveDraft={(name, ap) => {
+            if (!customizingId) return;
+            const key = `drafts:${customizingId}`;
+            const arr: Array<{ name: string; appearance: Appearance; ts: string }> =
+              JSON.parse(localStorage.getItem(key) || '[]');
+            arr.unshift({ name: name || `Draft ${new Date().toLocaleString()}`, appearance: ap, ts: nowISO() });
+            localStorage.setItem(key, JSON.stringify(arr.slice(0, 20)));
+          }}
+        />
+      )}
+
+      {viewedBot && <PromptOverlay bot={viewedBot} onClose={() => setViewId(null)} />}
+    </div>
+  );
+}
+
+/* --------------------------- Prompt Overlay --------------------------- */
+
 type PromptSectionKey =
   | 'DESCRIPTION'
   | 'AI DESCRIPTION'
@@ -216,217 +434,6 @@ function splitStep3IntoSections(step3Raw?: string): SplitSection[] | null {
   return out;
 }
 
-/* ----------------------------------- UI ----------------------------------- */
-
-export default function BuilderDashboard() {
-  const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
-
-  const rawStep = searchParams.get('step');
-  const step = rawStep && ['1', '2', '3', '4'].includes(rawStep) ? rawStep : null;
-
-  const [query, setQuery] = useState('');
-  const [bots, setBots] = useState<Bot[]>([]);
-  const [customizingId, setCustomizingId] = useState<string | null>(null);
-  const [viewId, setViewId] = useState<string | null>(null);
-
-  useEffect(() => {
-    try {
-      if (localStorage.getItem('builder:cleanup') === '1') {
-        ['builder:step1', 'builder:step2', 'builder:step3'].forEach((k) => localStorage.removeItem(k));
-        localStorage.removeItem('builder:cleanup');
-      }
-    } catch {}
-  }, []);
-
-  useEffect(() => {
-    try {
-      const normalize = (k: string) => {
-        const raw = localStorage.getItem(k);
-        if (!raw) return;
-        const v = JSON.parse(raw);
-        if (v && typeof v === 'object') {
-          (['name', 'industry', 'language'] as const).forEach((key) => {
-            if (v[key] !== undefined) v[key] = typeof v[key] === 'string' ? v[key] : '';
-          });
-          localStorage.setItem(k, JSON.stringify(v));
-        }
-      };
-      ['builder:step1', 'builder:step2', 'builder:step3'].forEach(normalize);
-    } catch {}
-  }, []);
-
-  useEffect(() => {
-    let mounted = true;
-
-    async function refresh() {
-      const local = loadLocalBots();
-      const cloud = await loadCloudBots();
-      if (!mounted) return;
-      setBots(mergeUnique(local, cloud));
-    }
-
-    // initial
-    refresh();
-
-    // storage changes (same device)
-    const onStorage = (e: StorageEvent) => {
-      if (STORAGE_KEYS.includes(e.key || '')) refresh();
-    };
-
-    // custom signal from Step 4 success path
-    const onBuildsUpdated = () => refresh();
-
-    // when tab becomes visible (iPad → laptop etc.)
-    const onVis = () => document.visibilityState === 'visible' && refresh();
-
-    // gentle polling as safety net
-    const id = setInterval(refresh, 12000);
-
-    if (typeof window !== 'undefined') {
-      window.addEventListener('storage', onStorage);
-      window.addEventListener('builds:updated', onBuildsUpdated);
-      document.addEventListener('visibilitychange', onVis);
-    }
-
-    return () => {
-      mounted = false;
-      if (typeof window !== 'undefined') {
-        window.removeEventListener('storage', onStorage);
-        window.removeEventListener('builds:updated', onBuildsUpdated);
-        document.removeEventListener('visibilitychange', onVis);
-      }
-      clearInterval(id);
-    };
-  }, []);
-
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return bots;
-    return bots.filter((b) => b.name.toLowerCase().includes(q));
-  }, [bots, query]);
-
-  const selectedBot = useMemo(() => bots.find((b) => b.id === customizingId), [bots, customizingId]);
-  const viewedBot = useMemo(() => bots.find((b) => b.id === viewId), [bots, viewId]);
-
-  const setStep = (next: string | null) => {
-    const usp = new URLSearchParams(Array.from(searchParams.entries()));
-    if (next) usp.set('step', next);
-    else usp.delete('step');
-    router.replace(`${pathname}?${usp.toString()}`, { scroll: false });
-  };
-
-  // ---------- Wizard (unchanged logic) ----------
-  if (step) {
-    return (
-      <div className="min-h-screen w-full font-movatif" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
-        <main className="w-full min-h-screen">
-          {step === '1' && <Step1AIType onNext={() => setStep('2')} />}
-          {step === '2' && <Step2ModelSettings onBack={() => setStep('1')} onNext={() => setStep('3')} />}
-          {step === '3' && <Step3PromptEditor onBack={() => setStep('2')} onNext={() => setStep('4')} />}
-          {step === '4' && <Step4Overview onBack={() => setStep('3')} onFinish={() => setStep(null)} />}
-        </main>
-      </div>
-    );
-  }
-
-  // ---------- Dashboard ----------
-  return (
-    <div className="min-h-screen w-full font-movatif" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
-      <main className="flex-1 w-full px-4 sm:px-6 pt-6 pb-24">
-        {/* Search */}
-        <div className="mb-6">
-          <div
-            className="flex items-center gap-2 w-full rounded-[14px] px-4 py-3 text-[15px]"
-            style={{
-              background: 'var(--card)',
-              color: 'var(--text-muted)',
-              border: '1px solid var(--border)',
-              boxShadow: 'var(--shadow-card)',
-            }}
-          >
-            <span className="opacity-70">🔎</span>
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search projects and builds…"
-              className="w-full bg-transparent outline-none"
-              style={{ color: 'var(--text)' }}
-            />
-          </div>
-        </div>
-
-        {/* HORIZONTAL LIST (wide rectangles stacked vertically) */}
-        <div className="space-y-6">
-          <CreateRow onClick={() => router.push('/builder?step=1')} />
-
-          {filtered.map((bot) => (
-            <BuildRow
-              key={bot.id}
-              bot={bot}
-              accent={accentFor(bot.id)}
-              onOpen={() => setViewId(bot.id)}
-              onDelete={() => {
-                const next = bots.filter((b) => (b.assistantId || b.id) !== (bot.assistantId || bot.id));
-                const sorted = sortByNewest(next);
-                setBots(sorted);
-                try { localStorage.setItem(SAVE_KEY, JSON.stringify(sorted)); } catch {}
-                // also mirror deletion to cloud (soft; no server function here)
-              }}
-              onCustomize={() => setCustomizingId(bot.id)}
-            />
-          ))}
-        </div>
-
-        {filtered.length === 0 && (
-          <div className="mt-12 text-center" style={{ color: 'var(--text-muted)' }}>
-            No builds found. Click <span style={{ color: 'var(--brand)' }}>Create a Build</span> to get started.
-          </div>
-        )}
-      </main>
-
-      {selectedBot && (
-        <CustomizeModal
-          bot={selectedBot}
-          onClose={() => setCustomizingId(null)}
-          onApply={(ap) => {
-            if (!customizingId) return;
-            const next = bots.map((b) =>
-              b.id === customizingId
-                ? { ...b, appearance: { ...(b.appearance ?? {}), ...ap }, updatedAt: nowISO() }
-                : b
-            );
-            const sorted = sortByNewest(next);
-            setBots(sorted);
-            try { localStorage.setItem(SAVE_KEY, JSON.stringify(sorted)); } catch {}
-          }}
-          onReset={() => {
-            if (!customizingId) return;
-            const next = bots.map((b) =>
-              b.id === customizingId ? { ...b, appearance: undefined, updatedAt: nowISO() } : b
-            );
-            const sorted = sortByNewest(next);
-            setBots(sorted);
-            try { localStorage.setItem(SAVE_KEY, JSON.stringify(sorted)); } catch {}
-          }}
-          onSaveDraft={(name, ap) => {
-            if (!customizingId) return;
-            const key = `drafts:${customizingId}`;
-            const arr: Array<{ name: string; appearance: Appearance; ts: string }> =
-              JSON.parse(localStorage.getItem(key) || '[]');
-            arr.unshift({ name: name || `Draft ${new Date().toLocaleString()}`, appearance: ap, ts: nowISO() });
-            localStorage.setItem(key, JSON.stringify(arr.slice(0, 20)));
-          }}
-        />
-      )}
-
-      {viewedBot && <PromptOverlay bot={viewedBot} onClose={() => setViewId(null)} />}
-    </div>
-  );
-}
-
-/* --------------------------- Prompt Overlay --------------------------- */
 function buildRawStep1PlusStep3(bot: Bot): string {
   const head = [bot.name, bot.industry, bot.language].filter(Boolean).join('\n');
   const step3 = bot.prompt ?? '';
@@ -439,9 +446,7 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
   const sections = splitStep3IntoSections(bot.prompt);
 
   const copyAll = async () => {
-    try {
-      await navigator.clipboard.writeText(rawOut);
-    } catch {}
+    try { await navigator.clipboard.writeText(rawOut); } catch {}
   };
   const downloadTxt = () => {
     const blob = new Blob([rawOut], { type: 'text/plain;charset=utf-8' });
@@ -513,9 +518,7 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
         {/* Body */}
         <div className="flex-1 overflow-y-auto p-6">
           {!bot.prompt ? (
-            <div className="p-5" style={CARD_STYLE}>
-              (No Step 3 prompt yet)
-            </div>
+            <div className="p-5" style={CARD_STYLE}>(No Step 3 prompt yet)</div>
           ) : sections ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {sections.map((sec, i) => (
@@ -559,7 +562,7 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
   );
 }
 
-/* --------------------------------- HORIZONTAL ROWS --------------------------------- */
+/* --------------------------------- ROWS --------------------------------- */
 
 function CreateRow({ onClick }: { onClick: () => void }) {
   return (
@@ -573,7 +576,6 @@ function CreateRow({ onClick }: { onClick: () => void }) {
       }}
     >
       <div className="flex items-stretch">
-        {/* Left accent / icon zone */}
         <div
           className="hidden sm:flex items-center justify-center w-[220px] min-h-[160px]"
           style={{
@@ -593,7 +595,6 @@ function CreateRow({ onClick }: { onClick: () => void }) {
           </div>
         </div>
 
-        {/* Right content */}
         <div className="flex-1 p-5 sm:p-6">
           <div className="flex items-center gap-3">
             <span
