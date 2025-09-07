@@ -35,7 +35,18 @@ const ACCENTS: Record<string, string> = {
   "/support": "#ff9db1",             // pink
 };
 
-const RAIL_H = 56; // px — header height
+/** NEW: subtitles to extend header vertically (not wider) */
+const SUBTITLES: Record<string, string> = {
+  "/builder": "Create, configure, and manage your AIs",
+  "/improve": "Experiment with prompts and iterate safely",
+  "/voice-agent": "Design and preview voice experiences",
+  "/launch": "Deploy, embed, and connect channels",
+  "/phone-numbers": "Provision numbers and configure routing",
+  "/apikeys": "Manage provider credentials securely",
+  "/support": "Docs, tips, and troubleshooting",
+};
+
+const RAIL_H = 88; // ↑ taller header
 
 export default function App({ Component, pageProps }: AppProps) {
   const router = useRouter();
@@ -81,17 +92,18 @@ export default function App({ Component, pageProps }: AppProps) {
     return () => sub.data.subscription.unsubscribe();
   }, [router, isPublic]);
 
-  // compute section title + accent from current route
-  const { sectionTitle, accent } = useMemo(() => {
+  // compute section title + accent + subtitle from current route
+  const { sectionTitle, accent, subtitle } = useMemo(() => {
     const key =
       Object.keys(TITLES).find((k) => pathname === k || pathname.startsWith(`${k}/`)) || "/builder";
     return {
       sectionTitle: TITLES[key],
       accent: ACCENTS[key] || "var(--brand)",
+      subtitle: SUBTITLES[key] || "Overview and quick actions",
     };
   }, [pathname]);
 
-  // expose rail height as a CSS var (useful if anything else needs it)
+  // expose rail height as a CSS var (so layouts can offset content)
   useEffect(() => {
     if (typeof document !== "undefined") {
       document.documentElement.style.setProperty("--rail-h", `${RAIL_H}px`);
@@ -136,31 +148,49 @@ export default function App({ Component, pageProps }: AppProps) {
             </aside>
 
             <div className="min-w-0 relative">
-              {/* ===== TOP RAIL (from right edge of sidebar to right edge of page) ===== */}
+              {/* ===== TOP RAIL (fixed) ===== */}
               <div
-                className="z-40 flex items-center px-6 font-movatif"
+                className="z-40 font-movatif"
                 style={{
                   position: "fixed",
                   top: 0,
-                  left: "var(--sidebar-w, 260px)",            // start exactly at sidebar edge
+                  left: "var(--sidebar-w, 260px)",
                   width: "calc(100% - var(--sidebar-w,260px))",
                   height: RAIL_H,
-                  background: "var(--panel)",                  // same surface vibe as API Keys/Numbers
+                  background: "var(--card)",                // match card surface
                   borderBottom: "1px solid var(--border)",
-                  // soft depth + subtle accent glow like your reference
-                  boxShadow:
-                    `0 10px 26px rgba(0,0,0,.32),
-                     0 0 0 1px color-mix(in oklab, var(--border) 60%, transparent),
-                     0 0 60px 0 color-mix(in oklab, ${accent} 14%, transparent)`,
+                  boxShadow: "var(--shadow-card)",          // same depth as cards
                 }}
               >
-                {/* page title (no rounded container, just text) */}
-                <span
-                  className="text-lg font-semibold tracking-wide"
-                  style={{ color: "var(--text)" }}
-                >
-                  {sectionTitle}
-                </span>
+                {/* subtle accent glow like other sections */}
+                <div
+                  aria-hidden
+                  className="pointer-events-none absolute -top-[36%] -left-[22%] w-[60%] h-[120%] rounded-full"
+                  style={{
+                    background:
+                      `radial-gradient(circle, color-mix(in oklab, ${accent} 14%, transparent) 0%, transparent 70%)`,
+                    filter: "blur(40px)",
+                  }}
+                />
+                {/* header content: stacked (taller), thinner fonts, no extra width */}
+                <div className="relative h-full flex items-center px-6">
+                  <div className="min-w-0">
+                    <div
+                      className="text-[24px] leading-tight font-medium tracking-tight truncate"
+                      style={{ color: "var(--text)", maxWidth: "min(860px, 100%)" }}
+                      title={sectionTitle}
+                    >
+                      {sectionTitle}
+                    </div>
+                    <div
+                      className="mt-1 text-sm leading-6 whitespace-nowrap overflow-hidden text-ellipsis"
+                      style={{ color: "var(--text-muted)", maxWidth: "min(860px, 100%)" }}
+                      title={subtitle}
+                    >
+                      {subtitle}
+                    </div>
+                  </div>
+                </div>
               </div>
 
               {/* spacer so page content sits below the fixed rail */}
