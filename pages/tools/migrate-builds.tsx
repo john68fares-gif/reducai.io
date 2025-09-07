@@ -9,131 +9,137 @@ type Bot = {
   id: string;
   assistantId?: string;
   name: string;
+  type?: string;
   industry?: string;
   language?: string;
   model?: string;
-  description?: string;
   prompt?: string;
   createdAt?: string;
   updatedAt?: string;
   appearance?: any;
 };
 
-const nowISO = () => new Date().toISOString();
-
 function normalize(b: any): Bot {
+  const id = String(b?.id ?? b?.assistantId ?? (typeof crypto !== 'undefined' ? crypto.randomUUID() : Date.now().toString()));
   return {
-    id: b?.id ?? b?.assistantId ?? String(Date.now()),
-    assistantId: b?.assistantId ?? b?.id,
-    name: String(b?.name || 'Untitled Bot'),
-    industry: String(b?.industry || ''),
-    language: String(b?.language || ''),
-    model: String(b?.model || 'gpt-4o-mini'),
-    description: String(b?.description || ''),
-    prompt: String(b?.prompt || ''),
-    createdAt: b?.createdAt || nowISO(),
-    updatedAt: b?.updatedAt || b?.createdAt || nowISO(),
+    id,
+    assistantId: String(b?.assistantId ?? b?.id ?? id),
+    name: String(b?.name || 'Untitled Assistant'),
+    type: b?.type || '',
+    industry: b?.industry || '',
+    language: b?.language || '',
+    model: b?.model || 'gpt-4o-mini',
+    prompt: b?.prompt || '',
+    createdAt: b?.createdAt || new Date().toISOString(),
+    updatedAt: b?.updatedAt || b?.createdAt || new Date().toISOString(),
     appearance: b?.appearance ?? undefined,
   };
 }
 
 export default function MigrateBuilds() {
   const [status, setStatus] = useState<'idle'|'running'|'done'|'error'>('idle');
-  const [msg, setMsg] = useState<string>('Ready to migrate…');
   const [moved, setMoved] = useState<number>(0);
+  const [skipped, setSkipped] = useState<number>(0);
+  const [err, setErr] = useState<string>('');
 
   async function run() {
+    setStatus('running');
+    setErr('');
     try {
-      setStatus('running');
-      setMsg('Reading localStorage…');
+      // Read local builds from any legacy keys
+      const keys = ['chatbots', 'agents', 'builds'];
+      let local: Bot[] = [];
+      for (const k of keys) {
+        try {
+          const raw = localStorage.getItem(k);
+          if (!raw) continue;
+          const arr = JSON.parse(raw);
+          if (Array.isArray(arr)) {
+            local = arr.map(normalize);
+            if (local.length) break;
+          }
+        } catch {}
+      }
 
-      const localRaw = typeof window !== 'undefined' ? localStorage.getItem('chatbots') : null;
-      const localArr: any[] = localRaw ? JSON.parse(localRaw) : [];
-      const locals: Bot[] = Array.isArray(localArr) ? localArr.map(normalize) : [];
+      // If nothing local, try current key
+      if (!local.length) {
+        try {
+          const raw = localStorage.getItem('chatbots');
+          if (raw) {
+            const arr = JSON.parse(raw);
+            if (Array.isArray(arr)) local = arr.map(normalize);
+          }
+        } catch {}
+      }
 
-      setMsg(`Found ${locals.length} local builds. Opening scoped storage…`);
       const ss = await scopedStorage();
       await ss.ensureOwnerGuard();
 
       const cloudArr = await ss.getJSON<any[]>('chatbots.v1', []);
-      const cloud: Bot[] = Array.isArray(cloudArr) ? cloudArr.map(normalize) : [];
+      const cloud = Array.isArray(cloudArr) ? cloudArr.map(normalize) : [];
+      const cloudIndex = new Map(cloud.map((b) => [(b.assistantId || b.id), b]));
 
-      // merge by assistantId/id, keep newest updatedAt
-      const map = new Map<string, Bot>();
-      const put = (x: Bot) => {
-        const key = x.assistantId || x.id;
-        const prev = map.get(key);
-        if (!prev) map.set(key, x);
-        else {
+      let added = 0;
+      let skip = 0;
+
+      for (const b of local) {
+        const key = b.assistantId || b.id;
+        const exist = cloudIndex.get(key);
+        if (!exist) {
+          cloud.unshift(b);
+          cloudIndex.set(key, b);
+          added++;
+        } else {
+          // keep newer
           const newer =
-            Date.parse(x.updatedAt || x.createdAt || '0') >
-            Date.parse(prev.updatedAt || prev.createdAt || '0')
-              ? x
-              : prev;
-          map.set(key, newer);
+            Date.parse(b.updatedAt || b.createdAt || '0') >
+            Date.parse(exist.updatedAt || exist.createdAt || '0');
+          if (newer) {
+            const idx = cloud.findIndex((x) => (x.assistantId || x.id) === key);
+            if (idx >= 0) cloud[idx] = b;
+          } else {
+            skip++;
+          }
         }
-      };
-      cloud.forEach(put);
-      locals.forEach(put);
+      }
 
-      const merged = Array.from(map.values()).sort(
-        (a, b) =>
-          Date.parse(b.updatedAt || b.createdAt || '0') -
-          Date.parse(a.updatedAt || a.createdAt || '0')
-      );
+      await ss.setJSON('chatbots.v1', cloud);
 
-      setMsg('Writing to cloud (chatbots.v1)…');
-      await ss.setJSON('chatbots.v1', merged);
-
-      // fire the live-refresh event the dashboard listens for
+      // re-seed local with merged cloud so we’re in sync
+      try { localStorage.setItem('chatbots', JSON.stringify(cloud)); } catch {}
       try { window.dispatchEvent(new Event('builds:updated')); } catch {}
 
-      setMoved(merged.length);
-      setMsg(`Migration complete. Cloud now has ${merged.length} builds.`);
+      setMoved(added);
+      setSkipped(skip);
       setStatus('done');
     } catch (e: any) {
+      setErr(e?.message || 'Migration failed');
       setStatus('error');
-      setMsg(e?.message || 'Migration failed.');
     }
   }
 
-  // Auto-run once when you open the page; you can refresh to run again safely.
-  useEffect(() => { run(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  useEffect(() => {
+    // auto-run once when you open this page
+    run();
+  }, []);
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)', color: 'var(--text)' }}>
-      <Head><title>Migrate Builds • Reduc AI</title></Head>
-      <div className="max-w-2xl mx-auto px-6 py-12 font-movatif">
-        <h1 className="text-2xl font-semibold mb-2">Migrate Local Builds to Cloud</h1>
+      <Head><title>Migrate Builds</title></Head>
+      <div className="max-w-xl mx-auto p-6">
+        <h1 className="text-2xl font-semibold mb-2">Migrate Builds</h1>
         <p className="text-sm mb-6" style={{ color: 'var(--text-muted)' }}>
-          Copies builds from this device’s <code>localStorage</code> into your account’s scoped storage
-          (<code>chatbots.v1</code>) so they appear on all devices.
+          Moves local builds into your cloud storage so they appear on all devices.
         </p>
-
-        <div className="rounded-2xl p-4" style={{ background: 'var(--panel)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-soft)' }}>
-          <div className="text-sm mb-2">Status:</div>
-          <div className="text-sm">{msg}</div>
-
-          <div className="mt-4 flex gap-2">
-            <button
-              onClick={run}
-              disabled={status === 'running'}
-              className="px-5 py-2 rounded-[14px] font-semibold"
-              style={{
-                background: status === 'running' ? 'color-mix(in oklab, var(--text) 14%, transparent)' : 'var(--brand)',
-                color: '#fff',
-                boxShadow: '0 10px 24px rgba(16,185,129,.25)',
-              }}
-            >
-              {status === 'running' ? 'Migrating…' : 'Run Again'}
-            </button>
-          </div>
-
+        <div className="rounded-2xl p-4" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
+          <div>Status: <b>{status}</b></div>
           {status === 'done' && (
-            <div className="mt-3 text-xs" style={{ color: 'var(--text-muted)' }}>
-              Migrated/merged total: {moved}
+            <div className="mt-2">
+              <div>Moved: {moved}</div>
+              <div>Skipped (already in cloud): {skipped}</div>
             </div>
           )}
+          {status === 'error' && <div className="mt-2" style={{ color: 'salmon' }}>{err}</div>}
         </div>
       </div>
     </div>
