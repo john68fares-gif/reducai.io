@@ -1,63 +1,49 @@
 // app/api/assistants/create/route.ts
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
-export const runtime = 'nodejs';           // ensure Node runtime (not edge)
-export const dynamic = 'force-dynamic';    // don’t cache this route
-
-type Body = {
-  name?: string;
-  model?: string;
-  prompt?: string;     // assistant instructions
-  apiKeyPlain?: string; // optional user key from Step 2
-};
-
-export async function POST(req: Request) {
+/**
+ * Creates an assistant (Assistants v2) using fetch (no SDK).
+ * Body: { name: string, model: string, prompt: string, apiKeyPlain?: string }
+ */
+export async function POST(req: NextRequest) {
   try {
-    const body = (await req.json()) as Body;
-    const name = body.name?.trim() || 'Untitled Assistant';
-    const model = body.model?.trim() || 'gpt-4o-mini';
-    const instructions = body.prompt?.trim() || 'You are a helpful assistant.';
-    const apiKey = (body.apiKeyPlain || process.env.OPENAI_API_KEY || '').trim();
+    const body = await req.json().catch(() => ({}));
+    const name = String(body?.name || 'Untitled Assistant');
+    const model = String(body?.model || 'gpt-4o-mini');
+    const instructions = String(body?.prompt || '');
+    const apiKeyPlain = String(body?.apiKeyPlain || '');
 
-    if (!apiKey) {
-      return NextResponse.json(
-        { ok: false, error: 'No OpenAI API key found (apiKeyPlain or OPENAI_API_KEY).' },
-        { status: 400 }
-      );
+    const key = (apiKeyPlain || process.env.OPENAI_API_KEY || '').trim();
+    if (!key) {
+      return NextResponse.json({ ok: false, error: 'Missing API key.' }, { status: 400 });
     }
 
-    // Call OpenAI Assistants REST API directly (no SDK)
-    const res = await fetch('https://api.openai.com/v1/assistants', {
+    const resp = await fetch('https://api.openai.com/v1/assistants', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${apiKey}`,
+        Authorization: `Bearer ${key}`,
         'Content-Type': 'application/json',
-        // v2 header is still required for Assistants:
+        // 👇 Required for Assistants v2
         'OpenAI-Beta': 'assistants=v2',
       },
       body: JSON.stringify({
         name,
         model,
         instructions,
-        // add tools / metadata here if you want:
-        // tools: [{ type: 'file_search' }],
-        // metadata: { source: 'reducai-builder' },
+        // add tools/metadata here if you like
       }),
     });
 
-    const data = await res.json();
-
-    if (!res.ok) {
+    const json = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
       return NextResponse.json(
-        { ok: false, error: data?.error?.message || `OpenAI error ${res.status}` },
-        { status: res.status }
+        { ok: false, error: json?.error?.message || 'Failed to create assistant' },
+        { status: resp.status }
       );
     }
 
-    // Return the whole assistant (contains .id)
-    return NextResponse.json({ ok: true, assistant: data });
+    return NextResponse.json({ ok: true, assistant: json });
   } catch (err: any) {
-    console.error('assistants/create error:', err);
     return NextResponse.json({ ok: false, error: err?.message || 'Server error' }, { status: 500 });
   }
 }
