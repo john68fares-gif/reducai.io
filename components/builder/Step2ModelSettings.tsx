@@ -1,8 +1,8 @@
 // components/builder/Step2ModelSettings.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { Cpu, Bolt, Rocket, Gauge, KeyRound, ArrowLeft, ArrowRight } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
+import { Cpu, Bolt, Rocket, Gauge, KeyRound, ArrowLeft, ArrowRight, ChevronDown, Search } from 'lucide-react';
 import StepProgress from './StepProgress';
 import { scopedStorage } from '@/utils/scoped-storage';
 
@@ -29,6 +29,159 @@ const BTN_DISABLED = 'color-mix(in oklab, var(--text) 14%, transparent)';
 const LS_KEYS = 'apiKeys.v1';
 const LS_SELECTED = 'apiKeys.selectedId';
 
+/* -----------------------------------------------------------------------------
+   Generic styled dropdown — same look/feel as Step 1 custom selects
+----------------------------------------------------------------------------- */
+type Item<T extends string> = { value: T; label: string; icon?: React.ComponentType<any> };
+function StyledSelect<T extends string>({
+  value,
+  items,
+  onChange,
+  placeholder,
+  leftIcon,
+  filterable = true,
+}: {
+  value: T | '';
+  items: Item<T>[];
+  onChange: (v: T) => void;
+  placeholder?: string;
+  leftIcon?: React.ReactNode;
+  filterable?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const btnRef = useRef<HTMLButtonElement | null>(null);
+  const portalRef = useRef<HTMLDivElement | null>(null);
+  const [rect, setRect] = useState<{ top: number; left: number; width: number; openUp: boolean } | null>(null);
+
+  const selected = items.find(i => i.value === value) || null;
+  const filtered = items.filter(i => i.label.toLowerCase().includes(query.trim().toLowerCase()));
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    const r = btnRef.current?.getBoundingClientRect();
+    if (!r) return;
+    const viewH = window.innerHeight;
+    const openUp = r.bottom + 360 > viewH;
+    setRect({ top: openUp ? r.top : r.bottom, left: r.left, width: r.width, openUp });
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (e: MouseEvent) => {
+      if (btnRef.current?.contains(e.target as Node) || portalRef.current?.contains(e.target as Node)) return;
+      setOpen(false);
+    };
+    window.addEventListener('mousedown', onClick);
+    return () => window.removeEventListener('mousedown', onClick);
+  }, [open]);
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center gap-3 px-3 py-3 rounded-[14px] text-[15px] transition will-change-transform"
+        style={{
+          background: 'var(--ms-input-bg)',
+          border: '1px solid var(--ms-input-border)',
+          boxShadow: 'var(--ms-input-shadow)',
+          color: 'var(--text)',
+        }}
+      >
+        {leftIcon ? <span className="shrink-0">{leftIcon}</span> : null}
+        {selected ? (
+          <span className="flex items-center gap-2 min-w-0">
+            {selected.icon ? <selected.icon className="w-4 h-4" style={{ color: 'var(--brand)' }} /> : null}
+            <span className="truncate">{selected.label}</span>
+          </span>
+        ) : (
+          <span className="opacity-70">{placeholder || 'Select…'}</span>
+        )}
+        <span className="ml-auto" />
+        <ChevronDown className="w-4 h-4 opacity-80" style={{ color: 'var(--text-muted)' }} />
+      </button>
+
+      {open && rect && typeof document !== 'undefined'
+        ? ( // portal menu
+          <div
+            ref={portalRef}
+            className="fixed z-[9999] p-3 animate-[popIn_140ms_ease-out]"
+            style={{
+              top: rect.openUp ? rect.top - 8 : rect.top + 8,
+              left: rect.left,
+              width: rect.width,
+              transform: rect.openUp ? 'translateY(-100%)' : 'none',
+              background: 'var(--ms-menu-bg, #ffffff)',
+              border: '1px solid var(--ms-menu-border, rgba(0,0,0,.10))',
+              borderRadius: 20,
+              boxShadow: '0 28px 70px rgba(0,0,0,.12), 0 10px 26px rgba(0,0,0,.08), 0 0 0 1px rgba(0,0,0,.02)',
+            }}
+          >
+            <style jsx global>{`
+              [data-theme="dark"] .model-step-scope ~ .fixed {
+                --ms-menu-bg: #101314;
+                --ms-menu-border: rgba(255,255,255,.16);
+              }
+            `}</style>
+
+            {filterable && (
+              <div
+                className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[12px]"
+                style={{
+                  background: 'var(--ms-input-bg)',
+                  border: '1px solid var(--ms-input-border)',
+                  boxShadow: 'var(--ms-input-shadow)',
+                  color: 'var(--text)',
+                }}
+              >
+                <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Type to filter…"
+                  className="w-full bg-transparent outline-none text-sm"
+                  style={{ color: 'var(--text)' }}
+                />
+              </div>
+            )}
+
+            <div className="max-h-80 overflow-y-auto pr-1" style={{ scrollbarWidth: 'thin' }}>
+              {filtered.map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => { onChange(opt.value); setOpen(false); }}
+                  className="w-full flex items-center gap-3 px-3 py-2 rounded-[10px] text-left transition"
+                  style={{ background: 'transparent', border: '1px solid transparent', color: 'var(--text)' }}
+                  onMouseEnter={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.background = 'rgba(0,255,194,0.10)';
+                    (e.currentTarget as HTMLButtonElement).style.border = '1px solid rgba(0,255,194,0.35)';
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
+                    (e.currentTarget as HTMLButtonElement).style.border = '1px solid transparent';
+                  }}
+                >
+                  {opt.icon ? <opt.icon className="w-4 h-4" style={{ color: 'var(--brand)' }} /> : null}
+                  <span className="flex-1 truncate">{opt.label}</span>
+                </button>
+              ))}
+              {filtered.length === 0 && (
+                <div className="px-3 py-6 text-sm" style={{ color: 'var(--text-muted)' }}>
+                  No matches.
+                </div>
+              )}
+            </div>
+          </div>
+        ) : null}
+    </>
+  );
+}
+
+/* -----------------------------------------------------------------------------
+   Page component
+----------------------------------------------------------------------------- */
 export default function Step2ModelSettings({ onBack, onNext }: Props) {
   const [model, setModel] = useState<string>('gpt-4o');
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
@@ -75,10 +228,8 @@ export default function Step2ModelSettings({ onBack, onNext }: Props) {
 
         setApiKeyId(chosen);
 
-        // ✅ NEW: also persist the chosen selection globally so Step 4 can fall back to it
         if (chosen) await ss.setJSON(LS_SELECTED, chosen);
 
-        // Optional: mirror any existing saved Step2 to localStorage so Step 4 sees it even before clicking Next again
         if (saved) {
           try { localStorage.setItem('builder:step2', JSON.stringify({ model: saved.model || model, apiKeyId: chosen })); } catch {}
         }
@@ -109,17 +260,24 @@ export default function Step2ModelSettings({ onBack, onNext }: Props) {
       const ss = await scopedStorage();
       await ss.ensureOwnerGuard();
       await ss.setJSON('builder:step2', payload);
-      await ss.setJSON(LS_SELECTED, apiKeyId); // ✅ keep global selection in sync
+      await ss.setJSON(LS_SELECTED, apiKeyId);
 
-      // mirror to localStorage so Step 4 can enable “Generate AI”
       try { localStorage.setItem('builder:step2', JSON.stringify(payload)); } catch {}
 
       onNext(payload);
     })();
   };
 
+  // API Keys -> items for StyledSelect (label includes masked tail)
+  const apiKeyItems = useMemo(() => {
+    return apiKeys.map(k => ({
+      value: k.id,
+      label: `${k.name} ••••${(k.key || '').slice(-4).toUpperCase()}`,
+    })) as Item<string>[];
+  }, [apiKeys]);
+
   return (
-    <div className="min-h-screen w-full font-movatif" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
+    <div className="min-h-screen w-full font-movatif model-step-scope" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
       <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 pt-8 pb-24">
         <StepProgress current={2} />
 
@@ -177,21 +335,15 @@ export default function Step2ModelSettings({ onBack, onNext }: Props) {
                   <label className="block mb-2 text-[13px] font-medium" style={{ color: 'var(--text)' }}>
                     ChatGPT Model
                   </label>
-                  <div className="relative">
-                    <select
-                      value={model}
-                      onChange={(e) => setModel(e.target.value)}
-                      className="w-full rounded-2xl px-4 py-3.5 text-[15px] outline-none"
-                      style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }}
-                    >
-                      {MODEL_OPTIONS.map((m) => (
-                        <option key={m.value} value={m.value}>{m.label}</option>
-                      ))}
-                    </select>
-                    <div className="flex items-center gap-2 mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
-                      {selectedMeta?.icon ? <selectedMeta.icon className="w-4 h-4" /> : <Cpu className="w-4 h-4" />}
-                      <span>{selectedMeta?.label}</span>
-                    </div>
+                  <StyledSelect
+                    value={model as any}
+                    items={MODEL_OPTIONS as any}
+                    onChange={(v) => setModel(v)}
+                    leftIcon={<Cpu className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />}
+                  />
+                  <div className="flex items-center gap-2 mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
+                    {selectedMeta?.icon ? <selectedMeta.icon className="w-4 h-4" /> : <Cpu className="w-4 h-4" />}
+                    <span>{selectedMeta?.label}</span>
                   </div>
                   <div className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
                     Your assistant will actually use this model.
@@ -203,31 +355,19 @@ export default function Step2ModelSettings({ onBack, onNext }: Props) {
                   <label className="block mb-2 text-[13px] font-medium" style={{ color: 'var(--text)' }}>
                     API Key
                   </label>
-                  <div className="relative">
-                    <select
-                      value={apiKeyId}
-                      onChange={async (e) => {
-                        const val = e.target.value;
-                        setApiKeyId(val);
-                        // ✅ save global selected id right when user changes it
-                        try {
-                          const ss = await scopedStorage();
-                          await ss.ensureOwnerGuard();
-                          await ss.setJSON(LS_SELECTED, val);
-                        } catch {}
-                      }}
-                      className="w-full rounded-2xl px-4 py-3.5 text-[15px] outline-none"
-                      style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }}
-                    >
-                      <option value="">Select an API key…</option>
-                      {apiKeys.map((k) => (
-                        <option key={k.id} value={k.id}>
-                          {k.name} ••••{(k.key || '').slice(-4).toUpperCase()}
-                        </option>
-                      ))}
-                    </select>
-                    <KeyRound className="w-4 h-4 absolute right-3 top-3.5 opacity-70" style={{ color: 'var(--text-muted)' }} />
-                  </div>
+                  <StyledSelect
+                    value={(apiKeyId || '') as any}
+                    items={apiKeyItems as any}
+                    onChange={async (val) => {
+                      setApiKeyId(val);
+                      try {
+                        const ss = await scopedStorage();
+                        await ss.ensureOwnerGuard();
+                        await ss.setJSON(LS_SELECTED, val);
+                      } catch {}
+                    }}
+                    leftIcon={<KeyRound className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />}
+                  />
                   <div className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
                     Keys are per-account via scoped storage. Add/manage them on the API Keys page.
                   </div>
@@ -280,6 +420,21 @@ export default function Step2ModelSettings({ onBack, onNext }: Props) {
           </div>
         </section>
       </div>
+
+      {/* Scoped theme vars (light/dark) for this step */}
+      <style jsx global>{`
+        @keyframes popIn { 0% { opacity: 0; transform: scale(.985); } 100% { opacity: 1; transform: scale(1); } }
+        .model-step-scope{
+          --ms-input-bg: #ffffff;
+          --ms-input-border: rgba(0,0,0,.12);
+          --ms-input-shadow: inset 0 1px 0 rgba(255,255,255,.8), 0 10px 22px rgba(0,0,0,.06);
+        }
+        [data-theme="dark"] .model-step-scope{
+          --ms-input-bg: rgba(255,255,255,.02);
+          --ms-input-border: rgba(255,255,255,.14);
+          --ms-input-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 12px 30px rgba(0,0,0,.38);
+        }
+      `}</style>
     </div>
   );
 }
