@@ -227,3 +227,82 @@ a{ color:inherit; text-decoration:none; }
   pointer-events:none;
   border-radius:999px;
 }
+
+/* =====================================================
+   ELEVATION & GLOW HELPERS (non-destructive)
+   Append-only utilities (don’t change colors)
+   ===================================================== */
+
+/* Light defaults (inherit your existing brand + ring) */
+:root{
+  /* stronger but tasteful depth */
+  --shadow-strong: 0 28px 70px rgba(0,0,0,.12), 0 10px 26px rgba(0,0,0,.08), 0 0 0 1px rgba(0,0,0,.02);
+  /* faint neon ring that won’t shift surface colors */
+  --ring-brand-soft: rgba(0,255,194,.10);
+  --ring-brand-line: rgba(0,255,194,.06);
+}
+
+/* Dark tune-up */
+[data-theme="dark"]{
+  --shadow-strong: 0 36px 90px rgba(0,0,0,.60), 0 14px 34px rgba(0,0,0,.45), 0 0 0 1px rgba(0,255,194,.08);
+  --ring-brand-soft: rgba(0,255,194,.14);
+  --ring-brand-line: rgba(0,255,194,.10);
+}
+
+/* Make any surface pop more (cards, panels, modals) */
+.elevate{ box-shadow: var(--shadow-strong) !important; }
+
+/* Add a subtle brand ring on the element’s edge */
+.ring-brand{ box-shadow: 0 0 0 1px var(--ring-brand-line), 0 0 0 4px var(--ring) !important; }
+
+/* Hover lift (pairs well with .builder-card / .card-hover) */
+.lift-hover{ transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
+.lift-hover:hover{ transform: translateY(-2px); box-shadow: var(--shadow-strong); }
+
+/* Soft radial brand glow *behind* the element (no color shift on surface) */
+.glow-spot{ position: relative; overflow: hidden; }
+.glow-spot::before{
+  content:""; position:absolute; inset:auto; width:70%; height:70%;
+  left:-28%; top:-28%; pointer-events:none; border-radius:999px;
+  background: radial-gradient(circle, var(--ring-brand-soft) 0%, transparent 70%);
+  filter: blur(40px);
+}
+
+/* Inner hairline so dark cards feel crisp without changing their color */
+.inner-line{ position: relative; }
+.inner-line::after{
+  content:""; position:absolute; inset:0; border-radius:inherit; pointer-events:none;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.04);
+}
+[data-theme="dark"] .inner-line::after{ box-shadow: inset 0 0 0 1px rgba(255,255,255,.06); }
+
+/* Inputs: slightly deeper focus without altering your brand token */
+.input.input-elevated{ box-shadow: var(--shadow-card), 0 10px 22px rgba(0,0,0,.06); }
+.input.input-elevated:focus{
+  border-color: var(--brand-weak);
+  box-shadow: 0 0 0 4px var(--ring), 0 10px 22px rgba(0,0,0,.08);
+}
+[data-theme="dark"] .input.input-elevated{
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 12px 30px rgba(0,0,0,.38);
+}
+[data-theme="dark"] .input.input-elevated:focus{
+  box-shadow: 0 0 0 2px rgba(0,255,194,.24), inset 0 1px 0 rgba(255,255,255,.04), 0 12px 30px rgba(0,0,0,.42);
+}
+
+/* Buttons: optional soft halo on brand buttons (doesn’t change the fill color) */
+.btn-brand.halo{ box-shadow: 0 0 0 1px var(--ring-brand-line), 0 12px 28px rgba(0,0,0,.12); }
+[data-theme="dark"] .btn-brand.halo{ box-shadow: 0 0 0 1px var(--ring-brand-line), 0 16px 36px rgba(0,0,0,.45); }
+
+/* Cards/Panel presets: compose helpers for convenience */
+.card.depth, .panel.depth, .builder-card.depth{ box-shadow: var(--shadow-strong); }
+.card.glow, .panel.glow, .builder-card.glow{ position:relative; overflow:hidden; }
+.card.glow::before, .panel.glow::before, .builder-card.glow::before{
+  content:""; position:absolute; left:-28%; top:-28%; width:70%; height:70%; pointer-events:none; border-radius:999px;
+  background: radial-gradient(circle, var(--ring-brand-soft) 0%, transparent 70%);
+  filter: blur(40px);
+}
+
+/* Optional: subtle foreground highlight line for very flat light cards */
+.card.edge, .panel.edge, .builder-card.edge{
+  box-shadow: var(--shadow-card), 0 0 0 1px var(--ring-brand-line);
+}
