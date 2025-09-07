@@ -27,7 +27,7 @@ import Step4Overview from './Step4Overview';
 import { s } from '@/utils/safe';
 import { scopedStorage } from '@/utils/scoped-storage';
 
-// NOTE: HeaderRail intentionally not used per your earlier request
+// NOTE: HeaderRail removed per your request
 
 const Bot3D = dynamic(() => import('./Bot3D.client'), {
   ssr: false,
@@ -58,7 +58,6 @@ type Appearance = {
 
 type Bot = {
   id: string;
-  assistantId?: string;
   name: string;
   industry?: string;
   language?: string;
@@ -68,11 +67,11 @@ type Bot = {
   createdAt?: string;
   updatedAt?: string;
   appearance?: Appearance;
+  assistantId?: string;
 };
 
 const STORAGE_KEYS = ['chatbots', 'agents', 'builds'];
 const SAVE_KEY = 'chatbots';
-const CLOUD_KEY = 'chatbots.v1'; // <- cloud bucket used for cross-device sync
 const nowISO = () => new Date().toISOString();
 const fmtDate = (iso?: string) => (iso ? new Date(iso).toLocaleDateString() : '');
 
@@ -85,22 +84,21 @@ const sortByNewest = (arr: Bot[]) =>
         Date.parse(a.updatedAt || a.createdAt || '0')
     );
 
-function normalizeBot(raw: any): Bot {
+/* ---------- Local + Cloud loaders & merge ---------- */
+
+function normalizeBot(b: any): Bot {
   return {
-    id:
-      raw?.id ??
-      raw?.assistantId ??
-      (typeof crypto !== 'undefined' ? crypto.randomUUID() : String(Date.now())),
-    assistantId: raw?.assistantId,
-    name: s(raw?.name, 'Untitled Bot'),
-    industry: s(raw?.industry),
-    language: s(raw?.language),
-    model: s(raw?.model, 'gpt-4o-mini'),
-    description: s(raw?.description),
-    prompt: s(raw?.prompt),
-    createdAt: raw?.createdAt ?? nowISO(),
-    updatedAt: raw?.updatedAt ?? raw?.createdAt ?? nowISO(),
-    appearance: raw?.appearance ?? undefined,
+    id: b?.id ?? b?.assistantId ?? (typeof crypto !== 'undefined' ? crypto.randomUUID() : String(Date.now())),
+    assistantId: b?.assistantId ?? b?.id,
+    name: s(b?.name, 'Untitled Bot'),
+    industry: s(b?.industry),
+    language: s(b?.language),
+    model: s(b?.model, 'gpt-4o-mini'),
+    description: s(b?.description),
+    prompt: s(b?.prompt),
+    createdAt: b?.createdAt ?? nowISO(),
+    updatedAt: b?.updatedAt ?? b?.createdAt ?? nowISO(),
+    appearance: b?.appearance ?? undefined,
   };
 }
 
@@ -112,62 +110,46 @@ function loadLocalBots(): Bot[] {
       if (!raw) continue;
       const arr = JSON.parse(raw);
       if (!Array.isArray(arr)) continue;
-      const out: Bot[] = arr.map(normalizeBot);
-      return sortByNewest(out);
+      return sortByNewest(arr.map(normalizeBot));
     } catch {}
   }
   return [];
-}
-
-function saveLocalBots(bots: Bot[]) {
-  try {
-    localStorage.setItem(SAVE_KEY, JSON.stringify(bots));
-  } catch {}
 }
 
 async function loadCloudBots(): Promise<Bot[]> {
   try {
     const ss = await scopedStorage();
     await ss.ensureOwnerGuard();
-    const arr = (await ss.getJSON<any[]>(CLOUD_KEY, [])) || [];
+    const arr = (await ss.getJSON<any[]>('chatbots.v1', [])) || [];
+    if (!Array.isArray(arr)) return [];
     return sortByNewest(arr.map(normalizeBot));
   } catch {
     return [];
   }
 }
 
-async function saveCloudBots(bots: Bot[]) {
-  try {
-    const ss = await scopedStorage();
-    await ss.ensureOwnerGuard();
-    await ss.setJSON(CLOUD_KEY, bots);
-  } catch {}
-}
-
-function mergeUnique(local: Bot[], cloud: Bot[]): Bot[] {
-  // prefer cloud if same assistantId/id exists
-  const byKey = new Map<string, Bot>();
-  const put = (b: Bot) => {
-    const key = b.assistantId || b.id;
-    const existing = byKey.get(key);
-    if (!existing) {
-      byKey.set(key, b);
-    } else {
-      // newer wins
+function mergeUnique(a: Bot[], b: Bot[]): Bot[] {
+  const map = new Map<string, Bot>();
+  const put = (x: Bot) => {
+    const key = x.assistantId || x.id;
+    const prev = map.get(key);
+    if (!prev) map.set(key, x);
+    else {
+      // keep the newest updatedAt
       const newer =
-        Date.parse(b.updatedAt || b.createdAt || '0') >
-        Date.parse(existing.updatedAt || existing.createdAt || '0')
-          ? b
-          : existing;
-      byKey.set(key, newer);
+        Date.parse(x.updatedAt || x.createdAt || '0') >
+        Date.parse(prev.updatedAt || prev.createdAt || '0')
+          ? x
+          : prev;
+      map.set(key, newer);
     }
   };
-  cloud.forEach(put);
-  local.forEach(put);
-  return sortByNewest(Array.from(byKey.values()));
+  a.forEach(put);
+  b.forEach(put);
+  return sortByNewest(Array.from(map.values()));
 }
 
-/* ---------- Step 3 splitter (unchanged) ---------- */
+/* ---------- Step 3 splitter ---------- */
 type PromptSectionKey =
   | 'DESCRIPTION'
   | 'AI DESCRIPTION'
@@ -249,7 +231,6 @@ export default function BuilderDashboard() {
   const [customizingId, setCustomizingId] = useState<string | null>(null);
   const [viewId, setViewId] = useState<string | null>(null);
 
-  // clean up wizard crumbs after a successful build
   useEffect(() => {
     try {
       if (localStorage.getItem('builder:cleanup') === '1') {
@@ -259,7 +240,6 @@ export default function BuilderDashboard() {
     } catch {}
   }, []);
 
-  // normalize step1/2/3 schema
   useEffect(() => {
     try {
       const normalize = (k: string) => {
@@ -277,7 +257,6 @@ export default function BuilderDashboard() {
     } catch {}
   }, []);
 
-  // initial load + cross-device merge
   useEffect(() => {
     let mounted = true;
 
@@ -288,29 +267,38 @@ export default function BuilderDashboard() {
       setBots(mergeUnique(local, cloud));
     }
 
-    // First paint
+    // initial
     refresh();
 
-    // Listen to localStorage changes (other tabs on same device)
+    // storage changes (same device)
     const onStorage = (e: StorageEvent) => {
       if (STORAGE_KEYS.includes(e.key || '')) refresh();
     };
+
+    // custom signal from Step 4 success path
+    const onBuildsUpdated = () => refresh();
+
+    // when tab becomes visible (iPad → laptop etc.)
+    const onVis = () => document.visibilityState === 'visible' && refresh();
+
+    // gentle polling as safety net
+    const id = setInterval(refresh, 12000);
+
     if (typeof window !== 'undefined') {
       window.addEventListener('storage', onStorage);
-      // Also refresh when tab regains focus (catch iPad → laptop changes)
-      const onVis = () => document.visibilityState === 'visible' && refresh();
+      window.addEventListener('builds:updated', onBuildsUpdated);
       document.addEventListener('visibilitychange', onVis);
-
-      // Light polling for cloud (cheap; 12s)
-      const id = setInterval(refresh, 12000);
-
-      return () => {
-        window.removeEventListener('storage', onStorage);
-        document.removeEventListener('visibilitychange', onVis);
-        clearInterval(id);
-        mounted = false;
-      };
     }
+
+    return () => {
+      mounted = false;
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('storage', onStorage);
+        window.removeEventListener('builds:updated', onBuildsUpdated);
+        document.removeEventListener('visibilitychange', onVis);
+      }
+      clearInterval(id);
+    };
   }, []);
 
   const filtered = useMemo(() => {
@@ -329,7 +317,7 @@ export default function BuilderDashboard() {
     router.replace(`${pathname}?${usp.toString()}`, { scroll: false });
   };
 
-  // ---------- Wizard ----------
+  // ---------- Wizard (unchanged logic) ----------
   if (step) {
     return (
       <div className="min-h-screen w-full font-movatif" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
@@ -343,7 +331,7 @@ export default function BuilderDashboard() {
     );
   }
 
-  // ---------- Dashboard (with Create row) ----------
+  // ---------- Dashboard ----------
   return (
     <div className="min-h-screen w-full font-movatif" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
       <main className="flex-1 w-full px-4 sm:px-6 pt-6 pb-24">
@@ -369,29 +357,22 @@ export default function BuilderDashboard() {
           </div>
         </div>
 
-        {/* Create + List */}
+        {/* HORIZONTAL LIST (wide rectangles stacked vertically) */}
         <div className="space-y-6">
           <CreateRow onClick={() => router.push('/builder?step=1')} />
 
           {filtered.map((bot) => (
             <BuildRow
-              key={bot.assistantId || bot.id}
+              key={bot.id}
               bot={bot}
               accent={accentFor(bot.id)}
               onOpen={() => setViewId(bot.id)}
-              onDelete={async () => {
-                // remove locally
+              onDelete={() => {
                 const next = bots.filter((b) => (b.assistantId || b.id) !== (bot.assistantId || bot.id));
                 const sorted = sortByNewest(next);
                 setBots(sorted);
-                saveLocalBots(sorted);
-
-                // try remove from cloud as well
-                try {
-                  const cloud = await loadCloudBots();
-                  const cloudNext = cloud.filter((b) => (b.assistantId || b.id) !== (bot.assistantId || bot.id));
-                  await saveCloudBots(cloudNext);
-                } catch {}
+                try { localStorage.setItem(SAVE_KEY, JSON.stringify(sorted)); } catch {}
+                // also mirror deletion to cloud (soft; no server function here)
               }}
               onCustomize={() => setCustomizingId(bot.id)}
             />
@@ -418,9 +399,7 @@ export default function BuilderDashboard() {
             );
             const sorted = sortByNewest(next);
             setBots(sorted);
-            saveLocalBots(sorted);
-            saveCloudBots(sorted); // mirror to cloud
-            setCustomizingId(null);
+            try { localStorage.setItem(SAVE_KEY, JSON.stringify(sorted)); } catch {}
           }}
           onReset={() => {
             if (!customizingId) return;
@@ -429,9 +408,7 @@ export default function BuilderDashboard() {
             );
             const sorted = sortByNewest(next);
             setBots(sorted);
-            saveLocalBots(sorted);
-            saveCloudBots(sorted);
-            setCustomizingId(null);
+            try { localStorage.setItem(SAVE_KEY, JSON.stringify(sorted)); } catch {}
           }}
           onSaveDraft={(name, ap) => {
             if (!customizingId) return;
@@ -544,7 +521,7 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
               {sections.map((sec, i) => (
                 <div key={i} style={CARD_STYLE} className="overflow-hidden">
                   <div className="px-5 pt-4 pb-3">
-                    <div className="flex items_center gap-2 font-semibold text-sm" style={{ color: 'var(--text)' }}>
+                    <div className="flex items-center gap-2 font-semibold text-sm" style={{ color: 'var(--text)' }}>
                       {ICONS[sec.key]} {sec.title}
                     </div>
                   </div>
