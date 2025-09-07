@@ -9,6 +9,9 @@ import {
 import StepProgress from './StepProgress';
 import { s, st } from '@/utils/safe';
 import { scopedStorage } from '@/utils/scoped-storage';
+import { supabase } from '@/lib/supabase-client';
+
+/* ─────────────────────────── Shared visuals (same as Step 1) ─────────────────────────── */
 
 const BTN_GREEN = '#10b981';
 const BTN_GREEN_HOVER = '#0ea473';
@@ -20,6 +23,7 @@ const CARD: React.CSSProperties = {
   boxShadow: 'var(--shadow-card)',
   borderRadius: 20,
 };
+
 const PANEL: React.CSSProperties = {
   background: 'var(--panel)',
   border: '1px solid var(--border)',
@@ -40,6 +44,7 @@ function Orb() {
     />
   );
 }
+
 function SubtleGrid() {
   return (
     <div
@@ -55,6 +60,8 @@ function SubtleGrid() {
   );
 }
 
+/* ───────────────────────────── Data helpers ───────────────────────────── */
+
 type Props = { onBack?: () => void; onFinish?: () => void };
 
 function getLS<T = any>(k: string, fb?: T): T {
@@ -66,6 +73,7 @@ function buildFinalPrompt() {
   const s3 = getLS<any>('builder:step3', {});
 
   const header = [st(s1?.name), st(s1?.industry), st(s1?.language)].filter(Boolean).join('\n');
+
   const languageText = s3?.languageText || s3?.language || '';
   const description = s(s3?.description) || '';
   const rules = s(s3?.rules) || '';
@@ -89,6 +97,8 @@ function buildFinalPrompt() {
     .trim();
 }
 
+/* ───────────────────────────── Component ───────────────────────────── */
+
 export default function Step4Overview({ onBack, onFinish }: Props) {
   const [loading, setLoading] = useState(false);
   const [loadingMsg, setLoadingMsg] = useState('Generating AI…');
@@ -105,7 +115,6 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
   const inputCostPerMTok = 2.5;
   const outputCostPerMTok = 10.0;
 
-  // Source-of-truth refresh for Step 2 (model/key) from cloud
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -152,36 +161,31 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
   };
   const ready = Object.values(checks).every(Boolean);
 
-  // Save build to both cloud and local; return the merged list so caller can do whatever
   async function saveBuildEverywhere(build: any) {
-    // 1) Cloud: scopedStorage at key chatbots.v1
+    // Cloud (scopedStorage)
     try {
       const ss = await scopedStorage();
       await ss.ensureOwnerGuard();
       const cloud = await ss.getJSON<any[]>('chatbots.v1', []);
-      const normalized = Array.isArray(cloud) ? cloud : [];
-      // Avoid dupes by assistantId or id
+      const list = Array.isArray(cloud) ? cloud : [];
       const key = build.assistantId || build.id;
-      const idx = normalized.findIndex((b) => (b.assistantId || b.id) === key);
-      if (idx >= 0) normalized[idx] = build;
-      else normalized.unshift(build);
-      await ss.setJSON('chatbots.v1', normalized);
-    } catch {
-      // non-fatal
-    }
-
-    // 2) Local: localStorage chatbots
-    try {
-      const local = getLS<any[]>('chatbots', []);
-      const norm = Array.isArray(local) ? local : [];
-      const key = build.assistantId || build.id;
-      const idx = norm.findIndex((b) => (b.assistantId || b.id) === key);
-      if (idx >= 0) norm[idx] = build;
-      else norm.unshift(build);
-      localStorage.setItem('chatbots', JSON.stringify(norm));
+      const idx = list.findIndex((b) => (b.assistantId || b.id) === key);
+      if (idx >= 0) list[idx] = build;
+      else list.unshift(build);
+      await ss.setJSON('chatbots.v1', list);
     } catch {}
 
-    // 3) Let dashboards listening update instantly
+    // Local
+    try {
+      const local = getLS<any[]>('chatbots', []);
+      const list = Array.isArray(local) ? local : [];
+      const key = build.assistantId || build.id;
+      const idx = list.findIndex((b) => (b.assistantId || b.id) === key);
+      if (idx >= 0) list[idx] = build;
+      else list.unshift(build);
+      localStorage.setItem('chatbots', JSON.stringify(list));
+    } catch {}
+
     try { window.dispatchEvent(new Event('builds:updated')); } catch {}
   }
 
@@ -192,7 +196,7 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
     setDone(false);
 
     try {
-      // read the selected api key from cloud keys stash
+      // 1) read selected API key value from scopedStorage
       let apiKeyPlain = '';
       const selectedModel = s2?.model || 'gpt-4o-mini';
       try {
@@ -203,7 +207,7 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
         apiKeyPlain = sel?.key || '';
       } catch {}
 
-      // create the assistant
+      // 2) create assistant via server route
       const resp = await fetch('/api/assistants/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -219,11 +223,37 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
       if (!resp.ok || !data?.ok || !data?.assistant?.id) {
         throw new Error(data?.error || 'Failed to create assistant');
       }
+      const assistantId = data.assistant.id as string;
 
-      // build object (normalized)
+      // 3) current user id
+      const { data: u } = await supabase.auth.getUser();
+      const userId = u?.user?.id;
+      if (!userId) throw new Error('No Supabase user session');
+
+      // 4) persist to Supabase through API
+      const saveRes = await fetch('/api/chatbots/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          assistantId,
+          name: st(s1?.name, 'Untitled Assistant'),
+          model: selectedModel,
+          industry: st(s1?.industry, null),
+          language: st(s1?.language, 'English'),
+          prompt: finalPrompt,
+          appearance: null,
+        }),
+      });
+      const saveJson = await saveRes.json();
+      if (!saveRes.ok || !saveJson?.ok) {
+        throw new Error(saveJson?.error || 'Saved to OpenAI but failed to store build');
+      }
+
+      // 5) mirror to cloud + local
       const build = {
-        id: data.assistant.id,                    // use assistant id as primary id
-        assistantId: data.assistant.id,
+        id: assistantId,
+        assistantId,
         name: st(s1?.name, 'Untitled Assistant'),
         type: s1?.type || s1?.botType || s1?.aiType || 'ai automation',
         industry: st(s1?.industry),
@@ -233,33 +263,8 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
-
-      // Optionally persist to Supabase if you added the helper (won’t throw if missing)
-      try {
-        const { upsertBuildToSupabase } = await import('@/utils/builds-store');
-        const payloadForDB = {
-          type: build.type,
-          industry: build.industry,
-          language: build.language,
-          model: build.model,
-          prompt: build.prompt,
-          createdAt: build.createdAt,
-          updatedAt: build.updatedAt,
-          appearance: null,
-        };
-        await upsertBuildToSupabase({
-          assistantId: build.assistantId || build.id,
-          name: build.name,
-          payload: payloadForDB,
-        });
-      } catch {
-        // ignore if helper not present or DB not configured
-      }
-
-      // Save to cloud + local and notify
       await saveBuildEverywhere(build);
 
-      // cleanup the wizard steps so dashboard starts fresh
       try { localStorage.setItem('builder:cleanup', '1'); } catch {}
 
       setLoading(false);
@@ -283,6 +288,7 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
             <Settings2 className="w-4 h-4" style={{ color: 'var(--brand)' }} />
             Final Review
           </div>
+
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <Info label="AI Name" value={s1?.name || '—'} icon={<FileText className="w-3.5 h-3.5" />} />
             <Info label="Industry" value={s1?.industry || '—'} icon={<Library className="w-3.5 h-3.5" />} />
@@ -292,7 +298,7 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
         </section>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left */}
+          {/* Left column */}
           <div className="lg:col-span-2 space-y-6">
             <div style={PANEL} className="relative p-6 rounded-[28px]">
               <Orb />
@@ -331,7 +337,7 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
             </div>
           </div>
 
-          {/* Right */}
+          {/* Right column */}
           <div className="space-y-6">
             <div style={PANEL} className="relative p-6 rounded-[28px]">
               <Orb />
@@ -410,8 +416,10 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
 
       {/* Done toast */}
       {done && (
-        <div className="fixed bottom-6 right-6 z-50 rounded-[16px] px-4 py-3"
-             style={{ background:'var(--panel)', border:'1px solid var(--border)', boxShadow:'var(--shadow-soft)', color:'var(--text)' }}>
+        <div
+          className="fixed bottom-6 right-6 z-50 rounded-[16px] px-4 py-3"
+          style={{ background: 'var(--panel)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-soft)', color: 'var(--text)' }}
+        >
           <div className="flex items-center gap-2">
             <Check className="w-4 h-4" style={{ color: 'var(--brand)' }} />
             <div className="text-sm">AI generated and saved to your Builds.</div>
@@ -422,6 +430,8 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
   );
 }
 
+/* ─────────────────────────── UI bits ─────────────────────────── */
+
 function Info({ label, value, icon }: { label: string; value: string; icon?: React.ReactNode }) {
   return (
     <div style={CARD} className="p-3 rounded-2xl">
@@ -430,14 +440,17 @@ function Info({ label, value, icon }: { label: string; value: string; icon?: Rea
     </div>
   );
 }
+
 function Req({ ok, label }: { ok: boolean; label: string }) {
   return (
     <div className="flex items-center gap-2 py-1.5 text-sm">
-      <span className="inline-flex items-center justify-center w-4 h-4 rounded-[6px]"
-            style={{
-              background: ok ? 'color-mix(in oklab, var(--brand) 15%, transparent)' : 'rgba(255,120,120,0.12)',
-              border: `1px solid ${ok ? 'color-mix(in oklab, var(--brand) 40%, transparent)' : 'rgba(255,120,120,0.4)'}`,
-            }}>
+      <span
+        className="inline-flex items-center justify-center w-4 h-4 rounded-[6px]"
+        style={{
+          background: ok ? 'color-mix(in oklab, var(--brand) 15%, transparent)' : 'rgba(255,120,120,0.12)',
+          border: `1px solid ${ok ? 'color-mix(in oklab, var(--brand) 40%, transparent)' : 'rgba(255,120,120,0.4)'}`,
+        }}
+      >
         {ok ? <Check className="w-3 h-3" style={{ color: 'var(--brand)' }} /> : <AlertCircle className="w-3 h-3" style={{ color: 'salmon' }} />}
       </span>
       <span style={{ color: ok ? 'var(--text)' : 'var(--text-muted)' }}>{label}</span>
