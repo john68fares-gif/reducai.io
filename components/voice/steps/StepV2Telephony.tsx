@@ -13,54 +13,109 @@ import {
   Search,
   ChevronDown,
 } from 'lucide-react';
+import { scopedStorage } from '@/utils/scoped-storage';
 
-/* ============================ THEME (scoped) ============================ */
-/* We mirror the Step 1 / Step 2 model styling: light by default, dark via [data-theme="dark"] */
-const ScopeClass = 'telephony-step-scope';
+/* ---------------------------------------------------------------------------
+   THEME VARS (same idea as StepV1)
+--------------------------------------------------------------------------- */
+const SCOPE_CLASS = 'voice-step2-scope';
 
-/* Brand / buttons */
+/* Brand button (same green you use elsewhere) */
 const BTN_GREEN = '#59d9b3';
 const BTN_GREEN_HOVER = '#54cfa9';
 const BTN_DISABLED = '#2e6f63';
 
 type Props = { onBack?: () => void; onNext?: () => void };
-type NumberItem = { id: string; e164?: string; label?: string; provider?: string; status?: string };
+
+type NumberItem = {
+  id: string;
+  e164?: string;
+  label?: string;
+  provider?: string;
+  status?: string;
+};
+
+type ApiKey = { id: string; name: string; key: string };
 
 const E164 = /^\+[1-9]\d{1,14}$/;
 
-/* =======================================================================
-   STEP 2 — TELEPHONY
-   (Styled inputs and dropdown with light/dark tokens; no native <select>)
-======================================================================= */
+// shared keys used across the app
+const LS_KEYS = 'apiKeys.v1';
+const LS_SELECTED = 'apiKeys.selectedId';
+
 export default function StepV2Telephony({ onBack, onNext }: Props) {
-  const [sid, setSid] = useState('');
-  const [token, setToken] = useState('');
   const [numbers, setNumbers] = useState<NumberItem[]>([]);
   const [fromE164, setFrom] = useState('');
-  const [busyMap, setBusyMap] = useState<Record<string, string>>({}); // number -> agentId
+  const [busyMap, setBusyMap] = useState<Record<string, string>>({}); // e164 -> agentId
   const [loading, setLoading] = useState(false);
 
+  // OpenAI API Keys
+  const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
+  const [apiKeyId, setApiKeyId] = useState<string>('');
+
+  /* ------------------------ bootstrap ------------------------ */
   useEffect(() => {
-    // restore creds
-    try {
-      const c = JSON.parse(localStorage.getItem('telephony:twilioCreds') || 'null');
-      if (c?.accountSid) setSid(c.accountSid);
-      if (c?.authToken) setToken(c.authToken);
-    } catch {}
-    // restore selection
+    // restore selection from previous step for this voice flow
     try {
       const s2 = JSON.parse(localStorage.getItem('voicebuilder:step2') || 'null');
       if (s2?.fromE164) setFrom(s2.fromE164);
+      if (s2?.apiKeyId) setApiKeyId(s2.apiKeyId);
     } catch {}
-    // bindings
-    try { setBusyMap(JSON.parse(localStorage.getItem('voice:numberBindings') || '{}')); } catch {}
-    // load numbers
+
+    // number->agent bindings (client cache)
+    try {
+      setBusyMap(JSON.parse(localStorage.getItem('voice:numberBindings') || '{}'));
+    } catch {}
+
+    // load phone numbers
     refreshNumbers();
+
+    // load OpenAI keys from scoped storage
+    (async () => {
+      try {
+        const ss = await scopedStorage();
+        await ss.ensureOwnerGuard();
+        const v1 = await ss.getJSON<ApiKey[]>(LS_KEYS, []);
+        const legacy = await ss.getJSON<ApiKey[]>('apiKeys', []);
+        const merged = Array.isArray(v1) && v1.length ? v1 : Array.isArray(legacy) ? legacy : [];
+        const cleaned = merged
+          .filter(Boolean)
+          .map((k: any) => ({ id: String(k?.id || ''), name: String(k?.name || ''), key: String(k?.key || '') }))
+          .filter((k) => k.id && k.name);
+
+        setApiKeys(cleaned);
+
+        // choose default key: previous voicebuilder choice -> global selected -> first available
+        const globalSelected = await ss.getJSON<string>(LS_SELECTED, '');
+        const chosen =
+          (apiKeyId && cleaned.some((k) => k.id === apiKeyId)) ? apiKeyId :
+          (globalSelected && cleaned.some((k) => k.id === globalSelected)) ? globalSelected :
+          (cleaned[0]?.id || '');
+
+        setApiKeyId(chosen);
+        if (chosen) await ss.setJSON(LS_SELECTED, chosen); // keep global in sync
+      } catch {}
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function refreshNumbers() {
+  // Optional: prune stale bindings (numbers that no longer exist)
+  useEffect(() => {
     try {
-      setLoading(true);
+      const raw = JSON.parse(localStorage.getItem('voice:numberBindings') || '{}') as Record<string, string>;
+      const validE164s = new Set(numbers.map((n) => n.e164).filter(Boolean) as string[]);
+      const cleaned: Record<string, string> = {};
+      Object.entries(raw).forEach(([e164, agentId]) => {
+        if (validE164s.has(e164)) cleaned[e164] = agentId;
+      });
+      setBusyMap(cleaned);
+      localStorage.setItem('voice:numberBindings', JSON.stringify(cleaned));
+    } catch {}
+  }, [numbers]);
+
+  async function refreshNumbers() {
+    setLoading(true);
+    try {
       const r = await fetch('/api/telephony/phone-numbers', { cache: 'no-store' });
       const j = await r.json();
       const list: NumberItem[] = j?.ok ? j.data : j;
@@ -72,39 +127,27 @@ export default function StepV2Telephony({ onBack, onNext }: Props) {
     }
   }
 
-  function saveCreds() {
-    const accountSid = (sid || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-    const authToken = (token || '').trim();
-    if (!/^AC[a-zA-Z0-9]{32}$/.test(accountSid)) {
-      alert('Invalid Account SID (must start with AC… and be 34 chars)');
-      return;
-    }
-    if (!authToken) {
-      alert('Missing Auth Token');
-      return;
-    }
-    try {
-      localStorage.setItem('telephony:twilioCreds', JSON.stringify({ accountSid, authToken }));
-      setSid(accountSid);
-      setToken(authToken);
-      alert('Saved to your browser.');
-    } catch {}
-  }
-
   function persistAndNext() {
     if (!E164.test(fromE164)) {
+      // soft guard
       alert('Choose a valid E.164 number, e.g. +15551234567');
+      return;
+    }
+    if (!apiKeyId) {
+      alert('Please select an OpenAI API key.');
       return;
     }
     if (busyMap[fromE164]) {
       alert(`This number is already attached to agent ${busyMap[fromE164]}. Choose another.`);
       return;
     }
-    try { localStorage.setItem('voicebuilder:step2', JSON.stringify({ fromE164 })); } catch {}
+    try {
+      localStorage.setItem('voicebuilder:step2', JSON.stringify({ fromE164, apiKeyId }));
+    } catch {}
     onNext?.();
   }
 
-  const options = useMemo(
+  const numberOptions = useMemo(
     () =>
       numbers.map((n) => ({
         value: n.e164 || '',
@@ -117,14 +160,16 @@ export default function StepV2Telephony({ onBack, onNext }: Props) {
     [numbers]
   );
 
+  const canNext = !!fromE164 && !!apiKeyId && E164.test(fromE164);
+
   return (
-    <section className={ScopeClass}>
+    <section className={SCOPE_CLASS}>
       {/* Header */}
-      <div className="mb-8">
+      <div className="mb-6">
         <h1 className="text-3xl md:text-4xl font-semibold" style={{ color: 'var(--text)' }}>Telephony</h1>
         <div
           className="mt-2 inline-flex items-center gap-2 text-xs tracking-wide px-3 py-1.5 rounded-[20px] border"
-          style={{ borderColor: 'var(--ts-chip-border)', background: 'var(--ts-chip-bg)', color: 'var(--text)' }}
+          style={{ borderColor: 'var(--vs-chip-border)', background: 'var(--vs-chip-bg)', color: 'var(--text)' }}
         >
           Step 2 of 4
         </div>
@@ -133,44 +178,53 @@ export default function StepV2Telephony({ onBack, onNext }: Props) {
       {/* Card */}
       <div
         className="relative p-6 sm:p-8 space-y-6 rounded-[28px]"
-        style={{
-          background: 'var(--ts-card)',
-          border: '1px solid var(--ts-border)',
-          boxShadow: 'var(--ts-shadow)',
-        }}
+        style={{ background: 'var(--vs-card)', border: '1px solid var(--vs-border)', boxShadow: 'var(--vs-shadow)' }}
       >
         {/* glow */}
         <div
           aria-hidden
           className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
-          style={{ background: 'radial-gradient(circle, var(--ts-ring) 0%, transparent 70%)', filter: 'blur(38px)' }}
+          style={{ background: 'radial-gradient(circle, var(--vs-ring) 0%, transparent 70%)', filter: 'blur(38px)' }}
         />
 
-        {/* creds row */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <LabeledInput
-            label="Twilio Account SID"
-            value={sid}
-            onChange={(v) => setSid(v.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
-            placeholder="ACXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
-            icon={<KeyRound className="w-4 h-4" style={{ color: 'var(--brand)' }} />}
-          />
-          <LabeledInput
-            label="Twilio Auth Token"
-            type="password"
-            value={token}
-            onChange={setToken}
-            placeholder="••••••••••••••••"
-          />
+        {/* OpenAI Key row */}
+        <div>
+          <label className="block mb-2 text-[13px] font-medium" style={{ color: 'var(--text)' }}>
+            OpenAI API Key
+          </label>
+          <div className="relative">
+            <select
+              value={apiKeyId}
+              onChange={async (e) => {
+                const val = e.target.value;
+                setApiKeyId(val);
+                try {
+                  const ss = await scopedStorage();
+                  await ss.ensureOwnerGuard();
+                  await ss.setJSON(LS_SELECTED, val); // keep global selection in sync for the account
+                } catch {}
+              }}
+              className="w-full rounded-2xl px-4 py-3.5 text-[15px] outline-none"
+              style={{
+                background: 'var(--vs-input-bg)',
+                border: '1px solid var(--vs-input-border)',
+                boxShadow: 'var(--vs-input-shadow)',
+                color: 'var(--text)',
+              }}
+            >
+              <option value="">Select an API key…</option>
+              {apiKeys.map((k) => (
+                <option key={k.id} value={k.id}>
+                  {k.name} ••••{(k.key || '').slice(-4).toUpperCase()}
+                </option>
+              ))}
+            </select>
+            <KeyRound className="w-4 h-4 absolute right-3 top-3.5 opacity-70" style={{ color: 'var(--text-muted)' }} />
+          </div>
+          <div className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
+            Keys are stored per-account via scoped storage. Manage them in the API Keys page.
+          </div>
         </div>
-
-        <button
-          onClick={saveCreds}
-          className="text-xs rounded-2xl px-3 py-1"
-          style={{ border: '1px solid var(--ts-input-border)', background: 'var(--ts-input-bg)', color: 'var(--text)', boxShadow: 'var(--ts-input-shadow)' }}
-        >
-          Save Credentials (browser only)
-        </button>
 
         {/* number row */}
         <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 items-end">
@@ -182,143 +236,109 @@ export default function StepV2Telephony({ onBack, onNext }: Props) {
               id="from-number"
               value={fromE164}
               onChange={setFrom}
-              options={options}
-              placeholder={numbers.length ? '— Choose —' : (loading ? 'Loading…' : 'No numbers imported')}
+              options={numberOptions}
+              placeholder={numbers.length ? '— Choose —' : 'No numbers imported'}
               icon={<Phone className="w-4 h-4" style={{ color: 'var(--brand)' }} />}
             />
           </div>
 
           <button
             onClick={refreshNumbers}
-            className="inline-flex items-center gap-2 rounded-2xl px-4 py-3 text-sm transition"
+            className="inline-flex items-center gap-2 rounded-2xl px-4 py-3 text-sm"
             style={{
-              border: '1px solid var(--ts-input-border)',
-              background: 'var(--ts-input-bg)',
+              background: 'var(--vs-input-bg)',
+              border: '1px solid var(--vs-input-border)',
+              boxShadow: 'var(--vs-input-shadow)',
               color: 'var(--text)',
-              boxShadow: 'var(--ts-input-shadow)',
             }}
           >
             <RefreshCw className="w-4 h-4" /> Refresh
           </button>
         </div>
 
-        <div className="text-sm leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+        <div className="text-sm leading-relaxed" style={{ color: 'var(--text)' }}>
           <div className="flex items-center gap-2 mb-1" style={{ color: 'var(--text)' }}>
             <LinkIcon className="w-4 h-4" /> One number → one agent
           </div>
-          Numbers are exclusive to a single agent. You can re-attach later, but only one active binding at a time.
+          <span style={{ color: 'var(--text-muted)' }}>
+            Numbers are exclusive to a single agent. You can re-attach later, but only one active binding at a time.
+          </span>
         </div>
 
         {/* actions */}
         <div className="flex items-center justify-between pt-2">
           <button
             onClick={onBack}
-            className="inline-flex items-center gap-2 rounded-[24px] px-4 py-2 transition"
-            style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)', boxShadow: 'var(--shadow-soft)' }}
+            className="inline-flex items-center gap-2 rounded-[18px] px-4 py-2 text-sm transition"
+            style={{
+              background: 'var(--vs-input-bg)',
+              border: '1px solid var(--vs-input-border)',
+              boxShadow: 'var(--vs-input-shadow)',
+              color: 'var(--text)',
+            }}
           >
             <ArrowLeft className="w-4 h-4" /> Previous
           </button>
 
           <button
-            disabled={!fromE164 || loading}
+            disabled={!canNext || loading}
             onClick={persistAndNext}
-            className="inline-flex items-center gap-2 px-8 py-2.5 rounded-[24px] font-semibold select-none transition-colors duration-150 disabled:cursor-not-allowed"
+            className="inline-flex items-center gap-2 px-8 h-[42px] rounded-[18px] font-semibold select-none disabled:cursor-not-allowed"
             style={{
-              background: fromE164 && !loading ? BTN_GREEN : BTN_DISABLED,
+              background: canNext && !loading ? BTN_GREEN : BTN_DISABLED,
               color: '#ffffff',
-              boxShadow: fromE164 && !loading ? '0 1px 0 rgba(0,0,0,0.18)' : 'none',
-              filter: fromE164 && !loading ? 'none' : 'saturate(85%) opacity(0.9)',
+              boxShadow: canNext && !loading ? '0 10px 24px rgba(16,185,129,.25)' : 'none',
+              transition: 'transform .15s ease, box-shadow .15s ease, background .15s ease',
             }}
             onMouseEnter={(e) => {
-              if (!fromE164 || loading) return;
+              if (!canNext || loading) return;
               (e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER;
             }}
             onMouseLeave={(e) => {
-              if (!fromE164 || loading) return;
+              if (!canNext || loading) return;
               (e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN;
             }}
           >
             Next <ArrowRight className="w-4 h-4" />
           </button>
         </div>
+
+        {/* Scoped theme vars for Step 2 */}
+        <style jsx global>{`
+          /* LIGHT (default) */
+          .${SCOPE_CLASS}{
+            --vs-card: #ffffff;
+            --vs-border: rgba(0,0,0,.10);
+            --vs-shadow: 0 28px 70px rgba(0,0,0,.12), 0 10px 26px rgba(0,0,0,.08), 0 0 0 1px rgba(0,0,0,.02);
+            --vs-ring: rgba(0,255,194,.10);
+
+            --vs-input-bg: #ffffff;
+            --vs-input-border: rgba(0,0,0,.12);
+            --vs-input-shadow: inset 0 1px 0 rgba(255,255,255,.8), 0 10px 22px rgba(0,0,0,.06);
+
+            --vs-chip-bg: rgba(0,255,194,.08);
+            --vs-chip-border: rgba(0,255,194,.24);
+          }
+
+          /* DARK */
+          [data-theme="dark"] .${SCOPE_CLASS}{
+            --vs-card:
+              radial-gradient(120% 180% at 50% -40%, rgba(0,255,194,.06) 0%, rgba(12,16,18,1) 42%),
+              linear-gradient(180deg, #0e1213 0%, #0c1012 100%);
+            --vs-border: rgba(255,255,255,.08);
+            --vs-shadow: 0 36px 90px rgba(0,0,0,.60), 0 14px 34px rgba(0,0,0,.45), 0 0 0 1px rgba(0,255,194,.10);
+            --vs-ring: rgba(0,255,194,.12);
+
+            --vs-input-bg: rgba(255,255,255,.02);
+            --vs-input-border: rgba(255,255,255,.14);
+            --vs-input-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 12px 30px rgba(0,0,0,.38);
+
+            --vs-chip-bg: rgba(0,255,194,.10);
+            --vs-chip-border: rgba(0,255,194,.28);
+          }
+        `}</style>
       </div>
-
-      {/* Scoped tokens for LIGHT / DARK */}
-      <style jsx global>{`
-        /* Light (default) */
-        .${ScopeClass}{
-          --ts-card: #ffffff;
-          --ts-border: rgba(0,0,0,.10);
-          --ts-shadow: 0 28px 70px rgba(0,0,0,.12), 0 10px 26px rgba(0,0,0,.08), 0 0 0 1px rgba(0,0,0,.02);
-          --ts-ring: rgba(0,255,194,.10);
-
-          --ts-input-bg: #ffffff;
-          --ts-input-border: rgba(0,0,0,.12);
-          --ts-input-shadow: inset 0 1px 0 rgba(255,255,255,.8), 0 10px 22px rgba(0,0,0,.06);
-
-          --ts-chip-bg: rgba(0,255,194,.10);
-          --ts-chip-border: rgba(0,255,194,.30);
-        }
-
-        /* Dark */
-        [data-theme="dark"] .${ScopeClass}{
-          --ts-card:
-            radial-gradient(120% 180% at 50% -40%, rgba(0,255,194,.06) 0%, rgba(12,16,18,1) 42%),
-            linear-gradient(180deg, #0e1213 0%, #0c1012 100%);
-          --ts-border: rgba(255,255,255,.08);
-          --ts-shadow: 0 36px 90px rgba(0,0,0,.60), 0 14px 34px rgba(0,0,0,.45), 0 0 0 1px rgba(0,255,194,.10);
-          --ts-ring: rgba(0,255,194,.12);
-
-          --ts-input-bg: rgba(255,255,255,.02);
-          --ts-input-border: rgba(255,255,255,.14);
-          --ts-input-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 12px 30px rgba(0,0,0,.38);
-
-          --ts-chip-bg: rgba(0,255,194,.10);
-          --ts-chip-border: rgba(0,255,194,.28);
-        }
-      `}</style>
     </section>
-  );
-}
-
-/* ---------------------- inputs ---------------------- */
-function LabeledInput({
-  label,
-  value,
-  onChange,
-  placeholder,
-  icon,
-  type = 'text',
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder?: string;
-  icon?: React.ReactNode;
-  type?: 'text' | 'password';
-}) {
-  return (
-    <div>
-      <label className="block mb-2 text-[13px] font-medium" style={{ color: 'var(--text)' }}>{label}</label>
-      <div
-        className="flex items-center gap-2 rounded-2xl px-4 py-3.5 border outline-none"
-        style={{
-          background: 'var(--ts-input-bg)',
-          borderColor: 'var(--ts-input-border)',
-          boxShadow: 'var(--ts-input-shadow)',
-        }}
-      >
-        {icon}
-        <input
-          type={type}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={placeholder}
-          className="w-full bg-transparent outline-none text-[15px]"
-          style={{ color: 'var(--text)' }}
-        />
-      </div>
-    </div>
   );
 }
 
@@ -358,7 +378,7 @@ function NumberSelect({
     const r = btnRef.current?.getBoundingClientRect();
     if (!r) return;
     const viewH = window.innerHeight;
-    const openUp = r.bottom + 360 > viewH;
+    const openUp = r.bottom + 320 > viewH;
     setRect({ top: openUp ? r.top : r.bottom, left: r.left, width: r.width, openUp });
   }, [open]);
 
@@ -381,9 +401,9 @@ function NumberSelect({
         onClick={() => { setOpen((v) => !v); setTimeout(() => searchRef.current?.focus(), 0); }}
         className="w-full flex items-center justify-between gap-3 px-3 py-3 rounded-[14px] text-sm outline-none transition"
         style={{
-          background: 'var(--ts-input-bg)',
-          border: '1px solid var(--ts-input-border)',
-          boxShadow: 'var(--ts-input-shadow)',
+          background: 'var(--vs-input-bg)',
+          border: '1px solid var(--vs-input-border)',
+          boxShadow: 'var(--vs-input-shadow)',
           color: 'var(--text)',
         }}
       >
@@ -391,7 +411,7 @@ function NumberSelect({
           {icon}
           <span className="truncate">{current ? current.label : (placeholder || '— Choose —')}</span>
         </span>
-        <ChevronDown className="w-4 h-4 opacity-80" style={{ color: 'var(--text-muted)' }} />
+        <ChevronDown className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
       </button>
 
       {open && rect
@@ -404,23 +424,29 @@ function NumberSelect({
                 left: rect.left,
                 width: rect.width,
                 transform: rect.openUp ? 'translateY(-100%)' : 'none',
-                background: 'var(--ts-menu-bg, #ffffff)',
-                border: '1px solid var(--ts-menu-border, rgba(0,0,0,.10))',
+                background: 'var(--vs-menu-bg, #ffffff)',
+                border: '1px solid var(--vs-menu-border, rgba(0,0,0,.10))',
                 borderRadius: 20,
                 boxShadow: '0 28px 70px rgba(0,0,0,.12), 0 10px 26px rgba(0,0,0,.08), 0 0 0 1px rgba(0,0,0,.02)',
               }}
             >
+              {/* make the portal obey dark mode */}
               <style jsx global>{`
-                [data-theme="dark"] .${ScopeClass} ~ .fixed {
-                  --ts-menu-bg: #101314;
-                  --ts-menu-border: rgba(255,255,255,.16);
+                [data-theme="dark"] .${SCOPE_CLASS} ~ .fixed {
+                  --vs-menu-bg: #101314;
+                  --vs-menu-border: rgba(255,255,255,.16);
                 }
               `}</style>
 
               {/* search */}
               <div
                 className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[12px]"
-                style={{ background: 'var(--ts-input-bg)', border: '1px solid var(--ts-input-border)', boxShadow: 'var(--ts-input-shadow)', color: 'var(--text)' }}
+                style={{
+                  background: 'var(--vs-input-bg)',
+                  border: '1px solid var(--vs-input-border)',
+                  boxShadow: 'var(--vs-input-shadow)',
+                  color: 'var(--text)',
+                }}
               >
                 <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
                 <input
@@ -434,7 +460,7 @@ function NumberSelect({
               </div>
 
               {/* list */}
-              <div className="max-h-80 overflow-y-auto pr-1" style={{ scrollbarWidth: 'thin' }}>
+              <div className="max-h-72 overflow-y-auto pr-1" style={{ scrollbarWidth: 'thin' }}>
                 {filtered.map((o) => (
                   <button
                     key={o.value || o.label}
