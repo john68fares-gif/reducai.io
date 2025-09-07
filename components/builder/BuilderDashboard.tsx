@@ -5,19 +5,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import {
-  Plus,
-  Bot as BotIcon,
-  ArrowRight,
-  Trash2,
-  SlidersHorizontal,
-  X,
-  Copy,
-  Download as DownloadIcon,
-  FileText,
-  Settings,
-  MessageSquareText,
-  Landmark,
-  ListChecks,
+  Plus, Bot as BotIcon, ArrowRight, Trash2, SlidersHorizontal, X, Copy,
+  Download as DownloadIcon, FileText, Settings, MessageSquareText, Landmark, ListChecks,
 } from 'lucide-react';
 import CustomizeModal from './CustomizeModal';
 import Step1AIType from './Step1AIType';
@@ -29,12 +18,7 @@ import { scopedStorage } from '@/utils/scoped-storage';
 
 const Bot3D = dynamic(() => import('./Bot3D.client'), {
   ssr: false,
-  loading: () => (
-    <div
-      className="h-full w-full"
-      style={{ background: 'linear-gradient(180deg, rgba(106,247,209,0.10), rgba(16,19,20,0.6))' }}
-    />
-  ),
+  loading: () => <div className="h-full w-full" style={{ background: 'linear-gradient(180deg, rgba(106,247,209,0.10), rgba(16,19,20,0.6))' }} />,
 });
 
 type Appearance = {
@@ -58,6 +42,7 @@ type Bot = {
   id: string;
   assistantId?: string;
   name: string;
+  type?: string;
   industry?: string;
   language?: string;
   model?: string;
@@ -68,10 +53,28 @@ type Bot = {
   appearance?: Appearance;
 };
 
-const SAVE_KEY = 'chatbots';
 const STORAGE_KEYS = ['chatbots', 'agents', 'builds'];
+const SAVE_KEY = 'chatbots';
 const nowISO = () => new Date().toISOString();
 const fmtDate = (iso?: string) => (iso ? new Date(iso).toLocaleDateString() : '');
+
+function normalize(b: any): Bot {
+  const id = String(b?.assistantId || b?.id || (typeof crypto !== 'undefined' ? crypto.randomUUID() : Date.now().toString()));
+  return {
+    id,
+    assistantId: String(b?.assistantId || b?.id || id),
+    name: s(b?.name, 'Untitled Assistant'),
+    type: s(b?.type),
+    industry: s(b?.industry),
+    language: s(b?.language),
+    model: s(b?.model, 'gpt-4o-mini'),
+    description: s(b?.description),
+    prompt: s(b?.prompt),
+    createdAt: b?.createdAt || nowISO(),
+    updatedAt: b?.updatedAt || b?.createdAt || nowISO(),
+    appearance: b?.appearance ?? undefined,
+  };
+}
 
 const sortByNewest = (arr: Bot[]) =>
   arr
@@ -82,54 +85,17 @@ const sortByNewest = (arr: Bot[]) =>
         Date.parse(a.updatedAt || a.createdAt || '0')
     );
 
-function normalize(b: any): Bot {
-  return {
-    id: String(b?.id ?? b?.assistantId ?? (typeof crypto !== 'undefined' ? crypto.randomUUID() : Date.now().toString())),
-    assistantId: String(b?.assistantId ?? b?.id ?? ''),
-    name: s(b?.name, 'Untitled Bot'),
-    industry: s(b?.industry),
-    language: s(b?.language),
-    model: s(b?.model, 'gpt-4o-mini'),
-    description: s(b?.description),
-    prompt: s(b?.prompt),
-    createdAt: b?.createdAt ?? nowISO(),
-    updatedAt: b?.updatedAt ?? b?.createdAt ?? nowISO(),
-    appearance: b?.appearance ?? undefined,
-  };
-}
-
-function loadLocalBots(): Bot[] {
-  if (typeof window === 'undefined') return [];
-  for (const k of STORAGE_KEYS) {
-    try {
-      const raw = localStorage.getItem(k);
-      if (!raw) continue;
-      const arr = JSON.parse(raw);
-      if (!Array.isArray(arr)) continue;
-      const out: Bot[] = arr.map(normalize);
-      if (out.length) return sortByNewest(out);
-    } catch {}
-  }
-  return [];
-}
-
-function saveLocalBots(bots: Bot[]) {
-  try { localStorage.setItem(SAVE_KEY, JSON.stringify(bots)); } catch {}
-}
-
 function mergeByAssistantId(a: Bot[], b: Bot[]): Bot[] {
   const map = new Map<string, Bot>();
   const put = (x: Bot) => {
     const key = x.assistantId || x.id;
-    const prev = map.get(key);
-    if (!prev) map.set(key, x);
+    const exist = map.get(key);
+    if (!exist) map.set(key, x);
     else {
       const newer =
         Date.parse(x.updatedAt || x.createdAt || '0') >
-        Date.parse(prev.updatedAt || prev.createdAt || '0')
-          ? x
-          : prev;
-      map.set(key, newer);
+        Date.parse(exist.updatedAt || exist.createdAt || '0');
+      map.set(key, newer ? x : exist);
     }
   };
   a.forEach(put);
@@ -137,7 +103,43 @@ function mergeByAssistantId(a: Bot[], b: Bot[]): Bot[] {
   return sortByNewest(Array.from(map.values()));
 }
 
-/* ----------------------------------- UI ----------------------------------- */
+function readLocal(): Bot[] {
+  if (typeof window === 'undefined') return [];
+  // Try current
+  try {
+    const raw = localStorage.getItem('chatbots');
+    if (raw) {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) return sortByNewest(arr.map(normalize));
+    }
+  } catch {}
+  // Try legacy buckets
+  for (const k of STORAGE_KEYS) {
+    try {
+      const raw = localStorage.getItem(k);
+      if (!raw) continue;
+      const arr = JSON.parse(raw);
+      if (!Array.isArray(arr)) continue;
+      return sortByNewest(arr.map(normalize));
+    } catch {}
+  }
+  return [];
+}
+function writeLocal(bots: Bot[]) {
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(sortByNewest(bots))); } catch {}
+}
+
+async function readCloud(): Promise<Bot[]> {
+  try {
+    const ss = await scopedStorage();
+    await ss.ensureOwnerGuard();
+    const cloud = await ss.getJSON<any[]>('chatbots.v1', []);
+    if (!Array.isArray(cloud)) return [];
+    return sortByNewest(cloud.map(normalize));
+  } catch {
+    return [];
+  }
+}
 
 export default function BuilderDashboard() {
   const router = useRouter();
@@ -152,7 +154,7 @@ export default function BuilderDashboard() {
   const [customizingId, setCustomizingId] = useState<string | null>(null);
   const [viewId, setViewId] = useState<string | null>(null);
 
-  // clean leftover builder data when a build completes
+  // clean builder temp on signal
   useEffect(() => {
     try {
       if (localStorage.getItem('builder:cleanup') === '1') {
@@ -162,10 +164,10 @@ export default function BuilderDashboard() {
     } catch {}
   }, []);
 
-  // normalize step data
+  // Ensure step objects are sane strings
   useEffect(() => {
     try {
-      const normalizeStep = (k: string) => {
+      const normalize = (k: string) => {
         const raw = localStorage.getItem(k);
         if (!raw) return;
         const v = JSON.parse(raw);
@@ -176,54 +178,71 @@ export default function BuilderDashboard() {
           localStorage.setItem(k, JSON.stringify(v));
         }
       };
-      ['builder:step1', 'builder:step2', 'builder:step3'].forEach(normalizeStep);
+      ['builder:step1', 'builder:step2', 'builder:step3'].forEach(normalize);
     } catch {}
   }, []);
 
-  // Load local immediately for fast paint
+  // Initial load + live refresh on custom events / storage changes
   useEffect(() => {
-    setBots(loadLocalBots());
-  }, []);
+    let alive = true;
+    (async () => {
+      const local = readLocal();
+      const cloud = await readCloud();
+      // Optional DB merge (only if helper exists)
+      let merged = mergeByAssistantId(local, cloud);
+      try {
+        const { fetchBuildsFromSupabase } = await import('@/utils/builds-store');
+        const dbRows = await fetchBuildsFromSupabase();
+        const dbBots = (dbRows || []).map((r: any) =>
+          normalize({
+            id: r.id,
+            assistantId: r.assistant_id,
+            name: r.name,
+            ...(r.payload || {}),
+            createdAt: (r.payload?.createdAt ?? r.created_at),
+            updatedAt: (r.payload?.updatedAt ?? r.updated_at),
+          })
+        );
+        merged = mergeByAssistantId(merged, dbBots);
+      } catch {
+        // DB layer optional
+      }
+      if (alive) {
+        setBots(merged);
+        writeLocal(merged); // keep local hot cache in sync
+      }
+    })();
 
-  // Then merge with cloud (scoped storage) and keep in sync
-  async function refreshFromCloud() {
-    try {
-      const ss = await scopedStorage();
-      await ss.ensureOwnerGuard();
-
-      const cloudArr = await ss.getJSON<any[]>('chatbots.v1', []);
-      const cloud = Array.isArray(cloudArr) ? cloudArr.map(normalize) : [];
-
-      const local = loadLocalBots();
-      const merged = mergeByAssistantId(local, cloud);
-
-      setBots(merged);
-      // keep localStorage in sync so offline still works
-      saveLocalBots(merged);
-    } catch {
-      // ignore cloud errors, stay with local
-    }
-  }
-
-  useEffect(() => {
-    refreshFromCloud();
-    // listen for localStorage & custom events to refresh
     const onStorage = (e: StorageEvent) => {
-      if (STORAGE_KEYS.includes(e.key || '') || e.key === 'chatbots') {
-        setBots(loadLocalBots());
-        refreshFromCloud();
+      if (!e.key) return;
+      if (['chatbots', 'agents', 'builds'].includes(e.key)) {
+        setBots(readLocal()); // quick refresh from local
+        // and silently try to merge cloud as well
+        (async () => {
+          const merged = mergeByAssistantId(readLocal(), await readCloud());
+          setBots(merged);
+          writeLocal(merged);
+        })();
       }
     };
-    const onBuildsUpdated = () => refreshFromCloud();
+    const onSignal = () => {
+      // generated from Step4 -> saveBuildEverywhere()
+      (async () => {
+        const merged = mergeByAssistantId(readLocal(), await readCloud());
+        setBots(merged);
+        writeLocal(merged);
+      })();
+    };
 
     if (typeof window !== 'undefined') {
       window.addEventListener('storage', onStorage);
-      window.addEventListener('builds:updated', onBuildsUpdated as any);
+      window.addEventListener('builds:updated', onSignal as any);
     }
     return () => {
+      alive = false;
       if (typeof window !== 'undefined') {
         window.removeEventListener('storage', onStorage);
-        window.removeEventListener('builds:updated', onBuildsUpdated as any);
+        window.removeEventListener('builds:updated', onSignal as any);
       }
     };
   }, []);
@@ -284,7 +303,7 @@ export default function BuilderDashboard() {
           </div>
         </div>
 
-        {/* Rows */}
+        {/* HORIZONTAL LIST */}
         <div className="space-y-6">
           <CreateRow onClick={() => router.push('/builder?step=1')} />
 
@@ -294,23 +313,24 @@ export default function BuilderDashboard() {
               bot={bot}
               accent={accentFor(bot.id)}
               onOpen={() => setViewId(bot.id)}
-              onDelete={async () => {
-                // delete locally…
+              onDelete={() => {
                 const next = bots.filter((b) => (b.assistantId || b.id) !== (bot.assistantId || bot.id));
                 const sorted = sortByNewest(next);
                 setBots(sorted);
-                saveLocalBots(sorted);
-                // …and in cloud
-                try {
-                  const ss = await scopedStorage();
-                  await ss.ensureOwnerGuard();
-                  const cloudArr = await ss.getJSON<any[]>('chatbots.v1', []);
-                  const cloud = Array.isArray(cloudArr) ? cloudArr : [];
-                  const key = bot.assistantId || bot.id;
-                  const filteredCloud = cloud.filter((c: any) => (c?.assistantId || c?.id) !== key);
-                  await ss.setJSON('chatbots.v1', filteredCloud);
+                writeLocal(sorted);
+                // also delete in cloud bucket
+                (async () => {
+                  try {
+                    const ss = await scopedStorage();
+                    await ss.ensureOwnerGuard();
+                    const cloud = await ss.getJSON<any[]>('chatbots.v1', []);
+                    if (Array.isArray(cloud)) {
+                      const pruned = cloud.filter((b) => (b.assistantId || b.id) !== (bot.assistantId || bot.id));
+                      await ss.setJSON('chatbots.v1', pruned);
+                    }
+                  } catch {}
                   try { window.dispatchEvent(new Event('builds:updated')); } catch {}
-                } catch {}
+                })();
               }}
               onCustomize={() => setCustomizingId(bot.id)}
             />
@@ -331,24 +351,54 @@ export default function BuilderDashboard() {
           onApply={(ap) => {
             if (!customizingId) return;
             const next = bots.map((b) =>
-              (b.assistantId || b.id) === (selectedBot.assistantId || selectedBot.id)
+              b.id === customizingId
                 ? { ...b, appearance: { ...(b.appearance ?? {}), ...ap }, updatedAt: nowISO() }
                 : b
             );
             const sorted = sortByNewest(next);
             setBots(sorted);
-            saveLocalBots(sorted);
+            writeLocal(sorted);
+            (async () => {
+              try {
+                const ss = await scopedStorage();
+                await ss.ensureOwnerGuard();
+                const cloud = await ss.getJSON<any[]>('chatbots.v1', []);
+                if (Array.isArray(cloud)) {
+                  const idx = cloud.findIndex((x) => (x.assistantId || x.id) === (selectedBot.assistantId || selectedBot.id));
+                  if (idx >= 0) {
+                    cloud[idx] = { ...cloud[idx], appearance: ap, updatedAt: nowISO() };
+                    await ss.setJSON('chatbots.v1', cloud);
+                  }
+                }
+              } catch {}
+              try { window.dispatchEvent(new Event('builds:updated')); } catch {}
+            })();
+            setCustomizingId(null);
           }}
           onReset={() => {
             if (!customizingId) return;
             const next = bots.map((b) =>
-              (b.assistantId || b.id) === (selectedBot.assistantId || selectedBot.id)
-                ? { ...b, appearance: undefined, updatedAt: nowISO() }
-                : b
+              b.id === customizingId ? { ...b, appearance: undefined, updatedAt: nowISO() } : b
             );
             const sorted = sortByNewest(next);
             setBots(sorted);
-            saveLocalBots(sorted);
+            writeLocal(sorted);
+            (async () => {
+              try {
+                const ss = await scopedStorage();
+                await ss.ensureOwnerGuard();
+                const cloud = await ss.getJSON<any[]>('chatbots.v1', []);
+                if (Array.isArray(cloud)) {
+                  const idx = cloud.findIndex((x) => (x.assistantId || x.id) === (selectedBot.assistantId || selectedBot.id));
+                  if (idx >= 0) {
+                    cloud[idx] = { ...cloud[idx], appearance: undefined, updatedAt: nowISO() };
+                    await ss.setJSON('chatbots.v1', cloud);
+                  }
+                }
+              } catch {}
+              try { window.dispatchEvent(new Event('builds:updated')); } catch {}
+            })();
+            setCustomizingId(null);
           }}
           onSaveDraft={(name, ap) => {
             if (!customizingId) return;
@@ -367,7 +417,6 @@ export default function BuilderDashboard() {
 }
 
 /* --------------------------- Prompt Overlay --------------------------- */
-
 type PromptSectionKey =
   | 'DESCRIPTION'
   | 'AI DESCRIPTION'
@@ -475,7 +524,6 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: 'rgba(0,0,0,0.45)' }}>
       <div className="relative w-full max-w-[1280px] max-h-[88vh] flex flex-col" style={FRAME_STYLE}>
-        {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 rounded-t-[30px]" style={HEADER_BORDER}>
           <div className="min-w-0">
             <h2 className="text-xl font-semibold truncate" style={{ color: 'var(--text)' }}>Prompt</h2>
@@ -515,10 +563,11 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
           </div>
         </div>
 
-        {/* Body */}
         <div className="flex-1 overflow-y-auto p-6">
           {!bot.prompt ? (
-            <div className="p-5" style={CARD_STYLE}>(No Step 3 prompt yet)</div>
+            <div className="p-5" style={CARD_STYLE}>
+              (No Step 3 prompt yet)
+            </div>
           ) : sections ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {sections.map((sec, i) => (
@@ -545,7 +594,6 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
           )}
         </div>
 
-        {/* Footer */}
         <div className="px-6 py-4 rounded-b-[30px]" style={{ borderTop: '1px solid var(--border)', background: 'var(--card)' }}>
           <div className="flex justify-end">
             <button
@@ -562,7 +610,7 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
   );
 }
 
-/* --------------------------------- ROWS --------------------------------- */
+/* --------------------------------- HORIZONTAL ROWS --------------------------------- */
 
 function CreateRow({ onClick }: { onClick: () => void }) {
   return (
@@ -585,11 +633,7 @@ function CreateRow({ onClick }: { onClick: () => void }) {
         >
           <div
             className="w-16 h-16 rounded-full grid place-items-center"
-            style={{
-              border: '2px dashed var(--brand-weak)',
-              color: 'var(--brand)',
-              boxShadow: 'inset 0 0 10px rgba(0,0,0,.08)',
-            }}
+            style={{ border: '2px dashed var(--brand-weak)', color: 'var(--brand)', boxShadow: 'inset 0 0 10px rgba(0,0,0,.08)' }}
           >
             <Plus className="w-9 h-9" />
           </div>
@@ -599,11 +643,7 @@ function CreateRow({ onClick }: { onClick: () => void }) {
           <div className="flex items-center gap-3">
             <span
               className="px-2 py-1 rounded-full text-xs"
-              style={{
-                background: 'color-mix(in oklab, var(--brand) 12%, var(--panel))',
-                color: 'var(--text)',
-                border: '1px solid var(--border)',
-              }}
+              style={{ background: 'color-mix(in oklab, var(--brand) 12%, var(--panel))', color: 'var(--text)', border: '1px solid var(--border)' }}
             >
               New
             </span>
@@ -614,16 +654,10 @@ function CreateRow({ onClick }: { onClick: () => void }) {
           <div className="mt-1 text-sm" style={{ color: 'var(--text-muted)' }}>
             Start building your AI assistant.
           </div>
-
           <div className="mt-4">
             <span
               className="inline-flex items-center gap-2 rounded-[10px] px-3 py-2 text-sm transition"
-              style={{
-                background: 'var(--panel)',
-                border: '1px solid var(--border)',
-                color: 'var(--text)',
-                boxShadow: 'var(--shadow-soft)',
-              }}
+              style={{ background: 'var(--panel)', border: '1px solid var(--border)', color: 'var(--text)', boxShadow: 'var(--shadow-soft)' }}
             >
               Continue <ArrowRight className="w-4 h-4" />
             </span>
@@ -635,44 +669,20 @@ function CreateRow({ onClick }: { onClick: () => void }) {
 }
 
 const palette = ['#00ffc2', '#7cc3ff', '#b28bff', '#ffd68a', '#ff9db1'];
-const accentFor = (id: string) =>
-  palette[Math.abs([...id].reduce((h, c) => h + c.charCodeAt(0), 0)) % palette.length];
+const accentFor = (id: string) => palette[Math.abs([...id].reduce((h, c) => h + c.charCodeAt(0), 0)) % palette.length];
 
 function BuildRow({
-  bot,
-  accent,
-  onOpen,
-  onDelete,
-  onCustomize,
-}: {
-  bot: Bot;
-  accent: string;
-  onOpen: () => void;
-  onDelete: () => void;
-  onCustomize: () => void;
-}) {
+  bot, accent, onOpen, onDelete, onCustomize,
+}: { bot: Bot; accent: string; onOpen: () => void; onDelete: () => void; onCustomize: () => void; }) {
   const ap = bot.appearance || {};
   return (
-    <div
-      className="w-full rounded-[16px] overflow-hidden transition"
-      style={{
-        background: 'var(--card)',
-        border: '1px solid var(--border)',
-        boxShadow: 'var(--shadow-card)',
-      }}
-    >
+    <div className="w-full rounded-[16px] overflow-hidden transition" style={{ background: 'var(--card)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card)' }}>
       <div className="flex items-stretch">
-        {/* Preview (left) */}
         <div className="relative w-[320px] min-h-[180px] hidden md:block" style={{ borderRight: '1px solid var(--border)' }}>
           <button
             onClick={onCustomize}
             className="absolute right-3 top-3 z-10 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-[10px] text-xs transition"
-            style={{
-              background: 'var(--panel)',
-              border: '1px solid var(--border)',
-              color: 'var(--text)',
-              boxShadow: 'var(--shadow-soft)',
-            }}
+            style={{ background: 'var(--panel)', border: '1px solid var(--border)', color: 'var(--text)', boxShadow: 'var(--shadow-soft)' }}
           >
             <SlidersHorizontal className="w-3.5 h-3.5" />
             Customize
@@ -697,13 +707,9 @@ function BuildRow({
           />
         </div>
 
-        {/* Info (right) */}
         <div className="flex-1 p-5 sm:p-6">
           <div className="flex items-center gap-3">
-            <div
-              className="w-11 h-11 rounded-[10px] flex items-center justify-center"
-              style={{ background: 'transparent', border: '2px solid var(--brand-weak)' }}
-            >
+            <div className="w-11 h-11 rounded-[10px] flex items-center justify-center" style={{ background: 'transparent', border: '2px solid var(--brand-weak)' }}>
               <BotIcon className="w-5 h-5" style={{ color: accent }} />
             </div>
             <div className="min-w-0">
@@ -734,12 +740,7 @@ function BuildRow({
             <button
               onClick={onOpen}
               className="inline-flex items-center gap-2 px-3.5 py-2 rounded-[10px] text-sm transition"
-              style={{
-                background: 'var(--panel)',
-                border: '1px solid var(--border)',
-                color: 'var(--text)',
-                boxShadow: 'var(--shadow-soft)',
-              }}
+              style={{ background: 'var(--panel)', border: '1px solid var(--border)', color: 'var(--text)', boxShadow: 'var(--shadow-soft)' }}
             >
               Open <ArrowRight className="w-4 h-4" />
             </button>
