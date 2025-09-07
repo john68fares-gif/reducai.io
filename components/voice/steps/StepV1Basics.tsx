@@ -6,8 +6,9 @@ import { createPortal } from 'react-dom';
 import {
   Sparkles, Building2, Languages as LangIcon, ChevronDown, Search, ArrowRight,
 } from 'lucide-react';
+import CountryDialSelect from '@/components/phone-numbers/CountryDialSelect';
 
-/* Brand button (keep your existing green so we don’t change your palette) */
+/* Brand button (keep your existing green) */
 const BTN_GREEN = '#59d9b3';
 const BTN_GREEN_HOVER = '#54cfa9';
 const BTN_DISABLED = '#2e6f63';
@@ -15,7 +16,7 @@ const BTN_DISABLED = '#2e6f63';
 type Props = { onNext?: () => void };
 
 /* =================================================================================
-   Step V1 — Voice Basics  (logic unchanged except: Accent dropdown is custom now)
+   Step V1 — Voice Basics
 ================================================================================= */
 export default function StepV1Basics({ onNext }: Props) {
   const [name, setName] = useState('');
@@ -130,12 +131,12 @@ export default function StepV1Basics({ onNext }: Props) {
             </div>
           </FieldShell>
 
-          {/* Language */}
+          {/* Language (styled portal dropdown) */}
           <FieldShell label="Language" error={errors.language}>
             <LanguageSelect value={language} onChange={setLanguage} />
           </FieldShell>
 
-          {/* Dialect / Accent (country ISO2) — now same component style as Language */}
+          {/* Dialect / Accent (country ISO2) */}
           <FieldShell
             label={
               <>
@@ -144,7 +145,11 @@ export default function StepV1Basics({ onNext }: Props) {
             }
             error={errors.accent}
           >
-            <AccentSelect iso2={accentIso2} onChange={(iso2) => setAccentIso2(iso2.toUpperCase())} />
+            <CountryDialSelect
+              value={accentIso2}
+              onChange={(iso2 /* , dial */) => setAccentIso2(iso2.toUpperCase())}
+              id="voice-accent"
+            />
           </FieldShell>
         </div>
 
@@ -175,7 +180,7 @@ export default function StepV1Basics({ onNext }: Props) {
         </div>
       </div>
 
-      {/* Scoped theme vars + animations for Step 1 */}
+      {/* Scoped theme vars + animations for Step 1 + PORTAL TOKENS */}
       <style jsx global>{`
         @keyframes popIn { 0% { opacity: 0; transform: scale(.985); } 100% { opacity: 1; transform: scale(1); } }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
@@ -210,6 +215,16 @@ export default function StepV1Basics({ onNext }: Props) {
 
           --vs-chip-bg: rgba(0,255,194,.10);
           --vs-chip-border: rgba(0,255,194,.28);
+        }
+
+        /* PORTAL MENU SURFACE (Step 1) */
+        .voice-step1-scope__portal{
+          --vs-menu-bg: #ffffff;
+          --vs-menu-border: rgba(0,0,0,.10);
+        }
+        [data-theme="dark"] .voice-step1-scope__portal{
+          --vs-menu-bg: #101314;
+          --vs-menu-border: rgba(255,255,255,.16);
         }
       `}</style>
     </section>
@@ -297,7 +312,7 @@ function LanguageSelect({
 
   return (
     <>
-      {/* trigger — same size/roundness as accent trigger */}
+      {/* trigger */}
       <button
         ref={btnRef}
         type="button"
@@ -312,8 +327,8 @@ function LanguageSelect({
       >
         <span className="flex items-center gap-2">
           <LangIcon className="w-4 h-4" style={{ color: 'var(--brand)' }} />
+          <span>{value}</span>
         </span>
-        <span className="flex-1 text-left">{value}</span>
         <ChevronDown className="w-4 h-4 opacity-80" style={{ color: 'var(--text-muted)' }} />
       </button>
 
@@ -322,27 +337,19 @@ function LanguageSelect({
         ? createPortal(
             <div
               ref={portalRef}
-              className="fixed z-[9999] p-3 animate-[popIn_140ms_ease-out]"
+              className="voice-step1-scope__portal fixed z-[9999] p-3 animate-[popIn_140ms_ease-out]"
               style={{
                 top: rect.openUp ? rect.top - 8 : rect.top + 8,
                 left: rect.left,
                 width: rect.width,
                 transform: rect.openUp ? 'translateY(-100%)' : 'none',
-                background: 'var(--vs-menu-bg, #ffffff)',
-                border: '1px solid var(--vs-menu-border, rgba(0,0,0,.10))',
+                background: 'var(--vs-menu-bg)',
+                border: '1px solid var(--vs-menu-border)',
                 borderRadius: 20,
                 boxShadow:
                   '0 28px 70px rgba(0,0,0,.12), 0 10px 26px rgba(0,0,0,.08), 0 0 0 1px rgba(0,0,0,.02)',
               }}
             >
-              <style jsx global>{`
-                /* menu theming for dark */
-                [data-theme="dark"] .voice-step-scope ~ .fixed {
-                  --vs-menu-bg: #101314;
-                  --vs-menu-border: rgba(255,255,255,.16);
-                }
-              `}</style>
-
               <div
                 className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[12px]"
                 style={{
@@ -383,163 +390,6 @@ function LanguageSelect({
                   >
                     <LangIcon className="w-4 h-4" style={{ color: 'var(--brand)' }} />
                     <span className="flex-1">{opt}</span>
-                  </button>
-                ))}
-                {filtered.length === 0 && (
-                  <div className="px-3 py-6 text-sm" style={{ color: 'var(--text-muted)' }}>
-                    No matches.
-                  </div>
-                )}
-              </div>
-            </div>,
-            document.body
-          )
-        : null}
-    </>
-  );
-}
-
-/* -------------------------- AccentSelect (new) -------------------------- */
-
-type Country = { iso2: string; name: string; dial: string };
-const COUNTRIES: Country[] = [
-  { iso2: 'US', name: 'United States', dial: '+1' },
-  { iso2: 'CA', name: 'Canada', dial: '+1' },
-  { iso2: 'GB', name: 'United Kingdom', dial: '+44' },
-  { iso2: 'AU', name: 'Australia', dial: '+61' },
-  { iso2: 'NZ', name: 'New Zealand', dial: '+64' },
-  { iso2: 'IE', name: 'Ireland', dial: '+353' },
-  { iso2: 'DE', name: 'Germany', dial: '+49' },
-  { iso2: 'FR', name: 'France', dial: '+33' },
-  { iso2: 'ES', name: 'Spain', dial: '+34' },
-  { iso2: 'IT', name: 'Italy', dial: '+39' },
-  { iso2: 'IN', name: 'India', dial: '+91' },
-  { iso2: 'SG', name: 'Singapore', dial: '+65' },
-];
-
-function AccentSelect({
-  iso2,
-  onChange,
-}: {
-  iso2: string;
-  onChange: (iso2: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState('');
-  const btnRef = useRef<HTMLButtonElement | null>(null);
-  const portalRef = useRef<HTMLDivElement | null>(null);
-  const [rect, setRect] = useState<{ top: number; left: number; width: number; openUp: boolean } | null>(null);
-
-  const selected = COUNTRIES.find(c => c.iso2 === (iso2 || '').toUpperCase()) || COUNTRIES[0];
-
-  const filtered = COUNTRIES.filter(c => {
-    const q = query.trim().toLowerCase();
-    return !q || c.name.toLowerCase().includes(q) || c.iso2.toLowerCase().includes(q) || c.dial.includes(q);
-  });
-
-  useLayoutEffect(() => {
-    if (!open) return;
-    const r = btnRef.current?.getBoundingClientRect();
-    if (!r) return;
-    const viewH = window.innerHeight;
-    const openUp = r.bottom + 360 > viewH;
-    setRect({ top: openUp ? r.top : r.bottom, left: r.left, width: r.width, openUp });
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onClick = (e: MouseEvent) => {
-      if (btnRef.current?.contains(e.target as Node) || portalRef.current?.contains(e.target as Node)) return;
-      setOpen(false);
-    };
-    window.addEventListener('mousedown', onClick);
-    return () => window.removeEventListener('mousedown', onClick);
-  }, [open]);
-
-  return (
-    <>
-      <button
-        ref={btnRef}
-        type="button"
-        onClick={() => setOpen(v => !v)}
-        className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-[14px] text-sm transition will-change-transform"
-        style={{
-          background: 'var(--vs-input-bg)',
-          border: '1px solid var(--vs-input-border)',
-          boxShadow: 'var(--vs-input-shadow)',
-          color: 'var(--text)',
-        }}
-      >
-        <span className="flex items-center gap-2">
-          <LangIcon className="w-4 h-4" style={{ color: 'var(--brand)' }} />
-          <span className="truncate">
-            {selected.iso2}&nbsp;&nbsp;{selected.name}&nbsp;&nbsp;<span style={{ color: 'var(--text-muted)' }}>{selected.dial}</span>
-          </span>
-        </span>
-        <ChevronDown className="w-4 h-4 opacity-80" style={{ color: 'var(--text-muted)' }} />
-      </button>
-
-      {open && rect && typeof document !== 'undefined'
-        ? createPortal(
-            <div
-              ref={portalRef}
-              className="fixed z-[9999] p-3 animate-[popIn_140ms_ease-out]"
-              style={{
-                top: rect.openUp ? rect.top - 8 : rect.top + 8,
-                left: rect.left,
-                width: rect.width,
-                transform: rect.openUp ? 'translateY(-100%)' : 'none',
-                background: 'var(--vs-menu-bg, #ffffff)',
-                border: '1px solid var(--vs-menu-border, rgba(0,0,0,.10))',
-                borderRadius: 20,
-                boxShadow: '0 28px 70px rgba(0,0,0,.12), 0 10px 26px rgba(0,0,0,.08), 0 0 0 1px rgba(0,0,0,.02)',
-              }}
-            >
-              <style jsx global>{`
-                [data-theme="dark"] .voice-step-scope ~ .fixed {
-                  --vs-menu-bg: #101314;
-                  --vs-menu-border: rgba(255,255,255,.16);
-                }
-              `}</style>
-
-              <div
-                className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[12px]"
-                style={{
-                  background: 'var(--vs-input-bg)',
-                  border: '1px solid var(--vs-input-border)',
-                  boxShadow: 'var(--vs-input-shadow)',
-                  color: 'var(--text)',
-                }}
-              >
-                <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
-                <input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Type country or +code…"
-                  className="w-full bg-transparent outline-none text-sm"
-                  style={{ color: 'var(--text)' }}
-                />
-              </div>
-
-              <div className="max-h-80 overflow-y-auto pr-1" style={{ scrollbarWidth: 'thin' }}>
-                {filtered.map((c) => (
-                  <button
-                    key={c.iso2}
-                    onClick={() => { onChange(c.iso2); setOpen(false); }}
-                    className="w-full flex items-center gap-3 px-3 py-2 rounded-[10px] text-left transition"
-                    style={{ background: 'transparent', border: '1px solid transparent', color: 'var(--text)' }}
-                    onMouseEnter={(e) => {
-                      (e.currentTarget as HTMLButtonElement).style.background = 'rgba(0,255,194,0.10)';
-                      (e.currentTarget as HTMLButtonElement).style.border = '1px solid rgba(0,255,194,0.35)';
-                    }}
-                    onMouseLeave={(e) => {
-                      (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
-                      (e.currentTarget as HTMLButtonElement).style.border = '1px solid transparent';
-                    }}
-                  >
-                    <span className="w-10 shrink-0" style={{ color: 'var(--text-muted)' }}>{c.iso2}</span>
-                    <span className="flex-1 truncate">{c.name}</span>
-                    <span style={{ color: 'var(--text-muted)' }}>{c.dial}</span>
                   </button>
                 ))}
                 {filtered.length === 0 && (
