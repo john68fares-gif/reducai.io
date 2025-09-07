@@ -1,30 +1,24 @@
-// pages/support.tsx (visuals aligned to API Keys page)
+// pages/support.tsx — visuals matched to Step1 (cards, glows, shadows, animations)
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import ContentWrapper from '@/components/layout/ContentWrapper';
-import { MessageSquareText, Shield } from 'lucide-react';
+import { MessageSquareText, Shield, Sparkles, Wrench, Rocket } from 'lucide-react';
 
 type Msg = { id: string; role: 'user' | 'assistant'; text: string };
 
 const sanitize = (text: string) =>
   text.replace(/\*\*/g, '').replace(/```[\s\S]*?```/g, '[redacted]').replace(/`([^`]+)`/g, '$1');
 
-/* ------------------------------- Look & feel -------------------------------- */
-const FRAME: React.CSSProperties = {
-  background: 'var(--frame-bg, var(--panel))',
-  border: '1px solid var(--border)',
-  boxShadow: 'var(--frame-shadow, var(--shadow-soft))',
-  borderRadius: 30,
-};
-const CARD: React.CSSProperties = {
-  background: 'var(--card-bg, var(--card))',
-  border: '1px solid var(--border)',
-  boxShadow: 'var(--card-shadow, var(--shadow-card))',
-  borderRadius: 20,
-};
+/* --- Same visual tokens used in Step1 --- */
 const BTN_GREEN = '#10b981';
 const BTN_GREEN_HOVER = '#0ea473';
+
+const CARD: React.CSSProperties = {
+  background: 'var(--card)',
+  border: '1px solid var(--border)',
+  boxShadow: 'var(--shadow-card)',
+  borderRadius: 20,
+};
 
 export default function SupportPage() {
   const [messages, setMessages] = useState<Msg[]>([
@@ -54,13 +48,20 @@ export default function SupportPage() {
         body: JSON.stringify({ message: value }),
       });
       const data = await r.json();
-      const botText = (data?.ok && typeof data?.message === 'string')
-        ? data.message
-        : 'Sorry, I can’t comply with that request.';
+      const botText =
+        data?.ok && typeof data?.message === 'string'
+          ? data.message
+          : 'Sorry, I can’t comply with that request.';
 
-      setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', text: sanitize(botText) }]);
+      setMessages(prev => [
+        ...prev,
+        { id: crypto.randomUUID(), role: 'assistant', text: sanitize(botText) },
+      ]);
     } catch {
-      setMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', text: 'Something went wrong. Please try again.' }]);
+      setMessages(prev => [
+        ...prev,
+        { id: crypto.randomUUID(), role: 'assistant', text: 'Something went wrong. Please try again.' },
+      ]);
     } finally {
       setLoading(false);
     }
@@ -71,122 +72,189 @@ export default function SupportPage() {
   };
 
   return (
-    <ContentWrapper>
-      {/* small section label above the panel (same as API Keys page) */}
-      <div className="mx-auto w-full max-w-[980px] mb-3">
-        <div className="text-xs font-semibold tracking-[.12em] opacity-70" style={{ color: 'var(--text-muted)' }}>
-          SUPPORT
-        </div>
-      </div>
+    <main className="min-h-screen w-full font-movatif" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
+      <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 pt-8 pb-24">
+        {/* HERO — mirrors Step1 hero (radial glow + grid overlay + chips) */}
+        <section className="relative overflow-hidden p-6 md:p-7 mb-8 animate-[fadeIn_180ms_ease]" style={CARD}>
+          {/* soft brand glow */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
+            style={{
+              background:
+                'radial-gradient(circle, color-mix(in oklab, var(--brand) 14%, transparent) 0%, transparent 70%)',
+              filter: 'blur(38px)',
+            }}
+          />
+          {/* faint grid mask like Step1 */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0 opacity-[.10]"
+            style={{
+              background:
+                'linear-gradient(transparent 31px, color-mix(in oklab, var(--text) 7%, transparent) 32px), linear-gradient(90deg, transparent 31px, color-mix(in oklab, var(--text) 7%, transparent) 32px)',
+              backgroundSize: '32px 32px',
+              maskImage: 'radial-gradient(circle at 30% 20%, black, transparent 70%)',
+            }}
+          />
 
-      <div className="mx-auto w-full max-w-[980px] support-panel">
-        <div className="relative" style={FRAME}>
-          {/* header */}
-          <div className="flex items-start justify-between px-6 lg:px-8 py-6" style={{ borderBottom: '1px solid var(--border)' }}>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center relative">
             <div>
-              <h1 className="text-2xl font-semibold" style={{ color: 'var(--text)' }}>Riley Support</h1>
-              <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
-                Ask questions about the builder, voice agent, deployments, and more
+              <div className="text-xl font-semibold mb-2">Riley Support</div>
+              <p className="opacity-80 mb-5" style={{ color: 'var(--text-muted)' }}>
+                Fast help for your Builder, Voice Agent, deployments, and storage wiring.
               </p>
-            </div>
-            <div className="w-10 h-10 rounded-2xl flex items-center justify-center"
-                 style={{ background: 'var(--brand-weak)', boxShadow: 'var(--chip-shadow, none)' }}>
-              <MessageSquareText className="w-5 h-5" style={{ color: 'var(--brand)' }} />
-            </div>
-          </div>
 
-          {/* body */}
-          <div className="px-6 lg:px-8 pb-7 space-y-5">
-            {/* messages card */}
-            <div style={CARD} className="p-4">
-              <div
-                ref={listRef}
-                className="flex-1 min-h-[360px] max-h-[60vh] overflow-y-auto p-2 flex flex-col gap-2"
-              >
-                {messages.map(m => (
-                  <div key={m.id} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
-                    <div
-                      className="px-3 py-2 rounded-lg max-w-[80%] whitespace-pre-wrap break-words text-sm"
-                      style={{
-                        background: m.role === 'user' ? 'var(--brand-weak)' : 'var(--card)',
-                        border: `1px solid var(--border)`,
-                        color: 'var(--text)',
-                      }}
-                    >
-                      {m.text}
-                    </div>
-                  </div>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  ['Builder & Steps', <Sparkles key="s" className="w-3.5 h-3.5" />],
+                  ['Fix & Debug', <Wrench key="w" className="w-3.5 h-3.5" />],
+                  ['Deploy & Launch', <Rocket key="r" className="w-3.5 h-3.5" />],
+                ].map(([t, icon]) => (
+                  <span
+                    key={String(t)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-2xl border transition hover:-translate-y-[1px]"
+                    style={{
+                      borderColor: 'var(--border)',
+                      background: 'var(--panel)',
+                      boxShadow: 'var(--shadow-soft)',
+                      color: 'var(--text)',
+                    }}
+                  >
+                    {icon}
+                    {t as string}
+                  </span>
                 ))}
-                {loading && (
-                  <div className="flex justify-start">
-                    <div
-                      className="px-3 py-2 rounded-lg max-w-[80%] text-sm"
-                      style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }}
-                    >
-                      <TypingDots />
-                    </div>
-                  </div>
-                )}
               </div>
             </div>
 
-            {/* input card */}
-            <div style={CARD} className="p-4">
-              <div className="flex gap-2">
-                <input
-                  value={input}
-                  onChange={e => setInput(e.target.value)}
-                  onKeyDown={onKey}
-                  placeholder="Ask Riley…"
-                  className="flex-1 rounded-[14px] px-3 h-[46px] text-sm outline-none"
+            <div className="justify-self-end">
+              <div
+                className="w-44 h-44 rounded-3xl grid place-items-center"
+                style={{
+                  background: 'radial-gradient(circle at 50% 20%, rgba(0,0,0,0.18), rgba(0,0,0,0.06))',
+                  border: '1px solid var(--border)',
+                  boxShadow: 'var(--shadow-soft)',
+                }}
+              >
+                <MessageSquareText className="w-11 h-11" style={{ color: 'var(--brand)' }} />
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* CHAT PANEL — card look & subtle animations like Step1 form */}
+        <section className="relative p-6 sm:p-7 space-y-5 animate-[fadeIn_220ms_ease]" style={CARD}>
+          {/* soft brand glow */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
+            style={{
+              background:
+                'radial-gradient(circle, color-mix(in oklab, var(--brand) 14%, transparent) 0%, transparent 70%)',
+              filter: 'blur(38px)',
+            }}
+          />
+
+          {/* Messages area */}
+          <div
+            ref={listRef}
+            className="min-h-[360px] max-h-[60vh] overflow-y-auto p-2 flex flex-col gap-2 rounded-xl"
+            style={{ background: 'transparent' }}
+          >
+            {messages.map((m) => (
+              <div
+                key={m.id}
+                className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}
+              >
+                <div
+                  className="px-3 py-2 rounded-lg max-w-[80%] whitespace-pre-wrap break-words text-sm animate-[popIn_140ms_ease]"
+                  style={{
+                    background: m.role === 'user' ? 'var(--brand-weak)' : 'var(--card)',
+                    border: '1px solid var(--border)',
+                    color: 'var(--text)',
+                    boxShadow: 'var(--shadow-soft)',
+                  }}
+                >
+                  {m.text}
+                </div>
+              </div>
+            ))}
+            {loading && (
+              <div className="flex justify-start">
+                <div
+                  className="px-3 py-2 rounded-lg max-w-[80%] text-sm"
                   style={{
                     background: 'var(--card)',
                     border: '1px solid var(--border)',
                     color: 'var(--text)',
+                    boxShadow: 'var(--shadow-soft)',
                   }}
-                />
-                <button
-                  onClick={send}
-                  disabled={loading || !input.trim()}
-                  className="px-5 h-[46px] rounded-[18px] font-semibold flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
-                  style={{ background: BTN_GREEN, color: '#fff' }}
-                  onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER)}
-                  onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN)}
                 >
-                  Send
-                </button>
+                  <TypingDots />
+                </div>
               </div>
-              <div className="text-xs text-center pt-3 flex items-center justify-center gap-2" style={{ color: 'var(--text-muted)' }}>
-                <Shield className="w-3.5 h-3.5 opacity-80" />
-                Riley will never reveal or summarize code, file contents, or paths. If asked, Riley will refuse.
-              </div>
-            </div>
+            )}
           </div>
-        </div>
+
+          {/* Input row */}
+          <div className="flex gap-2 pt-1">
+            <div
+              className="flex items-center gap-2 rounded-2xl px-4 h-[46px] border flex-1 transition-shadow"
+              style={{ borderColor: 'var(--border)', background: 'var(--panel)', boxShadow: 'var(--shadow-soft)' }}
+            >
+              <input
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={onKey}
+                placeholder="Ask Riley…"
+                className="w-full bg-transparent outline-none text-[15px]"
+                style={{ color: 'var(--text)' }}
+                onFocus={(e) => ((e.currentTarget.parentElement as HTMLDivElement).style.borderColor = 'var(--brand)')}
+                onBlur={(e) => ((e.currentTarget.parentElement as HTMLDivElement).style.borderColor = 'var(--border)')}
+              />
+            </div>
+
+            <button
+              onClick={send}
+              disabled={loading || !input.trim()}
+              className="inline-flex items-center justify-center gap-2 px-5 h-[46px] rounded-[18px] font-semibold disabled:opacity-60 disabled:cursor-not-allowed transition will-change-transform"
+              style={{ background: BTN_GREEN, color: '#fff' }}
+              onMouseEnter={(e) => {
+                if (loading || !input.trim()) return;
+                (e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER;
+              }}
+              onMouseLeave={(e) => {
+                if (loading || !input.trim()) return;
+                (e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN;
+              }}
+            >
+              Send
+            </button>
+          </div>
+
+          <div
+            className="text-xs text-center pt-2 flex items-center justify-center gap-2 opacity-80"
+            style={{ color: 'var(--text-muted)' }}
+          >
+            <Shield className="w-3.5 h-3.5 opacity-80" />
+            Riley will never reveal or summarize code, file contents, or paths. If asked, Riley will refuse.
+          </div>
+        </section>
       </div>
 
-      {/* page-scoped cosmetics to match API Keys panel */}
+      {/* tiny animations used above */}
       <style jsx global>{`
-        [data-theme="dark"] .support-panel {
-          --frame-bg: radial-gradient(120% 180% at 50% -40%, rgba(0,255,194,.06) 0%, rgba(12,16,18,1) 42%)
-                       , linear-gradient(180deg, #0e1213 0%, #0c1012 100%);
-          --frame-shadow:
-            0 26px 70px rgba(0,0,0,.60),
-            0 8px 24px rgba(0,0,0,.45),
-            0 0 0 1px rgba(0,255,194,.06);
-          --chip-shadow: 0 4px 14px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.05);
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(6px); }
+          to { opacity: 1; transform: translateY(0); }
         }
-        [data-theme="dark"] .support-panel .card,
-        [data-theme="dark"] .support-panel .p-4 {
-          --card-bg: linear-gradient(180deg, rgba(24,32,31,.86) 0%, rgba(16,22,21,.86) 100%);
-          --card-shadow:
-            0 16px 36px rgba(0,0,0,.55),
-            0 2px 8px rgba(0,0,0,.35),
-            inset 0 1px 0 rgba(255,255,255,.07),
-            0 0 0 1px rgba(0,255,194,.05);
+        @keyframes popIn {
+          0% { opacity: 0; transform: scale(0.98); }
+          100% { opacity: 1; transform: scale(1); }
         }
       `}</style>
-    </ContentWrapper>
+    </main>
   );
 }
 
