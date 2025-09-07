@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search, Plus, Folder, FolderOpen, Check, Trash2, Copy, Edit3, Sparkles,
   ChevronDown, ChevronRight, FileText, Mic2, BookOpen, SlidersHorizontal,
-  PanelLeft, Bot, UploadCloud, RefreshCw, X
+  PanelLeft, Bot, UploadCloud, RefreshCw, X, Undo2, Eye
 } from 'lucide-react';
 
 /* =============================================================================
@@ -56,7 +56,7 @@ const readLS = <T,>(k: string): T | null => { try { const r = localStorage.getIt
 const writeLS = <T,>(k: string, v: T) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 
 /* =============================================================================
-   BASE PROMPT + builders
+   PROMPT BUILDERS
 ============================================================================= */
 const BASE_PROMPT = `[Identity]
 You are an intelligent and responsive assistant designed to help users with a wide range of inquiries and tasks.
@@ -80,66 +80,6 @@ You are an intelligent and responsive assistant designed to help users with a wi
 - If a user's request is unclear or you encounter difficulty understanding, ask for clarification politely.
 - If a task cannot be completed, inform the user empathetically and suggest alternative solutions or resources.`.trim();
 
-/** Expand short instructions into a fully structured prompt. */
-function buildStructuredPrompt(input: string): string {
-  const raw = input.trim();
-
-  // If it's super short (e.g., "assistant", "medical intake"), build a full scaffold.
-  const isShort = raw.split(/\s+/).length <= 3;
-
-  // Try to extract a "collect" list if user pasted fields.
-  const collectMatch = raw.match(/collect(?:\s*[:\-])?\s*(.*)$/i);
-  let fields: string[] = [];
-  if (collectMatch) {
-    fields = collectMatch[1]
-      .split(/[,;\n]/).map(s => s.trim()).filter(Boolean)
-      .map(s => s.replace(/^[\-\*\d\.\s]+/, '')); // strip bullets
-  } else {
-    // also detect common nouns in short comma-lists
-    if (/,/.test(raw)) {
-      fields = raw.split(/[,;\n]/).map(s => s.trim()).filter(Boolean);
-    }
-  }
-
-  const title = isShort ? (raw || 'Assistant') : 'Assistant';
-
-  const sections = [
-`[Identity]
-You are a helpful, fast, and accurate ${title.toLowerCase()} that completes tasks and collects information.`,
-
-`[Style]
-- Friendly, to-the-point, concise.
-- Never over-explain; confirm critical details.`,
-
-`[System Behaviors]
-- Ask one targeted question at a time.
-- Confirm understanding and summarize before finalizing.
-- If the user seems unsure, suggest next best actions.`,
-
-`[Task & Goals]
-- Understand the caller's intent.
-- Collect the required details accurately.
-- Provide relevant guidance or next steps.`,
-
-`[Data to Collect]
-${fields.length ? fields.map(f => `- ${toTitle(f)}`).join('\n') : '- Full Name\n- Phone Number\n- Email (if provided)\n- Appointment Date/Time (if applicable)'}
-`,
-
-`[Safety]
-- Do not provide medical, legal, or financial advice beyond high-level information.
-- If the user asks for restricted actions, politely decline and suggest alternatives.`,
-
-`[Handover]
-- When all required info is gathered, summarize the details and provide a clear next step.
-- If needed, hand off to a human agent with the collected summary.`,
-
-`[First Message]
-Hello.`
-  ];
-
-  return sections.join('\n\n').trim();
-}
-
 function toTitle(s: string) {
   return s.replace(/\s+/g, ' ')
     .split(' ')
@@ -148,11 +88,64 @@ function toTitle(s: string) {
     .replace(/\b(Id|Url|Dob)\b/gi, m => m.toUpperCase());
 }
 
+/** Expand short instructions into a structured prompt */
+function buildStructuredPrompt(input: string): string {
+  const raw = input.trim();
+  const isShort = raw.split(/\s+/).length <= 3;
+  const collectMatch = raw.match(/collect(?:\s*[:\-])?\s*(.*)$/i);
+  let fields: string[] = [];
+  if (collectMatch) {
+    fields = collectMatch[1].split(/[,;\n]/).map(s => s.trim()).filter(Boolean).map(s => s.replace(/^[\-\*\d\.\s]+/, ''));
+  } else if (/,/.test(raw)) {
+    fields = raw.split(/[,;\n]/).map(s => s.trim()).filter(Boolean);
+  }
+  const title = isShort ? (raw || 'Assistant') : 'Assistant';
+
+  return [
+`[Identity]
+You are a helpful, fast, and accurate ${title.toLowerCase()} that completes tasks and collects information.`,
+
+`[Style]
+- Friendly, concise, affirmative.
+- Ask one question at a time and confirm critical details.`,
+
+`[System Behaviors]
+- Summarize & confirm before finalizing.
+- Offer next steps when appropriate.`,
+
+`[Task & Goals]
+- Understand intent, collect required details, and provide guidance.`,
+
+`[Data to Collect]
+${fields.length ? fields.map(f => `- ${toTitle(f)}`).join('\n') : '- Full Name\n- Phone Number\n- Email (if provided)\n- Appointment Date/Time (if applicable)'}
+`,
+
+`[Safety]
+- No medical/legal/financial advice beyond high-level pointers.
+- Decline restricted actions, suggest alternatives.`,
+
+`[Handover]
+- When done, summarize details and hand off if needed.`,
+
+`[First Message]
+Hello.`
+  ].join('\n\n').trim();
+}
+
+/** Build next prompt from user instruction and current */
+function makeNewPromptFrom(input: string, current: string): string {
+  const small = input.trim();
+  if (!small) return current || BASE_PROMPT;
+  if (small.split(/\s+/).length <= 3) return buildStructuredPrompt(small);
+  if (/collect|fields|capture|gather/i.test(small)) return buildStructuredPrompt(small);
+  return (current || BASE_PROMPT) + `\n\n[Refinements]\n- ${small.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim()}`;
+}
+
 /* =============================================================================
-   DIFF & TYPING
+   DIFF + TYPING
 ============================================================================= */
 
-/** Tokenize by words and mark which are "added" vs old text using LCS. */
+/** LCS tokens: new prompt words marked added; deletions are omitted */
 function tokenizeDiff(oldStr: string, newStr: string): { text: string; added: boolean }[] {
   const o = oldStr.split(/\s+/);
   const n = newStr.split(/\s+/);
@@ -166,15 +159,17 @@ function tokenizeDiff(oldStr: string, newStr: string): { text: string; added: bo
   let i = 0, j = 0;
   while (i < o.length && j < n.length) {
     if (o[i] === n[j]) { tokens.push({ text: n[j], added: false }); i++; j++; }
-    else if (dp[i + 1][j] >= dp[i][j + 1]) { i++; } // deletion (we don't render it)
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { i++; } // deletion
     else { tokens.push({ text: n[j], added: true }); j++; }
   }
-  while (j < n.length) tokens.push({ text: n[j++], added: true }); // remaining are additions
+  while (j < n.length) tokens.push({ text: n[j++], added: true });
   return tokens;
 }
 
-/** Renders a "typing" effect with green highlights for tokens marked added */
-function TypingHighlighter({ tokens, onDone }: { tokens: { text: string; added: boolean }[]; onDone: () => void }) {
+/** Renders typing of tokens; onDone is called when the last token is painted */
+function TypingHighlighter({
+  tokens, onDone, height = 480
+}: { tokens: { text: string; added: boolean }[]; onDone: () => void; height?: number }) {
   const [idx, setIdx] = useState(0);
   const boxRef = useRef<HTMLDivElement | null>(null);
 
@@ -182,8 +177,8 @@ function TypingHighlighter({ tokens, onDone }: { tokens: { text: string; added: 
     let raf = 0;
     const step = () => {
       setIdx(v => {
-        const next = Math.min(v + Math.max(1, Math.floor(tokens.length / 180)), tokens.length);
-        return next;
+        const speed = Math.max(1, Math.floor(tokens.length / 160)); // ~160 ticks
+        return Math.min(v + speed, tokens.length);
       });
       raf = requestAnimationFrame(step);
     };
@@ -192,13 +187,17 @@ function TypingHighlighter({ tokens, onDone }: { tokens: { text: string; added: 
   }, [tokens.length]);
 
   useEffect(() => {
-    // Scroll to bottom as we type
     if (!boxRef.current) return;
     boxRef.current.scrollTop = boxRef.current.scrollHeight;
     if (idx >= tokens.length) onDone();
   }, [idx, tokens.length, onDone]);
 
-  const toRender = tokens.slice(0, idx);
+  const parts = tokens.slice(0, idx).map((t, i) =>
+    t.added
+      ? <ins key={i} style={{ background:'rgba(16,185,129,.18)', padding:'1px 2px', borderRadius:4 }}>{t.text}</ins>
+      : <span key={i}>{t.text}</span>
+  ).reduce<(JSX.Element|string)[]>((acc, el, i) => (i ? acc.concat([' ', el]) : acc.concat([el])), []);
+
   return (
     <div
       ref={boxRef}
@@ -208,16 +207,32 @@ function TypingHighlighter({ tokens, onDone }: { tokens: { text: string; added: 
         boxShadow:'var(--va-shadow), inset 0 1px 0 rgba(255,255,255,.03)', color:'var(--text)',
         fontFamily:'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
         whiteSpace:'pre-wrap',
-        height: '420px',
+        height,
         overflowY:'auto'
       }}
     >
-      {toRender.map((t, i) => t.added
-        ? <ins key={i} style={{ background:'rgba(16,185,129,.18)', padding:'1px 2px', borderRadius:4 }}>{t.text}</ins>
-        : <span key={i}>{t.text}</span>
-      ).reduce((acc, el, i) => (i ? acc.concat([' ', el]) : acc.concat([el])), [] as (JSX.Element|string)[]) }
+      {parts}
+      {idx < tokens.length && <span className="animate-pulse"> ▌</span>}
     </div>
   );
+}
+
+/** simple before/after diff HTML with green adds + red dels */
+function htmlDiff(oldStr: string, newStr: string) {
+  const o = oldStr.split(/\s+/), n = newStr.split(/\s+/);
+  const dp: number[][] = Array(o.length + 1).fill(0).map(() => Array(n.length + 1).fill(0));
+  for (let i = o.length - 1; i >= 0; i--) for (let j = n.length - 1; j >= 0; j--)
+    dp[i][j] = o[i] === n[j] ? 1 + dp[i+1][j+1] : Math.max(dp[i+1][j], dp[i][j+1]);
+  const out: string[] = [];
+  let i=0, j=0;
+  while (i<o.length && j<n.length) {
+    if (o[i] === n[j]) { out.push(o[i]); i++; j++; }
+    else if (dp[i+1][j] >= dp[i][j+1]) { out.push(`<del>${o[i++]}</del>`); }
+    else { out.push(`<ins>${n[j++]}</ins>`); }
+  }
+  while (i<o.length) out.push(`<del>${o[i++]}</del>`);
+  while (j<n.length) out.push(`<ins>${n[j++]}</ins>`);
+  return out.join(' ');
 }
 
 /* =============================================================================
@@ -254,7 +269,7 @@ function DeleteModal({ open, name, onCancel, onConfirm }:{
    PAGE
 ============================================================================= */
 export default function VoiceAgentSection() {
-  /* ---------- Assistants list ---------- */
+  /* ---------- Assistants ---------- */
   const [assistants, setAssistants] = useState<Assistant[]>([]);
   const [activeId, setActiveId] = useState('');
   const [query, setQuery] = useState('');
@@ -324,53 +339,50 @@ export default function VoiceAgentSection() {
     if (!list.length) setActiveId('');
   };
 
-  /* ---------- Generate: ON-TEXTAREA LIVE TYPIST with green highlights ---------- */
+  /* ---------- Generate: true retype + commit + diff tray ---------- */
   const [genOpen, setGenOpen] = useState(false);
   const [genText, setGenText] = useState('');
   const [typingTokens, setTypingTokens] = useState<{ text: string; added: boolean }[] | null>(null);
   const [isTypingLive, setIsTypingLive] = useState(false);
-
-  function makeNewPromptFrom(input: string, current: string): string {
-    const small = input.trim();
-    if (!small) return current || BASE_PROMPT;
-
-    // If very short ("assistant", "medical intake") → structured
-    if (small.split(/\s+/).length <= 3) return buildStructuredPrompt(small);
-
-    // If looks like a list of requirements → build structured and insert those under Data to Collect.
-    if (/collect|fields|capture|gather/i.test(small)) {
-      return buildStructuredPrompt(small);
-    }
-
-    // Otherwise, treat as an addendum to current
-    const block = `\n\n[Refinements]\n- ${small.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim()}`;
-    return (current || BASE_PROMPT) + block;
-  }
+  const [lastOld, setLastOld] = useState<string>('');
+  const [lastNew, setLastNew] = useState<string>('');
+  const [showDiff, setShowDiff] = useState(false);
 
   const handleGenerate = () => {
     if (!active) return;
     const current = active.config.model.systemPrompt || '';
     const next = makeNewPromptFrom(genText, current);
 
-    // Prepare tokens for typing highlighter (only added words marked)
-    const tokens = tokenizeDiff(current, next);
-    setTypingTokens(tokens);
+    // keep exact strings to commit/undo and show diff
+    setLastOld(current);
+    setLastNew(next);
+    setShowDiff(false);
+
+    // Prepare tokens and start typing in-place
+    setTypingTokens(tokenizeDiff(current, next));
     setIsTypingLive(true);
     setGenOpen(false);
+    setGenText(''); // clear the input you complained about
   };
 
   const onTypingDone = () => {
-    if (!active || !typingTokens) { setIsTypingLive(false); return; }
-    // Reassemble plain text and set as the real prompt
-    const plain = typingTokens.map(t => t.text).join(' ').replace(/\s+\n/g, '\n').trim();
-    updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, systemPrompt: plain } } }));
+    if (!active) { setIsTypingLive(false); return; }
+    // commit EXACT new string (no reconstruction errors)
+    updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, systemPrompt: lastNew } } }));
     setIsTypingLive(false);
     setTypingTokens(null);
+    setShowDiff(true); // open changes tray
   };
 
-  /* ---------- Voices etc. ---------- */
-  const openaiVoices: { value:string; label:string }[] = [{ value:'alloy', label:'Alloy (OpenAI)' }, { value:'ember', label:'Ember (OpenAI)' }];
-  const elevenVoices: { value:string; label:string }[] = [{ value:'rachel', label:'Rachel (ElevenLabs)' }, { value:'adam', label:'Adam (ElevenLabs)' }, { value:'bella', label:'Bella (ElevenLabs)' }];
+  const undoLast = () => {
+    if (!active) return;
+    updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, systemPrompt: lastOld } } }));
+    setShowDiff(false);
+  };
+
+  /* ---------- Voices ---------- */
+  const openaiVoices = [{ value:'alloy', label:'Alloy (OpenAI)' }, { value:'ember', label:'Ember (OpenAI)' }];
+  const elevenVoices = [{ value:'rachel', label:'Rachel (ElevenLabs)' }, { value:'adam', label:'Adam (ElevenLabs)' }, { value:'bella', label:'Bella (ElevenLabs)' }];
 
   if (!active) return (
     <div className={SCOPE} style={{ color:'var(--text)' }}>
@@ -381,13 +393,11 @@ export default function VoiceAgentSection() {
 
   const visible = assistants.filter(a => a.name.toLowerCase().includes(query.trim().toLowerCase()));
 
-  /* ---------- Inline rename helpers ---------- */
   const beginRename = (a: Assistant) => { setEditingId(a.id); setTempName(a.name); };
   const saveRename = (a: Assistant) => {
     const name = (tempName || '').trim() || 'Untitled';
-    if (a.id === activeId) {
-      updateActive(x => ({ ...x, name }));
-    } else {
+    if (a.id === activeId) updateActive(x => ({ ...x, name }));
+    else {
       const cur = readLS<Assistant>(ak(a.id));
       if (cur) writeLS(ak(a.id), { ...cur, name, updatedAt: Date.now() });
       const list = (readLS<Assistant[]>(LS_LIST) || []).map(x => x.id === a.id ? { ...x, name, updatedAt: Date.now() } : x);
@@ -398,14 +408,14 @@ export default function VoiceAgentSection() {
 
   return (
     <div className={`${SCOPE}`} style={{ background:'var(--bg)', color:'var(--text)' }}>
-      {/* ================= ASSISTANT RAIL ================= */}
+      {/* ================= ASSISTANT RAIL (flush to app sidebar) ================= */}
       <aside
         className="hidden lg:flex flex-col"
         style={{
           position:'fixed',
           left:'var(--app-sidebar-w, 248px)',
           top:'var(--app-header-h, 64px)',
-          width:'var(--va-rail-w, 312px)',
+          width:'var(--va-rail-w, 332px)',            /* slightly wider */
           height:'calc(100vh - var(--app-header-h, 64px))',
           borderRight:'1px solid var(--va-border)',
           background:'var(--va-sidebar)',
@@ -428,7 +438,7 @@ export default function VoiceAgentSection() {
             style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)' }}>
             <Search className="w-4 h-4 icon" />
             <input value={query} onChange={(e)=> setQuery(e.target.value)} placeholder="Search assistants"
-                  className="w-full bg-transparent outline-none text-sm" style={{ color:'var(--text)' }}/>
+                   className="w-full bg-transparent outline-none text-sm" style={{ color:'var(--text)' }}/>
           </div>
 
           <div className="text-xs font-semibold flex items-center gap-2 mt-3 mb-1" style={{ color:'var(--text-muted)' }}>
@@ -465,7 +475,7 @@ export default function VoiceAgentSection() {
                             value={tempName}
                             onChange={(e)=> setTempName(e.target.value)}
                             onKeyDown={(e)=> { if (e.key==='Enter') saveRename(a); if (e.key==='Escape') setEditingId(null); }}
-                            className="bg-transparent rounded-md px-2 py-1 outline-none"
+                            className="bg-transparent rounded-md px-2 py-1 outline-none w-full"
                             style={{ border:'1px solid var(--va-input-border)', color:'var(--text)' }}
                           />
                         )}
@@ -499,10 +509,10 @@ export default function VoiceAgentSection() {
       <div
         className="va-main"
         style={{
-          marginLeft:'calc(var(--app-sidebar-w, 248px) + var(--va-rail-w, 312px))',
-          paddingRight:'clamp(12px, 3vw, 24px)',
+          marginLeft:'calc(var(--app-sidebar-w, 248px) + var(--va-rail-w, 332px))',
+          paddingRight:'clamp(16px, 4vw, 32px)',
           paddingTop:'calc(var(--app-header-h, 64px) + 12px)',
-          paddingBottom:'56px'
+          paddingBottom:'72px'
         }}
       >
         {/* top action bar */}
@@ -519,10 +529,12 @@ export default function VoiceAgentSection() {
           </div>
         </div>
 
-        {/* content body */}
-        <div className="max-w-[1600px] mx-auto px-2 sm:px-4 grid grid-cols-12 gap-8">
+        {/* content body — **EXTRA WIDE** */}
+        <div className="mx-auto grid grid-cols-12 gap-8"
+             style={{ maxWidth:'min(2200px, 96vw)' }}>
           <Section title="Model" icon={<FileText className="w-4 h-4 icon" />}>
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
+            <div className="grid gap-5"
+                 style={{ gridTemplateColumns:'repeat(4, minmax(280px, 1fr))' }}>
               <Field label="Provider">
                 <Select
                   value={active.config.model.provider}
@@ -575,35 +587,34 @@ export default function VoiceAgentSection() {
                 </div>
               </div>
 
-              {/* ACTUAL PROMPT EDITOR
-                  - While typingLive: show TypingHighlighter (the “re-type from zero” view)
-                  - After done: fallback to the real textarea with new text */}
+              {/* ACTUAL PROMPT BOX */}
               {!isTypingLive ? (
                 <textarea
-                  rows={18}
+                  rows={20}
                   value={active.config.model.systemPrompt || ''}
                   onChange={(e)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, systemPrompt: e.target.value } } })) }
                   className="w-full rounded-xl px-3 py-3 text-[14px] leading-6 outline-none"
                   style={{
                     background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)',
                     boxShadow:'var(--va-shadow), inset 0 1px 0 rgba(255,255,255,.03)', color:'var(--text)',
-                    fontFamily:'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace'
+                    fontFamily:'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+                    minHeight: 480
                   }}
                 />
               ) : (
-                <TypingHighlighter tokens={typingTokens || []} onDone={onTypingDone} />
+                <TypingHighlighter tokens={typingTokens || []} onDone={onTypingDone} height={480} />
               )}
             </div>
           </Section>
 
           <Section title="Voice" icon={<Mic2 className="w-4 h-4 icon" />}>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div className="grid gap-5" style={{ gridTemplateColumns:'repeat(2, minmax(320px, 1fr))' }}>
               <Field label="Provider">
                 <Select
                   value={active.config.voice.provider}
                   onChange={(v)=>{
                     const list = v==='elevenlabs' ? elevenVoices : openaiVoices;
-                    updateActive(a => ({ ...a, config:{ ...a.config, voice:{ provider: v as VoiceProvider, voiceId: list[0].value, voiceLabel: list[0].label } } }));
+                    updateActive(a => ({ ...a, config:{ ...a.config, voice:{ provider: v as VoiceProvider, voiceId: (list[0] as any).value, voiceLabel: (list[0] as any).label } } }));
                   }}
                   items={[
                     { value:'openai', label:'OpenAI', icon:<OpenAIIcon/> },
@@ -617,7 +628,7 @@ export default function VoiceAgentSection() {
                   value={active.config.voice.voiceId}
                   onChange={(v)=>{
                     const list = active.config.voice.provider==='elevenlabs' ? elevenVoices : openaiVoices;
-                    const found = list.find(x=>x.value===v);
+                    const found = (list as any[]).find(x=>x.value===v);
                     updateActive(a => ({ ...a, config:{ ...a.config, voice:{ ...a.config.voice, voiceId:v, voiceLabel: found?.label || v } } }));
                   }}
                   items={active.config.voice.provider==='elevenlabs' ? elevenVoices : openaiVoices}
@@ -627,14 +638,14 @@ export default function VoiceAgentSection() {
 
             <div className="mt-3">
               <button
-                onClick={()=> { window.dispatchEvent(new CustomEvent('voiceagent:import-11labs')); alert('Hook “voiceagent:import-11labs” to your ElevenLabs importer.'); }}
+                onClick={()=> { window.dispatchEvent(new CustomEvent('voiceagent:import-11labs')); alert('Hook “voiceagent:import-11labs” to your importer.'); }}
                 className="btn--ghost"
               ><UploadCloud className="w-4 h-4 icon" /> Import from ElevenLabs</button>
             </div>
           </Section>
 
           <Section title="Transcriber" icon={<BookOpen className="w-4 h-4 icon" />}>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div className="grid gap-5" style={{ gridTemplateColumns:'repeat(3, minmax(280px, 1fr))' }}>
               <Field label="Provider">
                 <Select
                   value={active.config.transcriber.provider}
@@ -685,7 +696,7 @@ export default function VoiceAgentSection() {
           </Section>
 
           <Section title="Tools" icon={<SlidersHorizontal className="w-4 h-4 icon" />}>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div className="grid gap-5" style={{ gridTemplateColumns:'repeat(2, minmax(320px, 1fr))' }}>
               <Field label="Enable End Call Function">
                 <Select
                   value={String(active.config.tools.enableEndCall)}
@@ -712,7 +723,7 @@ export default function VoiceAgentSection() {
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             style={{ background:'rgba(0,0,0,.45)' }}>
             <motion.div initial={{ y:10, opacity:0, scale:.98 }} animate={{ y:0, opacity:1, scale:1 }} exit={{ y:8, opacity:0, scale:.985 }}
-              className="w-full max-w-xl rounded-xl" style={{ background:'var(--va-card)', border:'1px solid var(--va-border)', boxShadow:'var(--va-shadow-lg)' }}>
+              className="w-full max-w-2xl rounded-xl" style={{ background:'var(--va-card)', border:'1px solid var(--va-border)', boxShadow:'var(--va-shadow-lg)' }}>
               <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom:'1px solid var(--va-border)' }}>
                 <div className="flex items-center gap-2 text-sm font-semibold"><Edit3 className="w-4 h-4 icon" /> Generate / Edit Prompt</div>
                 <button onClick={()=> setGenOpen(false)} className="p-2 rounded-lg hover:opacity-80"><X className="w-4 h-4 icon" /></button>
@@ -721,8 +732,8 @@ export default function VoiceAgentSection() {
                 <input
                   value={genText}
                   onChange={(e)=> setGenText(e.target.value)}
-                  placeholder={`e.g., assistant\nor: collect full name, phone, date\nor: Add a step to verify phone via OTP`}
-                  className="w-full rounded-lg px-3 py-2 text-sm outline-none"
+                  placeholder={`Examples:\n• assistant\n• collect full name, phone, date\n• Add a step: verify phone via OTP`}
+                  className="w-full rounded-lg px-3 py-3 text-[15px] outline-none"
                   style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)', color:'var(--text)' }}
                 />
                 <div className="mt-3 flex items-center justify-end gap-2">
@@ -731,6 +742,29 @@ export default function VoiceAgentSection() {
                 </div>
               </div>
             </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* View Changes / Undo tray */}
+      <AnimatePresence>
+        {showDiff && (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 8 }}
+            className="fixed right-6 bottom-6 z-[998] rounded-xl p-4 w-[min(760px,calc(100vw-24px))]"
+            style={{ background:'var(--va-card)', border:'1px solid var(--va-border)', boxShadow:'var(--va-shadow-lg)' }}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-sm font-semibold" style={{ color:'var(--text)' }}>Changes</div>
+              <div className="flex gap-2">
+                <button className="btn--ghost" onClick={()=> setShowDiff(false)}><X className="w-4 h-4 icon" /> Close</button>
+                <button className="btn--ghost" onClick={()=> setShowDiff(d=> !d)}><Eye className="w-4 h-4 icon" /> Toggle</button>
+                <button className="btn--ghost" onClick={undoLast}><Undo2 className="w-4 h-4 icon" /> Undo</button>
+              </div>
+            </div>
+            <div className="rounded-lg p-3 text-[13px] leading-6 overflow-y-auto max-h-[320px]"
+                 style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)', color:'var(--text)' }}
+                 dangerouslySetInnerHTML={{ __html: htmlDiff(lastOld, lastNew) }} />
           </motion.div>
         )}
       </AnimatePresence>
@@ -774,9 +808,8 @@ function Section({ title, icon, children }:{ title: string; icon: React.ReactNod
         boxShadow:'var(--va-shadow)',
       }}
     >
-      {/* subtle glow */}
-      <div aria-hidden className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
-           style={{ background:'radial-gradient(circle, color-mix(in oklab, var(--accent) 16%, transparent) 0%, transparent 70%)', filter:'blur(38px)' }} />
+      <div aria-hidden className="pointer-events-none absolute -top-[26%] -left-[26%] w-[70%] h-[70%] rounded-full"
+           style={{ background:'radial-gradient(circle, color-mix(in oklab, var(--accent) 14%, transparent) 0%, transparent 70%)', filter:'blur(40px)' }} />
       <button type="button" onClick={()=> setOpen(v=>!v)} className="w-full flex items-center justify-between px-5 py-4">
         <span className="flex items-center gap-2 text-sm font-semibold">{icon}{title}</span>
         {open ? <ChevronDown className="w-4 h-4 icon" /> : <ChevronRight className="w-4 h-4 icon" />}
@@ -817,7 +850,7 @@ function StyleBlock() {
         --va-shadow-lg:0 42px 110px rgba(0,0,0,.66), 0 20px 48px rgba(0,0,0,.5);
         --va-shadow-sm:0 12px 26px rgba(0,0,0,.35);
         --va-shadow-side:8px 0 28px rgba(0,0,0,.42);
-        --va-rail-w:312px;
+        --va-rail-w:332px; /* wider rail */
       }
       :root:not([data-theme="dark"]) .${SCOPE}{
         --bg:#f7f9fb;
@@ -845,7 +878,7 @@ function StyleBlock() {
 
       .${SCOPE} .btn--green{
         display:inline-flex; align-items:center; gap:.5rem;
-        border-radius:12px; padding:.6rem .9rem;
+        border-radius:12px; padding:.65rem 1rem;
         background:${ACCENT}; color:#fff; box-shadow:${BTN_SHADOW};
         border:1px solid rgba(255,255,255,.08);
         transition:transform .04s ease, background .18s ease;
@@ -855,13 +888,13 @@ function StyleBlock() {
 
       .${SCOPE} .btn--ghost{
         display:inline-flex; align-items:center; gap:.5rem;
-        border-radius:12px; padding:.55rem .85rem; font-size:14px;
+        border-radius:12px; padding:.6rem .9rem; font-size:14px;
         background:var(--va-card); color:var(--text);
         border:1px solid var(--va-border); box-shadow:var(--va-shadow-sm);
       }
       .${SCOPE} .btn--danger{
         display:inline-flex; align-items:center; gap:.5rem;
-        border-radius:12px; padding:.55rem .85rem; font-size:14px;
+        border-radius:12px; padding:.6rem .9rem; font-size:14px;
         background:rgba(220,38,38,.12); color:#fca5a5;
         border:1px solid rgba(220,38,38,.35); box-shadow:0 10px 24px rgba(220,38,38,.15);
       }
@@ -872,14 +905,18 @@ function StyleBlock() {
 
       /* iPad rail width */
       @media (max-width: 1180px){
-        .${SCOPE}{ --va-rail-w: 288px; }
+        .${SCOPE}{ --va-rail-w: 300px; }
       }
+
+      /* diff colors */
+      .${SCOPE} ins{ background:rgba(16,185,129,.18); color:inherit; text-decoration:none; padding:1px 2px; border-radius:4px; }
+      .${SCOPE} del{ background:rgba(239,68,68,.18); color:#fca5a5; text-decoration:line-through; padding:1px 2px; border-radius:4px; }
     `}</style>
   );
 }
 
 /* =============================================================================
-   Minimal Select used above
+   Minimal Select
 ============================================================================= */
 type Item = { value: string; label: string; icon?: React.ReactNode };
 function usePortalPos(open: boolean, ref: React.RefObject<HTMLElement>) {
