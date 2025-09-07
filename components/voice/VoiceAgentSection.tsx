@@ -9,14 +9,14 @@ import {
 } from 'lucide-react';
 
 /* ============================================================================
-   THEME — keep one accent color (matches main sidebar green)
+   THEME / CONSTANTS
 ============================================================================ */
 const SCOPE = 'va-scope';
-const ACCENT = '#10b981';          // main green
+const ACCENT = '#10b981';         // brand green
 const ACCENT_HOVER = '#0fb57a';
-const RAIL_W = 312;                 // assistants rail width
-const HDR = 'var(--header-h, 64px)';// header height from shell
-const SBW = 'var(--sidebar-w, 260px)'; // sidebar width from shell
+const RAIL_W = 312;               // assistants rail width
+const HDR = 'var(--header-h, 64px)';          // header height from your shell
+const SBW = 'var(--sidebar-w, 260px)';        // primary sidebar width
 
 const OpenAIIcon = () => (
   <svg width="16" height="16" viewBox="0 0 256 256" aria-hidden>
@@ -25,7 +25,7 @@ const OpenAIIcon = () => (
 );
 
 /* ============================================================================
-   TYPES + LOCAL STORAGE
+   TYPES / LOCAL STORAGE
 ============================================================================ */
 type Provider = 'openai';
 type ModelId = 'gpt-4o' | 'gpt-4o-mini' | 'gpt-4.1' | 'gpt-3.5-turbo';
@@ -56,7 +56,7 @@ const readLS = <T,>(k: string): T | null => { try { const r = localStorage.getIt
 const writeLS = <T,>(k: string, v: T) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 
 /* ============================================================================
-   SELECT (portal)
+   SELECT (tiny portal select)
 ============================================================================ */
 type Item = { value: string; label: string; icon?: React.ReactNode };
 
@@ -148,22 +148,76 @@ function Select({ value, items, onChange, placeholder, leftIcon }: {
 }
 
 /* ============================================================================
+   DIFF + PROMPT GENERATION HELPERS
+============================================================================ */
+
+// Ensure [Data to Collect] has Name / Phone / Appointment Date
+function ensureDataToCollect(prompt: string) {
+  const hasBlock = /\[Data to Collect\]/i.test(prompt);
+  const needsName  = !/Name\b/i.test(prompt);
+  const needsPhone = !/(Phone|Phone Number|Callback Number)\b/i.test(prompt);
+  const needsDate  = !/(Appointment Date|Date of Appointment)\b/i.test(prompt);
+
+  let addedLines: string[] = [];
+  if (needsName)  addedLines.push('- Full Name');
+  if (needsPhone) addedLines.push('- Phone Number');
+  if (needsDate)  addedLines.push('- Appointment Date');
+
+  if (!addedLines.length) return { next: prompt, additions: addedLines };
+
+  if (hasBlock) {
+    const next = prompt.replace(/\[Data to Collect\][\s\S]*?(?:\n{2,}|$)/i, (m) => {
+      const trimmed = m.trimEnd();
+      const toAdd = addedLines.map(l => `  ${l}`).join('\n');
+      const sep = trimmed.endsWith('\n') ? '' : '\n';
+      return `${trimmed}${sep}${toAdd}\n\n`;
+    });
+    return { next, additions: addedLines };
+  }
+
+  // Append a new block if it doesn't exist
+  const block = `\n\n[Data to Collect]\n- Full Name\n- Phone Number\n- Appointment Date\n`;
+  return { next: prompt + block, additions: ['- Full Name','- Phone Number','- Appointment Date'] };
+}
+
+// Super-simple line diff (for green/red preview)
+function diffLines(oldStr: string, newStr: string) {
+  const oldLines = oldStr.split('\n');
+  const newLines = newStr.split('\n');
+  const oldSet = new Set(oldLines);
+  const newSet = new Set(newLines);
+
+  const result: { text: string; type: 'same'|'add'|'del' }[] = [];
+  // Mark deletions (old lines missing from new)
+  for (const line of oldLines) {
+    if (!newSet.has(line)) result.push({ text: line, type: 'del' });
+  }
+  // Mark additions (new lines missing from old)
+  for (const line of newLines) {
+    if (!oldSet.has(line)) result.push({ text: line, type: 'add' });
+  }
+  // We don't render "same" lines in the compact diff preview.
+  return result;
+}
+
+// Fake “rewrite” feel by normalizing whitespace & sections
+function rewritePromptFromScratch(source: string) {
+  // Normalize multiple spaces/newlines to make it look freshly regenerated
+  return source
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/* ============================================================================
    PAGE
 ============================================================================ */
-type ModelDefaults = {
-  provider: Provider;
-  model: ModelId;
-  firstMessageMode: 'assistant_first' | 'user_first';
-  firstMessage: string;
-  systemPrompt: string;
-};
-
 export default function VoiceAgentSection() {
   const [assistants, setAssistants] = useState<Assistant[]>([]);
   const [activeId, setActiveId] = useState('');
   const [query, setQuery] = useState('');
 
-  // First boot: seed with one basic assistant
+  // First boot
   useEffect(() => {
     const list = readLS<Assistant[]>(LS_LIST) || [];
     if (!list.length) {
@@ -187,6 +241,7 @@ export default function VoiceAgentSection() {
   }, []);
 
   const active = useMemo(() => activeId ? readLS<Assistant>(ak(activeId)) : null, [activeId]);
+
   const updateActive = (mut: (a: Assistant) => Assistant) => {
     if (!active) return;
     const next = mut(active);
@@ -195,7 +250,7 @@ export default function VoiceAgentSection() {
     writeLS(LS_LIST, list); setAssistants(list);
   };
 
-  // NEW assistant: brand-new/blank (no cloning)
+  // New assistant is FRESH (blank)
   const addAssistant = () => {
     const id = `agent_${Math.random().toString(36).slice(2, 8)}`;
     const blank: Assistant = {
@@ -204,16 +259,10 @@ export default function VoiceAgentSection() {
       folder: 'Unfiled',
       updatedAt: Date.now(),
       config: {
-        model: {
-          provider: 'openai',
-          model: 'gpt-4o',
-          firstMessageMode: 'assistant_first',
-          firstMessage: '',
-          systemPrompt: '' // blank so user uses Generate/Edit
-        },
-        voice: { provider: 'openai', voiceId: '', voiceLabel: '' },
+        model: { provider:'openai', model:'gpt-4o', firstMessageMode:'assistant_first', firstMessage:'', systemPrompt:'' },
+        voice: { provider:'openai', voiceId:'', voiceLabel:'' },
         transcriber: { provider:'deepgram', model:'nova-2', language:'en', denoise:false, confidenceThreshold:0.4, numerals:false },
-        tools: { enableEndCall: true, dialKeypad: true }
+        tools: { enableEndCall:true, dialKeypad:true },
       }
     };
     writeLS(ak(id), blank);
@@ -224,21 +273,65 @@ export default function VoiceAgentSection() {
   const removeAssistant = (id: string) => {
     const list = assistants.filter(a => a.id !== id);
     writeLS(LS_LIST, list); setAssistants(list);
-    if (activeId === id && list.length) setActiveId(list[0].id);
+    if (activeId === id) {
+      const first = list[0]?.id ?? '';
+      setActiveId(first);
+    }
   };
 
-  // Prompt editor
+  // Generate/Edit modal state
   const [editOpen, setEditOpen] = useState(false);
   const [editText, setEditText] = useState('');
-  const submitEdit = () => {
+  const [previewTyping, setPreviewTyping] = useState('');  // typing animation buffer
+  const [previewFull, setPreviewFull] = useState('');      // final rewritten prompt
+  const [diff, setDiff] = useState<{text:string;type:'add'|'del'}[]>([]);
+  const [hasPending, setHasPending] = useState(false);     // whether Accept will apply something
+
+  // Kick off generation: rewrite + ensure data capture + build diff + animate typing
+  const runGenerate = () => {
     if (!active) return;
-    const trimmed = editText.trim();
-    const nextPrompt = trimmed ? trimmed : '';
-    updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, systemPrompt: nextPrompt } } }));
-    setEditOpen(false); setEditText('');
+    const current = active.config.model.systemPrompt || '';
+
+    // 1) Combine current prompt with the user instruction minimally (we simply append guidance if provided)
+    const merged = editText.trim()
+      ? `${current ? `${current}\n\n` : ''}${editText.trim()}`
+      : current;
+
+    // 2) Guarantee Name/Phone/Appointment Date present
+    const { next: ensured, additions } = ensureDataToCollect(merged);
+
+    // 3) Rewriting feel
+    const rewritten = rewritePromptFromScratch(ensured);
+
+    // 4) Diff new vs old
+    const d = diffLines(current, rewritten).filter(x => x.type !== 'same');
+
+    // 5) Animate typing of the new prompt
+    setPreviewFull(rewritten);
+    setPreviewTyping('');
+    setDiff(d);
+    setHasPending(rewritten !== current);
+
+    // smooth typing
+    const chars = [...rewritten];
+    let i = 0;
+    const step = () => {
+      i += Math.max(1, Math.floor(rewritten.length / 120)); // ~120 frames
+      setPreviewTyping(rewritten.slice(0, Math.min(i, chars.length)));
+      if (i < chars.length) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
   };
 
-  // Voices
+  // Accept changes
+  const acceptChanges = () => {
+    if (!active || !hasPending) { setEditOpen(false); return; }
+    updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, systemPrompt: previewFull } } }));
+    setEditOpen(false);
+    setEditText('');
+    setHasPending(false);
+  };
+
   const openaiVoices: Item[] = [{ value:'alloy', label:'Alloy (OpenAI)' }, { value:'ember', label:'Ember (OpenAI)' }];
   const elevenVoices: Item[] = [{ value:'rachel', label:'Rachel (ElevenLabs)' }, { value:'adam', label:'Adam (ElevenLabs)' }, { value:'bella', label:'Bella (ElevenLabs)' }];
 
@@ -247,9 +340,9 @@ export default function VoiceAgentSection() {
 
   return (
     <div className={`${SCOPE}`} style={{ background:'var(--bg)', color:'var(--text)' }}>
-      {/* Keep whole studio right of main app sidebar */}
+      {/* Keep whole studio right of the main sidebar */}
       <div className="flex w-full" style={{ marginLeft: SBW }}>
-        {/* =================== ASSISTANTS RAIL (fixed, below header, touching sidebar) =================== */}
+        {/* =================== ASSISTANTS RAIL (fixed, below header, aligned) =================== */}
         <aside
           className="hidden lg:flex flex-col"
           style={{
@@ -264,7 +357,6 @@ export default function VoiceAgentSection() {
             zIndex: 41
           }}
         >
-          {/* rail header */}
           <div className="px-3 py-3 flex items-center justify-between" style={{ borderBottom:'1px solid var(--va-border)' }}>
             <div className="flex items-center gap-2 text-sm font-semibold">
               <PanelLeft className="w-4 h-4 icon" /> Assistants
@@ -274,7 +366,6 @@ export default function VoiceAgentSection() {
             </button>
           </div>
 
-          {/* rail content */}
           <div className="p-3 overflow-hidden flex-1 flex flex-col">
             <div className="flex items-center gap-2 rounded-lg px-2.5 py-2"
               style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)' }}>
@@ -318,7 +409,7 @@ export default function VoiceAgentSection() {
 
         {/* =================================== EDITOR =================================== */}
         <main className="flex-1" style={{ paddingLeft: `${RAIL_W}px` }}>
-          {/* keep distance from header so we don't sit under it */}
+          {/* spacer equal to header so content starts below it */}
           <div style={{ height: `calc(${HDR})` }} aria-hidden />
           <div className="px-6 py-4 flex items-center justify-between" style={{ borderBottom:'1px solid var(--va-border)', background:'var(--va-topbar)' }}>
             <div className="flex items-center gap-3">
@@ -341,7 +432,8 @@ export default function VoiceAgentSection() {
             </div>
           </div>
 
-          <div className="max-w-[1440px] mx-auto px-6 py-6 grid grid-cols-12 gap-8">
+          {/* WIDER canvas; small gap to rail */}
+          <div className="mx-auto px-6 py-6 grid grid-cols-12 gap-7" style={{ maxWidth: '1680px' }}>
             <Section title="Model" icon={<FileText className="w-4 h-4 icon" />}>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <Field label="Provider">
@@ -381,7 +473,7 @@ export default function VoiceAgentSection() {
                 </Field>
               </div>
 
-              {/* System Prompt — one clean box */}
+              {/* System Prompt */}
               <div className="mt-6">
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="w-4 h-4 icon" /> System Prompt</div>
@@ -390,7 +482,7 @@ export default function VoiceAgentSection() {
                       onClick={()=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, systemPrompt: '' } } }))}
                       className="btn-ghost"
                     ><RefreshCw className="w-4 h-4 icon" /> Reset</button>
-                    <button onClick={()=> setEditOpen(true)} className="btn-primary">
+                    <button onClick={()=> { setEditOpen(true); setPreviewTyping(''); setPreviewFull(''); setDiff([]); setHasPending(false); }} className="btn-primary">
                       Generate / Edit
                     </button>
                   </div>
@@ -521,36 +613,91 @@ export default function VoiceAgentSection() {
         </main>
       </div>
 
-      {/* Generate/Edit Prompt */}
+      {/* ======================== Generate / Edit Modal ======================== */}
       <AnimatePresence>
         {editOpen && (
           <motion.div className="fixed inset-0 z-[999] flex items-center justify-center p-4"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             style={{ background:'rgba(0,0,0,.45)' }}>
             <motion.div initial={{ y:10, opacity:0, scale:.98 }} animate={{ y:0, opacity:1, scale:1 }} exit={{ y:8, opacity:0, scale:.985 }}
-              className="w-full max-w-xl rounded-lg" style={{ background:'var(--va-card)', border:'1px solid var(--va-border)', boxShadow:'var(--va-shadow-lg)' }}>
+              className="w-full max-w-3xl rounded-lg overflow-hidden"
+              style={{ background:'var(--va-card)', border:'1px solid var(--va-border)', boxShadow:'var(--va-shadow-lg)' }}>
+              {/* Header */}
               <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom:'1px solid var(--va-border)' }}>
-                <div className="flex items-center gap-2 text-sm font-semibold"><Edit3 className="w-4 h-4 icon" /> Edit Prompt</div>
+                <div className="flex items-center gap-2 text-sm font-semibold"><Edit3 className="w-4 h-4 icon" /> Generate Prompt</div>
               </div>
-              <div className="p-4">
-                <input
-                  value={editText}
-                  onChange={(e)=> setEditText(e.target.value)}
-                  placeholder="Describe how you'd like to edit the prompt"
-                  className="w-full rounded-md px-3 py-2 text-sm outline-none"
-                  style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)', color:'var(--text)' }}
-                />
-                <div className="mt-3 flex items-center justify-end gap-2">
-                  <button onClick={()=> setEditOpen(false)} className="btn-ghost">Cancel</button>
-                  <button onClick={submitEdit} className="btn-primary">Submit Edit</button>
+
+              {/* Body */}
+              <div className="p-4 grid grid-cols-12 gap-4">
+                {/* Instruction input */}
+                <div className="col-span-12">
+                  <div className="mb-1.5 text-[13px] font-medium" style={{ color:'var(--text)' }}>Describe the change</div>
+                  <input
+                    value={editText}
+                    onChange={(e)=> setEditText(e.target.value)}
+                    placeholder="e.g., Make sure to capture the caller's Name, Phone Number, and Appointment Date."
+                    className="w-full rounded-md px-3 py-2 text-sm outline-none"
+                    style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)', color:'var(--text)' }}
+                  />
                 </div>
+
+                {/* Controls */}
+                <div className="col-span-12 flex items-center gap-2">
+                  <button onClick={runGenerate} className="btn-primary"><Sparkles className="w-4 h-4 text-white" /> Generate</button>
+                  <div className="text-xs" style={{ color:'var(--text-muted)' }}>* The generator rewrites your prompt and guarantees Name / Phone / Appointment Date are collected.</div>
+                </div>
+
+                {/* Typing Preview */}
+                <div className="col-span-12 md:col-span-7">
+                  <div className="mb-1.5 text-[13px] font-medium" style={{ color:'var(--text)' }}>Preview (rewritten)</div>
+                  <pre className="rounded-md p-3 text-[12.5px] leading-5"
+                    style={{ minHeight: 220, whiteSpace:'pre-wrap', background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', color:'var(--text)' }}>
+{previewTyping || '—'}
+                  </pre>
+                </div>
+
+                {/* Diff Panel */}
+                <div className="col-span-12 md:col-span-5">
+                  <div className="mb-1.5 text-[13px] font-medium" style={{ color:'var(--text)' }}>Changes</div>
+                  <div className="rounded-md p-3 text-[12.5px] leading-5"
+                    style={{ minHeight: 220, background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', color:'var(--text)' }}>
+                    {diff.length === 0 ? (
+                      <div style={{ color:'var(--text-muted)' }}>No differences yet. Click <b>Generate</b> to see the proposed change.</div>
+                    ) : (
+                      <div className="space-y-1">
+                        {diff.map((d, i) => (
+                          <div key={i}
+                               style={{
+                                 background: d.type === 'add' ? 'rgba(16,185,129,.12)' : 'rgba(239,68,68,.12)',
+                                 border: `1px solid ${d.type === 'add' ? 'rgba(16,185,129,.35)' : 'rgba(239,68,68,.35)'}`,
+                                 color: d.type === 'add' ? 'var(--text)' : 'var(--text)',
+                                 borderRadius: 6,
+                                 padding: '6px 8px'
+                               }}>
+                            <span style={{ fontWeight: 700, marginRight: 6, color: d.type === 'add' ? ACCENT : '#ef4444' }}>
+                              {d.type === 'add' ? '+' : '−'}
+                            </span>{d.text}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="px-4 py-3 flex items-center justify-end gap-2" style={{ borderTop:'1px solid var(--va-border)' }}>
+                <button onClick={()=> { setEditOpen(false); setEditText(''); }} className="btn-ghost">Cancel</button>
+                <button onClick={acceptChanges} disabled={!hasPending} className="btn-primary">
+                  {hasPending ? 'Accept Changes' : 'No Changes'}
+                </button>
               </div>
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* ======================== SCOPED TOKENS & COSMETICS ======================== */}
+      {/* ======================== THEME / STYLES ======================== */}
       <style jsx global>{`
         .${SCOPE}{
           --accent:${ACCENT};
@@ -592,10 +739,9 @@ export default function VoiceAgentSection() {
           --va-shadow-side:8px 0 26px rgba(0,0,0,.08);
         }
 
-        /* Icon color */
         .${SCOPE} .icon{ color: var(--accent); }
 
-        /* Buttons */
+        /* Buttons = API Keys style (green + white) */
         .${SCOPE} .btn-primary{
           display:inline-flex;align-items:center;gap:.5rem;
           padding:.55rem .9rem;border-radius:12px;
@@ -649,7 +795,6 @@ function Section({ title, icon, children }:{ title: string; icon: React.ReactNod
         boxShadow:'var(--va-shadow)',
       }}
     >
-      {/* soft glow */}
       <div aria-hidden className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
            style={{ background:'radial-gradient(circle, color-mix(in oklab, var(--accent) 14%, transparent) 0%, transparent 70%)', filter:'blur(36px)' }} />
       <button type="button" onClick={()=> setOpen(v=>!v)} className="w-full flex items-center justify-between px-5 py-4">
