@@ -8,15 +8,7 @@ import {
 } from 'lucide-react';
 import CountryDialSelect from '@/components/phone-numbers/CountryDialSelect';
 
-/* -------------------- shared styles (matches Builder vibe) -------------------- */
-const CARD_STYLE: React.CSSProperties = {
-  background: 'rgba(13,15,17,0.92)',
-  border: '2px solid rgba(106,247,209,0.32)',
-  // subtle separation from bg (soft glow)
-  boxShadow: '0 18px 60px rgba(0,0,0,0.50), inset 0 0 22px rgba(0,0,0,0.28), 0 0 20px rgba(106,247,209,0.06)',
-  borderRadius: 28,
-};
-
+/* Brand button (keep your existing green so we don’t change your palette) */
 const BTN_GREEN = '#59d9b3';
 const BTN_GREEN_HOVER = '#54cfa9';
 const BTN_DISABLED = '#2e6f63';
@@ -24,9 +16,7 @@ const BTN_DISABLED = '#2e6f63';
 type Props = { onNext?: () => void };
 
 /* =================================================================================
-   Step V1 — Voice Basics
-   Fields: name, industry, language (dropdown), dialect/accent (country ISO-2)
-   Persists to localStorage: voicebuilder:step1
+   Step V1 — Voice Basics  (logic unchanged)
 ================================================================================= */
 export default function StepV1Basics({ onNext }: Props) {
   const [name, setName] = useState('');
@@ -67,7 +57,7 @@ export default function StepV1Basics({ onNext }: Props) {
           name: name.trim(),
           industry: industry.trim(),
           language,
-          accentIso2: (accentIso2 || '').toUpperCase(), // save as 2-letter ISO
+          accentIso2: (accentIso2 || '').toUpperCase(),
         }),
       );
     } catch {}
@@ -75,70 +65,86 @@ export default function StepV1Basics({ onNext }: Props) {
   }
 
   return (
-    <section className="relative">
+    <section className="relative voice-step-scope">
       {/* Header */}
-      <div className="mb-6">
+      <div className="mb-6 animate-[fadeIn_180ms_var(--ease,_ease-out)_both]">
         <div
           className="inline-flex items-center gap-2 text-xs tracking-wide px-3 py-1.5 rounded-[20px] border"
-          style={{ borderColor: 'rgba(106,247,209,0.32)', background: 'rgba(16,19,20,0.70)' }}
+          style={{ borderColor: 'var(--vs-chip-border)', background: 'var(--vs-chip-bg)', color: 'var(--text)' }}
         >
-          <Sparkles className="w-3.5 h-3.5 text-[#6af7d1]" />
+          <Sparkles className="w-3.5 h-3.5" style={{ color: 'var(--brand)' }} />
           Step 1 · Voice Basics
         </div>
-        <h2 className="mt-3 text-3xl md:text-4xl font-semibold tracking-tight">Voice Agent Setup</h2>
-        <p className="text-white/70 mt-1">Name it, set the industry, and choose how it speaks.</p>
+        <h2 className="mt-3 text-3xl md:text-4xl font-semibold tracking-tight" style={{ color: 'var(--text)' }}>
+          Voice Agent Setup
+        </h2>
+        <p className="mt-1" style={{ color: 'var(--text-muted)' }}>
+          Name it, set the industry, and choose how it speaks.
+        </p>
       </div>
 
       {/* Form Card */}
-      <div className="relative p-6 sm:p-8" style={CARD_STYLE}>
+      <div
+        className="relative p-6 sm:p-8 rounded-[28px] animate-[popIn_180ms_var(--ease,_ease-out)_both] glow-spot"
+        style={{
+          background: 'var(--vs-card)',
+          border: '1px solid var(--vs-border)',
+          boxShadow: 'var(--vs-shadow)',
+        }}
+      >
+        {/* radial brand glow behind */}
         <div
           aria-hidden
           className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
-          style={{ background: 'radial-gradient(circle, rgba(106,247,209,0.10) 0%, transparent 70%)', filter: 'blur(38px)' }}
+          style={{
+            background: 'radial-gradient(circle, var(--vs-ring) 0%, transparent 70%)',
+            filter: 'blur(38px)',
+          }}
         />
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* Agent name */}
-          <FieldShell label="Agent Name " error={errors.name}>
+          <FieldShell label="Agent Name" error={errors.name}>
             <div className="flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-[#6af7d1]" />
+              <Sparkles className="w-4 h-4" style={{ color: 'var(--brand)' }} />
               <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Enter agent name…"
-                className="w-full bg-transparent outline-none text-[15px] text-white/95"
+                className="w-full bg-transparent outline-none text-[15px]"
+                style={{ color: 'var(--text)' }}
               />
             </div>
           </FieldShell>
 
           {/* Industry */}
-          <FieldShell label="Industry " error={errors.industry}>
+          <FieldShell label="Industry" error={errors.industry}>
             <div className="flex items-center gap-2">
-              <Building2 className="w-4 h-4 text-[#6af7d1]" />
+              <Building2 className="w-4 h-4" style={{ color: 'var(--brand)' }} />
               <input
                 value={industry}
                 onChange={(e) => setIndustry(e.target.value)}
                 placeholder="Enter your industry…"
-                className="w-full bg-transparent outline-none text-[15px] text-white/95"
+                className="w-full bg-transparent outline-none text-[15px]"
+                style={{ color: 'var(--text)' }}
               />
             </div>
           </FieldShell>
 
           {/* Language (styled portal dropdown) */}
-          <FieldShell label="Language " error={errors.language}>
+          <FieldShell label="Language" error={errors.language}>
             <LanguageSelect value={language} onChange={setLanguage} />
           </FieldShell>
 
-          {/* Dialect / Accent (country ISO2) — identical height/rounding, NO inner label */}
+          {/* Dialect / Accent (country ISO2) */}
           <FieldShell
             label={
               <>
-                Dialect / Accent <span className="text-white/50 text-xs">(choose country)</span>
+                Dialect / Accent <span className="text-xs" style={{ color: 'var(--text-muted)' }}>(choose country)</span>
               </>
             }
             error={errors.accent}
           >
-            {/* No label prop passed => no “Country” text inside the component */}
             <CountryDialSelect
               value={accentIso2}
               onChange={(iso2 /* , dial */) => setAccentIso2(iso2.toUpperCase())}
@@ -152,12 +158,13 @@ export default function StepV1Basics({ onNext }: Props) {
           <button
             disabled={!canNext}
             onClick={persistAndNext}
-            className="inline-flex items-center gap-2 px-8 py-2.5 rounded-[24px] font-semibold select-none transition-colors duration-150 disabled:cursor-not-allowed"
+            className="inline-flex items-center gap-2 px-8 h-[44px] rounded-[24px] font-semibold select-none transition will-change-transform disabled:opacity-60 disabled:cursor-not-allowed"
             style={{
               background: canNext ? BTN_GREEN : BTN_DISABLED,
               color: '#ffffff',
-              boxShadow: canNext ? '0 1px 0 rgba(0,0,0,0.18)' : 'none',
-              filter: canNext ? 'none' : 'saturate(85%) opacity(0.9)',
+              boxShadow: canNext
+                ? '0 12px 26px rgba(0,0,0,.18), 0 0 0 1px rgba(255,255,255,.06)'
+                : 'none',
             }}
             onMouseEnter={(e) => {
               if (!canNext) return;
@@ -172,6 +179,44 @@ export default function StepV1Basics({ onNext }: Props) {
           </button>
         </div>
       </div>
+
+      {/* Scoped theme vars + animations for Step 1 */}
+      <style jsx global>{`
+        @keyframes popIn { 0% { opacity: 0; transform: scale(.985); } 100% { opacity: 1; transform: scale(1); } }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* LIGHT (default) */
+        .voice-step-scope{
+          --vs-card: #ffffff;
+          --vs-border: rgba(0,0,0,.10);
+          --vs-shadow: 0 28px 70px rgba(0,0,0,.12), 0 10px 26px rgba(0,0,0,.08), 0 0 0 1px rgba(0,0,0,.02);
+          --vs-ring: rgba(0,255,194,.10);
+
+          --vs-input-bg: #ffffff;
+          --vs-input-border: rgba(0,0,0,.12);
+          --vs-input-shadow: inset 0 1px 0 rgba(255,255,255,.8), 0 10px 22px rgba(0,0,0,.06);
+
+          --vs-chip-bg: rgba(0,255,194,.10);
+          --vs-chip-border: rgba(0,255,194,.30);
+        }
+
+        /* DARK */
+        [data-theme="dark"] .voice-step-scope{
+          --vs-card:
+            radial-gradient(120% 180% at 50% -40%, rgba(0,255,194,.06) 0%, rgba(12,16,18,1) 42%),
+            linear-gradient(180deg, #0e1213 0%, #0c1012 100%);
+          --vs-border: rgba(255,255,255,.08);
+          --vs-shadow: 0 36px 90px rgba(0,0,0,.60), 0 14px 34px rgba(0,0,0,.45), 0 0 0 1px rgba(0,255,194,.10);
+          --vs-ring: rgba(0,255,194,.12);
+
+          --vs-input-bg: rgba(255,255,255,.02);
+          --vs-input-border: rgba(255,255,255,.14);
+          --vs-input-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 12px 30px rgba(0,0,0,.38);
+
+          --vs-chip-bg: rgba(0,255,194,.10);
+          --vs-chip-border: rgba(0,255,194,.28);
+        }
+      `}</style>
     </section>
   );
 }
@@ -186,21 +231,24 @@ function FieldShell({
   error?: string;
   children: React.ReactNode;
 }) {
-  const borderBase = error ? 'rgba(255,120,120,0.55)' : '#13312b';
+  const borderBase = error ? 'rgba(255,120,120,0.55)' : 'var(--vs-input-border)';
   return (
-    <div>
-      <label className="block mb-2 text-[13px] font-medium text-white/85 tracking-wide">{label}</label>
+    <div className="animate-[fadeIn_160ms_var(--ease,_ease-out)_both]">
+      <label className="block mb-2 text-[13px] font-medium" style={{ color: 'var(--text)' }}>
+        {label}
+      </label>
       <div
-        className="rounded-2xl bg-[#101314] border px-3 py-2.5"
+        className="rounded-2xl px-3 py-2.5"
         style={{
-          borderColor: borderBase,
-          boxShadow: '0 8px 34px rgba(0,0,0,0.25)', // subtle shadow on the input shell
+          background: 'var(--vs-input-bg)',
+          border: `1px solid ${borderBase}`,
+          boxShadow: 'var(--vs-input-shadow)',
         }}
       >
         {children}
       </div>
-      <div className="mt-1 text-xs">
-        {error ? <span className="text-[rgba(255,138,138,0.95)]">{error}</span> : null}
+      <div className="mt-1 text-xs" style={{ color: error ? 'rgba(255,138,138,0.95)' : 'var(--text-muted)' }}>
+        {error ? error : null}
       </div>
     </div>
   );
@@ -259,18 +307,19 @@ function LanguageSelect({
         ref={btnRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-[14px] text-sm"
+        className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-[14px] text-sm transition will-change-transform"
         style={{
-          background: 'rgba(0,0,0,0.30)',
-          border: '1px solid rgba(255,255,255,0.20)',
-          boxShadow: '0 8px 34px rgba(0,0,0,0.25)',
+          background: 'var(--vs-input-bg)',
+          border: '1px solid var(--vs-input-border)',
+          boxShadow: 'var(--vs-input-shadow)',
+          color: 'var(--text)',
         }}
       >
         <span className="flex items-center gap-2">
-          <LangIcon className="w-4 h-4 text-white/75" />
+          <LangIcon className="w-4 h-4" style={{ color: 'var(--brand)' }} />
           <span>{value}</span>
         </span>
-        <ChevronDown className="w-4 h-4 opacity-80" />
+        <ChevronDown className="w-4 h-4 opacity-80" style={{ color: 'var(--text-muted)' }} />
       </button>
 
       {/* dropdown portal */}
@@ -278,28 +327,43 @@ function LanguageSelect({
         ? createPortal(
             <div
               ref={portalRef}
-              className="fixed z-[9999] p-3"
+              className="fixed z-[9999] p-3 animate-[popIn_140ms_ease-out]"
               style={{
                 top: rect.openUp ? rect.top - 8 : rect.top + 8,
                 left: rect.left,
                 width: rect.width,
                 transform: rect.openUp ? 'translateY(-100%)' : 'none',
-                background: '#101314',
-                border: '1px solid rgba(255,255,255,0.30)',
+                background: 'var(--vs-menu-bg, #ffffff)',
+                border: '1px solid var(--vs-menu-border, rgba(0,0,0,.10))',
                 borderRadius: 20,
-                boxShadow: '0 20px 60px rgba(0,0,0,0.45), 0 0 1px rgba(0,0,0,0.5)',
+                boxShadow:
+                  '0 28px 70px rgba(0,0,0,.12), 0 10px 26px rgba(0,0,0,.08), 0 0 0 1px rgba(0,0,0,.02)',
               }}
             >
+              <style jsx global>{`
+                /* menu theming for dark */
+                [data-theme="dark"] .voice-step-scope ~ .fixed {
+                  --vs-menu-bg: #101314;
+                  --vs-menu-border: rgba(255,255,255,.16);
+                }
+              `}</style>
+
               <div
                 className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[12px]"
-                style={{ background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.15)' }}
+                style={{
+                  background: 'var(--vs-input-bg)',
+                  border: '1px solid var(--vs-input-border)',
+                  boxShadow: 'var(--vs-input-shadow)',
+                  color: 'var(--text)',
+                }}
               >
-                <Search className="w-4 h-4 text-white/70" />
+                <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
                 <input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Type to filter…"
-                  className="w-full bg-transparent outline-none text-sm text-white placeholder:text-white/60"
+                  className="w-full bg-transparent outline-none text-sm"
+                  style={{ color: 'var(--text)' }}
                 />
               </div>
 
@@ -312,7 +376,7 @@ function LanguageSelect({
                       setOpen(false);
                     }}
                     className="w-full flex items-center gap-3 px-3 py-2 rounded-[10px] text-left transition"
-                    style={{ background: 'transparent', border: '1px solid transparent' }}
+                    style={{ background: 'transparent', border: '1px solid transparent', color: 'var(--text)' }}
                     onMouseEnter={(e) => {
                       (e.currentTarget as HTMLButtonElement).style.background = 'rgba(0,255,194,0.10)';
                       (e.currentTarget as HTMLButtonElement).style.border = '1px solid rgba(0,255,194,0.35)';
@@ -322,11 +386,15 @@ function LanguageSelect({
                       (e.currentTarget as HTMLButtonElement).style.border = '1px solid transparent';
                     }}
                   >
-                    <LangIcon className="w-4 h-4 text-white/80" />
+                    <LangIcon className="w-4 h-4" style={{ color: 'var(--brand)' }} />
                     <span className="flex-1">{opt}</span>
                   </button>
                 ))}
-                {filtered.length === 0 && <div className="px-3 py-6 text-sm text-white/70">No matches.</div>}
+                {filtered.length === 0 && (
+                  <div className="px-3 py-6 text-sm" style={{ color: 'var(--text-muted)' }}>
+                    No matches.
+                  </div>
+                )}
               </div>
             </div>,
             document.body
