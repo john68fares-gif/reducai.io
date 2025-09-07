@@ -6,18 +6,18 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search, Plus, Folder, FolderOpen, Check, Trash2, Copy, Edit3, Sparkles,
   ChevronDown, ChevronRight, FileText, Mic2, BookOpen, SlidersHorizontal,
-  PanelLeft, Bot, UploadCloud, RefreshCw
+  PanelLeft, Bot, UploadCloud, RefreshCw, X, Check as CheckIcon
 } from 'lucide-react';
 
 /* =============================================================================
    THEME / TOKENS (match sidebar green + API Keys button style)
 ============================================================================= */
 const SCOPE = 'va-scope';
-const ACCENT = '#10b981'; // same as your brand/Sidebar
+const ACCENT = '#10b981';
 const ACCENT_HOVER = '#0ea371';
 const BTN_SHADOW = '0 10px 24px rgba(16,185,129,.22)';
 
-/* tiny OpenAI glyph (correct mark-like swirl) */
+/* tiny OpenAI glyph */
 const OpenAIIcon = () => (
   <svg width="16" height="16" viewBox="0 0 256 256" aria-hidden>
     <path fill="currentColor" d="M214.7 111.7c1.9-7.6 1.5-15.7-1.2-23.3-7.6-21.3-28.6-35.2-51.4-33.6-12.1-19.9-36.5-29-59-21.2-22.1 7.6-36.7 28.6-35.4 51.5-19.9 12.1-29 36.5-21.2 59 7.6 22.1 28.6 36.7 51.5 35.4 12.1 19.9 36.5 29 59 21.2 22.1-7.6 36.7-28.6 35.4-51.5 8.7-5.5 15.5-13.9 18.9-24.1ZM156 193.2c-9.2 3.2-19.2 2.7-28-1.4l17.4-30.1c4.8-0.7 9.2-3.8 11.6-8.4c1.2-2.4 1.8-5 1.8-7.6v-40l27 15.6v28.6c0 17.1-10.7 32.8-29.8 43.3Zm-76.9-8.7c-9.2-5.2-16-13.2-19.6-23c-3.6-10-3-20.4 1.2-29.7l27 15.6v16.1c0 4.9 2.6 9.4 6.7 11.9l31 17.9c-15.1 2.8-31-0.1-46.3-8.8ZM62.8 92.5c5.2-9.2 13.2-16 23-19.6c10-3.6 20.4-3 29.7 1.2l-15.6 27h-16.1c-4.9 0-9.4 2.6-11.9 6.7l-17.9 31c-2.8-15.1 0.1-31 8.8-46.3Zm118.4 5.1l-31-17.9c-3.6-2.1-7.8-2.5-11.7-1.4c-3.8 1.1-7 3.6-9.1 7.1l-17.5 30.3l-27-15.6l16.6-28.7c9.7-16.7 31.1-22.4 48-12.7c0.6 0.3 1.1 0.7 1.7 1l30 17.3c-0.7 7.4-0.8 13.4 0 20.6Z"/>
@@ -87,31 +87,24 @@ function applyRefinement(base: string, addendum: string) {
   return base + block;
 }
 
-/** super-light diff: returns HTML with <ins> green, <del> red */
+/** tiny diff highlighter */
 function diffText(oldStr: string, newStr: string) {
-  // line-ish compare – good enough for prompts
-  const o = oldStr.split(/\s+/);
-  const n = newStr.split(/\s+/);
+  const o = oldStr.split(/\s+/); const n = newStr.split(/\s+/);
   const dp: number[][] = Array(o.length + 1).fill(0).map(() => Array(n.length + 1).fill(0));
-  for (let i = o.length - 1; i >= 0; i--) {
-    for (let j = n.length - 1; j >= 0; j--) {
-      dp[i][j] = o[i] === n[j] ? 1 + dp[i + 1][j + 1] : Math.max(dp[i + 1][j], dp[i][j + 1]);
-    }
-  }
-  const out: string[] = [];
-  let i = 0, j = 0;
+  for (let i = o.length - 1; i >= 0; i--) for (let j = n.length - 1; j >= 0; j--) dp[i][j] = o[i] === n[j] ? 1 + dp[i + 1][j + 1] : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  const out: string[] = []; let i = 0, j = 0;
   while (i < o.length && j < n.length) {
     if (o[i] === n[j]) { out.push(o[i]); i++; j++; }
-    else if (dp[i + 1][j] >= dp[i][j + 1]) { out.push(`<del>${o[i]}</del>`); i++; }
-    else { out.push(`<ins>${n[j]}</ins>`); j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { out.push(`<del>${o[i++]}</del>`); }
+    else { out.push(`<ins>${n[j++]}</ins>`); }
   }
-  while (i < o.length) { out.push(`<del>${o[i++]}</del>`); }
-  while (j < n.length) { out.push(`<ins>${n[j++]}</ins>`); }
+  while (i < o.length) out.push(`<del>${o[i++]}</del>`);
+  while (j < n.length) out.push(`<ins>${n[j++]}</ins>`);
   return out.join(' ');
 }
 
 /* =============================================================================
-   Reusable Select (portal-positioned)
+   Reusable Select
 ============================================================================= */
 type Item = { value: string; label: string; icon?: React.ReactNode };
 
@@ -244,7 +237,6 @@ export default function VoiceAgentSection() {
   };
 
   const addAssistant = () => {
-    // brand-new: minimal defaults only (not full clone)
     const id = `agent_${Math.random().toString(36).slice(2, 8)}`;
     const a: Assistant = {
       id, name:'New Assistant', updatedAt: Date.now(),
@@ -260,6 +252,8 @@ export default function VoiceAgentSection() {
     setAssistants(list); setActiveId(id);
   };
 
+  // DELETE overlay state (replaces browser confirm)
+  const [showDelete, setShowDelete] = useState(false);
   const removeAssistant = (id: string) => {
     const list = assistants.filter(a => a.id !== id);
     writeLS(LS_LIST, list); setAssistants(list);
@@ -278,16 +272,10 @@ export default function VoiceAgentSection() {
   const submitGenerate = () => {
     if (!active) return;
     const preview = applyRefinement(active.config.model.systemPrompt, genText);
-    // fake typing animation for preview
     setTyping('');
     let i = 0;
-    const reveal = () => {
-      i += Math.max(4, Math.floor(preview.length / 120));
-      setTyping(preview.slice(0, i));
-      if (i < preview.length) requestAnimationFrame(reveal);
-    };
+    const reveal = () => { i += Math.max(4, Math.floor(preview.length / 120)); setTyping(preview.slice(0, i)); if (i < preview.length) requestAnimationFrame(reveal); };
     reveal();
-
     const html = diffText(active.config.model.systemPrompt, preview);
     setPending({ preview, htmlDiff: html });
     setGenOpen(false);
@@ -316,17 +304,16 @@ export default function VoiceAgentSection() {
 
   return (
     <div className={`${SCOPE}`} style={{ background:'var(--bg)', color:'var(--text)' }}>
-      <div className="grid w-full"
+      <div className="grid w-full -ml-4"  /* nudge left so it TOUCHES app sidebar */
            style={{ gridTemplateColumns:'312px 1fr' }}>
-        {/* ================= ASSISTANT SIDEBAR (fixed under header & flush to main sidebar) ================ */}
+        {/* ================= ASSISTANT SIDEBAR (flush & not vertically scrollable) ================ */}
         <aside
-          className="hidden lg:flex shrink-0 flex-col"
+          className="hidden lg:flex shrink-0 flex-col overflow-hidden" /* no vertical swipe */
           style={{
             position:'sticky',
-            // Use the app’s header css var if present. Fallback 64px.
             top: 'var(--app-header-h, 64px)',
             height: 'calc(100vh - var(--app-header-h, 64px))',
-            marginLeft:'-1px', // butt against app sidebar’s border
+            marginLeft:'-1px',
             borderRight:'1px solid var(--va-border)',
             background:'var(--va-sidebar)',
             boxShadow:'var(--va-shadow-side)',
@@ -337,15 +324,13 @@ export default function VoiceAgentSection() {
             <div className="flex items-center gap-2 text-sm font-semibold">
               <PanelLeft className="w-4 h-4 icon" /> Assistants
             </div>
-            <button
-              onClick={addAssistant}
-              className="btn--green px-3 py-1.5 text-xs rounded-lg"
-            >
+            <button onClick={addAssistant} className="btn--green px-3 py-1.5 text-xs rounded-lg">
               <Plus className="w-3.5 h-3.5 text-white" /> <span className="text-white">Create</span>
             </button>
           </div>
 
-          <div className="p-3 min-h-0 flex-1 overflow-y-auto" style={{ scrollbarWidth:'thin' }}>
+          {/* inner content kept static (no scroll) */}
+          <div className="p-3">
             <div className="flex items-center gap-2 rounded-lg px-2.5 py-2 mb-2"
               style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)' }}>
               <Search className="w-4 h-4 icon" />
@@ -405,8 +390,8 @@ export default function VoiceAgentSection() {
                       className="btn--ghost">
                 <Copy className="w-4 h-4 icon" /> Copy Prompt
               </button>
-              <button onClick={()=> { if (confirm('Delete this assistant?')) removeAssistant(active.id); }}
-                      className="btn--danger">
+              {/* OPEN DELETE OVERLAY INSTEAD OF BROWSER CONFIRM */}
+              <button onClick={()=> setShowDelete(true)} className="btn--danger">
                 <Trash2 className="w-4 h-4" /> Delete
               </button>
             </div>
@@ -468,7 +453,6 @@ export default function VoiceAgentSection() {
                   </div>
                 </div>
 
-                {/* live prompt editor */}
                 <textarea
                   rows={18}
                   value={active.config.model.systemPrompt}
@@ -603,6 +587,7 @@ export default function VoiceAgentSection() {
               className="w-full max-w-xl rounded-xl" style={{ background:'var(--va-card)', border:'1px solid var(--va-border)', boxShadow:'var(--va-shadow-lg)' }}>
               <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom:'1px solid var(--va-border)' }}>
                 <div className="flex items-center gap-2 text-sm font-semibold"><Edit3 className="w-4 h-4 icon" /> Edit Prompt</div>
+                <button onClick={()=> setGenOpen(false)} className="p-1 rounded hover:opacity-75"><X className="w-4 h-4" /></button>
               </div>
               <div className="p-4">
                 <input
@@ -622,7 +607,7 @@ export default function VoiceAgentSection() {
         )}
       </AnimatePresence>
 
-      {/* ---------------- Changes tray (like your screenshots) ---------------- */}
+      {/* ---------------- Changes tray ---------------- */}
       <AnimatePresence>
         {pending && (
           <motion.div
@@ -634,17 +619,58 @@ export default function VoiceAgentSection() {
             <div className="rounded-lg p-3 mb-3 text-[13px] leading-6 overflow-y-auto max-h-[280px]"
                  style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)', color:'var(--text)' }}
                  dangerouslySetInnerHTML={{ __html: pending.htmlDiff }} />
-            {/* appear like “typing” preview (subtle) */}
             {typing && (
               <div className="text-[12px] opacity-70 mb-3" style={{ fontFamily:'ui-monospace' }}>
-                {typing}
-                <span className="animate-pulse">▌</span>
+                {typing}<span className="animate-pulse">▌</span>
               </div>
             )}
             <div className="flex gap-2">
               <button onClick={discardChanges} className="btn--ghost">✕ Discard Changes</button>
               <button onClick={acceptChanges} className="btn--green"><span className="text-white">Accept Changes ✓</span></button>
             </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ---------------- Delete overlay (visual modal) ---------------- */}
+      <AnimatePresence>
+        {showDelete && (
+          <motion.div className="fixed inset-0 z-[9998] flex items-center justify-center p-4 backdrop"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <motion.div
+              initial={{ y: 10, opacity: 0, scale: .98 }}
+              animate={{ y: 0, opacity: 1, scale: 1 }}
+              exit={{ y: 8, opacity: 0, scale: .985 }}
+              className="panel elevate glow-spot w-[92vw] max-w-[520px] rounded-2xl overflow-hidden"
+              style={{ background:'var(--va-card)', border:'1px solid var(--va-border)', boxShadow:'var(--va-shadow-lg)' }}
+            >
+              <div className="px-6 py-5 border-b flex items-center gap-3" style={{ borderColor:'var(--va-border)' }}>
+                <div className="w-10 h-10 rounded-xl grid place-items-center" style={{ background:'var(--accent)', opacity:.18 }}>
+                  <Trash2 className="w-5 h-5 text-red-400" />
+                </div>
+                <div className="font-semibold">Delete Assistant</div>
+                <button className="ml-auto p-2 rounded-full hover:opacity-70" onClick={()=> setShowDelete(false)}>
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="px-6 py-6">
+                <div className="text-sm">
+                  Are you sure you want to permanently delete <span className="font-semibold">“{active.name}”</span>?
+                </div>
+                <div className="mt-5 flex gap-3">
+                  <button className="btn--ghost flex-1" onClick={()=> setShowDelete(false)}>Cancel</button>
+                  <button
+                    className="btn--green flex-1"
+                    style={{ background:'#ef4444' }}
+                    onMouseEnter={(e)=> ((e.currentTarget as HTMLButtonElement).style.filter='brightness(0.95)')}
+                    onMouseLeave={(e)=> ((e.currentTarget as HTMLButtonElement).style.filter='none')}
+                    onClick={()=> { setShowDelete(false); removeAssistant(active.id); }}
+                  >
+                    <Trash2 className="w-4 h-4 text-white" /> <span className="text-white">Delete</span>
+                  </button>
+                </div>
+              </div>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -676,7 +702,6 @@ function Section({ title, icon, children }:{ title: string; icon: React.ReactNod
         boxShadow:'var(--va-shadow)',
       }}
     >
-      {/* subtle glow */}
       <div aria-hidden className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
            style={{ background:'radial-gradient(circle, color-mix(in oklab, var(--accent) 16%, transparent) 0%, transparent 70%)', filter:'blur(38px)' }} />
       <button type="button" onClick={()=> setOpen(v=>!v)} className="w-full flex items-center justify-between px-5 py-4">
@@ -695,7 +720,7 @@ function Section({ title, icon, children }:{ title: string; icon: React.ReactNod
 }
 
 /* =============================================================================
-   Scoped CSS (one place)
+   Scoped CSS
 ============================================================================= */
 function StyleBlock() {
   return (
@@ -740,13 +765,11 @@ function StyleBlock() {
         --va-shadow-side:8px 0 26px rgba(0,0,0,.08);
       }
 
-      /* Single icon color everywhere (match sidebar) */
       .${SCOPE} .icon{ color: var(--accent); }
 
-      /* Green API-Keys-style buttons */
       .${SCOPE} .btn--green{
         display:inline-flex; align-items:center; gap:.5rem;
-        border-radius:10px; padding:.6rem .9rem;
+        border-radius:14px; padding:.65rem .95rem;
         background:${ACCENT}; color:#fff; box-shadow:${BTN_SHADOW};
         border:1px solid rgba(255,255,255,.08);
         transition:transform .04s ease, background .18s ease;
@@ -756,23 +779,21 @@ function StyleBlock() {
 
       .${SCOPE} .btn--ghost{
         display:inline-flex; align-items:center; gap:.5rem;
-        border-radius:10px; padding:.55rem .85rem; font-size:14px;
+        border-radius:14px; padding:.6rem .9rem; font-size:14px;
         background:var(--va-card); color:var(--text);
         border:1px solid var(--va-border); box-shadow:var(--va-shadow-sm);
       }
       .${SCOPE} .btn--danger{
         display:inline-flex; align-items:center; gap:.5rem;
-        border-radius:10px; padding:.55rem .85rem; font-size:14px;
+        border-radius:14px; padding:.6rem .9rem; font-size:14px;
         background:rgba(220,38,38,.12); color:#fca5a5;
         border:1px solid rgba(220,38,38,.35); box-shadow:0 10px 24px rgba(220,38,38,.15);
       }
 
-      /* Thin green sliders */
       .${SCOPE} .va-range{ -webkit-appearance:none; height:4px; background:color-mix(in oklab, var(--accent) 24%, #0000); border-radius:999px; outline:none; }
       .${SCOPE} .va-range::-webkit-slider-thumb{ -webkit-appearance:none; width:14px;height:14px;border-radius:50%;background:var(--accent); border:2px solid #fff; box-shadow:0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent); }
       .${SCOPE} .va-range::-moz-range-thumb{ width:14px;height:14px;border:0;border-radius:50%;background:var(--accent); box-shadow:0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent); }
 
-      /* Diff colors */
       .${SCOPE} ins{ background:rgba(16,185,129,.18); color:var(--text); text-decoration:none; padding:1px 2px; border-radius:4px; }
       .${SCOPE} del{ background:rgba(239,68,68,.18); color:#fca5a5; text-decoration:line-through; padding:1px 2px; border-radius:4px; }
     `}</style>
