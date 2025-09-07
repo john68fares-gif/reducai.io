@@ -25,8 +25,9 @@ import Step2ModelSettings from './Step2ModelSettings';
 import Step3PromptEditor from './Step3PromptEditor';
 import Step4Overview from './Step4Overview';
 import { s } from '@/utils/safe';
+import { scopedStorage } from '@/utils/scoped-storage';
 
-// NOTE: Removed HeaderRail import/usage per your request
+// NOTE: HeaderRail intentionally not used per your earlier request
 
 const Bot3D = dynamic(() => import('./Bot3D.client'), {
   ssr: false,
@@ -57,6 +58,7 @@ type Appearance = {
 
 type Bot = {
   id: string;
+  assistantId?: string;
   name: string;
   industry?: string;
   language?: string;
@@ -70,6 +72,7 @@ type Bot = {
 
 const STORAGE_KEYS = ['chatbots', 'agents', 'builds'];
 const SAVE_KEY = 'chatbots';
+const CLOUD_KEY = 'chatbots.v1'; // <- cloud bucket used for cross-device sync
 const nowISO = () => new Date().toISOString();
 const fmtDate = (iso?: string) => (iso ? new Date(iso).toLocaleDateString() : '');
 
@@ -82,7 +85,26 @@ const sortByNewest = (arr: Bot[]) =>
         Date.parse(a.updatedAt || a.createdAt || '0')
     );
 
-function loadBots(): Bot[] {
+function normalizeBot(raw: any): Bot {
+  return {
+    id:
+      raw?.id ??
+      raw?.assistantId ??
+      (typeof crypto !== 'undefined' ? crypto.randomUUID() : String(Date.now())),
+    assistantId: raw?.assistantId,
+    name: s(raw?.name, 'Untitled Bot'),
+    industry: s(raw?.industry),
+    language: s(raw?.language),
+    model: s(raw?.model, 'gpt-4o-mini'),
+    description: s(raw?.description),
+    prompt: s(raw?.prompt),
+    createdAt: raw?.createdAt ?? nowISO(),
+    updatedAt: raw?.updatedAt ?? raw?.createdAt ?? nowISO(),
+    appearance: raw?.appearance ?? undefined,
+  };
+}
+
+function loadLocalBots(): Bot[] {
   if (typeof window === 'undefined') return [];
   for (const k of STORAGE_KEYS) {
     try {
@@ -90,32 +112,62 @@ function loadBots(): Bot[] {
       if (!raw) continue;
       const arr = JSON.parse(raw);
       if (!Array.isArray(arr)) continue;
-
-      const out: Bot[] = arr.map((b: any) => ({
-        id: b?.id ?? (typeof crypto !== 'undefined' ? crypto.randomUUID() : String(Date.now())),
-        name: s(b?.name, 'Untitled Bot'),
-        industry: s(b?.industry),
-        language: s(b?.language),
-        model: s(b?.model, 'gpt-4o-mini'),
-        description: s(b?.description),
-        prompt: s(b?.prompt),
-        createdAt: b?.createdAt ?? nowISO(),
-        updatedAt: b?.updatedAt ?? b?.createdAt ?? nowISO(),
-        appearance: b?.appearance ?? undefined,
-      }));
+      const out: Bot[] = arr.map(normalizeBot);
       return sortByNewest(out);
     } catch {}
   }
   return [];
 }
 
-function saveBots(bots: Bot[]) {
+function saveLocalBots(bots: Bot[]) {
   try {
     localStorage.setItem(SAVE_KEY, JSON.stringify(bots));
   } catch {}
 }
 
-/* ---------- Step 3 splitter ---------- */
+async function loadCloudBots(): Promise<Bot[]> {
+  try {
+    const ss = await scopedStorage();
+    await ss.ensureOwnerGuard();
+    const arr = (await ss.getJSON<any[]>(CLOUD_KEY, [])) || [];
+    return sortByNewest(arr.map(normalizeBot));
+  } catch {
+    return [];
+  }
+}
+
+async function saveCloudBots(bots: Bot[]) {
+  try {
+    const ss = await scopedStorage();
+    await ss.ensureOwnerGuard();
+    await ss.setJSON(CLOUD_KEY, bots);
+  } catch {}
+}
+
+function mergeUnique(local: Bot[], cloud: Bot[]): Bot[] {
+  // prefer cloud if same assistantId/id exists
+  const byKey = new Map<string, Bot>();
+  const put = (b: Bot) => {
+    const key = b.assistantId || b.id;
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, b);
+    } else {
+      // newer wins
+      const newer =
+        Date.parse(b.updatedAt || b.createdAt || '0') >
+        Date.parse(existing.updatedAt || existing.createdAt || '0')
+          ? b
+          : existing;
+      byKey.set(key, newer);
+    }
+  };
+  cloud.forEach(put);
+  local.forEach(put);
+  return sortByNewest(Array.from(byKey.values()));
+}
+
+/* ---------- Step 3 splitter (unchanged) ---------- */
 type PromptSectionKey =
   | 'DESCRIPTION'
   | 'AI DESCRIPTION'
@@ -197,6 +249,7 @@ export default function BuilderDashboard() {
   const [customizingId, setCustomizingId] = useState<string | null>(null);
   const [viewId, setViewId] = useState<string | null>(null);
 
+  // clean up wizard crumbs after a successful build
   useEffect(() => {
     try {
       if (localStorage.getItem('builder:cleanup') === '1') {
@@ -206,6 +259,7 @@ export default function BuilderDashboard() {
     } catch {}
   }, []);
 
+  // normalize step1/2/3 schema
   useEffect(() => {
     try {
       const normalize = (k: string) => {
@@ -223,14 +277,39 @@ export default function BuilderDashboard() {
     } catch {}
   }, []);
 
+  // initial load + cross-device merge
   useEffect(() => {
-    setBots(loadBots());
+    let mounted = true;
+
+    async function refresh() {
+      const local = loadLocalBots();
+      const cloud = await loadCloudBots();
+      if (!mounted) return;
+      setBots(mergeUnique(local, cloud));
+    }
+
+    // First paint
+    refresh();
+
+    // Listen to localStorage changes (other tabs on same device)
     const onStorage = (e: StorageEvent) => {
-      if (STORAGE_KEYS.includes(e.key || '')) setBots(loadBots());
+      if (STORAGE_KEYS.includes(e.key || '')) refresh();
     };
     if (typeof window !== 'undefined') {
       window.addEventListener('storage', onStorage);
-      return () => window.removeEventListener('storage', onStorage);
+      // Also refresh when tab regains focus (catch iPad → laptop changes)
+      const onVis = () => document.visibilityState === 'visible' && refresh();
+      document.addEventListener('visibilitychange', onVis);
+
+      // Light polling for cloud (cheap; 12s)
+      const id = setInterval(refresh, 12000);
+
+      return () => {
+        window.removeEventListener('storage', onStorage);
+        document.removeEventListener('visibilitychange', onVis);
+        clearInterval(id);
+        mounted = false;
+      };
     }
   }, []);
 
@@ -250,7 +329,7 @@ export default function BuilderDashboard() {
     router.replace(`${pathname}?${usp.toString()}`, { scroll: false });
   };
 
-  // ---------- Wizard (unchanged logic, rail removed) ----------
+  // ---------- Wizard ----------
   if (step) {
     return (
       <div className="min-h-screen w-full font-movatif" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
@@ -264,7 +343,7 @@ export default function BuilderDashboard() {
     );
   }
 
-  // ---------- Dashboard ----------
+  // ---------- Dashboard (with Create row) ----------
   return (
     <div className="min-h-screen w-full font-movatif" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
       <main className="flex-1 w-full px-4 sm:px-6 pt-6 pb-24">
@@ -290,21 +369,29 @@ export default function BuilderDashboard() {
           </div>
         </div>
 
-        {/* HORIZONTAL LIST (wide rectangles stacked vertically) */}
+        {/* Create + List */}
         <div className="space-y-6">
           <CreateRow onClick={() => router.push('/builder?step=1')} />
 
           {filtered.map((bot) => (
             <BuildRow
-              key={bot.id}
+              key={bot.assistantId || bot.id}
               bot={bot}
               accent={accentFor(bot.id)}
               onOpen={() => setViewId(bot.id)}
-              onDelete={() => {
-                const next = bots.filter((b) => b.id !== bot.id);
+              onDelete={async () => {
+                // remove locally
+                const next = bots.filter((b) => (b.assistantId || b.id) !== (bot.assistantId || bot.id));
                 const sorted = sortByNewest(next);
                 setBots(sorted);
-                saveBots(sorted);
+                saveLocalBots(sorted);
+
+                // try remove from cloud as well
+                try {
+                  const cloud = await loadCloudBots();
+                  const cloudNext = cloud.filter((b) => (b.assistantId || b.id) !== (bot.assistantId || bot.id));
+                  await saveCloudBots(cloudNext);
+                } catch {}
               }}
               onCustomize={() => setCustomizingId(bot.id)}
             />
@@ -331,7 +418,8 @@ export default function BuilderDashboard() {
             );
             const sorted = sortByNewest(next);
             setBots(sorted);
-            saveBots(sorted);
+            saveLocalBots(sorted);
+            saveCloudBots(sorted); // mirror to cloud
             setCustomizingId(null);
           }}
           onReset={() => {
@@ -341,7 +429,8 @@ export default function BuilderDashboard() {
             );
             const sorted = sortByNewest(next);
             setBots(sorted);
-            saveBots(sorted);
+            saveLocalBots(sorted);
+            saveCloudBots(sorted);
             setCustomizingId(null);
           }}
           onSaveDraft={(name, ap) => {
@@ -455,7 +544,7 @@ function PromptOverlay({ bot, onClose }: { bot: Bot; onClose: () => void }) {
               {sections.map((sec, i) => (
                 <div key={i} style={CARD_STYLE} className="overflow-hidden">
                   <div className="px-5 pt-4 pb-3">
-                    <div className="flex items-center gap-2 font-semibold text-sm" style={{ color: 'var(--text)' }}>
+                    <div className="flex items_center gap-2 font-semibold text-sm" style={{ color: 'var(--text)' }}>
                       {ICONS[sec.key]} {sec.title}
                     </div>
                   </div>
@@ -660,7 +749,7 @@ function BuildRow({
           <div className="mt-4 grid gap-2 md:grid-cols-3">
             <RowStat label="Model" value={bot.model || '—'} />
             <RowStat label="Updated" value={fmtDate(bot.updatedAt || bot.createdAt)} />
-            <RowStat label="ID" value={bot.id.slice(0, 8) + '…'} />
+            <RowStat label="ID" value={(bot.assistantId || bot.id).slice(0, 8) + '…'} />
           </div>
 
           <div className="mt-5 flex flex-wrap items-center gap-3">
