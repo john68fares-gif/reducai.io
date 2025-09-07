@@ -104,28 +104,21 @@ function StyledSelect<T extends string>({
       </button>
 
       {open && rect && typeof document !== 'undefined'
-        ? ( // portal menu
+        ? (
           <div
             ref={portalRef}
-            className="fixed z-[9999] p-3 animate-[popIn_140ms_ease-out]"
+            className="model-step-portal fixed z-[9999] p-3 animate-[popIn_140ms_ease-out]"
             style={{
               top: rect.openUp ? rect.top - 8 : rect.top + 8,
               left: rect.left,
               width: rect.width,
               transform: rect.openUp ? 'translateY(-100%)' : 'none',
-              background: 'var(--ms-menu-bg, #ffffff)',
-              border: '1px solid var(--ms-menu-border, rgba(0,0,0,.10))',
+              background: 'var(--ms-menu-bg)',
+              border: '1px solid var(--ms-menu-border)',
               borderRadius: 20,
               boxShadow: '0 28px 70px rgba(0,0,0,.12), 0 10px 26px rgba(0,0,0,.08), 0 0 0 1px rgba(0,0,0,.02)',
             }}
           >
-            <style jsx global>{`
-              [data-theme="dark"] .model-step-scope ~ .fixed {
-                --ms-menu-bg: #101314;
-                --ms-menu-border: rgba(255,255,255,.16);
-              }
-            `}</style>
-
             {filterable && (
               <div
                 className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[12px]"
@@ -421,7 +414,7 @@ export default function Step2ModelSettings({ onBack, onNext }: Props) {
         </section>
       </div>
 
-      {/* Scoped theme vars (light/dark) for this step */}
+      {/* Scoped theme vars (light/dark) for this step + portal menu tokens */}
       <style jsx global>{`
         @keyframes popIn { 0% { opacity: 0; transform: scale(.985); } 100% { opacity: 1; transform: scale(1); } }
         .model-step-scope{
@@ -433,6 +426,16 @@ export default function Step2ModelSettings({ onBack, onNext }: Props) {
           --ms-input-bg: rgba(255,255,255,.02);
           --ms-input-border: rgba(255,255,255,.14);
           --ms-input-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 12px 30px rgba(0,0,0,.38);
+        }
+
+        /* Portal (menu) surface — reliable class instead of sibling hack */
+        .model-step-portal{
+          --ms-menu-bg: #ffffff;
+          --ms-menu-border: rgba(0,0,0,.10);
+        }
+        [data-theme="dark"] .model-step-portal{
+          --ms-menu-bg: #101314;
+          --ms-menu-border: rgba(255,255,255,.16);
         }
       `}</style>
     </div>
