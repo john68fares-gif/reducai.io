@@ -36,8 +36,7 @@ function Orb() {
       aria-hidden
       className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
       style={{
-        background:
-          'radial-gradient(circle, color-mix(in oklab, var(--brand) 14%, transparent) 0%, transparent 70%)',
+        background: 'radial-gradient(circle, color-mix(in oklab, var(--brand) 14%, transparent) 0%, transparent 70%)',
         filter: 'blur(38px)',
       }}
     />
@@ -96,19 +95,19 @@ function buildFinalPrompt() {
     .trim();
 }
 
-/** Save a build to the user's cloud-scoped storage so other devices see it */
-async function saveBuildToCloud(build: any) {
-  try {
-    const ss = await scopedStorage();
-    await ss.ensureOwnerGuard();
-    const arr = (await ss.getJSON<any[]>('chatbots.v1', [])) || [];
-    const key = build.assistantId || build.id;
-    const merged = [build, ...arr.filter(b => (b.assistantId || b.id) !== key)];
-    await ss.setJSON('chatbots.v1', merged.slice(0, 200));
-  } catch {
-    // silent fallback; localStorage still works
-  }
-}
+type CloudBot = {
+  id: string;
+  assistantId?: string;
+  name: string;
+  type?: string;
+  industry?: string;
+  language?: string;
+  model?: string;
+  prompt?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  appearance?: any;
+};
 
 /* ───────────────────────────── Component ───────────────────────────── */
 
@@ -174,6 +173,60 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
   };
   const ready = Object.values(checks).every(Boolean);
 
+  function normalize(b: any): CloudBot {
+    return {
+      id: String(b?.id ?? b?.assistantId ?? (typeof crypto !== 'undefined' ? crypto.randomUUID() : Date.now().toString())),
+      assistantId: String(b?.assistantId ?? b?.id ?? ''),
+      name: String(b?.name || 'Untitled Assistant'),
+      type: String(b?.type || ''),
+      industry: String(b?.industry || ''),
+      language: String(b?.language || ''),
+      model: String(b?.model || 'gpt-4o-mini'),
+      prompt: String(b?.prompt || ''),
+      createdAt: String(b?.createdAt || new Date().toISOString()),
+      updatedAt: String(b?.updatedAt || b?.createdAt || new Date().toISOString()),
+      appearance: b?.appearance ?? undefined,
+    };
+  }
+
+  async function saveToCloudAndLocal(newBot: CloudBot) {
+    // 1) Save to cloud (scoped storage)
+    try {
+      const ss = await scopedStorage();
+      await ss.ensureOwnerGuard();
+
+      const cloudArr = await ss.getJSON<any[]>('chatbots.v1', []);
+      const cloud = Array.isArray(cloudArr) ? cloudArr.map(normalize) : [];
+
+      const key = newBot.assistantId || newBot.id;
+      const idx = cloud.findIndex((c) => (c.assistantId || c.id) === key);
+      if (idx >= 0) {
+        cloud[idx] = { ...cloud[idx], ...newBot, updatedAt: newBot.updatedAt || new Date().toISOString() };
+      } else {
+        cloud.unshift(newBot);
+      }
+      await ss.setJSON('chatbots.v1', cloud);
+    } catch (e) {
+      // non-fatal: dashboard still gets local copy
+      // console.warn('Cloud save failed', e);
+    }
+
+    // 2) Save to localStorage (for immediate local UI)
+    try {
+      const bots = getLS<any[]>('chatbots', []);
+      const arr = Array.isArray(bots) ? bots.slice() : [];
+      const key = newBot.assistantId || newBot.id;
+      const idx = arr.findIndex((c: any) => (c.assistantId || c.id) === key);
+      if (idx >= 0) arr[idx] = { ...arr[idx], ...newBot };
+      else arr.unshift(newBot);
+      localStorage.setItem('chatbots', JSON.stringify(arr));
+      localStorage.setItem('builder:cleanup', '1');
+    } catch {}
+
+    // 3) Notify any listeners to refresh
+    try { window.dispatchEvent(new Event('builds:updated')); } catch {}
+  }
+
   async function handleGenerate() {
     if (!ready) return;
 
@@ -208,8 +261,8 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
         throw new Error(data?.error || 'Failed to create assistant');
       }
 
-      const bots = getLS<any[]>('chatbots', []);
-      const build = {
+      // unified build object (cloud + local)
+      const build: CloudBot = {
         id: data.assistant.id,
         assistantId: data.assistant.id,
         name: st(s1?.name, 'Untitled Assistant'),
@@ -221,17 +274,8 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
-      bots.unshift(build);
 
-      // local first
-      try { localStorage.setItem('chatbots', JSON.stringify(bots)); } catch {}
-      try { localStorage.setItem('builder:cleanup', '1'); } catch {}
-
-      // cloud save for cross-device
-      await saveBuildToCloud(build);
-
-      // ping dashboards to refresh instantly
-      try { window.dispatchEvent(new Event('builds:updated')); } catch {}
+      await saveToCloudAndLocal(build);
 
       setLoading(false);
       setDone(true);
