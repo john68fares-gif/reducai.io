@@ -1,8 +1,7 @@
-// pages/api/assistants/list.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
 
 /**
- * Lists assistants straight from OpenAI using fetch (no 'openai' SDK needed).
+ * Lists assistants from OpenAI (Assistants v2) using fetch.
  * Priority for API key:
  *  1) req.body.apiKeyPlain
  *  2) process.env.OPENAI_API_KEY
@@ -14,7 +13,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
-    const { apiKeyPlain, limit = 25 } = (req.body || {}) as {
+    const { apiKeyPlain, limit = 50 } = (req.body || {}) as {
       apiKeyPlain?: string;
       limit?: number;
     };
@@ -24,44 +23,41 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(400).json({ ok: false, error: 'Missing API key (apiKeyPlain or OPENAI_API_KEY).' });
     }
 
-    // Clamp limit 1..100 (OpenAI accepts up to 100)
-    const capped = Math.max(1, Math.min(100, Number(limit) || 25));
-
-    // Call OpenAI Assistants list endpoint
+    const capped = Math.max(1, Math.min(100, Number(limit) || 50));
     const url = `https://api.openai.com/v1/assistants?limit=${encodeURIComponent(String(capped))}`;
+
     const resp = await fetch(url, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${key}`,
         'Content-Type': 'application/json',
-        // No special beta header needed for v1 Assistants list
+        // 👇 Required for Assistants v2
+        'OpenAI-Beta': 'assistants=v2',
       },
     });
 
     const json = await resp.json().catch(() => ({}));
     if (!resp.ok) {
-      return res.status(resp.status).json({
-        ok: false,
-        error: (json && (json.error?.message || json.error)) || 'Failed to list assistants',
-      });
+      return res
+        .status(resp.status)
+        .json({ ok: false, error: json?.error?.message || 'Failed to list assistants' });
     }
 
     const items = Array.isArray(json?.data) ? json.data : [];
 
-    // Normalize what the dashboard expects
     const normalized = items.map((a: any) => {
-      const createdAt =
+      const created =
         typeof a?.created_at === 'number' ? new Date(a.created_at * 1000).toISOString() : null;
-      const updatedAt =
-        typeof a?.updated_at === 'number' ? new Date(a.updated_at * 1000).toISOString() : createdAt;
+      const updated =
+        typeof a?.updated_at === 'number' ? new Date(a.updated_at * 1000).toISOString() : created;
 
       return {
         id: String(a?.id || ''),
         name: a?.name || 'Untitled Assistant',
         model: String(a?.model || ''),
         instructions: a?.instructions || '',
-        created_at: createdAt,
-        updated_at: updatedAt,
+        created_at: created,
+        updated_at: updated,
         metadata: a?.metadata || {},
       };
     });
