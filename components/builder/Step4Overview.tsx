@@ -10,8 +10,6 @@ import StepProgress from './StepProgress';
 import { s, st } from '@/utils/safe';
 import { scopedStorage } from '@/utils/scoped-storage';
 
-/* ─────────────────────────── Shared visuals (same as Step 1) ─────────────────────────── */
-
 const BTN_GREEN = '#10b981';
 const BTN_GREEN_HOVER = '#0ea473';
 const BTN_DISABLED = 'color-mix(in oklab, var(--text) 14%, transparent)';
@@ -22,7 +20,6 @@ const CARD: React.CSSProperties = {
   boxShadow: 'var(--shadow-card)',
   borderRadius: 20,
 };
-
 const PANEL: React.CSSProperties = {
   background: 'var(--panel)',
   border: '1px solid var(--border)',
@@ -36,13 +33,13 @@ function Orb() {
       aria-hidden
       className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
       style={{
-        background: 'radial-gradient(circle, color-mix(in oklab, var(--brand) 14%, transparent) 0%, transparent 70%)',
+        background:
+          'radial-gradient(circle, color-mix(in oklab, var(--brand) 14%, transparent) 0%, transparent 70%)',
         filter: 'blur(38px)',
       }}
     />
   );
 }
-
 function SubtleGrid() {
   return (
     <div
@@ -58,8 +55,6 @@ function SubtleGrid() {
   );
 }
 
-/* ───────────────────────────── Data helpers ───────────────────────────── */
-
 type Props = { onBack?: () => void; onFinish?: () => void };
 
 function getLS<T = any>(k: string, fb?: T): T {
@@ -71,7 +66,6 @@ function buildFinalPrompt() {
   const s3 = getLS<any>('builder:step3', {});
 
   const header = [st(s1?.name), st(s1?.industry), st(s1?.language)].filter(Boolean).join('\n');
-
   const languageText = s3?.languageText || s3?.language || '';
   const description = s(s3?.description) || '';
   const rules = s(s3?.rules) || '';
@@ -95,22 +89,6 @@ function buildFinalPrompt() {
     .trim();
 }
 
-type CloudBot = {
-  id: string;
-  assistantId?: string;
-  name: string;
-  type?: string;
-  industry?: string;
-  language?: string;
-  model?: string;
-  prompt?: string;
-  createdAt?: string;
-  updatedAt?: string;
-  appearance?: any;
-};
-
-/* ───────────────────────────── Component ───────────────────────────── */
-
 export default function Step4Overview({ onBack, onFinish }: Props) {
   const [loading, setLoading] = useState(false);
   const [loadingMsg, setLoadingMsg] = useState('Generating AI…');
@@ -127,6 +105,7 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
   const inputCostPerMTok = 2.5;
   const outputCostPerMTok = 10.0;
 
+  // Source-of-truth refresh for Step 2 (model/key) from cloud
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -173,70 +152,49 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
   };
   const ready = Object.values(checks).every(Boolean);
 
-  function normalize(b: any): CloudBot {
-    return {
-      id: String(b?.id ?? b?.assistantId ?? (typeof crypto !== 'undefined' ? crypto.randomUUID() : Date.now().toString())),
-      assistantId: String(b?.assistantId ?? b?.id ?? ''),
-      name: String(b?.name || 'Untitled Assistant'),
-      type: String(b?.type || ''),
-      industry: String(b?.industry || ''),
-      language: String(b?.language || ''),
-      model: String(b?.model || 'gpt-4o-mini'),
-      prompt: String(b?.prompt || ''),
-      createdAt: String(b?.createdAt || new Date().toISOString()),
-      updatedAt: String(b?.updatedAt || b?.createdAt || new Date().toISOString()),
-      appearance: b?.appearance ?? undefined,
-    };
-  }
-
-  async function saveToCloudAndLocal(newBot: CloudBot) {
-    // 1) Save to cloud (scoped storage)
+  // Save build to both cloud and local; return the merged list so caller can do whatever
+  async function saveBuildEverywhere(build: any) {
+    // 1) Cloud: scopedStorage at key chatbots.v1
     try {
       const ss = await scopedStorage();
       await ss.ensureOwnerGuard();
-
-      const cloudArr = await ss.getJSON<any[]>('chatbots.v1', []);
-      const cloud = Array.isArray(cloudArr) ? cloudArr.map(normalize) : [];
-
-      const key = newBot.assistantId || newBot.id;
-      const idx = cloud.findIndex((c) => (c.assistantId || c.id) === key);
-      if (idx >= 0) {
-        cloud[idx] = { ...cloud[idx], ...newBot, updatedAt: newBot.updatedAt || new Date().toISOString() };
-      } else {
-        cloud.unshift(newBot);
-      }
-      await ss.setJSON('chatbots.v1', cloud);
-    } catch (e) {
-      // non-fatal: dashboard still gets local copy
-      // console.warn('Cloud save failed', e);
+      const cloud = await ss.getJSON<any[]>('chatbots.v1', []);
+      const normalized = Array.isArray(cloud) ? cloud : [];
+      // Avoid dupes by assistantId or id
+      const key = build.assistantId || build.id;
+      const idx = normalized.findIndex((b) => (b.assistantId || b.id) === key);
+      if (idx >= 0) normalized[idx] = build;
+      else normalized.unshift(build);
+      await ss.setJSON('chatbots.v1', normalized);
+    } catch {
+      // non-fatal
     }
 
-    // 2) Save to localStorage (for immediate local UI)
+    // 2) Local: localStorage chatbots
     try {
-      const bots = getLS<any[]>('chatbots', []);
-      const arr = Array.isArray(bots) ? bots.slice() : [];
-      const key = newBot.assistantId || newBot.id;
-      const idx = arr.findIndex((c: any) => (c.assistantId || c.id) === key);
-      if (idx >= 0) arr[idx] = { ...arr[idx], ...newBot };
-      else arr.unshift(newBot);
-      localStorage.setItem('chatbots', JSON.stringify(arr));
-      localStorage.setItem('builder:cleanup', '1');
+      const local = getLS<any[]>('chatbots', []);
+      const norm = Array.isArray(local) ? local : [];
+      const key = build.assistantId || build.id;
+      const idx = norm.findIndex((b) => (b.assistantId || b.id) === key);
+      if (idx >= 0) norm[idx] = build;
+      else norm.unshift(build);
+      localStorage.setItem('chatbots', JSON.stringify(norm));
     } catch {}
 
-    // 3) Notify any listeners to refresh
+    // 3) Let dashboards listening update instantly
     try { window.dispatchEvent(new Event('builds:updated')); } catch {}
   }
 
   async function handleGenerate() {
-    if (!ready) return;
+    if (!ready || loading) return;
 
     setLoading(true);
     setDone(false);
 
     try {
+      // read the selected api key from cloud keys stash
       let apiKeyPlain = '';
       const selectedModel = s2?.model || 'gpt-4o-mini';
-
       try {
         const ss = await scopedStorage();
         await ss.ensureOwnerGuard();
@@ -245,6 +203,7 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
         apiKeyPlain = sel?.key || '';
       } catch {}
 
+      // create the assistant
       const resp = await fetch('/api/assistants/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -261,9 +220,9 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
         throw new Error(data?.error || 'Failed to create assistant');
       }
 
-      // unified build object (cloud + local)
-      const build: CloudBot = {
-        id: data.assistant.id,
+      // build object (normalized)
+      const build = {
+        id: data.assistant.id,                    // use assistant id as primary id
         assistantId: data.assistant.id,
         name: st(s1?.name, 'Untitled Assistant'),
         type: s1?.type || s1?.botType || s1?.aiType || 'ai automation',
@@ -275,7 +234,33 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
         updatedAt: new Date().toISOString(),
       };
 
-      await saveToCloudAndLocal(build);
+      // Optionally persist to Supabase if you added the helper (won’t throw if missing)
+      try {
+        const { upsertBuildToSupabase } = await import('@/utils/builds-store');
+        const payloadForDB = {
+          type: build.type,
+          industry: build.industry,
+          language: build.language,
+          model: build.model,
+          prompt: build.prompt,
+          createdAt: build.createdAt,
+          updatedAt: build.updatedAt,
+          appearance: null,
+        };
+        await upsertBuildToSupabase({
+          assistantId: build.assistantId || build.id,
+          name: build.name,
+          payload: payloadForDB,
+        });
+      } catch {
+        // ignore if helper not present or DB not configured
+      }
+
+      // Save to cloud + local and notify
+      await saveBuildEverywhere(build);
+
+      // cleanup the wizard steps so dashboard starts fresh
+      try { localStorage.setItem('builder:cleanup', '1'); } catch {}
 
       setLoading(false);
       setDone(true);
@@ -298,7 +283,6 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
             <Settings2 className="w-4 h-4" style={{ color: 'var(--brand)' }} />
             Final Review
           </div>
-
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <Info label="AI Name" value={s1?.name || '—'} icon={<FileText className="w-3.5 h-3.5" />} />
             <Info label="Industry" value={s1?.industry || '—'} icon={<Library className="w-3.5 h-3.5" />} />
@@ -308,7 +292,7 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
         </section>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left column */}
+          {/* Left */}
           <div className="lg:col-span-2 space-y-6">
             <div style={PANEL} className="relative p-6 rounded-[28px]">
               <Orb />
@@ -347,7 +331,7 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
             </div>
           </div>
 
-          {/* Right column */}
+          {/* Right */}
           <div className="space-y-6">
             <div style={PANEL} className="relative p-6 rounded-[28px]">
               <Orb />
@@ -438,8 +422,6 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
   );
 }
 
-/* ─────────────────────────── UI bits ─────────────────────────── */
-
 function Info({ label, value, icon }: { label: string; value: string; icon?: React.ReactNode }) {
   return (
     <div style={CARD} className="p-3 rounded-2xl">
@@ -448,7 +430,6 @@ function Info({ label, value, icon }: { label: string; value: string; icon?: Rea
     </div>
   );
 }
-
 function Req({ ok, label }: { ok: boolean; label: string }) {
   return (
     <div className="flex items-center gap-2 py-1.5 text-sm">
