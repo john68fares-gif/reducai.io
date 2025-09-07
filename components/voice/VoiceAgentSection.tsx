@@ -10,11 +10,12 @@ import {
 } from 'lucide-react';
 
 /* ============================================================================
-   THEME — single accent & shared icon color (matches your sidebar green)
+   THEME — single accent & shared icon color (matches your main sidebar green)
 ============================================================================ */
 const SCOPE = 'va-scope';
-const ACCENT = '#14e4a3';      // <-- same green as your main sidebar icons
-const ACCENT_HOVER = '#11c892';
+const ACCENT = '#10b981';       // same green as your primary sidebar icons
+const ACCENT_HOVER = '#0fb57a';
+const RAIL_W = 312;             // assistants rail visual width
 
 const OpenAIIcon = () => (
   <svg width="16" height="16" viewBox="0 0 256 256" aria-hidden>
@@ -162,7 +163,7 @@ function Select({ value, items, onChange, placeholder, leftIcon }: {
                   onClick={() => { onChange(it.value); setOpen(false); }}
                   className="w-full flex items-center gap-3 px-3 py-2 rounded-[12px] text-left"
                   style={{ color:'var(--text)' }}
-                  onMouseEnter={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='rgba(20,228,163,.10)'; (e.currentTarget as HTMLButtonElement).style.border='1px solid rgba(20,228,163,.35)'; }}
+                  onMouseEnter={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='rgba(16,185,129,.10)'; (e.currentTarget as HTMLButtonElement).style.border='1px solid rgba(16,185,129,.35)'; }}
                   onMouseLeave={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='transparent'; (e.currentTarget as HTMLButtonElement).style.border='1px solid transparent'; }}
                 >
                   {it.icon}{it.label}
@@ -257,31 +258,30 @@ export default function VoiceAgentSection() {
 
   return (
     <div className={`${SCOPE}`} style={{ background:'var(--bg)', color:'var(--text)' }}>
-      <div className="flex w-full">
-        {/* =================== ASSISTANT SIDEBAR (touches app sidebar & header) =================== */}
+      {/* Push whole studio to the right of the main app sidebar */}
+      <div className="flex w-full" style={{ marginLeft: 'var(--sidebar-w)' }}>
+        {/* =================== ASSISTANT SIDEBAR (fixed, touching sidebar & header) =================== */}
         <aside
-          className="hidden lg:flex shrink-0 w-[312px] flex-col"
+          className="hidden lg:flex flex-col"
           style={{
-            position:'sticky', top:0, height:'100vh',
-            marginLeft:'-1px', /* butt against app sidebar border */
+            position:'fixed',
+            top: 0,
+            left: 'var(--sidebar-w)',           // hugs the main sidebar
+            width: `${RAIL_W}px`,
+            height: '100vh',
             borderRight:'1px solid var(--va-border)',
             background:'var(--va-sidebar)',
             boxShadow:'var(--va-shadow-side)',
-            zIndex: 1
+            zIndex: 41,
+            marginLeft: '-1px'                  // optional 1px overlap if your shell has a border
           }}
         >
-          {/* header (touches app header via sticky top:0) */}
+          {/* header */}
           <div className="px-3 py-3 flex items-center justify-between" style={{ borderBottom:'1px solid var(--va-border)' }}>
             <div className="flex items-center gap-2 text-sm font-semibold">
               <PanelLeft className="w-4 h-4 icon" /> Assistants
             </div>
-            <button
-              onClick={addAssistant}
-              className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs"
-              style={{ background:ACCENT, color:'#00110b', boxShadow:'0 8px 22px rgba(20,228,163,.25)' }}
-              onMouseEnter={(e)=> (e.currentTarget as HTMLButtonElement).style.background = ACCENT_HOVER}
-              onMouseLeave={(e)=> (e.currentTarget as HTMLButtonElement).style.background = ACCENT}
-            >
+            <button onClick={addAssistant} className="btn-primary btn-sm">
               <Plus className="w-3.5 h-3.5 icon--invert" /> Create
             </button>
           </div>
@@ -328,7 +328,7 @@ export default function VoiceAgentSection() {
         </aside>
 
         {/* =================================== EDITOR =================================== */}
-        <main className="flex-1">
+        <main className="flex-1" style={{ paddingLeft: `${RAIL_W}px` }}>
           <div className="px-6 py-4 flex items-center justify-between" style={{ borderBottom:'1px solid var(--va-border)', background:'var(--va-topbar)' }}>
             <div className="flex items-center gap-3">
               <Bot className="w-5 h-5 icon" />
@@ -403,13 +403,9 @@ export default function VoiceAgentSection() {
                       className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm"
                       style={{ border:'1px solid var(--va-border)', background:'var(--va-card)' }}
                     ><RefreshCw className="w-4 h-4 icon" /> Reset</button>
-                    <button
-                      onClick={()=> setEditOpen(true)}
-                      className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm"
-                      style={{ background:ACCENT, color:'#00110b', boxShadow:'0 10px 24px rgba(20,228,163,.24)' }}
-                      onMouseEnter={(e)=> (e.currentTarget as HTMLButtonElement).style.background=ACCENT_HOVER}
-                      onMouseLeave={(e)=> (e.currentTarget as HTMLButtonElement).style.background=ACCENT}
-                    >Generate / Edit</button>
+                    <button onClick={()=> setEditOpen(true)} className="btn-primary">
+                      Generate / Edit
+                    </button>
                   </div>
                 </div>
 
@@ -559,15 +555,7 @@ export default function VoiceAgentSection() {
                 />
                 <div className="mt-3 flex items-center justify-end gap-2">
                   <button onClick={()=> setEditOpen(false)} className="px-3 py-2 rounded-lg text-sm" style={{ border:'1px solid var(--va-border)', background:'var(--va-card)' }}>Cancel</button>
-                  <button
-                    onClick={submitEdit}
-                    className="px-3 py-2 rounded-lg text-sm"
-                    style={{ background:ACCENT, color:'#00110b', boxShadow:'0 10px 24px rgba(20,228,163,.24)' }}
-                    onMouseEnter={(e)=> (e.currentTarget as HTMLButtonElement).style.background = ACCENT_HOVER}
-                    onMouseLeave={(e)=> (e.currentTarget as HTMLButtonElement).style.background = ACCENT}
-                  >
-                    Submit Edit
-                  </button>
+                  <button onClick={submitEdit} className="btn-primary">Submit Edit</button>
                 </div>
               </div>
             </motion.div>
@@ -617,9 +605,23 @@ export default function VoiceAgentSection() {
           --va-shadow-side:8px 0 26px rgba(0,0,0,.08);
         }
 
-        /* One icon color everywhere — matches sidebar green */
+        /* One icon color everywhere — matches primary sidebar green */
         .${SCOPE} .icon{ color: var(--accent); }
         .${SCOPE} .icon--invert{ color: #00110b; }
+
+        /* Primary button (matches API Keys style) */
+        .${SCOPE} .btn-primary{
+          display:inline-flex;align-items:center;gap:.5rem;
+          padding:.5rem .85rem;border-radius:12px;
+          background:var(--accent); color:#00110b;
+          border:1px solid color-mix(in oklab, var(--accent) 38%, transparent);
+          box-shadow: 0 10px 24px color-mix(in oklab, var(--accent) 30%, transparent),
+                      inset 0 1px 0 rgba(255,255,255,.25);
+          font-weight:600; font-size:14px;
+          transition:background .15s ease, transform .15s ease, box-shadow .15s ease;
+        }
+        .${SCOPE} .btn-primary:hover{ background:${ACCENT_HOVER}; transform: translateY(-1px); }
+        .${SCOPE} .btn-sm{ padding:.40rem .7rem; font-size:12.5px; border-radius:10px; }
 
         /* Thin green sliders */
         .${SCOPE} .va-range{ -webkit-appearance:none; height:4px; background:color-mix(in oklab, var(--accent) 24%, #0000); border-radius:999px; outline:none; }
