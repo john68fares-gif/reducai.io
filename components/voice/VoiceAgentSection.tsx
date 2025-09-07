@@ -16,12 +16,21 @@ const ACCENT = '#10b981';
 const ACCENT_HOVER = '#0fb57a';
 const RAIL_W = 312;
 
-/** Use these CSS variables from your shell.
- *  --sidebar-w: left app sidebar width
- *  --header-h : global header height
- */
-const SBW = 'var(--sidebar-w, 260px)';
-const HDR = 'var(--header-h, 64px)';
+/** These should be defined by your app shell */
+const SBW = 'var(--sidebar-w, 260px)';  // main app sidebar width
+const HDR = 'var(--header-h, 64px)';    // global header height
+
+/* OpenAI logo (monochrome, inherits currentColor) */
+function OpenAIIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 256 256" width="16" height="16" aria-hidden>
+      <path
+        fill="currentColor"
+        d="M214.7 111.7c1.9-7.6 1.5-15.7-1.2-23.3-7.6-21.3-28.6-35.2-51.4-33.6-12.1-19.9-36.5-29-59-21.2-22.1 7.6-36.7 28.6-35.4 51.5-19.9 12.1-29 36.5-21.2 59 7.6 22.1 28.6 36.7 51.5 35.4 12.1 19.9 36.5 29 59 21.2 22.1-7.6 36.7-28.6 35.4-51.5 8.7-5.5 15.5-13.9 18.9-24.1ZM156 193.2c-9.2 3.2-19.2 2.7-28-1.4l17.4-30.1c4.8-.7 9.2-3.8 11.6-8.4 1.2-2.4 1.8-5 1.8-7.6v-40l27 15.6v28.6c0 17.1-10.7 32.8-29.8 43.3Zm-76.9-8.7c-9.2-5.2-16-13.2-19.6-23-3.6-10-3-20.4 1.2-29.7l27 15.6v16.1c0 4.9 2.6 9.4 6.7 11.9l31 17.9c-15.1 2.8-31-.1-46.3-8.8ZM62.8 92.5c5.2-9.2 13.2-16 23-19.6 10-3.6 20.4-3 29.7 1.2l-15.6 27H84c-4.9 0-9.4 2.6-11.9 6.7l-17.9 31c-2.8-15.1.1-31 8.8-46.3Zm118.4 5.1-31-17.9c-3.6-2.1-7.8-2.5-11.7-1.4-3.8 1.1-7 3.6-9.1 7.1l-17.5 30.3-27-15.6 16.6-28.7c9.7-16.7 31.1-22.4 48-12.7.6.3 1.1.7 1.7 1l30 17.3c-.7 7.4-.8 13.4 0 20.6Z"
+      />
+    </svg>
+  );
+}
 
 /* ============================================================================
    BASE STRUCTURE — your “main prompt” skeleton
@@ -180,16 +189,12 @@ function Select({ value, items, onChange, placeholder, leftIcon }: {
 /* ============================================================================
    PROMPT GEN HELPERS
 ============================================================================ */
-
-/** If prompt doesn't have your sections, start from BASE_PROMPT. */
 function ensureBase(prompt: string) {
   const hasIdentity = /\[Identity\]/i.test(prompt);
   const hasStyle = /\[Style\]/i.test(prompt);
   const hasTasks = /\[Task & Goals\]/i.test(prompt);
   return (hasIdentity && hasStyle && hasTasks) ? prompt : BASE_PROMPT;
 }
-
-/** Make sure [Data to Collect] lists Name/Phone/Appointment Date. */
 function ensureDataToCollect(prompt: string) {
   const hasBlock = /\[Data to Collect\]/i.test(prompt);
   const needsName  = !/Full Name/i.test(prompt);
@@ -216,8 +221,6 @@ function ensureDataToCollect(prompt: string) {
   const block = `\n\n[Data to Collect]\n- Full Name\n- Phone Number\n- Appointment Date`;
   return { next: prompt + block, additions: ['- Full Name','- Phone Number','- Appointment Date'] };
 }
-
-/** Insert refinements as a section (non-destructive). */
 function applyRefinement(prompt: string, refinement: string) {
   const clean = refinement.trim();
   if (!clean) return prompt;
@@ -232,13 +235,9 @@ function applyRefinement(prompt: string, refinement: string) {
   }
   return `${prompt}\n\n[Refinements]\n- ${clean.replace(/\s+/g, ' ')}`;
 }
-
-/** Cosmetic rewrite to feel “fresh”. */
 function rewrite(prompt: string) {
   return prompt.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
 }
-
-/** Very simple diff list (only adds/removals for preview). */
 function diffLines(oldStr: string, newStr: string) {
   const oldLines = oldStr.split('\n');
   const newLines = newStr.split('\n');
@@ -254,6 +253,10 @@ function diffLines(oldStr: string, newStr: string) {
 /* ============================================================================
    PAGE
 ============================================================================ */
+type VoiceItem = Item;
+const openaiVoices: VoiceItem[] = [{ value:'alloy', label:'Alloy (OpenAI)' }, { value:'ember', label:'Ember (OpenAI)' }];
+const elevenVoices: VoiceItem[] = [{ value:'rachel', label:'Rachel (ElevenLabs)' }, { value:'adam', label:'Adam (ElevenLabs)' }, { value:'bella', label:'Bella (ElevenLabs)' }];
+
 export default function VoiceAgentSection() {
   const [assistants, setAssistants] = useState<Assistant[]>([]);
   const [activeId, setActiveId] = useState('');
@@ -291,7 +294,7 @@ export default function VoiceAgentSection() {
     writeLS(LS_LIST, list); setAssistants(list);
   };
 
-  /** Blank new assistant (user said: not cloned). */
+  // create brand-new (not cloned)
   const addAssistant = () => {
     const id = `agent_${Math.random().toString(36).slice(2, 8)}`;
     const blank: Assistant = {
@@ -314,31 +317,21 @@ export default function VoiceAgentSection() {
     if (activeId === id) setActiveId(list[0]?.id ?? '');
   };
 
-  // --- Generate flow state ---
-  const [quickRefine, setQuickRefine] = useState('');       // small inline input by the button
+  // Generate / preview state
+  const [quickRefine, setQuickRefine] = useState('');
   const [editOpen, setEditOpen] = useState(false);
   const [previewTyping, setPreviewTyping] = useState('');
   const [previewFull, setPreviewFull] = useState('');
   const [diff, setDiff] = useState<{text:string;type:'add'|'del'}[]>([]);
   const [hasPending, setHasPending] = useState(false);
 
-  // Run generator with current/quickRefine
   const runGenerate = () => {
     if (!active) return;
-
-    // 1) Ensure we start from your structure when empty/invalid
     const base = ensureBase(active.config.model.systemPrompt || '');
-
-    // 2) Apply quick refinement (what user typed in the small box)
     const withRef = applyRefinement(base, quickRefine);
-
-    // 3) Guarantee Name / Phone / Appointment Date
     const ensured = ensureDataToCollect(withRef).next;
-
-    // 4) Cosmetic rewrite
     const rewritten = rewrite(ensured);
 
-    // 5) Diff + typing
     const d = diffLines(active.config.model.systemPrompt || '', rewritten);
     setDiff(d.filter(x => x.type === 'add' || x.type === 'del'));
     setPreviewFull(rewritten);
@@ -346,6 +339,7 @@ export default function VoiceAgentSection() {
     setPreviewTyping('');
     setEditOpen(true);
 
+    // typing
     const chars = [...rewritten];
     let i = 0;
     const step = () => {
@@ -365,23 +359,18 @@ export default function VoiceAgentSection() {
     setQuickRefine('');
   };
 
-  const openaiVoices: Item[] = [{ value:'alloy', label:'Alloy (OpenAI)' }, { value:'ember', label:'Ember (OpenAI)' }];
-  const elevenVoices: Item[] = [{ value:'rachel', label:'Rachel (ElevenLabs)' }, { value:'adam', label:'Adam (ElevenLabs)' }, { value:'bella', label:'Bella (ElevenLabs)' }];
-
   if (!active) return null;
   const visible = assistants.filter(a => a.name.toLowerCase().includes(query.trim().toLowerCase()));
 
   return (
     <div className={`${SCOPE}`} style={{ background:'var(--bg)', color:'var(--text)' }}>
-      {/* Everything sits to the right of the main sidebar */}
       <div className="flex w-full" style={{ marginLeft: SBW }}>
-        {/* =================== ASSISTANTS RAIL =================== */}
+        {/* Assistants rail (fixed, sits just under header) */}
         <aside
           className="hidden lg:flex flex-col"
           style={{
             position:'fixed',
             left: SBW,
-            /* IMPORTANT: sit just under the header (not inside it) */
             top: `calc(${HDR} + 6px)`,
             height: `calc(100vh - ( ${HDR} + 6px ))`,
             width: `${RAIL_W}px`,
@@ -441,9 +430,8 @@ export default function VoiceAgentSection() {
           </div>
         </aside>
 
-        {/* =================================== EDITOR =================================== */}
+        {/* Editor */}
         <main className="flex-1" style={{ paddingLeft: `${RAIL_W}px` }}>
-          {/* header spacer to stay under app header + rail offset */}
           <div style={{ height: `calc(${HDR} + 6px)` }} aria-hidden />
           <div className="px-6 py-4 flex items-center justify-between" style={{ borderBottom:'1px solid var(--va-border)', background:'var(--va-topbar)' }}>
             <div className="flex items-center gap-3">
@@ -466,7 +454,6 @@ export default function VoiceAgentSection() {
             </div>
           </div>
 
-          {/* wider canvas; small gap to rail */}
           <div className="mx-auto px-6 py-6 grid grid-cols-12 gap-7" style={{ maxWidth: '1680px' }}>
             <Section title="Model" icon={<FileText className="w-4 h-4 icon" />}>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
@@ -474,8 +461,8 @@ export default function VoiceAgentSection() {
                   <Select
                     value={active.config.model.provider}
                     onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, provider: v as Provider } } }))}
-                    items={[{ value:'openai', label:'OpenAI', icon:<OpenAIIcon /> }]}
-                    leftIcon={<OpenAIIcon />}
+                    items={[{ value:'openai', label:'OpenAI', icon:<OpenAIIcon className="w-4 h-4" /> }]}
+                    leftIcon={<OpenAIIcon className="w-4 h-4" />}
                   />
                 </Field>
                 <Field label="Model">
@@ -512,7 +499,6 @@ export default function VoiceAgentSection() {
                 <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
                   <div className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="w-4 h-4 icon" /> System Prompt</div>
                   <div className="flex items-center gap-2 flex-wrap">
-                    {/* small inline refine input */}
                     <input
                       value={quickRefine}
                       onChange={(e)=> setQuickRefine(e.target.value)}
@@ -555,10 +541,10 @@ export default function VoiceAgentSection() {
                       updateActive(a => ({ ...a, config:{ ...a.config, voice:{ provider: v as VoiceProvider, voiceId: first.value, voiceLabel: first.label } } }));
                     }}
                     items={[
-                      { value:'openai', label:'OpenAI', icon:<OpenAIIcon/> },
+                      { value:'openai', label:'OpenAI', icon:<OpenAIIcon className="w-4 h-4" /> },
                       { value:'elevenlabs', label:'ElevenLabs' },
                     ]}
-                    leftIcon={<OpenAIIcon />}
+                    leftIcon={<OpenAIIcon className="w-4 h-4" />}
                   />
                 </Field>
                 <Field label="Voice">
@@ -655,7 +641,7 @@ export default function VoiceAgentSection() {
         </main>
       </div>
 
-      {/* ======================== Generate / Preview Modal ======================== */}
+      {/* Generate / Preview Modal */}
       <AnimatePresence>
         {editOpen && (
           <motion.div className="fixed inset-0 z-[999] flex items-center justify-center p-4"
@@ -714,7 +700,7 @@ export default function VoiceAgentSection() {
         )}
       </AnimatePresence>
 
-      {/* ======================== THEME / STYLES ======================== */}
+      {/* THEME */}
       <style jsx global>{`
         .${SCOPE}{
           --accent:${ACCENT};
@@ -758,7 +744,6 @@ export default function VoiceAgentSection() {
 
         .${SCOPE} .icon{ color: var(--accent); }
 
-        /* Buttons styled like API Keys page (green/white) */
         .${SCOPE} .btn-primary{
           display:inline-flex;align-items:center;gap:.5rem;
           padding:.55rem .9rem;border-radius:12px;
@@ -781,7 +766,6 @@ export default function VoiceAgentSection() {
           font-weight:600; font-size:14px;
         }
 
-        /* Thin green sliders */
         .${SCOPE} .va-range{ -webkit-appearance:none; height:4px; background:color-mix(in oklab, var(--accent) 24%, #0000); border-radius:999px; outline:none; }
         .${SCOPE} .va-range::-webkit-slider-thumb{ -webkit-appearance:none; width:14px;height:14px;border-radius:50%;background:var(--accent); border:2px solid #fff; box-shadow:0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent); }
         .${SCOPE} .va-range::-moz-range-thumb{ width:14px;height:14px;border:0;border-radius:50%;background:var(--accent); box-shadow:0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent); }
@@ -828,7 +812,3 @@ function Section({ title, icon, children }:{ title: string; icon: React.ReactNod
     </div>
   );
 }
-
-/* Voice lists */
-const openaiVoices: Item[] = [{ value:'alloy', label:'Alloy (OpenAI)' }, { value:'ember', label:'Ember (OpenAI)' }];
-const elevenVoices: Item[] = [{ value:'rachel', label:'Rachel (ElevenLabs)' }, { value:'adam', label:'Adam (ElevenLabs)' }, { value:'bella', label:'Bella (ElevenLabs)' }];
