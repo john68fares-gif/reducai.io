@@ -6,14 +6,17 @@ import { createPortal } from 'react-dom';
 import {
   Sparkles, Building2, Languages as LangIcon, ChevronDown, Search, ArrowRight,
 } from 'lucide-react';
-import CountryDialSelect from '@/components/phone-numbers/CountryDialSelect';
 
+/* --- Button palette (kept) --- */
 const BTN_GREEN = '#59d9b3';
 const BTN_GREEN_HOVER = '#54cfa9';
 const BTN_DISABLED = '#2e6f63';
 
 type Props = { onNext?: () => void };
 
+/* =================================================================================
+   Step V1 — Voice Basics  (logic unchanged; Accent picker now matches Language UI)
+================================================================================= */
 export default function StepV1Basics({ onNext }: Props) {
   const [name, setName] = useState('');
   const [industry, setIndustry] = useState('');
@@ -60,46 +63,6 @@ export default function StepV1Basics({ onNext }: Props) {
     onNext?.();
   }
 
-  /* === react-select style override for the ACCENT picker (light + dark) === */
-  const accentStyles: any = {
-    control: (base: any, state: any) => ({
-      ...base,
-      background: 'var(--vs-input-bg)',
-      borderColor: state.isFocused ? 'var(--brand)' : 'var(--vs-input-border)',
-      boxShadow: 'var(--vs-input-shadow)',
-      minHeight: 42,
-      borderRadius: 14,
-      color: 'var(--text)',
-      '&:hover': { borderColor: state.isFocused ? 'var(--brand)' : 'var(--vs-input-border)' },
-    }),
-    singleValue: (base: any) => ({ ...base, color: 'var(--text)' }),
-    placeholder: (base: any) => ({ ...base, color: 'var(--text-muted)' }),
-    input: (base: any) => ({ ...base, color: 'var(--text)' }),
-    valueContainer: (base: any) => ({ ...base, paddingInline: 8 }),
-    indicatorsContainer: (base: any) => ({ ...base, color: 'var(--text-muted)' }),
-    dropdownIndicator: (base: any) => ({ ...base, color: 'var(--text-muted)' }),
-    clearIndicator: (base: any) => ({ ...base, color: 'var(--text-muted)' }),
-    menuPortal: (base: any) => ({ ...base, zIndex: 9999 }),
-    menu: (base: any) => ({
-      ...base,
-      background: 'var(--vs-menu-bg)',
-      border: '1px solid var(--vs-menu-border)',
-      boxShadow: 'var(--vs-menu-shadow)',
-      borderRadius: 16,
-      overflow: 'hidden',
-    }),
-    menuList: (base: any) => ({ ...base, padding: 6, maxHeight: 420 }),
-    option: (base: any, state: any) => ({
-      ...base,
-      color: 'var(--text)',
-      borderRadius: 10,
-      margin: 2,
-      backgroundColor: state.isSelected || state.isFocused ? 'var(--vs-option-hover)' : 'transparent',
-      border: `1px solid ${state.isSelected || state.isFocused ? 'var(--vs-option-border)' : 'transparent'}`,
-      ':active': { backgroundColor: 'var(--vs-option-hover)' },
-    }),
-  };
-
   return (
     <section className="relative voice-step-scope">
       {/* Header */}
@@ -121,20 +84,16 @@ export default function StepV1Basics({ onNext }: Props) {
 
       {/* Form Card */}
       <div
-        className="relative p-6 sm:p-8 rounded-[28px] animate-[popIn_180ms_var(--ease,_ease-out)_both] glow-spot"
-        style={{
-          background: 'var(--vs-card)',
-          border: '1px solid var(--vs-border)',
-          boxShadow: 'var(--vs-shadow)',
-        }}
+        className="relative p-6 sm:p-8 rounded-[28px] animate-[popIn_180ms_var(--ease,_ease-out)_both]"
+        style={{ background: 'var(--vs-card)', border: '1px solid var(--vs-border)', boxShadow: 'var(--vs-shadow)' }}
       >
         <div
           aria-hidden
           className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
           style={{ background: 'radial-gradient(circle, var(--vs-ring) 0%, transparent 70%)', filter: 'blur(38px)' }}
         />
-
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Name */}
           <FieldShell label="Agent Name" error={errors.name}>
             <div className="flex items-center gap-2">
               <Sparkles className="w-4 h-4" style={{ color: 'var(--brand)' }} />
@@ -148,6 +107,7 @@ export default function StepV1Basics({ onNext }: Props) {
             </div>
           </FieldShell>
 
+          {/* Industry */}
           <FieldShell label="Industry" error={errors.industry}>
             <div className="flex items-center gap-2">
               <Building2 className="w-4 h-4" style={{ color: 'var(--brand)' }} />
@@ -161,27 +121,25 @@ export default function StepV1Basics({ onNext }: Props) {
             </div>
           </FieldShell>
 
-          {/* Language (unchanged) */}
+          {/* Language (kept as-is) */}
           <FieldShell label="Language" error={errors.language}>
             <LanguageSelect value={language} onChange={setLanguage} />
           </FieldShell>
 
-          {/* Accent — SAME look as Language by forcing react-select styles */}
+          {/* Accent — now same UI as LanguageSelect */}
           <FieldShell
-            label={<>Dialect / Accent <span className="text-xs" style={{ color: 'var(--text-muted)' }}>(choose country)</span></>}
+            label={
+              <>
+                Dialect / Accent <span className="text-xs" style={{ color: 'var(--text-muted)' }}>(choose country)</span>
+              </>
+            }
             error={errors.accent}
           >
-            <CountryDialSelect
-              id="voice-accent"
-              value={accentIso2}
-              onChange={(iso2 /* , dial */) => setAccentIso2(iso2.toUpperCase())}
-              classNamePrefix="accent"
-              styles={accentStyles}
-              menuPortalTarget={typeof document !== 'undefined' ? document.body : undefined}
-            />
+            <AccentSelect value={accentIso2} onChange={(v) => setAccentIso2(v.toUpperCase())} />
           </FieldShell>
         </div>
 
+        {/* Actions */}
         <div className="mt-8 flex justify-end">
           <button
             disabled={!canNext}
@@ -206,7 +164,7 @@ export default function StepV1Basics({ onNext }: Props) {
         </div>
       </div>
 
-      {/* Theme tokens used by both controls */}
+      {/* Step-scoped theme tokens (light + dark) */}
       <style jsx global>{`
         @keyframes popIn { 0% { opacity: 0; transform: scale(.985); } 100% { opacity: 1; transform: scale(1); } }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
@@ -292,7 +250,7 @@ function FieldShell({
   );
 }
 
-/* ---------------------------- LanguageSelect (unchanged) ---------------------------- */
+/* ---------------------------- LanguageSelect (kept) ---------------------------- */
 function LanguageSelect({
   value,
   onChange,
@@ -300,16 +258,7 @@ function LanguageSelect({
   value: 'English' | 'Spanish' | 'French' | 'Arabic' | 'German' | 'Portuguese' | 'Chinese' | 'Japanese';
   onChange: (v: any) => void;
 }) {
-  const options = [
-    'English',
-    'Spanish',
-    'French',
-    'Arabic',
-    'German',
-    'Portuguese',
-    'Chinese',
-    'Japanese',
-  ] as const;
+  const options = ['English','Spanish','French','Arabic','German','Portuguese','Chinese','Japanese'] as const;
 
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -402,7 +351,7 @@ function LanguageSelect({
                     className="w-full flex items-center gap-3 px-3 py-2 rounded-[10px] text-left transition"
                     style={{ background: 'transparent', border: '1px solid transparent', color: 'var(--text)' }}
                     onMouseEnter={(e) => {
-                      (e.currentTarget as HTMLButtonElement).style.background = 'var(--vs-option-hover)';
+                      (e.currentTarget as HTMLButtonButtonElement).style.background = 'var(--vs-option-hover)';
                       (e.currentTarget as HTMLButtonElement).style.border = '1px solid var(--vs-option-border)';
                     }}
                     onMouseLeave={(e) => {
@@ -412,6 +361,202 @@ function LanguageSelect({
                   >
                     <LangIcon className="w-4 h-4" style={{ color: 'var(--brand)' }} />
                     <span className="flex-1">{opt}</span>
+                  </button>
+                ))}
+                {filtered.length === 0 && (
+                  <div className="px-3 py-6 text-sm" style={{ color: 'var(--text-muted)' }}>
+                    No matches.
+                  </div>
+                )}
+              </div>
+            </div>,
+            document.body
+          )
+        : null}
+    </>
+  );
+}
+
+/* ---------------------------- AccentSelect (NEW) ---------------------------- */
+type Country = { iso2: string; name: string; dial: string };
+const COUNTRIES: Country[] = [
+  { iso2: 'US', name: 'United States', dial: '+1' },
+  { iso2: 'CA', name: 'Canada', dial: '+1' },
+  { iso2: 'GB', name: 'United Kingdom', dial: '+44' },
+  { iso2: 'AU', name: 'Australia', dial: '+61' },
+  { iso2: 'NZ', name: 'New Zealand', dial: '+64' },
+  { iso2: 'IE', name: 'Ireland', dial: '+353' },
+  { iso2: 'DE', name: 'Germany', dial: '+49' },
+  { iso2: 'FR', name: 'France', dial: '+33' },
+  { iso2: 'ES', name: 'Spain', dial: '+34' },
+  { iso2: 'IT', name: 'Italy', dial: '+39' },
+  { iso2: 'PT', name: 'Portugal', dial: '+351' },
+  { iso2: 'NL', name: 'Netherlands', dial: '+31' },
+  { iso2: 'BE', name: 'Belgium', dial: '+32' },
+  { iso2: 'SE', name: 'Sweden', dial: '+46' },
+  { iso2: 'NO', name: 'Norway', dial: '+47' },
+  { iso2: 'DK', name: 'Denmark', dial: '+45' },
+  { iso2: 'FI', name: 'Finland', dial: '+358' },
+  { iso2: 'CH', name: 'Switzerland', dial: '+41' },
+  { iso2: 'AT', name: 'Austria', dial: '+43' },
+  { iso2: 'PL', name: 'Poland', dial: '+48' },
+  { iso2: 'CZ', name: 'Czechia', dial: '+420' },
+  { iso2: 'HU', name: 'Hungary', dial: '+36' },
+  { iso2: 'RO', name: 'Romania', dial: '+40' },
+  { iso2: 'GR', name: 'Greece', dial: '+30' },
+  { iso2: 'TR', name: 'Türkiye', dial: '+90' },
+  { iso2: 'RU', name: 'Russia', dial: '+7' },
+  { iso2: 'UA', name: 'Ukraine', dial: '+380' },
+  { iso2: 'CN', name: 'China', dial: '+86' },
+  { iso2: 'JP', name: 'Japan', dial: '+81' },
+  { iso2: 'KR', name: 'South Korea', dial: '+82' },
+  { iso2: 'HK', name: 'Hong Kong', dial: '+852' },
+  { iso2: 'TW', name: 'Taiwan', dial: '+886' },
+  { iso2: 'SG', name: 'Singapore', dial: '+65' },
+  { iso2: 'MY', name: 'Malaysia', dial: '+60' },
+  { iso2: 'TH', name: 'Thailand', dial: '+66' },
+  { iso2: 'VN', name: 'Vietnam', dial: '+84' },
+  { iso2: 'PH', name: 'Philippines', dial: '+63' },
+  { iso2: 'IN', name: 'India', dial: '+91' },
+  { iso2: 'PK', name: 'Pakistan', dial: '+92' },
+  { iso2: 'BD', name: 'Bangladesh', dial: '+880' },
+  { iso2: 'AE', name: 'United Arab Emirates', dial: '+971' },
+  { iso2: 'SA', name: 'Saudi Arabia', dial: '+966' },
+  { iso2: 'QA', name: 'Qatar', dial: '+974' },
+  { iso2: 'KW', name: 'Kuwait', dial: '+965' },
+  { iso2: 'EG', name: 'Egypt', dial: '+20' },
+  { iso2: 'ZA', name: 'South Africa', dial: '+27' },
+  { iso2: 'NG', name: 'Nigeria', dial: '+234' },
+  { iso2: 'KE', name: 'Kenya', dial: '+254' },
+  { iso2: 'BR', name: 'Brazil', dial: '+55' },
+  { iso2: 'AR', name: 'Argentina', dial: '+54' },
+  { iso2: 'CL', name: 'Chile', dial: '+56' },
+  { iso2: 'CO', name: 'Colombia', dial: '+57' },
+  { iso2: 'MX', name: 'Mexico', dial: '+52' },
+  // (You can extend this list or import a shared country dataset)
+];
+
+function AccentSelect({
+  value,
+  onChange,
+}: {
+  value: string; // ISO2
+  onChange: (iso2: string) => void;
+}) {
+  const current = COUNTRIES.find((c) => c.iso2 === value) || COUNTRIES[0];
+
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const btnRef = useRef<HTMLButtonElement | null>(null);
+  const portalRef = useRef<HTMLDivElement | null>(null);
+  const [rect, setRect] = useState<{ top: number; left: number; width: number; openUp: boolean } | null>(null);
+
+  const norm = (s: string) => s.toLowerCase();
+  const filtered = COUNTRIES.filter(
+    (c) =>
+      norm(c.name).includes(norm(query)) ||
+      norm(c.iso2).includes(norm(query)) ||
+      c.dial.replace('+', '').startsWith(query.replace('+', ''))
+  );
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    const r = btnRef.current?.getBoundingClientRect();
+    if (!r) return;
+    const viewH = window.innerHeight;
+    const openUp = r.bottom + 420 > viewH;
+    setRect({ top: openUp ? r.top : r.bottom, left: r.left, width: r.width, openUp });
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (e: MouseEvent) => {
+      if (btnRef.current?.contains(e.target as Node) || portalRef.current?.contains(e.target as Node)) return;
+      setOpen(false);
+    };
+    window.addEventListener('mousedown', onClick);
+    return () => window.removeEventListener('mousedown', onClick);
+  }, [open]);
+
+  return (
+    <>
+      {/* trigger — identical to LanguageSelect */}
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-[14px] text-sm transition will-change-transform"
+        style={{
+          background: 'var(--vs-input-bg)',
+          border: '1px solid var(--vs-input-border)',
+          boxShadow: 'var(--vs-input-shadow)',
+          color: 'var(--text)',
+        }}
+      >
+        <span className="flex items-center gap-2">
+          <LangIcon className="w-4 h-4" style={{ color: 'var(--brand)' }} />
+          <span className="truncate">
+            {current?.iso2 || value} {current ? ` ${current.name} (${current.dial})` : ''}
+          </span>
+        </span>
+        <ChevronDown className="w-4 h-4 opacity-80" style={{ color: 'var(--text-muted)' }} />
+      </button>
+
+      {/* dropdown portal — identical shell */}
+      {open && rect && typeof document !== 'undefined'
+        ? createPortal(
+            <div
+              ref={portalRef}
+              className="fixed z-[9999] p-3 animate-[popIn_140ms_ease-out]"
+              style={{
+                top: rect.openUp ? rect.top - 8 : rect.top + 8,
+                left: rect.left,
+                width: rect.width,
+                transform: rect.openUp ? 'translateY(-100%)' : 'none',
+                background: 'var(--vs-menu-bg)',
+                border: '1px solid var(--vs-menu-border)',
+                borderRadius: 20,
+                boxShadow: 'var(--vs-menu-shadow)',
+              }}
+            >
+              <div
+                className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[12px]"
+                style={{
+                  background: 'var(--vs-input-bg)',
+                  border: '1px solid var(--vs-input-border)',
+                  boxShadow: 'var(--vs-input-shadow)',
+                  color: 'var(--text)',
+                }}
+              >
+                <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Type country or +code…"
+                  className="w-full bg-transparent outline-none text-sm"
+                  style={{ color: 'var(--text)' }}
+                />
+              </div>
+
+              <div className="max-h-96 overflow-y-auto pr-1" style={{ scrollbarWidth: 'thin' }}>
+                {filtered.map((c) => (
+                  <button
+                    key={c.iso2}
+                    onClick={() => { onChange(c.iso2); setOpen(false); }}
+                    className="w-full flex items-center gap-3 px-3 py-2 rounded-[10px] text-left transition"
+                    style={{ background: 'transparent', border: '1px solid transparent', color: 'var(--text)' }}
+                    onMouseEnter={(e) => {
+                      (e.currentTarget as HTMLButtonElement).style.background = 'var(--vs-option-hover)';
+                      (e.currentTarget as HTMLButtonElement).style.border = '1px solid var(--vs-option-border)';
+                    }}
+                    onMouseLeave={(e) => {
+                      (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
+                      (e.currentTarget as HTMLButtonElement).style.border = '1px solid transparent';
+                    }}
+                  >
+                    <span className="w-10 text-xs opacity-80">{c.iso2}</span>
+                    <span className="flex-1 truncate">{c.name}</span>
+                    <span className="text-xs opacity-70">{c.dial}</span>
                   </button>
                 ))}
                 {filtered.length === 0 && (
