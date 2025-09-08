@@ -6,20 +6,20 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search, Plus, Folder, FolderOpen, Check, Trash2, Copy, Edit3, Sparkles,
   ChevronDown, ChevronRight, FileText, Mic2, BookOpen, SlidersHorizontal,
-  PanelLeft, Bot, UploadCloud, RefreshCw, X, ChevronsLeft, ChevronsRight
+  PanelLeft, Bot, UploadCloud, RefreshCw, X, ChevronLeft, ChevronRight as ChevronRightIcon
 } from 'lucide-react';
 
 /* =============================================================================
-   CONFIG
+   CONFIG / TOKENS
 ============================================================================= */
 const SCOPE = 'va-scope';
 const ACCENT = '#10b981';
 const ACCENT_HOVER = '#0ea371';
 const BTN_SHADOW = '0 10px 24px rgba(16,185,129,.22)';
 
-/* typing animation (fast) */
-const TICK_MS = 10;
-const CHUNK_SIZE = 6;
+/* Typing speed (fast) */
+const TICK_MS = 10;        // interval for typing
+const CHUNK_SIZE = 6;      // chars per tick
 
 /* =============================================================================
    TYPES + STORAGE
@@ -49,6 +49,7 @@ type Assistant = {
 
 const LS_LIST = 'voice:assistants.v1';
 const ak = (id: string) => `voice:assistant:${id}`;
+
 const readLS = <T,>(k: string): T | null => { try { const r = localStorage.getItem(k); return r ? JSON.parse(r) as T : null; } catch { return null; } };
 const writeLS = <T,>(k: string, v: T) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 
@@ -136,21 +137,24 @@ function makeNewPromptFrom(input: string, current: string): string {
 }
 
 /* =============================================================================
-   DIFF (character-level; deletions omitted during live typing)
+   DIFF (character-level, preserve newlines). We show only *added* chars green.
 ============================================================================= */
 type CharTok = { ch: string; added: boolean };
+
 function charDiffAdded(oldStr: string, newStr: string): CharTok[] {
   const o = [...oldStr];
   const n = [...newStr];
   const dp: number[][] = Array(o.length + 1).fill(0).map(() => Array(n.length + 1).fill(0));
-  for (let i = o.length - 1; i >= 0; i--) for (let j = n.length - 1; j >= 0; j--) {
-    dp[i][j] = o[i] === n[j] ? 1 + dp[i + 1][j + 1] : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  for (let i = o.length - 1; i >= 0; i--) {
+    for (let j = n.length - 1; j >= 0; j--) {
+      dp[i][j] = o[i] === n[j] ? 1 + dp[i + 1][j + 1] : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
   }
   const out: CharTok[] = [];
   let i = 0, j = 0;
   while (i < o.length && j < n.length) {
     if (o[i] === n[j]) { out.push({ ch: n[j], added: false }); i++; j++; }
-    else if (dp[i + 1][j] >= dp[i][j + 1]) { i++; } // deletion => skip
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { i++; } // deletion (skip)
     else { out.push({ ch: n[j], added: true }); j++; }
   }
   while (j < n.length) out.push({ ch: n[j++], added: true });
@@ -158,39 +162,41 @@ function charDiffAdded(oldStr: string, newStr: string): CharTok[] {
 }
 
 /* =============================================================================
-   DELETE MODAL
-============================================================================= */
-function DeleteModal({ open, name, onCancel, onConfirm }:{
-  open: boolean; name: string; onCancel: () => void; onConfirm: () => void;
-}) {
-  if (!open) return null;
-  return (
-    <motion.div className="fixed inset-0 z-[9998] flex items-center justify-center p-4"
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      style={{ background:'rgba(0,0,0,.55)' }}>
-      <motion.div initial={{ y: 10, opacity: .9, scale:.98 }} animate={{ y:0, opacity:1, scale:1 }}
-        className="w-full max-w-md rounded-2xl"
-        style={{ background:'var(--va-card)', border:'1px solid var(--va-border)', boxShadow:'var(--va-shadow-lg)' }}>
-        <div className="px-5 py-4 flex items-center justify-between" style={{ borderBottom:'1px solid var(--va-border)' }}>
-          <div className="text-sm font-semibold" style={{ color:'var(--text)' }}>Delete Assistant</div>
-          <button onClick={onCancel} className="p-2 rounded-lg hover:opacity-80"><X className="w-4 h-4 icon" /></button>
-        </div>
-        <div className="px-5 py-4 text-sm" style={{ color:'var(--text-muted)' }}>
-          Are you sure you want to delete <span style={{ color:'var(--text)' }}>&ldquo;{name}&rdquo;</span>? This cannot be undone.
-        </div>
-        <div className="px-5 pb-5 flex gap-2 justify-end">
-          <button onClick={onCancel} className="btn--ghost">Cancel</button>
-          <button onClick={onConfirm} className="btn--danger"><Trash2 className="w-4 h-4" /> Delete</button>
-        </div>
-      </motion.div>
-    </motion.div>
-  );
-}
-
-/* =============================================================================
    PAGE
 ============================================================================= */
 export default function VoiceAgentSection() {
+  /* ---------- Sync with APP sidebar collapse ---------- */
+  const scopeRef = useRef<HTMLDivElement | null>(null);
+  const [sbCollapsed, setSbCollapsed] = useState<boolean>(() => {
+    if (typeof document === 'undefined') return false;
+    return document.body.getAttribute('data-sb-collapsed') === 'true';
+  });
+
+  useEffect(() => {
+    // 1) Listen for a custom app event if you dispatch one: window.dispatchEvent(new CustomEvent('layout:sidebar', { detail: { collapsed: true } }))
+    const onEvt = (e: Event) => {
+      const detail = (e as CustomEvent).detail || {};
+      if (typeof detail.collapsed === 'boolean') setSbCollapsed(!!detail.collapsed);
+    };
+    window.addEventListener('layout:sidebar', onEvt as EventListener);
+
+    // 2) Fallback: observe body[data-sb-collapsed]
+    const mo = new MutationObserver(() => {
+      setSbCollapsed(document.body.getAttribute('data-sb-collapsed') === 'true');
+    });
+    mo.observe(document.body, { attributes: true, attributeFilter: ['data-sb-collapsed', 'class'] });
+
+    return () => { window.removeEventListener('layout:sidebar', onEvt as EventListener); mo.disconnect(); };
+  }, []);
+
+  // Push the app's current sidebar width into our scope CSS vars
+  useEffect(() => {
+    if (!scopeRef.current) return;
+    const el = scopeRef.current;
+    // If your app sets a CSS var for width, this is unnecessary. We mirror a sensible value:
+    el.style.setProperty('--app-sidebar-w', sbCollapsed ? '72px' : '248px');
+  }, [sbCollapsed]);
+
   /* ---------- Assistants ---------- */
   const [assistants, setAssistants] = useState<Assistant[]>([]);
   const [activeId, setActiveId] = useState('');
@@ -231,7 +237,6 @@ export default function VoiceAgentSection() {
     writeLS(LS_LIST, list); setAssistants(list);
   };
 
-  /* ---------- Create ---------- */
   const [creating, setCreating] = useState(false);
   const addAssistant = async () => {
     setCreating(true);
@@ -261,6 +266,9 @@ export default function VoiceAgentSection() {
     if (activeId === id && list.length) setActiveId(list[0].id);
     if (!list.length) setActiveId('');
   };
+
+  /* ---------- Rail collapse/expand (manual) ---------- */
+  const [railCollapsed, setRailCollapsed] = useState(false);
 
   /* ---------- Generate (live type + accept/decline) ---------- */
   const [genOpen, setGenOpen] = useState(false);
@@ -297,7 +305,7 @@ export default function VoiceAgentSection() {
     const current = active.config.model.systemPrompt || '';
     const next = makeNewPromptFrom(genText, current);
     setLastNew(next);
-    startTyping(charDiffAdded(current, next));
+    startTyping(charDiffAdded(current, next)); // live retype; deletions omitted, additions green
     setGenOpen(false);
     setGenText('');
   };
@@ -309,34 +317,16 @@ export default function VoiceAgentSection() {
   };
   const declineTyping = () => setTyping(null);
 
-  /* ---------- Rail collapse (sync with app sidebar) ---------- */
-  const [railCollapsed, setRailCollapsed] = useState(false);
-  const scopeRef = useRef<HTMLDivElement | null>(null);
-
-  // listen to app's collapse signal: either body attr or event
-  useEffect(() => {
-    const root = document.documentElement;
-
-    const applyFromBody = () => {
-      const collapsed = root.getAttribute('data-sb-collapsed') === '1';
-      // if the app updates --app-sidebar-w, our layout already uses it;
-      // this hook only auto-collapses the rail a bit to free space on iPad.
-      if (collapsed) scopeRef.current?.style.setProperty('--va-rail-w', '300px');
-      else scopeRef.current?.style.setProperty('--va-rail-w', '360px');
-    };
-    applyFromBody();
-
-    const onCustom = (e: Event) => {
-      const det = (e as CustomEvent).detail as boolean;
-      scopeRef.current?.style.setProperty('--va-rail-w', det ? '300px' : '360px');
-    };
-    window.addEventListener('app:sidebar-collapsed', onCustom);
-
-    const mo = new MutationObserver(applyFromBody);
-    mo.observe(root, { attributes: true, attributeFilter: ['data-sb-collapsed', 'class', 'style'] });
-
-    return () => { window.removeEventListener('app:sidebar-collapsed', onCustom); mo.disconnect(); };
-  }, []);
+  /* ---------- Voices (static options) ---------- */
+  const openaiVoices = [
+    { value: 'alloy', label: 'Alloy (OpenAI)' },
+    { value: 'ember', label: 'Ember (OpenAI)' },
+  ];
+  const elevenVoices = [
+    { value: 'rachel', label: 'Rachel (ElevenLabs)' },
+    { value: 'adam',   label: 'Adam (ElevenLabs)'   },
+    { value: 'bella',  label: 'Bella (ElevenLabs)'  },
+  ];
 
   if (!active) {
     return (
@@ -362,15 +352,16 @@ export default function VoiceAgentSection() {
   };
 
   return (
-    <div ref={scopeRef} className={`${SCOPE}${railCollapsed ? ' va-collapsed' : ''}`} style={{ background:'var(--bg)', color:'var(--text)' }}>
-      {/* ================= ASSISTANT RAIL ================= */}
+    <div ref={scopeRef} className={SCOPE} style={{ background:'var(--bg)', color:'var(--text)' }}>
+      {/* ================= ASSISTANTS RAIL ================= */}
       <aside
         className="hidden lg:flex flex-col"
+        data-collapsed={railCollapsed ? 'true' : 'false'}
         style={{
           position:'fixed',
           left:'var(--app-sidebar-w, 248px)',
           top:'var(--app-header-h, 64px)',
-          width:'var(--va-rail-w, 360px)',
+          width: railCollapsed ? '72px' : 'var(--va-rail-w, 360px)',
           height:'calc(100vh - var(--app-header-h, 64px))',
           borderRight:'1px solid var(--va-border)',
           background:'var(--va-sidebar)',
@@ -380,47 +371,73 @@ export default function VoiceAgentSection() {
       >
         <div className="px-3 py-3 flex items-center justify-between" style={{ borderBottom:'1px solid var(--va-border)' }}>
           <div className="flex items-center gap-2 text-sm font-semibold">
-            <PanelLeft className="w-4 h-4 icon" /> <span className="va-hide-when-collapsed">Assistants</span>
+            <PanelLeft className="w-4 h-4 icon" />
+            {!railCollapsed && <span>Assistants</span>}
           </div>
-          <div className="flex items-center gap-1">
-            <button onClick={addAssistant} className="btn--green px-3 py-1.5 text-xs rounded-lg va-hide-when-collapsed">
-              {creating ? <span className="w-3.5 h-3.5 rounded-full border-2 border-white/50 border-t-transparent animate-spin" /> : <Plus className="w-3.5 h-3.5 text-white" />}
-              <span className="text-white">{creating ? 'Creating…' : 'Create'}</span>
-            </button>
+          <div className="flex items-center gap-2">
+            {!railCollapsed && (
+              <button onClick={addAssistant} className="btn--green px-3 py-1.5 text-xs rounded-lg">
+                {creating ? <span className="w-3.5 h-3.5 rounded-full border-2 border-white/50 border-t-transparent animate-spin" /> : <Plus className="w-3.5 h-3.5 text-white" />}
+                <span className="text-white">{creating ? 'Creating…' : 'Create'}</span>
+              </button>
+            )}
             <button
-              aria-label="Toggle assistants rail"
-              onClick={()=> setRailCollapsed(v=>!v)}
-              className="btn--ghost px-2 py-1.5"
               title={railCollapsed ? 'Expand assistants' : 'Collapse assistants'}
+              className="btn--ghost px-2 py-1"
+              onClick={() => setRailCollapsed(v => !v)}
             >
-              {railCollapsed ? <ChevronsRight className="w-4 h-4 icon" /> : <ChevronsLeft className="w-4 h-4 icon" />}
+              {railCollapsed ? <ChevronRightIcon className="w-4 h-4 icon" /> : <ChevronLeft className="w-4 h-4 icon" />}
             </button>
           </div>
         </div>
 
         <div className="p-3 min-h-0 flex-1 overflow-y-auto" style={{ scrollbarWidth:'thin' }}>
-          <div className="flex items-center gap-2 rounded-lg px-2.5 py-2 mb-2 va-hide-when-collapsed"
-            style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)' }}>
-            <Search className="w-4 h-4 icon" />
-            <input value={query} onChange={(e)=> setQuery(e.target.value)} placeholder="Search assistants"
-                   className="w-full bg-transparent outline-none text-sm" style={{ color:'var(--text)' }}/>
-          </div>
+          {!railCollapsed && (
+            <div className="flex items-center gap-2 rounded-lg px-2.5 py-2 mb-2"
+              style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)' }}>
+              <Search className="w-4 h-4 icon" />
+              <input value={query} onChange={(e)=> setQuery(e.target.value)} placeholder="Search assistants"
+                    className="w-full bg-transparent outline-none text-sm" style={{ color:'var(--text)' }}/>
+            </div>
+          )}
 
-          <div className="text-xs font-semibold flex items-center gap-2 mt-3 mb-1 va-hide-when-collapsed" style={{ color:'var(--text-muted)' }}>
-            <Folder className="w-3.5 h-3.5 icon" /> Folders
-          </div>
-          <button className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/5 va-hide-when-collapsed">
-            <FolderOpen className="w-4 h-4 icon" /> All
-          </button>
+          {!railCollapsed && (
+            <>
+              <div className="text-xs font-semibold flex items-center gap-2 mt-3 mb-1" style={{ color:'var(--text-muted)' }}>
+                <Folder className="w-3.5 h-3.5 icon" /> Folders
+              </div>
+              <button className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/5">
+                <FolderOpen className="w-4 h-4 icon" /> All
+              </button>
+            </>
+          )}
 
           <div className="mt-4 space-y-2">
             {visible.map(a => {
               const isActive = a.id === activeId;
               const isEdit = editingId === a.id;
+              if (railCollapsed) {
+                // icon-only button
+                return (
+                  <button
+                    key={a.id}
+                    onClick={()=> setActiveId(a.id)}
+                    className="w-full rounded-xl p-3 grid place-items-center"
+                    style={{
+                      background: isActive ? 'color-mix(in oklab, var(--accent) 10%, transparent)' : 'var(--va-card)',
+                      border: `1px solid ${isActive ? 'color-mix(in oklab, var(--accent) 35%, var(--va-border))' : 'var(--va-border)'}`,
+                      boxShadow:'var(--va-shadow-sm)'
+                    }}
+                    title={a.name}
+                  >
+                    <Bot className="w-4 h-4 icon" />
+                  </button>
+                );
+              }
               return (
                 <div
                   key={a.id}
-                  className="w-full rounded-xl p-3 va-item"
+                  className="w-full rounded-xl p-3"
                   style={{
                     background: isActive ? 'color-mix(in oklab, var(--accent) 10%, transparent)' : 'var(--va-card)',
                     border: `1px solid ${isActive ? 'color-mix(in oklab, var(--accent) 35%, var(--va-border))' : 'var(--va-border)'}`,
@@ -428,14 +445,12 @@ export default function VoiceAgentSection() {
                   }}
                 >
                   <button className="w-full text-left flex items-center justify-between"
-                          onClick={()=> setActiveId(a.id)} title={a.name}>
-                    <div className="min-w-0 flex items-center gap-2">
-                      <div className="w-6 h-6 rounded-lg grid place-items-center" style={{ background:'var(--va-chip)' }}>
+                          onClick={()=> setActiveId(a.id)}>
+                    <div className="min-w-0">
+                      <div className="font-medium truncate flex items-center gap-2">
                         <Bot className="w-4 h-4 icon" />
-                      </div>
-                      <div className="va-hide-when-collapsed min-w-0">
                         {!isEdit ? (
-                          <div className="font-medium truncate">{a.name}</div>
+                          <span className="truncate">{a.name}</span>
                         ) : (
                           <input
                             autoFocus
@@ -446,16 +461,16 @@ export default function VoiceAgentSection() {
                             style={{ border:'1px solid var(--va-input-border)', color:'var(--text)' }}
                           />
                         )}
-                        <div className="text-[11px] mt-0.5 opacity-70 truncate">{a.folder || 'Unfiled'} • {new Date(a.updatedAt).toLocaleDateString()}</div>
                       </div>
-                      {isActive ? <Check className="w-4 h-4 icon va-hide-when-collapsed" /> : null}
+                      <div className="text-[11px] mt-0.5 opacity-70 truncate">{a.folder || 'Unfiled'} • {new Date(a.updatedAt).toLocaleDateString()}</div>
                     </div>
+                    {isActive ? <Check className="w-4 h-4 icon" /> : null}
                   </button>
 
-                  <div className="mt-2 flex items-center gap-2 va-hide-when-collapsed">
+                  <div className="mt-2 flex items-center gap-2">
                     {!isEdit ? (
                       <>
-                        <button onClick={(e)=> { e.stopPropagation(); setEditingId(a.id); setTempName(a.name); }} className="btn--ghost text-xs px-2 py-1"><Edit3 className="w-3.5 h-3.5 icon" /> Rename</button>
+                        <button onClick={(e)=> { e.stopPropagation(); beginRename(a); }} className="btn--ghost text-xs px-2 py-1"><Edit3 className="w-3.5 h-3.5 icon" /> Rename</button>
                         <button onClick={(e)=> { e.stopPropagation(); setDeleting({ id:a.id, name:a.name }); }} className="btn--danger text-xs px-2 py-1"><Trash2 className="w-3.5 h-3.5" /> Delete</button>
                       </>
                     ) : (
@@ -476,7 +491,7 @@ export default function VoiceAgentSection() {
       <div
         className="va-main"
         style={{
-          marginLeft:'calc(var(--app-sidebar-w, 248px) + var(--va-rail-w, 360px))',
+          marginLeft:`calc(var(--app-sidebar-w, 248px) + ${railCollapsed ? '72px' : 'var(--va-rail-w, 360px)'})`,
           paddingRight:'clamp(20px, 4vw, 40px)',
           paddingTop:'calc(var(--app-header-h, 64px) + 12px)',
           paddingBottom:'88px'
@@ -497,9 +512,10 @@ export default function VoiceAgentSection() {
         </div>
 
         {/* content body — WIDER */}
-        <div className="mx-auto grid grid-cols-12 gap-10" style={{ maxWidth:'min(2400px, 98vw)' }}>
+        <div className="mx-auto grid grid-cols-12 gap-10"
+             style={{ maxWidth:'min(2400px, 98vw)' }}>
           <Section title="Model" icon={<FileText className="w-4 h-4 icon" />}>
-            <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(4, minmax(380px, 1fr))' }}>
+            <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(4, minmax(360px, 1fr))' }}>
               <Field label="Provider">
                 <Select
                   value={active.config.model.provider}
@@ -551,7 +567,7 @@ export default function VoiceAgentSection() {
                 </div>
               </div>
 
-              {/* PROMPT BOX */}
+              {/* PROMPT BOX: either textarea, or live typing preview with Accept/Decline */}
               {!typing ? (
                 <textarea
                   rows={26}
@@ -580,6 +596,7 @@ export default function VoiceAgentSection() {
                       overflowY:'auto'
                     }}
                   >
+                    {/* render typed characters; added ones in green */}
                     {(() => {
                       const slice = typing.slice(0, typedCount);
                       const out: JSX.Element[] = [];
@@ -587,11 +604,18 @@ export default function VoiceAgentSection() {
                       let added = slice.length ? slice[0].added : false;
                       slice.forEach((t, i) => {
                         if (t.added !== added) {
-                          out.push(added ? <ins key={`ins-${i}`} style={{ background:'rgba(16,185,129,.18)', padding:'1px 2px', borderRadius:4 }}>{buf}</ins> : <span key={`nor-${i}`}>{buf}</span>);
-                          buf = t.ch; added = t.added;
-                        } else buf += t.ch;
+                          out.push(added
+                            ? <ins key={`ins-${i}`} style={{ background:'rgba(16,185,129,.18)', padding:'1px 2px', borderRadius:4 }}>{buf}</ins>
+                            : <span key={`nor-${i}`}>{buf}</span>);
+                          buf = t.ch;
+                          added = t.added;
+                        } else {
+                          buf += t.ch;
+                        }
                       });
-                      if (buf) out.push(added ? <ins key="tail-ins" style={{ background:'rgba(16,185,129,.18)', padding:'1px 2px', borderRadius:4 }}>{buf}</ins> : <span key="tail-nor">{buf}</span>);
+                      if (buf) out.push(added
+                        ? <ins key="tail-ins" style={{ background:'rgba(16,185,129,.18)', padding:'1px 2px', borderRadius:4 }}>{buf}</ins>
+                        : <span key="tail-nor">{buf}</span>);
                       if (typedCount < (typing?.length || 0)) out.push(<span key="caret" className="animate-pulse"> ▌</span>);
                       return out;
                     })()}
@@ -607,7 +631,7 @@ export default function VoiceAgentSection() {
           </Section>
 
           <Section title="Voice" icon={<Mic2 className="w-4 h-4 icon" />}>
-            <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(2, minmax(380px, 1fr))' }}>
+            <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(2, minmax(360px, 1fr))' }}>
               <Field label="Provider">
                 <Select
                   value={active.config.voice.provider}
@@ -643,7 +667,7 @@ export default function VoiceAgentSection() {
           </Section>
 
           <Section title="Transcriber" icon={<BookOpen className="w-4 h-4 icon" />}>
-            <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(3, minmax(380px, 1fr))' }}>
+            <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(3, minmax(360px, 1fr))' }}>
               <Field label="Provider">
                 <Select
                   value={active.config.transcriber.provider}
@@ -694,7 +718,7 @@ export default function VoiceAgentSection() {
           </Section>
 
           <Section title="Tools" icon={<SlidersHorizontal className="w-4 h-4 icon" />}>
-            <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(2, minmax(380px, 1fr))' }}>
+            <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(2, minmax(360px, 1fr))' }}>
               <Field label="Enable End Call Function">
                 <Select
                   value={String(active.config.tools.enableEndCall)}
@@ -758,6 +782,36 @@ export default function VoiceAgentSection() {
 
       <StyleBlock />
     </div>
+  );
+}
+
+/* =============================================================================
+   Delete Modal
+============================================================================= */
+function DeleteModal({ open, name, onCancel, onConfirm }:{
+  open: boolean; name: string; onCancel: () => void; onConfirm: () => void;
+}) {
+  if (!open) return null;
+  return (
+    <motion.div className="fixed inset-0 z-[9998] flex items-center justify-center p-4"
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      style={{ background:'rgba(0,0,0,.55)' }}>
+      <motion.div initial={{ y: 10, opacity: .9, scale:.98 }} animate={{ y:0, opacity:1, scale:1 }}
+        className="w-full max-w-md rounded-2xl"
+        style={{ background:'var(--va-card)', border:'1px solid var(--va-border)', boxShadow:'var(--va-shadow-lg)' }}>
+        <div className="px-5 py-4 flex items-center justify-between" style={{ borderBottom:'1px solid var(--va-border)' }}>
+          <div className="text-sm font-semibold" style={{ color:'var(--text)' }}>Delete Assistant</div>
+          <button onClick={onCancel} className="p-2 rounded-lg hover:opacity-80"><X className="w-4 h-4 icon" /></button>
+        </div>
+        <div className="px-5 py-4 text-sm" style={{ color:'var(--text-muted)' }}>
+          Are you sure you want to delete <span style={{ color:'var(--text)' }}>&ldquo;{name}&rdquo;</span>? This cannot be undone.
+        </div>
+        <div className="px-5 pb-5 flex gap-2 justify-end">
+          <button onClick={onCancel} className="btn--ghost">Cancel</button>
+          <button onClick={onConfirm} className="btn--danger"><Trash2 className="w-4 h-4" /> Delete</button>
+        </div>
+      </motion.div>
+    </motion.div>
   );
 }
 
@@ -847,20 +901,6 @@ function StyleBlock() {
         --va-shadow-side:8px 0 26px rgba(0,0,0,.08);
       }
 
-      /* icon-only rail */
-      .${SCOPE}.va-collapsed{ --va-rail-w: 84px; }
-      .${SCOPE}.va-collapsed .va-hide-when-collapsed{ display:none !important; }
-      .${SCOPE}.va-collapsed .va-item{ padding:10px !important; }
-
-      /* small screens auto make the rail slimmer to free space */
-      @media (max-width: 1180px){
-        .${SCOPE}{ --va-rail-w: 320px; }
-      }
-      @media (max-width: 980px){
-        .${SCOPE}{ --va-rail-w: 84px; }
-        .${SCOPE} .va-hide-when-collapsed{ display:none !important; }
-      }
-
       .${SCOPE} .va-main{ max-width: none !important; }
       .${SCOPE} .icon{ color: var(--accent); }
 
@@ -890,6 +930,13 @@ function StyleBlock() {
       .${SCOPE} .va-range{ -webkit-appearance:none; height:4px; background:color-mix(in oklab, var(--accent) 24%, #0000); border-radius:999px; outline:none; }
       .${SCOPE} .va-range::-webkit-slider-thumb{ -webkit-appearance:none; width:14px;height:14px;border-radius:50%;background:var(--accent); border:2px solid #fff; box-shadow:0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent); }
       .${SCOPE} .va-range::-moz-range-thumb{ width:14px;height:14px;border:0;border-radius:50%;background:var(--accent); box-shadow:0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent); }
+
+      /* When the app sidebar collapses (body[data-sb-collapsed="true"]), our margin is already updated by JS.
+         If your app instead toggles a class, keep the MutationObserver above. */
+
+      @media (max-width: 1180px){
+        .${SCOPE}{ --va-rail-w: 320px; }
+      }
     `}</style>
   );
 }
@@ -970,7 +1017,7 @@ function Select({ value, items, onChange, placeholder, leftIcon }: {
                   className="w-full flex items-center gap-3 px-3 py-2 rounded-[10px] text-left"
                   style={{ color:'var(--text)' }}
                   onMouseEnter={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='rgba(16,185,129,.10)'; (e.currentTarget as HTMLButtonElement).style.border='1px solid rgba(16,185,129,.35)'; }}
-                  onMouseLeave={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='transparent'; (e.currentTarget as HTMLButtonElement).style.border='1px solid transparent'; }}
+                  onMouseLeave={(e)=>{ (e.currentTarget as HTMLButtonButtonElement).style.background='transparent'; (e.currentTarget as HTMLButtonElement).style.border='1px solid transparent'; }}
                 >
                   {it.icon}{it.label}
                 </button>
