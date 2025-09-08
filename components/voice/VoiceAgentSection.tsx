@@ -4,9 +4,10 @@
 import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Search, Plus, Folder, FolderOpen, Check, Trash2, Copy, Edit3, Sparkles,
+  Search, Plus, Folder, FolderOpen, Check, Trash2, Copy as ClipboardCopy, Edit3,
   ChevronDown, ChevronRight, FileText, Mic2, BookOpen, SlidersHorizontal,
-  PanelLeft, Bot, UploadCloud, RefreshCw, X, ChevronLeft, ChevronRight as ChevronRightIcon
+  PanelLeft, Bot, UploadCloud, RefreshCw, X, ChevronLeft, ChevronRight as ChevronRightIcon,
+  Wand2
 } from 'lucide-react';
 
 /* =============================================================================
@@ -17,6 +18,7 @@ const ACCENT = '#10b981';
 const ACCENT_HOVER = '#0ea371';
 const BTN_SHADOW = '0 10px 24px rgba(16,185,129,.22)';
 
+/* Typing speed (fast) */
 const TICK_MS = 10;
 const CHUNK_SIZE = 6;
 
@@ -82,6 +84,18 @@ You are an intelligent and responsive assistant designed to help users with a wi
 [Handover]
 - When done, summarize details and hand off if needed.`.trim();
 
+const SECTION_KEYS = [
+  'Identity',
+  'Style',
+  'System Behaviors',
+  'Task & Goals',
+  'Data to Collect',
+  'Safety',
+  'Handover',
+  'Refinements',
+] as const;
+type SectionKey = typeof SECTION_KEYS[number];
+
 function toTitle(s: string) {
   return s
     .replace(/\s+/g, ' ')
@@ -91,7 +105,29 @@ function toTitle(s: string) {
     .replace(/\b(Id|Url|Dob)\b/gi, m => m.toUpperCase());
 }
 
-function buildDefaultsFromHint(hint: string) {
+function readSectionsFromPrompt(txt: string): Record<SectionKey, string> {
+  const out = Object.fromEntries(SECTION_KEYS.map(k => [k, ''])) as Record<SectionKey, string>;
+  if (!txt) return out;
+  const rx = /\[([^\]]+)\]\s*([\s\S]*?)(?=\n\[[^\]]+\]|\s*$)/g;
+  let m: RegExpExecArray | null;
+  while ((m = rx.exec(txt))) {
+    const key = m[1].trim();
+    const body = m[2].trim();
+    const canon = SECTION_KEYS.find(k => k.toLowerCase() === key.toLowerCase());
+    if (canon) out[canon] = body;
+  }
+  return out;
+}
+
+function sectionsToPrompt(s: Record<SectionKey, string>): string {
+  return SECTION_KEYS
+    .filter(k => k !== 'Refinements' || (s['Refinements'] && s['Refinements'].trim()))
+    .map(k => `[${k}]\n${(s[k] || '').trim()}`)
+    .join('\n\n')
+    .trim();
+}
+
+function buildDefaultsFromHint(hint: string): Record<SectionKey, string> {
   const short = hint.trim().split(/\s+/).length <= 3 ? hint.trim() : 'Assistant';
   const collectMatch = hint.match(/collect(?:\s*[:\-])?\s*(.*)$/i);
   const fields = collectMatch
@@ -106,60 +142,63 @@ function buildDefaultsFromHint(hint: string) {
 - Email (if provided)
 - Appointment Date/Time (if applicable)`;
 
-  return [
-`[Identity]
-You are a helpful, fast, and accurate ${short.toLowerCase()} that completes tasks and collects information.`,
-
-`[Style]
-- Friendly, concise, affirmative.
-- Ask one question at a time and confirm critical details.`,
-
-`[System Behaviors]
-- Summarize & confirm before finalizing.
-- Offer next steps when appropriate.`,
-
-`[Task & Goals]
-- Understand intent, collect required details, and provide guidance.`,
-
-`[Data to Collect]
-${collectList}`,
-
-`[Safety]
-- No medical/legal/financial advice beyond high-level pointers.
-- Decline restricted actions, suggest alternatives.`,
-
-`[Handover]
-- When done, summarize details and hand off if needed.`
-  ].join('\n\n');
+  return {
+    'Identity': `You are a helpful, fast, and accurate ${short.toLowerCase()} that completes tasks and collects information.`,
+    'Style': `- Friendly, concise, affirmative.\n- Ask one question at a time and confirm critical details.`,
+    'System Behaviors': `- Summarize & confirm before finalizing.\n- Offer next steps when appropriate.`,
+    'Task & Goals': `- Understand intent, collect required details, and provide guidance.`,
+    'Data to Collect': collectList,
+    'Safety': `- No medical/legal/financial advice beyond high-level pointers.\n- Decline restricted actions, suggest alternatives.`,
+    'Handover': `- When done, summarize details and hand off if needed.`,
+    'Refinements': ''
+  };
 }
 
-/** Merge user free-text into a new prompt and/or first message (safe & simple). */
-function mergeInput(genText: string, currentPrompt: string) {
-  const raw = (genText || '').trim();
-  const out = { prompt: currentPrompt || BASE_PROMPT, firstMessage: undefined as string | undefined };
+/** Merge user free-text into sections professionally. Supports:
+ *  - short hints ("assistant", "collect name, phone")
+ *  - "first message: ..."
+ *  - section targets like "style: be warmer and briefer"
+ *  - bullet or multiline entries -> added under [Refinements]
+ */
+function mergeInputIntoSections(input: string, basePrompt: string): {
+  merged: Record<SectionKey, string>;
+  firstMessage?: string;
+} {
+  const current = readSectionsFromPrompt(basePrompt || BASE_PROMPT);
 
-  if (!raw) return out;
+  const raw = input.trim();
+  if (!raw) return { merged: current };
 
-  // "first message: hello there"
+  // first message
   const fm = raw.match(/^(?:first\s*message|greeting)\s*[:\-]\s*(.+)$/i);
-  if (fm) {
-    out.firstMessage = fm[1].trim();
-    return out;
+  if (fm) return { merged: current, firstMessage: fm[1].trim() };
+
+  // explicit "section: value"
+  const secMatch = raw.match(/^([a-z][a-z\s&]+)\s*[:\-]\s*([\s\S]+)$/i);
+  if (secMatch) {
+    const keyTxt = secMatch[1].trim().toLowerCase();
+    const body = secMatch[2].trim();
+    const secKey = SECTION_KEYS.find(k => k.toLowerCase() === keyTxt);
+    if (secKey) {
+      current[secKey] = body;
+      return { merged: current };
+    }
   }
 
-  // short hints or "collect name, phone"
+  // short / collect hints
   if (raw.split(/\s+/).length <= 3 || /collect|fields|capture|gather/i.test(raw)) {
-    out.prompt = buildDefaultsFromHint(raw);
-    return out;
+    const d = buildDefaultsFromHint(raw);
+    SECTION_KEYS.forEach(k => { if (d[k]) current[k] = d[k]; });
+    return { merged: current };
   }
 
-  // otherwise append as a refinement section bullet
-  const hasRef = /\n\[Refinements\]\s*/i.test(currentPrompt);
-  const bullet = `- ${raw.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim()}`;
-  out.prompt = hasRef
-    ? currentPrompt.replace(/\n\[Refinements\]\s*([\s\S]*)$/i, (m, body) => `\n[Refinements]\n${(body || '').trim()}\n${bullet}`)
-    : `${currentPrompt}\n\n[Refinements]\n${bullet}`;
-  return out;
+  // default -> append as professional refinement bullet
+  const line = `- ${raw.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim()}`;
+  current['Refinements'] = current['Refinements']
+    ? `${current['Refinements']}\n${line}`
+    : line;
+
+  return { merged: current };
 }
 
 /* =============================================================================
@@ -187,63 +226,16 @@ function charDiffAdded(oldStr: string, newStr: string): CharTok[] {
 }
 
 /* =============================================================================
-   FIX THE DRIFT: Measure real app sidebar width
-============================================================================= */
-function useAppSidebarWidth(scopeRef: React.RefObject<HTMLDivElement>, fallbackCollapsed: boolean) {
-  useEffect(() => {
-    const scope = scopeRef.current;
-    if (!scope) return;
-
-    const setVar = (w: number) => scope.style.setProperty('--app-sidebar-w', `${Math.round(w)}px`);
-
-    const findSidebar = () =>
-      (document.querySelector('[data-app-sidebar]') as HTMLElement) ||
-      (document.querySelector('#app-sidebar') as HTMLElement) ||
-      (document.querySelector('.app-sidebar') as HTMLElement) ||
-      (document.querySelector('aside.sidebar') as HTMLElement) ||
-      null;
-
-    let target = findSidebar();
-    if (!target) { setVar(fallbackCollapsed ? 72 : 248); return; }
-
-    // Initial read
-    setVar(target.getBoundingClientRect().width);
-
-    const ro = new ResizeObserver(() => {
-      setVar(target!.getBoundingClientRect().width);
-    });
-    ro.observe(target);
-
-    // If classes/inline styles toggle during animation, capture them too
-    const mo = new MutationObserver(() => {
-      setVar(target!.getBoundingClientRect().width);
-    });
-    mo.observe(target, { attributes: true, attributeFilter: ['class', 'style'] });
-
-    // As a backstop, re-apply after CSS transition ends
-    const onTransitionEnd = () => setVar(target!.getBoundingClientRect().width);
-    target.addEventListener('transitionend', onTransitionEnd);
-
-    return () => {
-      ro.disconnect();
-      mo.disconnect();
-      target.removeEventListener('transitionend', onTransitionEnd);
-    };
-  }, [scopeRef, fallbackCollapsed]);
-}
-
-/* =============================================================================
    PAGE
 ============================================================================= */
 export default function VoiceAgentSection() {
-  // Collapsed flag only as a fallback default if we cannot find/observe the real sidebar.
+  /* ---------- Sync with APP sidebar collapse ---------- */
   const scopeRef = useRef<HTMLDivElement | null>(null);
   const [sbCollapsed, setSbCollapsed] = useState<boolean>(() => {
     if (typeof document === 'undefined') return false;
     return document.body.getAttribute('data-sb-collapsed') === 'true';
   });
 
-  // Listen to your app event + body attr changes (just to keep the fallback flag fresh)
   useEffect(() => {
     const onEvt = (e: Event) => {
       const detail = (e as CustomEvent).detail || {};
@@ -259,8 +251,11 @@ export default function VoiceAgentSection() {
     return () => { window.removeEventListener('layout:sidebar', onEvt as EventListener); mo.disconnect(); };
   }, []);
 
-  // The actual fix: measure real width and keep --app-sidebar-w current
-  useAppSidebarWidth(scopeRef, sbCollapsed);
+  useEffect(() => {
+    if (!scopeRef.current) return;
+    const el = scopeRef.current;
+    el.style.setProperty('--app-sidebar-w', sbCollapsed ? '72px' : '248px');
+  }, [sbCollapsed]);
 
   /* ---------- Assistants ---------- */
   const [assistants, setAssistants] = useState<Assistant[]>([]);
@@ -269,7 +264,7 @@ export default function VoiceAgentSection() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [tempName, setTempName] = useState('');
   const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
-  const [rev, setRev] = useState(0);
+  const [rev, setRev] = useState(0); // refresh after LS writes
 
   useEffect(() => {
     const list = readLS<Assistant[]>(LS_LIST) || [];
@@ -373,10 +368,12 @@ export default function VoiceAgentSection() {
   const handleGenerate = () => {
     if (!active) return;
     const current = active.config.model.systemPrompt || '';
-    const { prompt, firstMessage } = mergeInput(genText, current || BASE_PROMPT);
-    setLastNew(prompt);
+    const { merged, firstMessage } = mergeInputIntoSections(genText, current || BASE_PROMPT);
+    const nextPrompt = sectionsToPrompt(merged);
+
+    setLastNew(nextPrompt);
     setPendingFirstMsg(firstMessage);
-    startTyping(charDiffAdded(current, prompt));
+    startTyping(charDiffAdded(current, nextPrompt)); // live diff (added chars green)
     setGenOpen(false);
     setGenText('');
   };
@@ -450,8 +447,7 @@ export default function VoiceAgentSection() {
           borderRight:'1px solid var(--va-border)',
           background:'var(--va-sidebar)',
           boxShadow:'var(--va-shadow-side)',
-          zIndex: 10,
-          willChange: 'left' // no CSS transitions -> no jitter
+          zIndex: 10
         }}
       >
         <div className="px-3 py-3 flex items-center justify-between" style={{ borderBottom:'1px solid var(--va-border)' }}>
@@ -461,14 +457,14 @@ export default function VoiceAgentSection() {
           </div>
           <div className="flex items-center gap-2">
             {!railCollapsed && (
-              <button onClick={addAssistant} className="btn--green px-3 py-1.5 text-xs rounded-lg">
-                {creating ? <span className="w-3.5 h-3.5 rounded-full border-2 border-white/50 border-t-transparent animate-spin" /> : <Plus className="w-3.5 h-3.5 text-white" />}
-                <span className="text-white">{creating ? 'Creating…' : 'Create'}</span>
+              <button onClick={addAssistant} className="btn btn--primary">
+                {creating ? <span className="w-3.5 h-3.5 rounded-full border-2 border-white/50 border-t-transparent animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                <span>{creating ? 'Creating…' : 'Create'}</span>
               </button>
             )}
             <button
               title={railCollapsed ? 'Expand assistants' : 'Collapse assistants'}
-              className="btn--ghost px-2 py-1"
+              className="btn btn--ghost"
               onClick={() => setRailCollapsed(v => !v)}
             >
               {railCollapsed ? <ChevronRightIcon className="w-4 h-4 icon" /> : <ChevronLeft className="w-4 h-4 icon" />}
@@ -478,7 +474,7 @@ export default function VoiceAgentSection() {
 
         <div className="p-3 min-h-0 flex-1 overflow-y-auto" style={{ scrollbarWidth:'thin' }}>
           {!railCollapsed && (
-            <div className="flex items-center gap-2 rounded-lg px-2.5 py-2 mb-2"
+            <div className="flex items-center gap-2 rounded-xl px-3 py-2.5 mb-2"
               style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)' }}>
               <Search className="w-4 h-4 icon" />
               <input value={query} onChange={(e)=> setQuery(e.target.value)} placeholder="Search assistants"
@@ -506,7 +502,7 @@ export default function VoiceAgentSection() {
                   <button
                     key={a.id}
                     onClick={()=> setActiveId(a.id)}
-                    className="w-full rounded-xl p-3 grid place-items-center"
+                    className="w-full rounded-xl p-3 grid place-items-center btn-surface"
                     style={{
                       background: isActive ? 'color-mix(in oklab, var(--accent) 10%, transparent)' : 'var(--va-card)',
                       border: `1px solid ${isActive ? 'color-mix(in oklab, var(--accent) 35%, var(--va-border))' : 'var(--va-border)'}`,
@@ -554,13 +550,13 @@ export default function VoiceAgentSection() {
                   <div className="mt-2 flex items-center gap-2">
                     {!isEdit ? (
                       <>
-                        <button onClick={(e)=> { e.stopPropagation(); beginRename(a); }} className="btn--ghost text-xs px-2 py-1"><Edit3 className="w-3.5 h-3.5 icon" /> Rename</button>
-                        <button onClick={(e)=> { e.stopPropagation(); setDeleting({ id:a.id, name:a.name }); }} className="btn--danger text-xs px-2 py-1"><Trash2 className="w-3.5 h-3.5" /> Delete</button>
+                        <button onClick={(e)=> { e.stopPropagation(); beginRename(a); }} className="btn btn--ghost btn--sm"><Edit3 className="w-3.5 h-3.5 icon" /> Rename</button>
+                        <button onClick={(e)=> { e.stopPropagation(); setDeleting({ id:a.id, name:a.name }); }} className="btn btn--danger btn--sm"><Trash2 className="w-3.5 h-3.5" /> Delete</button>
                       </>
                     ) : (
                       <>
-                        <button onClick={(e)=> { e.stopPropagation(); saveRename(a); }} className="btn--green text-xs px-2 py-1"><Check className="w-3.5 h-3.5 text-white" /><span className="text-white">Save</span></button>
-                        <button onClick={(e)=> { e.stopPropagation(); setEditingId(null); }} className="btn--ghost text-xs px-2 py-1">Cancel</button>
+                        <button onClick={(e)=> { e.stopPropagation(); saveRename(a); }} className="btn btn--primary btn--sm"><Check className="w-3.5 h-3.5" /><span>Save</span></button>
+                        <button onClick={(e)=> { e.stopPropagation(); setEditingId(null); }} className="btn btn--ghost btn--sm">Cancel</button>
                       </>
                     )}
                   </div>
@@ -578,7 +574,7 @@ export default function VoiceAgentSection() {
           marginLeft:`calc(var(--app-sidebar-w, 248px) + ${railCollapsed ? '72px' : 'var(--va-rail-w, 360px)'})`,
           paddingRight:'clamp(20px, 4vw, 40px)',
           paddingTop:'calc(var(--app-header-h, 64px) + 12px)',
-          paddingBottom:'88px)'
+          paddingBottom:'88px'
         }}
       >
         {/* top action bar */}
@@ -586,17 +582,18 @@ export default function VoiceAgentSection() {
              style={{ top:'calc(var(--app-header-h, 64px) + 8px)', zIndex:2 }}>
           <div className="flex items-center gap-2">
             <button onClick={()=> navigator.clipboard.writeText(active.config.model.systemPrompt || '').catch(()=>{})}
-                    className="btn--ghost">
-              <Copy className="w-4 h-4 icon" /> Copy Prompt
+                    className="btn btn--ghost">
+              <ClipboardCopy className="w-4 h-4 icon" /> Copy Prompt
             </button>
-            <button onClick={()=> setDeleting({ id: active.id, name: active.name })} className="btn--danger">
+            <button onClick={()=> setDeleting({ id: active.id, name: active.name })} className="btn btn--danger">
               <Trash2 className="w-4 h-4" /> Delete
             </button>
           </div>
         </div>
 
-        {/* content body */}
-        <div className="mx-auto grid grid-cols-12 gap-10" style={{ maxWidth:'min(2400px, 98vw)' }}>
+        {/* content body — WIDER */}
+        <div className="mx-auto grid grid-cols-12 gap-10"
+             style={{ maxWidth:'min(2400px, 98vw)' }}>
           <Section title="Model" icon={<FileText className="w-4 h-4 icon" />}>
             <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(4, minmax(360px, 1fr))' }}>
               <Field label="Provider">
@@ -628,7 +625,7 @@ export default function VoiceAgentSection() {
               <Field label="First Message">
                 <input
                   value={active.config.model.firstMessage}
-                  onChange={(e)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, firstMessage: e.target.value } } })) }
+                  onChange={(e)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, firstMessage: e.target.value } } }))}
                   className="w-full rounded-xl px-3 py-3 text-[15px] outline-none"
                   style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)', color:'var(--text)' }}
                 />
@@ -638,14 +635,14 @@ export default function VoiceAgentSection() {
             {/* System Prompt */}
             <div className="mt-6">
               <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="w-4 h-4 icon" /> System Prompt</div>
+                <div className="flex items-center gap-2 text-sm font-semibold"><Wand2 className="w-4 h-4 icon" /> System Prompt</div>
                 <div className="flex items-center gap-2">
                   <button
                     onClick={()=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, systemPrompt: BASE_PROMPT } } }))}
-                    className="btn--ghost"
+                    className="btn btn--ghost"
                   ><RefreshCw className="w-4 h-4 icon" /> Reset</button>
-                  <button onClick={()=> setGenOpen(true)} className="btn--green">
-                    <Sparkles className="w-4 h-4 text-white" /> <span className="text-white">Generate / Edit</span>
+                  <button onClick={()=> setGenOpen(true)} className="btn btn--primary">
+                    <Wand2 className="w-4 h-4" /> <span>Generate / Edit</span>
                   </button>
                 </div>
               </div>
@@ -654,7 +651,7 @@ export default function VoiceAgentSection() {
                 <textarea
                   rows={26}
                   value={active.config.model.systemPrompt || ''}
-                  onChange={(e)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, systemPrompt: e.target.value } } })) }
+                  onChange={(e)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, systemPrompt: e.target.value } } }))}
                   className="w-full rounded-xl px-3 py-3 text-[14px] leading-6 outline-none"
                   style={{
                     background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)',
@@ -702,9 +699,10 @@ export default function VoiceAgentSection() {
                     })()}
                   </div>
 
-                  <div className="flex items-center gap-2 justify-end mt-3">
-                    <button onClick={declineTyping} className="btn--ghost"><X className="w-4 h-4 icon" /> Decline</button>
-                    <button onClick={acceptTyping} className="btn--green"><Check className="w-4 h-4 text-white" /><span className="text-white">Accept</span></button>
+                  <div className="flex items-center gap-2 justify-between mt-3">
+                    {/* Cancel on the LEFT, same size/shape */}
+                    <button onClick={declineTyping} className="btn btn--ghost"><X className="w-4 h-4 icon" /> Cancel</button>
+                    <button onClick={acceptTyping} className="btn btn--primary"><Check className="w-4 h-4" /><span>Accept</span></button>
                   </div>
                 </div>
               )}
@@ -742,7 +740,7 @@ export default function VoiceAgentSection() {
             <div className="mt-3">
               <button
                 onClick={()=> { window.dispatchEvent(new CustomEvent('voiceagent:import-11labs')); alert('Hook “voiceagent:import-11labs” to your importer.'); }}
-                className="btn--ghost"
+                className="btn btn--ghost"
               ><UploadCloud className="w-4 h-4 icon" /> Import from ElevenLabs</button>
             </div>
           </Section>
@@ -826,26 +824,30 @@ export default function VoiceAgentSection() {
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             style={{ background:'rgba(0,0,0,.45)' }}>
             <motion.div initial={{ y:10, opacity:0, scale:.98 }} animate={{ y:0, opacity:1, scale:1 }} exit={{ y:8, opacity:0, scale:.985 }}
-              className="w-full max-w-2xl rounded-xl" style={{ background:'var(--va-card)', border:'1px solid var(--va-border)', boxShadow:'var(--va-shadow-lg)' }}>
-              <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom:'1px solid var(--va-border)' }}>
-                <div className="flex items-center gap-2 text-sm font-semibold"><Edit3 className="w-4 h-4 icon" /> Generate / Edit Prompt</div>
-                <button onClick={()=> setGenOpen(false)} className="p-2 rounded-lg hover:opacity-80"><X className="w-4 h-4 icon" /></button>
+              className="w-full max-w-2xl rounded-2xl" style={{ background:'var(--va-card)', border:'1px solid var(--va-border)', boxShadow:'var(--va-shadow-lg)' }}>
+              <div className="px-5 py-4 flex items-center justify-between" style={{ borderBottom:'1px solid var(--va-border)' }}>
+                <div className="flex items-center gap-2 text-sm font-semibold"><Wand2 className="w-4 h-4 icon" /> Generate / Edit Prompt</div>
+                <button onClick={()=> setGenOpen(false)} className="btn btn--ghost btn--sm"><X className="w-4 h-4 icon" /></button>
               </div>
-              <div className="p-4">
+              <div className="p-5">
                 <input
                   value={genText}
                   onChange={(e)=> setGenText(e.target.value)}
                   placeholder={`Examples:
 • assistant
 • collect full name, phone, date
-• Identity: AI Sales Agent for roofers
+• Style: be warmer but concise
 • first message: Hey—quick question to get you booked…`}
-                  className="w-full rounded-lg px-3 py-3 text-[15px] outline-none"
+                  className="w-full rounded-2xl px-4 py-3 text-[15px] outline-none"
                   style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)', color:'var(--text)' }}
                 />
-                <div className="mt-3 flex items-center justify-end gap-2">
-                  <button onClick={()=> setGenOpen(false)} className="btn--ghost">Cancel</button>
-                  <button onClick={handleGenerate} className="btn--green"><span className="text-white">Generate</span></button>
+                <div className="mt-4 flex items-center justify-between">
+                  <button onClick={()=> setGenOpen(false)} className="btn btn--ghost">
+                    <X className="w-4 h-4 icon" /> Cancel
+                  </button>
+                  <button onClick={handleGenerate} className="btn btn--primary">
+                    <Wand2 className="w-4 h-4" /><span>Generate</span>
+                  </button>
                 </div>
               </div>
             </motion.div>
@@ -886,14 +888,14 @@ function DeleteModal({ open, name, onCancel, onConfirm }:{
         style={{ background:'var(--va-card)', border:'1px solid var(--va-border)', boxShadow:'var(--va-shadow-lg)' }}>
         <div className="px-5 py-4 flex items-center justify-between" style={{ borderBottom:'1px solid var(--va-border)' }}>
           <div className="text-sm font-semibold" style={{ color:'var(--text)' }}>Delete Assistant</div>
-          <button onClick={onCancel} className="p-2 rounded-lg hover:opacity-80"><X className="w-4 h-4 icon" /></button>
+          <button onClick={onCancel} className="btn btn--ghost btn--sm"><X className="w-4 h-4 icon" /></button>
         </div>
         <div className="px-5 py-4 text-sm" style={{ color:'var(--text-muted)' }}>
           Are you sure you want to delete <span style={{ color:'var(--text)' }}>&ldquo;{name}&rdquo;</span>? This cannot be undone.
         </div>
         <div className="px-5 pb-5 flex gap-2 justify-end">
-          <button onClick={onCancel} className="btn--ghost">Cancel</button>
-          <button onClick={onConfirm} className="btn--danger"><Trash2 className="w-4 h-4" /> Delete</button>
+          <button onClick={onCancel} className="btn btn--ghost">Cancel</button>
+          <button onClick={onConfirm} className="btn btn--danger"><Trash2 className="w-4 h-4" /> Delete</button>
         </div>
       </motion.div>
     </motion.div>
@@ -940,7 +942,7 @@ function Section({ title, icon, children }:{ title: string; icon: React.ReactNod
 }
 
 /* =============================================================================
-   Scoped CSS
+   Scoped CSS (unified button sizing + style)
 ============================================================================= */
 function StyleBlock() {
   return (
@@ -965,6 +967,12 @@ function StyleBlock() {
         --va-shadow-sm:0 12px 26px rgba(0,0,0,.35);
         --va-shadow-side:8px 0 28px rgba(0,0,0,.42);
         --va-rail-w:360px;
+
+        /* unified buttons */
+        --btn-h: 40px;
+        --btn-r: 12px;
+        --btn-px: 12px;
+        --btn-gap: .5rem;
       }
       :root:not([data-theme="dark"]) .${SCOPE}{
         --bg:#f7f9fb;
@@ -989,35 +997,50 @@ function StyleBlock() {
       .${SCOPE} .va-main{ max-width: none !important; }
       .${SCOPE} .icon{ color: var(--accent); }
 
-      .${SCOPE} .btn--green{
-        display:inline-flex; align-items:center; gap:.5rem;
-        border-radius:12px; padding:.65rem 1rem;
-        background:${ACCENT}; color:#fff; box-shadow:${BTN_SHADOW};
-        border:1px solid rgba(255,255,255,.08);
-        transition:transform .04s ease, background .18s ease;
+      /* Unified button base */
+      .${SCOPE} .btn{
+        display:inline-flex; align-items:center; justify-content:center; gap:var(--btn-gap);
+        height: var(--btn-h); padding: 0 var(--btn-px);
+        border-radius: var(--btn-r); font-size:14px; line-height:1;
+        border:1px solid var(--va-border); box-shadow:var(--va-shadow-sm);
+        background: var(--va-card); color: var(--text);
+        transition: transform .04s ease, background .18s ease, border-color .18s ease, box-shadow .18s ease;
       }
-      .${SCOPE} .btn--green:hover{ background:${ACCENT_HOVER}; }
-      .${SCOPE} .btn--green:active{ transform:translateY(1px); }
+      .${SCOPE} .btn--sm{ height: 34px; }
+      .${SCOPE} .btn:active{ transform: translateY(1px); }
+
+      .${SCOPE} .btn--primary{
+        background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 96%, #fff 0%) 0%, color-mix(in oklab, var(--accent) 85%, #000 0%) 100%);
+        color: #fff;
+        border-color: color-mix(in oklab, var(--accent) 55%, var(--va-border));
+        box-shadow:${BTN_SHADOW};
+      }
+      .${SCOPE} .btn--primary:hover{
+        background: linear-gradient(180deg, ${ACCENT_HOVER} 0%, color-mix(in oklab, ${ACCENT_HOVER} 90%, #000 0%) 100%);
+      }
 
       .${SCOPE} .btn--ghost{
-        display:inline-flex; align-items:center; gap:.5rem;
-        border-radius:12px; padding:.6rem .9rem; font-size:14px;
-        background:var(--va-card); color:var(--text);
-        border:1px solid var(--va-border); box-shadow:var(--va-shadow-sm);
+        background: var(--va-card);
+        color: var(--text);
       }
       .${SCOPE} .btn--danger{
-        display:inline-flex; align-items:center; gap:.5rem;
-        border-radius:12px; padding:.6rem .9rem; font-size:14px;
-        background:rgba(220,38,38,.12); color:#fca5a5;
-        border:1px solid rgba(220,38,38,.35); box-shadow:0 10px 24px rgba(220,38,38,.15);
+        background: rgba(220,38,38,.12);
+        color:#fca5a5;
+        border:1px solid rgba(220,38,38,.35);
+        box-shadow:0 10px 24px rgba(220,38,38,.15);
       }
 
       .${SCOPE} .va-range{ -webkit-appearance:none; height:4px; background:color-mix(in oklab, var(--accent) 24%, #0000); border-radius:999px; outline:none; }
       .${SCOPE} .va-range::-webkit-slider-thumb{ -webkit-appearance:none; width:14px;height:14px;border-radius:50%;background:var(--accent); border:2px solid #fff; box-shadow:0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent); }
       .${SCOPE} .va-range::-moz-range-thumb{ width:14px;height:14px;border:0;border-radius:50%;background:var(--accent); box-shadow:0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent); }
 
-      /* no transitions on left so Safari/iPad won't jitter during sidebar animation */
-      .${SCOPE} aside{ transition:none !important; }
+      /* Fuse assistants rail to main sidebar in collapsed state (remove hairline gap) */
+      .${SCOPE} aside[data-collapsed="true"]{
+        left: calc(var(--app-sidebar-w, 248px) - 1px);
+      }
+
+      /* Helper surface for collapsed items */
+      .${SCOPE} .btn-surface { border:1px solid var(--va-border); }
 
       @media (max-width: 1180px){
         .${SCOPE}{ --va-rail-w: 320px; }
@@ -1100,7 +1123,7 @@ function Select({ value, items, onChange, placeholder, leftIcon }: {
                   key={it.value}
                   onClick={() => { onChange(it.value); setOpen(false); }}
                   className="w-full flex items-center gap-3 px-3 py-2 rounded-[10px] text-left"
-                  style={{ color:'var(--text)' }}
+                  style={{ color:'var(--text)', border:'1px solid transparent' }}
                   onMouseEnter={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='rgba(16,185,129,.10)'; (e.currentTarget as HTMLButtonElement).style.border='1px solid rgba(16,185,129,.35)'; }}
                   onMouseLeave={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='transparent'; (e.currentTarget as HTMLButtonElement).style.border='1px solid transparent'; }}
                 >
