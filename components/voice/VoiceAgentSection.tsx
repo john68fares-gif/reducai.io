@@ -7,7 +7,8 @@ import {
   Search, Plus, Folder, FolderOpen, Check, Trash2, Copy, Edit3, Sparkles,
   ChevronDown, ChevronRight, FileText, Mic2, BookOpen, SlidersHorizontal,
   PanelLeft, Bot, UploadCloud, RefreshCw, X, ChevronLeft, ChevronRight as ChevronRightIcon,
-  Phone as PhoneIcon, Rocket, PhoneCall, PhoneOff, MessageSquare, ListTree, AudioLines
+  Phone as PhoneIcon, Rocket, PhoneCall, PhoneOff, MessageSquare, ListTree, AudioLines,
+  Shield
 } from 'lucide-react';
 
 /* =============================================================================
@@ -56,7 +57,7 @@ type Assistant = {
       model: ModelId;
       firstMessageMode: 'assistant_first' | 'user_first';
       firstMessage: string;
-      systemPrompt: string; // <= ALWAYS the source of truth. We never hardcode a prompt.
+      systemPrompt: string; // the prompt you edit in the UI (single source of truth)
     };
     voice: { provider: VoiceProvider; voiceId: string; voiceLabel: string };
     transcriber: {
@@ -72,11 +73,17 @@ type Assistant = {
   };
 };
 
+type Settings = {
+  openaiKey: string;
+  xiKey: string; // ElevenLabs
+};
+
 const LS_LIST = 'voice:assistants.v1';
 const ak = (id: string) => `voice:assistant:${id}`;
 
 const LS_CALLS = 'voice:calls.v1';
 const LS_ROUTES = 'voice:phoneRoutes.v1';
+const LS_SETTINGS = 'voice:settings.v1';
 
 const readLS = <T,>(k: string): T | null => {
   try { const r = localStorage.getItem(k); return r ? (JSON.parse(r) as T) : null; }
@@ -85,91 +92,18 @@ const readLS = <T,>(k: string): T | null => {
 const writeLS = <T,>(k: string, v: T) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 
 /* =============================================================================
-   PROMPT HELPERS
-   (NO hardcoded Riley prompt — we only shape/merge what the user types)
+   SMALL HELPERS
 ============================================================================= */
-const DEFAULT_SCAFFOLD = `[Identity]
-You are an intelligent and responsive assistant.
+const DEFAULT_SCAFFOLD = '';
 
-[Style]
-* Friendly, clear, concise.
-
-[System Behaviors]
-* Ask one question at a time.
-* Confirm critical details.
-* Summarize before finalizing.
-
-[Safety]
-* No medical/legal/financial advice beyond high-level guidance.
-* Decline restricted actions and suggest alternatives.`.trim();
-
-/** Replace or add a named section like [Identity] ... */
-function setSection(prompt: string, name: string, body: string) {
-  const section = name.replace(/^\[|\]$/g, '');
-  const re = new RegExp(String.raw`\[${section}\]\s*([\s\S]*?)(?=\n\[|$)`, 'i');
-  if (re.test(prompt)) return prompt.replace(re, `[${section}]\n${body.trim()}\n`);
-  const nl = prompt.endsWith('\n') ? '' : '\n';
-  return `${prompt}${nl}\n[${section}]\n${body.trim()}\n`;
-}
-
-/** Quick parse for "first message:" */
-function parseFirstMessage(raw: string): string | null {
-  const m = raw.match(/^(?:first\s*message|greeting)\s*[:\-]\s*(.+)$/i);
-  return m ? m[1].trim() : null;
-}
-
-/** Merge user's free text into the EXISTING system prompt */
-function mergeInput(genText: string, currentPrompt: string) {
-  const raw = (genText || '').trim();
-  const out = { prompt: currentPrompt || DEFAULT_SCAFFOLD, firstMessage: undefined as string | undefined };
-  if (!raw) return out;
-
-  // 1) first message
-  const fm = parseFirstMessage(raw);
-  if (fm) { out.firstMessage = fm; return out; }
-
-  // 2) explicit [Sections]
-  const sectionBlocks = [...raw.matchAll(/\[([^\]]+)\]\s*([\s\S]*?)(?=\n\[|$)/g)];
-  if (sectionBlocks.length) {
-    let next = out.prompt || DEFAULT_SCAFFOLD;
-    sectionBlocks.forEach((m) => {
-      const sec = m[1]; const body = m[2];
-      next = setSection(next, `[${sec}]`, body);
-    });
-    out.prompt = next;
-    return out;
-  }
-
-  // 3) otherwise append as a refinement bullet
-  const hasRef = /\[Refinements\]/i.test(out.prompt);
-  const bullet = `- ${raw.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim()}`;
-  out.prompt = hasRef
-    ? out.prompt.replace(/\[Refinements\]\s*([\s\S]*?)(?=\n\[|$)/i, (m, body) => `[Refinements]\n${(body || '').trim()}\n${bullet}\n`)
-    : `${out.prompt}\n\n[Refinements]\n${bullet}\n`;
-  return out;
-}
-
-/** Pull out a greeting suggestion from the user-authored prompt (if present) */
-function extractGreetingFromPrompt(prompt: string): string | undefined {
-  const m =
-    prompt.match(/^\s*1\.\s*Greet.*?["“](.*?)["”]/im) ||
-    prompt.match(/\[Greeting\]\s*([\s\S]*?)(?=\n\[|$)/i);
-  return m ? (m[1] || m[0]).toString().trim() : undefined;
-}
-
-/* =============================================================================
-   DIFF (character-level) for typewriter accept/decline
-============================================================================= */
 type CharTok = { ch: string; added: boolean };
 function charDiffAdded(oldStr: string, newStr: string): CharTok[] {
-  const o = [...oldStr];
-  const n = [...newStr];
+  const o = [...oldStr]; const n = [...newStr];
   const dp: number[][] = Array(o.length + 1).fill(0).map(() => Array(n.length + 1).fill(0));
   for (let i = o.length - 1; i >= 0; i--) for (let j = n.length - 1; j >= 0; j--) {
     dp[i][j] = o[i] === n[j] ? 1 + dp[i + 1][j + 1] : Math.max(dp[i + 1][j], dp[i][j + 1]);
   }
-  const out: CharTok[] = [];
-  let i = 0, j = 0;
+  const out: CharTok[] = []; let i = 0, j = 0;
   while (i < o.length && j < n.length) {
     if (o[i] === n[j]) { out.push({ ch: n[j], added: false }); i++; j++; }
     else if (dp[i + 1][j] >= dp[i][j + 1]) { i++; }
@@ -179,61 +113,16 @@ function charDiffAdded(oldStr: string, newStr: string): CharTok[] {
   return out;
 }
 
-/* =============================================================================
-   FIX THE DRIFT: Measure real app sidebar width
-============================================================================= */
-function useAppSidebarWidth(scopeRef: React.RefObject<HTMLDivElement>, fallbackCollapsed: boolean) {
-  useEffect(() => {
-    const scope = scopeRef.current;
-    if (!scope) return;
-
-    const setVar = (w: number) => scope.style.setProperty('--app-sidebar-w', `${Math.round(w)}px`);
-
-    const findSidebar = () =>
-      (document.querySelector('[data-app-sidebar]') as HTMLElement) ||
-      (document.querySelector('#app-sidebar') as HTMLElement) ||
-      (document.querySelector('.app-sidebar') as HTMLElement) ||
-      (document.querySelector('aside.sidebar') as HTMLElement) ||
-      null;
-
-    let target = findSidebar();
-    if (!target) { setVar(fallbackCollapsed ? 72 : 248); return; }
-
-    setVar(target.getBoundingClientRect().width);
-
-    const ro = new ResizeObserver(() => setVar(target!.getBoundingClientRect().width));
-    ro.observe(target);
-
-    const mo = new MutationObserver(() => setVar(target!.getBoundingClientRect().width));
-    mo.observe(target, { attributes: true, attributeFilter: ['class', 'style'] });
-
-    const onTransitionEnd = () => setVar(target!.getBoundingClientRect().width);
-    target.addEventListener('transitionend', onTransitionEnd);
-
-    return () => { ro.disconnect(); mo.disconnect(); target.removeEventListener('transitionend', onTransitionEnd); };
-  }, [scopeRef, fallbackCollapsed]);
+function extractGreetingFromPrompt(prompt: string): string | undefined {
+  const m =
+    prompt.match(/^\s*1\.\s*Greet.*?["“](.*?)["”]/im) ||
+    prompt.match(/\[Greeting\]\s*([\s\S]*?)(?=\n\[|$)/i);
+  return m ? (m[1] || m[0]).toString().trim() : undefined;
 }
 
-/* =============================================================================
-   SIMPLE WEB VOICE (no Vapi). Uses YOUR prompt from the UI.
-   - For LLM, we POST to /api/llm with {system, messages[]}
-   - For ElevenLabs audio, we expose hooks so you can plug your player in:
-       1) window.elevenlabsSpeak?.(text:string, voiceId:string)
-       2) window.dispatchEvent(new CustomEvent('elevenlabs:tts', {detail:{text, voiceId}}))
-   If neither is provided, we fallback to Web Speech TTS (browser).
-============================================================================= */
-type BookingState = {
-  service?: string;
-  provider?: string;
-  patientStatus?: 'new'|'returning';
-  name?: string;
-  phone?: string;
-  date?: string;
-  time?: string;
-};
 const yesNo = (s:string)=>/(^|\b)(yes|yeah|yup|sure|ok|okay|correct)\b/i.test(s)?'yes':/(^|\b)(no|nope|nah)\b/i.test(s)?'no':undefined;
 
-function basicSlotExtract(text: string): Partial<BookingState> {
+function basicSlotExtract(text: string) {
   const name = text.match(/\b(?:I am|I'm|my name is)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/i)?.[1];
   const phone = text.match(/(\+?\d[\d\s\-().]{7,}\d)/)?.[1];
   const service = text.match(/\b(?:book|schedule|need|for)\s+(?:a |an )?([a-z ]+?)(?: appointment| visit| checkup| consult)?\b/i)?.[1]?.trim();
@@ -244,48 +133,7 @@ function basicSlotExtract(text: string): Partial<BookingState> {
   return { name, phone, service, provider, date, time, patientStatus };
 }
 
-function speakText(text: string, voiceProvider: VoiceProvider, voiceId: string, voiceLabel: string) {
-  // Preferred: user provided ElevenLabs hook
-  const custom = (window as any).elevenlabsSpeak;
-  if (voiceProvider === 'elevenlabs' && typeof custom === 'function') {
-    try { custom(text, voiceId); return; } catch {}
-  }
-  if (voiceProvider === 'elevenlabs') {
-    // Fire an event so your importer/player can catch it
-    try { window.dispatchEvent(new CustomEvent('elevenlabs:tts', { detail:{ text, voiceId } })); return; } catch {}
-  }
-
-  // Fallback: Web Speech API
-  const synth = window.speechSynthesis;
-  const u = new SpeechSynthesisUtterance(text);
-  const voices = synth.getVoices();
-  // Try match by label hint
-  const match = voices.find(v => v.name.toLowerCase().includes((voiceLabel||'').toLowerCase()));
-  if (match) u.voice = match;
-  u.rate = 1; u.pitch = 1; u.volume = 1;
-  synth.cancel(); synth.speak(u);
-}
-
-async function callLLM(system: string, turns: TranscriptTurn[], userTurn: string) {
-  // Use YOUR exact prompt from the UI as system
-  const messages = [
-    { role:'system', content: system },
-    ...turns.filter(t => t.role !== 'system').map(t => ({ role: t.role, content: t.text })),
-    { role:'user', content: userTurn }
-  ];
-  try {
-    const r = await fetch('/api/llm', {
-      method:'POST',
-      headers:{ 'content-type':'application/json' },
-      body: JSON.stringify({ system, messages, temperature: 0.2 })
-    });
-    if (r.ok) { const j = await r.json(); if (j?.reply) return String(j.reply); }
-  } catch {}
-  return null;
-}
-
 function policyGuard(text: string) {
-  // Very small guard to avoid the "Understood. Anything else?" trap
   if (/^\s*(understood|noted|okay|ok)[.!]?\s*(is there anything|anything else)?.*$/i.test(text)) {
     return 'I can help you book, reschedule, or cancel an appointment. What would you like to do?';
   }
@@ -293,31 +141,49 @@ function policyGuard(text: string) {
 }
 
 /* =============================================================================
-   PAGE
+   LAYOUT UTILS
+============================================================================= */
+function useAppSidebarWidth(scopeRef: React.RefObject<HTMLDivElement>, fallbackCollapsed: boolean) {
+  useEffect(() => {
+    const scope = scopeRef.current; if (!scope) return;
+    const setVar = (w: number) => scope.style.setProperty('--app-sidebar-w', `${Math.round(w)}px`);
+    const findSidebar = () =>
+      (document.querySelector('[data-app-sidebar]') as HTMLElement) ||
+      (document.querySelector('#app-sidebar') as HTMLElement) ||
+      (document.querySelector('.app-sidebar') as HTMLElement) ||
+      (document.querySelector('aside.sidebar') as HTMLElement) ||
+      null;
+    let target = findSidebar();
+    if (!target) { setVar(fallbackCollapsed ? 72 : 248); return; }
+    setVar(target.getBoundingClientRect().width);
+    const ro = new ResizeObserver(() => setVar(target!.getBoundingClientRect().width));
+    ro.observe(target);
+    const mo = new MutationObserver(() => setVar(target!.getBoundingClientRect().width));
+    mo.observe(target, { attributes: true, attributeFilter: ['class', 'style'] });
+    const onTransitionEnd = () => setVar(target!.getBoundingClientRect().width);
+    target.addEventListener('transitionend', onTransitionEnd);
+    return () => { ro.disconnect(); mo.disconnect(); target.removeEventListener('transitionend', onTransitionEnd); };
+  }, [scopeRef, fallbackCollapsed]);
+}
+
+/* =============================================================================
+   COMPONENT
 ============================================================================= */
 export default function VoiceAgentSection() {
   const scopeRef = useRef<HTMLDivElement | null>(null);
-  const [sbCollapsed, setSbCollapsed] = useState<boolean>(() => {
-    if (typeof document === 'undefined') return false;
-    return document.body.getAttribute('data-sb-collapsed') === 'true';
-  });
-
+  const [sbCollapsed, setSbCollapsed] = useState(false);
   useEffect(() => {
-    const onEvt = (e: Event) => {
-      const detail = (e as CustomEvent).detail || {};
-      if (typeof detail.collapsed === 'boolean') setSbCollapsed(!!detail.collapsed);
-    };
-    window.addEventListener('layout:sidebar', onEvt as EventListener);
-
     const mo = new MutationObserver(() => {
       setSbCollapsed(document.body.getAttribute('data-sb-collapsed') === 'true');
     });
     mo.observe(document.body, { attributes: true, attributeFilter: ['data-sb-collapsed', 'class'] });
-
-    return () => { window.removeEventListener('layout:sidebar', onEvt as EventListener); mo.disconnect(); };
+    return () => mo.disconnect();
   }, []);
-
   useAppSidebarWidth(scopeRef, sbCollapsed);
+
+  /* ---------- Settings (BYO keys) ---------- */
+  const [settings, setSettings] = useState<Settings>(() => readLS<Settings>(LS_SETTINGS) || { openaiKey: '', xiKey: '' });
+  const saveSettings = (s: Settings) => { setSettings(s); writeLS(LS_SETTINGS, s); };
 
   /* ---------- Assistants ---------- */
   const [assistants, setAssistants] = useState<Assistant[]>([]);
@@ -339,7 +205,7 @@ export default function VoiceAgentSection() {
         published: false,
         config: {
           model: { provider:'openai', model:'gpt-4o', firstMessageMode:'assistant_first', firstMessage:'', systemPrompt: '' },
-          voice: { provider:'openai', voiceId:'alloy', voiceLabel:'Alloy (OpenAI)' },
+          voice: { provider:'elevenlabs', voiceId:'wBXNqKUATyqu0RtYt25i', voiceLabel:'Custom 1 (11L)' },
           transcriber: { provider:'deepgram', model:'nova-2', language:'en', denoise:false, confidenceThreshold:0.4, numerals:false },
           tools: { enableEndCall:true, dialKeypad:true },
           telephony: { numbers: [], linkedNumberId: undefined }
@@ -372,13 +238,13 @@ export default function VoiceAgentSection() {
   const [creating, setCreating] = useState(false);
   const addAssistant = async () => {
     setCreating(true);
-    await new Promise(r => setTimeout(r, 360));
+    await new Promise(r => setTimeout(r, 200));
     const id = `agent_${Math.random().toString(36).slice(2, 8)}`;
     const a: Assistant = {
       id, name:'New Assistant', updatedAt: Date.now(), published: false,
       config: {
         model: { provider:'openai', model:'gpt-4o', firstMessageMode:'assistant_first', firstMessage:'', systemPrompt: '' },
-        voice: { provider:'openai', voiceId:'alloy', voiceLabel:'Alloy (OpenAI)' },
+        voice: { provider:'elevenlabs', voiceId:'4RZ84U1b4WCqpu57LvIq', voiceLabel:'Custom 2 (11L)' },
         transcriber: { provider:'deepgram', model:'nova-2', language:'en', denoise:false, confidenceThreshold:0.4, numerals:false },
         tools: { enableEndCall:true, dialKeypad:true },
         telephony: { numbers: [], linkedNumberId: undefined }
@@ -387,9 +253,7 @@ export default function VoiceAgentSection() {
     writeLS(ak(id), a);
     const list = [...assistants, a]; writeLS(LS_LIST, list);
     setAssistants(list); setActiveId(id);
-    setCreating(false);
-    setEditingId(id);
-    setTempName('New Assistant');
+    setCreating(false); setEditingId(id); setTempName('New Assistant');
   };
 
   const removeAssistant = (id: string) => {
@@ -401,92 +265,89 @@ export default function VoiceAgentSection() {
     setRev(r => r + 1);
   };
 
-  /* ---------- Rail collapse/expand (manual) ---------- */
-  const [railCollapsed, setRailCollapsed] = useState(false);
-
-  /* ---------- Generate (live type + accept/decline) ---------- */
-  const [genOpen, setGenOpen] = useState(false);
-  const [genText, setGenText] = useState('');
-  const [typing, setTyping] = useState<CharTok[] | null>(null);
-  const [typedCount, setTypedCount] = useState(0);
-  const [lastNew, setLastNew] = useState('');
-  const [pendingFirstMsg, setPendingFirstMsg] = useState<string | undefined>(undefined);
-  const typingBoxRef = useRef<HTMLDivElement | null>(null);
-  const typingTimer = useRef<number | null>(null);
-
-  const startTyping = (tokens: CharTok[]) => {
-    setTyping(tokens);
-    setTypedCount(0);
-    if (typingTimer.current) window.clearInterval(typingTimer.current);
-    typingTimer.current = window.setInterval(() => {
-      setTypedCount(c => {
-        const next = Math.min(c + CHUNK_SIZE, tokens.length);
-        if (next >= tokens.length && typingTimer.current) {
-          window.clearInterval(typingTimer.current);
-          typingTimer.current = null;
-        }
-        return next;
-      });
-    }, TICK_MS);
-  };
-
-  useEffect(() => {
-    if (!typingBoxRef.current) return;
-    typingBoxRef.current.scrollTop = typingBoxRef.current.scrollHeight;
-  }, [typedCount]);
-
-  const handleGenerate = () => {
-    if (!active) return;
-    const current = active.config.model.systemPrompt || '';
-    const { prompt, firstMessage } = mergeInput(genText, current || DEFAULT_SCAFFOLD);
-    setLastNew(prompt);
-    setPendingFirstMsg(firstMessage);
-    startTyping(charDiffAdded(current, prompt));
-    setGenOpen(false);
-    setGenText('');
-  };
-
-  const acceptTyping = () => {
-    if (!active) return;
-    updateActive(a => ({
-      ...a,
-      config: {
-        ...a.config,
-        model: {
-          ...a.config.model,
-          systemPrompt: lastNew || a.config.model.systemPrompt,
-          firstMessage: typeof pendingFirstMsg === 'string' ? pendingFirstMsg : a.config.model.firstMessage
-        }
-      }
-    }));
-    setTyping(null);
-    setPendingFirstMsg(undefined);
-  };
-  const declineTyping = () => { setTyping(null); setPendingFirstMsg(undefined); };
-
   /* ---------- Voices ---------- */
   const openaiVoices = [
     { value: 'alloy', label: 'Alloy (OpenAI)' },
     { value: 'ember', label: 'Ember (OpenAI)' },
   ];
   const elevenVoices = [
-    { value: 'rachel', label: 'Rachel (ElevenLabs)' },
-    { value: 'adam',   label: 'Adam (ElevenLabs)'   },
-    { value: 'bella',  label: 'Bella (ElevenLabs)'  },
+    { value: 'wBXNqKUATyqu0RtYt25i', label: 'Custom 1 (11L)' },
+    { value: '4RZ84U1b4WCqpu57LvIq', label: 'Custom 2 (11L)' },
+    // common catalog fallbacks:
+    { value: 'Rachel', label: 'Rachel (11L default)' },
+    { value: 'Aria',   label: 'Aria (11L default)' },
   ];
 
-  /* ---------- Web call + logs (prompt-driven) ---------- */
+  /* ---------- ElevenLabs speaker hook (uses user key via header) ---------- */
+  useEffect(() => {
+    (window as any).elevenlabsSpeak = async (text: string, voiceId: string) => {
+      try {
+        if (!settings.xiKey) throw new Error('No ElevenLabs key set. Open Settings.');
+        const r = await fetch('/api/tts', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-elevenlabs-key': settings.xiKey,
+          },
+          body: JSON.stringify({ text, voiceId }),
+        });
+        if (!r.ok) throw new Error(await r.text());
+        const blob = await r.blob();
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        await audio.play().catch(() => {});
+        audio.onended = () => URL.revokeObjectURL(url);
+      } catch (err) {
+        console.error('TTS error', err);
+        // fallback handled by speakText()
+      }
+    };
+  }, [settings.xiKey]);
+
+  /* ---------- Helpers for speech + LLM ---------- */
+  function speakText(text: string, voiceProvider: VoiceProvider, voiceId: string, voiceLabel: string) {
+    const custom = (window as any).elevenlabsSpeak;
+    if (voiceProvider === 'elevenlabs' && typeof custom === 'function') {
+      try { custom(text, voiceId); return; } catch {}
+    }
+    const synth = window.speechSynthesis;
+    const u = new SpeechSynthesisUtterance(text);
+    const voices = synth.getVoices();
+    const match = voices.find(v => v.name.toLowerCase().includes((voiceLabel||'').toLowerCase()));
+    if (match) u.voice = match;
+    synth.cancel(); synth.speak(u);
+  }
+
+  async function callLLM(system: string, turns: TranscriptTurn[], userTurn: string) {
+    const messages = [
+      { role:'system', content: system },
+      ...turns.filter(t => t.role !== 'system').map(t => ({ role: t.role, content: t.text })),
+      { role:'user', content: userTurn }
+    ];
+    try {
+      if (!settings.openaiKey) throw new Error('No OpenAI key set. Open Settings.');
+      const r = await fetch('/api/llm', {
+        method:'POST',
+        headers:{
+          'content-type':'application/json',
+          'x-openai-key': settings.openaiKey,
+        },
+        body: JSON.stringify({ system, messages, temperature: 0.2 }),
+      });
+      if (r.ok) { const j = await r.json(); if (j?.reply) return String(j.reply); }
+    } catch {}
+    return null;
+  }
+
+  /* ---------- Web call + logs ---------- */
   const [currentCallId, setCurrentCallId] = useState<string | null>(null);
   const [transcript, setTranscript] = useState<TranscriptTurn[]>([]);
 
-  // ASR (simple): Web Speech recognition (use your actual transcriber in production)
   function getRecognizer(onFinalText: (text:string)=>void) {
     const SR: any = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
     if (!SR) return null;
     const r = new SR();
-    r.continuous = true;
-    r.interimResults = true;
-    r.lang = active?.config.transcriber.language === 'multi' ? 'en-US' : 'en-US';
+    r.continuous = true; r.interimResults = true; r.lang = 'en-US';
     r.onresult = (e: any) => {
       let final = '';
       for (let i = e.resultIndex; i < e.results.length; i++) if (e.results[i].isFinal) final += e.results[i][0].transcript;
@@ -511,47 +372,48 @@ export default function VoiceAgentSection() {
 
   async function startCall() {
     if (!active) return;
+
+    if (!settings.openaiKey) { alert('Add your OpenAI API key in Settings.'); return; }
+    if (active.config.voice.provider === 'elevenlabs' && !settings.xiKey) {
+      alert('Add your ElevenLabs API key in Settings or switch voice provider.');
+      return;
+    }
+
     const id = `call_${crypto.randomUUID?.() || Math.random().toString(36).slice(2)}`;
-    setCurrentCallId(id);
-    setTranscript([]);
+    setCurrentCallId(id); setTranscript([]);
 
     const linkedNum = active.config.telephony?.numbers.find(n => n.id === active.config.telephony?.linkedNumberId)?.e164;
     const calls = readLS<CallLog[]>(LS_CALLS) || [];
     calls.unshift({ id, assistantId: active.id, assistantName: active.name, startedAt: Date.now(), type: 'Web', assistantPhoneNumber: linkedNum, transcript: [] });
     writeLS(LS_CALLS, calls);
 
-    // Greet from YOUR prompt (firstMessage takes priority if set in UI)
-    const userSystemPrompt = (active.config.model.systemPrompt || DEFAULT_SCAFFOLD).trim();
-    const configuredGreeting =
+    const system = (active.config.model.systemPrompt || DEFAULT_SCAFFOLD).trim();
+    const greet =
       (active.config.model.firstMessage || '').trim() ||
-      extractGreetingFromPrompt(userSystemPrompt) ||
+      extractGreetingFromPrompt(system) ||
       'Hello, how can I help you today?';
 
     if (active.config.model.firstMessageMode === 'assistant_first') {
-      pushTurn('assistant', configuredGreeting);
-      speakText(configuredGreeting, active.config.voice.provider, active.config.voice.voiceId, active.config.voice.voiceLabel);
+      pushTurn('assistant', greet);
+      speakText(greet, active.config.voice.provider, active.config.voice.voiceId, active.config.voice.voiceLabel);
     }
-
-    // keep system as first transcript turn, so it’s always used by /api/llm
-    pushTurn('system', userSystemPrompt);
+    pushTurn('system', system);
 
     const rec = getRecognizer(async (finalText) => {
       pushTurn('user', finalText);
 
-      // 1) Try your backend LLM with YOUR prompt
-      let reply = await callLLM(userSystemPrompt, transcript, finalText);
-
-      // 2) If backend missing, do a tiny slot-filling to keep convo useful
+      let reply = await callLLM(system, transcript, finalText);
       if (!reply) {
+        // minimal slot filling fallback
         const all = transcript.map(t => `${t.role}: ${t.text}`).join('\n') + `\nuser: ${finalText}`;
         const got = basicSlotExtract(all);
         const have = {
-          service: !!got.service || /service:/.test(all),
-          status: !!got.patientStatus || /new|returning patient/i.test(all),
-          name: !!got.name || /name:/.test(all),
-          phone: !!got.phone || /phone:/.test(all),
-          date: !!got.date || / on /i.test(all),
-          time: !!got.time || / at /i.test(all),
+          service: !!got.service,
+          status: !!got.patientStatus,
+          name:   !!got.name,
+          phone:  !!got.phone,
+          date:   !!got.date,
+          time:   !!got.time,
         };
         if (!have.service) reply = 'What type of appointment do you need? For example, “primary care”, “dermatology”, or “physical therapy.”';
         else if (!have.status) reply = 'Are you a new or returning patient?';
@@ -561,7 +423,6 @@ export default function VoiceAgentSection() {
         else if (!have.time) reply = 'What time works best for you? For example, 10am or 3:30pm.';
         else {
           const sum = `To confirm: ${got.name}, ${got.patientStatus} patient, service ${got.service}${got.provider ? ` with ${got.provider}`:''}, ${got.date} at ${got.time}. Phone ${got.phone}. Is that correct?`;
-          // If last thing was a confirmation, check yes/no
           const lastAi = [...transcript].reverse().find(t=>t.role==='assistant')?.text || '';
           if (/Is that correct\??$/i.test(lastAi)) {
             const yn = yesNo(finalText);
@@ -578,7 +439,7 @@ export default function VoiceAgentSection() {
     });
 
     if (!rec) {
-      const msg = 'Browser speech recognition is not available. Try Chrome or Edge, or wire in your preferred transcriber.';
+      const msg = 'Browser speech recognition is not available. Try Chrome/Edge, or wire in your server transcriber.';
       pushTurn('assistant', msg);
       speakText(msg, active.config.voice.provider, active.config.voice.voiceId, active.config.voice.voiceLabel);
       return;
@@ -597,34 +458,9 @@ export default function VoiceAgentSection() {
 
   const callsForAssistant = (readLS<CallLog[]>(LS_CALLS) || []).filter(c => c.assistantId === active?.id);
 
-  if (!active) {
-    return (
-      <div ref={scopeRef} className={SCOPE} style={{ color:'var(--text)' }}>
-        <div className="px-6 py-10 opacity-70">Create your first assistant.</div>
-        <StyleBlock />
-      </div>
-    );
-  }
-
-  const visible = assistants.filter(a => a.name.toLowerCase().includes(query.trim().toLowerCase()));
-  const beginRename = (a: Assistant) => { setEditingId(a.id); setTempName(a.name); };
-  const saveRename = (a: Assistant) => {
-    const name = (tempName || '').trim() || 'Untitled';
-    if (a.id === activeId) updateActive(x => ({ ...x, name }));
-    else {
-      const cur = readLS<Assistant>(ak(a.id));
-      if (cur) writeLS(ak(a.id), { ...cur, name, updatedAt: Date.now() });
-      const list = (readLS<Assistant[]>(LS_LIST) || []).map(x => x.id === a.id ? { ...x, name, updatedAt: Date.now() } : x);
-      writeLS(LS_LIST, list); setAssistants(list);
-      setRev(r => r + 1);
-    }
-    setEditingId(null);
-  };
-
   /* ---------- Telephony helpers ---------- */
   const addPhone = (e164: string, label?: string) => {
-    const norm = e164.trim();
-    if (!norm) return;
+    const norm = e164.trim(); if (!norm) return;
     updateActive(a => {
       const nums = a.config.telephony?.numbers ?? [];
       return {
@@ -649,142 +485,106 @@ export default function VoiceAgentSection() {
   };
 
   const publish = () => {
-    const linkedId = active.config.telephony?.linkedNumberId;
-    const numbers = active.config.telephony?.numbers ?? [];
+    const linkedId = active?.config.telephony?.linkedNumberId;
+    const numbers = active?.config.telephony?.numbers ?? [];
     const num = numbers.find(n=>n.id===linkedId);
     if (!num) { alert('Pick a Phone Number (Linked) before publishing.'); return; }
     const routes = readLS<Record<string, string>>(LS_ROUTES) || {};
-    routes[num.id] = active.id; // link phone-number -> assistant
+    routes[num.id] = active!.id; // link phone-number -> assistant
     writeLS(LS_ROUTES, routes);
     updateActive(a => ({ ...a, published: true }));
-    alert(`Published! ${num.e164} is now linked to ${active.name}.`);
+    alert(`Published! ${num.e164} is now linked to ${active!.name}.`);
+  };
+
+  /* ---------- Early returns ---------- */
+  if (!active) {
+    return (
+      <div ref={scopeRef} className={SCOPE} style={{ color:'var(--text)' }}>
+        <div className="px-6 py-10 opacity-70">Create your first assistant.</div>
+        <StyleBlock />
+      </div>
+    );
+  }
+
+  const visible = assistants.filter(a => a.name.toLowerCase().includes(query.trim().toLowerCase()));
+  const beginRename = (a: Assistant) => { setEditingId(a.id); setTempName(a.name); };
+  const saveRename = (a: Assistant) => {
+    const name = (tempName || '').trim() || 'Untitled';
+    if (a.id === activeId) updateActive(x => ({ ...x, name }));
+    else {
+      const cur = readLS<Assistant>(ak(a.id));
+      if (cur) writeLS(ak(a.id), { ...cur, name, updatedAt: Date.now() });
+      const list = (readLS<Assistant[]>(LS_LIST) || []).map(x => x.id === a.id ? { ...x, name, updatedAt: Date.now() } : x);
+      writeLS(LS_LIST, list); setAssistants(list);
+      setRev(r => r + 1);
+    }
+    setEditingId(null);
   };
 
   /* =================================== RENDER =================================== */
   return (
     <div ref={scopeRef} className={SCOPE} style={{ background:'var(--bg)', color:'var(--text)' }}>
       {/* ================= ASSISTANTS RAIL ================= */}
-      <aside
-        className="hidden lg:flex flex-col"
-        data-collapsed={railCollapsed ? 'true' : 'false'}
-        style={{
-          position:'fixed',
-          left:'calc(var(--app-sidebar-w, 248px) - 1px)',
-          top:'var(--app-header-h, 64px)',
-          width: railCollapsed ? '72px' : 'var(--va-rail-w, 360px)',
-          height:'calc(100vh - var(--app-header-h, 64px))',
-          borderLeft:'none',
-          borderRight:'1px solid var(--va-border)',
-          background:'var(--va-sidebar)',
-          boxShadow:'var(--va-shadow-side)',
-          zIndex: 10,
-          willChange: 'left'
-        }}
-      >
+      <aside className="hidden lg:flex flex-col" style={{
+        position:'fixed',
+        left:'calc(var(--app-sidebar-w, 248px) - 1px)',
+        top:'var(--app-header-h, 64px)',
+        width: 'var(--va-rail-w, 360px)',
+        height:'calc(100vh - var(--app-header-h, 64px))',
+        borderRight:'1px solid var(--va-border)',
+        background:'var(--va-sidebar)',
+        boxShadow:'var(--va-shadow-side)',
+        zIndex: 10,
+      }}>
         <div className="px-3 py-3 flex items-center justify-between" style={{ borderBottom:'1px solid var(--va-border)' }}>
           <div className="flex items-center gap-2 text-sm font-semibold">
             <PanelLeft className="w-4 h-4 icon" />
-            {!railCollapsed && <span>Assistants</span>}
+            <span>Assistants</span>
           </div>
           <div className="flex items-center gap-2">
-            {!railCollapsed && (
-              <button onClick={addAssistant} className="btn btn--green">
-                {creating ? <span className="w-3.5 h-3.5 rounded-full border-2 border-white/50 border-t-transparent animate-spin" /> : <Plus className="w-3.5 h-3.5 text-white" />}
-                <span className="text-white">{creating ? 'Creating…' : 'Create'}</span>
-              </button>
-            )}
-            <button
-              title={railCollapsed ? 'Expand assistants' : 'Collapse assistants'}
-              className="btn btn--ghost"
-              onClick={() => setRailCollapsed(v => !v)}
-            >
-              {railCollapsed ? <ChevronRightIcon className="w-4 h-4 icon" /> : <ChevronLeft className="w-4 h-4 icon" />}
+            <button onClick={addAssistant} className="btn btn--green">
+              {creating ? <span className="w-3.5 h-3.5 rounded-full border-2 border-white/50 border-t-transparent animate-spin" /> : <Plus className="w-3.5 h-3.5 text-white" />}
+              <span className="text-white">{creating ? 'Creating…' : 'Create'}</span>
             </button>
           </div>
         </div>
 
         <div className="p-3 min-h-0 flex-1 overflow-y-auto" style={{ scrollbarWidth:'thin' }}>
-          {!railCollapsed && (
-            <div
-              className="flex items-center gap-2 rounded-lg px-2.5 py-2 mb-2"
-              style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)' }}
-            >
-              <Search className="w-4 h-4 icon" />
-              <input
-                value={query}
-                onChange={(e)=> setQuery(e.target.value)}
-                placeholder="Search assistants"
-                className="w-full bg-transparent outline-none text-sm"
-                style={{ color:'var(--text)' }}
-              />
-            </div>
-          )}
+          <div className="flex items-center gap-2 rounded-lg px-2.5 py-2 mb-2"
+               style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)' }}>
+            <Search className="w-4 h-4 icon" />
+            <input value={query} onChange={(e)=> setQuery(e.target.value)} placeholder="Search assistants"
+                   className="w-full bg-transparent outline-none text-sm" style={{ color:'var(--text)' }} />
+          </div>
 
-          {!railCollapsed && (
-            <>
-              <div className="text-xs font-semibold flex items-center gap-2 mt-3 mb-1" style={{ color:'var(--text-muted)' }}>
-                <Folder className="w-3.5 h-3.5 icon" /> Folders
-              </div>
-              <button className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/5">
-                <FolderOpen className="w-4 h-4 icon" /> All
-              </button>
-            </>
-          )}
+          <div className="text-xs font-semibold flex items-center gap-2 mt-3 mb-1" style={{ color:'var(--text-muted)' }}>
+            <Folder className="w-3.5 h-3.5 icon" /> Folders
+          </div>
+          <button className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/5">
+            <FolderOpen className="w-4 h-4 icon" /> All
+          </button>
 
           <div className="mt-4 space-y-2">
             {visible.map(a => {
-              const isActive = a.id === activeId;
               const isEdit = editingId === a.id;
-              if (railCollapsed) {
-                return (
-                  <button
-                    key={a.id}
-                    onClick={()=> setActiveId(a.id)}
-                    className="w-full rounded-xl p-3 grid place-items-center"
-                    style={{
-                      background: isActive ? 'color-mix(in oklab, var(--accent) 10%, transparent)' : 'var(--va-card)',
-                      border: `1px solid ${isActive ? 'color-mix(in oklab, var(--accent) 35%, var(--va-border))' : 'var(--va-border)'}`,
-                      boxShadow:'var(--va-shadow-sm)'
-                    }}
-                    title={a.name}
-                  >
-                    <Bot className="w-4 h-4 icon" />
-                  </button>
-                );
-              }
               return (
-                <div
-                  key={a.id}
-                  className="w-full rounded-xl p-3"
-                  style={{
-                    background: isActive ? 'color-mix(in oklab, var(--accent) 10%, transparent)' : 'var(--va-card)',
-                    border: `1px solid ${isActive ? 'color-mix(in oklab, var(--accent) 35%, var(--va-border))' : 'var(--va-border)'}`,
-                    boxShadow:'var(--va-shadow-sm)'
-                  }}
-                >
-                  <button className="w-full text-left flex items-center justify-between"
-                          onClick={()=> setActiveId(a.id)}>
+                <div key={a.id} className="w-full rounded-xl p-3" style={{ background:'var(--va-card)', border:'1px solid var(--va-border)', boxShadow:'var(--va-shadow-sm)' }}>
+                  <button className="w-full text-left flex items-center justify-between" onClick={()=> setActiveId(a.id)}>
                     <div className="min-w-0">
                       <div className="font-medium truncate flex items-center gap-2">
                         <Bot className="w-4 h-4 icon" />
                         {!isEdit ? (
                           <span className="truncate">{a.name}</span>
                         ) : (
-                          <input
-                            autoFocus
-                            value={tempName}
-                            onChange={(e)=> setTempName(e.target.value)}
-                            onKeyDown={(e)=> { if (e.key==='Enter') saveRename(a); if (e.key==='Escape') setEditingId(null); }}
-                            className="bg-transparent rounded-md px-2 py-1 outline-none w-full"
-                            style={{ border:'1px solid var(--va-input-border)', color:'var(--text)' }}
-                          />
+                          <input autoFocus value={tempName} onChange={(e)=> setTempName(e.target.value)}
+                                 onKeyDown={(e)=> { if (e.key==='Enter') saveRename(a); if (e.key==='Escape') setEditingId(null); }}
+                                 className="bg-transparent rounded-md px-2 py-1 outline-none w-full"
+                                 style={{ border:'1px solid var(--va-input-border)', color:'var(--text)' }} />
                         )}
                       </div>
-                      <div className="text-[11px] mt-0.5 opacity-70 truncate">
-                        {a.folder || 'Unfiled'} • {new Date(a.updatedAt).toLocaleDateString()}
-                      </div>
+                      <div className="text-[11px] mt-0.5 opacity-70 truncate">{a.folder || 'Unfiled'} • {new Date(a.updatedAt).toLocaleDateString()}</div>
                     </div>
-                    {isActive ? <Check className="w-4 h-4 icon" /> : null}
+                    <Check className="w-4 h-4 icon" />
                   </button>
 
                   <div className="mt-2 flex items-center gap-2">
@@ -807,19 +607,15 @@ export default function VoiceAgentSection() {
         </div>
       </aside>
 
-      {/* =================================== EDITOR =================================== */}
-      <div
-        className="va-main"
-        style={{
-          marginLeft:`calc(var(--app-sidebar-w, 248px) + ${railCollapsed ? '72px' : 'var(--va-rail-w, 360px)'})`,
-          paddingRight:'clamp(20px, 4vw, 40px)',
-          paddingTop:'calc(var(--app-header-h, 64px) + 12px)',
-          paddingBottom:'88px'
-        }}
-      >
+      {/* =================================== MAIN =================================== */}
+      <div className="va-main" style={{
+        marginLeft:`calc(var(--app-sidebar-w, 248px) + var(--va-rail-w, 360px))`,
+        paddingRight:'clamp(20px, 4vw, 40px)',
+        paddingTop:'calc(var(--app-header-h, 64px) + 12px)',
+        paddingBottom:'88px'
+      }}>
         {/* top action bar */}
-        <div className="px-2 pb-3 flex items-center justify-between sticky"
-             style={{ top:'calc(var(--app-header-h, 64px) + 8px)', zIndex:2 }}>
+        <div className="px-2 pb-3 flex items-center justify-between sticky" style={{ top:'calc(var(--app-header-h, 64px) + 8px)', zIndex:2 }}>
           <div className="flex items-center gap-2">
             {!currentCallId ? (
               <button onClick={startCall} className="btn btn--green">
@@ -835,18 +631,10 @@ export default function VoiceAgentSection() {
             </button>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              onClick={()=> navigator.clipboard.writeText(active.config.model.systemPrompt || '').catch(()=>{})}
-              className="btn btn--ghost"
-            >
-              <Copy className="w-4 h-4 icon" /> Copy Prompt
-            </button>
-            <button onClick={()=> setDeleting({ id: active.id, name: active.name })} className="btn btn--danger">
-              <Trash2 className="w-4 h-4" /> Delete
-            </button>
-            <button onClick={publish} className="btn btn--green">
-              <Rocket className="w-4 h-4 text-white" /><span className="text-white">{active.published ? 'Republish' : 'Publish'}</span>
-            </button>
+            <SettingsButton settings={settings} onSave={saveSettings} />
+            <button onClick={()=> navigator.clipboard.writeText(active.config.model.systemPrompt || '').catch(()=>{})} className="btn btn--ghost"><Copy className="w-4 h-4 icon" /> Copy Prompt</button>
+            <button onClick={()=> setDeleting({ id: active.id, name: active.name })} className="btn btn--danger"><Trash2 className="w-4 h-4" /> Delete</button>
+            <button onClick={publish} className="btn btn--green"><Rocket className="w-4 h-4 text-white" /><span className="text-white">{active.published ? 'Republish' : 'Publish'}</span></button>
           </div>
         </div>
 
@@ -855,200 +643,95 @@ export default function VoiceAgentSection() {
           <Section title="Model" icon={<FileText className="w-4 h-4 icon" />}>
             <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(4, minmax(360px, 1fr))' }}>
               <Field label="Provider">
-                <Select
-                  value={active.config.model.provider}
-                  onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, provider: v as Provider } } }))}
-                  items={[{ value:'openai', label:'OpenAI' }]}
-                />
+                <Select value={active.config.model.provider} onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, provider: v as Provider } } }))} items={[{ value:'openai', label:'OpenAI' }]} />
               </Field>
               <Field label="Model">
-                <Select
-                  value={active.config.model.model}
-                  onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, model: v as ModelId } } }))}
-                  items={[
-                    { value:'gpt-4o', label:'GPT-4o' },
-                    { value:'gpt-4o-mini', label:'GPT-4o mini' },
-                    { value:'gpt-4.1', label:'GPT-4.1' },
-                    { value:'gpt-3.5-turbo', label:'GPT-3.5 Turbo' },
-                  ]}
-                />
+                <Select value={active.config.model.model} onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, model: v as ModelId } } }))} items={[
+                  { value:'gpt-4o', label:'GPT-4o' },
+                  { value:'gpt-4o-mini', label:'GPT-4o mini' },
+                  { value:'gpt-4.1', label:'GPT-4.1' },
+                  { value:'gpt-3.5-turbo', label:'GPT-3.5 Turbo' },
+                ]} />
               </Field>
               <Field label="First Message Mode">
-                <Select
-                  value={active.config.model.firstMessageMode}
-                  onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, firstMessageMode: v as any } } }))}
-                  items={[{ value:'assistant_first', label:'Assistant speaks first' }, { value:'user_first', label:'User speaks first' }]}
-                />
+                <Select value={active.config.model.firstMessageMode} onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, firstMessageMode: v as any } } }))} items={[
+                  { value:'assistant_first', label:'Assistant speaks first' },
+                  { value:'user_first', label:'User speaks first' },
+                ]} />
               </Field>
               <Field label="First Message">
-                <input
-                  value={active.config.model.firstMessage}
-                  onChange={(e)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, firstMessage: e.target.value } } }))}
-                  className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
-                  style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)', color:'var(--text)' }}
-                />
+                <input value={active.config.model.firstMessage} onChange={(e)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, firstMessage: e.target.value } } }))} className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none" style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)', color:'var(--text)' }} />
               </Field>
             </div>
 
-            {/* System Prompt (THIS is the single source of truth used for calls) */}
             <div className="mt-6">
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="w-4 h-4 icon" /> System Prompt</div>
                 <div className="flex items-center gap-2">
-                  <button
-                    onClick={()=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, systemPrompt: '' } } }))}
-                    className="btn btn--ghost"
-                  ><RefreshCw className="w-4 h-4 icon" /> Clear</button>
-                  <button onClick={()=> setGenOpen(true)} className="btn btn--green">
-                    <Sparkles className="w-4 h-4 text-white" /> <span className="text-white">Generate / Edit</span>
-                  </button>
+                  <button onClick={()=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, systemPrompt: '' } } }))} className="btn btn--ghost"><RefreshCw className="w-4 h-4 icon" /> Clear</button>
                 </div>
               </div>
-
-              <textarea
-                rows={26}
-                value={active.config.model.systemPrompt || ''}
-                onChange={(e)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, systemPrompt: e.target.value } } }))}
-                className="w-full rounded-2xl px-3 py-3 text-[14px] leading-6 outline-none"
-                style={{
-                  background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)',
-                  boxShadow:'var(--va-shadow), inset 0 1px 0 rgba(255,255,255,.03)', color:'var(--text)',
-                  fontFamily:'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-                  minHeight: 560
-                }}
-                placeholder={`Paste your full prompt here (e.g., your Riley spec).\nThis exact text is sent as the system message.`}
-              />
+              <textarea rows={26} value={active.config.model.systemPrompt || ''} onChange={(e)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, systemPrompt: e.target.value } } }))} className="w-full rounded-2xl px-3 py-3 text-[14px] leading-6 outline-none" style={{
+                background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)',
+                boxShadow:'var(--va-shadow), inset 0 1px 0 rgba(255,255,255,.03)', color:'var(--text)',
+                fontFamily:'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+                minHeight: 560
+              }} placeholder={`Paste your full prompt here (e.g., your Riley spec). This exact text becomes the system message.`} />
             </div>
           </Section>
 
           <Section title="Voice" icon={<Mic2 className="w-4 h-4 icon" />}>
             <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(2, minmax(360px, 1fr))' }}>
               <Field label="Provider">
-                <Select
-                  value={active.config.voice.provider}
-                  onChange={(v)=>{
-                    const list = v==='elevenlabs' ? elevenVoices : openaiVoices;
-                    updateActive(a => ({ ...a, config:{ ...a.config, voice:{ provider: v as VoiceProvider, voiceId: list[0].value, voiceLabel: list[0].label } } }));
-                  }}
-                  items={[
-                    { value:'openai', label:'OpenAI (browser TTS)' },
-                    { value:'elevenlabs', label:'ElevenLabs (hook in your player)' },
-                  ]}
-                />
+                <Select value={active.config.voice.provider} onChange={(v)=>{
+                  const list = v==='elevenlabs' ? elevenVoices : openaiVoices;
+                  updateActive(a => ({ ...a, config:{ ...a.config, voice:{ provider: v as VoiceProvider, voiceId: list[0].value, voiceLabel: list[0].label } } }));
+                }} items={[
+                  { value:'openai', label:'OpenAI (browser TTS)' },
+                  { value:'elevenlabs', label:'ElevenLabs (best human sound)' },
+                ]} />
               </Field>
               <Field label="Voice">
-                <Select
-                  value={active.config.voice.voiceId}
-                  onChange={(v)=>{
-                    const list = active.config.voice.provider==='elevenlabs' ? elevenVoices : openaiVoices;
-                    const found = list.find(x=>x.value===v);
-                    updateActive(a => ({ ...a, config:{ ...a.config, voice:{ ...a.config.voice, voiceId:v, voiceLabel: found?.label || v } } }));
-                  }}
-                  items={active.config.voice.provider==='elevenlabs' ? elevenVoices : openaiVoices}
-                />
+                <Select value={active.config.voice.voiceId} onChange={(v)=>{
+                  const list = active.config.voice.provider==='elevenlabs' ? elevenVoices : openaiVoices;
+                  const found = list.find(x=>x.value===v);
+                  updateActive(a => ({ ...a, config:{ ...a.config, voice:{ ...a.config.voice, voiceId:v, voiceLabel: found?.label || v } } }));
+                }} items={active.config.voice.provider==='elevenlabs' ? elevenVoices : openaiVoices} />
               </Field>
             </div>
 
             <div className="mt-3">
-              <button
-                onClick={()=> { window.dispatchEvent(new CustomEvent('voiceagent:import-11labs')); alert('Hook “voiceagent:import-11labs” to your ElevenLabs connector.\nAlso implement window.elevenlabsSpeak(text, voiceId) OR listen to the "elevenlabs:tts" event.'); }}
-                className="btn btn--ghost"
-              ><UploadCloud className="w-4 h-4 icon" /> Import / Connect ElevenLabs</button>
+              <button onClick={()=> { alert('Voices come from your ElevenLabs account. Make sure your API Key is set in Settings.'); }} className="btn btn--ghost"><UploadCloud className="w-4 h-4 icon" /> Manage ElevenLabs Voices</button>
             </div>
           </Section>
 
           <Section title="Transcriber" icon={<BookOpen className="w-4 h-4 icon" />}>
             <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(3, minmax(360px, 1fr))' }}>
-              <Field label="Provider">
-                <Select
-                  value={active.config.transcriber.provider}
-                  onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, transcriber:{ ...a.config.transcriber, provider: v as any } } }))}
-                  items={[{ value:'deepgram', label:'Deepgram (server)' }]}
-                />
-              </Field>
-              <Field label="Model">
-                <Select
-                  value={active.config.transcriber.model}
-                  onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, transcriber:{ ...a.config.transcriber, model: v as any } } }))}
-                  items={[{ value:'nova-2', label:'Nova 2' }, { value:'nova-3', label:'Nova 3' }]}
-                />
-              </Field>
-              <Field label="Language">
-                <Select
-                  value={active.config.transcriber.language}
-                  onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, transcriber:{ ...a.config.transcriber, language: v as any } } }))}
-                  items={[{ value:'en', label:'English' }, { value:'multi', label:'Multi' }]}
-                />
-              </Field>
-              <Field label="Confidence Threshold">
-                <div className="flex items-center gap-3">
-                  <input
-                    type="range" min={0} max={1} step={0.01}
-                    value={active.config.transcriber.confidenceThreshold}
-                    onChange={(e)=> updateActive(a => ({ ...a, config:{ ...a.config, transcriber:{ ...a.config.transcriber, confidenceThreshold: Number(e.target.value) } } }))}
-                    className="va-range w-full"
-                  />
-                  <span className="text-xs" style={{ color:'var(--text-muted)' }}>{active.config.transcriber.confidenceThreshold.toFixed(2)}</span>
-                </div>
-              </Field>
-              <Field label="Denoise">
-                <Select
-                  value={String(active.config.transcriber.denoise)}
-                  onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, transcriber:{ ...a.config.transcriber, denoise: v==='true' } } }))}
-                  items={[{ value:'false', label:'Off' }, { value:'true', label:'On' }]}
-                />
-              </Field>
-              <Field label="Use Numerals">
-                <Select
-                  value={String(active.config.transcriber.numerals)}
-                  onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, transcriber:{ ...a.config.transcriber, numerals: v==='true' } } }))}
-                  items={[{ value:'false', label:'No' }, { value:'true', label:'Yes' }]}
-                />
-              </Field>
+              <Field label="Provider"><Select value={active.config.transcriber.provider} onChange={()=>{}} items={[{ value:'deepgram', label:'Deepgram (server)' }]} /></Field>
+              <Field label="Model"><Select value={active.config.transcriber.model} onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, transcriber:{ ...a.config.transcriber, model: v as any } } }))} items={[{ value:'nova-2', label:'Nova 2' }, { value:'nova-3', label:'Nova 3' }]} /></Field>
+              <Field label="Language"><Select value={active.config.transcriber.language} onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, transcriber:{ ...a.config.transcriber, language: v as any } } }))} items={[{ value:'en', label:'English' }, { value:'multi', label:'Multi' }]} /></Field>
             </div>
           </Section>
 
           <Section title="Tools" icon={<SlidersHorizontal className="w-4 h-4 icon" />}>
             <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(2, minmax(360px, 1fr))' }}>
-              <Field label="Enable End Call Function">
-                <Select
-                  value={String(active.config.tools.enableEndCall)}
-                  onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, tools:{ ...a.config.tools, enableEndCall: v==='true' } } }))}
-                  items={[{ value:'true', label:'Enabled' }, { value:'false', label:'Disabled' }]}
-                />
-              </Field>
-              <Field label="Dial Keypad">
-                <Select
-                  value={String(active.config.tools.dialKeypad)}
-                  onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, tools:{ ...a.config.tools, dialKeypad: v==='true' } } }))}
-                  items={[{ value:'true', label:'Enabled' }, { value:'false', label:'Disabled' }]}
-                />
-              </Field>
+              <Field label="Enable End Call Function"><Select value={String(active.config.tools.enableEndCall)} onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, tools:{ ...a.config.tools, enableEndCall: v==='true' } } }))} items={[{ value:'true', label:'Enabled' }, { value:'false', label:'Disabled' }]} /></Field>
+              <Field label="Dial Keypad"><Select value={String(active.config.tools.dialKeypad)} onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, tools:{ ...a.config.tools, dialKeypad: v==='true' } } }))} items={[{ value:'true', label:'Enabled' }, { value:'false', label:'Disabled' }]} /></Field>
             </div>
           </Section>
 
           <Section title="Telephony" icon={<PhoneIcon className="w-4 h-4 icon" />}>
-            <TelephonyEditor
-              numbers={active.config.telephony?.numbers ?? []}
-              linkedId={active.config.telephony?.linkedNumberId}
-              onLink={(id)=> setLinkedNumber(id)}
-              onAdd={addPhone}
-              onRemove={removePhone}
-            />
+            <TelephonyEditor numbers={active.config.telephony?.numbers ?? []} linkedId={active.config.telephony?.linkedNumberId} onLink={(id)=> setLinkedNumber(id)} onAdd={addPhone} onRemove={removePhone} />
           </Section>
 
           <Section title="Call Assistant (Web test)" icon={<AudioLines className="w-4 h-4 icon" />}>
             <div className="flex items-center gap-2 mb-3">
               {!currentCallId ? (
-                <button onClick={startCall} className="btn btn--green">
-                  <PhoneCall className="w-4 h-4 text-white" /><span className="text-white">Start Web Call</span>
-                </button>
+                <button onClick={startCall} className="btn btn--green"><PhoneCall className="w-4 h-4 text-white" /><span className="text-white">Start Web Call</span></button>
               ) : (
-                <button onClick={()=> endCall('Ended by user')} className="btn btn--danger">
-                  <PhoneOff className="w-4 h-4" /> End Call
-                </button>
+                <button onClick={()=> endCall('Ended by user')} className="btn btn--danger"><PhoneOff className="w-4 h-4" /> End Call</button>
               )}
-              <div className="text-xs opacity-70">Uses YOUR prompt (system message) + your ElevenLabs hook if set.</div>
+              <div className="text-xs opacity-70">Uses YOUR prompt (system message) + YOUR ElevenLabs key if selected.</div>
             </div>
             <div className="rounded-2xl p-3" style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)' }}>
               {transcript.length === 0 && <div className="text-sm opacity-60">No transcript yet.</div>}
@@ -1098,49 +781,10 @@ export default function VoiceAgentSection() {
         </div>
       </div>
 
-      {/* ---------------- Generate overlay ---------------- */}
-      <AnimatePresence>
-        {genOpen && (
-          <motion.div className="fixed inset-0 z-[999] flex items-center justify-center p-4"
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            style={{ background:'rgba(0,0,0,.45)' }}>
-            <motion.div
-              initial={{ y:10, opacity:0, scale:.98 }} animate={{ y:0, opacity:1, scale:1 }} exit={{ y:8, opacity:0, scale:.985 }}
-              className="w-full max-w-2xl rounded-2xl"
-              style={{ background:'var(--va-card)', border:'1px solid var(--va-border)', boxShadow:'var(--va-shadow-lg)' }}
-            >
-              <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom:'1px solid var(--va-border)' }}>
-                <div className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="w-4 h-4 icon" /> Generate / Edit Prompt</div>
-                <button onClick={()=> setGenOpen(false)} className="p-2 rounded-lg hover:opacity-80"><X className="w-4 h-4 icon" /></button>
-              </div>
-              <div className="p-4">
-                <input
-                  value={genText}
-                  onChange={(e)=> setGenText(e.target.value)}
-                  placeholder={`Paste or write edits. Supports [Sections] and "first message: ...".`}
-                  className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
-                  style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)', color:'var(--text)' }}
-                />
-
-                <div className="mt-3 flex items-center justify-between gap-2">
-                  <button onClick={()=> setGenOpen(false)} className="btn btn--ghost">Cancel</button>
-                  <button onClick={handleGenerate} className="btn btn--green"><span className="text-white">Generate</span></button>
-                </div>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       {/* Delete overlay */}
       <AnimatePresence>
         {deleting && (
-          <DeleteModal
-            open={true}
-            name={deleting.name}
-            onCancel={()=> setDeleting(null)}
-            onConfirm={()=> { removeAssistant(deleting.id); setDeleting(null); }}
-          />
+          <DeleteModal open={true} name={deleting.name} onCancel={()=> setDeleting(null)} onConfirm={()=> { removeAssistant(deleting.id); setDeleting(null); }} />
         )}
       </AnimatePresence>
 
@@ -1150,11 +794,64 @@ export default function VoiceAgentSection() {
 }
 
 /* =============================================================================
+   Settings Button (BYO keys)
+============================================================================= */
+function SettingsButton({ settings, onSave }:{ settings: Settings; onSave: (s:Settings)=>void }) {
+  const [open, setOpen] = useState(false);
+  const [openaiKey, setOpenaiKey] = useState(settings.openaiKey);
+  const [xiKey, setXiKey] = useState(settings.xiKey);
+
+  return (
+    <>
+      <button className="btn btn--ghost" onClick={()=> setOpen(true)}>
+        <Shield className="w-4 h-4 icon" /> Keys
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div className="fixed inset-0 z-[999] flex items-center justify-center p-4"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            style={{ background:'rgba(0,0,0,.45)' }}>
+            <motion.div initial={{ y:10, opacity:0, scale:.98 }} animate={{ y:0, opacity:1, scale:1 }} exit={{ y:8, opacity:0, scale:.985 }}
+              className="w-full max-w-lg rounded-2xl"
+              style={{ background:'var(--va-card)', border:'1px solid var(--va-border)', boxShadow:'var(--va-shadow-lg)' }}>
+              <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom:'1px solid var(--va-border)' }}>
+                <div className="flex items-center gap-2 text-sm font-semibold"><Shield className="w-4 h-4 icon" /> API Keys (BYO)</div>
+                <button onClick={()=> setOpen(false)} className="p-2 rounded-lg hover:opacity-80"><X className="w-4 h-4 icon" /></button>
+              </div>
+              <div className="p-4 space-y-3">
+                <div>
+                  <div className="mb-1.5 text-[13px] font-medium">OpenAI Key</div>
+                  <input type="password" value={openaiKey} onChange={(e)=> setOpenaiKey(e.target.value)} placeholder="sk-..."
+                    className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
+                    style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)', color:'var(--text)' }} />
+                </div>
+                <div>
+                  <div className="mb-1.5 text-[13px] font-medium">ElevenLabs Key</div>
+                  <input type="password" value={xiKey} onChange={(e)=> setXiKey(e.target.value)} placeholder="eleven_..."
+                    className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
+                    style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)', color:'var(--text)' }} />
+                </div>
+                <div className="flex items-center justify-end gap-2 pt-2">
+                  <button onClick={()=> setOpen(false)} className="btn btn--ghost">Cancel</button>
+                  <button onClick={()=> { onSave({ openaiKey, xiKey }); setOpen(false); }} className="btn btn--green"><span className="text-white">Save</span></button>
+                </div>
+                <div className="text-xs opacity-70">
+                  Your keys are stored locally in your browser (localStorage) and sent only to your server on each request in headers
+                  <code> x-openai-key</code> / <code> x-elevenlabs-key</code>. If not set, the APIs refuse to run.
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>
+  );
+}
+
+/* =============================================================================
    Delete Modal
 ============================================================================= */
-function DeleteModal({ open, name, onCancel, onConfirm }:{
-  open: boolean; name: string; onCancel: () => void; onConfirm: () => void;
-}) {
+function DeleteModal({ open, name, onCancel, onConfirm }:{ open: boolean; name: string; onCancel: () => void; onConfirm: () => void; }) {
   if (!open) return null;
   return (
     <motion.div className="fixed inset-0 z-[9998] flex items-center justify-center p-4"
@@ -1180,28 +877,15 @@ function DeleteModal({ open, name, onCancel, onConfirm }:{
 }
 
 /* =============================================================================
-   Atoms
+   Atoms + Styles (same as before)
 ============================================================================= */
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <div className="mb-1.5 text-[13px] font-medium" style={{ color:'var(--text)' }}>{label}</div>
-      {children}
-    </div>
-  );
+  return (<div><div className="mb-1.5 text-[13px] font-medium" style={{ color:'var(--text)' }}>{label}</div>{children}</div>);
 }
-
 function Section({ title, icon, children }:{ title: string; icon: React.ReactNode; children: React.ReactNode }) {
   const [open, setOpen] = useState(true);
   return (
-    <div
-      className="col-span-12 rounded-xl relative"
-      style={{
-        background:'var(--va-card)',
-        border:'1px solid var(--va-border)',
-        boxShadow:'var(--va-shadow)',
-      }}
-    >
+    <div className="col-span-12 rounded-xl relative" style={{ background:'var(--va-card)', border:'1px solid var(--va-border)', boxShadow:'var(--va-shadow)' }}>
       <div aria-hidden className="pointer-events-none absolute -top-[22%] -left-[22%] w-[70%] h-[70%] rounded-full"
            style={{ background:'radial-gradient(circle, color-mix(in oklab, var(--accent) 14%, transparent) 0%, transparent 70%)', filter:'blur(40px)' }} />
       <button type="button" onClick={()=> setOpen(v=>!v)} className="w-full flex items-center justify-between px-5 py-4">
@@ -1209,66 +893,37 @@ function Section({ title, icon, children }:{ title: string; icon: React.ReactNod
         {open ? <ChevronDown className="w-4 h-4 icon" /> : <ChevronRight className="w-4 h-4 icon" />}
       </button>
       <AnimatePresence initial={false}>
-        {open && (
-          <motion.div initial={{ height:0, opacity:0 }} animate={{ height:'auto', opacity:1 }} exit={{ height:0, opacity:0 }} transition={{ duration:.18 }} className="px-5 pb-5">
-            {children}
-          </motion.div>
-        )}
+        {open && (<motion.div initial={{ height:0, opacity:0 }} animate={{ height:'auto', opacity:1 }} exit={{ height:0, opacity:0 }} transition={{ duration:.18 }} className="px-5 pb-5">{children}</motion.div>)}
       </AnimatePresence>
     </div>
   );
 }
-
-/* =============================================================================
-   Telephony editor
-============================================================================= */
 function TelephonyEditor({ numbers, linkedId, onLink, onAdd, onRemove }:{
-  numbers: PhoneNum[];
-  linkedId?: string;
-  onLink: (id?: string) => void;
-  onAdd: (e164: string, label?: string) => void;
-  onRemove: (id: string) => void;
+  numbers: PhoneNum[]; linkedId?: string; onLink: (id?: string) => void; onAdd: (e164: string, label?: string) => void; onRemove: (id: string) => void;
 }) {
-  const [e164, setE164] = useState('');
-  const [label, setLabel] = useState('');
-
+  const [e164, setE164] = useState(''); const [label, setLabel] = useState('');
   return (
     <div className="space-y-4">
       <div className="grid gap-4" style={{ gridTemplateColumns:'repeat(3, minmax(240px, 1fr))' }}>
-        <div>
-          <div className="mb-1.5 text-[13px] font-medium" style={{ color:'var(--text)' }}>Phone Number (E.164)</div>
-          <input
-            value={e164}
-            onChange={(e)=> setE164(e.target.value)}
-            placeholder="+1xxxxxxxxxx"
-            className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
-            style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)', color:'var(--text)' }}
-          />
+        <div><div className="mb-1.5 text-[13px] font-medium" style={{ color:'var(--text)' }}>Phone Number (E.164)</div>
+          <input value={e164} onChange={(e)=> setE164(e.target.value)} placeholder="+1xxxxxxxxxx"
+                 className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
+                 style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)', color:'var(--text)' }} />
         </div>
-        <div>
-          <div className="mb-1.5 text-[13px] font-medium" style={{ color:'var(--text)' }}>Label</div>
-          <input
-            value={label}
-            onChange={(e)=> setLabel(e.target.value)}
-            placeholder="Support line"
-            className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
-            style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)', color:'var(--text)' }}
-          />
+        <div><div className="mb-1.5 text-[13px] font-medium" style={{ color:'var(--text)' }}>Label</div>
+          <input value={label} onChange={(e)=> setLabel(e.target.value)} placeholder="Support line"
+                 className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
+                 style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)', color:'var(--text)' }} />
         </div>
         <div className="flex items-end">
-          <button
-            onClick={()=> { onAdd(e164, label); setE164(''); setLabel(''); }}
-            className="btn btn--green w-full justify-center"
-          >
+          <button onClick={()=> { onAdd(e164, label); setE164(''); setLabel(''); }} className="btn btn--green w-full justify-center">
             <PhoneIcon className="w-4 h-4 text-white" /><span className="text-white">Add Number</span>
           </button>
         </div>
       </div>
 
       <div className="space-y-2">
-        {numbers.length === 0 && (
-          <div className="text-sm opacity-70">No phone numbers added yet.</div>
-        )}
+        {numbers.length === 0 && (<div className="text-sm opacity-70">No phone numbers added yet.</div>)}
         {numbers.map(n => (
           <div key={n.id} className="flex items-center justify-between rounded-xl px-3 py-2"
                style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)' }}>
@@ -1285,20 +940,13 @@ function TelephonyEditor({ numbers, linkedId, onLink, onAdd, onRemove }:{
             </div>
           </div>
         ))}
-        {numbers.length > 0 && (
-          <div className="text-xs opacity-70">The number marked as <b>Linked</b> will be attached to this assistant on <i>Publish</i>.</div>
-        )}
+        {numbers.length > 0 && (<div className="text-xs opacity-70">The number marked as <b>Linked</b> will attach on <i>Publish</i>.</div>)}
       </div>
     </div>
   );
 }
-
-/* =============================================================================
-   Scoped CSS
-============================================================================= */
 function StyleBlock() {
-  return (
-    <style jsx global>{`
+  return (<style jsx global>{`
 .${SCOPE}{
   --accent:${ACCENT};
   --bg:#0b0c10;
@@ -1320,64 +968,15 @@ function StyleBlock() {
   --va-shadow-side:8px 0 28px rgba(0,0,0,.42);
   --va-rail-w:360px;
 }
-:root:not([data-theme="dark"]) .${SCOPE}{
-  --bg:#f7f9fb;
-  --text:#101316;
-  --text-muted:color-mix(in oklab, var(--text) 55%, transparent);
-  --va-card:#ffffff;
-  --va-topbar:#ffffff;
-  --va-sidebar:linear-gradient(180deg,#ffffff 0%,#f7f9fb 100%);
-  --va-chip:#ffffff;
-  --va-border:rgba(0,0,0,.10);
-  --va-input-bg:#ffffff;
-  --va-input-border:rgba(0,0,0,.12);
-  --va-input-shadow:inset 0 1px 0 rgba(255,255,255,.85);
-  --va-menu-bg:#ffffff;
-  --va-menu-border:rgba(0,0,0,.10);
-  --va-shadow:0 28px 70px rgba(0,0,0,.12), 0 12px 28px rgba(0,0,0,.08);
-  --va-shadow-lg:0 42px 110px rgba(0,0,0,.16), 0 22px 54px rgba(0,0,0,.10);
-  --va-shadow-sm:0 12px 26px rgba(0,0,0,.10);
-  --va-shadow-side:8px 0 26px rgba(0,0,0,.08);
-}
-
-/* main */
 .${SCOPE} .va-main{ max-width: none !important; }
 .${SCOPE} .icon{ color: var(--accent); }
-
-/* unified button sizing + style parity */
-.${SCOPE} .btn{
-  display:inline-flex; align-items:center; gap:.5rem;
-  border-radius:14px; padding:.65rem 1rem; font-size:14px; line-height:1;
-  border:1px solid var(--va-border);
-}
-.${SCOPE} .btn--green{
-  background:${ACCENT}; color:#fff; box-shadow:${BTN_SHADOW};
-  transition:transform .04s ease, background .18s ease;
-}
+.${SCOPE} .btn{ display:inline-flex; align-items:center; gap:.5rem; border-radius:14px; padding:.65rem 1rem; font-size:14px; line-height:1; border:1px solid var(--va-border); }
+.${SCOPE} .btn--green{ background:${ACCENT}; color:#fff; box-shadow:${BTN_SHADOW}; transition:transform .04s ease, background .18s ease; }
 .${SCOPE} .btn--green:hover{ background:${ACCENT_HOVER}; }
 .${SCOPE} .btn--green:active{ transform:translateY(1px); }
-.${SCOPE} .btn--ghost{
-  background:var(--va-card); color:var(--text);
-  box-shadow:var(--va-shadow-sm);
-}
-.${SCOPE} .btn--danger{
-  background:rgba(220,38,38,.12); color:#fca5a5;
-  box-shadow:0 10px 24px rgba(220,38,38,.15);
-  border-color:rgba(220,38,38,.35);
-}
-
-.${SCOPE} .va-range{ -webkit-appearance:none; height:4px; background:color-mix(in oklab, var(--accent) 24%, #0000); border-radius:999px; outline:none; }
-.${SCOPE} .va-range::-webkit-slider-thumb{ -webkit-appearance:none; width:14px;height:14px;border-radius:50%;background:var(--accent); border:2px solid #fff; box-shadow:0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent); }
-.${SCOPE} .va-range::-moz-range-thumb{ width:14px;height:14px;border:0;border-radius:50%;background:var(--accent); box-shadow:0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent); }
-
-/* no transitions on left so Safari/iPad won't jitter during sidebar animation */
-.${SCOPE} aside{ transition:none !important; }
-
-@media (max-width: 1180px){
-  .${SCOPE}{ --va-rail-w: 320px; }
-}
-`}</style>
-  );
+.${SCOPE} .btn--ghost{ background:var(--va-card); color:var(--text); box-shadow:var(--va-shadow-sm); }
+.${SCOPE} .btn--danger{ background:rgba(220,38,38,.12); color:#fca5a5; box-shadow:0 10px 24px rgba(220,38,38,.15); border-color:rgba(220,38,38,.35); }
+`}</style>);
 }
 
 /* =============================================================================
@@ -1387,8 +986,7 @@ type Item = { value: string; label: string; icon?: React.ReactNode };
 function usePortalPos(open: boolean, ref: React.RefObject<HTMLElement>) {
   const [rect, setRect] = useState<{ top: number; left: number; width: number; up: boolean } | null>(null);
   useLayoutEffect(() => {
-    if (!open) return;
-    const r = ref.current?.getBoundingClientRect(); if (!r) return;
+    if (!open) return; const r = ref.current?.getBoundingClientRect(); if (!r) return;
     const up = r.bottom + 320 > window.innerHeight;
     setRect({ top: up ? r.top : r.bottom, left: r.left, width: r.width, up });
   }, [open]);
@@ -1418,13 +1016,8 @@ function Select({ value, items, onChange, placeholder, leftIcon }: {
 
   return (
     <>
-      <button
-        ref={btn}
-        type="button"
-        onClick={() => setOpen(v => !v)}
-        className="w-full flex items-center gap-3 px-3 py-3 rounded-2xl text-[15px]"
-        style={{ background:'var(--va-input-bg)', color:'var(--text)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)' }}
-      >
+      <button ref={btn} type="button" onClick={() => setOpen(v => !v)} className="w-full flex items-center gap-3 px-3 py-3 rounded-2xl text-[15px]"
+              style={{ background:'var(--va-input-bg)', color:'var(--text)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)' }}>
         {leftIcon ? <span className="shrink-0">{leftIcon}</span> : null}
         {sel ? <span className="flex items-center gap-2 min-w-0">{sel.icon}<span className="truncate">{sel.label}</span></span> : <span className="opacity-70">{placeholder || 'Select…'}</span>}
         <span className="ml-auto" />
@@ -1433,31 +1026,20 @@ function Select({ value, items, onChange, placeholder, leftIcon }: {
 
       <AnimatePresence>
         {open && rect && (
-          <motion.div
-            ref={portal}
-            initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 4 }}
+          <motion.div ref={portal} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 4 }}
             className="fixed z-[9999] p-3 rounded-xl"
             style={{
               top: rect.up ? rect.top - 8 : rect.top + 8,
               left: rect.left, width: rect.width, transform: rect.up ? 'translateY(-100%)' : 'none',
               background:'var(--va-menu-bg)', border:'1px solid var(--va-menu-border)', boxShadow:'var(--va-shadow-lg)'
-            }}
-          >
-            <div className="flex items-center gap-2 mb-3 px-2 py-2 rounded-lg"
-              style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)' }}>
+            }}>
+            <div className="flex items-center gap-2 mb-3 px-2 py-2 rounded-lg" style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)' }}>
               <Search className="w-4 h-4 icon" />
               <input value={q} onChange={(e)=> setQ(e.target.value)} placeholder="Filter…" className="w-full bg-transparent outline-none text-sm" style={{ color:'var(--text)' }}/>
             </div>
             <div className="max-h-72 overflow-y-auto pr-1" style={{ scrollbarWidth:'thin' }}>
               {filtered.map(it => (
-                <button
-                  key={it.value}
-                  onClick={() => { onChange(it.value); setOpen(false); }}
-                  className="w-full flex items-center gap-3 px-3 py-2 rounded-[10px] text-left"
-                  style={{ color:'var(--text)' }}
-                  onMouseEnter={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='rgba(16,185,129,.10)'; (e.currentTarget as HTMLButtonElement).style.border='1px solid rgba(16,185,129,.35)'; }}
-                  onMouseLeave={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='transparent'; (e.currentTarget as HTMLButtonElement).style.border='1px solid transparent'; }}
-                >
+                <button key={it.value} onClick={() => { onChange(it.value); setOpen(false); }} className="w-full flex items-center gap-3 px-3 py-2 rounded-[10px] text-left" style={{ color:'var(--text)' }}>
                   {it.icon}{it.label}
                 </button>
               ))}
