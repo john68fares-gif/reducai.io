@@ -17,7 +17,6 @@ const ACCENT = '#10b981';
 const ACCENT_HOVER = '#0ea371';
 const BTN_SHADOW = '0 10px 24px rgba(16,185,129,.22)';
 
-/* Typing speed (fast) */
 const TICK_MS = 10;
 const CHUNK_SIZE = 6;
 
@@ -83,18 +82,6 @@ You are an intelligent and responsive assistant designed to help users with a wi
 [Handover]
 - When done, summarize details and hand off if needed.`.trim();
 
-const SECTION_KEYS = [
-  'Identity',
-  'Style',
-  'System Behaviors',
-  'Task & Goals',
-  'Data to Collect',
-  'Safety',
-  'Handover',
-  'Refinements',
-] as const;
-type SectionKey = typeof SECTION_KEYS[number];
-
 function toTitle(s: string) {
   return s
     .replace(/\s+/g, ' ')
@@ -104,29 +91,7 @@ function toTitle(s: string) {
     .replace(/\b(Id|Url|Dob)\b/gi, m => m.toUpperCase());
 }
 
-function readSectionsFromPrompt(txt: string): Record<SectionKey, string> {
-  const out = Object.fromEntries(SECTION_KEYS.map(k => [k, ''])) as Record<SectionKey, string>;
-  if (!txt) return out;
-  const rx = /\[([^\]]+)\]\s*([\s\S]*?)(?=\n\[[^\]]+\]|\s*$)/g;
-  let m: RegExpExecArray | null;
-  while ((m = rx.exec(txt))) {
-    const key = m[1].trim();
-    const body = m[2].trim();
-    const canon = SECTION_KEYS.find(k => k.toLowerCase() === key.toLowerCase());
-    if (canon) out[canon] = body;
-  }
-  return out;
-}
-
-function sectionsToPrompt(s: Record<SectionKey, string>): string {
-  return SECTION_KEYS
-    .filter(k => k !== 'Refinements' || (s['Refinements'] && s['Refinements'].trim()))
-    .map(k => `[${k}]\n${(s[k] || '').trim()}`)
-    .join('\n\n')
-    .trim();
-}
-
-function buildDefaultsFromHint(hint: string): Record<SectionKey, string> {
+function buildDefaultsFromHint(hint: string) {
   const short = hint.trim().split(/\s+/).length <= 3 ? hint.trim() : 'Assistant';
   const collectMatch = hint.match(/collect(?:\s*[:\-])?\s*(.*)$/i);
   const fields = collectMatch
@@ -141,64 +106,60 @@ function buildDefaultsFromHint(hint: string): Record<SectionKey, string> {
 - Email (if provided)
 - Appointment Date/Time (if applicable)`;
 
-  return {
-    'Identity': `You are a helpful, fast, and accurate ${short.toLowerCase()} that completes tasks and collects information.`,
-    'Style': `- Friendly, concise, affirmative.\n- Ask one question at a time and confirm critical details.`,
-    'System Behaviors': `- Summarize & confirm before finalizing.\n- Offer next steps when appropriate.`,
-    'Task & Goals': `- Understand intent, collect required details, and provide guidance.`,
-    'Data to Collect': collectList,
-    'Safety': `- No medical/legal/financial advice beyond high-level pointers.\n- Decline restricted actions, suggest alternatives.`,
-    'Handover': `- When done, summarize details and hand off if needed.`,
-    'Refinements': ''
-  };
+  return [
+`[Identity]
+You are a helpful, fast, and accurate ${short.toLowerCase()} that completes tasks and collects information.`,
+
+`[Style]
+- Friendly, concise, affirmative.
+- Ask one question at a time and confirm critical details.`,
+
+`[System Behaviors]
+- Summarize & confirm before finalizing.
+- Offer next steps when appropriate.`,
+
+`[Task & Goals]
+- Understand intent, collect required details, and provide guidance.`,
+
+`[Data to Collect]
+${collectList}`,
+
+`[Safety]
+- No medical/legal/financial advice beyond high-level pointers.
+- Decline restricted actions, suggest alternatives.`,
+
+`[Handover]
+- When done, summarize details and hand off if needed.`
+  ].join('\n\n');
 }
 
-/** Merge user free-text into sections. Also returns optional firstMessage override. */
-function mergeInputIntoSections(input: string, basePrompt: string): {
-  merged: Record<SectionKey, string>;
-  firstMessage?: string;
-} {
-  const current = readSectionsFromPrompt(basePrompt || BASE_PROMPT);
+/** Merge user free-text into a new prompt and/or first message (safe & simple). */
+function mergeInput(genText: string, currentPrompt: string) {
+  const raw = (genText || '').trim();
+  const out = { prompt: currentPrompt || BASE_PROMPT, firstMessage: undefined as string | undefined };
 
-  let firstMessage: string | undefined;
+  if (!raw) return out;
 
-  const raw = input.trim();
-  if (!raw) return { merged: current };
-
-  // Direct “first message” commands
+  // "first message: hello there"
   const fm = raw.match(/^(?:first\s*message|greeting)\s*[:\-]\s*(.+)$/i);
   if (fm) {
-    firstMessage = fm[1].trim();
-    return { merged: current, firstMessage };
+    out.firstMessage = fm[1].trim();
+    return out;
   }
 
-  // If the user pasted structured sections, map them in
-  let consumed = false;
-  SECTION_KEYS.forEach(key => {
-    const rx = new RegExp(`\$begin:math:display$${key}\\$end:math:display$\\s*([\\s\\S]*?)(?=\\n\$begin:math:display$[^\\$end:math:display$]+\\]|\\s*$)`, 'i');
-    const m = raw.match(rx);
-    if (m) {
-      current[key] = m[1].trim();
-      consumed = true;
-    }
-  });
-
-  // Short hints like "assistant" or "collect name, phone"
-  if (!consumed && (raw.split(/\s+/).length <= 3 || /collect|fields|capture|gather/i.test(raw))) {
-    const d = buildDefaultsFromHint(raw);
-    SECTION_KEYS.forEach(k => { if (d[k]) current[k] = d[k]; });
-    consumed = true;
+  // short hints or "collect name, phone"
+  if (raw.split(/\s+/).length <= 3 || /collect|fields|capture|gather/i.test(raw)) {
+    out.prompt = buildDefaultsFromHint(raw);
+    return out;
   }
 
-  // If nothing matched, append to Refinements as a bullet (but keep previous edits)
-  if (!consumed) {
-    const line = `- ${raw.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim()}`;
-    current['Refinements'] = current['Refinements']
-      ? `${current['Refinements']}\n${line}`
-      : line;
-  }
-
-  return { merged: current, firstMessage };
+  // otherwise append as a refinement section bullet
+  const hasRef = /\n\[Refinements\]\s*/i.test(currentPrompt);
+  const bullet = `- ${raw.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim()}`;
+  out.prompt = hasRef
+    ? currentPrompt.replace(/\n\[Refinements\]\s*([\s\S]*)$/i, (m, body) => `\n[Refinements]\n${(body || '').trim()}\n${bullet}`)
+    : `${currentPrompt}\n\n[Refinements]\n${bullet}`;
+  return out;
 }
 
 /* =============================================================================
@@ -226,16 +187,63 @@ function charDiffAdded(oldStr: string, newStr: string): CharTok[] {
 }
 
 /* =============================================================================
+   FIX THE DRIFT: Measure real app sidebar width
+============================================================================= */
+function useAppSidebarWidth(scopeRef: React.RefObject<HTMLDivElement>, fallbackCollapsed: boolean) {
+  useEffect(() => {
+    const scope = scopeRef.current;
+    if (!scope) return;
+
+    const setVar = (w: number) => scope.style.setProperty('--app-sidebar-w', `${Math.round(w)}px`);
+
+    const findSidebar = () =>
+      (document.querySelector('[data-app-sidebar]') as HTMLElement) ||
+      (document.querySelector('#app-sidebar') as HTMLElement) ||
+      (document.querySelector('.app-sidebar') as HTMLElement) ||
+      (document.querySelector('aside.sidebar') as HTMLElement) ||
+      null;
+
+    let target = findSidebar();
+    if (!target) { setVar(fallbackCollapsed ? 72 : 248); return; }
+
+    // Initial read
+    setVar(target.getBoundingClientRect().width);
+
+    const ro = new ResizeObserver(() => {
+      setVar(target!.getBoundingClientRect().width);
+    });
+    ro.observe(target);
+
+    // If classes/inline styles toggle during animation, capture them too
+    const mo = new MutationObserver(() => {
+      setVar(target!.getBoundingClientRect().width);
+    });
+    mo.observe(target, { attributes: true, attributeFilter: ['class', 'style'] });
+
+    // As a backstop, re-apply after CSS transition ends
+    const onTransitionEnd = () => setVar(target!.getBoundingClientRect().width);
+    target.addEventListener('transitionend', onTransitionEnd);
+
+    return () => {
+      ro.disconnect();
+      mo.disconnect();
+      target.removeEventListener('transitionend', onTransitionEnd);
+    };
+  }, [scopeRef, fallbackCollapsed]);
+}
+
+/* =============================================================================
    PAGE
 ============================================================================= */
 export default function VoiceAgentSection() {
-  /* ---------- Sync with APP sidebar collapse ---------- */
+  // Collapsed flag only as a fallback default if we cannot find/observe the real sidebar.
   const scopeRef = useRef<HTMLDivElement | null>(null);
   const [sbCollapsed, setSbCollapsed] = useState<boolean>(() => {
     if (typeof document === 'undefined') return false;
     return document.body.getAttribute('data-sb-collapsed') === 'true';
   });
 
+  // Listen to your app event + body attr changes (just to keep the fallback flag fresh)
   useEffect(() => {
     const onEvt = (e: Event) => {
       const detail = (e as CustomEvent).detail || {};
@@ -251,64 +259,8 @@ export default function VoiceAgentSection() {
     return () => { window.removeEventListener('layout:sidebar', onEvt as EventListener); mo.disconnect(); };
   }, []);
 
-  useEffect(() => {
-    if (!scopeRef.current) return;
-    const el = scopeRef.current;
-    el.style.setProperty('--app-sidebar-w', sbCollapsed ? '72px' : '248px');
-  }, [sbCollapsed]);
-
-  /* ====== NEW: measure the actual left sidebar width so our rail snaps flush ====== */
-  useEffect(() => {
-    if (!scopeRef.current || typeof window === 'undefined') return;
-
-    const scope = scopeRef.current;
-
-    const measure = () => {
-      const candidates = Array.from(document.querySelectorAll<HTMLElement>(
-        '[data-app-sidebar], [data-sidebar], aside[role="navigation"], aside, nav'
-      ));
-
-      let bestW = 0;
-
-      for (const el of candidates) {
-        const cs = window.getComputedStyle(el);
-        if (cs.display === 'none') continue;
-        if (cs.position !== 'fixed' && cs.position !== 'sticky') continue;
-
-        const r = el.getBoundingClientRect();
-        // must hug the left edge
-        if (Math.round(r.left) !== 0) continue;
-
-        // ignore overlays; keep reasonable widths
-        if (r.width > 0 && r.width < 500 && r.width > bestW) bestW = r.width;
-      }
-
-      if (bestW) {
-        scope.style.setProperty('--app-sidebar-w', `${Math.round(bestW)}px`);
-      }
-    };
-
-    measure();
-
-    const mo = new MutationObserver(measure);
-    mo.observe(document.body, {
-      attributes: true,
-      subtree: true,
-      attributeFilter: ['class', 'style', 'data-sb-collapsed']
-    });
-
-    window.addEventListener('resize', measure);
-    const t1 = setTimeout(measure, 120);
-    const t2 = setTimeout(measure, 260);
-
-    return () => {
-      mo.disconnect();
-      window.removeEventListener('resize', measure);
-      clearTimeout(t1);
-      clearTimeout(t2);
-    };
-  }, []);
-  /* ============================================================================== */
+  // The actual fix: measure real width and keep --app-sidebar-w current
+  useAppSidebarWidth(scopeRef, sbCollapsed);
 
   /* ---------- Assistants ---------- */
   const [assistants, setAssistants] = useState<Assistant[]>([]);
@@ -317,7 +269,7 @@ export default function VoiceAgentSection() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [tempName, setTempName] = useState('');
   const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
-  const [rev, setRev] = useState(0); // force refresh after LS writes
+  const [rev, setRev] = useState(0);
 
   useEffect(() => {
     const list = readLS<Assistant[]>(LS_LIST) || [];
@@ -350,7 +302,7 @@ export default function VoiceAgentSection() {
     const list = (readLS<Assistant[]>(LS_LIST) || []).map(x => x.id === next.id ? { ...x, name: next.name, folder: next.folder, updatedAt: Date.now() } : x);
     writeLS(LS_LIST, list);
     setAssistants(list);
-    setRev(r => r + 1); // ensure re-render picks new LS state
+    setRev(r => r + 1);
   };
 
   const [creating, setCreating] = useState(false);
@@ -421,12 +373,10 @@ export default function VoiceAgentSection() {
   const handleGenerate = () => {
     if (!active) return;
     const current = active.config.model.systemPrompt || '';
-    const { merged, firstMessage } = mergeInputIntoSections(genText, current || BASE_PROMPT);
-    const nextPrompt = sectionsToPrompt(merged);
-
-    setLastNew(nextPrompt);
+    const { prompt, firstMessage } = mergeInput(genText, current || BASE_PROMPT);
+    setLastNew(prompt);
     setPendingFirstMsg(firstMessage);
-    startTyping(charDiffAdded(current, nextPrompt)); // live diff (added chars green)
+    startTyping(charDiffAdded(current, prompt));
     setGenOpen(false);
     setGenText('');
   };
@@ -492,15 +442,16 @@ export default function VoiceAgentSection() {
         data-collapsed={railCollapsed ? 'true' : 'false'}
         style={{
           position:'fixed',
-          left:'calc(var(--app-sidebar-w, 248px) - 1px)', // FUSE with main sidebar
+          left:'calc(var(--app-sidebar-w, 248px) - 1px)', // fuse with main sidebar
           top:'var(--app-header-h, 64px)',
           width: railCollapsed ? '72px' : 'var(--va-rail-w, 360px)',
           height:'calc(100vh - var(--app-header-h, 64px))',
-          borderLeft:'none',                                 // no left seam
+          borderLeft:'none',
           borderRight:'1px solid var(--va-border)',
           background:'var(--va-sidebar)',
           boxShadow:'var(--va-shadow-side)',
-          zIndex: 10
+          zIndex: 10,
+          willChange: 'left' // no CSS transitions -> no jitter
         }}
       >
         <div className="px-3 py-3 flex items-center justify-between" style={{ borderBottom:'1px solid var(--va-border)' }}>
@@ -627,7 +578,7 @@ export default function VoiceAgentSection() {
           marginLeft:`calc(var(--app-sidebar-w, 248px) + ${railCollapsed ? '72px' : 'var(--va-rail-w, 360px)'})`,
           paddingRight:'clamp(20px, 4vw, 40px)',
           paddingTop:'calc(var(--app-header-h, 64px) + 12px)',
-          paddingBottom:'88px'
+          paddingBottom:'88px)'
         }}
       >
         {/* top action bar */}
@@ -644,9 +595,8 @@ export default function VoiceAgentSection() {
           </div>
         </div>
 
-        {/* content body — WIDER */}
-        <div className="mx-auto grid grid-cols-12 gap-10"
-             style={{ maxWidth:'min(2400px, 98vw)' }}>
+        {/* content body */}
+        <div className="mx-auto grid grid-cols-12 gap-10" style={{ maxWidth:'min(2400px, 98vw)' }}>
           <Section title="Model" icon={<FileText className="w-4 h-4 icon" />}>
             <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(4, minmax(360px, 1fr))' }}>
               <Field label="Provider">
@@ -729,7 +679,7 @@ export default function VoiceAgentSection() {
                     }}
                   >
                     {(() => {
-                      const slice = typing!.slice(0, typedCount);
+                      const slice = typing.slice(0, typedCount);
                       const out: JSX.Element[] = [];
                       let buf = '';
                       let added = slice.length ? slice[0].added : false;
@@ -890,7 +840,7 @@ export default function VoiceAgentSection() {
 • collect full name, phone, date
 • Identity: AI Sales Agent for roofers
 • first message: Hey—quick question to get you booked…`}
-                  className="w-full rounded-lg px-3 py-3 text>[15px] outline-none"
+                  className="w-full rounded-lg px-3 py-3 text-[15px] outline-none"
                   style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)', color:'var(--text)' }}
                 />
                 <div className="mt-3 flex items-center justify-end gap-2">
@@ -1066,10 +1016,8 @@ function StyleBlock() {
       .${SCOPE} .va-range::-webkit-slider-thumb{ -webkit-appearance:none; width:14px;height:14px;border-radius:50%;background:var(--accent); border:2px solid #fff; box-shadow:0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent); }
       .${SCOPE} .va-range::-moz-range-thumb{ width:14px;height:14px;border:0;border-radius:50%;background:var(--accent); box-shadow:0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent); }
 
-      /* Fuse assistants rail to main sidebar in collapsed state (remove hairline gap) */
-      .${SCOPE} aside[data-collapsed="true"]{
-        left: calc(var(--app-sidebar-w, 248px) - 1px);
-      }
+      /* no transitions on left so Safari/iPad won't jitter during sidebar animation */
+      .${SCOPE} aside{ transition:none !important; }
 
       @media (max-width: 1180px){
         .${SCOPE}{ --va-rail-w: 320px; }
