@@ -6,26 +6,23 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search, Plus, Folder, FolderOpen, Check, Trash2, Copy, Edit3, Sparkles,
   ChevronDown, ChevronRight, FileText, Mic2, BookOpen, SlidersHorizontal,
-  PanelLeft, Bot, UploadCloud, RefreshCw, X, Undo2, Eye
+  PanelLeft, Bot, UploadCloud, RefreshCw, X, Undo2
 } from 'lucide-react';
 
 /* =============================================================================
-   THEME / TOKENS
+   CONFIG
 ============================================================================= */
 const SCOPE = 'va-scope';
 const ACCENT = '#10b981';
 const ACCENT_HOVER = '#0ea371';
 const BTN_SHADOW = '0 10px 24px rgba(16,185,129,.22)';
 
-/* tiny OpenAI glyph */
-const OpenAIIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 256 256" aria-hidden>
-    <path fill="currentColor" d="M214.7 111.7c1.9-7.6 1.5-15.7-1.2-23.3-7.6-21.3-28.6-35.2-51.4-33.6-12.1-19.9-36.5-29-59-21.2-22.1 7.6-36.7 28.6-35.4 51.5-19.9 12.1-29 36.5-21.2 59 7.6 22.1 28.6 36.7 51.5 35.4 12.1 19.9 36.5 29 59 21.2 22.1-7.6 36.7-28.6 35.4-51.5 8.7-5.5 15.5-13.9 18.9-24.1ZM156 193.2c-9.2 3.2-19.2 2.7-28-1.4l17.4-30.1c4.8-0.7 9.2-3.8 11.6-8.4c1.2-2.4 1.8-5 1.8-7.6v-40l27 15.6v28.6c0 17.1-10.7 32.8-29.8 43.3Zm-76.9-8.7c-9.2-5.2-16-13.2-19.6-23c-3.6-10-3-20.4 1.2-29.7l27 15.6v16.1c0 4.9 2.6 9.4 6.7 11.9l31 17.9c-15.1 2.8-31-0.1-46.3-8.8ZM62.8 92.5c5.2-9.2 13.2-16 23-19.6c10-3.6 20.4-3 29.7 1.2l-15.6 27h-16.1c-4.9 0-9.4 2.6-11.9 6.7l-17.9 31c-2.8-15.1 0.1-31 8.8-46.3Zm118.4 5.1l-31-17.9c-3.6-2.1-7.8-2.5-11.7-1.4c-3.8 1.1-7 3.6-9.1 7.1l-17.5 30.3l-27-15.6l16.6-28.7c9.7-16.7 31.1-22.4 48-12.7c0.6 0.3 1.1 0.7 1.7 1l30 17.3c-0.7 7.4-0.8 13.4 0 20.6Z"/>
-  </svg>
-);
+/* Typing speed (fast) */
+const TICK_MS = 10;         // animation tick
+const CHUNK_SIZE = 6;       // how many characters per tick
 
 /* =============================================================================
-   STORAGE + TYPES
+   TYPES + STORAGE
 ============================================================================= */
 type Provider = 'openai';
 type ModelId = 'gpt-4o' | 'gpt-4o-mini' | 'gpt-4.1' | 'gpt-3.5-turbo';
@@ -56,7 +53,7 @@ const readLS = <T,>(k: string): T | null => { try { const r = localStorage.getIt
 const writeLS = <T,>(k: string, v: T) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 
 /* =============================================================================
-   PROMPT BUILDERS
+   PROMPT HELPERS
 ============================================================================= */
 const BASE_PROMPT = `[Identity]
 You are an intelligent and responsive assistant designed to help users with a wide range of inquiries and tasks.
@@ -88,7 +85,6 @@ function toTitle(s: string) {
     .replace(/\b(Id|Url|Dob)\b/gi, m => m.toUpperCase());
 }
 
-/** Expand short instructions into a structured prompt */
 function buildStructuredPrompt(input: string): string {
   const raw = input.trim();
   const isShort = raw.split(/\s+/).length <= 3;
@@ -117,8 +113,7 @@ You are a helpful, fast, and accurate ${title.toLowerCase()} that completes task
 - Understand intent, collect required details, and provide guidance.`,
 
 `[Data to Collect]
-${fields.length ? fields.map(f => `- ${toTitle(f)}`).join('\n') : '- Full Name\n- Phone Number\n- Email (if provided)\n- Appointment Date/Time (if applicable)'}
-`,
+${fields.length ? fields.map(f => `- ${toTitle(f)}`).join('\n') : '- Full Name\n- Phone Number\n- Email (if provided)\n- Appointment Date/Time (if applicable)'}`,
 
 `[Safety]
 - No medical/legal/financial advice beyond high-level pointers.
@@ -132,7 +127,6 @@ Hello.`
   ].join('\n\n').trim();
 }
 
-/** Build next prompt from user instruction and current */
 function makeNewPromptFrom(input: string, current: string): string {
   const small = input.trim();
   if (!small) return current || BASE_PROMPT;
@@ -142,101 +136,33 @@ function makeNewPromptFrom(input: string, current: string): string {
 }
 
 /* =============================================================================
-   DIFF + TYPING
+   DIFF (character-level, preserves newlines)
+   - marks added chars; deletions omitted for live typing
 ============================================================================= */
+type CharTok = { ch: string; added: boolean };
 
-/** LCS tokens: new prompt words marked added; deletions are omitted */
-function tokenizeDiff(oldStr: string, newStr: string): { text: string; added: boolean }[] {
-  const o = oldStr.split(/\s+/);
-  const n = newStr.split(/\s+/);
+function charDiffAdded(oldStr: string, newStr: string): CharTok[] {
+  const o = [...oldStr]; // char arrays (preserves newlines)
+  const n = [...newStr];
   const dp: number[][] = Array(o.length + 1).fill(0).map(() => Array(n.length + 1).fill(0));
   for (let i = o.length - 1; i >= 0; i--) {
     for (let j = n.length - 1; j >= 0; j--) {
       dp[i][j] = o[i] === n[j] ? 1 + dp[i + 1][j + 1] : Math.max(dp[i + 1][j], dp[i][j + 1]);
     }
   }
-  const tokens: { text: string; added: boolean }[] = [];
+  const out: CharTok[] = [];
   let i = 0, j = 0;
   while (i < o.length && j < n.length) {
-    if (o[i] === n[j]) { tokens.push({ text: n[j], added: false }); i++; j++; }
-    else if (dp[i + 1][j] >= dp[i][j + 1]) { i++; } // deletion
-    else { tokens.push({ text: n[j], added: true }); j++; }
+    if (o[i] === n[j]) { out.push({ ch: n[j], added: false }); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { i++; } // deletion -> omit in live typing
+    else { out.push({ ch: n[j], added: true }); j++; }
   }
-  while (j < n.length) tokens.push({ text: n[j++], added: true });
-  return tokens;
-}
-
-/** Renders typing of tokens; onDone is called when the last token is painted */
-function TypingHighlighter({
-  tokens, onDone, height = 480
-}: { tokens: { text: string; added: boolean }[]; onDone: () => void; height?: number }) {
-  const [idx, setIdx] = useState(0);
-  const boxRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    let raf = 0;
-    const step = () => {
-      setIdx(v => {
-        const speed = Math.max(1, Math.floor(tokens.length / 160)); // ~160 ticks
-        return Math.min(v + speed, tokens.length);
-      });
-      raf = requestAnimationFrame(step);
-    };
-    raf = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(raf);
-  }, [tokens.length]);
-
-  useEffect(() => {
-    if (!boxRef.current) return;
-    boxRef.current.scrollTop = boxRef.current.scrollHeight;
-    if (idx >= tokens.length) onDone();
-  }, [idx, tokens.length, onDone]);
-
-  const parts = tokens.slice(0, idx).map((t, i) =>
-    t.added
-      ? <ins key={i} style={{ background:'rgba(16,185,129,.18)', padding:'1px 2px', borderRadius:4 }}>{t.text}</ins>
-      : <span key={i}>{t.text}</span>
-  ).reduce<(JSX.Element|string)[]>((acc, el, i) => (i ? acc.concat([' ', el]) : acc.concat([el])), []);
-
-  return (
-    <div
-      ref={boxRef}
-      className="w-full rounded-xl px-3 py-3 text-[14px] leading-6 outline-none"
-      style={{
-        background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)',
-        boxShadow:'var(--va-shadow), inset 0 1px 0 rgba(255,255,255,.03)', color:'var(--text)',
-        fontFamily:'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-        whiteSpace:'pre-wrap',
-        height,
-        overflowY:'auto'
-      }}
-    >
-      {parts}
-      {idx < tokens.length && <span className="animate-pulse"> ▌</span>}
-    </div>
-  );
-}
-
-/** simple before/after diff HTML with green adds + red dels */
-function htmlDiff(oldStr: string, newStr: string) {
-  const o = oldStr.split(/\s+/), n = newStr.split(/\s+/);
-  const dp: number[][] = Array(o.length + 1).fill(0).map(() => Array(n.length + 1).fill(0));
-  for (let i = o.length - 1; i >= 0; i--) for (let j = n.length - 1; j >= 0; j--)
-    dp[i][j] = o[i] === n[j] ? 1 + dp[i+1][j+1] : Math.max(dp[i+1][j], dp[i][j+1]);
-  const out: string[] = [];
-  let i=0, j=0;
-  while (i<o.length && j<n.length) {
-    if (o[i] === n[j]) { out.push(o[i]); i++; j++; }
-    else if (dp[i+1][j] >= dp[i][j+1]) { out.push(`<del>${o[i++]}</del>`); }
-    else { out.push(`<ins>${n[j++]}</ins>`); }
-  }
-  while (i<o.length) out.push(`<del>${o[i++]}</del>`);
-  while (j<n.length) out.push(`<ins>${n[j++]}</ins>`);
-  return out.join(' ');
+  while (j < n.length) out.push({ ch: n[j++], added: true });
+  return out;
 }
 
 /* =============================================================================
-   Delete Modal (overlay)
+   DELETE MODAL
 ============================================================================= */
 function DeleteModal({ open, name, onCancel, onConfirm }:{
   open: boolean; name: string; onCancel: () => void; onConfirm: () => void;
@@ -312,7 +238,7 @@ export default function VoiceAgentSection() {
   const [creating, setCreating] = useState(false);
   const addAssistant = async () => {
     setCreating(true);
-    await new Promise(r => setTimeout(r, 420));
+    await new Promise(r => setTimeout(r, 360));
     const id = `agent_${Math.random().toString(36).slice(2, 8)}`;
     const a: Assistant = {
       id, name:'New Assistant', updatedAt: Date.now(),
@@ -339,48 +265,58 @@ export default function VoiceAgentSection() {
     if (!list.length) setActiveId('');
   };
 
-  /* ---------- Generate: true retype + commit + diff tray ---------- */
+  /* ---------- Generate (live type + accept/decline) ---------- */
   const [genOpen, setGenOpen] = useState(false);
   const [genText, setGenText] = useState('');
-  const [typingTokens, setTypingTokens] = useState<{ text: string; added: boolean }[] | null>(null);
-  const [isTypingLive, setIsTypingLive] = useState(false);
-  const [lastOld, setLastOld] = useState<string>('');
-  const [lastNew, setLastNew] = useState<string>('');
-  const [showDiff, setShowDiff] = useState(false);
+  const [typing, setTyping] = useState<CharTok[] | null>(null);
+  const [typedCount, setTypedCount] = useState(0);
+  const [lastOld, setLastOld] = useState('');
+  const [lastNew, setLastNew] = useState('');
+  const typingBoxRef = useRef<HTMLDivElement | null>(null);
+  const typingTimer = useRef<number | null>(null);
+
+  const startTyping = (tokens: CharTok[]) => {
+    setTyping(tokens);
+    setTypedCount(0);
+    if (typingTimer.current) window.clearInterval(typingTimer.current);
+    typingTimer.current = window.setInterval(() => {
+      setTypedCount(c => {
+        const next = Math.min(c + CHUNK_SIZE, tokens.length);
+        if (next >= tokens.length && typingTimer.current) {
+          window.clearInterval(typingTimer.current);
+          typingTimer.current = null;
+        }
+        return next;
+      });
+    }, TICK_MS);
+  };
+
+  useEffect(() => {
+    if (!typingBoxRef.current) return;
+    typingBoxRef.current.scrollTop = typingBoxRef.current.scrollHeight;
+  }, [typedCount]);
 
   const handleGenerate = () => {
     if (!active) return;
     const current = active.config.model.systemPrompt || '';
     const next = makeNewPromptFrom(genText, current);
-
-    // keep exact strings to commit/undo and show diff
     setLastOld(current);
     setLastNew(next);
-    setShowDiff(false);
-
-    // Prepare tokens and start typing in-place
-    setTypingTokens(tokenizeDiff(current, next));
-    setIsTypingLive(true);
+    startTyping(charDiffAdded(current, next));
     setGenOpen(false);
-    setGenText(''); // clear the input you complained about
+    setGenText('');
   };
 
-  const onTypingDone = () => {
-    if (!active) { setIsTypingLive(false); return; }
-    // commit EXACT new string (no reconstruction errors)
-    updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, systemPrompt: lastNew } } }));
-    setIsTypingLive(false);
-    setTypingTokens(null);
-    setShowDiff(true); // open changes tray
-  };
-
-  const undoLast = () => {
+  const acceptTyping = () => {
     if (!active) return;
-    updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, systemPrompt: lastOld } } }));
-    setShowDiff(false);
+    updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, systemPrompt: lastNew } } }));
+    setTyping(null);
+  };
+  const declineTyping = () => {
+    setTyping(null);
   };
 
-  /* ---------- Voices ---------- */
+  /* ---------- Voices (static options) ---------- */
   const openaiVoices = [{ value:'alloy', label:'Alloy (OpenAI)' }, { value:'ember', label:'Ember (OpenAI)' }];
   const elevenVoices = [{ value:'rachel', label:'Rachel (ElevenLabs)' }, { value:'adam', label:'Adam (ElevenLabs)' }, { value:'bella', label:'Bella (ElevenLabs)' }];
 
@@ -392,7 +328,6 @@ export default function VoiceAgentSection() {
   );
 
   const visible = assistants.filter(a => a.name.toLowerCase().includes(query.trim().toLowerCase()));
-
   const beginRename = (a: Assistant) => { setEditingId(a.id); setTempName(a.name); };
   const saveRename = (a: Assistant) => {
     const name = (tempName || '').trim() || 'Untitled';
@@ -415,7 +350,7 @@ export default function VoiceAgentSection() {
           position:'fixed',
           left:'var(--app-sidebar-w, 248px)',
           top:'var(--app-header-h, 64px)',
-          width:'var(--va-rail-w, 332px)',            /* slightly wider */
+          width:'var(--va-rail-w, 360px)',
           height:'calc(100vh - var(--app-header-h, 64px))',
           borderRight:'1px solid var(--va-border)',
           background:'var(--va-sidebar)',
@@ -509,10 +444,10 @@ export default function VoiceAgentSection() {
       <div
         className="va-main"
         style={{
-          marginLeft:'calc(var(--app-sidebar-w, 248px) + var(--va-rail-w, 332px))',
-          paddingRight:'clamp(16px, 4vw, 32px)',
+          marginLeft:'calc(var(--app-sidebar-w, 248px) + var(--va-rail-w, 360px))',
+          paddingRight:'clamp(20px, 4vw, 40px)',
           paddingTop:'calc(var(--app-header-h, 64px) + 12px)',
-          paddingBottom:'72px'
+          paddingBottom:'88px'
         }}
       >
         {/* top action bar */}
@@ -529,18 +464,17 @@ export default function VoiceAgentSection() {
           </div>
         </div>
 
-        {/* content body — **EXTRA WIDE** */}
-        <div className="mx-auto grid grid-cols-12 gap-8"
-             style={{ maxWidth:'min(2200px, 96vw)' }}>
+        {/* content body — WIDER */}
+        <div className="mx-auto grid grid-cols-12 gap-10"
+             style={{ maxWidth:'min(2400px, 98vw)' }}>
           <Section title="Model" icon={<FileText className="w-4 h-4 icon" />}>
-            <div className="grid gap-5"
-                 style={{ gridTemplateColumns:'repeat(4, minmax(280px, 1fr))' }}>
+            <div className="grid gap-6"
+                 style={{ gridTemplateColumns:'repeat(4, minmax(360px, 1fr))' }}>
               <Field label="Provider">
                 <Select
                   value={active.config.model.provider}
                   onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, provider: v as Provider } } }))}
-                  items={[{ value:'openai', label:'OpenAI', icon:<OpenAIIcon /> }]}
-                  leftIcon={<OpenAIIcon />}
+                  items={[{ value:'openai', label:'OpenAI', icon:<svg width="16" height="16" viewBox="0 0 256 256" aria-hidden><path fill="currentColor" d="M214.7 111.7c1.9-7.6 1.5-15.7-1.2-23.3-7.6-21.3-28.6-35.2-51.4-33.6-12.1-19.9-36.5-29-59-21.2-22.1 7.6-36.7 28.6-35.4 51.5-19.9 12.1-29 36.5-21.2 59 7.6 22.1 28.6 36.7 51.5 35.4 12.1 19.9 36.5 29 59 21.2 22.1-7.6 36.7-28.6 35.4-51.5 8.7-5.5 15.5-13.9 18.9-24.1ZM156 193.2c-9.2 3.2-19.2 2.7-28-1.4l17.4-30.1c4.8-0.7 9.2-3.8 11.6-8.4c1.2-2.4 1.8-5 1.8-7.6v-40l27 15.6v28.6c0 17.1-10.7 32.8-29.8 43.3Zm-76.9-8.7c-9.2-5.2-16-13.2-19.6-23c-3.6-10-3-20.4 1.2-29.7l27 15.6v16.1c0 4.9 2.6 9.4 6.7 11.9l31 17.9c-15.1 2.8-31-0.1-46.3-8.8ZM62.8 92.5c5.2-9.2 13.2-16 23-19.6c10-3.6 20.4-3 29.7 1.2l-15.6 27h-16.1c-4.9 0-9.4 2.6-11.9 6.7l-17.9 31c-2.8-15.1 0.1-31 8.8-46.3Zm118.4 5.1l-31-17.9c-3.6-2.1-7.8-2.5-11.7-1.4c-3.8 1.1-7 3.6-9.1 7.1l-17.5 30.3l-27-15.6l16.6-28.7c9.7-16.7 31.1-22.4 48-12.7c0.6 0.3 1.1 0.7 1.7 1l30 17.3c-0.7 7.4-0.8 13.4 0 20.6Z"/></svg> }]}
                 />
               </Field>
               <Field label="Model">
@@ -587,10 +521,10 @@ export default function VoiceAgentSection() {
                 </div>
               </div>
 
-              {/* ACTUAL PROMPT BOX */}
-              {!isTypingLive ? (
+              {/* PROMPT BOX: either textarea, or live typing preview with Accept/Decline */}
+              {!typing ? (
                 <textarea
-                  rows={20}
+                  rows={26}
                   value={active.config.model.systemPrompt || ''}
                   onChange={(e)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, systemPrompt: e.target.value } } })) }
                   className="w-full rounded-xl px-3 py-3 text-[14px] leading-6 outline-none"
@@ -598,29 +532,70 @@ export default function VoiceAgentSection() {
                     background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)',
                     boxShadow:'var(--va-shadow), inset 0 1px 0 rgba(255,255,255,.03)', color:'var(--text)',
                     fontFamily:'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-                    minHeight: 480
+                    minHeight: 560
                   }}
                 />
               ) : (
-                <TypingHighlighter tokens={typingTokens || []} onDone={onTypingDone} height={480} />
+                <div>
+                  <div
+                    ref={typingBoxRef}
+                    className="w-full rounded-xl px-3 py-3 text-[14px] leading-6 outline-none"
+                    style={{
+                      background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)',
+                      boxShadow:'var(--va-shadow), inset 0 1px 0 rgba(255,255,255,.03)', color:'var(--text)',
+                      fontFamily:'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+                      whiteSpace:'pre-wrap',
+                      minHeight: 560,
+                      maxHeight: 680,
+                      overflowY:'auto'
+                    }}
+                  >
+                    {/* render typed characters; added ones in green */}
+                    {(() => {
+                      const slice = typing.slice(0, typedCount);
+                      const out: JSX.Element[] = [];
+                      let buf = '';
+                      let added = slice.length ? slice[0].added : false;
+                      slice.forEach((t, i) => {
+                        if (t.added !== added) {
+                          out.push(added ? <ins key={`ins-${i}`} style={{ background:'rgba(16,185,129,.18)', padding:'1px 2px', borderRadius:4 }}>{buf}</ins> : <span key={`nor-${i}`}>{buf}</span>);
+                          buf = t.ch;
+                          added = t.added;
+                        } else {
+                          buf += t.ch;
+                        }
+                      });
+                      if (buf) out.push(added ? <ins key="tail-ins" style={{ background:'rgba(16,185,129,.18)', padding:'1px 2px', borderRadius:4 }}>{buf}</ins> : <span key="tail-nor">{buf}</span>);
+                      // caret while streaming
+                      if (typedCount < (typing?.length || 0)) out.push(<span key="caret" className="animate-pulse"> ▌</span>);
+                      return out;
+                    })()}
+                  </div>
+
+                  <div className="flex items-center gap-2 justify-end mt-3">
+                    <button onClick={declineTyping} className="btn--ghost"><X className="w-4 h-4 icon" /> Decline</button>
+                    {typedCount >= typing.length
+                      ? <button onClick={acceptTyping} className="btn--green"><Check className="w-4 h-4 text-white" /><span className="text-white">Accept</span></button>
+                      : <button onClick={acceptTyping} className="btn--green" title="Accept current result"><Check className="w-4 h-4 text-white" /><span className="text-white">Accept</span></button>}
+                  </div>
+                </div>
               )}
             </div>
           </Section>
 
           <Section title="Voice" icon={<Mic2 className="w-4 h-4 icon" />}>
-            <div className="grid gap-5" style={{ gridTemplateColumns:'repeat(2, minmax(320px, 1fr))' }}>
+            <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(2, minmax(360px, 1fr))' }}>
               <Field label="Provider">
                 <Select
                   value={active.config.voice.provider}
                   onChange={(v)=>{
                     const list = v==='elevenlabs' ? elevenVoices : openaiVoices;
-                    updateActive(a => ({ ...a, config:{ ...a.config, voice:{ provider: v as VoiceProvider, voiceId: (list[0] as any).value, voiceLabel: (list[0] as any).label } } }));
+                    updateActive(a => ({ ...a, config:{ ...a.config, voice:{ provider: v as VoiceProvider, voiceId: list[0].value, voiceLabel: list[0].label } } }));
                   }}
                   items={[
-                    { value:'openai', label:'OpenAI', icon:<OpenAIIcon/> },
+                    { value:'openai', label:'OpenAI' },
                     { value:'elevenlabs', label:'ElevenLabs' },
                   ]}
-                  leftIcon={<OpenAIIcon />}
                 />
               </Field>
               <Field label="Voice">
@@ -628,7 +603,7 @@ export default function VoiceAgentSection() {
                   value={active.config.voice.voiceId}
                   onChange={(v)=>{
                     const list = active.config.voice.provider==='elevenlabs' ? elevenVoices : openaiVoices;
-                    const found = (list as any[]).find(x=>x.value===v);
+                    const found = list.find(x=>x.value===v);
                     updateActive(a => ({ ...a, config:{ ...a.config, voice:{ ...a.config.voice, voiceId:v, voiceLabel: found?.label || v } } }));
                   }}
                   items={active.config.voice.provider==='elevenlabs' ? elevenVoices : openaiVoices}
@@ -645,7 +620,7 @@ export default function VoiceAgentSection() {
           </Section>
 
           <Section title="Transcriber" icon={<BookOpen className="w-4 h-4 icon" />}>
-            <div className="grid gap-5" style={{ gridTemplateColumns:'repeat(3, minmax(280px, 1fr))' }}>
+            <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(3, minmax(360px, 1fr))' }}>
               <Field label="Provider">
                 <Select
                   value={active.config.transcriber.provider}
@@ -696,7 +671,7 @@ export default function VoiceAgentSection() {
           </Section>
 
           <Section title="Tools" icon={<SlidersHorizontal className="w-4 h-4 icon" />}>
-            <div className="grid gap-5" style={{ gridTemplateColumns:'repeat(2, minmax(320px, 1fr))' }}>
+            <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(2, minmax(360px, 1fr))' }}>
               <Field label="Enable End Call Function">
                 <Select
                   value={String(active.config.tools.enableEndCall)}
@@ -746,29 +721,6 @@ export default function VoiceAgentSection() {
         )}
       </AnimatePresence>
 
-      {/* View Changes / Undo tray */}
-      <AnimatePresence>
-        {showDiff && (
-          <motion.div
-            initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 8 }}
-            className="fixed right-6 bottom-6 z-[998] rounded-xl p-4 w-[min(760px,calc(100vw-24px))]"
-            style={{ background:'var(--va-card)', border:'1px solid var(--va-border)', boxShadow:'var(--va-shadow-lg)' }}
-          >
-            <div className="flex items-center justify-between mb-2">
-              <div className="text-sm font-semibold" style={{ color:'var(--text)' }}>Changes</div>
-              <div className="flex gap-2">
-                <button className="btn--ghost" onClick={()=> setShowDiff(false)}><X className="w-4 h-4 icon" /> Close</button>
-                <button className="btn--ghost" onClick={()=> setShowDiff(d=> !d)}><Eye className="w-4 h-4 icon" /> Toggle</button>
-                <button className="btn--ghost" onClick={undoLast}><Undo2 className="w-4 h-4 icon" /> Undo</button>
-              </div>
-            </div>
-            <div className="rounded-lg p-3 text-[13px] leading-6 overflow-y-auto max-h-[320px]"
-                 style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)', color:'var(--text)' }}
-                 dangerouslySetInnerHTML={{ __html: htmlDiff(lastOld, lastNew) }} />
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       {/* Delete overlay */}
       <AnimatePresence>
         {deleting && (
@@ -808,7 +760,7 @@ function Section({ title, icon, children }:{ title: string; icon: React.ReactNod
         boxShadow:'var(--va-shadow)',
       }}
     >
-      <div aria-hidden className="pointer-events-none absolute -top-[26%] -left-[26%] w-[70%] h-[70%] rounded-full"
+      <div aria-hidden className="pointer-events-none absolute -top-[22%] -left-[22%] w-[70%] h-[70%] rounded-full"
            style={{ background:'radial-gradient(circle, color-mix(in oklab, var(--accent) 14%, transparent) 0%, transparent 70%)', filter:'blur(40px)' }} />
       <button type="button" onClick={()=> setOpen(v=>!v)} className="w-full flex items-center justify-between px-5 py-4">
         <span className="flex items-center gap-2 text-sm font-semibold">{icon}{title}</span>
@@ -850,7 +802,7 @@ function StyleBlock() {
         --va-shadow-lg:0 42px 110px rgba(0,0,0,.66), 0 20px 48px rgba(0,0,0,.5);
         --va-shadow-sm:0 12px 26px rgba(0,0,0,.35);
         --va-shadow-side:8px 0 28px rgba(0,0,0,.42);
-        --va-rail-w:332px; /* wider rail */
+        --va-rail-w:360px;
       }
       :root:not([data-theme="dark"]) .${SCOPE}{
         --bg:#f7f9fb;
@@ -873,7 +825,6 @@ function StyleBlock() {
       }
 
       .${SCOPE} .va-main{ max-width: none !important; }
-
       .${SCOPE} .icon{ color: var(--accent); }
 
       .${SCOPE} .btn--green{
@@ -903,14 +854,9 @@ function StyleBlock() {
       .${SCOPE} .va-range::-webkit-slider-thumb{ -webkit-appearance:none; width:14px;height:14px;border-radius:50%;background:var(--accent); border:2px solid #fff; box-shadow:0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent); }
       .${SCOPE} .va-range::-moz-range-thumb{ width:14px;height:14px;border:0;border-radius:50%;background:var(--accent); box-shadow:0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent); }
 
-      /* iPad rail width */
       @media (max-width: 1180px){
-        .${SCOPE}{ --va-rail-w: 300px; }
+        .${SCOPE}{ --va-rail-w: 320px; }
       }
-
-      /* diff colors */
-      .${SCOPE} ins{ background:rgba(16,185,129,.18); color:inherit; text-decoration:none; padding:1px 2px; border-radius:4px; }
-      .${SCOPE} del{ background:rgba(239,68,68,.18); color:#fca5a5; text-decoration:line-through; padding:1px 2px; border-radius:4px; }
     `}</style>
   );
 }
