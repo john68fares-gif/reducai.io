@@ -3,10 +3,13 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  try {
-    const { system, messages, temperature = 0.2, model = 'gpt-4o-mini' } = req.body || {};
-    if (!process.env.OPENAI_API_KEY) return res.status(500).json({ error: 'Missing OPENAI_API_KEY' });
 
+  try {
+    // BYO-KEY: must be provided in header
+    const userKey = (req.headers['x-openai-key'] || '').toString().trim();
+    if (!userKey) return res.status(401).json({ error: 'Missing x-openai-key header' });
+
+    const { system, messages, temperature = 0.2, model = 'gpt-4o-mini' } = req.body || {};
     const body = {
       model,
       temperature,
@@ -20,7 +23,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        Authorization: `Bearer ${userKey}`,
       },
       body: JSON.stringify(body),
     });
@@ -36,8 +39,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       j?.choices?.[0]?.delta?.content ??
       '';
 
-    return res.status(200).json({ reply: String(reply) });
+    res.status(200).json({ reply: String(reply) });
   } catch (e: any) {
-    return res.status(500).json({ error: e?.message || 'Unknown error' });
+    res.status(500).json({ error: e?.message || 'Unknown error' });
   }
 }
