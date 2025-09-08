@@ -154,26 +154,20 @@ function buildDefaultsFromHint(hint: string): Record<SectionKey, string> {
   };
 }
 
-/** Merge user free-text into sections professionally. Supports:
- *  - short hints ("assistant", "collect name, phone")
- *  - "first message: ..."
- *  - section targets like "style: be warmer and briefer"
- *  - bullet or multiline entries -> added under [Refinements]
- */
+/** Merge text professionally into the structured prompt (never raw paste). */
 function mergeInputIntoSections(input: string, basePrompt: string): {
   merged: Record<SectionKey, string>;
   firstMessage?: string;
 } {
   const current = readSectionsFromPrompt(basePrompt || BASE_PROMPT);
-
   const raw = input.trim();
   if (!raw) return { merged: current };
 
-  // first message
+  // "first message: ..."
   const fm = raw.match(/^(?:first\s*message|greeting)\s*[:\-]\s*(.+)$/i);
   if (fm) return { merged: current, firstMessage: fm[1].trim() };
 
-  // explicit "section: value"
+  // "section: value"
   const secMatch = raw.match(/^([a-z][a-z\s&]+)\s*[:\-]\s*([\s\S]+)$/i);
   if (secMatch) {
     const keyTxt = secMatch[1].trim().toLowerCase();
@@ -192,7 +186,7 @@ function mergeInputIntoSections(input: string, basePrompt: string): {
     return { merged: current };
   }
 
-  // default -> append as professional refinement bullet
+  // default -> append as refinement bullet
   const line = `- ${raw.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim()}`;
   current['Refinements'] = current['Refinements']
     ? `${current['Refinements']}\n${line}`
@@ -229,33 +223,43 @@ function charDiffAdded(oldStr: string, newStr: string): CharTok[] {
    PAGE
 ============================================================================= */
 export default function VoiceAgentSection() {
-  /* ---------- Sync with APP sidebar collapse ---------- */
+  /* ---------- Sync with APP sidebar collapse (stable) ---------- */
   const scopeRef = useRef<HTMLDivElement | null>(null);
+
+  // true when main app sidebar is collapsed
   const [sbCollapsed, setSbCollapsed] = useState<boolean>(() => {
     if (typeof document === 'undefined') return false;
     return document.body.getAttribute('data-sb-collapsed') === 'true';
   });
 
+  // pixel width of the main app sidebar (72 expanded? 248 expanded?) -> we assume 72 when collapsed, 248 when expanded
+  const [appSidebarPx, setAppSidebarPx] = useState<number>(() => {
+    if (typeof document === 'undefined') return 248;
+    return document.body.getAttribute('data-sb-collapsed') === 'true' ? 72 : 248;
+  });
+
   useEffect(() => {
+    let raf = 0;
+    const apply = () => {
+      const collapsed = document.body.getAttribute('data-sb-collapsed') === 'true';
+      setSbCollapsed(collapsed);
+      setAppSidebarPx(collapsed ? 72 : 248);
+    };
+
     const onEvt = (e: Event) => {
-      const detail = (e as CustomEvent).detail || {};
-      if (typeof detail.collapsed === 'boolean') setSbCollapsed(!!detail.collapsed);
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(apply);
     };
     window.addEventListener('layout:sidebar', onEvt as EventListener);
 
     const mo = new MutationObserver(() => {
-      setSbCollapsed(document.body.getAttribute('data-sb-collapsed') === 'true');
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(apply);
     });
     mo.observe(document.body, { attributes: true, attributeFilter: ['data-sb-collapsed', 'class'] });
 
-    return () => { window.removeEventListener('layout:sidebar', onEvt as EventListener); mo.disconnect(); };
+    return () => { window.removeEventListener('layout:sidebar', onEvt as EventListener); mo.disconnect(); cancelAnimationFrame(raf); };
   }, []);
-
-  useEffect(() => {
-    if (!scopeRef.current) return;
-    const el = scopeRef.current;
-    el.style.setProperty('--app-sidebar-w', sbCollapsed ? '72px' : '248px');
-  }, [sbCollapsed]);
 
   /* ---------- Assistants ---------- */
   const [assistants, setAssistants] = useState<Assistant[]>([]);
@@ -264,7 +268,7 @@ export default function VoiceAgentSection() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [tempName, setTempName] = useState('');
   const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
-  const [rev, setRev] = useState(0); // refresh after LS writes
+  const [rev, setRev] = useState(0);
 
   useEffect(() => {
     const list = readLS<Assistant[]>(LS_LIST) || [];
@@ -370,10 +374,9 @@ export default function VoiceAgentSection() {
     const current = active.config.model.systemPrompt || '';
     const { merged, firstMessage } = mergeInputIntoSections(genText, current || BASE_PROMPT);
     const nextPrompt = sectionsToPrompt(merged);
-
     setLastNew(nextPrompt);
     setPendingFirstMsg(firstMessage);
-    startTyping(charDiffAdded(current, nextPrompt)); // live diff (added chars green)
+    startTyping(charDiffAdded(current, nextPrompt));
     setGenOpen(false);
     setGenText('');
   };
@@ -431,6 +434,7 @@ export default function VoiceAgentSection() {
     setEditingId(null);
   };
 
+  /* ================================= RENDER ================================= */
   return (
     <div ref={scopeRef} className={SCOPE} style={{ background:'var(--bg)', color:'var(--text)' }}>
       {/* ================= ASSISTANTS RAIL ================= */}
@@ -439,7 +443,7 @@ export default function VoiceAgentSection() {
         data-collapsed={railCollapsed ? 'true' : 'false'}
         style={{
           position:'fixed',
-          left:'calc(var(--app-sidebar-w, 248px) - 1px)', // fuse with main sidebar
+          left: `${Math.max(0, appSidebarPx - 1)}px`,   // hard pixel lock to main sidebar edge (no jitter)
           top:'var(--app-header-h, 64px)',
           width: railCollapsed ? '72px' : 'var(--va-rail-w, 360px)',
           height:'calc(100vh - var(--app-header-h, 64px))',
@@ -447,7 +451,9 @@ export default function VoiceAgentSection() {
           borderRight:'1px solid var(--va-border)',
           background:'var(--va-sidebar)',
           boxShadow:'var(--va-shadow-side)',
-          zIndex: 10
+          zIndex: 10,
+          transition: 'width .15s ease',                // never animate "left" to avoid drift
+          willChange: 'width'
         }}
       >
         <div className="px-3 py-3 flex items-center justify-between" style={{ borderBottom:'1px solid var(--va-border)' }}>
@@ -571,7 +577,7 @@ export default function VoiceAgentSection() {
       <div
         className="va-main"
         style={{
-          marginLeft:`calc(var(--app-sidebar-w, 248px) + ${railCollapsed ? '72px' : 'var(--va-rail-w, 360px)'})`,
+          marginLeft:`calc(${appSidebarPx}px + ${railCollapsed ? '72px' : 'var(--va-rail-w, 360px)'})`,
           paddingRight:'clamp(20px, 4vw, 40px)',
           paddingTop:'calc(var(--app-header-h, 64px) + 12px)',
           paddingBottom:'88px'
@@ -700,7 +706,6 @@ export default function VoiceAgentSection() {
                   </div>
 
                   <div className="flex items-center gap-2 justify-between mt-3">
-                    {/* Cancel on the LEFT, same size/shape */}
                     <button onClick={declineTyping} className="btn btn--ghost"><X className="w-4 h-4 icon" /> Cancel</button>
                     <button onClick={acceptTyping} className="btn btn--primary"><Check className="w-4 h-4" /><span>Accept</span></button>
                   </div>
@@ -1033,11 +1038,6 @@ function StyleBlock() {
       .${SCOPE} .va-range{ -webkit-appearance:none; height:4px; background:color-mix(in oklab, var(--accent) 24%, #0000); border-radius:999px; outline:none; }
       .${SCOPE} .va-range::-webkit-slider-thumb{ -webkit-appearance:none; width:14px;height:14px;border-radius:50%;background:var(--accent); border:2px solid #fff; box-shadow:0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent); }
       .${SCOPE} .va-range::-moz-range-thumb{ width:14px;height:14px;border:0;border-radius:50%;background:var(--accent); box-shadow:0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent); }
-
-      /* Fuse assistants rail to main sidebar in collapsed state (remove hairline gap) */
-      .${SCOPE} aside[data-collapsed="true"]{
-        left: calc(var(--app-sidebar-w, 248px) - 1px);
-      }
 
       /* Helper surface for collapsed items */
       .${SCOPE} .btn-surface { border:1px solid var(--va-border); }
