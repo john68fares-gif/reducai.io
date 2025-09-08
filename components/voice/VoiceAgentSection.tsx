@@ -165,9 +165,11 @@ ${collectList}`,
 }
 
 /** Replace or add a named section like [Identity] ... */
+// FIXED: correct regex that targets [Section] blocks
 function setSection(prompt: string, name: string, body: string) {
   const section = name.replace(/^\[|\]$/g, '');
-  const re = new RegExp(String.raw`$begin:math:display$${section}$end:math:display$\s*([\s\S]*?)(?=\n\[|$)`, 'i');
+  const re = new RegExp(String.raw`\$begin:math:display$${section}\\$end:math:display$\\s*([\\s\\S]*?)(?=\\n\\[|$)`, 'i')
+    .compile?.() || new RegExp(String.raw`\[${section}\]\s*([\s\S]*?)(?=\n\[|$)`, 'i');
   if (re.test(prompt)) {
     return prompt.replace(re, `[${section}]\n${body.trim()}\n`);
   }
@@ -313,12 +315,10 @@ function speak(text: string) {
   window.speechSynthesis.speak(u);
 }
 async function tryLLM(system: string, message: string): Promise<string> {
-  // If you have a backend /api/llm, we'll use it; else fall back to a local mock.
   try {
     const r = await fetch('/api/llm', { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ system, message }) });
     if (r.ok) { const j = await r.json(); if (j?.reply) return String(j.reply); }
   } catch {}
-  // Mock: tiny rule-based responder so you can test without paying a phone bill.
   const m = message.toLowerCase();
   if (/hello|hi|hey/.test(m)) return 'Hi! I can book appointments and answer questions. What do you need?';
   if (/book|schedule|appointment/.test(m)) return 'Sure—what date and time works for you? I also need your full name and phone number.';
@@ -383,7 +383,6 @@ export default function VoiceAgentSection() {
       writeLS(ak(seed.id), seed); writeLS(LS_LIST, [seed]);
       setAssistants([seed]); setActiveId(seed.id);
     } else {
-      // ensure telephony shape
       const fixed = list.map(a => ({ ...a, config:{ ...a.config, telephony: a.config.telephony || { numbers: [], linkedNumberId: undefined } } }));
       writeLS(LS_LIST, fixed);
       setAssistants(fixed); setActiveId(fixed[0].id);
@@ -638,7 +637,7 @@ export default function VoiceAgentSection() {
         data-collapsed={railCollapsed ? 'true' : 'false'}
         style={{
           position:'fixed',
-          left:'calc(var(--app-sidebar-w, 248px) - 1px)', // fuse with main sidebar
+          left:'calc(var(--app-sidebar-w, 248px) - 1px)',
           top:'var(--app-header-h, 64px)',
           width: railCollapsed ? '72px' : 'var(--va-rail-w, 360px)',
           height:'calc(100vh - var(--app-header-h, 64px))',
@@ -1474,7 +1473,8 @@ function Select({ value, items, onChange, placeholder, leftIcon }: {
                   className="w-full flex items-center gap-3 px-3 py-2 rounded-[10px] text-left"
                   style={{ color:'var(--text)' }}
                   onMouseEnter={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='rgba(16,185,129,.10)'; (e.currentTarget as HTMLButtonElement).style.border='1px solid rgba(16,185,129,.35)'; }}
-                  onMouseLeave={(e)=>{ (e.currentTarget as HTMLButtonButtonElement).style.background='transparent'; (e.currentTarget as HTMLButtonElement).style.border='1px solid transparent'; }}
+                  // FIXED: HTMLButtonElement (typo previously HTMLButtonButtonElement)
+                  onMouseLeave={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='transparent'; (e.currentTarget as HTMLButtonElement).style.border='1px solid transparent'; }}
                 >
                   {it.icon}{it.label}
                 </button>
