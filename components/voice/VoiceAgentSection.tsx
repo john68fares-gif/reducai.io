@@ -7,7 +7,7 @@ import {
   Search, Plus, Folder, FolderOpen, Check, Trash2, Copy, Edit3, Sparkles,
   ChevronDown, ChevronRight, FileText, Mic2, BookOpen, SlidersHorizontal,
   PanelLeft, Bot, UploadCloud, RefreshCw, X, ChevronLeft, ChevronRight as ChevronRightIcon,
-  Phone as PhoneIcon, Rocket, PhoneCall, PhoneOff, Play, MessageSquare, ListTree, Archive,
+  Phone as PhoneIcon, Rocket
 } from 'lucide-react';
 
 /* =============================================================================
@@ -29,22 +29,6 @@ type ModelId = 'gpt-4o' | 'gpt-4o-mini' | 'gpt-4.1' | 'gpt-3.5-turbo';
 type VoiceProvider = 'openai' | 'elevenlabs';
 
 type PhoneNum = { id: string; label?: string; e164: string };
-
-type TranscriptTurn = { role: 'assistant'|'user'; text: string; ts: number };
-
-type CallLog = {
-  id: string;
-  assistantId: string;
-  assistantName: string;
-  startedAt: number;
-  endedAt?: number;
-  type: 'Web'|'PSTN';
-  assistantPhoneNumber?: string;
-  customerPhoneNumber?: string;
-  endedReason?: string;
-  transcript: TranscriptTurn[];
-  costUSD?: number;
-};
 
 type Assistant = {
   id: string;
@@ -70,15 +54,12 @@ type Assistant = {
       numerals: boolean;
     };
     tools: { enableEndCall: boolean; dialKeypad: boolean };
-    telephony?: { numbers: PhoneNum[]; linkedNumberId?: string };
+    telephony?: { numbers: PhoneNum[] };
   };
 };
 
 const LS_LIST = 'voice:assistants.v1';
 const ak = (id: string) => `voice:assistant:${id}`;
-const LS_CALLS = 'voice:calls.v1';
-const LS_PHONE_NUMBERS = 'voice:phoneNumbers.v1';     // “Phone Numbers” page seed
-const LS_ROUTES = 'voice:phoneRoutes.v1';            // phone -> assistant linking map
 
 const readLS = <T,>(k: string): T | null => {
   try { const r = localStorage.getItem(k); return r ? (JSON.parse(r) as T) : null; }
@@ -170,37 +151,53 @@ ${collectList}`,
 function setSection(prompt: string, name: string, body: string) {
   const section = name.replace(/^\[|\]$/g, '');
   const re = new RegExp(String.raw`\[${section}\]\s*([\s\S]*?)(?=\n\[|$)`, 'i');
-  if (re.test(prompt)) return prompt.replace(re, `[${section}]\n${body.trim()}\n`);
+  if (re.test(prompt)) {
+    return prompt.replace(re, `[${section}]\n${body.trim()}\n`);
+  }
+  // append at end
   const nl = prompt.endsWith('\n') ? '' : '\n';
   return `${prompt}${nl}\n[${section}]\n${body.trim()}\n`;
 }
 
+/** Parse quick "first message:" directive */
 function parseFirstMessage(raw: string): string | null {
   const m = raw.match(/^(?:first\s*message|greeting)\s*[:\-]\s*(.+)$/i);
   return m ? m[1].trim() : null;
 }
 
+/** Merge free-text into prompt smartly: section-aware, "first message", collect, or refinements */
 function mergeInput(genText: string, currentPrompt: string) {
   const raw = (genText || '').trim();
   const out = { prompt: currentPrompt || BASE_PROMPT, firstMessage: undefined as string | undefined };
   if (!raw) return out;
 
+  // 1) first message
   const fm = parseFirstMessage(raw);
-  if (fm) { out.firstMessage = fm; return out; }
+  if (fm) {
+    out.firstMessage = fm;
+    return out;
+  }
 
+  // 2) Explicit sections present → replace/add them
   const sectionBlocks = [...raw.matchAll(/\[(Identity|Style|System Behaviors|Task & Goals|Data to Collect|Safety|Handover|Refinements)\]\s*([\s\S]*?)(?=\n\[|$)/gi)];
   if (sectionBlocks.length) {
     let next = out.prompt;
-    sectionBlocks.forEach((m) => { next = setSection(next, `[${m[1]}]`, m[2]); });
+    sectionBlocks.forEach((m) => {
+      const sec = m[1];
+      const body = m[2];
+      next = setSection(next, `[${sec}]`, body);
+    });
     out.prompt = next;
     return out;
   }
 
+  // 3) Short hint or "collect ..." → rebuild defaults around it
   if (raw.split(/\s+/).length <= 3 || /(^|\s)collect(\s|:)/i.test(raw)) {
     out.prompt = buildDefaultsFromHint(raw);
     return out;
   }
 
+  // 4) Otherwise append as a refinement bullet (create section if missing)
   const hasRef = /\[Refinements\]/i.test(out.prompt);
   const bullet = `- ${raw.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim()}`;
   out.prompt = hasRef
@@ -253,6 +250,7 @@ function useAppSidebarWidth(scopeRef: React.RefObject<HTMLDivElement>, fallbackC
     let target = findSidebar();
     if (!target) { setVar(fallbackCollapsed ? 72 : 248); return; }
 
+    // Initial read
     setVar(target.getBoundingClientRect().width);
 
     const ro = new ResizeObserver(() => setVar(target!.getBoundingClientRect().width));
@@ -276,7 +274,6 @@ function useAppSidebarWidth(scopeRef: React.RefObject<HTMLDivElement>, fallbackC
    PAGE
 ============================================================================= */
 export default function VoiceAgentSection() {
-  // Collapsed flag only as a fallback default if we cannot find/observe the real sidebar.
   const scopeRef = useRef<HTMLDivElement | null>(null);
   const [sbCollapsed, setSbCollapsed] = useState<boolean>(() => {
     if (typeof document === 'undefined') return false;
@@ -309,11 +306,6 @@ export default function VoiceAgentSection() {
   const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
   const [rev, setRev] = useState(0);
 
-  // CALLS + UI
-  const [currentCallId, setCurrentCallId] = useState<string | null>(null);
-  const [transcript, setTranscript] = useState<TranscriptTurn[]>([]);
-  const [callType, setCallType] = useState<'Web'|'PSTN'>('Web');
-
   useEffect(() => {
     const list = readLS<Assistant[]>(LS_LIST) || [];
     if (!list.length) {
@@ -336,13 +328,6 @@ export default function VoiceAgentSection() {
     } else {
       setAssistants(list); setActiveId(list[0].id);
     }
-    // seed calls & phone numbers stores if missing
-    if (!readLS<CallLog[]>(LS_CALLS)) writeLS(LS_CALLS, []);
-    if (!readLS<PhoneNum[]>(LS_PHONE_NUMBERS)) writeLS(LS_PHONE_NUMBERS, [
-      { id: 'pn_usa_1', e164: '+15551234567', label: 'US Support' },
-      { id: 'pn_usa_2', e164: '+15557654321', label: 'US Sales' },
-    ]);
-    if (!readLS<Record<string, string>>(LS_ROUTES)) writeLS(LS_ROUTES, {});
   }, []);
 
   const active = useMemo(() => activeId ? readLS<Assistant>(ak(activeId)) : null, [activeId, rev]);
@@ -489,14 +474,6 @@ export default function VoiceAgentSection() {
   };
 
   /* ---------- Telephony helpers ---------- */
-  const importFromPhoneNumbersPage = () => {
-    const globalNums = readLS<PhoneNum[]>(LS_PHONE_NUMBERS) || [];
-    const existing = active.config.telephony?.numbers ?? [];
-    const byId = new Set(existing.map(n=>n.id));
-    const merged = [...existing, ...globalNums.filter(n=>!byId.has(n.id))];
-    updateActive(a => ({ ...a, config: { ...a.config, telephony: { ...(a.config.telephony||{numbers:[]}), numbers: merged } } }));
-  };
-
   const addPhone = (e164: string, label?: string) => {
     const norm = e164.trim();
     if (!norm) return;
@@ -515,136 +492,16 @@ export default function VoiceAgentSection() {
   const removePhone = (id: string) => {
     updateActive(a => {
       const nums = a.config.telephony?.numbers ?? [];
-      const linked = a.config.telephony?.linkedNumberId;
-      const nextLinked = linked === id ? undefined : linked;
-      return { ...a, config: { ...a.config, telephony: { numbers: nums.filter(n => n.id !== id), linkedNumberId: nextLinked } } };
+      return { ...a, config: { ...a.config, telephony: { numbers: nums.filter(n => n.id !== id) } } };
     });
   };
 
-  /** Publish: link assistant -> selected number, persist route, emit event hook */
   const publish = () => {
-    const linkedId = active.config.telephony?.linkedNumberId;
-    const numbers = active.config.telephony?.numbers ?? [];
-    const num = numbers.find(n=>n.id===linkedId);
-    if (!num) { alert('Pick a Phone Number before publishing.'); return; }
-
-    // persist route
-    const routes = readLS<Record<string,string>>(LS_ROUTES) || {};
-    routes[num.id] = active.id;
-    writeLS(LS_ROUTES, routes);
-
-    // mark published
+    // Hook your deploy flow here
+    window.dispatchEvent(new CustomEvent('voiceagent:publish', { detail: { id: active.id } }));
     updateActive(a => ({ ...a, published: true }));
-
-    // hook for your backend deploy flow
-    window.dispatchEvent(new CustomEvent('voiceagent:publish', {
-      detail: {
-        assistantId: active.id,
-        assistantName: active.name,
-        phoneNumberId: num.id,
-        e164: num.e164
-      }
-    }));
-    alert('Published! Number is linked to this assistant.');
+    alert('Publish triggered (hook into your deploy flow).');
   };
-
-  /* ---------- CALL ENGINE (VAPI if present, else mock) ---------- */
-  // We expose a tiny driver that either talks to window.Vapi (if your app loaded their SDK)
-  // or uses a mock that fakes a short conversation for local testing.
-  const vapiRef = useRef<any | null>(null);
-  const mediaRef = useRef<HTMLAudioElement | null>(null); // for Web voice playback if needed
-
-  useEffect(() => {
-    // hydrate vapi handle if available
-    // @ts-ignore
-    vapiRef.current = (window as any)?.Vapi || null;
-  }, []);
-
-  const startCall = async () => {
-    if (!active) return;
-    const id = `call_${crypto.randomUUID?.() || Math.random().toString(36).slice(2)}`;
-    setCurrentCallId(id);
-    setTranscript([]);
-    const calls = readLS<CallLog[]>(LS_CALLS) || [];
-    calls.unshift({
-      id,
-      assistantId: active.id,
-      assistantName: active.name,
-      startedAt: Date.now(),
-      type: callType,
-      assistantPhoneNumber: (active.config.telephony?.numbers || []).find(n=>n.id===active.config.telephony?.linkedNumberId)?.e164,
-      transcript: [],
-    });
-    writeLS(LS_CALLS, calls);
-
-    // If Vapi SDK exists, try to kick off a call:
-    // (You should replace the below with your actual SDK init and options.)
-    const vapi = vapiRef.current;
-    if (vapi && typeof vapi.start === 'function') {
-      try {
-        await vapi.start({
-          // Example shape – replace with real config:
-          assistant: {
-            // use your backend ID / prompt
-            systemPrompt: active.config.model.systemPrompt,
-            voice: active.config.voice.voiceId,
-            firstMessage: active.config.model.firstMessage,
-          },
-          transcriber: active.config.transcriber,
-          transport: callType === 'PSTN'
-            ? { type: 'pstn', to: 'customer-number-here', from: (active.config.telephony?.numbers || []).find(n=>n.id===active.config.telephony?.linkedNumberId)?.e164 }
-            : { type: 'web' }
-        });
-
-        // wiring simple events if SDK exposes them
-        vapi.on?.('transcript', (evt: any) => {
-          if (!evt?.text) return;
-          pushTurn(evt.role === 'assistant' ? 'assistant' : 'user', evt.text);
-        });
-        vapi.on?.('end', (evt: any) => {
-          endCall('Completed');
-        });
-      } catch (e) {
-        pushTurn('assistant', 'Sorry—failed to start the call engine in this environment.');
-      }
-      return;
-    }
-
-    // Otherwise, MOCK: a tiny scripted exchange to prove UI / logs
-    const first = active.config.model.firstMessage || 'Hello.';
-    pushTurn('assistant', first);
-    setTimeout(()=> pushTurn('user', 'Hello. Hello. I wanna…'), 900);
-    setTimeout(()=> pushTurn('assistant', 'Hi there.'), 1700);
-    setTimeout(()=> pushTurn('assistant', 'I can help you schedule an appointment. What day works?'), 3000);
-  };
-
-  const endCall = (reason: string) => {
-    if (!currentCallId) return;
-    const calls = (readLS<CallLog[]>(LS_CALLS) || []).map(c => c.id === currentCallId ? { ...c, endedAt: Date.now(), endedReason: reason } : c);
-    writeLS(LS_CALLS, calls);
-    setCurrentCallId(null);
-    // stop SDK if any
-    const vapi = vapiRef.current;
-    try { vapi?.stop?.(); } catch {}
-  };
-
-  const pushTurn = (role: 'assistant'|'user', text: string) => {
-    const turn = { role, text, ts: Date.now() };
-    setTranscript(t => {
-      const next = [...t, turn];
-      if (currentCallId) {
-        const calls = readLS<CallLog[]>(LS_CALLS) || [];
-        const idx = calls.findIndex(c => c.id === currentCallId);
-        if (idx >= 0) {
-          calls[idx] = { ...calls[idx], transcript: [...calls[idx].transcript, turn] };
-          writeLS(LS_CALLS, calls);
-        }
-      }
-      return next;
-    });
-  };
-
-  const callsForAssistant = (readLS<CallLog[]>(LS_CALLS) || []).filter(c => c.assistantId === active.id);
 
   return (
     <div ref={scopeRef} className={SCOPE} style={{ background:'var(--bg)', color:'var(--text)' }}>
@@ -803,27 +660,8 @@ export default function VoiceAgentSection() {
         }}
       >
         {/* top action bar */}
-        <div className="px-2 pb-3 flex items-center justify-between sticky"
+        <div className="px-2 pb-3 flex items-center justify-end sticky"
              style={{ top:'calc(var(--app-header-h, 64px) + 8px)', zIndex:2 }}>
-          {/* CALL CONTROLS */}
-          <div className="flex items-center gap-2">
-            <button className="btn btn--ghost" onClick={()=> setCallType(c => c==='Web'?'PSTN':'Web')}>
-              <ListTree className="w-4 h-4 icon" /> {callType === 'Web' ? 'Web' : 'PSTN'}
-            </button>
-            {!currentCallId ? (
-              <button onClick={startCall} className="btn btn--green">
-                <PhoneCall className="w-4 h-4 text-white" /><span className="text-white">Call Assistant</span>
-              </button>
-            ) : (
-              <button onClick={()=> endCall('Ended by user')} className="btn btn--danger">
-                <PhoneOff className="w-4 h-4" /> End Call
-              </button>
-            )}
-            <button onClick={()=> window.dispatchEvent(new CustomEvent('voiceagent:open-chat', { detail:{ id: active.id } }))} className="btn btn--ghost">
-              <MessageSquare className="w-4 h-4 icon" /> Chat
-            </button>
-          </div>
-
           <div className="flex items-center gap-2">
             <button
               onClick={()=> navigator.clipboard.writeText(active.config.model.systemPrompt || '').catch(()=>{})}
@@ -842,303 +680,233 @@ export default function VoiceAgentSection() {
 
         {/* content body */}
         <div className="mx-auto grid grid-cols-12 gap-10" style={{ maxWidth:'min(2400px, 98vw)' }}>
-          {/* LEFT: Editor */}
-          <div className="col-span-12 xl:col-span-7 space-y-10">
-            <Section title="Model" icon={<FileText className="w-4 h-4 icon" />}>
-              <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(4, minmax(260px, 1fr))' }}>
-                <Field label="Provider">
-                  <Select
-                    value={active.config.model.provider}
-                    onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, provider: v as Provider } } }))}
-                    items={[{ value:'openai', label:'OpenAI' }]}
-                  />
-                </Field>
-                <Field label="Model">
-                  <Select
-                    value={active.config.model.model}
-                    onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, model: v as ModelId } } }))}
-                    items={[
-                      { value:'gpt-4o', label:'GPT-4o' },
-                      { value:'gpt-4o-mini', label:'GPT-4o mini' },
-                      { value:'gpt-4.1', label:'GPT-4.1' },
-                      { value:'gpt-3.5-turbo', label:'GPT-3.5 Turbo' },
-                    ]}
-                  />
-                </Field>
-                <Field label="First Message Mode">
-                  <Select
-                    value={active.config.model.firstMessageMode}
-                    onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, firstMessageMode: v as any } } }))}
-                    items={[{ value:'assistant_first', label:'Assistant speaks first' }, { value:'user_first', label:'User speaks first' }]}
-                  />
-                </Field>
-                <Field label="First Message">
-                  <input
-                    value={active.config.model.firstMessage}
-                    onChange={(e)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, firstMessage: e.target.value } } })) }
-                    className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
-                    style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)', color:'var(--text)' }}
-                  />
-                </Field>
+          <Section title="Model" icon={<FileText className="w-4 h-4 icon" />}>
+            <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(4, minmax(360px, 1fr))' }}>
+              <Field label="Provider">
+                <Select
+                  value={active.config.model.provider}
+                  onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, provider: v as Provider } } }))}
+                  items={[{ value:'openai', label:'OpenAI' }]}
+                />
+              </Field>
+              <Field label="Model">
+                <Select
+                  value={active.config.model.model}
+                  onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, model: v as ModelId } } }))}
+                  items={[
+                    { value:'gpt-4o', label:'GPT-4o' },
+                    { value:'gpt-4o-mini', label:'GPT-4o mini' },
+                    { value:'gpt-4.1', label:'GPT-4.1' },
+                    { value:'gpt-3.5-turbo', label:'GPT-3.5 Turbo' },
+                  ]}
+                />
+              </Field>
+              <Field label="First Message Mode">
+                <Select
+                  value={active.config.model.firstMessageMode}
+                  onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, firstMessageMode: v as any } } }))}
+                  items={[{ value:'assistant_first', label:'Assistant speaks first' }, { value:'user_first', label:'User speaks first' }]}
+                />
+              </Field>
+              <Field label="First Message">
+                <input
+                  value={active.config.model.firstMessage}
+                  onChange={(e)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, firstMessage: e.target.value } } })) }
+                  className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
+                  style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)', color:'var(--text)' }}
+                />
+              </Field>
+            </div>
+
+            {/* System Prompt */}
+            <div className="mt-6">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="w-4 h-4 icon" /> System Prompt</div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={()=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, systemPrompt: BASE_PROMPT } } }))}
+                    className="btn btn--ghost"
+                  ><RefreshCw className="w-4 h-4 icon" /> Reset</button>
+                  <button onClick={()=> setGenOpen(true)} className="btn btn--green">
+                    <Sparkles className="w-4 h-4 text-white" /> <span className="text-white">Generate / Edit</span>
+                  </button>
+                </div>
               </div>
 
-              {/* System Prompt */}
-              <div className="mt-6">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="w-4 h-4 icon" /> System Prompt</div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={()=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, systemPrompt: BASE_PROMPT } } }))}
-                      className="btn btn--ghost"
-                    ><RefreshCw className="w-4 h-4 icon" /> Reset</button>
-                    <button onClick={()=> setGenOpen(true)} className="btn btn--green">
-                      <Sparkles className="w-4 h-4 text-white" /> <span className="text-white">Generate / Edit</span>
-                    </button>
-                  </div>
-                </div>
-
-                {!typing ? (
-                  <textarea
-                    rows={20}
-                    value={active.config.model.systemPrompt || ''}
-                    onChange={(e)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, systemPrompt: e.target.value } } })) }
+              {!typing ? (
+                <textarea
+                  rows={26}
+                  value={active.config.model.systemPrompt || ''}
+                  onChange={(e)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, systemPrompt: e.target.value } } })) }
+                  className="w-full rounded-2xl px-3 py-3 text-[14px] leading-6 outline-none"
+                  style={{
+                    background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)',
+                    boxShadow:'var(--va-shadow), inset 0 1px 0 rgba(255,255,255,.03)', color:'var(--text)',
+                    fontFamily:'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+                    minHeight: 560
+                  }}
+                />
+              ) : (
+                <div>
+                  <div
+                    ref={typingBoxRef}
                     className="w-full rounded-2xl px-3 py-3 text-[14px] leading-6 outline-none"
                     style={{
                       background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)',
                       boxShadow:'var(--va-shadow), inset 0 1px 0 rgba(255,255,255,.03)', color:'var(--text)',
                       fontFamily:'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-                      minHeight: 420
+                      whiteSpace:'pre-wrap',
+                      minHeight: 560,
+                      maxHeight: 680,
+                      overflowY:'auto'
                     }}
-                  />
-                ) : (
-                  <div>
-                    <div
-                      ref={typingBoxRef}
-                      className="w-full rounded-2xl px-3 py-3 text-[14px] leading-6 outline-none"
-                      style={{
-                        background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)',
-                        boxShadow:'var(--va-shadow), inset 0 1px 0 rgba(255,255,255,.03)', color:'var(--text)',
-                        fontFamily:'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-                        whiteSpace:'pre-wrap',
-                        minHeight: 420,
-                        maxHeight: 560,
-                        overflowY:'auto'
-                      }}
-                    >
-                      {(() => {
-                        const slice = typing.slice(0, typedCount);
-                        const out: JSX.Element[] = [];
-                        let buf = '';
-                        let added = slice.length ? slice[0].added : false;
-                        slice.forEach((t, i) => {
-                          if (t.added !== added) {
-                            out.push(added
-                              ? <ins key={`ins-${i}`} style={{ background:'rgba(16,185,129,.18)', padding:'1px 2px', borderRadius:4 }}>{buf}</ins>
-                              : <span key={`nor-${i}`}>{buf}</span>);
-                            buf = t.ch;
-                            added = t.added;
-                          } else {
-                            buf += t.ch;
-                          }
-                        });
-                        if (buf) out.push(added
-                          ? <ins key="tail-ins" style={{ background:'rgba(16,185,129,.18)', padding:'1px 2px', borderRadius:4 }}>{buf}</ins>
-                          : <span key="tail-nor">{buf}</span>);
-                        if (typedCount < (typing?.length || 0)) out.push(<span key="caret" className="animate-pulse"> ▌</span>);
-                        return out;
-                      })()}
-                    </div>
-
-                    <div className="flex items-center gap-2 justify-end mt-3">
-                      <button onClick={declineTyping} className="btn btn--ghost"><X className="w-4 h-4 icon" /> Decline</button>
-                      <button onClick={acceptTyping} className="btn btn--green"><Check className="w-4 h-4 text-white" /><span className="text-white">Accept</span></button>
-                    </div>
+                  >
+                    {(() => {
+                      const slice = typing.slice(0, typedCount);
+                      const out: JSX.Element[] = [];
+                      let buf = '';
+                      let added = slice.length ? slice[0].added : false;
+                      slice.forEach((t, i) => {
+                        if (t.added !== added) {
+                          out.push(added
+                            ? <ins key={`ins-${i}`} style={{ background:'rgba(16,185,129,.18)', padding:'1px 2px', borderRadius:4 }}>{buf}</ins>
+                            : <span key={`nor-${i}`}>{buf}</span>);
+                          buf = t.ch;
+                          added = t.added;
+                        } else {
+                          buf += t.ch;
+                        }
+                      });
+                      if (buf) out.push(added
+                        ? <ins key="tail-ins" style={{ background:'rgba(16,185,129,.18)', padding:'1px 2px', borderRadius:4 }}>{buf}</ins>
+                        : <span key="tail-nor">{buf}</span>);
+                      if (typedCount < (typing?.length || 0)) out.push(<span key="caret" className="animate-pulse"> ▌</span>);
+                      return out;
+                    })()}
                   </div>
-                )}
-              </div>
-            </Section>
 
-            <Section title="Voice" icon={<Mic2 className="w-4 h-4 icon" />}>
-              <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(2, minmax(260px, 1fr))' }}>
-                <Field label="Provider">
-                  <Select
-                    value={active.config.voice.provider}
-                    onChange={(v)=>{
-                      const list = v==='elevenlabs' ? elevenVoices : openaiVoices;
-                      updateActive(a => ({ ...a, config:{ ...a.config, voice:{ provider: v as VoiceProvider, voiceId: list[0].value, voiceLabel: list[0].label } } }));
-                    }}
-                    items={[
-                      { value:'openai', label:'OpenAI' },
-                      { value:'elevenlabs', label:'ElevenLabs' },
-                    ]}
-                  />
-                </Field>
-                <Field label="Voice">
-                  <Select
-                    value={active.config.voice.voiceId}
-                    onChange={(v)=>{
-                      const list = active.config.voice.provider==='elevenlabs' ? elevenVoices : openaiVoices;
-                      const found = list.find(x=>x.value===v);
-                      updateActive(a => ({ ...a, config:{ ...a.config, voice:{ ...a.config.voice, voiceId:v, voiceLabel: found?.label || v } } }));
-                    }}
-                    items={active.config.voice.provider==='elevenlabs' ? elevenVoices : openaiVoices}
-                  />
-                </Field>
-              </div>
-
-              <div className="mt-3 flex items-center gap-2">
-                <button
-                  onClick={()=> { window.dispatchEvent(new CustomEvent('voiceagent:import-11labs')); alert('Hook “voiceagent:import-11labs” to your importer.'); }}
-                  className="btn btn--ghost"
-                ><UploadCloud className="w-4 h-4 icon" /> Import from ElevenLabs</button>
-                <button
-                  onClick={()=> mediaRef.current?.play?.()}
-                  className="btn btn--ghost"
-                ><Play className="w-4 h-4 icon" /> Test Output Device</button>
-                <audio ref={mediaRef} />
-              </div>
-            </Section>
-
-            <Section title="Transcriber" icon={<BookOpen className="w-4 h-4 icon" />}>
-              <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(3, minmax(260px, 1fr))' }}>
-                <Field label="Provider">
-                  <Select
-                    value={active.config.transcriber.provider}
-                    onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, transcriber:{ ...a.config.transcriber, provider: v as any } } }))}
-                    items={[{ value:'deepgram', label:'Deepgram' }]}
-                  />
-                </Field>
-                <Field label="Model">
-                  <Select
-                    value={active.config.transcriber.model}
-                    onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, transcriber:{ ...a.config.transcriber, model: v as any } } }))}
-                    items={[{ value:'nova-2', label:'Nova 2' }, { value:'nova-3', label:'Nova 3' }]}
-                  />
-                </Field>
-                <Field label="Language">
-                  <Select
-                    value={active.config.transcriber.language}
-                    onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, transcriber:{ ...a.config.transcriber, language: v as any } } }))}
-                    items={[{ value:'en', label:'English' }, { value:'multi', label:'Multi' }]}
-                  />
-                </Field>
-                <Field label="Confidence Threshold">
-                  <div className="flex items-center gap-3">
-                    <input
-                      type="range" min={0} max={1} step={0.01}
-                      value={active.config.transcriber.confidenceThreshold}
-                      onChange={(e)=> updateActive(a => ({ ...a, config:{ ...a.config, transcriber:{ ...a.config.transcriber, confidenceThreshold: Number(e.target.value) } } }))}
-                      className="va-range w-full"
-                    />
-                    <span className="text-xs" style={{ color:'var(--text-muted)' }}>{active.config.transcriber.confidenceThreshold.toFixed(2)}</span>
+                  <div className="flex items-center gap-2 justify-end mt-3">
+                    <button onClick={declineTyping} className="btn btn--ghost"><X className="w-4 h-4 icon" /> Decline</button>
+                    <button onClick={acceptTyping} className="btn btn--green"><Check className="w-4 h-4 text-white" /><span className="text-white">Accept</span></button>
                   </div>
-                </Field>
-                <Field label="Denoise">
-                  <Select
-                    value={String(active.config.transcriber.denoise)}
-                    onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, transcriber:{ ...a.config.transcriber, denoise: v==='true' } } }))}
-                    items={[{ value:'false', label:'Off' }, { value:'true', label:'On' }]}
+                </div>
+              )}
+            </div>
+          </Section>
+
+          <Section title="Voice" icon={<Mic2 className="w-4 h-4 icon" />}>
+            <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(2, minmax(360px, 1fr))' }}>
+              <Field label="Provider">
+                <Select
+                  value={active.config.voice.provider}
+                  onChange={(v)=>{
+                    const list = v==='elevenlabs' ? elevenVoices : openaiVoices;
+                    updateActive(a => ({ ...a, config:{ ...a.config, voice:{ provider: v as VoiceProvider, voiceId: list[0].value, voiceLabel: list[0].label } } }));
+                  }}
+                  items={[
+                    { value:'openai', label:'OpenAI' },
+                    { value:'elevenlabs', label:'ElevenLabs' },
+                  ]}
+                />
+              </Field>
+              <Field label="Voice">
+                <Select
+                  value={active.config.voice.voiceId}
+                  onChange={(v)=>{
+                    const list = active.config.voice.provider==='elevenlabs' ? elevenVoices : openaiVoices;
+                    const found = list.find(x=>x.value===v);
+                    updateActive(a => ({ ...a, config:{ ...a.config, voice:{ ...a.config.voice, voiceId:v, voiceLabel: found?.label || v } } }));
+                  }}
+                  items={active.config.voice.provider==='elevenlabs' ? elevenVoices : openaiVoices}
+                />
+              </Field>
+            </div>
+
+            <div className="mt-3">
+              <button
+                onClick={()=> { window.dispatchEvent(new CustomEvent('voiceagent:import-11labs')); alert('Hook “voiceagent:import-11labs” to your importer.'); }}
+                className="btn btn--ghost"
+              ><UploadCloud className="w-4 h-4 icon" /> Import from ElevenLabs</button>
+            </div>
+          </Section>
+
+          <Section title="Transcriber" icon={<BookOpen className="w-4 h-4 icon" />}>
+            <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(3, minmax(360px, 1fr))' }}>
+              <Field label="Provider">
+                <Select
+                  value={active.config.transcriber.provider}
+                  onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, transcriber:{ ...a.config.transcriber, provider: v as any } } }))}
+                  items={[{ value:'deepgram', label:'Deepgram' }]}
+                />
+              </Field>
+              <Field label="Model">
+                <Select
+                  value={active.config.transcriber.model}
+                  onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, transcriber:{ ...a.config.transcriber, model: v as any } } }))}
+                  items={[{ value:'nova-2', label:'Nova 2' }, { value:'nova-3', label:'Nova 3' }]}
+                />
+              </Field>
+              <Field label="Language">
+                <Select
+                  value={active.config.transcriber.language}
+                  onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, transcriber:{ ...a.config.transcriber, language: v as any } } }))}
+                  items={[{ value:'en', label:'English' }, { value:'multi', label:'Multi' }]}
+                />
+              </Field>
+              <Field label="Confidence Threshold">
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range" min={0} max={1} step={0.01}
+                    value={active.config.transcriber.confidenceThreshold}
+                    onChange={(e)=> updateActive(a => ({ ...a, config:{ ...a.config, transcriber:{ ...a.config.transcriber, confidenceThreshold: Number(e.target.value) } } }))}
+                    className="va-range w-full"
                   />
-                </Field>
-                <Field label="Use Numerals">
-                  <Select
-                    value={String(active.config.transcriber.numerals)}
-                    onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, transcriber:{ ...a.config.transcriber, numerals: v==='true' } } }))}
-                    items={[{ value:'false', label:'No' }, { value:'true', label:'Yes' }]}
-                  />
-                </Field>
-              </div>
-            </Section>
+                  <span className="text-xs" style={{ color:'var(--text-muted)' }}>{active.config.transcriber.confidenceThreshold.toFixed(2)}</span>
+                </div>
+              </Field>
+              <Field label="Denoise">
+                <Select
+                  value={String(active.config.transcriber.denoise)}
+                  onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, transcriber:{ ...a.config.transcriber, denoise: v==='true' } } }))}
+                  items={[{ value:'false', label:'Off' }, { value:'true', label:'On' }]}
+                />
+              </Field>
+              <Field label="Use Numerals">
+                <Select
+                  value={String(active.config.transcriber.numerals)}
+                  onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, transcriber:{ ...a.config.transcriber, numerals: v==='true' } } }))}
+                  items={[{ value:'false', label:'No' }, { value:'true', label:'Yes' }]}
+                />
+              </Field>
+            </div>
+          </Section>
 
-            <Section title="Tools" icon={<SlidersHorizontal className="w-4 h-4 icon" />}>
-              <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(2, minmax(260px, 1fr))' }}>
-                <Field label="Enable End Call Function">
-                  <Select
-                    value={String(active.config.tools.enableEndCall)}
-                    onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, tools:{ ...a.config.tools, enableEndCall: v==='true' } } }))}
-                    items={[{ value:'true', label:'Enabled' }, { value:'false', label:'Disabled' }]}
-                  />
-                </Field>
-                <Field label="Dial Keypad">
-                  <Select
-                    value={String(active.config.tools.dialKeypad)}
-                    onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, tools:{ ...a.config.tools, dialKeypad: v==='true' } } }))}
-                    items={[{ value:'true', label:'Enabled' }, { value:'false', label:'Disabled' }]}
-                  />
-                </Field>
-              </div>
-            </Section>
+          <Section title="Tools" icon={<SlidersHorizontal className="w-4 h-4 icon" />}>
+            <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(2, minmax(360px, 1fr))' }}>
+              <Field label="Enable End Call Function">
+                <Select
+                  value={String(active.config.tools.enableEndCall)}
+                  onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, tools:{ ...a.config.tools, enableEndCall: v==='true' } } }))}
+                  items={[{ value:'true', label:'Enabled' }, { value:'false', label:'Disabled' }]}
+                />
+              </Field>
+              <Field label="Dial Keypad">
+                <Select
+                  value={String(active.config.tools.dialKeypad)}
+                  onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, tools:{ ...a.config.tools, dialKeypad: v==='true' } } }))}
+                  items={[{ value:'true', label:'Enabled' }, { value:'false', label:'Disabled' }]}
+                />
+              </Field>
+            </div>
+          </Section>
 
-            <Section title="Telephony" icon={<PhoneIcon className="w-4 h-4 icon" />}>
-              <div className="mb-3">
-                <button className="btn btn--ghost" onClick={importFromPhoneNumbersPage}>
-                  <UploadCloud className="w-4 h-4 icon" /> Import from Phone Numbers
-                </button>
-              </div>
-
-              <TelephonyEditor
-                numbers={active.config.telephony?.numbers ?? []}
-                linkedId={active.config.telephony?.linkedNumberId}
-                onAdd={addPhone}
-                onRemove={removePhone}
-                onLink={(id)=> updateActive(a => ({ ...a, config:{ ...a.config, telephony:{ ...(a.config.telephony||{numbers:[]}), linkedNumberId:id } } }))}
-              />
-            </Section>
-          </div>
-
-          {/* RIGHT: Call transcript + logs */}
-          <div className="col-span-12 xl:col-span-5 space-y-10">
-            <Section title="Call Transcript" icon={<Archive className="w-4 h-4 icon" />}>
-              <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1" style={{ scrollbarWidth:'thin' }}>
-                {transcript.length === 0 && (
-                  <div className="text-sm opacity-70">No transcript yet. Start a call to see messages here.</div>
-                )}
-                {transcript.map((t, i) => (
-                  <div key={i} className="rounded-xl px-3 py-2"
-                       style={{
-                         background: t.role==='assistant' ? 'rgba(255,255,255,.04)' : 'rgba(16,185,129,.08)',
-                         border: '1px solid var(--va-border)'
-                       }}>
-                    <div className="text-[11px] opacity-70 mb-0.5">{t.role==='assistant'?'Assistant':'You'} • {new Date(t.ts).toLocaleTimeString()}</div>
-                    <div className="text-sm">{t.text}</div>
-                  </div>
-                ))}
-              </div>
-            </Section>
-
-            <Section title="Call Logs" icon={<ListTree className="w-4 h-4 icon" />}>
-              <div className="space-y-2">
-                {callsForAssistant.length === 0 && <div className="text-sm opacity-70">No calls yet.</div>}
-                {callsForAssistant.map(c => (
-                  <div key={c.id} className="rounded-xl px-3 py-3"
-                       style={{ background:'var(--va-card)', border:'1px solid var(--va-border)' }}>
-                    <div className="flex items-center justify-between">
-                      <div className="text-sm font-medium">{c.type} • {new Date(c.startedAt).toLocaleString()}</div>
-                      <div className="text-xs opacity-70">{c.endedReason || 'In progress'}</div>
-                    </div>
-                    {(c.assistantPhoneNumber || c.customerPhoneNumber) && (
-                      <div className="text-xs opacity-70 mt-1">
-                        {c.assistantPhoneNumber ? <>Assistant #: {c.assistantPhoneNumber} • </> : null}
-                        {c.customerPhoneNumber ? <>Customer #: {c.customerPhoneNumber}</> : null}
-                      </div>
-                    )}
-                    <details className="mt-2">
-                      <summary className="cursor-pointer text-sm">Transcript</summary>
-                      <div className="mt-2 space-y-2">
-                        {c.transcript.map((t, i) => (
-                          <div key={i} className="rounded-lg px-2 py-1"
-                               style={{ background:'rgba(255,255,255,.03)', border:'1px solid var(--va-border)' }}>
-                            <div className="text-[11px] opacity-70">{t.role==='assistant'?'Assistant':'You'} • {new Date(t.ts).toLocaleTimeString()}</div>
-                            <div className="text-sm">{t.text}</div>
-                          </div>
-                        ))}
-                      </div>
-                    </details>
-                  </div>
-                ))}
-              </div>
-            </Section>
-          </div>
+          <Section title="Telephony" icon={<PhoneIcon className="w-4 h-4 icon" />}>
+            <TelephonyEditor
+              numbers={active.config.telephony?.numbers ?? []}
+              onAdd={addPhone}
+              onRemove={removePhone}
+            />
+          </Section>
         </div>
       </div>
 
@@ -1270,19 +1038,17 @@ function Section({ title, icon, children }:{ title: string; icon: React.ReactNod
 /* =============================================================================
    Telephony editor
 ============================================================================= */
-function TelephonyEditor({ numbers, linkedId, onAdd, onRemove, onLink }:{
+function TelephonyEditor({ numbers, onAdd, onRemove }:{
   numbers: PhoneNum[];
-  linkedId?: string;
   onAdd: (e164: string, label?: string) => void;
   onRemove: (id: string) => void;
-  onLink: (id: string) => void;
 }) {
   const [e164, setE164] = useState('');
   const [label, setLabel] = useState('');
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-4" style={{ gridTemplateColumns:'repeat(3, minmax(220px, 1fr))' }}>
+      <div className="grid gap-4" style={{ gridTemplateColumns:'repeat(3, minmax(240px, 1fr))' }}>
         <div>
           <div className="mb-1.5 text-[13px] font-medium" style={{ color:'var(--text)' }}>Phone Number (E.164)</div>
           <input
@@ -1317,26 +1083,16 @@ function TelephonyEditor({ numbers, linkedId, onAdd, onRemove, onLink }:{
         {numbers.length === 0 && (
           <div className="text-sm opacity-70">No phone numbers added yet.</div>
         )}
-        {numbers.map(n => {
-          const linked = n.id === linkedId;
-          return (
-            <div key={n.id} className="flex items-center justify-between rounded-xl px-3 py-2"
-                 style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)' }}>
-              <div className="min-w-0">
-                <div className="font-medium truncate">{n.label || 'Untitled'} {linked ? <span className="text-xs opacity-70">• Linked</span> : null}</div>
-                <div className="text-xs opacity-70">{n.e164}</div>
-              </div>
-              <div className="flex items-center gap-2">
-                {!linked ? (
-                  <button onClick={()=> onLink(n.id)} className="btn btn--green text-xs"><Check className="w-4 h-4 text-white" /> <span className="text-white">Link</span></button>
-                ) : (
-                  <button onClick={()=> onLink('' as any)} className="btn btn--ghost text-xs">Unlink</button>
-                )}
-                <button onClick={()=> onRemove(n.id)} className="btn btn--danger text-xs"><Trash2 className="w-4 h-4" /> Remove</button>
-              </div>
+        {numbers.map(n => (
+          <div key={n.id} className="flex items-center justify-between rounded-xl px-3 py-2"
+               style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)' }}>
+            <div className="min-w-0">
+              <div className="font-medium truncate">{n.label || 'Untitled'}</div>
+              <div className="text-xs opacity-70">{n.e164}</div>
             </div>
-          );
-        })}
+            <button onClick={()=> onRemove(n.id)} className="btn btn--danger text-xs"><Trash2 className="w-4 h-4" /> Remove</button>
+          </div>
+        ))}
       </div>
     </div>
   );
