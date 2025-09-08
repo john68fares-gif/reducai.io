@@ -2,6 +2,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search, Plus, Folder, FolderOpen, Check, Trash2, Copy, Edit3, Sparkles,
@@ -18,8 +19,8 @@ const ACCENT_HOVER = '#0ea371';
 const BTN_SHADOW = '0 10px 24px rgba(16,185,129,.22)';
 
 /* Typing speed (fast) */
-const TICK_MS = 10;
-const CHUNK_SIZE = 6;
+const TICK_MS = 10;        // interval for typing
+const CHUNK_SIZE = 6;      // chars per tick
 
 /* =============================================================================
    TYPES + STORAGE
@@ -54,7 +55,7 @@ const readLS = <T,>(k: string): T | null => { try { const r = localStorage.getIt
 const writeLS = <T,>(k: string, v: T) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 
 /* =============================================================================
-   PROMPT HELPERS
+   PROMPT HELPERS (unchanged from last working version)
 ============================================================================= */
 const BASE_PROMPT = `[Identity]
 You are an intelligent and responsive assistant designed to help users with a wide range of inquiries and tasks.
@@ -96,14 +97,12 @@ const SECTION_KEYS = [
 type SectionKey = typeof SECTION_KEYS[number];
 
 function toTitle(s: string) {
-  return s
-    .replace(/\s+/g, ' ')
+  return s.replace(/\s+/g, ' ')
     .split(' ')
     .map(w => (w.length ? w[0].toUpperCase() + w.slice(1) : ''))
     .join(' ')
     .replace(/\b(Id|Url|Dob)\b/gi, m => m.toUpperCase());
 }
-
 function readSectionsFromPrompt(txt: string): Record<SectionKey, string> {
   const out = Object.fromEntries(SECTION_KEYS.map(k => [k, ''])) as Record<SectionKey, string>;
   if (!txt) return out;
@@ -117,7 +116,6 @@ function readSectionsFromPrompt(txt: string): Record<SectionKey, string> {
   }
   return out;
 }
-
 function sectionsToPrompt(s: Record<SectionKey, string>): string {
   return SECTION_KEYS
     .filter(k => k !== 'Refinements' || (s['Refinements'] && s['Refinements'].trim()))
@@ -125,18 +123,13 @@ function sectionsToPrompt(s: Record<SectionKey, string>): string {
     .join('\n\n')
     .trim();
 }
-
 function buildDefaultsFromHint(hint: string): Record<SectionKey, string> {
   const short = hint.trim().split(/\s+/).length <= 3 ? hint.trim() : 'Assistant';
   const collectMatch = hint.match(/collect(?:\s*[:\-])?\s*(.*)$/i);
-  const fields = collectMatch
-    ? collectMatch[1].split(/[,;\n]/).map(s => s.trim()).filter(Boolean)
-    : [];
-
-  const collectList =
-    fields.length
-      ? fields.map(f => `- ${toTitle(f)}`).join('\n')
-      : `- Full Name
+  const fields = collectMatch ? collectMatch[1].split(/[,;\n]/).map(s => s.trim()).filter(Boolean) : [];
+  const collectList = fields.length
+    ? fields.map(f => `- ${toTitle(f)}`).join('\n')
+    : `- Full Name
 - Phone Number
 - Email (if provided)
 - Appointment Date/Time (if applicable)`;
@@ -152,57 +145,42 @@ function buildDefaultsFromHint(hint: string): Record<SectionKey, string> {
     'Refinements': ''
   };
 }
-
-/** Merge user free-text into sections. Also returns optional firstMessage override. */
 function mergeInputIntoSections(input: string, basePrompt: string): {
   merged: Record<SectionKey, string>;
   firstMessage?: string;
 } {
   const current = readSectionsFromPrompt(basePrompt || BASE_PROMPT);
-
   let firstMessage: string | undefined;
-
   const raw = input.trim();
   if (!raw) return { merged: current };
 
-  // Direct “first message” commands
   const fm = raw.match(/^(?:first\s*message|greeting)\s*[:\-]\s*(.+)$/i);
   if (fm) {
     firstMessage = fm[1].trim();
     return { merged: current, firstMessage };
   }
 
-  // If the user pasted structured sections, map them in
   let consumed = false;
   SECTION_KEYS.forEach(key => {
     const rx = new RegExp(`\$begin:math:display$${key}\\$end:math:display$\\s*([\\s\\S]*?)(?=\\n\$begin:math:display$[^\\$end:math:display$]+\\]|\\s*$)`, 'i');
     const m = raw.match(rx);
-    if (m) {
-      current[key] = m[1].trim();
-      consumed = true;
-    }
+    if (m) { current[key] = m[1].trim(); consumed = true; }
   });
 
-  // Short hints like "assistant" or "collect name, phone"
   if (!consumed && (raw.split(/\s+/).length <= 3 || /collect|fields|capture|gather/i.test(raw))) {
     const d = buildDefaultsFromHint(raw);
     SECTION_KEYS.forEach(k => { if (d[k]) current[k] = d[k]; });
     consumed = true;
   }
-
-  // If nothing matched, append to Refinements as a bullet (but keep previous edits)
   if (!consumed) {
     const line = `- ${raw.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim()}`;
-    current['Refinements'] = current['Refinements']
-      ? `${current['Refinements']}\n${line}`
-      : line;
+    current['Refinements'] = current['Refinements'] ? `${current['Refinements']}\n${line}` : line;
   }
-
   return { merged: current, firstMessage };
 }
 
 /* =============================================================================
-   DIFF (character-level)
+   DIFF (character-level, preserve newlines). We show only *added* chars green.
 ============================================================================= */
 type CharTok = { ch: string; added: boolean };
 function charDiffAdded(oldStr: string, newStr: string): CharTok[] {
@@ -226,36 +204,44 @@ function charDiffAdded(oldStr: string, newStr: string): CharTok[] {
 }
 
 /* =============================================================================
+   Small portal to avoid Safari/iPad transform bugs with position: fixed
+============================================================================= */
+function Portal({ children }: { children: React.ReactNode }) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  if (!mounted) return null;
+  return createPortal(children, document.body);
+}
+
+/* =============================================================================
    PAGE
 ============================================================================= */
 export default function VoiceAgentSection() {
-  /* ---------- Sync with APP sidebar collapse ---------- */
   const scopeRef = useRef<HTMLDivElement | null>(null);
-  const [sbCollapsed, setSbCollapsed] = useState<boolean>(() => {
-    if (typeof document === 'undefined') return false;
-    return document.body.getAttribute('data-sb-collapsed') === 'true';
-  });
 
+  /* ---------- Read actual right edge of APP sidebar and store CSS var ---------- */
+  const APP_SIDEBAR_SELECTOR = '[data-app-sidebar]';
   useEffect(() => {
-    const onEvt = (e: Event) => {
-      const detail = (e as CustomEvent).detail || {};
-      if (typeof detail.collapsed === 'boolean') setSbCollapsed(!!detail.collapsed);
-    };
-    window.addEventListener('layout:sidebar', onEvt as EventListener);
+    const scope = scopeRef.current;
+    if (!scope) return;
+    const sidebar = document.querySelector(APP_SIDEBAR_SELECTOR) as HTMLElement | null;
 
-    const mo = new MutationObserver(() => {
-      setSbCollapsed(document.body.getAttribute('data-sb-collapsed') === 'true');
-    });
+    const apply = () => {
+      const r = sidebar?.getBoundingClientRect();
+      const right = r ? Math.round(r.right) : 248; // fallback if not found
+      scope.style.setProperty('--app-sidebar-right', `${right}px`);
+    };
+
+    apply();
+    const ro = sidebar && 'ResizeObserver' in window ? new ResizeObserver(apply) : null;
+    ro?.observe(sidebar!);
+
+    const mo = new MutationObserver(apply);
     mo.observe(document.body, { attributes: true, attributeFilter: ['data-sb-collapsed', 'class'] });
 
-    return () => { window.removeEventListener('layout:sidebar', onEvt as EventListener); mo.disconnect(); };
+    window.addEventListener('resize', apply);
+    return () => { window.removeEventListener('resize', apply); mo.disconnect(); ro?.disconnect(); };
   }, []);
-
-  useEffect(() => {
-    if (!scopeRef.current) return;
-    const el = scopeRef.current;
-    el.style.setProperty('--app-sidebar-w', sbCollapsed ? '72px' : '248px');
-  }, [sbCollapsed]);
 
   /* ---------- Assistants ---------- */
   const [assistants, setAssistants] = useState<Assistant[]>([]);
@@ -264,7 +250,7 @@ export default function VoiceAgentSection() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [tempName, setTempName] = useState('');
   const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
-  const [rev, setRev] = useState(0); // force refresh after LS writes
+  const [rev, setRev] = useState(0);
 
   useEffect(() => {
     const list = readLS<Assistant[]>(LS_LIST) || [];
@@ -297,7 +283,7 @@ export default function VoiceAgentSection() {
     const list = (readLS<Assistant[]>(LS_LIST) || []).map(x => x.id === next.id ? { ...x, name: next.name, folder: next.folder, updatedAt: Date.now() } : x);
     writeLS(LS_LIST, list);
     setAssistants(list);
-    setRev(r => r + 1); // ensure re-render picks new LS state (fixes "can't edit first message")
+    setRev(r => r + 1);
   };
 
   const [creating, setCreating] = useState(false);
@@ -373,7 +359,7 @@ export default function VoiceAgentSection() {
 
     setLastNew(nextPrompt);
     setPendingFirstMsg(firstMessage);
-    startTyping(charDiffAdded(current, nextPrompt)); // live diff (added chars green)
+    startTyping(charDiffAdded(current, nextPrompt));
     setGenOpen(false);
     setGenText('');
   };
@@ -434,144 +420,147 @@ export default function VoiceAgentSection() {
   return (
     <div ref={scopeRef} className={SCOPE} style={{ background:'var(--bg)', color:'var(--text)' }}>
       {/* ================= ASSISTANTS RAIL ================= */}
-      <aside
-        className="hidden lg:flex flex-col"
-        data-collapsed={railCollapsed ? 'true' : 'false'}
-        style={{
-          position:'fixed',
-          left:'calc(var(--app-sidebar-w, 248px) - 1px)', // FUSE with main sidebar
-          top:'var(--app-header-h, 64px)',
-          width: railCollapsed ? '72px' : 'var(--va-rail-w, 360px)',
-          height:'calc(100vh - var(--app-header-h, 64px))',
-          borderLeft:'none',                                 // no left seam
-          borderRight:'1px solid var(--va-border)',
-          background:'var(--va-sidebar)',
-          boxShadow:'var(--va-shadow-side)',
-          zIndex: 10
-        }}
-      >
-        <div className="px-3 py-3 flex items-center justify-between" style={{ borderBottom:'1px solid var(--va-border)' }}>
-          <div className="flex items-center gap-2 text-sm font-semibold">
-            <PanelLeft className="w-4 h-4 icon" />
-            {!railCollapsed && <span>Assistants</span>}
-          </div>
-          <div className="flex items-center gap-2">
-            {!railCollapsed && (
-              <button onClick={addAssistant} className="btn--green px-3 py-1.5 text-xs rounded-lg">
-                {creating ? <span className="w-3.5 h-3.5 rounded-full border-2 border-white/50 border-t-transparent animate-spin" /> : <Plus className="w-3.5 h-3.5 text-white" />}
-                <span className="text-white">{creating ? 'Creating…' : 'Create'}</span>
-              </button>
-            )}
-            <button
-              title={railCollapsed ? 'Expand assistants' : 'Collapse assistants'}
-              className="btn--ghost px-2 py-1"
-              onClick={() => setRailCollapsed(v => !v)}
-            >
-              {railCollapsed ? <ChevronRightIcon className="w-4 h-4 icon" /> : <ChevronLeft className="w-4 h-4 icon" />}
-            </button>
-          </div>
-        </div>
-
-        <div className="p-3 min-h-0 flex-1 overflow-y-auto" style={{ scrollbarWidth:'thin' }}>
-          {!railCollapsed && (
-            <div className="flex items-center gap-2 rounded-lg px-2.5 py-2 mb-2"
-              style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)' }}>
-              <Search className="w-4 h-4 icon" />
-              <input value={query} onChange={(e)=> setQuery(e.target.value)} placeholder="Search assistants"
-                    className="w-full bg-transparent outline-none text-sm" style={{ color:'var(--text)' }}/>
+      <Portal>
+        <aside
+          className="hidden lg:flex flex-col"
+          data-collapsed={railCollapsed ? 'true' : 'false'}
+          style={{
+            position:'fixed',
+            left:'calc(var(--app-sidebar-right, 248px) - 1px)', // exact sidebar edge – 1px overlap
+            top:'var(--app-header-h, 64px)',
+            width: railCollapsed ? '72px' : 'var(--va-rail-w, 360px)',
+            height:'calc(100vh - var(--app-header-h, 64px))',
+            borderLeft:'none',
+            borderRight:'1px solid var(--va-border)',
+            background:'var(--va-sidebar)',
+            boxShadow:'var(--va-shadow-side)',
+            zIndex: 1000
+          }}
+        >
+          <div className="px-3 py-3 flex items-center justify-between" style={{ borderBottom:'1px solid var(--va-border)' }}>
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <PanelLeft className="w-4 h-4 icon" />
+              {!railCollapsed && <span>Assistants</span>}
             </div>
-          )}
-
-          {!railCollapsed && (
-            <>
-              <div className="text-xs font-semibold flex items-center gap-2 mt-3 mb-1" style={{ color:'var(--text-muted)' }}>
-                <Folder className="w-3.5 h-3.5 icon" /> Folders
-              </div>
-              <button className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/5">
-                <FolderOpen className="w-4 h-4 icon" /> All
+            <div className="flex items-center gap-2">
+              {!railCollapsed && (
+                <button onClick={addAssistant} className="btn--green px-3 py-1.5 text-xs rounded-lg">
+                  {creating ? <span className="w-3.5 h-3.5 rounded-full border-2 border-white/50 border-t-transparent animate-spin" /> : <Plus className="w-3.5 h-3.5 text-white" />}
+                  <span className="text-white">{creating ? 'Creating…' : 'Create'}</span>
+                </button>
+              )}
+              <button
+                title={railCollapsed ? 'Expand assistants' : 'Collapse assistants'}
+                className="btn--ghost px-2 py-1"
+                onClick={() => setRailCollapsed(v => !v)}
+              >
+                {railCollapsed ? <ChevronRightIcon className="w-4 h-4 icon" /> : <ChevronLeft className="w-4 h-4 icon" />}
               </button>
-            </>
-          )}
+            </div>
+          </div>
 
-          <div className="mt-4 space-y-2">
-            {visible.map(a => {
-              const isActive = a.id === activeId;
-              const isEdit = editingId === a.id;
-              if (railCollapsed) {
+          <div className="p-3 min-h-0 flex-1 overflow-y-auto" style={{ scrollbarWidth:'thin' }}>
+            {!railCollapsed && (
+              <div className="flex items-center gap-2 rounded-lg px-2.5 py-2 mb-2"
+                style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)' }}>
+                <Search className="w-4 h-4 icon" />
+                <input value={query} onChange={(e)=> setQuery(e.target.value)} placeholder="Search assistants"
+                      className="w-full bg-transparent outline-none text-sm" style={{ color:'var(--text)' }}/>
+              </div>
+            )}
+
+            {!railCollapsed && (
+              <>
+                <div className="text-xs font-semibold flex items-center gap-2 mt-3 mb-1" style={{ color:'var(--text-muted)' }}>
+                  <Folder className="w-3.5 h-3.5 icon" /> Folders
+                </div>
+                <button className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/5">
+                  <FolderOpen className="w-4 h-4 icon" /> All
+                </button>
+              </>
+            )}
+
+            <div className="mt-4 space-y-2">
+              {visible.map(a => {
+                const isActive = a.id === activeId;
+                const isEdit = editingId === a.id;
+                if (railCollapsed) {
+                  return (
+                    <button
+                      key={a.id}
+                      onClick={()=> setActiveId(a.id)}
+                      className="w-full rounded-xl p-3 grid place-items-center"
+                      style={{
+                        background: isActive ? 'color-mix(in oklab, var(--accent) 10%, transparent)' : 'var(--va-card)',
+                        border: `1px solid ${isActive ? 'color-mix(in oklab, var(--accent) 35%, var(--va-border))' : 'var(--va-border)'}`,
+                        boxShadow:'var(--va-shadow-sm)'
+                      }}
+                      title={a.name}
+                    >
+                      <Bot className="w-4 h-4 icon" />
+                    </button>
+                  );
+                }
                 return (
-                  <button
+                  <div
                     key={a.id}
-                    onClick={()=> setActiveId(a.id)}
-                    className="w-full rounded-xl p-3 grid place-items-center"
+                    className="w-full rounded-xl p-3"
                     style={{
                       background: isActive ? 'color-mix(in oklab, var(--accent) 10%, transparent)' : 'var(--va-card)',
                       border: `1px solid ${isActive ? 'color-mix(in oklab, var(--accent) 35%, var(--va-border))' : 'var(--va-border)'}`,
                       boxShadow:'var(--va-shadow-sm)'
                     }}
-                    title={a.name}
                   >
-                    <Bot className="w-4 h-4 icon" />
-                  </button>
-                );
-              }
-              return (
-                <div
-                  key={a.id}
-                  className="w-full rounded-xl p-3"
-                  style={{
-                    background: isActive ? 'color-mix(in oklab, var(--accent) 10%, transparent)' : 'var(--va-card)',
-                    border: `1px solid ${isActive ? 'color-mix(in oklab, var(--accent) 35%, var(--va-border))' : 'var(--va-border)'}`,
-                    boxShadow:'var(--va-shadow-sm)'
-                  }}
-                >
-                  <button className="w-full text-left flex items-center justify-between"
-                          onClick={()=> setActiveId(a.id)}>
-                    <div className="min-w-0">
-                      <div className="font-medium truncate flex items-center gap-2">
-                        <Bot className="w-4 h-4 icon" />
-                        {!isEdit ? (
-                          <span className="truncate">{a.name}</span>
-                        ) : (
-                          <input
-                            autoFocus
-                            value={tempName}
-                            onChange={(e)=> setTempName(e.target.value)}
-                            onKeyDown={(e)=> { if (e.key==='Enter') saveRename(a); if (e.key==='Escape') setEditingId(null); }}
-                            className="bg-transparent rounded-md px-2 py-1 outline-none w-full"
-                            style={{ border:'1px solid var(--va-input-border)', color:'var(--text)' }}
-                          />
-                        )}
+                    <button className="w-full text-left flex items-center justify-between"
+                            onClick={()=> setActiveId(a.id)}>
+                      <div className="min-w-0">
+                        <div className="font-medium truncate flex items-center gap-2">
+                          <Bot className="w-4 h-4 icon" />
+                          {!isEdit ? (
+                            <span className="truncate">{a.name}</span>
+                          ) : (
+                            <input
+                              autoFocus
+                              value={tempName}
+                              onChange={(e)=> setTempName(e.target.value)}
+                              onKeyDown={(e)=> { if (e.key==='Enter') saveRename(a); if (e.key==='Escape') setEditingId(null); }}
+                              className="bg-transparent rounded-md px-2 py-1 outline-none w-full"
+                              style={{ border:'1px solid var(--va-input-border)', color:'var(--text)' }}
+                            />
+                          )}
+                        </div>
+                        <div className="text-[11px] mt-0.5 opacity-70 truncate">{a.folder || 'Unfiled'} • {new Date(a.updatedAt).toLocaleDateString()}</div>
                       </div>
-                      <div className="text-[11px] mt-0.5 opacity-70 truncate">{a.folder || 'Unfiled'} • {new Date(a.updatedAt).toLocaleDateString()}</div>
-                    </div>
-                    {isActive ? <Check className="w-4 h-4 icon" /> : null}
-                  </button>
+                      {isActive ? <Check className="w-4 h-4 icon" /> : null}
+                    </button>
 
-                  <div className="mt-2 flex items-center gap-2">
-                    {!isEdit ? (
-                      <>
-                        <button onClick={(e)=> { e.stopPropagation(); beginRename(a); }} className="btn--ghost text-xs px-2 py-1"><Edit3 className="w-3.5 h-3.5 icon" /> Rename</button>
-                        <button onClick={(e)=> { e.stopPropagation(); setDeleting({ id:a.id, name:a.name }); }} className="btn--danger text-xs px-2 py-1"><Trash2 className="w-3.5 h-3.5" /> Delete</button>
-                      </>
-                    ) : (
-                      <>
-                        <button onClick={(e)=> { e.stopPropagation(); saveRename(a); }} className="btn--green text-xs px-2 py-1"><Check className="w-3.5 h-3.5 text-white" /><span className="text-white">Save</span></button>
-                        <button onClick={(e)=> { e.stopPropagation(); setEditingId(null); }} className="btn--ghost text-xs px-2 py-1">Cancel</button>
-                      </>
-                    )}
+                    <div className="mt-2 flex items-center gap-2">
+                      {!isEdit ? (
+                        <>
+                          <button onClick={(e)=> { e.stopPropagation(); beginRename(a); }} className="btn--ghost text-xs px-2 py-1"><Edit3 className="w-3.5 h-3.5 icon" /> Rename</button>
+                          <button onClick={(e)=> { e.stopPropagation(); setDeleting({ id:a.id, name:a.name }); }} className="btn--danger text-xs px-2 py-1"><Trash2 className="w-3.5 h-3.5" /> Delete</button>
+                        </>
+                      ) : (
+                        <>
+                          <button onClick={(e)=> { e.stopPropagation(); saveRename(a); }} className="btn--green text-xs px-2 py-1"><Check className="w-3.5 h-3.5 text-white" /><span className="text-white">Save</span></button>
+                          <button onClick={(e)=> { e.stopPropagation(); setEditingId(null); }} className="btn--ghost text-xs px-2 py-1">Cancel</button>
+                        </>
+                      )}
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
-        </div>
-      </aside>
+        </aside>
+      </Portal>
 
       {/* =================================== EDITOR =================================== */}
       <div
         className="va-main"
         style={{
-          marginLeft:`calc(var(--app-sidebar-w, 248px) + ${railCollapsed ? '72px' : 'var(--va-rail-w, 360px)'})`,
+          /* Use the real right edge variable for the main content margin */
+          marginLeft:`calc(var(--app-sidebar-right, 248px) + ${railCollapsed ? '72px' : 'var(--va-rail-w, 360px)'} - 1px)`,
           paddingRight:'clamp(20px, 4vw, 40px)',
           paddingTop:'calc(var(--app-header-h, 64px) + 12px)',
           paddingBottom:'88px'
@@ -687,9 +676,7 @@ export default function VoiceAgentSection() {
                             : <span key={`nor-${i}`}>{buf}</span>);
                           buf = t.ch;
                           added = t.added;
-                        } else {
-                          buf += t.ch;
-                        }
+                        } else { buf += t.ch; }
                       });
                       if (buf) out.push(added
                         ? <ins key="tail-ins" style={{ background:'rgba(16,185,129,.18)', padding:'1px 2px', borderRadius:4 }}>{buf}</ins>
@@ -960,7 +947,7 @@ function StyleBlock() {
         --va-shadow:0 24px 70px rgba(0,0,0,.55), 0 10px 28px rgba(0,0,0,.4);
         --va-shadow-lg:0 42px 110px rgba(0,0,0,.66), 0 20px 48px rgba(0,0,0,.5);
         --va-shadow-sm:0 12px 26px rgba(0,0,0,.35);
-        --va-shadow-side:8px 0 28px rgba(0,0,0,.42);
+        --va-shadow-side:4px 0 18px rgba(0,0,0,.28);
         --va-rail-w:360px;
       }
       :root:not([data-theme="dark"]) .${SCOPE}{
@@ -1012,11 +999,6 @@ function StyleBlock() {
       .${SCOPE} .va-range{ -webkit-appearance:none; height:4px; background:color-mix(in oklab, var(--accent) 24%, #0000); border-radius:999px; outline:none; }
       .${SCOPE} .va-range::-webkit-slider-thumb{ -webkit-appearance:none; width:14px;height:14px;border-radius:50%;background:var(--accent); border:2px solid #fff; box-shadow:0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent); }
       .${SCOPE} .va-range::-moz-range-thumb{ width:14px;height:14px;border:0;border-radius:50%;background:var(--accent); box-shadow:0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent); }
-
-      /* Fuse assistants rail to main sidebar in collapsed state (remove hairline gap) */
-      .${SCOPE} aside[data-collapsed="true"]{
-        left: calc(var(--app-sidebar-w, 248px) - 1px);
-      }
 
       @media (max-width: 1180px){
         .${SCOPE}{ --va-rail-w: 320px; }
