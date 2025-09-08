@@ -18,8 +18,8 @@ const ACCENT_HOVER = '#0ea371';
 const BTN_SHADOW = '0 10px 24px rgba(16,185,129,.22)';
 
 /* Typing speed (fast) */
-const TICK_MS = 10;        // interval for typing
-const CHUNK_SIZE = 6;      // chars per tick
+const TICK_MS = 10;
+const CHUNK_SIZE = 6;
 
 /* =============================================================================
    TYPES + STORAGE
@@ -63,84 +63,148 @@ You are an intelligent and responsive assistant designed to help users with a wi
 - Maintain a professional and approachable demeanor.
 - Use clear and concise language, avoiding overly technical jargon.
 
-[Response Guidelines]
-- Keep responses short and focused on the user's immediate query.
-- Verify user-provided information before proceeding with further steps.
+[System Behaviors]
+- Summarize & confirm before finalizing.
+- Offer next steps when appropriate.
 
 [Task & Goals]
-1. Greet the user warmly and inquire about how you can assist them today.
-2. Listen carefully to the user's request or question.
-3. Provide relevant and accurate information based on the user's needs.
-<wait for user response>
-4. If a query requires further action, guide the user through step-by-step instructions.
+- Understand intent, collect required details, and provide guidance.
 
-[Error Handling / Fallback]
-- If a user's request is unclear or you encounter difficulty understanding, ask for clarification politely.
-- If a task cannot be completed, inform the user empathetically and suggest alternative solutions or resources.`.trim();
+[Data to Collect]
+- Full Name
+- Phone Number
+- Email (if provided)
+- Appointment Date/Time (if applicable)
+
+[Safety]
+- No medical/legal/financial advice beyond high-level pointers.
+- Decline restricted actions, suggest alternatives.
+
+[Handover]
+- When done, summarize details and hand off if needed.`.trim();
+
+const SECTION_KEYS = [
+  'Identity',
+  'Style',
+  'System Behaviors',
+  'Task & Goals',
+  'Data to Collect',
+  'Safety',
+  'Handover',
+  'Refinements',
+] as const;
+type SectionKey = typeof SECTION_KEYS[number];
 
 function toTitle(s: string) {
-  return s.replace(/\s+/g, ' ')
+  return s
+    .replace(/\s+/g, ' ')
     .split(' ')
     .map(w => (w.length ? w[0].toUpperCase() + w.slice(1) : ''))
     .join(' ')
     .replace(/\b(Id|Url|Dob)\b/gi, m => m.toUpperCase());
 }
 
-function buildStructuredPrompt(input: string): string {
-  const raw = input.trim();
-  const isShort = raw.split(/\s+/).length <= 3;
-  const collectMatch = raw.match(/collect(?:\s*[:\-])?\s*(.*)$/i);
-  let fields: string[] = [];
-  if (collectMatch) {
-    fields = collectMatch[1].split(/[,;\n]/).map(s => s.trim()).filter(Boolean).map(s => s.replace(/^[\-\*\d\.\s]+/, ''));
-  } else if (/,/.test(raw)) {
-    fields = raw.split(/[,;\n]/).map(s => s.trim()).filter(Boolean);
+function readSectionsFromPrompt(txt: string): Record<SectionKey, string> {
+  const out = Object.fromEntries(SECTION_KEYS.map(k => [k, ''])) as Record<SectionKey, string>;
+  if (!txt) return out;
+  const rx = /\[([^\]]+)\]\s*([\s\S]*?)(?=\n\[[^\]]+\]|\s*$)/g;
+  let m: RegExpExecArray | null;
+  while ((m = rx.exec(txt))) {
+    const key = m[1].trim();
+    const body = m[2].trim();
+    const canon = SECTION_KEYS.find(k => k.toLowerCase() === key.toLowerCase());
+    if (canon) out[canon] = body;
   }
-  const title = isShort ? (raw || 'Assistant') : 'Assistant';
-
-  return [
-`[Identity]
-You are a helpful, fast, and accurate ${title.toLowerCase()} that completes tasks and collects information.`,
-
-`[Style]
-- Friendly, concise, affirmative.
-- Ask one question at a time and confirm critical details.`,
-
-`[System Behaviors]
-- Summarize & confirm before finalizing.
-- Offer next steps when appropriate.`,
-
-`[Task & Goals]
-- Understand intent, collect required details, and provide guidance.`,
-
-`[Data to Collect]
-${fields.length ? fields.map(f => `- ${toTitle(f)}`).join('\n') : '- Full Name\n- Phone Number\n- Email (if provided)\n- Appointment Date/Time (if applicable)'}`,
-
-`[Safety]
-- No medical/legal/financial advice beyond high-level pointers.
-- Decline restricted actions, suggest alternatives.`,
-
-`[Handover]
-- When done, summarize details and hand off if needed.`,
-
-`[First Message]
-Hello.`
-  ].join('\n\n').trim();
+  return out;
 }
 
-function makeNewPromptFrom(input: string, current: string): string {
-  const small = input.trim();
-  if (!small) return current || BASE_PROMPT;
-  if (small.split(/\s+/).length <= 3) return buildStructuredPrompt(small);
-  if (/collect|fields|capture|gather/i.test(small)) return buildStructuredPrompt(small);
-  return (current || BASE_PROMPT) + `\n\n[Refinements]\n- ${small.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim()}`;
+function sectionsToPrompt(s: Record<SectionKey, string>): string {
+  return SECTION_KEYS
+    .filter(k => k !== 'Refinements' || (s['Refinements'] && s['Refinements'].trim()))
+    .map(k => `[${k}]\n${(s[k] || '').trim()}`)
+    .join('\n\n')
+    .trim();
+}
+
+function buildDefaultsFromHint(hint: string): Record<SectionKey, string> {
+  const short = hint.trim().split(/\s+/).length <= 3 ? hint.trim() : 'Assistant';
+  const collectMatch = hint.match(/collect(?:\s*[:\-])?\s*(.*)$/i);
+  const fields = collectMatch
+    ? collectMatch[1].split(/[,;\n]/).map(s => s.trim()).filter(Boolean)
+    : [];
+
+  const collectList =
+    fields.length
+      ? fields.map(f => `- ${toTitle(f)}`).join('\n')
+      : `- Full Name
+- Phone Number
+- Email (if provided)
+- Appointment Date/Time (if applicable)`;
+
+  return {
+    'Identity': `You are a helpful, fast, and accurate ${short.toLowerCase()} that completes tasks and collects information.`,
+    'Style': `- Friendly, concise, affirmative.\n- Ask one question at a time and confirm critical details.`,
+    'System Behaviors': `- Summarize & confirm before finalizing.\n- Offer next steps when appropriate.`,
+    'Task & Goals': `- Understand intent, collect required details, and provide guidance.`,
+    'Data to Collect': collectList,
+    'Safety': `- No medical/legal/financial advice beyond high-level pointers.\n- Decline restricted actions, suggest alternatives.`,
+    'Handover': `- When done, summarize details and hand off if needed.`,
+    'Refinements': ''
+  };
+}
+
+/** Merge user free-text into sections. Also returns optional firstMessage override. */
+function mergeInputIntoSections(input: string, basePrompt: string): {
+  merged: Record<SectionKey, string>;
+  firstMessage?: string;
+} {
+  const current = readSectionsFromPrompt(basePrompt || BASE_PROMPT);
+
+  let firstMessage: string | undefined;
+
+  const raw = input.trim();
+  if (!raw) return { merged: current };
+
+  // Direct “first message” commands
+  const fm = raw.match(/^(?:first\s*message|greeting)\s*[:\-]\s*(.+)$/i);
+  if (fm) {
+    firstMessage = fm[1].trim();
+    return { merged: current, firstMessage };
+  }
+
+  // If the user pasted structured sections, map them in
+  let consumed = false;
+  SECTION_KEYS.forEach(key => {
+    const rx = new RegExp(`\$begin:math:display$${key}\\$end:math:display$\\s*([\\s\\S]*?)(?=\\n\$begin:math:display$[^\\$end:math:display$]+\\]|\\s*$)`, 'i');
+    const m = raw.match(rx);
+    if (m) {
+      current[key] = m[1].trim();
+      consumed = true;
+    }
+  });
+
+  // Short hints like "assistant" or "collect name, phone"
+  if (!consumed && (raw.split(/\s+/).length <= 3 || /collect|fields|capture|gather/i.test(raw))) {
+    const d = buildDefaultsFromHint(raw);
+    SECTION_KEYS.forEach(k => { if (d[k]) current[k] = d[k]; });
+    consumed = true;
+  }
+
+  // If nothing matched, append to Refinements as a bullet (but keep previous edits)
+  if (!consumed) {
+    const line = `- ${raw.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim()}`;
+    current['Refinements'] = current['Refinements']
+      ? `${current['Refinements']}\n${line}`
+      : line;
+  }
+
+  return { merged: current, firstMessage };
 }
 
 /* =============================================================================
-   DIFF (character-level, preserve newlines). We show only *added* chars green.
+   DIFF (character-level)
 ============================================================================= */
 type CharTok = { ch: string; added: boolean };
-
 function charDiffAdded(oldStr: string, newStr: string): CharTok[] {
   const o = [...oldStr];
   const n = [...newStr];
@@ -154,7 +218,7 @@ function charDiffAdded(oldStr: string, newStr: string): CharTok[] {
   let i = 0, j = 0;
   while (i < o.length && j < n.length) {
     if (o[i] === n[j]) { out.push({ ch: n[j], added: false }); i++; j++; }
-    else if (dp[i + 1][j] >= dp[i][j + 1]) { i++; } // deletion (skip)
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { i++; }
     else { out.push({ ch: n[j], added: true }); j++; }
   }
   while (j < n.length) out.push({ ch: n[j++], added: true });
@@ -173,14 +237,12 @@ export default function VoiceAgentSection() {
   });
 
   useEffect(() => {
-    // 1) Listen for a custom app event if you dispatch one: window.dispatchEvent(new CustomEvent('layout:sidebar', { detail: { collapsed: true } }))
     const onEvt = (e: Event) => {
       const detail = (e as CustomEvent).detail || {};
       if (typeof detail.collapsed === 'boolean') setSbCollapsed(!!detail.collapsed);
     };
     window.addEventListener('layout:sidebar', onEvt as EventListener);
 
-    // 2) Fallback: observe body[data-sb-collapsed]
     const mo = new MutationObserver(() => {
       setSbCollapsed(document.body.getAttribute('data-sb-collapsed') === 'true');
     });
@@ -189,11 +251,9 @@ export default function VoiceAgentSection() {
     return () => { window.removeEventListener('layout:sidebar', onEvt as EventListener); mo.disconnect(); };
   }, []);
 
-  // Push the app's current sidebar width into our scope CSS vars
   useEffect(() => {
     if (!scopeRef.current) return;
     const el = scopeRef.current;
-    // If your app sets a CSS var for width, this is unnecessary. We mirror a sensible value:
     el.style.setProperty('--app-sidebar-w', sbCollapsed ? '72px' : '248px');
   }, [sbCollapsed]);
 
@@ -204,6 +264,7 @@ export default function VoiceAgentSection() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [tempName, setTempName] = useState('');
   const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
+  const [rev, setRev] = useState(0); // force refresh after LS writes
 
   useEffect(() => {
     const list = readLS<Assistant[]>(LS_LIST) || [];
@@ -227,14 +288,16 @@ export default function VoiceAgentSection() {
     }
   }, []);
 
-  const active = useMemo(() => activeId ? readLS<Assistant>(ak(activeId)) : null, [activeId]);
+  const active = useMemo(() => activeId ? readLS<Assistant>(ak(activeId)) : null, [activeId, rev]);
 
   const updateActive = (mut: (a: Assistant) => Assistant) => {
     if (!active) return;
     const next = mut(active);
     writeLS(ak(next.id), next);
     const list = (readLS<Assistant[]>(LS_LIST) || []).map(x => x.id === next.id ? { ...x, name: next.name, folder: next.folder, updatedAt: Date.now() } : x);
-    writeLS(LS_LIST, list); setAssistants(list);
+    writeLS(LS_LIST, list);
+    setAssistants(list);
+    setRev(r => r + 1); // ensure re-render picks new LS state (fixes "can't edit first message")
   };
 
   const [creating, setCreating] = useState(false);
@@ -265,6 +328,7 @@ export default function VoiceAgentSection() {
     localStorage.removeItem(ak(id));
     if (activeId === id && list.length) setActiveId(list[0].id);
     if (!list.length) setActiveId('');
+    setRev(r => r + 1);
   };
 
   /* ---------- Rail collapse/expand (manual) ---------- */
@@ -276,6 +340,7 @@ export default function VoiceAgentSection() {
   const [typing, setTyping] = useState<CharTok[] | null>(null);
   const [typedCount, setTypedCount] = useState(0);
   const [lastNew, setLastNew] = useState('');
+  const [pendingFirstMsg, setPendingFirstMsg] = useState<string | undefined>(undefined);
   const typingBoxRef = useRef<HTMLDivElement | null>(null);
   const typingTimer = useRef<number | null>(null);
 
@@ -303,19 +368,33 @@ export default function VoiceAgentSection() {
   const handleGenerate = () => {
     if (!active) return;
     const current = active.config.model.systemPrompt || '';
-    const next = makeNewPromptFrom(genText, current);
-    setLastNew(next);
-    startTyping(charDiffAdded(current, next)); // live retype; deletions omitted, additions green
+    const { merged, firstMessage } = mergeInputIntoSections(genText, current || BASE_PROMPT);
+    const nextPrompt = sectionsToPrompt(merged);
+
+    setLastNew(nextPrompt);
+    setPendingFirstMsg(firstMessage);
+    startTyping(charDiffAdded(current, nextPrompt)); // live diff (added chars green)
     setGenOpen(false);
     setGenText('');
   };
 
   const acceptTyping = () => {
     if (!active) return;
-    updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, systemPrompt: lastNew } } }));
+    updateActive(a => ({
+      ...a,
+      config: {
+        ...a.config,
+        model: {
+          ...a.config.model,
+          systemPrompt: lastNew || a.config.model.systemPrompt,
+          firstMessage: typeof pendingFirstMsg === 'string' ? pendingFirstMsg : a.config.model.firstMessage
+        }
+      }
+    }));
     setTyping(null);
+    setPendingFirstMsg(undefined);
   };
-  const declineTyping = () => setTyping(null);
+  const declineTyping = () => { setTyping(null); setPendingFirstMsg(undefined); };
 
   /* ---------- Voices (static options) ---------- */
   const openaiVoices = [
@@ -347,6 +426,7 @@ export default function VoiceAgentSection() {
       if (cur) writeLS(ak(a.id), { ...cur, name, updatedAt: Date.now() });
       const list = (readLS<Assistant[]>(LS_LIST) || []).map(x => x.id === a.id ? { ...x, name, updatedAt: Date.now() } : x);
       writeLS(LS_LIST, list); setAssistants(list);
+      setRev(r => r + 1);
     }
     setEditingId(null);
   };
@@ -359,10 +439,11 @@ export default function VoiceAgentSection() {
         data-collapsed={railCollapsed ? 'true' : 'false'}
         style={{
           position:'fixed',
-          left:'var(--app-sidebar-w, 248px)',
+          left:'calc(var(--app-sidebar-w, 248px) - 1px)', // FUSE with main sidebar
           top:'var(--app-header-h, 64px)',
           width: railCollapsed ? '72px' : 'var(--va-rail-w, 360px)',
           height:'calc(100vh - var(--app-header-h, 64px))',
+          borderLeft:'none',                                 // no left seam
           borderRight:'1px solid var(--va-border)',
           background:'var(--va-sidebar)',
           boxShadow:'var(--va-shadow-side)',
@@ -417,7 +498,6 @@ export default function VoiceAgentSection() {
               const isActive = a.id === activeId;
               const isEdit = editingId === a.id;
               if (railCollapsed) {
-                // icon-only button
                 return (
                   <button
                     key={a.id}
@@ -567,7 +647,6 @@ export default function VoiceAgentSection() {
                 </div>
               </div>
 
-              {/* PROMPT BOX: either textarea, or live typing preview with Accept/Decline */}
               {!typing ? (
                 <textarea
                   rows={26}
@@ -596,7 +675,6 @@ export default function VoiceAgentSection() {
                       overflowY:'auto'
                     }}
                   >
-                    {/* render typed characters; added ones in green */}
                     {(() => {
                       const slice = typing.slice(0, typedCount);
                       const out: JSX.Element[] = [];
@@ -754,7 +832,11 @@ export default function VoiceAgentSection() {
                 <input
                   value={genText}
                   onChange={(e)=> setGenText(e.target.value)}
-                  placeholder={`Examples:\n• assistant\n• collect full name, phone, date\n• Add a step: verify phone via OTP`}
+                  placeholder={`Examples:
+• assistant
+• collect full name, phone, date
+• Identity: AI Sales Agent for roofers
+• first message: Hey—quick question to get you booked…`}
                   className="w-full rounded-lg px-3 py-3 text-[15px] outline-none"
                   style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)', color:'var(--text)' }}
                 />
@@ -931,8 +1013,10 @@ function StyleBlock() {
       .${SCOPE} .va-range::-webkit-slider-thumb{ -webkit-appearance:none; width:14px;height:14px;border-radius:50%;background:var(--accent); border:2px solid #fff; box-shadow:0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent); }
       .${SCOPE} .va-range::-moz-range-thumb{ width:14px;height:14px;border:0;border-radius:50%;background:var(--accent); box-shadow:0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent); }
 
-      /* When the app sidebar collapses (body[data-sb-collapsed="true"]), our margin is already updated by JS.
-         If your app instead toggles a class, keep the MutationObserver above. */
+      /* Fuse assistants rail to main sidebar in collapsed state (remove hairline gap) */
+      .${SCOPE} aside[data-collapsed="true"]{
+        left: calc(var(--app-sidebar-w, 248px) - 1px);
+      }
 
       @media (max-width: 1180px){
         .${SCOPE}{ --va-rail-w: 320px; }
@@ -1017,7 +1101,7 @@ function Select({ value, items, onChange, placeholder, leftIcon }: {
                   className="w-full flex items-center gap-3 px-3 py-2 rounded-[10px] text-left"
                   style={{ color:'var(--text)' }}
                   onMouseEnter={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='rgba(16,185,129,.10)'; (e.currentTarget as HTMLButtonElement).style.border='1px solid rgba(16,185,129,.35)'; }}
-                  onMouseLeave={(e)=>{ (e.currentTarget as HTMLButtonButtonElement).style.background='transparent'; (e.currentTarget as HTMLButtonElement).style.border='1px solid transparent'; }}
+                  onMouseLeave={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='transparent'; (e.currentTarget as HTMLButtonElement).style.border='1px solid transparent'; }}
                 >
                   {it.icon}{it.label}
                 </button>
