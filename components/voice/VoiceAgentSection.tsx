@@ -181,7 +181,16 @@ function parseFirstMessage(raw: string): string | null {
   return m ? m[1].trim() : null;
 }
 
-/** Merge free-text into prompt smartly: section-aware, "first message", collect, or refinements */
+/** Pull helpful bits from user's Riley prompt (greeting + style flags) */
+function parsePromptBits(prompt: string){
+  const greetMatch = prompt.match(/(?:1\.\s*Greet.*?:\s*["“])(.*?)(?:["”])/i);
+  const greeting = greetMatch?.[1]?.trim();
+  const askOneAtATime = /\bAsk one question at a time\b/i.test(prompt) || /\bone question at a time\b/i.test(prompt);
+  const confirmDetails = /\bConfirm (?:dates|times|names|details)\b/i.test(prompt) || /\bConfirm .* explicitly\b/i.test(prompt);
+  return { greeting, askOneAtATime, confirmDetails };
+}
+
+/** Merge free-text into prompt smartly */
 function mergeInput(genText: string, currentPrompt: string) {
   const raw = (genText || '').trim();
   const out = { prompt: currentPrompt || BASE_PROMPT, firstMessage: undefined as string | undefined };
@@ -195,7 +204,7 @@ function mergeInput(genText: string, currentPrompt: string) {
   }
 
   // 2) Explicit sections
-  const sectionBlocks = [...raw.matchAll(/\[(Identity|Style|System Behaviors|Task & Goals|Data to Collect|Safety|Handover|Refinements)\]\s*([\s\S]*?)(?=\n\[|$)/gi)];
+  const sectionBlocks = [...raw.matchAll(/\[(Identity|Style|System Behaviors|Task & Goals|Data to Collect|Safety|Handover|Refinements|Response Guidelines|Error Handling[^\]]*)\]\s*([\s\S]*?)(?=\n\[|$)/gi)];
   if (sectionBlocks.length) {
     let next = out.prompt;
     sectionBlocks.forEach((m) => {
@@ -266,7 +275,6 @@ function useAppSidebarWidth(scopeRef: React.RefObject<HTMLDivElement>, fallbackC
     let target = findSidebar();
     if (!target) { setVar(fallbackCollapsed ? 72 : 248); return; }
 
-    // Initial read
     setVar(target.getBoundingClientRect().width);
 
     const ro = new ResizeObserver(() => setVar(target!.getBoundingClientRect().width));
@@ -287,8 +295,19 @@ function useAppSidebarWidth(scopeRef: React.RefObject<HTMLDivElement>, fallbackC
 }
 
 /* =============================================================================
-   SIMPLE WEB VOICE (no Vapi, no server required)
+   SIMPLE WEB VOICE (no Vapi). IMPROVED DIALOG MANAGER
 ============================================================================= */
+type BookingState = {
+  step: 'greet'|'intent'|'service'|'provider'|'patient_status'|'name'|'phone'|'date'|'time'|'summary'|'done';
+  service?: string;
+  provider?: string;
+  patientStatus?: 'new'|'returning';
+  name?: string;
+  phone?: string;
+  date?: string;
+  time?: string;
+};
+
 function makeRecognizer(onFinalText: (text:string)=>void) {
   const SR: any = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
   if (!SR) return null;
@@ -306,25 +325,97 @@ function makeRecognizer(onFinalText: (text:string)=>void) {
   };
   return r;
 }
-function speak(text: string) {
+function speak(text: string, voiceHint?: string) {
+  const synth = window.speechSynthesis;
   const u = new SpeechSynthesisUtterance(text);
+  if (voiceHint) {
+    const v = synth.getVoices().find(v => v.name.toLowerCase().includes(voiceHint.toLowerCase()));
+    if (v) u.voice = v;
+  }
   u.rate = 1; u.pitch = 1; u.volume = 1;
-  window.speechSynthesis.cancel();
-  window.speechSynthesis.speak(u);
+  synth.cancel();
+  synth.speak(u);
 }
-async function tryLLM(system: string, message: string): Promise<string> {
-  // If you have a backend /api/llm, we'll use it; else fall back to a local mock.
+
+/** Try your backend; if missing, fall back to deterministic booking dialog */
+async function tryLLM(system: string, transcript: TranscriptTurn[], userTurn: string): Promise<string> {
+  // 1) If you have /api/llm, send full chat so the model can follow your Riley prompt.
   try {
-    const r = await fetch('/api/llm', { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ system, message }) });
+    const r = await fetch('/api/llm', {
+      method:'POST',
+      headers:{ 'content-type':'application/json' },
+      body: JSON.stringify({
+        system,
+        messages: [
+          { role: 'system', content: system },
+          ...transcript.map(t => ({ role: t.role, content: t.text })),
+          { role: 'user', content: userTurn }
+        ],
+        temperature: 0.2
+      })
+    });
     if (r.ok) { const j = await r.json(); if (j?.reply) return String(j.reply); }
   } catch {}
-  // Mock: tiny rule-based responder so you can test without paying a phone bill.
-  const m = message.toLowerCase();
-  if (/hello|hi|hey/.test(m)) return 'Hi! I can book appointments and answer questions. What do you need?';
-  if (/book|schedule|appointment/.test(m)) return 'Sure—what date and time works for you? I also need your full name and phone number.';
-  if (/name is|i am/.test(m)) return 'Got it. Noted your name. What’s the best phone number to reach you?';
-  if (/phone|number|digits/.test(m)) return 'Thanks! I saved that number. Anything else before I confirm?';
-  return 'Understood. Could you share any other details so I can help you faster?';
+
+  // 2) Local fallback: task-focused booking flow (follows "ask one question at a time", confirm details).
+  return fallbackBookingReply(system, transcript, userTurn);
+}
+
+/** Extract simple intents & slots */
+function firstMatch(re: RegExp, text: string){ const m = text.match(re); return m ? m[1] || m[0] : undefined; }
+function yesNo(text: string){ const s = text.toLowerCase(); if (/(^|\b)(yes|yeah|yup|sure|okay|ok|correct)\b/.test(s)) return 'yes'; if (/(^|\b)(no|nope|nah|incorrect|not really)\b/.test(s)) return 'no'; return undefined; }
+
+function fallbackBookingReply(system: string, transcript: TranscriptTurn[], userTurn: string): string {
+  // Minimal slot-filling based on the Riley prompt.
+  // NOTE: This keeps answers professional and avoids "Understood..." loops.
+  const bits = parsePromptBits(system);
+  // reconstruct a tiny state from transcript
+  const textAll = transcript.map(t=>`${t.role}: ${t.text}`).join('\n') + `\nuser: ${userTurn}`;
+  const state: BookingState = { step:'intent' };
+
+  // Extract already provided info from conversation (naive)
+  const name = firstMatch(/\b(?:I am|I'm|my name is)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/i, textAll);
+  const phone = firstMatch(/(\+?\d[\d\s\-().]{7,}\d)/, textAll);
+  const service = firstMatch(/\b(?:for|need|book|schedule|about)\s+(a |an )?([a-z ]{3,})(?: appointment| visit| checkup| consult)?/i, textAll)?.replace(/^a |an /i,'');
+  const provider = firstMatch(/\b(?:with|for)\s+Dr\.?\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/i, textAll) || firstMatch(/\b(?:with|provider)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/i, textAll);
+  const date = firstMatch(/\b(?:on|for)\s+((?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\w*\s+\d{1,2}|\d{4}-\d{2}-\d{2}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\w*\s+\d{1,2})/i, textAll);
+  const time = firstMatch(/\b(?:at)\s+(\d{1,2}(:\d{2})?\s?(?:am|pm)?)\b/i, textAll);
+  const isNew = /new patient/i.test(textAll) ? 'new' : (/returning|follow-?up/i.test(textAll) ? 'returning' : undefined);
+
+  // Determine which question to ask next (one at a time)
+  const haveService = !!service;
+  const haveStatus = !!isNew;
+  const haveName = !!name;
+  const havePhone = !!phone;
+  const haveDate = !!date;
+  const haveTime = !!time;
+
+  // Greeting if needed
+  if (!transcript.some(t=>t.role==='assistant')) {
+    const greet = bits.greeting || 'Thank you for calling Wellness Partners. This is Riley, your scheduling assistant. How may I help you today?';
+    return greet;
+  }
+
+  if (!haveService) return 'What type of appointment do you need today? For example, “primary care”, “dermatology”, or “physical therapy.”';
+  if (!haveStatus) return 'Are you a new or returning patient?';
+  if (!haveName) return 'Please tell me your full name (first and last).';
+  if (!havePhone) return 'What is the best phone number to reach you?';
+  if (!haveDate) return 'What day works for you? You can say something like “Wednesday the 12th” or a specific date.';
+  if (!haveTime) return 'What time works best? For example, 10am or 3:30pm.';
+
+  // Confirm + summarize
+  const summary =
+    `Great. To confirm: ${name}, ${isNew} patient, service: ${service}${provider?` with ${provider}`:''}, ${date} at ${time}. Phone: ${phone}. Is that correct?`;
+  const yn = yesNo(userTurn);
+  if (/(is that correct|confirm)/i.test(transcript.slice(-1)[0]?.text || '')) {
+    if (yn === 'yes') {
+      return 'All set. Your appointment is confirmed. You’ll receive a confirmation message shortly. Is there anything else I can help you with today?';
+    }
+    if (yn === 'no') {
+      return 'No problem. Which detail should we update—service, date, time, name, or phone?';
+    }
+  }
+  return summary;
 }
 
 /* =============================================================================
@@ -373,7 +464,7 @@ export default function VoiceAgentSection() {
         updatedAt: Date.now(),
         published: false,
         config: {
-          model: { provider:'openai', model:'gpt-4o', firstMessageMode:'assistant_first', firstMessage:'Hello.', systemPrompt: BASE_PROMPT },
+          model: { provider:'openai', model:'gpt-4o', firstMessageMode:'assistant_first', firstMessage:'', systemPrompt: BASE_PROMPT },
           voice: { provider:'openai', voiceId:'alloy', voiceLabel:'Alloy (OpenAI)' },
           transcriber: { provider:'deepgram', model:'nova-2', language:'en', denoise:false, confidenceThreshold:0.4, numerals:false },
           tools: { enableEndCall:true, dialKeypad:true },
@@ -383,7 +474,6 @@ export default function VoiceAgentSection() {
       writeLS(ak(seed.id), seed); writeLS(LS_LIST, [seed]);
       setAssistants([seed]); setActiveId(seed.id);
     } else {
-      // ensure telephony shape
       const fixed = list.map(a => ({ ...a, config:{ ...a.config, telephony: a.config.telephony || { numbers: [], linkedNumberId: undefined } } }));
       writeLS(LS_LIST, fixed);
       setAssistants(fixed); setActiveId(fixed[0].id);
@@ -413,7 +503,7 @@ export default function VoiceAgentSection() {
     const a: Assistant = {
       id, name:'New Assistant', updatedAt: Date.now(), published: false,
       config: {
-        model: { provider:'openai', model:'gpt-4o', firstMessageMode:'assistant_first', firstMessage:'Hello.', systemPrompt: '' },
+        model: { provider:'openai', model:'gpt-4o', firstMessageMode:'assistant_first', firstMessage:'', systemPrompt: '' },
         voice: { provider:'openai', voiceId:'alloy', voiceLabel:'Alloy (OpenAI)' },
         transcriber: { provider:'deepgram', model:'nova-2', language:'en', denoise:false, confidenceThreshold:0.4, numerals:false },
         tools: { enableEndCall:true, dialKeypad:true },
@@ -528,6 +618,7 @@ export default function VoiceAgentSection() {
       return next;
     });
   }
+
   async function startCall() {
     if (!active) return;
     const id = `call_${crypto.randomUUID?.() || Math.random().toString(36).slice(2)}`;
@@ -539,24 +630,31 @@ export default function VoiceAgentSection() {
     calls.unshift({ id, assistantId: active.id, assistantName: active.name, startedAt: Date.now(), type: 'Web', assistantPhoneNumber: linkedNum, transcript: [] });
     writeLS(LS_CALLS, calls);
 
-    const greet = active.config.model.firstMessage || 'Hello. How may I help you today?';
+    const bits = parsePromptBits(active.config.model.systemPrompt || '');
+    const greet =
+      active.config.model.firstMessage?.trim() ||
+      bits.greeting ||
+      'Thank you for calling Wellness Partners. This is Riley, your scheduling assistant. How may I help you today?';
+
+    // assistant speaks first if configured
     if (active.config.model.firstMessageMode === 'assistant_first') {
-      pushTurn('assistant', greet); speak(greet);
+      pushTurn('assistant', greet); speak(greet, active.config.voice.voiceLabel);
     }
 
     const rec = makeRecognizer(async (finalText) => {
       pushTurn('user', finalText);
-      const reply = await tryLLM(active.config.model.systemPrompt, finalText);
+      const reply = await tryLLM(active.config.model.systemPrompt || '', transcript, finalText);
       pushTurn('assistant', reply);
-      speak(reply);
+      speak(reply, active.config.voice.voiceLabel);
     });
     if (!rec) {
-      const msg = 'Browser speech recognition is not available here. Use Chrome or Edge.';
-      pushTurn('assistant', msg); speak(msg);
+      const msg = 'Browser speech recognition is not available. Try Chrome or Edge.';
+      pushTurn('assistant', msg); speak(msg, active.config.voice.voiceLabel);
       return;
     }
     recogRef.current = rec; try { rec.start(); } catch {}
   }
+
   function endCall(reason: string) {
     if (recogRef.current) { try { recogRef.current.stop(); } catch {} recogRef.current = null; }
     window.speechSynthesis.cancel();
@@ -565,6 +663,7 @@ export default function VoiceAgentSection() {
     writeLS(LS_CALLS, calls);
     setCurrentCallId(null);
   }
+
   const callsForAssistant = (readLS<CallLog[]>(LS_CALLS) || []).filter(c => c.assistantId === active?.id);
 
   if (!active) {
@@ -638,7 +737,7 @@ export default function VoiceAgentSection() {
         data-collapsed={railCollapsed ? 'true' : 'false'}
         style={{
           position:'fixed',
-          left:'calc(var(--app-sidebar-w, 248px) - 1px)', // fuse with main sidebar
+          left:'calc(var(--app-sidebar-w, 248px) - 1px)',
           top:'var(--app-header-h, 64px)',
           width: railCollapsed ? '72px' : 'var(--va-rail-w, 360px)',
           height:'calc(100vh - var(--app-header-h, 64px))',
@@ -655,7 +754,7 @@ export default function VoiceAgentSection() {
             <PanelLeft className="w-4 h-4 icon" />
             {!railCollapsed && <span>Assistants</span>}
           </div>
-          <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2">
             {!railCollapsed && (
               <button onClick={addAssistant} className="btn btn--green">
                 {creating ? <span className="w-3.5 h-3.5 rounded-full border-2 border-white/50 border-t-transparent animate-spin" /> : <Plus className="w-3.5 h-3.5 text-white" />}
@@ -701,76 +800,78 @@ export default function VoiceAgentSection() {
           )}
 
           <div className="mt-4 space-y-2">
-            {visible.map(a => {
-              const isActive = a.id === activeId;
-              const isEdit = editingId === a.id;
-              if (railCollapsed) {
+            {assistants
+              .filter(a => a.name.toLowerCase().includes(query.trim().toLowerCase()))
+              .map(a => {
+                const isActive = a.id === activeId;
+                const isEdit = editingId === a.id;
+                if (railCollapsed) {
+                  return (
+                    <button
+                      key={a.id}
+                      onClick={()=> setActiveId(a.id)}
+                      className="w-full rounded-xl p-3 grid place-items-center"
+                      style={{
+                        background: isActive ? 'color-mix(in oklab, var(--accent) 10%, transparent)' : 'var(--va-card)',
+                        border: `1px solid ${isActive ? 'color-mix(in oklab, var(--accent) 35%, var(--va-border))' : 'var(--va-border)'}`,
+                        boxShadow:'var(--va-shadow-sm)'
+                      }}
+                      title={a.name}
+                    >
+                      <Bot className="w-4 h-4 icon" />
+                    </button>
+                  );
+                }
                 return (
-                  <button
+                  <div
                     key={a.id}
-                    onClick={()=> setActiveId(a.id)}
-                    className="w-full rounded-xl p-3 grid place-items-center"
+                    className="w-full rounded-xl p-3"
                     style={{
                       background: isActive ? 'color-mix(in oklab, var(--accent) 10%, transparent)' : 'var(--va-card)',
                       border: `1px solid ${isActive ? 'color-mix(in oklab, var(--accent) 35%, var(--va-border))' : 'var(--va-border)'}`,
                       boxShadow:'var(--va-shadow-sm)'
                     }}
-                    title={a.name}
                   >
-                    <Bot className="w-4 h-4 icon" />
-                  </button>
-                );
-              }
-              return (
-                <div
-                  key={a.id}
-                  className="w-full rounded-xl p-3"
-                  style={{
-                    background: isActive ? 'color-mix(in oklab, var(--accent) 10%, transparent)' : 'var(--va-card)',
-                    border: `1px solid ${isActive ? 'color-mix(in oklab, var(--accent) 35%, var(--va-border))' : 'var(--va-border)'}`,
-                    boxShadow:'var(--va-shadow-sm)'
-                  }}
-                >
-                  <button className="w-full text-left flex items-center justify-between"
-                          onClick={()=> setActiveId(a.id)}>
-                    <div className="min-w-0">
-                      <div className="font-medium truncate flex items-center gap-2">
-                        <Bot className="w-4 h-4 icon" />
-                        {!isEdit ? (
-                          <span className="truncate">{a.name}</span>
-                        ) : (
-                          <input
-                            autoFocus
-                            value={tempName}
-                            onChange={(e)=> setTempName(e.target.value)}
-                            onKeyDown={(e)=> { if (e.key==='Enter') saveRename(a); if (e.key==='Escape') setEditingId(null); }}
-                            className="bg-transparent rounded-md px-2 py-1 outline-none w-full"
-                            style={{ border:'1px solid var(--va-input-border)', color:'var(--text)' }}
-                          />
-                        )}
+                    <button className="w-full text-left flex items-center justify-between"
+                            onClick={()=> setActiveId(a.id)}>
+                      <div className="min-w-0">
+                        <div className="font-medium truncate flex items-center gap-2">
+                          <Bot className="w-4 h-4 icon" />
+                          {!isEdit ? (
+                            <span className="truncate">{a.name}</span>
+                          ) : (
+                            <input
+                              autoFocus
+                              value={tempName}
+                              onChange={(e)=> setTempName(e.target.value)}
+                              onKeyDown={(e)=> { if (e.key==='Enter') saveRename(a); if (e.key==='Escape') setEditingId(null); }}
+                              className="bg-transparent rounded-md px-2 py-1 outline-none w-full"
+                              style={{ border:'1px solid var(--va-input-border)', color:'var(--text)' }}
+                            />
+                          )}
+                        </div>
+                        <div className="text-[11px] mt-0.5 opacity-70 truncate">
+                          {a.folder || 'Unfiled'} • {new Date(a.updatedAt).toLocaleDateString()}
+                        </div>
                       </div>
-                      <div className="text-[11px] mt-0.5 opacity-70 truncate">
-                        {a.folder || 'Unfiled'} • {new Date(a.updatedAt).toLocaleDateString()}
-                      </div>
-                    </div>
-                    {isActive ? <Check className="w-4 h-4 icon" /> : null}
-                  </button>
+                      {isActive ? <Check className="w-4 h-4 icon" /> : null}
+                    </button>
 
-                  <div className="mt-2 flex items-center gap-2">
-                    {!isEdit ? (
-                      <>
-                        <button onClick={(e)=> { e.stopPropagation(); beginRename(a); }} className="btn btn--ghost text-xs"><Edit3 className="w-3.5 h-3.5 icon" /> Rename</button>
-                        <button onClick={(e)=> { e.stopPropagation(); setDeleting({ id:a.id, name:a.name }); }} className="btn btn--danger text-xs"><Trash2 className="w-3.5 h-3.5" /> Delete</button>
-                      </>
-                    ) : (
-                      <>
-                        <button onClick={(e)=> { e.stopPropagation(); saveRename(a); }} className="btn btn--green text-xs"><Check className="w-3.5 h-3.5 text-white" /><span className="text-white">Save</span></button>
-                        <button onClick={(e)=> { e.stopPropagation(); setEditingId(null); }} className="btn btn--ghost text-xs">Cancel</button>
-                      </>
-                    )}
+                    <div className="mt-2 flex items-center gap-2">
+                      {!isEdit ? (
+                        <>
+                          <button onClick={(e)=> { e.stopPropagation(); beginRename(a); }} className="btn btn--ghost text-xs"><Edit3 className="w-3.5 h-3.5 icon" /> Rename</button>
+                          <button onClick={(e)=> { e.stopPropagation(); setDeleting({ id:a.id, name:a.name }); }} className="btn btn--danger text-xs"><Trash2 className="w-3.5 h-3.5" /> Delete</button>
+                        </>
+                      ) : (
+                        <>
+                          <button onClick={(e)=> { e.stopPropagation(); saveRename(a); }} className="btn btn--green text-xs"><Check className="w-3.5 h-3.5 text-white" /><span className="text-white">Save</span></button>
+                          <button onClick={(e)=> { e.stopPropagation(); setEditingId(null); }} className="btn btn--ghost text-xs">Cancel</button>
+                        </>
+                      )}
+                    </div>
                   </div>
-                </div>
-              );
+                );
             })}
           </div>
         </div>
@@ -874,64 +975,18 @@ export default function VoiceAgentSection() {
                 </div>
               </div>
 
-              {!typing ? (
-                <textarea
-                  rows={26}
-                  value={active.config.model.systemPrompt || ''}
-                  onChange={(e)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, systemPrompt: e.target.value } } }))}
-                  className="w-full rounded-2xl px-3 py-3 text-[14px] leading-6 outline-none"
-                  style={{
-                    background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)',
-                    boxShadow:'var(--va-shadow), inset 0 1px 0 rgba(255,255,255,.03)', color:'var(--text)',
-                    fontFamily:'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-                    minHeight: 560
-                  }}
-                />
-              ) : (
-                <div>
-                  <div
-                    ref={typingBoxRef}
-                    className="w-full rounded-2xl px-3 py-3 text-[14px] leading-6 outline-none"
-                    style={{
-                      background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)',
-                      boxShadow:'var(--va-shadow), inset 0 1px 0 rgba(255,255,255,.03)', color:'var(--text)',
-                      fontFamily:'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-                      whiteSpace:'pre-wrap',
-                      minHeight: 560,
-                      maxHeight: 680,
-                      overflowY:'auto'
-                    }}
-                  >
-                    {(() => {
-                      const slice = typing.slice(0, typedCount);
-                      const out: JSX.Element[] = [];
-                      let buf = '';
-                      let added = slice.length ? slice[0].added : false;
-                      slice.forEach((t, i) => {
-                        if (t.added !== added) {
-                          out.push(added
-                            ? <ins key={`ins-${i}`} style={{ background:'rgba(16,185,129,.18)', padding:'1px 2px', borderRadius:4 }}>{buf}</ins>
-                            : <span key={`nor-${i}`}>{buf}</span>);
-                          buf = t.ch;
-                          added = t.added;
-                        } else {
-                          buf += t.ch;
-                        }
-                      });
-                      if (buf) out.push(added
-                        ? <ins key="tail-ins" style={{ background:'rgba(16,185,129,.18)', padding:'1px 2px', borderRadius:4 }}>{buf}</ins>
-                        : <span key="tail-nor">{buf}</span>);
-                      if (typedCount < (typing?.length || 0)) out.push(<span key="caret" className="animate-pulse"> ▌</span>);
-                      return out;
-                    })()}
-                  </div>
-
-                  <div className="flex items-center gap-2 justify-end mt-3">
-                    <button onClick={declineTyping} className="btn btn--ghost"><X className="w-4 h-4 icon" /> Decline</button>
-                    <button onClick={acceptTyping} className="btn btn--green"><Check className="w-4 h-4 text-white" /><span className="text-white">Accept</span></button>
-                  </div>
-                </div>
-              )}
+              <textarea
+                rows={26}
+                value={active.config.model.systemPrompt || ''}
+                onChange={(e)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, systemPrompt: e.target.value } } }))}
+                className="w-full rounded-2xl px-3 py-3 text-[14px] leading-6 outline-none"
+                style={{
+                  background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)',
+                  boxShadow:'var(--va-shadow), inset 0 1px 0 rgba(255,255,255,.03)', color:'var(--text)',
+                  fontFamily:'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+                  minHeight: 560
+                }}
+              />
             </div>
           </Section>
 
@@ -1131,11 +1186,7 @@ export default function VoiceAgentSection() {
                 <input
                   value={genText}
                   onChange={(e)=> setGenText(e.target.value)}
-                  placeholder={`Examples:
-• assistant
-• collect full name, phone, date
-• [Identity] AI Sales Agent for roofers
-• first message: Hey—quick question to get you booked…`}
+                  placeholder={`Paste your Riley prompt or quick hints (e.g., "collect name, phone, date"). Supports [Sections] and "first message: ..."`}
                   className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
                   style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)', color:'var(--text)' }}
                 />
@@ -1474,7 +1525,7 @@ function Select({ value, items, onChange, placeholder, leftIcon }: {
                   className="w-full flex items-center gap-3 px-3 py-2 rounded-[10px] text-left"
                   style={{ color:'var(--text)' }}
                   onMouseEnter={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='rgba(16,185,129,.10)'; (e.currentTarget as HTMLButtonElement).style.border='1px solid rgba(16,185,129,.35)'; }}
-                  onMouseLeave={(e)=>{ (e.currentTarget as HTMLButtonButtonElement).style.background='transparent'; (e.currentTarget as HTMLButtonElement).style.border='1px solid transparent'; }}
+                  onMouseLeave={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='transparent'; (e.currentTarget as HTMLButtonElement).style.border='1px solid transparent'; }}
                 >
                   {it.icon}{it.label}
                 </button>
