@@ -7,7 +7,7 @@ import {
   Search, Plus, Folder, FolderOpen, Check, Trash2, Copy, Edit3, Sparkles,
   ChevronDown, ChevronRight, FileText, Mic2, BookOpen, SlidersHorizontal,
   PanelLeft, Bot, UploadCloud, RefreshCw, X, ChevronLeft, ChevronRight as ChevronRightIcon,
-  Phone as PhoneIcon, Rocket
+  Phone as PhoneIcon, Rocket, PhoneCall, PhoneOff, Play, MessageSquare, ListTree, Archive,
 } from 'lucide-react';
 
 /* =============================================================================
@@ -29,6 +29,22 @@ type ModelId = 'gpt-4o' | 'gpt-4o-mini' | 'gpt-4.1' | 'gpt-3.5-turbo';
 type VoiceProvider = 'openai' | 'elevenlabs';
 
 type PhoneNum = { id: string; label?: string; e164: string };
+
+type TranscriptTurn = { role: 'assistant'|'user'; text: string; ts: number };
+
+type CallLog = {
+  id: string;
+  assistantId: string;
+  assistantName: string;
+  startedAt: number;
+  endedAt?: number;
+  type: 'Web'|'PSTN';
+  assistantPhoneNumber?: string;
+  customerPhoneNumber?: string;
+  endedReason?: string;
+  transcript: TranscriptTurn[];
+  costUSD?: number;
+};
 
 type Assistant = {
   id: string;
@@ -54,12 +70,15 @@ type Assistant = {
       numerals: boolean;
     };
     tools: { enableEndCall: boolean; dialKeypad: boolean };
-    telephony?: { numbers: PhoneNum[] };
+    telephony?: { numbers: PhoneNum[]; linkedNumberId?: string };
   };
 };
 
 const LS_LIST = 'voice:assistants.v1';
 const ak = (id: string) => `voice:assistant:${id}`;
+const LS_CALLS = 'voice:calls.v1';
+const LS_PHONE_NUMBERS = 'voice:phoneNumbers.v1';     // “Phone Numbers” page seed
+const LS_ROUTES = 'voice:phoneRoutes.v1';            // phone -> assistant linking map
 
 const readLS = <T,>(k: string): T | null => {
   try { const r = localStorage.getItem(k); return r ? (JSON.parse(r) as T) : null; }
@@ -151,20 +170,16 @@ ${collectList}`,
 function setSection(prompt: string, name: string, body: string) {
   const section = name.replace(/^\[|\]$/g, '');
   const re = new RegExp(String.raw`$begin:math:display$${section}$end:math:display$\s*([\s\S]*?)(?=\n\[|$)`, 'i');
-  if (re.test(prompt)) {
-    return prompt.replace(re, `[${section}]\n${body.trim()}\n`);
-  }
+  if (re.test(prompt)) return prompt.replace(re, `[${section}]\n${body.trim()}\n`);
   const nl = prompt.endsWith('\n') ? '' : '\n';
   return `${prompt}${nl}\n[${section}]\n${body.trim()}\n`;
 }
 
-/** Parse quick "first message:" directive */
 function parseFirstMessage(raw: string): string | null {
   const m = raw.match(/^(?:first\s*message|greeting)\s*[:\-]\s*(.+)$/i);
   return m ? m[1].trim() : null;
 }
 
-/** Merge free-text into prompt smartly */
 function mergeInput(genText: string, currentPrompt: string) {
   const raw = (genText || '').trim();
   const out = { prompt: currentPrompt || BASE_PROMPT, firstMessage: undefined as string | undefined };
@@ -176,10 +191,7 @@ function mergeInput(genText: string, currentPrompt: string) {
   const sectionBlocks = [...raw.matchAll(/\[(Identity|Style|System Behaviors|Task & Goals|Data to Collect|Safety|Handover|Refinements)\]\s*([\s\S]*?)(?=\n\[|$)/gi)];
   if (sectionBlocks.length) {
     let next = out.prompt;
-    sectionBlocks.forEach((m) => {
-      const sec = m[1]; const body = m[2];
-      next = setSection(next, `[${sec}]`, body);
-    });
+    sectionBlocks.forEach((m) => { next = setSection(next, `[${m[1]}]`, m[2]); });
     out.prompt = next;
     return out;
   }
@@ -238,7 +250,7 @@ function useAppSidebarWidth(scopeRef: React.RefObject<HTMLDivElement>, fallbackC
       (document.querySelector('aside.sidebar') as HTMLElement) ||
       null;
 
-    const target = findSidebar();
+    let target = findSidebar();
     if (!target) { setVar(fallbackCollapsed ? 72 : 248); return; }
 
     setVar(target.getBoundingClientRect().width);
@@ -264,6 +276,7 @@ function useAppSidebarWidth(scopeRef: React.RefObject<HTMLDivElement>, fallbackC
    PAGE
 ============================================================================= */
 export default function VoiceAgentSection() {
+  // Collapsed flag only as a fallback default if we cannot find/observe the real sidebar.
   const scopeRef = useRef<HTMLDivElement | null>(null);
   const [sbCollapsed, setSbCollapsed] = useState<boolean>(() => {
     if (typeof document === 'undefined') return false;
@@ -296,6 +309,11 @@ export default function VoiceAgentSection() {
   const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
   const [rev, setRev] = useState(0);
 
+  // CALLS + UI
+  const [currentCallId, setCurrentCallId] = useState<string | null>(null);
+  const [transcript, setTranscript] = useState<TranscriptTurn[]>([]);
+  const [callType, setCallType] = useState<'Web'|'PSTN'>('Web');
+
   useEffect(() => {
     const list = readLS<Assistant[]>(LS_LIST) || [];
     if (!list.length) {
@@ -318,6 +336,13 @@ export default function VoiceAgentSection() {
     } else {
       setAssistants(list); setActiveId(list[0].id);
     }
+    // seed calls & phone numbers stores if missing
+    if (!readLS<CallLog[]>(LS_CALLS)) writeLS(LS_CALLS, []);
+    if (!readLS<PhoneNum[]>(LS_PHONE_NUMBERS)) writeLS(LS_PHONE_NUMBERS, [
+      { id: 'pn_usa_1', e164: '+15551234567', label: 'US Support' },
+      { id: 'pn_usa_2', e164: '+15557654321', label: 'US Sales' },
+    ]);
+    if (!readLS<Record<string, string>>(LS_ROUTES)) writeLS(LS_ROUTES, {});
   }, []);
 
   const active = useMemo(() => activeId ? readLS<Assistant>(ak(activeId)) : null, [activeId, rev]);
@@ -464,6 +489,14 @@ export default function VoiceAgentSection() {
   };
 
   /* ---------- Telephony helpers ---------- */
+  const importFromPhoneNumbersPage = () => {
+    const globalNums = readLS<PhoneNum[]>(LS_PHONE_NUMBERS) || [];
+    const existing = active.config.telephony?.numbers ?? [];
+    const byId = new Set(existing.map(n=>n.id));
+    const merged = [...existing, ...globalNums.filter(n=>!byId.has(n.id))];
+    updateActive(a => ({ ...a, config: { ...a.config, telephony: { ...(a.config.telephony||{numbers:[]}), numbers: merged } } }));
+  };
+
   const addPhone = (e164: string, label?: string) => {
     const norm = e164.trim();
     if (!norm) return;
@@ -482,188 +515,337 @@ export default function VoiceAgentSection() {
   const removePhone = (id: string) => {
     updateActive(a => {
       const nums = a.config.telephony?.numbers ?? [];
-      return { ...a, config: { ...a.config, telephony: { numbers: nums.filter(n => n.id !== id) } } };
+      const linked = a.config.telephony?.linkedNumberId;
+      const nextLinked = linked === id ? undefined : linked;
+      return { ...a, config: { ...a.config, telephony: { numbers: nums.filter(n => n.id !== id), linkedNumberId: nextLinked } } };
     });
   };
 
+  /** Publish: link assistant -> selected number, persist route, emit event hook */
   const publish = () => {
-    window.dispatchEvent(new CustomEvent('voiceagent:publish', { detail: { id: active.id } }));
+    const linkedId = active.config.telephony?.linkedNumberId;
+    const numbers = active.config.telephony?.numbers ?? [];
+    const num = numbers.find(n=>n.id===linkedId);
+    if (!num) { alert('Pick a Phone Number before publishing.'); return; }
+
+    // persist route
+    const routes = readLS<Record<string,string>>(LS_ROUTES) || {};
+    routes[num.id] = active.id;
+    writeLS(LS_ROUTES, routes);
+
+    // mark published
     updateActive(a => ({ ...a, published: true }));
-    alert('Publish triggered (hook into your deploy flow).');
+
+    // hook for your backend deploy flow
+    window.dispatchEvent(new CustomEvent('voiceagent:publish', {
+      detail: {
+        assistantId: active.id,
+        assistantName: active.name,
+        phoneNumberId: num.id,
+        e164: num.e164
+      }
+    }));
+    alert('Published! Number is linked to this assistant.');
   };
 
-  // dynamic rail width CSS var so grid can react to collapse w/o fixed positioning
-  const dynRail = railCollapsed ? '72px' : 'var(--va-rail-w, 360px)';
+  /* ---------- CALL ENGINE (VAPI if present, else mock) ---------- */
+  // We expose a tiny driver that either talks to window.Vapi (if your app loaded their SDK)
+  // or uses a mock that fakes a short conversation for local testing.
+  const vapiRef = useRef<any | null>(null);
+  const mediaRef = useRef<HTMLAudioElement | null>(null); // for Web voice playback if needed
+
+  useEffect(() => {
+    // hydrate vapi handle if available
+    // @ts-ignore
+    vapiRef.current = (window as any)?.Vapi || null;
+  }, []);
+
+  const startCall = async () => {
+    if (!active) return;
+    const id = `call_${crypto.randomUUID?.() || Math.random().toString(36).slice(2)}`;
+    setCurrentCallId(id);
+    setTranscript([]);
+    const calls = readLS<CallLog[]>(LS_CALLS) || [];
+    calls.unshift({
+      id,
+      assistantId: active.id,
+      assistantName: active.name,
+      startedAt: Date.now(),
+      type: callType,
+      assistantPhoneNumber: (active.config.telephony?.numbers || []).find(n=>n.id===active.config.telephony?.linkedNumberId)?.e164,
+      transcript: [],
+    });
+    writeLS(LS_CALLS, calls);
+
+    // If Vapi SDK exists, try to kick off a call:
+    // (You should replace the below with your actual SDK init and options.)
+    const vapi = vapiRef.current;
+    if (vapi && typeof vapi.start === 'function') {
+      try {
+        await vapi.start({
+          // Example shape – replace with real config:
+          assistant: {
+            // use your backend ID / prompt
+            systemPrompt: active.config.model.systemPrompt,
+            voice: active.config.voice.voiceId,
+            firstMessage: active.config.model.firstMessage,
+          },
+          transcriber: active.config.transcriber,
+          transport: callType === 'PSTN'
+            ? { type: 'pstn', to: 'customer-number-here', from: (active.config.telephony?.numbers || []).find(n=>n.id===active.config.telephony?.linkedNumberId)?.e164 }
+            : { type: 'web' }
+        });
+
+        // wiring simple events if SDK exposes them
+        vapi.on?.('transcript', (evt: any) => {
+          if (!evt?.text) return;
+          pushTurn(evt.role === 'assistant' ? 'assistant' : 'user', evt.text);
+        });
+        vapi.on?.('end', (evt: any) => {
+          endCall('Completed');
+        });
+      } catch (e) {
+        pushTurn('assistant', 'Sorry—failed to start the call engine in this environment.');
+      }
+      return;
+    }
+
+    // Otherwise, MOCK: a tiny scripted exchange to prove UI / logs
+    const first = active.config.model.firstMessage || 'Hello.';
+    pushTurn('assistant', first);
+    setTimeout(()=> pushTurn('user', 'Hello. Hello. I wanna…'), 900);
+    setTimeout(()=> pushTurn('assistant', 'Hi there.'), 1700);
+    setTimeout(()=> pushTurn('assistant', 'I can help you schedule an appointment. What day works?'), 3000);
+  };
+
+  const endCall = (reason: string) => {
+    if (!currentCallId) return;
+    const calls = (readLS<CallLog[]>(LS_CALLS) || []).map(c => c.id === currentCallId ? { ...c, endedAt: Date.now(), endedReason: reason } : c);
+    writeLS(LS_CALLS, calls);
+    setCurrentCallId(null);
+    // stop SDK if any
+    const vapi = vapiRef.current;
+    try { vapi?.stop?.(); } catch {}
+  };
+
+  const pushTurn = (role: 'assistant'|'user', text: string) => {
+    const turn = { role, text, ts: Date.now() };
+    setTranscript(t => {
+      const next = [...t, turn];
+      if (currentCallId) {
+        const calls = readLS<CallLog[]>(LS_CALLS) || [];
+        const idx = calls.findIndex(c => c.id === currentCallId);
+        if (idx >= 0) {
+          calls[idx] = { ...calls[idx], transcript: [...calls[idx].transcript, turn] };
+          writeLS(LS_CALLS, calls);
+        }
+      }
+      return next;
+    });
+  };
+
+  const callsForAssistant = (readLS<CallLog[]>(LS_CALLS) || []).filter(c => c.assistantId === active.id);
 
   return (
-    <div
-      ref={scopeRef}
-      className={SCOPE}
-      style={{
-        background:'var(--bg)',
-        color:'var(--text)',
-        // expose dynamic rail width to CSS grid
-        ['--va-rail-w-dyn' as any]: dynRail
-      }}
-    >
-      {/* GRID LAYOUT: [app sidebar spacer] [our rail] [editor] — NO fixed positioning */}
-      <div className="va-grid">
-        {/* 1) spacer column so our rail always touches the real app sidebar */}
-        <div aria-hidden />
-
-        {/* 2) ASSISTANTS RAIL (collapsible) */}
-        <aside className="va-rail">
-          <div className="px-3 py-3 flex items-center justify-between" style={{ borderBottom:'1px solid var(--va-border)' }}>
-            <div className="flex items-center gap-2 text-sm font-semibold">
-              <PanelLeft className="w-4 h-4 icon" />
-              {!railCollapsed && <span>Assistants</span>}
-            </div>
-            <div className="flex items-center gap-2">
-              {!railCollapsed && (
-                <button onClick={addAssistant} className="btn btn--green">
-                  {creating ? <span className="w-3.5 h-3.5 rounded-full border-2 border-white/50 border-t-transparent animate-spin" /> : <Plus className="w-3.5 h-3.5 text-white" />}
-                  <span className="text-white">{creating ? 'Creating…' : 'Create'}</span>
-                </button>
-              )}
-              <button
-                title={railCollapsed ? 'Expand assistants' : 'Collapse assistants'}
-                className="btn btn--ghost"
-                onClick={() => setRailCollapsed(v => !v)}
-              >
-                {railCollapsed ? <ChevronRightIcon className="w-4 h-4 icon" /> : <ChevronLeft className="w-4 h-4 icon" />}
-              </button>
-            </div>
+    <div ref={scopeRef} className={SCOPE} style={{ background:'var(--bg)', color:'var(--text)' }}>
+      {/* ================= ASSISTANTS RAIL ================= */}
+      <aside
+        className="hidden lg:flex flex-col"
+        data-collapsed={railCollapsed ? 'true' : 'false'}
+        style={{
+          position:'fixed',
+          left:'calc(var(--app-sidebar-w, 248px) - 1px)', // fuse with main sidebar
+          top:'var(--app-header-h, 64px)',
+          width: railCollapsed ? '72px' : 'var(--va-rail-w, 360px)',
+          height:'calc(100vh - var(--app-header-h, 64px))',
+          borderLeft:'none',
+          borderRight:'1px solid var(--va-border)',
+          background:'var(--va-sidebar)',
+          boxShadow:'var(--va-shadow-side)',
+          zIndex: 10,
+          willChange: 'left'
+        }}
+      >
+        <div className="px-3 py-3 flex items-center justify-between" style={{ borderBottom:'1px solid var(--va-border)' }}>
+          <div className="flex items-center gap-2 text-sm font-semibold">
+            <PanelLeft className="w-4 h-4 icon" />
+            {!railCollapsed && <span>Assistants</span>}
           </div>
-
-          <div className="p-3 min-h-0" style={{ overflowY:'auto', scrollbarWidth:'thin', height:'calc(100vh - var(--app-header-h, 64px) - 56px)' }}>
+          <div className="flex items-center gap-2">
             {!railCollapsed && (
-              <div
-                className="flex items-center gap-2 rounded-lg px-2.5 py-2 mb-2"
-                style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)' }}
-              >
-                <Search className="w-4 h-4 icon" />
-                <input
-                  value={query}
-                  onChange={(e)=> setQuery(e.target.value)}
-                  placeholder="Search assistants"
-                  className="w-full bg-transparent outline-none text-sm"
-                  style={{ color:'var(--text)' }}
-                />
+              <button onClick={addAssistant} className="btn btn--green">
+                {creating ? <span className="w-3.5 h-3.5 rounded-full border-2 border-white/50 border-t-transparent animate-spin" /> : <Plus className="w-3.5 h-3.5 text-white" />}
+                <span className="text-white">{creating ? 'Creating…' : 'Create'}</span>
+              </button>
+            )}
+            <button
+              title={railCollapsed ? 'Expand assistants' : 'Collapse assistants'}
+              className="btn btn--ghost"
+              onClick={() => setRailCollapsed(v => !v)}
+            >
+              {railCollapsed ? <ChevronRightIcon className="w-4 h-4 icon" /> : <ChevronLeft className="w-4 h-4 icon" />}
+            </button>
+          </div>
+        </div>
+
+        <div className="p-3 min-h-0 flex-1 overflow-y-auto" style={{ scrollbarWidth:'thin' }}>
+          {!railCollapsed && (
+            <div
+              className="flex items-center gap-2 rounded-lg px-2.5 py-2 mb-2"
+              style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)' }}
+            >
+              <Search className="w-4 h-4 icon" />
+              <input
+                value={query}
+                onChange={(e)=> setQuery(e.target.value)}
+                placeholder="Search assistants"
+                className="w-full bg-transparent outline-none text-sm"
+                style={{ color:'var(--text)' }}
+              />
+            </div>
+          )}
+
+          {!railCollapsed && (
+            <>
+              <div className="text-xs font-semibold flex items-center gap-2 mt-3 mb-1" style={{ color:'var(--text-muted)' }}>
+                <Folder className="w-3.5 h-3.5 icon" /> Folders
               </div>
-            )}
+              <button className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/5">
+                <FolderOpen className="w-4 h-4 icon" /> All
+              </button>
+            </>
+          )}
 
-            {!railCollapsed && (
-              <>
-                <div className="text-xs font-semibold flex items-center gap-2 mt-3 mb-1" style={{ color:'var(--text-muted)' }}>
-                  <Folder className="w-3.5 h-3.5 icon" /> Folders
-                </div>
-                <button className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/5">
-                  <FolderOpen className="w-4 h-4 icon" /> All
-                </button>
-              </>
-            )}
-
-            <div className="mt-4 space-y-2">
-              {visible.map(a => {
-                const isActive = a.id === activeId;
-                const isEdit = editingId === a.id;
-                if (railCollapsed) {
-                  return (
-                    <button
-                      key={a.id}
-                      onClick={()=> setActiveId(a.id)}
-                      className="w-full rounded-xl p-3 grid place-items-center"
-                      style={{
-                        background: isActive ? 'color-mix(in oklab, var(--accent) 10%, transparent)' : 'var(--va-card)',
-                        border: `1px solid ${isActive ? 'color-mix(in oklab, var(--accent) 35%, var(--va-border))' : 'var(--va-border)'}`,
-                        boxShadow:'var(--va-shadow-sm)'
-                      }}
-                      title={a.name}
-                    >
-                      <Bot className="w-4 h-4 icon" />
-                    </button>
-                  );
-                }
+          <div className="mt-4 space-y-2">
+            {visible.map(a => {
+              const isActive = a.id === activeId;
+              const isEdit = editingId === a.id;
+              if (railCollapsed) {
                 return (
-                  <div
+                  <button
                     key={a.id}
-                    className="w-full rounded-xl p-3"
+                    onClick={()=> setActiveId(a.id)}
+                    className="w-full rounded-xl p-3 grid place-items-center"
                     style={{
                       background: isActive ? 'color-mix(in oklab, var(--accent) 10%, transparent)' : 'var(--va-card)',
                       border: `1px solid ${isActive ? 'color-mix(in oklab, var(--accent) 35%, var(--va-border))' : 'var(--va-border)'}`,
                       boxShadow:'var(--va-shadow-sm)'
                     }}
+                    title={a.name}
                   >
-                    <button className="w-full text-left flex items-center justify-between"
-                            onClick={()=> setActiveId(a.id)}>
-                      <div className="min-w-0">
-                        <div className="font-medium truncate flex items-center gap-2">
-                          <Bot className="w-4 h-4 icon" />
-                          {!isEdit ? (
-                            <span className="truncate">{a.name}</span>
-                          ) : (
-                            <input
-                              autoFocus
-                              value={tempName}
-                              onChange={(e)=> setTempName(e.target.value)}
-                              onKeyDown={(e)=> { if (e.key==='Enter') saveRename(a); if (e.key==='Escape') setEditingId(null); }}
-                              className="bg-transparent rounded-md px-2 py-1 outline-none w-full"
-                              style={{ border:'1px solid var(--va-input-border)', color:'var(--text)' }}
-                            />
-                          )}
-                        </div>
-                        <div className="text-[11px] mt-0.5 opacity-70 truncate">
-                          {a.folder || 'Unfiled'} • {new Date(a.updatedAt).toLocaleDateString()}
-                        </div>
-                      </div>
-                      {isActive ? <Check className="w-4 h-4 icon" /> : null}
-                    </button>
-
-                    <div className="mt-2 flex items-center gap-2">
-                      {!isEdit ? (
-                        <>
-                          <button onClick={(e)=> { e.stopPropagation(); beginRename(a); }} className="btn btn--ghost text-xs"><Edit3 className="w-3.5 h-3.5 icon" /> Rename</button>
-                          <button onClick={(e)=> { e.stopPropagation(); setDeleting({ id:a.id, name:a.name }); }} className="btn btn--danger text-xs"><Trash2 className="w-3.5 h-3.5" /> Delete</button>
-                        </>
-                      ) : (
-                        <>
-                          <button onClick={(e)=> { e.stopPropagation(); saveRename(a); }} className="btn btn--green text-xs"><Check className="w-3.5 h-3.5 text-white" /><span className="text-white">Save</span></button>
-                          <button onClick={(e)=> { e.stopPropagation(); setEditingId(null); }} className="btn btn--ghost text-xs">Cancel</button>
-                        </>
-                      )}
-                    </div>
-                  </div>
+                    <Bot className="w-4 h-4 icon" />
+                  </button>
                 );
-              })}
-            </div>
-          </div>
-        </aside>
+              }
+              return (
+                <div
+                  key={a.id}
+                  className="w-full rounded-xl p-3"
+                  style={{
+                    background: isActive ? 'color-mix(in oklab, var(--accent) 10%, transparent)' : 'var(--va-card)',
+                    border: `1px solid ${isActive ? 'color-mix(in oklab, var(--accent) 35%, var(--va-border))' : 'var(--va-border)'}`,
+                    boxShadow:'var(--va-shadow-sm)'
+                  }}
+                >
+                  <button className="w-full text-left flex items-center justify-between"
+                          onClick={()=> setActiveId(a.id)}>
+                    <div className="min-w-0">
+                      <div className="font-medium truncate flex items-center gap-2">
+                        <Bot className="w-4 h-4 icon" />
+                        {!isEdit ? (
+                          <span className="truncate">{a.name}</span>
+                        ) : (
+                          <input
+                            autoFocus
+                            value={tempName}
+                            onChange={(e)=> setTempName(e.target.value)}
+                            onKeyDown={(e)=> { if (e.key==='Enter') saveRename(a); if (e.key==='Escape') setEditingId(null); }}
+                            className="bg-transparent rounded-md px-2 py-1 outline-none w-full"
+                            style={{ border:'1px solid var(--va-input-border)', color:'var(--text)' }}
+                          />
+                        )}
+                      </div>
+                      <div className="text-[11px] mt-0.5 opacity-70 truncate">
+                        {a.folder || 'Unfiled'} • {new Date(a.updatedAt).toLocaleDateString()}
+                      </div>
+                    </div>
+                    {isActive ? <Check className="w-4 h-4 icon" /> : null}
+                  </button>
 
-        {/* 3) EDITOR */}
-        <div className="va-main">
-          {/* top action bar */}
-          <div className="px-2 pb-3 flex items-center justify-end sticky"
-               style={{ top:'calc(var(--app-header-h, 64px) + 8px)', zIndex:2 }}>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={()=> navigator.clipboard.writeText(active.config.model.systemPrompt || '').catch(()=>{})}
-                className="btn btn--ghost"
-              >
-                <Copy className="w-4 h-4 icon" /> Copy Prompt
+                  <div className="mt-2 flex items-center gap-2">
+                    {!isEdit ? (
+                      <>
+                        <button onClick={(e)=> { e.stopPropagation(); beginRename(a); }} className="btn btn--ghost text-xs"><Edit3 className="w-3.5 h-3.5 icon" /> Rename</button>
+                        <button onClick={(e)=> { e.stopPropagation(); setDeleting({ id:a.id, name:a.name }); }} className="btn btn--danger text-xs"><Trash2 className="w-3.5 h-3.5" /> Delete</button>
+                      </>
+                    ) : (
+                      <>
+                        <button onClick={(e)=> { e.stopPropagation(); saveRename(a); }} className="btn btn--green text-xs"><Check className="w-3.5 h-3.5 text-white" /><span className="text-white">Save</span></button>
+                        <button onClick={(e)=> { e.stopPropagation(); setEditingId(null); }} className="btn btn--ghost text-xs">Cancel</button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </aside>
+
+      {/* =================================== EDITOR =================================== */}
+      <div
+        className="va-main"
+        style={{
+          marginLeft:`calc(var(--app-sidebar-w, 248px) + ${railCollapsed ? '72px' : 'var(--va-rail-w, 360px)'})`,
+          paddingRight:'clamp(20px, 4vw, 40px)',
+          paddingTop:'calc(var(--app-header-h, 64px) + 12px)',
+          paddingBottom:'88px'
+        }}
+      >
+        {/* top action bar */}
+        <div className="px-2 pb-3 flex items-center justify-between sticky"
+             style={{ top:'calc(var(--app-header-h, 64px) + 8px)', zIndex:2 }}>
+          {/* CALL CONTROLS */}
+          <div className="flex items-center gap-2">
+            <button className="btn btn--ghost" onClick={()=> setCallType(c => c==='Web'?'PSTN':'Web')}>
+              <ListTree className="w-4 h-4 icon" /> {callType === 'Web' ? 'Web' : 'PSTN'}
+            </button>
+            {!currentCallId ? (
+              <button onClick={startCall} className="btn btn--green">
+                <PhoneCall className="w-4 h-4 text-white" /><span className="text-white">Call Assistant</span>
               </button>
-              <button onClick={()=> setDeleting({ id: active.id, name: active.name })} className="btn btn--danger">
-                <Trash2 className="w-4 h-4" /> Delete
+            ) : (
+              <button onClick={()=> endCall('Ended by user')} className="btn btn--danger">
+                <PhoneOff className="w-4 h-4" /> End Call
               </button>
-              <button onClick={publish} className="btn btn--green">
-                <Rocket className="w-4 h-4 text-white" /><span className="text-white">{active.published ? 'Republish' : 'Publish'}</span>
-              </button>
-            </div>
+            )}
+            <button onClick={()=> window.dispatchEvent(new CustomEvent('voiceagent:open-chat', { detail:{ id: active.id } }))} className="btn btn--ghost">
+              <MessageSquare className="w-4 h-4 icon" /> Chat
+            </button>
           </div>
 
-          {/* content body */}
-          <div className="mx-auto grid grid-cols-12 gap-10" style={{ maxWidth:'min(2400px, 98vw)' }}>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={()=> navigator.clipboard.writeText(active.config.model.systemPrompt || '').catch(()=>{})}
+              className="btn btn--ghost"
+            >
+              <Copy className="w-4 h-4 icon" /> Copy Prompt
+            </button>
+            <button onClick={()=> setDeleting({ id: active.id, name: active.name })} className="btn btn--danger">
+              <Trash2 className="w-4 h-4" /> Delete
+            </button>
+            <button onClick={publish} className="btn btn--green">
+              <Rocket className="w-4 h-4 text-white" /><span className="text-white">{active.published ? 'Republish' : 'Publish'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* content body */}
+        <div className="mx-auto grid grid-cols-12 gap-10" style={{ maxWidth:'min(2400px, 98vw)' }}>
+          {/* LEFT: Editor */}
+          <div className="col-span-12 xl:col-span-7 space-y-10">
             <Section title="Model" icon={<FileText className="w-4 h-4 icon" />}>
-              <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(4, minmax(360px, 1fr))' }}>
+              <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(4, minmax(260px, 1fr))' }}>
                 <Field label="Provider">
                   <Select
                     value={active.config.model.provider}
@@ -717,7 +899,7 @@ export default function VoiceAgentSection() {
 
                 {!typing ? (
                   <textarea
-                    rows={26}
+                    rows={20}
                     value={active.config.model.systemPrompt || ''}
                     onChange={(e)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, systemPrompt: e.target.value } } })) }
                     className="w-full rounded-2xl px-3 py-3 text-[14px] leading-6 outline-none"
@@ -725,7 +907,7 @@ export default function VoiceAgentSection() {
                       background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)',
                       boxShadow:'var(--va-shadow), inset 0 1px 0 rgba(255,255,255,.03)', color:'var(--text)',
                       fontFamily:'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-                      minHeight: 560
+                      minHeight: 420
                     }}
                   />
                 ) : (
@@ -738,8 +920,8 @@ export default function VoiceAgentSection() {
                         boxShadow:'var(--va-shadow), inset 0 1px 0 rgba(255,255,255,.03)', color:'var(--text)',
                         fontFamily:'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
                         whiteSpace:'pre-wrap',
-                        minHeight: 560,
-                        maxHeight: 680,
+                        minHeight: 420,
+                        maxHeight: 560,
                         overflowY:'auto'
                       }}
                     >
@@ -777,7 +959,7 @@ export default function VoiceAgentSection() {
             </Section>
 
             <Section title="Voice" icon={<Mic2 className="w-4 h-4 icon" />}>
-              <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(2, minmax(360px, 1fr))' }}>
+              <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(2, minmax(260px, 1fr))' }}>
                 <Field label="Provider">
                   <Select
                     value={active.config.voice.provider}
@@ -804,16 +986,21 @@ export default function VoiceAgentSection() {
                 </Field>
               </div>
 
-              <div className="mt-3">
+              <div className="mt-3 flex items-center gap-2">
                 <button
                   onClick={()=> { window.dispatchEvent(new CustomEvent('voiceagent:import-11labs')); alert('Hook “voiceagent:import-11labs” to your importer.'); }}
                   className="btn btn--ghost"
                 ><UploadCloud className="w-4 h-4 icon" /> Import from ElevenLabs</button>
+                <button
+                  onClick={()=> mediaRef.current?.play?.()}
+                  className="btn btn--ghost"
+                ><Play className="w-4 h-4 icon" /> Test Output Device</button>
+                <audio ref={mediaRef} />
               </div>
             </Section>
 
             <Section title="Transcriber" icon={<BookOpen className="w-4 h-4 icon" />}>
-              <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(3, minmax(360px, 1fr))' }}>
+              <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(3, minmax(260px, 1fr))' }}>
                 <Field label="Provider">
                   <Select
                     value={active.config.transcriber.provider}
@@ -864,7 +1051,7 @@ export default function VoiceAgentSection() {
             </Section>
 
             <Section title="Tools" icon={<SlidersHorizontal className="w-4 h-4 icon" />}>
-              <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(2, minmax(360px, 1fr))' }}>
+              <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(2, minmax(260px, 1fr))' }}>
                 <Field label="Enable End Call Function">
                   <Select
                     value={String(active.config.tools.enableEndCall)}
@@ -883,11 +1070,73 @@ export default function VoiceAgentSection() {
             </Section>
 
             <Section title="Telephony" icon={<PhoneIcon className="w-4 h-4 icon" />}>
+              <div className="mb-3">
+                <button className="btn btn--ghost" onClick={importFromPhoneNumbersPage}>
+                  <UploadCloud className="w-4 h-4 icon" /> Import from Phone Numbers
+                </button>
+              </div>
+
               <TelephonyEditor
                 numbers={active.config.telephony?.numbers ?? []}
+                linkedId={active.config.telephony?.linkedNumberId}
                 onAdd={addPhone}
                 onRemove={removePhone}
+                onLink={(id)=> updateActive(a => ({ ...a, config:{ ...a.config, telephony:{ ...(a.config.telephony||{numbers:[]}), linkedNumberId:id } } }))}
               />
+            </Section>
+          </div>
+
+          {/* RIGHT: Call transcript + logs */}
+          <div className="col-span-12 xl:col-span-5 space-y-10">
+            <Section title="Call Transcript" icon={<Archive className="w-4 h-4 icon" />}>
+              <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1" style={{ scrollbarWidth:'thin' }}>
+                {transcript.length === 0 && (
+                  <div className="text-sm opacity-70">No transcript yet. Start a call to see messages here.</div>
+                )}
+                {transcript.map((t, i) => (
+                  <div key={i} className="rounded-xl px-3 py-2"
+                       style={{
+                         background: t.role==='assistant' ? 'rgba(255,255,255,.04)' : 'rgba(16,185,129,.08)',
+                         border: '1px solid var(--va-border)'
+                       }}>
+                    <div className="text-[11px] opacity-70 mb-0.5">{t.role==='assistant'?'Assistant':'You'} • {new Date(t.ts).toLocaleTimeString()}</div>
+                    <div className="text-sm">{t.text}</div>
+                  </div>
+                ))}
+              </div>
+            </Section>
+
+            <Section title="Call Logs" icon={<ListTree className="w-4 h-4 icon" />}>
+              <div className="space-y-2">
+                {callsForAssistant.length === 0 && <div className="text-sm opacity-70">No calls yet.</div>}
+                {callsForAssistant.map(c => (
+                  <div key={c.id} className="rounded-xl px-3 py-3"
+                       style={{ background:'var(--va-card)', border:'1px solid var(--va-border)' }}>
+                    <div className="flex items-center justify-between">
+                      <div className="text-sm font-medium">{c.type} • {new Date(c.startedAt).toLocaleString()}</div>
+                      <div className="text-xs opacity-70">{c.endedReason || 'In progress'}</div>
+                    </div>
+                    {(c.assistantPhoneNumber || c.customerPhoneNumber) && (
+                      <div className="text-xs opacity-70 mt-1">
+                        {c.assistantPhoneNumber ? <>Assistant #: {c.assistantPhoneNumber} • </> : null}
+                        {c.customerPhoneNumber ? <>Customer #: {c.customerPhoneNumber}</> : null}
+                      </div>
+                    )}
+                    <details className="mt-2">
+                      <summary className="cursor-pointer text-sm">Transcript</summary>
+                      <div className="mt-2 space-y-2">
+                        {c.transcript.map((t, i) => (
+                          <div key={i} className="rounded-lg px-2 py-1"
+                               style={{ background:'rgba(255,255,255,.03)', border:'1px solid var(--va-border)' }}>
+                            <div className="text-[11px] opacity-70">{t.role==='assistant'?'Assistant':'You'} • {new Date(t.ts).toLocaleTimeString()}</div>
+                            <div className="text-sm">{t.text}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  </div>
+                ))}
+              </div>
             </Section>
           </div>
         </div>
@@ -1021,17 +1270,19 @@ function Section({ title, icon, children }:{ title: string; icon: React.ReactNod
 /* =============================================================================
    Telephony editor
 ============================================================================= */
-function TelephonyEditor({ numbers, onAdd, onRemove }:{
+function TelephonyEditor({ numbers, linkedId, onAdd, onRemove, onLink }:{
   numbers: PhoneNum[];
+  linkedId?: string;
   onAdd: (e164: string, label?: string) => void;
   onRemove: (id: string) => void;
+  onLink: (id: string) => void;
 }) {
   const [e164, setE164] = useState('');
   const [label, setLabel] = useState('');
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-4" style={{ gridTemplateColumns:'repeat(3, minmax(240px, 1fr))' }}>
+      <div className="grid gap-4" style={{ gridTemplateColumns:'repeat(3, minmax(220px, 1fr))' }}>
         <div>
           <div className="mb-1.5 text-[13px] font-medium" style={{ color:'var(--text)' }}>Phone Number (E.164)</div>
           <input
@@ -1066,23 +1317,33 @@ function TelephonyEditor({ numbers, onAdd, onRemove }:{
         {numbers.length === 0 && (
           <div className="text-sm opacity-70">No phone numbers added yet.</div>
         )}
-        {numbers.map(n => (
-          <div key={n.id} className="flex items-center justify-between rounded-xl px-3 py-2"
-               style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)' }}>
-            <div className="min-w-0">
-              <div className="font-medium truncate">{n.label || 'Untitled'}</div>
-              <div className="text-xs opacity-70">{n.e164}</div>
+        {numbers.map(n => {
+          const linked = n.id === linkedId;
+          return (
+            <div key={n.id} className="flex items-center justify-between rounded-xl px-3 py-2"
+                 style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)' }}>
+              <div className="min-w-0">
+                <div className="font-medium truncate">{n.label || 'Untitled'} {linked ? <span className="text-xs opacity-70">• Linked</span> : null}</div>
+                <div className="text-xs opacity-70">{n.e164}</div>
+              </div>
+              <div className="flex items-center gap-2">
+                {!linked ? (
+                  <button onClick={()=> onLink(n.id)} className="btn btn--green text-xs"><Check className="w-4 h-4 text-white" /> <span className="text-white">Link</span></button>
+                ) : (
+                  <button onClick={()=> onLink('' as any)} className="btn btn--ghost text-xs">Unlink</button>
+                )}
+                <button onClick={()=> onRemove(n.id)} className="btn btn--danger text-xs"><Trash2 className="w-4 h-4" /> Remove</button>
+              </div>
             </div>
-            <button onClick={()=> onRemove(n.id)} className="btn btn--danger text-xs"><Trash2 className="w-4 h-4" /> Remove</button>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
 }
 
 /* =============================================================================
-   Scoped CSS (unchanged visuals; new grid so the rail hugs the app sidebar)
+   Scoped CSS
 ============================================================================= */
 function StyleBlock() {
   return (
@@ -1108,8 +1369,6 @@ function StyleBlock() {
   --va-shadow-side:8px 0 28px rgba(0,0,0,.42);
   --va-rail-w:360px;
 }
-
-/* Light theme swap */
 :root:not([data-theme="dark"]) .${SCOPE}{
   --bg:#f7f9fb;
   --text:#101316;
@@ -1130,30 +1389,11 @@ function StyleBlock() {
   --va-shadow-side:8px 0 26px rgba(0,0,0,.08);
 }
 
-/* ====== GRID that hugs the app sidebar (no fixed) ====== */
-.${SCOPE} .va-grid{
-  display:grid;
-  grid-template-columns: var(--app-sidebar-w, 248px) var(--va-rail-w-dyn, var(--va-rail-w, 360px)) 1fr;
-  column-gap: 0; /* rail touches the sidebar spacer */
-  min-height: calc(100vh - var(--app-header-h, 64px));
-}
-
-/* Assistants rail visuals */
-.${SCOPE} .va-rail{
-  background:var(--va-sidebar);
-  border-right:1px solid var(--va-border);
-  box-shadow:var(--va-shadow-side);
-}
-
-/* Main content column */
-.${SCOPE} .va-main{
-  padding-right:clamp(20px, 4vw, 40px);
-  padding-top:calc(var(--app-header-h, 64px) + 12px);
-  padding-bottom:88px;
-}
-
-/* icons + buttons (kept) */
+/* main */
+.${SCOPE} .va-main{ max-width: none !important; }
 .${SCOPE} .icon{ color: var(--accent); }
+
+/* unified button sizing */
 .${SCOPE} .btn{
   display:inline-flex; align-items:center; gap:.5rem;
   border-radius:14px; padding:.65rem 1rem; font-size:14px; line-height:1;
@@ -1175,17 +1415,15 @@ function StyleBlock() {
   border-color:rgba(220,38,38,.35);
 }
 
-/* sliders */
 .${SCOPE} .va-range{ -webkit-appearance:none; height:4px; background:color-mix(in oklab, var(--accent) 24%, #0000); border-radius:999px; outline:none; }
 .${SCOPE} .va-range::-webkit-slider-thumb{ -webkit-appearance:none; width:14px;height:14px;border-radius:50%;background:var(--accent); border:2px solid #fff; box-shadow:0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent); }
 .${SCOPE} .va-range::-moz-range-thumb{ width:14px;height:14px;border:0;border-radius:50%;background:var(--accent); box-shadow:0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent); }
 
 /* no transitions on left so Safari/iPad won't jitter during sidebar animation */
-.${SCOPE} .va-rail{ transition:none !important; }
+.${SCOPE} aside{ transition:none !important; }
 
 @media (max-width: 1180px){
   .${SCOPE}{ --va-rail-w: 320px; }
-  .${SCOPE} .va-grid{ grid-template-columns: var(--app-sidebar-w, 248px) var(--va-rail-w-dyn, 320px) 1fr; }
 }
 `}</style>
   );
