@@ -1,16 +1,18 @@
+// components/voice/VoiceAgentSection.tsx
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import {
-  Search, Plus, Folder, FolderOpen, Check, Trash2, Copy, Edit3,
-  FileText, Mic2, BookOpen, SlidersHorizontal, PanelLeft, Bot,
-  RefreshCw, Phone as PhoneIcon, Rocket, PhoneCall, PhoneOff,
-  MessageSquare, ListTree, AudioLines, Volume2, Save
+  Search, Plus, Check, Trash2, Copy, Edit3, FileText, Mic2, BookOpen, PanelLeft,
+  RefreshCw, Phone as PhoneIcon, Rocket, PhoneCall, PhoneOff, MessageSquare,
+  ListTree, AudioLines, Volume2, Save
 } from 'lucide-react';
 import { scopedStorage } from '@/utils/scoped-storage';
 
-/* ===== Shared mini UI (same names as before so imports aren’t needed) ===== */
+/* ============================================================================
+   Tiny UI atoms (in-file to keep it self-contained)
+============================================================================ */
 const SCOPE = 'va-scope';
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (<div><div className="mb-1.5 text-[13px] font-medium" style={{ color:'var(--text)' }}>{label}</div>{children}</div>);
@@ -109,7 +111,9 @@ function StyleBlock(){ return (<style jsx global>{`
 .btn--danger{ background:rgba(220,38,38,.12); color:#fca5a5; border-color:rgba(220,38,38,.35); }
 `}</style>);}
 
-/* ================================ Types & Local ================================ */
+/* ============================================================================
+   Types & Local state
+============================================================================ */
 type Provider = 'openai';
 type ModelId = 'gpt-4o'|'gpt-4o-mini'|'gpt-4.1'|'gpt-3.5-turbo';
 type VoiceProvider = 'openai'|'elevenlabs';
@@ -140,15 +144,16 @@ const ak = (id:string)=>`voice:assistant:${id}`;
 const readLS = <T,>(k:string):T|null => { try{ const r=localStorage.getItem(k); return r?JSON.parse(r) as T:null; }catch{ return null; } };
 const writeLS = <T,>(k:string,v:T)=>{ try{ localStorage.setItem(k, JSON.stringify(v)); }catch{} };
 
-/* ============================== Scoped storage buckets ============================== */
-/** EXACTLY like Step 2 */
+/* ============================================================================
+   Scoped-storage buckets (match Step2ModelSettings)
+============================================================================ */
 const KEY_BUCKETS = ['apiKeys.v1','apiKeys'] as const;
 const KEY_SELECTED = 'apiKeys.selectedId';
-/** Adjust if your Phone Numbers page uses another key */
 const PN_BUCKETS  = ['phoneNumbers.v1','phoneNumbers'] as const;
-const PN_SELECTED = 'phoneNumbers.selectedId';
 
-/* ================================ Prompt & Speech ================================ */
+/* ============================================================================
+   Prompt + Speech
+============================================================================ */
 const BASE_PROMPT = `[Identity]
 You are a friendly, fast, accurate voice assistant.
 
@@ -173,35 +178,38 @@ You are a friendly, fast, accurate voice assistant.
 * No medical/legal/financial advice beyond high-level pointers.
 * Decline restricted actions; suggest alternatives.`.trim();
 
+/* ---------- Speech recognition ---------- */
 function makeRecognizer(onFinal:(t:string)=>void){
   const SR:any=(window as any).webkitSpeechRecognition||(window as any).SpeechRecognition; if(!SR) return null;
   const r=new SR(); r.continuous=true; r.interimResults=true; r.lang='en-US';
   r.onresult=(e:any)=>{ let final=''; for(let i=e.resultIndex;i<e.results.length;i++){ if(e.results[i].isFinal) final+=e.results[i][0].transcript; } if(final.trim()) onFinal(final.trim()); };
   return r;
 }
-async function speakVia11Labs(text:string, voiceId:string){
+
+/* ---------- ElevenLabs (old working style) + browser fallback ---------- */
+async function ttsElevenLabs(text:string, voiceId:string){
   const r=await fetch('/api/tts/elevenlabs',{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ text, voiceId })});
   if(!r.ok) throw new Error(await r.text());
   const blob=await r.blob(); const url=URL.createObjectURL(blob); const a=new Audio(url); await a.play(); a.onended=()=>URL.revokeObjectURL(url);
 }
-async function speakFallback(text:string){
+async function ttsFallback(text:string){
   const s=window.speechSynthesis; const u=new SpeechSynthesisUtterance(text);
   const vs=s.getVoices(); u.voice = vs.find(v=>/US|en-US/i.test(`${v.name} ${v.lang}`)) || vs[0]; s.cancel(); s.speak(u);
 }
 async function speak(text:string, provider:VoiceProvider, voiceId:string){
-  try{
-    if(provider==='elevenlabs'){ await speakVia11Labs(text, voiceId); return; }
-  }catch(e){ console.warn('ElevenLabs failed, fallback TTS'); }
-  await speakFallback(text);
+  try{ if(provider==='elevenlabs'){ await ttsElevenLabs(text, voiceId); return; } }catch(e){ console.warn('TTS fallback', e); }
+  await ttsFallback(text);
 }
 
-/* ==================================== Component ==================================== */
+/* ============================================================================
+   Component
+============================================================================ */
 export default function VoiceAgentSection(){
-  /* ---------- registries from scopedStorage ---------- */
+  /* ----- load registries from scoped storage (matches Step 2) ----- */
   const [apiKeys, setApiKeys]   = useState<RegistryOpenAIKey[]>([]);
   const [phones,  setPhones]    = useState<RegistryPhone[]>([]);
   const [selectedKeyId, setSelectedKeyId] = useState<string>('');
-  const [loadedRegistries, setLoadedRegistries] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const [loadErr, setLoadErr] = useState<string>('');
 
   useEffect(()=>{ (async()=>{
@@ -209,15 +217,13 @@ export default function VoiceAgentSection(){
       const ss = await scopedStorage();
       await ss.ensureOwnerGuard();
 
-      // Keys (exactly like Step 2)
+      // API keys
       let keys:RegistryOpenAIKey[] = [];
       for (const b of KEY_BUCKETS){
         const v = await ss.getJSON<RegistryOpenAIKey[]>(b, []);
         if (Array.isArray(v) && v.length){ keys = v.filter(Boolean).map(k=>({ id:String(k.id), name:String(k.name), key:String(k.key) })); break; }
       }
       setApiKeys(keys);
-
-      // Selected key id (Step 2 writes here)
       const selId = await ss.getJSON<string>(KEY_SELECTED, '');
       if (selId && keys.some(k=>k.id===selId)) setSelectedKeyId(selId);
       else if (keys[0]?.id) { setSelectedKeyId(keys[0].id); await ss.setJSON(KEY_SELECTED, keys[0].id); }
@@ -230,17 +236,14 @@ export default function VoiceAgentSection(){
       }
       setPhones(pns);
 
-      setLoadedRegistries(true);
-    }catch(e:any){
-      setLoadErr(e?.message || 'Failed to load keys/phones');
-      setLoadedRegistries(true);
-    }
+      setLoaded(true);
+    }catch(e:any){ setLoadErr(e?.message || 'Failed to load keys/phones'); setLoaded(true); }
   })(); },[]);
 
   const resolveKeyById = (id?:string)=> (id ? apiKeys.find(k=>k.id===id)?.key : apiKeys.find(Boolean)?.key) || '';
   const resolvePhoneById = (id?:string)=> (id ? phones.find(p=>p.id===id) : undefined);
 
-  /* ---------- assistant list ---------- */
+  /* ----- assistants ----- */
   const [assistants, setAssistants] = useState<Assistant[]>([]);
   const [activeId, setActiveId] = useState('');
   const [query,setQuery]=useState('');
@@ -256,7 +259,7 @@ export default function VoiceAgentSection(){
         id:'riley', name:'Riley', folder:'Voice', updatedAt:Date.now(), published:false,
         config:{
           model:{ provider:'openai', model:'gpt-4o', firstMessageMode:'assistant_first', firstMessage:'Hello! How can I help today?', systemPrompt:BASE_PROMPT, temperature:0.5, openaiKeyId: '' },
-          voice:{ provider:'elevenlabs', voiceId:'rachel', voiceLabel:'Rachel (US)' },
+          voice:{ provider:'elevenlabs', voiceId:'Rachel', voiceLabel:'Rachel (US)' },
           transcriber:{ provider:'deepgram', model:'nova-2', language:'en', denoise:false, confidenceThreshold:0.4, numerals:false },
           tools:{ enableEndCall:true, dialKeypad:true },
           telephony:{ linkedPhoneId: undefined }
@@ -271,10 +274,9 @@ export default function VoiceAgentSection(){
     if (!readLS<Record<string,string>>(LS_ROUTES)) writeLS(LS_ROUTES, {});
   },[]);
 
-  // If registries loaded and assistant has empty keyId, default it like Step 2
+  // Default assistant key id (once registries are loaded)
   useEffect(()=>{
-    if(!loadedRegistries) return;
-    if(!activeId) return;
+    if(!loaded || !activeId) return;
     const a = readLS<Assistant>(ak(activeId)); if(!a) return;
     if(!a.config.model.openaiKeyId){
       const idToUse = selectedKeyId || apiKeys[0]?.id || '';
@@ -285,7 +287,7 @@ export default function VoiceAgentSection(){
         writeLS(LS_LIST, list); setAssistants(list); setRev(r=>r+1);
       }
     }
-  },[loadedRegistries, selectedKeyId, activeId, apiKeys]);
+  },[loaded, selectedKeyId, activeId, apiKeys]);
 
   const active = useMemo(()=> activeId ? readLS<Assistant>(ak(activeId)) : null, [activeId, rev]);
   const updateActive = (mut:(a:Assistant)=>Assistant) => {
@@ -301,7 +303,7 @@ export default function VoiceAgentSection(){
       id, name:'New Assistant', updatedAt:Date.now(), published:false,
       config:{
         model:{ provider:'openai', model:'gpt-4o', firstMessageMode:'assistant_first', firstMessage:'Hello!', systemPrompt:'', temperature:0.5, openaiKeyId: selectedKeyId || apiKeys[0]?.id },
-        voice:{ provider:'elevenlabs', voiceId:'rachel', voiceLabel:'Rachel (US)' },
+        voice:{ provider:'elevenlabs', voiceId:'Rachel', voiceLabel:'Rachel (US)' },
         transcriber:{ provider:'deepgram', model:'nova-2', language:'en', denoise:false, confidenceThreshold:0.4, numerals:false },
         tools:{ enableEndCall:true, dialKeypad:true },
         telephony:{ linkedPhoneId: undefined }
@@ -315,9 +317,9 @@ export default function VoiceAgentSection(){
     localStorage.removeItem(ak(id)); if(activeId===id && list.length) setActiveId(list[0].id); if(!list.length) setActiveId(''); setRev(r=>r+1);
   };
 
-  /* ---------- voices ---------- */
+  /* ----- voices (US stock) ----- */
   const openaiVoices=[{value:'alloy',label:'Alloy (Browser)'},{value:'ember',label:'Ember (Browser)'}];
-  const elevenVoices=[{value:'rachel',label:'Rachel (US)'},{value:'adam',label:'Adam (US)'},{value:'bella',label:'Bella (US)'}];
+  const elevenVoices=[{value:'Rachel',label:'Rachel (US)'},{value:'Adam',label:'Adam (US)'},{value:'Bella',label:'Bella (US)'}];
   const [pendingVoiceId,setPendingVoiceId]=useState<string|null>(null);
   const [pendingVoiceLabel,setPendingVoiceLabel]=useState<string|null>(null);
   useEffect(()=>{ if(active){ setPendingVoiceId(active.config.voice.voiceId); setPendingVoiceLabel(active.config.voice.voiceLabel);} },[active?.id]);
@@ -338,7 +340,7 @@ export default function VoiceAgentSection(){
   };
   const testVoice=async()=>{ if(!active||!pendingVoiceId) return; await speak('This is a quick preview of the selected voice.', active.config.voice.provider, pendingVoiceId); };
 
-  /* ---------- call & chat ---------- */
+  /* ----- call & chat ----- */
   const [currentCallId,setCurrentCallId]=useState<string|null>(null);
   const [transcript,setTranscript]=useState<TranscriptTurn[]>([]);
   const recogRef=useRef<any|null>(null);
@@ -379,7 +381,7 @@ export default function VoiceAgentSection(){
 
   async function startCall(){
     if(!active) return;
-    if(!loadedRegistries){ alert('Loading keys…'); return; }
+    if(!loaded){ alert('Loading keys…'); return; }
     const id=`call_${crypto.randomUUID?.()||Math.random().toString(36).slice(2)}`;
     setCurrentCallId(id); setTranscript([]); historyRef.current=[];
     const linkedPhone = resolvePhoneById(active.config.telephony?.linkedPhoneId);
@@ -416,7 +418,7 @@ export default function VoiceAgentSection(){
     writeLS(LS_CALLS, calls); setCurrentCallId(null);
   }
 
-  /* ---------- UI helpers ---------- */
+  /* ----- UI helpers ----- */
   const callsForAssistant=(readLS<CallLog[]>(LS_CALLS)||[]).filter(c=>c.assistantId===active?.id);
   const visible = assistants.filter(a=>a.name.toLowerCase().includes(query.trim().toLowerCase()));
   const beginRename=(a:Assistant)=>{ setEditingId(a.id); setTempName(a.name); };
@@ -444,6 +446,9 @@ export default function VoiceAgentSection(){
     return (<div className={SCOPE}><div className="px-6 py-10 opacity-70">Create your first assistant.</div><StyleBlock /></div>);
   }
 
+  /* ============================================================================
+     Render
+  ============================================================================ */
   return (
     <div className={SCOPE} style={{ background:'var(--bg)', color:'var(--text)' }}>
       {/* LEFT RAIL */}
@@ -463,7 +468,8 @@ export default function VoiceAgentSection(){
                 <div key={a.id} className="w-full rounded-xl p-3" style={{ background: isActive?'color-mix(in oklab, var(--accent) 10%, transparent)':'var(--va-card)', border:`1px solid ${isActive?'color-mix(in oklab, var(--accent) 35%, var(--va-border))':'var(--va-border)'}`}}>
                   <button className="w-full text-left flex items-center justify-between" onClick={()=>setActiveId(a.id)}>
                     <div className="min-w-0">
-                      <div className="font-medium truncate flex items-center gap-2"><Bot className="w-4 h-4" />
+                      <div className="font-medium truncate flex items-center gap-2">
+                        <MessageSquare className="w-4 h-4" />
                         {!isEdit ? <span className="truncate">{a.name}</span> :
                         <input autoFocus value={tempName} onChange={(e)=>setTempName(e.target.value)} onKeyDown={(e)=>{ if(e.key==='Enter') saveRename(a); if(e.key==='Escape') setEditingId(null); }} className="bg-transparent rounded-md px-2 py-1 outline-none w-full" style={{ border:'1px solid var(--va-input-border)', color:'var(--text)' }}/>}
                       </div>
@@ -533,7 +539,7 @@ export default function VoiceAgentSection(){
                   value={active.config.model.openaiKeyId || ''}
                   onChange={(id)=> updateActive(a=>({...a, config:{...a.config, model:{...a.config.model, openaiKeyId:id||undefined}}}))}
                   items={apiKeys.map(k=>({ value:k.id, label:`${k.name} ••••${(k.key||'').slice(-4).toUpperCase()}` }))}
-                  placeholder={loadedRegistries ? (apiKeys.length? 'Choose…' : (loadErr || 'No API keys found — add in API Keys page.')) : 'Loading keys…'}
+                  placeholder={loaded ? (apiKeys.length? 'Choose…' : (loadErr || 'No API keys found — add in API Keys page.')) : 'Loading keys…'}
                 />
               </Field>
               <Field label="Temperature">
@@ -574,8 +580,8 @@ export default function VoiceAgentSection(){
               <Field label="Voice">
                 <Select value={pendingVoiceId || active.config.voice.voiceId} onChange={handleVoiceIdChange}
                   items={(active.config.voice.provider==='elevenlabs'
-                    ? [{value:'rachel',label:'Rachel (US)'},{value:'adam',label:'Adam (US)'},{value:'bella',label:'Bella (US)'}]
-                    : [{value:'alloy',label:'Alloy (Browser)'},{value:'ember',label:'Ember (Browser)'}]
+                    ? elevenVoices
+                    : openaiVoices
                   )}/>
               </Field>
             </div>
@@ -597,8 +603,8 @@ export default function VoiceAgentSection(){
           {/* Telephony (scoped storage) */}
           <Section title="Telephony (from Phone Numbers page)" icon={<PhoneIcon className="w-4 h-4" />}>
             <div className="space-y-2">
-              {(!loadedRegistries) && <div className="text-sm opacity-70">Loading phone numbers…</div>}
-              {(loadedRegistries && phones.length===0) && <div className="text-sm opacity-70">{loadErr || 'No phone numbers found. Add them on the Phone Numbers page.'}</div>}
+              {(!loaded) && <div className="text-sm opacity-70">Loading phone numbers…</div>}
+              {(loaded && phones.length===0) && <div className="text-sm opacity-70">{loadErr || 'No phone numbers found. Add them on the Phone Numbers page.'}</div>}
               {phones.map(p=>(
                 <label key={p.id} className="flex items-center justify-between rounded-xl px-3 py-2"
                   style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)' }}>
