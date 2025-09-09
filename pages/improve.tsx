@@ -210,7 +210,7 @@ export default function ImprovePage() {
   const [state, setState] = useState<AgentState | null>(null);
 
   const [input, setInput] = useState('');
-  const [addingRefine, setAddingRefine] = useState(''); // <-- fixed "const"
+  const [addingRefine, setAddingRefine] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showWhyFor, setShowWhyFor] = useState<string | null>(null);
@@ -346,6 +346,39 @@ export default function ImprovePage() {
     setState({ ...state, ...last, redo: newRedo, undo: [...state.undo, undoSnap] } as AgentState);
   }
 
+  // --- Agent creation (for the selector) ---
+  function createAgent() {
+    const a: Agent = {
+      id: uid('agent'),
+      name: `Agent ${agents.length + 1}`,
+      createdAt: now(),
+      model: 'gpt-4o',
+      temperature: DEFAULT_TEMPERATURE,
+    };
+    const next = [...agents, a];
+    saveAgents(next);
+    setAgents(next);
+    saveSelectedAgentId(a.id);
+    setAgentId(a.id);
+
+    const st: AgentState = {
+      model: a.model,
+      temperature: a.temperature ?? DEFAULT_TEMPERATURE,
+      refinements: [],
+      history: [{
+        id: uid('sys'),
+        role: 'system',
+        content: 'This is the Improve panel. Your agent will reply based on the active refinements.',
+        createdAt: now(),
+      }],
+      versions: [],
+      undo: [],
+      redo: [],
+    };
+    saveAgentState(a.id, st);
+    setState(st);
+  }
+
   // Chat
   async function sendMessage() {
     if (!state) return;
@@ -392,6 +425,10 @@ export default function ImprovePage() {
 
   // Derived
   const selectedAgent = useMemo(() => agents.find(a => a.id === agentId) ?? null, [agents, agentId]);
+  const safeSelectedId = useMemo(
+    () => (agentId && agents.some(a => a.id === agentId)) ? agentId : (agents[0]?.id ?? ''),
+    [agentId, agents]
+  );
 
   if (!state || !selectedAgent) {
     return (
@@ -413,21 +450,35 @@ export default function ImprovePage() {
       <div className="sticky top-0 z-20 backdrop-blur-sm border-b"
            style={{ background: 'color-mix(in oklab, var(--panel) 88%, transparent)', borderColor: 'var(--border)' }}>
         <div className="mx-auto w-full max-w-[1400px] px-4 py-3 flex items-center justify-between">
+          {/* Agent picker (safe value + create button) */}
           <div className="flex items-center gap-3">
             <Bot size={20} />
             <span className="font-semibold">Improve</span>
             <span className="opacity-60">/</span>
+
             <select
               className="rounded-md px-2 py-1 text-sm border bg-transparent"
               style={{ borderColor: 'var(--border)' }}
-              value={selectedAgent.id}
-              onChange={e => selectAgent(e.target.value)}
+              value={safeSelectedId}
+              onChange={(e) => {
+                const id = e.target.value;
+                if (id && id !== agentId) selectAgent(id);
+              }}
               title="Pick which agent you want to change"
             >
               {agents.map(a => (
                 <option key={a.id} value={a.id}>{a.name}</option>
               ))}
             </select>
+
+            <button
+              onClick={createAgent}
+              className="px-2 py-1 rounded-md border"
+              style={{ borderColor: 'var(--border)' }}
+              title="Create a new agent"
+            >
+              + New
+            </button>
           </div>
 
           <div className="flex items-center gap-2">
@@ -610,7 +661,7 @@ export default function ImprovePage() {
             ))}
 
             {isSending && (
-              <div className="max-w-[80%]">
+              <div className="max-w=[80%]">
                 <div className="rounded-lg px-3 py-2 text-sm border" style={{ borderColor: 'var(--border)', background: 'var(--panel)' }}>
                   <span className="inline-flex gap-1 items-center">
                     <span className="w-2 h-2 rounded-full animate-bounce" style={{ background: 'currentColor', animationDelay: '0ms' }} />
