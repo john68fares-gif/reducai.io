@@ -1,68 +1,55 @@
+// pages/api/chat.ts
 import type { NextApiRequest, NextApiResponse } from "next";
 import OpenAI from "openai";
 
-type ReqBody = {
-  message: string;      // user input
-  agentPrompt?: string; // prompt saved from agent
-  model?: string;       // chosen model
-  temperature?: number; // chosen temperature
-  apiKey?: string;      // optional override
-};
+type Message = { role: "system" | "user" | "assistant"; content: string };
 
-type Resp =
-  | { ok: true; reply: string }
-  | { ok: false; error: string };
-
-export default async function handler(
-  req: NextApiRequest,
-  res: NextApiResponse<Resp>
-) {
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "POST") {
-    res.status(405).json({ ok: false, error: "Method not allowed" });
-    return;
+    return res.status(405).json({ error: "Method not allowed" });
   }
 
   try {
-    const {
-      message,
-      agentPrompt = "You are a helpful assistant.",
-      model = "gpt-4o-mini",
-      temperature = 0.7,
-      apiKey = process.env.OPENAI_API_KEY, // fallback to server env
-    } = req.body as ReqBody;
+    const { agent, messages } = req.body as {
+      agent: {
+        name: string;
+        prompt: string;
+        model: string;
+        temperature: number;
+        apiKey?: string; // optional per-agent API key
+      };
+      messages: Message[];
+    };
 
-    if (!message) {
-      res.status(400).json({ ok: false, error: "Missing message." });
-      return;
-    }
-    if (!apiKey) {
-      res.status(400).json({ ok: false, error: "No API key provided." });
-      return;
+    if (!agent || !agent.prompt || !agent.model) {
+      return res.status(400).json({ error: "Missing agent config" });
     }
 
-    // Init OpenAI client
-    const openai = new OpenAI({ apiKey });
-
-    // Build messages
-    const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-      { role: "system", content: agentPrompt },
-      { role: "user", content: message },
-    ];
-
-    // Call OpenAI
-    const completion = await openai.chat.completions.create({
-      model,
-      messages,
-      temperature,
+    // Use either agent’s key (if stored) or fallback to global
+    const client = new OpenAI({
+      apiKey: agent.apiKey || process.env.OPENAI_API_KEY,
     });
 
-    const reply =
-      completion.choices[0]?.message?.content?.trim() ||
-      "(no response from model)";
+    // Construct conversation
+    const convo: Message[] = [
+      { role: "system", content: agent.prompt },
+      ...messages,
+    ];
 
-    res.status(200).json({ ok: true, reply });
-  } catch (e: any) {
-    console.error("Chat API error:", e);
-    res.status(500).json({ ok: false, error: e?.message || "Internal error" });
+    const resp = await client.chat.completions.create({
+      model: agent.model || "gpt-4o-mini",
+      temperature: agent.temperature ?? 0.5,
+      messages: convo,
+    });
+
+    const reply = resp.choices[0]?.message?.content || "⚠️ No response from model.";
+
+    return res.status(200).json({
+      ok: true,
+      reply,
+    });
+  } catch (err: any) {
+    console.error("Chat API error:", err);
+    return res.status(500).json({ error: err.message || "Server error" });
   }
 }
