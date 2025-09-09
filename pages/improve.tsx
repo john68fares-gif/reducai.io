@@ -7,90 +7,20 @@ import {
   Sparkles, Trash2, Undo2, Redo2, ChevronDown, ChevronUp, HelpCircle, X
 } from 'lucide-react';
 
-/* =============================================================================
-   SAFE STORAGE (SSR/Edge safe) + ACCOUNT SCOPING
-============================================================================= */
-type Backend = {
-  getItem: (k: string) => string | null;
-  setItem: (k: string, v: string) => void;
-  removeItem: (k: string) => void;
-};
-function makeMemoryBackend(): Backend {
-  const m = new Map<string, string>();
-  return {
-    getItem: (k) => (m.has(k) ? m.get(k)! : null),
-    setItem: (k, v) => { m.set(k, v); },
-    removeItem: (k) => { m.delete(k); },
-  };
-}
-function resolveBackend(): Backend {
-  if (typeof window === 'undefined') return makeMemoryBackend();
-  const ls: any = (window as any).localStorage;
-  if (ls && typeof ls.getItem === 'function' && typeof ls.setItem === 'function') return ls as Backend;
-  return makeMemoryBackend();
-}
-function getAccountKey(): string {
-  if (typeof window === 'undefined') return 'anon';
-  try {
-    const g = (window as any).__ACCOUNT_ID__ || (window as any).__USER_ID__;
-    if (g) return String(g);
-  } catch {}
-  try {
-    const u = new URL(window.location.href);
-    const p = u.searchParams.get('acc');
-    if (p) return p;
-  } catch {}
-  try {
-    const m = document.cookie.match(/(?:^|;\s*)accid=([^;]+)/);
-    if (m) return decodeURIComponent(m[1]);
-  } catch {}
-  try {
-    const id = (window as any).localStorage?.getItem('account:id');
-    if (id) return id;
-  } catch {}
-  return 'anon';
-}
-function createScopedStorage(scope: string) {
-  const backend = resolveBackend();
-  const account = getAccountKey();
-  const prefix = `${account}:${scope}:`;
-  return {
-    getItem<T = any>(k: string): T | null {
-      try {
-        const raw = backend.getItem(prefix + k);
-        if (!raw) return null;
-        return JSON.parse(raw) as T;
-      } catch { return null; }
-    },
-    setItem<T = any>(k: string, v: T): void {
-      try { backend.setItem(prefix + k, JSON.stringify(v)); } catch {}
-    },
-    removeItem(k: string): void {
-      try { backend.removeItem(prefix + k); } catch {}
-    },
-    _allKeys(): string[] {
-      try {
-        if (typeof window === 'undefined') return [];
-        const keys: string[] = [];
-        for (let i = 0; i < window.localStorage.length; i++) {
-          const k = window.localStorage.key(i);
-          if (!k) continue;
-          if (k.startsWith(prefix)) keys.push(k.slice(prefix.length));
-        }
-        return keys;
-      } catch { return []; }
-    }
-  };
-}
-const store = createScopedStorage('reduc');
+import { scopedStorage, migrateLegacyKeysToUser } from '@/utils/scoped-storage';
 
 /* =============================================================================
-   CONFIG
+   CONFIG / KEYS
 ============================================================================= */
 const SCOPE = 'improve';
 const MAX_REFINEMENTS = 5;
 const TYPING_LATENCY_MS = 950;
 const DEFAULT_TEMPERATURE = 0.5;
+
+const K_SELECTED_AGENT_ID = `${SCOPE}:selectedAgentId`;   // string
+const K_AGENT_LIST        = `agents`;                     // Agent[]
+const K_AGENT_META_PREFIX = `agents:meta:`;               // AgentMeta
+const K_IMPROVE_STATE     = `${SCOPE}:agent:`;            // AgentState
 
 type ModelId =
   | 'gpt-4o'
@@ -108,12 +38,6 @@ const MODEL_OPTIONS: Array<{ value: ModelId; label: string }> = [
   { value: 'o3',           label: 'o3 (reasoning)' },
   { value: 'o3-mini',      label: 'o3-mini (reasoning, fast)' },
 ];
-
-/* Canonical keys shared with the rest of app */
-const K_SELECTED_AGENT_ID = `${SCOPE}:selectedAgentId`;
-const K_AGENT_LIST        = `agents:all`;          // list of agents
-const K_AGENT_META_PREFIX = `agents:meta:`;        // per-agent tuning (model/temp/rules)
-const K_IMPROVE_STATE     = `${SCOPE}:agent:`;     // Improve’s per-agent (history/versions)
 
 /* =============================================================================
    TYPES
@@ -144,13 +68,14 @@ type AgentMeta = {
 };
 
 /* =============================================================================
-   HELPERS
+   STORAGE HELPER (async)
 ============================================================================= */
+type Store = Awaited<ReturnType<typeof scopedStorage>>;
 function uid(prefix = 'id'): string {
   return `${prefix}_${Math.random().toString(36).slice(2, 9)}${Date.now().toString(36).slice(-4)}`;
 }
-function now() { return Date.now(); }
-function clamp01(n: number) { return Math.max(0, Math.min(1, n)); }
+const now = () => Date.now();
+const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
 
 function normalizeAgents(list: any): Agent[] {
   if (!Array.isArray(list)) return [];
@@ -164,67 +89,7 @@ function normalizeAgents(list: any): Agent[] {
       temperature: typeof a.temperature === 'number' ? a.temperature : DEFAULT_TEMPERATURE
     }));
 }
-function discoverAgents(): Agent[] {
-  const main = normalizeAgents(store.getItem(K_AGENT_LIST));
-  if (main.length) return main;
 
-  const altKeys = [
-    `${SCOPE}:agents`,
-    `assistants:list`,
-    `builder:agents`,
-    `voice:assistants`,
-    `chat:agents`,
-  ];
-  for (const k of altKeys) {
-    const list = normalizeAgents(store.getItem(k));
-    if (list.length) { store.setItem(K_AGENT_LIST, list); return list; }
-  }
-
-  try {
-    for (const k of store._allKeys()) {
-      const list = normalizeAgents(store.getItem(k));
-      if (list.length) { store.setItem(K_AGENT_LIST, list); return list; }
-    }
-  } catch {}
-  return [];
-}
-function loadAgents(): Agent[] {
-  const list = discoverAgents();
-  if (list.length) return list;
-  const fallback = [{
-    id: uid('agent'),
-    name: 'My First Agent',
-    createdAt: now(),
-    model: 'gpt-4o' as ModelId,
-    temperature: DEFAULT_TEMPERATURE,
-  }];
-  store.setItem(K_AGENT_LIST, fallback);
-  return fallback;
-}
-function saveAgents(list: Agent[]) { store.setItem(K_AGENT_LIST, list); }
-
-function loadAgentMeta(agentId: string): AgentMeta | null {
-  return store.getItem(`${K_AGENT_META_PREFIX}${agentId}`);
-}
-function saveAgentMeta(agentId: string, meta: AgentMeta) {
-  store.setItem(`${K_AGENT_META_PREFIX}${agentId}`, meta);
-}
-
-function loadImproveState(agentId: string): AgentState | null {
-  return store.getItem(`${K_IMPROVE_STATE}${agentId}`);
-}
-function saveImproveState(agentId: string, st: AgentState) {
-  store.setItem(`${K_IMPROVE_STATE}${agentId}`, st);
-}
-
-function loadSelectedAgentId(): string | null { return store.getItem(K_SELECTED_AGENT_ID); }
-function saveSelectedAgentId(agentId: string) { store.setItem(K_SELECTED_AGENT_ID, agentId); }
-
-function pickLatestAgent(agents: Agent[]): Agent | null {
-  return agents.length ? [...agents].sort((a,b)=>b.createdAt-a.createdAt)[0] : null;
-}
-
-/* Reason text for the "Why?" modal */
 function reasonFrom(refs: Refinement[]): string {
   const active = refs.filter(r => r.enabled);
   if (!active.length) return 'No special requests are active—using a default helpful tone.';
@@ -232,7 +97,6 @@ function reasonFrom(refs: Refinement[]): string {
   return `Following your active refinements: ${bullets.join('; ')}.`;
 }
 
-/* Smarter default replies */
 function defaultAnswerFor(text: string, history: ChatMessage[]): string {
   const t = text.trim().toLowerCase();
   if (!t) return "Sure—what would you like to do?";
@@ -261,22 +125,18 @@ function defaultAnswerFor(text: string, history: ChatMessage[]): string {
     if (startCount <= 1) return "Great — let’s kick this off. " + actions;
     return "Okay, picking up: " + actions + " Tell me which one and any constraints.";
   }
-  if (isHelp) {
-    return "Absolutely. Tell me your objective and any constraints (deadline, style, length). " + actions;
-  }
-  if (isQuestion) {
-    return "Here’s a concise answer. If you want a specific tone or length, add a rule on the left.";
-  }
-  if (isNTM) {
-    return "No worries. Want to spin up something small? " + actions;
-  }
+  if (isHelp) return "Absolutely. Tell me your objective and any constraints (deadline, style, length). " + actions;
+  if (isQuestion) return "Here’s a concise answer. If you want a specific tone or length, add a rule on the left.";
+  if (isNTM) return "No worries. Want to spin up something small? " + actions;
   return "Got it. Here’s a concise response. If you want a different tone or structure, add a rule on the left.";
 }
 
 /* =============================================================================
-   MAIN
+   COMPONENT
 ============================================================================= */
 export default function ImprovePage() {
+  const [store, setStore] = useState<Store | null>(null);
+
   const [agents, setAgents] = useState<Agent[]>([]);
   const [agentId, setAgentId] = useState<string | null>(null);
   const [state, setState] = useState<AgentState | null>(null);
@@ -287,31 +147,48 @@ export default function ImprovePage() {
   const [showSettings, setShowSettings] = useState(false);
   const [showWhyFor, setShowWhyFor] = useState<string | null>(null);
 
-  // tiny visual save indicator
   const [isSaving, setIsSaving] = useState(false);
-  const [justSavedAt, setJustSavedAt] = useState<number>(0);
 
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Boot
+  /* ------------------------------ Boot ------------------------------ */
   useEffect(() => {
-    const list = loadAgents();
-    setAgents(list);
+    (async () => {
+      const st = await scopedStorage();
+      await st.ensureOwnerGuard();
+      await migrateLegacyKeysToUser();
+      setStore(st);
 
-    const savedId = loadSelectedAgentId();
-    const selected = list.find(a => a.id === savedId) ?? pickLatestAgent(list);
-    if (selected) {
-      setAgentId(selected.id);
-      hydrateFromAgent(selected.id, list);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+      // load or create agents list
+      let list = normalizeAgents(await st.getJSON<Agent[]>(K_AGENT_LIST, []));
+      if (!list.length) {
+        list = [{
+          id: uid('agent'),
+          name: 'My First Agent',
+          createdAt: now(),
+          model: 'gpt-4o',
+          temperature: DEFAULT_TEMPERATURE,
+        }];
+        await st.setJSON(K_AGENT_LIST, list);
+      }
+      setAgents(list);
+
+      // pick selected or latest
+      const savedId = await st.getJSON<string | null>(K_SELECTED_AGENT_ID, null as any);
+      const selected = list.find(a => a.id === savedId) ?? [...list].sort((a,b)=>b.createdAt-a.createdAt)[0];
+      if (selected) {
+        setAgentId(selected.id);
+        await hydrateFromAgent(st, selected.id, list);
+      }
+    })();
   }, []);
 
-  function hydrateFromAgent(id: string, list: Agent[] = agents) {
+  async function hydrateFromAgent(st: Store, id: string, list: Agent[] = agents) {
     const agent = list.find(a => a.id === id);
     if (!agent) return;
 
-    const base: AgentState = loadImproveState(id) ?? {
+    // Improve’s per-agent state (chat, versions…)
+    let base: AgentState = await st.getJSON<AgentState | null>(K_IMPROVE_STATE + id, null as any) ?? {
       model: agent.model,
       temperature: agent.temperature ?? DEFAULT_TEMPERATURE,
       refinements: [],
@@ -326,7 +203,8 @@ export default function ImprovePage() {
       redo: [],
     };
 
-    const meta = loadAgentMeta(id);
+    // Overlay tuning from agent meta
+    const meta = await st.getJSON<AgentMeta | null>(K_AGENT_META_PREFIX + id, null as any);
     if (meta) {
       base.model = meta.model;
       base.temperature = meta.temperature;
@@ -335,48 +213,47 @@ export default function ImprovePage() {
     if (!MODEL_OPTIONS.some(m => m.value === base.model)) base.model = 'gpt-4o';
 
     setState(base);
-    saveImproveState(id, base);
+    await st.setJSON(K_IMPROVE_STATE + id, base);
   }
 
-  // Persist Improve state (history etc.)
+  /* ------------------------------ Persist ------------------------------ */
   useEffect(() => {
-    if (!agentId || !state) return;
-    saveImproveState(agentId, state);
-  }, [agentId, state]);
+    if (!store || !agentId || !state) return;
+    store.setJSON(K_IMPROVE_STATE + agentId, state);
+  }, [store, agentId, state]);
 
-  // Auto-save tuning to the agent + show "Saving…/Saved"
+  // Auto-save tuning to agent meta + agents list
   useEffect(() => {
-    if (!agentId || !state) return;
-    // visual feedback
-    setIsSaving(true);
+    if (!store || !agentId || !state) return;
+    (async () => {
+      setIsSaving(true);
 
-    // persist tuning to agent meta
-    const meta: AgentMeta = {
-      model: state.model,
-      temperature: state.temperature,
-      refinements: state.refinements,
-      updatedAt: now(),
-    };
-    saveAgentMeta(agentId, meta);
+      // save per-agent tuning
+      const meta: AgentMeta = {
+        model: state.model,
+        temperature: state.temperature,
+        refinements: state.refinements,
+        updatedAt: now(),
+      };
+      await store.setJSON(K_AGENT_META_PREFIX + agentId, meta);
 
-    // also reflect on agents list
-    setAgents(prev => {
-      const next = prev.map(a => a.id === agentId ? { ...a, model: state.model, temperature: state.temperature } : a);
-      saveAgents(next);
-      return next;
-    });
+      // reflect model/temp on list
+      const latest = normalizeAgents(await store.getJSON<Agent[]>(K_AGENT_LIST, []));
+      const next = latest.map(a => a.id === agentId ? { ...a, model: state.model, temperature: state.temperature } : a);
+      await store.setJSON(K_AGENT_LIST, next);
+      setAgents(next);
 
-    // settle the "Saving…" indicator quickly
-    const t = setTimeout(() => { setIsSaving(false); setJustSavedAt(Date.now()); }, 300);
-    return () => clearTimeout(t);
-  }, [agentId, state?.model, state?.temperature, JSON.stringify(state?.refinements || [])]);
+      setIsSaving(false);
+    })();
+  // stringify refinements so the effect runs when content changes, not just length
+  }, [store, agentId, state?.model, state?.temperature, JSON.stringify(state?.refinements || [])]);
 
-  // Scroll
+  // scroll to bottom on new messages
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [state?.history.length, isSending]);
 
-  // Undo helpers
+  /* ------------------------------ Actions ------------------------------ */
   function snapshotCore(st: AgentState): Omit<AgentState, 'versions' | 'undo' | 'redo'> {
     const { model, temperature, refinements, history } = st;
     return { model, temperature, refinements: [...refinements], history: [...history] };
@@ -385,7 +262,6 @@ export default function ImprovePage() {
     setState(prev => prev ? { ...prev, undo: [...prev.undo, ss], redo: [] } : prev);
   }
 
-  // Refinements
   function handleAddRefinement() {
     if (!state) return;
     const text = addingRefine.trim();
@@ -412,7 +288,6 @@ export default function ImprovePage() {
     setState({ ...state, refinements: [] });
   }
 
-  // Settings
   function changeModel(m: ModelId) {
     if (!state) return;
     pushUndo(snapshotCore(state));
@@ -420,17 +295,19 @@ export default function ImprovePage() {
   }
   function changeTemperature(t: number) {
     if (!state) return;
-    const val = clamp01(t);
     pushUndo(snapshotCore(state));
-    setState({ ...state, temperature: val });
+    setState({ ...state, temperature: clamp01(t) });
   }
-  function selectAgent(id: string) {
+
+  async function selectAgent(id: string) {
+    if (!store) return;
     const a = agents.find(x => x.id === id);
     if (!a) return;
-    saveSelectedAgentId(a.id);
-    setAgentId(a.id);
-    hydrateFromAgent(a.id);
+    await store.setJSON(K_SELECTED_AGENT_ID, id);
+    setAgentId(id);
+    await hydrateFromAgent(store, id);
   }
+
   function saveVersion() {
     if (!state) return;
     const ver = { id: uid('ver'), label: new Date().toLocaleString(), createdAt: now(), snapshot: snapshotCore(state) };
@@ -458,40 +335,40 @@ export default function ImprovePage() {
     setState({ ...state, ...last, redo: newRedo, undo: [...state.undo, undoSnap] } as AgentState);
   }
 
-  // Optional: quick new agent
   function createAgent() {
-    const a: Agent = {
-      id: uid('agent'),
-      name: `Agent ${agents.length + 1}`,
-      createdAt: now(),
-      model: 'gpt-4o',
-      temperature: DEFAULT_TEMPERATURE,
-    };
-    const next = [...agents, a];
-    saveAgents(next);
-    setAgents(next);
-    saveSelectedAgentId(a.id);
-    setAgentId(a.id);
-
-    const st: AgentState = {
-      model: a.model,
-      temperature: a.temperature ?? DEFAULT_TEMPERATURE,
-      refinements: [],
-      history: [{
-        id: uid('sys'),
-        role: 'system',
-        content: 'This is the Improve panel. Your agent will reply based on the active refinements.',
+    (async () => {
+      if (!store) return;
+      const a: Agent = {
+        id: uid('agent'),
+        name: `Agent ${agents.length + 1}`,
         createdAt: now(),
-      }],
-      versions: [],
-      undo: [],
-      redo: [],
-    };
-    saveImproveState(a.id, st);
-    setState(st);
+        model: 'gpt-4o',
+        temperature: DEFAULT_TEMPERATURE,
+      };
+      const next = [...agents, a];
+      setAgents(next);
+      await store.setJSON(K_AGENT_LIST, next);
+      await selectAgent(a.id);
+
+      const st: AgentState = {
+        model: a.model,
+        temperature: a.temperature ?? DEFAULT_TEMPERATURE,
+        refinements: [],
+        history: [{
+          id: uid('sys'),
+          role: 'system',
+          content: 'This is the Improve panel. Your agent will reply based on the active refinements.',
+          createdAt: now(),
+        }],
+        versions: [],
+        undo: [],
+        redo: [],
+      };
+      await store.setJSON(K_IMPROVE_STATE + a.id, st);
+      setState(st);
+    })();
   }
 
-  // Chat
   async function sendMessage() {
     if (!state) return;
     const text = input.trim();
@@ -535,7 +412,7 @@ export default function ImprovePage() {
     if (last) navigator.clipboard?.writeText(last.content);
   }
 
-  // Derived
+  /* ------------------------------ Derived ------------------------------ */
   const selectedAgent = useMemo(() => agents.find(a => a.id === agentId) ?? null, [agents, agentId]);
   const safeSelectedId = useMemo(
     () => (agentId && agents.some(a => a.id === agentId)) ? agentId : (agents[0]?.id ?? ''),
@@ -573,10 +450,7 @@ export default function ImprovePage() {
               className="rounded-md px-2 py-1 text-sm border bg-transparent"
               style={{ borderColor: 'var(--border)' }}
               value={safeSelectedId}
-              onChange={(e) => {
-                const id = e.target.value;
-                if (id && id !== agentId) selectAgent(id);
-              }}
+              onChange={(e) => { const id = e.target.value; if (id && id !== agentId) selectAgent(id); }}
               title="Pick which agent you want to tune"
             >
               {agents.map(a => (
@@ -584,26 +458,13 @@ export default function ImprovePage() {
               ))}
             </select>
 
-            <button
-              onClick={createAgent}
-              className="px-2 py-1 rounded-md border"
-              style={{ borderColor: 'var(--border)' }}
-              title="Create a new agent"
-            >
+            <button onClick={createAgent} className="px-2 py-1 rounded-md border" style={{ borderColor: 'var(--border)' }}>
               + New
             </button>
 
             {/* Save indicator */}
             <div className="ml-2 text-xs flex items-center gap-1 opacity-80">
-              {isSaving ? (
-                <>
-                  <Loader2 size={14} className="animate-spin" /> Saving…
-                </>
-              ) : (
-                <>
-                  <Check size={14} /> Saved
-                </>
-              )}
+              {isSaving ? (<><Loader2 size={14} className="animate-spin" /> Saving…</>) : (<><Check size={14} /> Saved</>)}
             </div>
           </div>
 
@@ -641,9 +502,7 @@ export default function ImprovePage() {
                     <option key={m.value} value={m.value}>{m.label}</option>
                   ))}
                 </select>
-                <div className="mt-2 text-xs opacity-60">
-                  Tuning is auto-saved to this agent (per account).
-                </div>
+                <div className="mt-2 text-xs opacity-60">Tuning is auto-saved to this agent (per account).</div>
               </div>
 
               <div className="rounded-lg p-3 border" style={{ borderColor: 'var(--border)', background: 'var(--panel)' }}>
