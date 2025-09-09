@@ -10,12 +10,12 @@ import {
 /* =============================================================================
    SAFE STORAGE (SSR/Edge safe) + ACCOUNT SCOPING
    - Saves per account by prefixing keys with an account id.
-   - Where the account id comes from (first hit wins):
+   - Account id source (first hit wins):
      1) window.__ACCOUNT_ID__ (or __USER_ID__)
      2) URL ?acc=YOUR_ID
      3) cookie accid=YOUR_ID
      4) localStorage("account:id")
-     5) "anon" fallback
+     5) "anon"
 ============================================================================= */
 type Backend = {
   getItem: (k: string) => string | null;
@@ -104,7 +104,7 @@ const MODEL_OPTIONS: Array<{ value: ModelId; label: string }> = [
   { value: 'o3-mini',      label: 'o3-mini (reasoning, fast)' },
 ];
 
-// storage keys (scoped per account by the helper above)
+// storage keys (scoped per account)
 const K_SELECTED_AGENT_ID = `${SCOPE}:selectedAgentId`;
 const K_AGENT_LIST = `${SCOPE}:agents`;
 const K_AGENT_STATE_PREFIX = `${SCOPE}:agent:`;
@@ -210,7 +210,7 @@ export default function ImprovePage() {
   const [state, setState] = useState<AgentState | null>(null);
 
   const [input, setInput] = useState('');
-  the [addingRefine, setAddingRefine] = useState('');
+  const [addingRefine, setAddingRefine] = useState(''); // <-- fixed "const"
   const [isSending, setIsSending] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showWhyFor, setShowWhyFor] = useState<string | null>(null);
@@ -405,7 +405,7 @@ export default function ImprovePage() {
   }
 
   /* =============================================================================
-     UI (color tokens + explicit “applies to agent” copy)
+     UI
   ============================================================================= */
   return (
     <div className={`${SCOPE} min-h-screen font-sans`} style={{ background: 'var(--bg)', color: 'var(--text)' }}>
