@@ -1,38 +1,31 @@
-// app/api/tts/elevenlabs/route.ts
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
-export const runtime = 'nodejs';         // ensure Buffer is available
-export const dynamic = 'force-dynamic';  // no caching
+export const runtime = 'nodejs';
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const { text, voiceId, apiKey } = (await req.json()) as {
-      text: string;
-      voiceId: string;
-      apiKey?: string;
-    };
-
-    const key = apiKey || process.env.ELEVENLABS_API_KEY;
-    if (!key) {
-      return NextResponse.json({ error: 'Missing ElevenLabs API key' }, { status: 400 });
+    const { voiceId, text } = await req.json();
+    if (!process.env.ELEVENLABS_API_KEY) {
+      return new NextResponse('Missing ELEVENLABS_API_KEY', { status: 500 });
     }
-    if (!text || !voiceId) {
-      return NextResponse.json({ error: 'Missing text or voiceId' }, { status: 400 });
+    if (!text || typeof text !== 'string') {
+      return new NextResponse('Missing "text" in request body', { status: 400 });
     }
 
-    const r = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+    const id = voiceId || 'Rachel';
+    const r = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${id}`, {
       method: 'POST',
       headers: {
-        'xi-api-key': key,
-        'Content-Type': 'application/json',
-        Accept: 'audio/mpeg',
+        'xi-api-key': process.env.ELEVENLABS_API_KEY!,
+        'content-type': 'application/json',
       },
       body: JSON.stringify({
         text,
+        model_id: 'eleven_multilingual_v2',
         voice_settings: {
-          stability: 0.4,
-          similarity_boost: 0.85,
-          style: 0.35,
+          stability: 0.5,
+          similarity_boost: 0.75,
+          style: 0.3,
           use_speaker_boost: true,
         },
       }),
@@ -40,23 +33,18 @@ export async function POST(req: Request) {
 
     if (!r.ok) {
       const msg = await r.text();
-      return NextResponse.json({ error: `ElevenLabs error: ${msg}` }, { status: r.status });
+      return new NextResponse(`TTS error: ${msg}`, { status: r.status });
     }
 
-    const arrayBuf = await r.arrayBuffer();
-    const buf = Buffer.from(arrayBuf);
-
+    const buf = Buffer.from(await r.arrayBuffer());
     return new NextResponse(buf, {
       status: 200,
       headers: {
-        'Content-Type': 'audio/mpeg',
-        'Cache-Control': 'no-store',
+        'content-type': 'audio/mpeg',
+        'cache-control': 'no-store',
       },
     });
   } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message || 'Server error' },
-      { status: 500 },
-    );
+    return new NextResponse(`TTS exception: ${e?.message || String(e)}`, { status: 500 });
   }
 }
