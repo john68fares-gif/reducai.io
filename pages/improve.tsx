@@ -3,20 +3,21 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Settings2, Send } from "lucide-react";
-import { AgentProvider } from "@/components/agents/AgentContext"; // ✅ NEW
+import { AgentProvider } from "@/components/agents/AgentContext";
 
+/* ================= Types ================= */
 type Msg = { role: "user" | "assistant"; text: string };
 
 type Agent = {
   id: string;
   name: string;
   prompt: string;
-  phoneNumberId?: string;
   firstMessage?: string;
 };
 
+/* ================= Helpers ================= */
 const STORAGE_KEY = "chatbots";
-const THREAD_KEY = (agentId: string) => `improve:thread:${agentId}`;
+const THREAD_KEY = (id: string) => `improve:thread:${id}`;
 
 const clamp = (s: string, n = 8000) => String(s ?? "").slice(0, n);
 const hash = (s: string) => {
@@ -25,17 +26,27 @@ const hash = (s: string) => {
   return String(h);
 };
 
+/* ================= Inner Component ================= */
 function ImproveInner() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
+
   const [model, setModel] = useState("gpt-4o-mini");
-  const [temperature, setTemperature] = useState(0.5);
+
+  // “Creativity” slider (0–100), mapped to 0.2–0.8 temperature
+  const [creativity, setCreativity] = useState(50);
+  const temperature = useMemo(
+    () => +(0.2 + (creativity / 100) * 0.6).toFixed(2),
+    [creativity]
+  );
+
   const [loading, setLoading] = useState(false);
   const lastAssistantHashRef = useRef<string | null>(null);
 
+  /* Load agents list */
   useEffect(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
@@ -48,6 +59,7 @@ function ImproveInner() {
     [agents, selectedId]
   );
 
+  /* Load thread for selected agent */
   useEffect(() => {
     lastAssistantHashRef.current = null;
 
@@ -76,6 +88,7 @@ function ImproveInner() {
     }
   }, [selectedAgent?.id]);
 
+  /* Persist thread */
   useEffect(() => {
     if (!selectedAgent) return;
     try {
@@ -83,6 +96,7 @@ function ImproveInner() {
     } catch {}
   }, [messages, selectedAgent?.id]);
 
+  /* Send message */
   const send = async () => {
     const value = input.trim();
     if (!value || !selectedAgent || loading) return;
@@ -92,34 +106,21 @@ function ImproveInner() {
     setLoading(true);
 
     try {
-      const bodyForNewRoute = {
-        phoneNumberId: selectedAgent.phoneNumberId,
-        model,
-        temperature,
-        messages: [
-          ...messages.map((m) => ({ role: m.role, content: clamp(m.text) })),
-          { role: "user", content: clamp(value) },
-        ],
-      };
-
-      const bodyForLegacyRoute = {
-        agent: {
-          name: selectedAgent.name,
-          prompt: clamp(selectedAgent.prompt, 12000),
-          model,
-          temperature,
-        },
-        messages: [
-          ...messages.map((m) => ({ role: m.role, content: clamp(m.text) })),
-          { role: "user", content: clamp(value) },
-        ],
-      };
-
-      const useNewShape = Boolean(selectedAgent.phoneNumberId);
       const resp = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(useNewShape ? bodyForNewRoute : bodyForLegacyRoute),
+        body: JSON.stringify({
+          agent: {
+            name: selectedAgent.name,
+            prompt: clamp(selectedAgent.prompt, 12000),
+            model,
+            temperature,
+          },
+          messages: [
+            ...messages.map((m) => ({ role: m.role, content: clamp(m.text) })),
+            { role: "user", content: clamp(value) },
+          ],
+        }),
       });
 
       const data = await resp.json();
@@ -156,11 +157,14 @@ function ImproveInner() {
   return (
     <div className="min-h-screen px-6 py-10 md:pl-[260px] bg-[var(--bg)] text-[var(--text)]">
       <div className="max-w-6xl mx-auto space-y-6">
+        {/* Header */}
         <h1 className="text-2xl font-semibold flex items-center gap-2">
           <Settings2 className="w-5 h-5" /> Tuning Lab
         </h1>
 
+        {/* Controls */}
         <div className="flex flex-wrap items-center gap-4">
+          {/* Agent selector */}
           <select
             value={selectedId || ""}
             onChange={(e) => setSelectedId(e.target.value || null)}
@@ -174,6 +178,7 @@ function ImproveInner() {
             ))}
           </select>
 
+          {/* Model selector */}
           <select
             value={model}
             onChange={(e) => setModel(e.target.value)}
@@ -184,20 +189,23 @@ function ImproveInner() {
             <option value="gpt-3.5">GPT-3.5</option>
           </select>
 
+          {/* Creativity slider */}
           <div className="flex items-center gap-2 text-sm">
-            <span>Temp:</span>
+            <span className="text-gray-400">Basic</span>
             <input
               type="range"
               min={0}
-              max={1}
-              step={0.1}
-              value={temperature}
-              onChange={(e) => setTemperature(parseFloat(e.target.value))}
+              max={100}
+              step={5}
+              value={creativity}
+              onChange={(e) => setCreativity(parseInt(e.target.value))}
+              className="w-28 accent-[var(--brand)]"
             />
-            <span>{temperature.toFixed(1)}</span>
+            <span className="text-gray-400">Creative</span>
           </div>
         </div>
 
+        {/* Chat box */}
         <div className="rounded-xl border border-gray-700 bg-[#0d0f11] p-4 h-[500px] overflow-y-auto space-y-3">
           {messages.map((m, i) => (
             <div
@@ -219,6 +227,7 @@ function ImproveInner() {
           )}
         </div>
 
+        {/* Input row */}
         <div className="flex gap-2">
           <input
             value={input}
@@ -240,6 +249,7 @@ function ImproveInner() {
   );
 }
 
+/* ================= Page Wrapper ================= */
 export default function ImprovePage() {
   return (
     <AgentProvider>
@@ -248,6 +258,7 @@ export default function ImprovePage() {
   );
 }
 
+/* ================= Typing Dots ================= */
 function TypingDots() {
   return (
     <span className="inline-flex items-center gap-1">
