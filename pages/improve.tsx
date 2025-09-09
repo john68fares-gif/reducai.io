@@ -3,7 +3,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Bot, Check, Copy, History, Info, Loader2, Plus, RefreshCw, Send, Settings2,
+  Bot, Copy, History, Info, Loader2, Plus, Send, Settings2,
   Sparkles, Trash2, Undo2, Redo2, ChevronDown, ChevronUp, HelpCircle, X
 } from 'lucide-react';
 
@@ -127,15 +127,50 @@ function buildReasonFromRefinements(refs: Refinement[]): string {
   return `Following your active refinements: ${bullets.join('; ')}.`;
 }
 
-/* Tiny heuristic so we answer even with no refinements */
-function defaultAnswerFor(text: string): string {
+/* Smarter default replies so it doesn’t feel same-y */
+function defaultAnswerFor(text: string, history: ChatMessage[]): string {
   const t = text.trim().toLowerCase();
   if (!t) return "Sure—what would you like to do?";
-  if (/^(hi|hey|hello)\b/.test(t)) return "Hey! I’m here and ready to help. What are you working on?";
-  if (/\bhow are (you|u)\b/.test(t)) return "Doing well and ready to help—what can I do for you?";
-  if (/\b(help|assist|support)\b/.test(t)) return "Absolutely. Tell me what you’re trying to achieve and any constraints.";
-  if (t.endsWith('?')) return "Quick take: here’s a concise answer. If you want a specific style, add a rule on the left.";
-  return "Got it. Here’s a concise response. Ask for a different tone or format any time.";
+
+  const isGreeting = /^(hi|hey|hello|yo|hiya|heya|sup)\b/.test(t);
+  const isStatus   = /\b(how are (you|u)|hru|wyd|what'?s up|wbu)\b/.test(t);
+  const isHelp     = /\b(help|assist|support)\b/.test(t);
+  const isStart    = /\b(let'?s|lets)\s*(start|begin|kick ?off|work|get started)\b/.test(t);
+  const isQuestion = t.endsWith('?');
+  const isNTM      = t === 'ntm' || t === 'not much' || t === 'not too much';
+
+  const countUser = (re: RegExp) =>
+    history.filter(m => m.role === 'user' && re.test(m.content.toLowerCase())).length;
+
+  const greetingCount = countUser(/^(hi|hey|hello|yo|hiya|heya|sup)\b/i) + (isGreeting ? 1 : 0);
+  const startCount    = countUser(/\b(let'?s|lets)\s*(start|begin|kick ?off|work|get started)\b/i) + (isStart ? 1 : 0);
+
+  const actions = 'We can ① set a quick goal, ② outline a 3-step plan, or ③ make a to-do checklist.';
+
+  if (isGreeting || isStatus) {
+    if (greetingCount <= 1) return "Hey! I’m here and ready to help. What are you working on?";
+    if (greetingCount === 2) return "Hi again — want me to set a quick goal or create a starter plan?";
+    return "Ready when you are. " + actions;
+  }
+
+  if (isStart) {
+    if (startCount <= 1) return "Great — let’s kick this off. " + actions;
+    return "Okay, picking up: " + actions + " Tell me which one and any constraints.";
+  }
+
+  if (isHelp) {
+    return "Absolutely. Tell me your objective and any constraints (deadline, style, length). " + actions;
+  }
+
+  if (isQuestion) {
+    return "Here’s a concise answer. If you want a specific tone or length, add a rule on the left.";
+  }
+
+  if (isNTM) {
+    return "No worries. Want to spin up something small? " + actions;
+  }
+
+  return "Got it. Here’s a concise response. If you want a different tone or structure, add a rule on the left.";
 }
 
 /* =============================================================================
@@ -298,15 +333,15 @@ export default function ImprovePage() {
     await new Promise(r => setTimeout(r, TYPING_LATENCY_MS));
 
     const active = state.refinements.filter(r => r.enabled).map(r => r.text.toLowerCase());
-    const wantsYesNo  = active.some(s => s.includes('yes or no') || s.includes('yes/no'));
+    const wantsYesNo   = active.some(s => s.includes('yes or no') || s.includes('yes/no'));
     const wantsOneWord = active.some(s => s.includes('one word') || s.includes('1 word'));
-    const noGreeting  = active.some(s => s.includes('no greeting') || s.includes('no hello'));
+    const noGreeting   = active.some(s => s.includes('no greeting') || s.includes('no hello'));
 
     let reply: string;
     if (wantsOneWord) reply = 'Yes';
     else if (wantsYesNo) reply = 'Yes';
     else {
-      const base = defaultAnswerFor(text);
+      const base = defaultAnswerFor(text, [...state.history, userMsg]);
       reply = noGreeting ? base.replace(/^hey!?\s*/i, '').trim() : base;
     }
 
@@ -361,9 +396,7 @@ export default function ImprovePage() {
               onChange={e => selectAgent(e.target.value)}
             >
               {agents.map(a => (
-                <option key={a.id} value={a.id}>
-                  {a.name}
-                </option>
+                <option key={a.id} value={a.id}>{a.name}</option>
               ))}
             </select>
           </div>
