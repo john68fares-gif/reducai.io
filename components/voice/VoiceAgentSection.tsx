@@ -7,7 +7,8 @@ import {
   Search, Plus, Folder, FolderOpen, Check, Trash2, Copy, Edit3, Sparkles,
   ChevronDown, ChevronRight, FileText, Mic2, BookOpen, SlidersHorizontal,
   PanelLeft, Bot, UploadCloud, RefreshCw, X, ChevronLeft, ChevronRight as ChevronRightIcon,
-  Phone as PhoneIcon, Rocket, PhoneCall, PhoneOff, MessageSquare, ListTree, AudioLines
+  Phone as PhoneIcon, Rocket, PhoneCall, PhoneOff, MessageSquare, ListTree, AudioLines,
+  Volume2
 } from 'lucide-react';
 
 /* =============================================================================
@@ -165,11 +166,9 @@ ${collectList}`,
 }
 
 /** Replace or add a named section like [Identity] ... */
-// FIXED: correct regex that targets [Section] blocks
 function setSection(prompt: string, name: string, body: string) {
   const section = name.replace(/^\[|\]$/g, '');
-  const re = new RegExp(String.raw`\$begin:math:display$${section}\\$end:math:display$\\s*([\\s\\S]*?)(?=\\n\\[|$)`, 'i')
-    .compile?.() || new RegExp(String.raw`\[${section}\]\s*([\s\S]*?)(?=\n\[|$)`, 'i');
+  const re = new RegExp(String.raw`$begin:math:display$${section}$end:math:display$\s*([\s\S]*?)(?=\n\[|$)`, 'i');
   if (re.test(prompt)) {
     return prompt.replace(re, `[${section}]\n${body.trim()}\n`);
   }
@@ -308,23 +307,82 @@ function makeRecognizer(onFinalText: (text:string)=>void) {
   };
   return r;
 }
-function speak(text: string) {
-  const u = new SpeechSynthesisUtterance(text);
-  u.rate = 1; u.pitch = 1; u.volume = 1;
-  window.speechSynthesis.cancel();
-  window.speechSynthesis.speak(u);
+
+/** Speech via current assistant voice settings.
+ * - openai: uses Web Speech Synthesis, picks the closest human-sounding voice and matches label if possible.
+ * - elevenlabs: tries POST /api/tts/elevenlabs {voiceId, text}. Must return audio/mpeg.
+ *   If your API route isn’t wired yet, we fall back to Web Speech so you can still test. */
+async function speakWithVoice(voiceCfg: Assistant['config']['voice'], text: string) {
+  const fallbackWebSpeech = async () => {
+    const u = new SpeechSynthesisUtterance(text);
+    // aimed for natural, not “robotic”: normal rate, slightly lower pitch
+    u.rate = 1;
+    u.pitch = 0.95;
+    u.volume = 1;
+
+    // try to match a local voice by label or reasonable English voice
+    const voices = window.speechSynthesis.getVoices();
+    if (voices?.length) {
+      const byLabel = voices.find(v => voiceCfg.voiceLabel && v.name.toLowerCase().includes(voiceCfg.voiceLabel.toLowerCase()));
+      const en = voices.find(v => /en-|English/i.test(`${v.lang} ${v.name}`));
+      u.voice = byLabel || en || voices[0];
+    }
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(u);
+  };
+
+  if (voiceCfg.provider === 'elevenlabs') {
+    try {
+      const r = await fetch('/api/tts/elevenlabs', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ voiceId: voiceCfg.voiceId, text })
+      });
+      if (r.ok) {
+        const blob = await r.blob();
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        await audio.play();
+        return;
+      }
+    } catch { /* fall through */ }
+    await fallbackWebSpeech();
+    return;
+  }
+
+  // OpenAI (or default): Web Speech
+  await fallbackWebSpeech();
 }
+
+/** Very small professional mock so you can test dialogue without any paid API */
 async function tryLLM(system: string, message: string): Promise<string> {
+  // Attempt backend if you have one:
   try {
     const r = await fetch('/api/llm', { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ system, message }) });
     if (r.ok) { const j = await r.json(); if (j?.reply) return String(j.reply); }
   } catch {}
+
+  // Professional browser-only mock:
   const m = message.toLowerCase();
-  if (/hello|hi|hey/.test(m)) return 'Hi! I can book appointments and answer questions. What do you need?';
-  if (/book|schedule|appointment/.test(m)) return 'Sure—what date and time works for you? I also need your full name and phone number.';
-  if (/name is|i am/.test(m)) return 'Got it. Noted your name. What’s the best phone number to reach you?';
-  if (/phone|number|digits/.test(m)) return 'Thanks! I saved that number. Anything else before I confirm?';
-  return 'Understood. Could you share any other details so I can help you faster?';
+  if (/hello|hi|hey/.test(m)) {
+    return 'Hi, this is your assistant. I can book appointments, answer questions, and follow up. What would you like to get done today?';
+  }
+  if (/book|schedule|appointment/.test(m)) {
+    return 'Absolutely. What date and time work best for you? I’ll also need your full name and a phone number for confirmation.';
+  }
+  if (/name is|i am|this is /.test(m)) {
+    return 'Thanks—got your name. What’s the best phone number to reach you if we need to confirm or reschedule?';
+  }
+  if (/phone|number|digits/.test(m)) {
+    return 'Perfect. I’ve saved that. Any other details I should note before I lock this in?';
+  }
+  if (/email/.test(m)) {
+    return 'You can share an email if you prefer confirmations there as well. Otherwise, we can proceed with SMS.';
+  }
+  if (/thanks|thank you|great|perfect/.test(m)) {
+    return 'You’re welcome. I’ll summarize the details and confirm next steps. Anything else you’d like me to handle?';
+  }
+  return 'Got it. I’ll take care of that. If there’s anything specific you’d like me to prioritize, let me know.';
 }
 
 /* =============================================================================
@@ -383,6 +441,7 @@ export default function VoiceAgentSection() {
       writeLS(ak(seed.id), seed); writeLS(LS_LIST, [seed]);
       setAssistants([seed]); setActiveId(seed.id);
     } else {
+      // ensure telephony shape
       const fixed = list.map(a => ({ ...a, config:{ ...a.config, telephony: a.config.telephony || { numbers: [], linkedNumberId: undefined } } }));
       writeLS(LS_LIST, fixed);
       setAssistants(fixed); setActiveId(fixed[0].id);
@@ -499,7 +558,7 @@ export default function VoiceAgentSection() {
   };
   const declineTyping = () => { setTyping(null); setPendingFirstMsg(undefined); };
 
-  /* ---------- Voices (static options) ---------- */
+  /* ---------- Voices (options + SAVE/DRAFT) ---------- */
   const openaiVoices = [
     { value: 'alloy', label: 'Alloy (OpenAI)' },
     { value: 'ember', label: 'Ember (OpenAI)' },
@@ -509,6 +568,30 @@ export default function VoiceAgentSection() {
     { value: 'adam',   label: 'Adam (ElevenLabs)'   },
     { value: 'bella',  label: 'Bella (ElevenLabs)'  },
   ];
+
+  // draft state so changes don’t apply until you hit Save
+  const [voiceDraft, setVoiceDraft] = useState<Assistant['config']['voice'] | null>(null);
+  useEffect(() => {
+    if (active) setVoiceDraft(active.config.voice);
+  }, [active?.id]); // reset draft when switching assistants
+
+  const voiceDirty =
+    !!voiceDraft &&
+    active &&
+    (voiceDraft.provider !== active.config.voice.provider ||
+     voiceDraft.voiceId  !== active.config.voice.voiceId ||
+     voiceDraft.voiceLabel !== active.config.voice.voiceLabel);
+
+  const saveVoice = () => {
+    if (!active || !voiceDraft) return;
+    updateActive(a => ({ ...a, config: { ...a.config, voice: voiceDraft }}));
+  };
+
+  const testVoice = async () => {
+    const v = voiceDraft || active?.config.voice;
+    if (!v) return;
+    await speakWithVoice(v, 'Hi—this is a quick test of the selected voice. How does this sound to you?');
+  };
 
   /* ---------- Web call + logs ---------- */
   const [currentCallId, setCurrentCallId] = useState<string | null>(null);
@@ -540,18 +623,20 @@ export default function VoiceAgentSection() {
 
     const greet = active.config.model.firstMessage || 'Hello. How may I help you today?';
     if (active.config.model.firstMessageMode === 'assistant_first') {
-      pushTurn('assistant', greet); speak(greet);
+      pushTurn('assistant', greet);
+      await speakWithVoice(voiceDraft || active.config.voice, greet);
     }
 
     const rec = makeRecognizer(async (finalText) => {
       pushTurn('user', finalText);
       const reply = await tryLLM(active.config.model.systemPrompt, finalText);
       pushTurn('assistant', reply);
-      speak(reply);
+      await speakWithVoice(voiceDraft || active.config.voice, reply);
     });
     if (!rec) {
       const msg = 'Browser speech recognition is not available here. Use Chrome or Edge.';
-      pushTurn('assistant', msg); speak(msg);
+      pushTurn('assistant', msg);
+      await speakWithVoice(voiceDraft || active.config.voice, msg);
       return;
     }
     recogRef.current = rec; try { rec.start(); } catch {}
@@ -748,7 +833,7 @@ export default function VoiceAgentSection() {
                           />
                         )}
                       </div>
-                      <div className="text-[11px] mt-0.5 opacity-70 truncate">
+                      <div className="text:[11px] mt-0.5 opacity-70 truncate">
                         {a.folder || 'Unfiled'} • {new Date(a.updatedAt).toLocaleDateString()}
                       </div>
                     </div>
@@ -938,10 +1023,14 @@ export default function VoiceAgentSection() {
             <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(2, minmax(360px, 1fr))' }}>
               <Field label="Provider">
                 <Select
-                  value={active.config.voice.provider}
+                  value={voiceDraft?.provider || active.config.voice.provider}
                   onChange={(v)=>{
                     const list = v==='elevenlabs' ? elevenVoices : openaiVoices;
-                    updateActive(a => ({ ...a, config:{ ...a.config, voice:{ provider: v as VoiceProvider, voiceId: list[0].value, voiceLabel: list[0].label } } }));
+                    setVoiceDraft({
+                      provider: v as VoiceProvider,
+                      voiceId: list[0].value,
+                      voiceLabel: list[0].label
+                    });
                   }}
                   items={[
                     { value:'openai', label:'OpenAI' },
@@ -951,22 +1040,40 @@ export default function VoiceAgentSection() {
               </Field>
               <Field label="Voice">
                 <Select
-                  value={active.config.voice.voiceId}
+                  value={voiceDraft?.voiceId || active.config.voice.voiceId}
                   onChange={(v)=>{
-                    const list = active.config.voice.provider==='elevenlabs' ? elevenVoices : openaiVoices;
+                    const provider = (voiceDraft?.provider || active.config.voice.provider);
+                    const list = provider==='elevenlabs' ? elevenVoices : openaiVoices;
                     const found = list.find(x=>x.value===v);
-                    updateActive(a => ({ ...a, config:{ ...a.config, voice:{ ...a.config.voice, voiceId:v, voiceLabel: found?.label || v } } }));
+                    setVoiceDraft({
+                      provider,
+                      voiceId: v,
+                      voiceLabel: found?.label || v
+                    });
                   }}
-                  items={active.config.voice.provider==='elevenlabs' ? elevenVoices : openaiVoices}
+                  items={(voiceDraft?.provider || active.config.voice.provider)==='elevenlabs' ? elevenVoices : openaiVoices}
                 />
               </Field>
             </div>
 
-            <div className="mt-3">
+            <div className="mt-3 flex items-center gap-2">
+              <button onClick={testVoice} className="btn btn--ghost">
+                <Volume2 className="w-4 h-4 icon" /> Test Voice
+              </button>
               <button
                 onClick={()=> { window.dispatchEvent(new CustomEvent('voiceagent:import-11labs')); alert('Hook “voiceagent:import-11labs” to your importer.'); }}
                 className="btn btn--ghost"
               ><UploadCloud className="w-4 h-4 icon" /> Import from ElevenLabs</button>
+              <div className="ml-auto flex items-center gap-2">
+                <button
+                  disabled={!voiceDirty}
+                  onClick={saveVoice}
+                  className="btn btn--green"
+                  style={!voiceDirty ? { opacity:.55, cursor:'not-allowed' } : undefined}
+                >
+                  <Check className="w-4 h-4 text-white" /><span className="text-white">Save Voice</span>
+                </button>
+              </div>
             </div>
           </Section>
 
@@ -1114,7 +1221,7 @@ export default function VoiceAgentSection() {
       {/* ---------------- Generate overlay ---------------- */}
       <AnimatePresence>
         {genOpen && (
-          <motion.div className="fixed inset-0 z-[999] flex items-center justify-center p-4"
+          <motion.div className="fixed inset-0 z={[999] as any} /* satisfy TS */ flex items-center justify-center p-4"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             style={{ background:'rgba(0,0,0,.45)' }}>
             <motion.div
@@ -1239,13 +1346,14 @@ function Section({ title, icon, children }:{ title: string; icon: React.ReactNod
 /* =============================================================================
    Telephony editor
 ============================================================================= */
-function TelephonyEditor({ numbers, linkedId, onLink, onAdd, onRemove }:{
+type TelephonyProps = {
   numbers: PhoneNum[];
   linkedId?: string;
   onLink: (id?: string) => void;
   onAdd: (e164: string, label?: string) => void;
   onRemove: (id: string) => void;
-}) {
+};
+function TelephonyEditor({ numbers, linkedId, onLink, onAdd, onRemove }: TelephonyProps) {
   const [e164, setE164] = useState('');
   const [label, setLabel] = useState('');
 
@@ -1439,7 +1547,7 @@ function Select({ value, items, onChange, placeholder, leftIcon }: {
         ref={btn}
         type="button"
         onClick={() => setOpen(v => !v)}
-        className="w-full flex items-center gap-3 px-3 py-3 rounded-2xl text-[15px]"
+        className="w-full flex items-center gap-3 px-3 py-3 rounded-2xl text:[15px]"
         style={{ background:'var(--va-input-bg)', color:'var(--text)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)' }}
       >
         {leftIcon ? <span className="shrink-0">{leftIcon}</span> : null}
@@ -1473,7 +1581,6 @@ function Select({ value, items, onChange, placeholder, leftIcon }: {
                   className="w-full flex items-center gap-3 px-3 py-2 rounded-[10px] text-left"
                   style={{ color:'var(--text)' }}
                   onMouseEnter={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='rgba(16,185,129,.10)'; (e.currentTarget as HTMLButtonElement).style.border='1px solid rgba(16,185,129,.35)'; }}
-                  // FIXED: HTMLButtonElement (typo previously HTMLButtonButtonElement)
                   onMouseLeave={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='transparent'; (e.currentTarget as HTMLButtonElement).style.border='1px solid transparent'; }}
                 >
                   {it.icon}{it.label}
