@@ -2,24 +2,31 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Bot, Save, MessageSquare, Settings2, Wand2, X } from 'lucide-react';
+import { Bot, Save, MessageSquare, Settings2, Edit3, X } from 'lucide-react';
 
-type Agent = { id: string; name: string; prompt: string };
-type Msg = { role: 'user' | 'assistant'; text: string; id: string };
+type Agent = {
+  id: string;
+  name: string;
+  prompt: string;
+};
 
 const STORAGE_KEY = 'chatbots';
+
+type Message = { role: 'user' | 'assistant'; text: string };
 
 export default function ImprovePage() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<Msg[]>([]);
+  const [prompt, setPrompt] = useState('');
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [model, setModel] = useState('gpt-4o-mini');
   const [temperature, setTemperature] = useState(0.5);
 
-  const [improvingMsg, setImprovingMsg] = useState<Msg | null>(null);
+  // Improve overlay
+  const [improveOpen, setImproveOpen] = useState(false);
+  const [improveTarget, setImproveTarget] = useState<Message | null>(null);
   const [improveText, setImproveText] = useState('');
-  const [improvePrompt, setImprovePrompt] = useState('');
 
   // Load agents
   useEffect(() => {
@@ -29,119 +36,123 @@ export default function ImprovePage() {
     } catch {}
   }, []);
 
-  const send = () => {
+  // Load prompt when agent selected
+  useEffect(() => {
+    const agent = agents.find((a) => a.id === selectedId);
+    if (agent) setPrompt(agent.prompt || '');
+  }, [selectedId, agents]);
+
+  const saveChanges = () => {
+    if (!selectedId) return;
+    const next = agents.map((a) =>
+      a.id === selectedId ? { ...a, prompt } : a
+    );
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    setAgents(next);
+    alert('Changes saved');
+  };
+
+  const send = async () => {
     const value = input.trim();
     if (!value) return;
-    const id = crypto.randomUUID();
-    setMessages(prev => [...prev, { role: 'user', text: value, id }]);
+    setMessages((prev) => [...prev, { role: 'user', text: value }]);
     setInput('');
 
-    // mock reply
-    setTimeout(() => {
-      const replyId = crypto.randomUUID();
-      setMessages(prev => [
+    try {
+      const res = await fetch('/api/voice/improve-prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          raw: prompt,
+          company: 'Your Company',
+          language: 'en-US',
+        }),
+      });
+      const data = await res.json();
+      const reply =
+        data?.data?.prompt ||
+        `(mock: ${model}, temp ${temperature}) → response to "${value}"`;
+
+      setMessages((prev) => [...prev, { role: 'assistant', text: reply }]);
+    } catch (e) {
+      setMessages((prev) => [
         ...prev,
-        { role: 'assistant', text: `(${model}, temp ${temperature}) → response to "${value}"`, id: replyId }
+        { role: 'assistant', text: '⚠️ Error contacting API' },
       ]);
-    }, 600);
+    }
   };
 
-  const openImprove = (msg: Msg) => {
-    setImprovingMsg(msg);
-    setImproveText('');
-    setImprovePrompt(selectedAgent?.prompt || '');
+  const openImprove = (m: Message) => {
+    setImproveTarget(m);
+    setImproveText(m.text);
+    setImproveOpen(true);
   };
 
-  const saveImprove = () => {
-    if (!selectedId || !improvingMsg) return;
-    const updated = agents.map(a =>
-      a.id === selectedId ? { ...a, prompt: improvePrompt } : a
+  const applyImprove = () => {
+    if (!improveTarget) return;
+    // Replace the text with the improved version
+    setMessages((msgs) =>
+      msgs.map((m) =>
+        m === improveTarget ? { ...m, text: improveText } : m
+      )
     );
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-    setAgents(updated);
-    setImprovingMsg(null);
+    setImproveOpen(false);
   };
-
-  const selectedAgent = agents.find(a => a.id === selectedId);
 
   return (
-    <div className="min-h-screen bg-white text-black dark:bg-[#0b0c10] dark:text-white px-6 py-10 md:pl-[260px]">
+    <div
+      className="min-h-screen px-6 py-10 md:pl-[260px]"
+      style={{ background: 'var(--bg)', color: 'var(--text)' }}
+    >
       <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* Left side: Chat + improve */}
-        <div className="space-y-6">
+        {/* Prompt Editor */}
+        <div className="panel p-6 space-y-6">
           <h1 className="text-2xl font-semibold flex items-center gap-2">
-            <MessageSquare className="w-5 h-5" /> Tuning Lab
+            <Settings2 className="w-5 h-5 text-[var(--brand)]" /> Improve Agent
           </h1>
 
           {/* Agent selector */}
           <select
             value={selectedId || ''}
-            onChange={e => setSelectedId(e.target.value)}
-            className="w-full p-2 rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#0d0f11] text-black dark:text-white"
+            onChange={(e) => setSelectedId(e.target.value)}
+            className="w-full p-2 rounded-md border bg-[var(--card)] border-[var(--border)] text-[var(--text)]"
           >
             <option value="">Select an agent…</option>
-            {agents.map(a => (
+            {agents.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.name}
               </option>
             ))}
           </select>
 
-          {/* Chat */}
-          <div className="h-[460px] overflow-y-auto rounded-lg border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-[#0d0f11] p-4 space-y-3">
-            {messages.map(m => (
-              <div key={m.id} className="flex items-start gap-2">
-                <div
-                  className={`p-2 rounded-md max-w-[80%] ${
-                    m.role === 'user'
-                      ? 'ml-auto bg-green-100 dark:bg-emerald-900/30'
-                      : 'bg-gray-200 dark:bg-[#1a1d21]'
-                  }`}
-                >
-                  {m.text}
-                </div>
-                {m.role === 'assistant' && (
-                  <button
-                    onClick={() => openImprove(m)}
-                    className="p-1 rounded hover:bg-white/10"
-                    title="Improve this response"
-                  >
-                    <Wand2 className="w-4 h-4 text-emerald-400" />
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
+          {/* Prompt editor */}
+          <textarea
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            placeholder="Edit your agent’s prompt here…"
+            className="w-full h-[400px] p-3 rounded-lg border bg-[var(--card)] border-[var(--border)] text-sm text-[var(--text)] outline-none"
+          />
 
-          {/* Input */}
-          <div className="flex gap-2">
-            <input
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && send()}
-              placeholder="Type a message…"
-              className="flex-1 p-2 rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#0d0f11] text-black dark:text-white"
-            />
-            <button
-              onClick={send}
-              className="px-4 py-2 rounded-md bg-green-400 text-black font-semibold hover:bg-green-300 dark:bg-emerald-900/30 dark:text-emerald-100 dark:hover:bg-emerald-800/50"
-            >
-              Send
-            </button>
-          </div>
+          <button
+            onClick={saveChanges}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-md font-semibold btn-brand"
+          >
+            <Save className="w-4 h-4" /> Save Changes
+          </button>
         </div>
 
-        {/* Right side: Model + Temp */}
-        <div className="space-y-6">
+        {/* Test Lab */}
+        <div className="panel p-6 space-y-6">
           <h2 className="text-xl font-semibold flex items-center gap-2">
-            <Settings2 className="w-5 h-5" /> Settings
+            <MessageSquare className="w-5 h-5 text-[var(--brand)]" /> Tuning Lab
           </h2>
 
+          {/* Model + temp */}
           <div className="flex items-center gap-3">
             <select
               value={model}
-              onChange={e => setModel(e.target.value)}
-              className="flex-1 p-2 rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#0d0f11] text-black dark:text-white"
+              onChange={(e) => setModel(e.target.value)}
+              className="flex-1 p-2 rounded-md border bg-[var(--card)] border-[var(--border)] text-[var(--text)]"
             >
               <option value="gpt-4o-mini">GPT-4o Mini</option>
               <option value="gpt-4o">GPT-4o</option>
@@ -155,48 +166,73 @@ export default function ImprovePage() {
                 max={1}
                 step={0.1}
                 value={temperature}
-                onChange={e => setTemperature(parseFloat(e.target.value))}
+                onChange={(e) => setTemperature(parseFloat(e.target.value))}
               />
               <span>{temperature.toFixed(1)}</span>
             </div>
+          </div>
+
+          {/* Chat window */}
+          <div className="h-[400px] overflow-y-auto rounded-lg border bg-[var(--card)] border-[var(--border)] p-4 space-y-3">
+            {messages.map((m, i) => (
+              <div
+                key={i}
+                className={`relative p-3 rounded-md max-w-[80%] text-sm ${
+                  m.role === 'user'
+                    ? 'ml-auto bg-[var(--brand)] text-black'
+                    : 'bg-[var(--panel)] text-[var(--text)]'
+                }`}
+              >
+                {m.text}
+                {m.role === 'assistant' && (
+                  <button
+                    onClick={() => openImprove(m)}
+                    className="absolute -right-7 top-2 text-[var(--text-muted)] hover:text-[var(--brand)]"
+                  >
+                    <Edit3 className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Input */}
+          <div className="flex gap-2">
+            <input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && send()}
+              placeholder="Type a message…"
+              className="flex-1 p-2 rounded-md border bg-[var(--card)] border-[var(--border)] text-[var(--text)]"
+            />
+            <button onClick={send} className="px-4 py-2 rounded-md font-semibold btn-brand">
+              Send
+            </button>
           </div>
         </div>
       </div>
 
       {/* Improve Overlay */}
-      {improvingMsg && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
-          <div className="bg-white dark:bg-[#0d0f11] border border-gray-300 dark:border-gray-700 rounded-xl p-6 w-full max-w-2xl space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold flex items-center gap-2">
-                <Wand2 className="w-5 h-5 text-emerald-400" /> Improve Response
-              </h3>
-              <button onClick={() => setImprovingMsg(null)} className="p-1 rounded hover:bg-white/10">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="text-sm text-gray-600 dark:text-gray-400">
-              AI chose this response based on its current prompt. You can edit the prompt directly
-              or describe how you want it improved.
-            </div>
-
-            <textarea
-              value={improvePrompt}
-              onChange={e => setImprovePrompt(e.target.value)}
-              className="w-full h-[180px] p-3 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#0b0c10] text-sm text-black dark:text-white"
-            />
-
-            <input
-              value={improveText}
-              onChange={e => setImproveText(e.target.value)}
-              placeholder="Describe how to improve (optional)…"
-              className="w-full p-2 rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#0d0f11] text-black dark:text-white"
-            />
-
+      {improveOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: 'rgba(0,0,0,0.6)' }}>
+          <div className="panel w-full max-w-[600px] p-6 space-y-4 relative">
             <button
-              onClick={saveImprove}
-              className="px-4 py-2 rounded-md font-semibold bg-green-400 text-black hover:bg-green-300 dark:bg-emerald-900/30 dark:text-emerald-100 dark:hover:bg-emerald-800/50"
+              onClick={() => setImproveOpen(false)}
+              className="absolute top-3 right-3 text-[var(--text-muted)] hover:text-[var(--brand)]"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            <h3 className="text-lg font-semibold flex items-center gap-2">
+              <Edit3 className="w-5 h-5 text-[var(--brand)]" /> Improve Response
+            </h3>
+            <textarea
+              value={improveText}
+              onChange={(e) => setImproveText(e.target.value)}
+              className="w-full h-[200px] p-3 rounded-lg border bg-[var(--card)] border-[var(--border)] text-sm text-[var(--text)] outline-none"
+            />
+            <button
+              onClick={applyImprove}
+              className="w-full px-4 py-2 rounded-md font-semibold btn-brand"
             >
               Save Improvement
             </button>
