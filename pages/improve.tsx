@@ -2,31 +2,30 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Bot, Save, MessageSquare, Settings2, Edit3, X } from 'lucide-react';
+import { MessageSquare, Settings2, Edit3, X, Save } from 'lucide-react';
 
 type Agent = {
   id: string;
   name: string;
-  prompt: string;
+  prompt: string[]; // store prompts as array of rules
 };
 
 const STORAGE_KEY = 'chatbots';
-
-type Message = { role: 'user' | 'assistant'; text: string };
+type Message = { role: 'user' | 'assistant'; text: string; usedPrompts?: string[] };
 
 export default function ImprovePage() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [prompt, setPrompt] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [model, setModel] = useState('gpt-4o-mini');
   const [temperature, setTemperature] = useState(0.5);
 
-  // Improve overlay
+  // Overlay for improvements
   const [improveOpen, setImproveOpen] = useState(false);
-  const [improveTarget, setImproveTarget] = useState<Message | null>(null);
-  const [improveText, setImproveText] = useState('');
+  const [targetMessage, setTargetMessage] = useState<Message | null>(null);
+  const [editPrompt, setEditPrompt] = useState('');
+  const [userInstruction, setUserInstruction] = useState('');
 
   // Load agents
   useEffect(() => {
@@ -36,66 +35,51 @@ export default function ImprovePage() {
     } catch {}
   }, []);
 
-  // Load prompt when agent selected
-  useEffect(() => {
-    const agent = agents.find((a) => a.id === selectedId);
-    if (agent) setPrompt(agent.prompt || '');
-  }, [selectedId, agents]);
-
-  const saveChanges = () => {
-    if (!selectedId) return;
-    const next = agents.map((a) =>
-      a.id === selectedId ? { ...a, prompt } : a
-    );
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-    setAgents(next);
-    alert('Changes saved');
-  };
+  const agent = agents.find((a) => a.id === selectedId);
 
   const send = async () => {
     const value = input.trim();
-    if (!value) return;
+    if (!value || !agent) return;
+
     setMessages((prev) => [...prev, { role: 'user', text: value }]);
     setInput('');
 
-    try {
-      const res = await fetch('/api/voice/improve-prompt', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          raw: prompt,
-          company: 'Your Company',
-          language: 'en-US',
-        }),
-      });
-      const data = await res.json();
-      const reply =
-        data?.data?.prompt ||
-        `(mock: ${model}, temp ${temperature}) → response to "${value}"`;
+    // Fake AI logic: pick some rules from agent.prompt
+    const used = agent.prompt.slice(0, 2); // simulate subset of prompts
+    const reply = `Hello! Thanks for your message: "${value}".`;
 
-      setMessages((prev) => [...prev, { role: 'assistant', text: reply }]);
-    } catch (e) {
-      setMessages((prev) => [
-        ...prev,
-        { role: 'assistant', text: '⚠️ Error contacting API' },
-      ]);
-    }
+    setMessages((prev) => [...prev, { role: 'assistant', text: reply, usedPrompts: used }]);
   };
 
   const openImprove = (m: Message) => {
-    setImproveTarget(m);
-    setImproveText(m.text);
+    if (!m.usedPrompts) return;
+    setTargetMessage(m);
+    setEditPrompt(m.usedPrompts[0] || ''); // default: first rule
+    setUserInstruction('');
     setImproveOpen(true);
   };
 
   const applyImprove = () => {
-    if (!improveTarget) return;
-    // Replace the text with the improved version
-    setMessages((msgs) =>
-      msgs.map((m) =>
-        m === improveTarget ? { ...m, text: improveText } : m
-      )
-    );
+    if (!agent || !targetMessage) return;
+
+    const nextAgents = agents.map((a) => {
+      if (a.id !== agent.id) return a;
+
+      let newPrompts = [...a.prompt];
+      if (editPrompt) {
+        // Replace the first used prompt for now
+        const idx = a.prompt.indexOf(targetMessage.usedPrompts?.[0] || '');
+        if (idx >= 0) newPrompts[idx] = editPrompt;
+      }
+      if (userInstruction) {
+        // Append user suggestion as a new refinement
+        newPrompts.push(`Refinement: ${userInstruction}`);
+      }
+      return { ...a, prompt: newPrompts };
+    });
+
+    setAgents(nextAgents);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(nextAgents));
     setImproveOpen(false);
   };
 
@@ -104,14 +88,12 @@ export default function ImprovePage() {
       className="min-h-screen px-6 py-10 md:pl-[260px]"
       style={{ background: 'var(--bg)', color: 'var(--text)' }}
     >
-      <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* Prompt Editor */}
+      <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {/* Left: Agent selector */}
         <div className="panel p-6 space-y-6">
           <h1 className="text-2xl font-semibold flex items-center gap-2">
-            <Settings2 className="w-5 h-5 text-[var(--brand)]" /> Improve Agent
+            <Settings2 className="w-5 h-5 text-[var(--brand)]" /> Choose Agent
           </h1>
-
-          {/* Agent selector */}
           <select
             value={selectedId || ''}
             onChange={(e) => setSelectedId(e.target.value)}
@@ -124,56 +106,16 @@ export default function ImprovePage() {
               </option>
             ))}
           </select>
-
-          {/* Prompt editor */}
-          <textarea
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder="Edit your agent’s prompt here…"
-            className="w-full h-[400px] p-3 rounded-lg border bg-[var(--card)] border-[var(--border)] text-sm text-[var(--text)] outline-none"
-          />
-
-          <button
-            onClick={saveChanges}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-md font-semibold btn-brand"
-          >
-            <Save className="w-4 h-4" /> Save Changes
-          </button>
         </div>
 
-        {/* Test Lab */}
+        {/* Right: Tuning Lab */}
         <div className="panel p-6 space-y-6">
           <h2 className="text-xl font-semibold flex items-center gap-2">
             <MessageSquare className="w-5 h-5 text-[var(--brand)]" /> Tuning Lab
           </h2>
 
-          {/* Model + temp */}
-          <div className="flex items-center gap-3">
-            <select
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              className="flex-1 p-2 rounded-md border bg-[var(--card)] border-[var(--border)] text-[var(--text)]"
-            >
-              <option value="gpt-4o-mini">GPT-4o Mini</option>
-              <option value="gpt-4o">GPT-4o</option>
-              <option value="gpt-3.5">GPT-3.5</option>
-            </select>
-            <div className="flex items-center gap-2 text-sm">
-              <span>Temp:</span>
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.1}
-                value={temperature}
-                onChange={(e) => setTemperature(parseFloat(e.target.value))}
-              />
-              <span>{temperature.toFixed(1)}</span>
-            </div>
-          </div>
-
           {/* Chat window */}
-          <div className="h-[400px] overflow-y-auto rounded-lg border bg-[var(--card)] border-[var(--border)] p-4 space-y-3">
+          <div className="h-[500px] overflow-y-auto rounded-lg border bg-[var(--card)] border-[var(--border)] p-4 space-y-3">
             {messages.map((m, i) => (
               <div
                 key={i}
@@ -183,7 +125,7 @@ export default function ImprovePage() {
                     : 'bg-[var(--panel)] text-[var(--text)]'
                 }`}
               >
-                {m.text}
+                {m.text.replace(/\*\*/g, '')}
                 {m.role === 'assistant' && (
                   <button
                     onClick={() => openImprove(m)}
@@ -205,7 +147,10 @@ export default function ImprovePage() {
               placeholder="Type a message…"
               className="flex-1 p-2 rounded-md border bg-[var(--card)] border-[var(--border)] text-[var(--text)]"
             />
-            <button onClick={send} className="px-4 py-2 rounded-md font-semibold btn-brand">
+            <button
+              onClick={send}
+              className="px-4 py-2 rounded-md font-semibold btn-brand"
+            >
               Send
             </button>
           </div>
@@ -214,8 +159,11 @@ export default function ImprovePage() {
 
       {/* Improve Overlay */}
       {improveOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-4" style={{ background: 'rgba(0,0,0,0.6)' }}>
-          <div className="panel w-full max-w-[600px] p-6 space-y-4 relative">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center px-4"
+          style={{ background: 'rgba(0,0,0,0.6)' }}
+        >
+          <div className="panel w-full max-w-[700px] p-6 space-y-4 relative">
             <button
               onClick={() => setImproveOpen(false)}
               className="absolute top-3 right-3 text-[var(--text-muted)] hover:text-[var(--brand)]"
@@ -225,16 +173,31 @@ export default function ImprovePage() {
             <h3 className="text-lg font-semibold flex items-center gap-2">
               <Edit3 className="w-5 h-5 text-[var(--brand)]" /> Improve Response
             </h3>
-            <textarea
-              value={improveText}
-              onChange={(e) => setImproveText(e.target.value)}
-              className="w-full h-[200px] p-3 rounded-lg border bg-[var(--card)] border-[var(--border)] text-sm text-[var(--text)] outline-none"
+
+            {targetMessage?.usedPrompts && (
+              <>
+                <label className="block text-sm mb-1">Edit used prompt:</label>
+                <textarea
+                  value={editPrompt}
+                  onChange={(e) => setEditPrompt(e.target.value)}
+                  className="w-full h-[120px] p-3 rounded-lg border bg-[var(--card)] border-[var(--border)] text-sm text-[var(--text)]"
+                />
+              </>
+            )}
+
+            <label className="block text-sm mb-1">Or describe what to change:</label>
+            <input
+              value={userInstruction}
+              onChange={(e) => setUserInstruction(e.target.value)}
+              placeholder="E.g. Instead of 'Hello', say 'Hi'"
+              className="w-full p-2 rounded-md border bg-[var(--card)] border-[var(--border)] text-[var(--text)]"
             />
+
             <button
               onClick={applyImprove}
-              className="w-full px-4 py-2 rounded-md font-semibold btn-brand"
+              className="w-full px-4 py-2 rounded-md font-semibold btn-brand flex items-center justify-center gap-2"
             >
-              Save Improvement
+              <Save className="w-4 h-4" /> Save Improvement
             </button>
           </div>
         </div>
