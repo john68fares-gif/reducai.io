@@ -1,69 +1,64 @@
 // pages/api/chat.ts
 import type { NextApiRequest, NextApiResponse } from "next";
 
-type Role = "system" | "user" | "assistant";
-type Message = { role: Role; content: string };
-
-export const config = {
-  api: { bodyParser: { sizeLimit: "1mb" } },
+type Body = {
+  agent: {
+    name: string;
+    prompt: string;
+    model: string;
+    temperature: number;
+  };
+  messages: { role: "user" | "assistant"; content: string }[];
 };
 
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+type Resp =
+  | { ok: true; reply: string }
+  | { ok: false; error: string };
+
+export default async function handler(
+  req: NextApiRequest,
+  res: NextApiResponse<Resp>
+) {
   if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
+    return res.status(405).json({ ok: false, error: "Use POST." });
   }
 
   try {
-    const { agent, messages } = req.body as {
-      agent: {
-        name: string;
-        prompt: string;
-        model: string;
-        temperature: number;
-        apiKey?: string; // optional per-agent API key
-      };
-      messages: Message[];
+    const { agent, messages } = req.body as Body;
+
+    if (!agent || !agent.prompt || !messages) {
+      return res.status(400).json({ ok: false, error: "Missing agent or messages." });
+    }
+
+    const systemMessage = {
+      role: "system",
+      content: agent.prompt,
     };
 
-    if (!agent || !agent.prompt || !agent.model) {
-      return res.status(400).json({ error: "Missing agent config" });
-    }
-
-    const key = agent.apiKey || process.env.OPENAI_API_KEY;
-    if (!key) {
-      return res.status(500).json({ error: "Missing OpenAI API key" });
-    }
-
-    // Build conversation
-    const convo: Message[] = [{ role: "system", content: agent.prompt }, ...(messages || [])];
-
-    const r = await fetch("https://api.openai.com/v1/chat/completions", {
+    const resp = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${key}`,
         "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
       },
       body: JSON.stringify({
         model: agent.model || "gpt-4o-mini",
         temperature: agent.temperature ?? 0.5,
-        messages: convo,
+        messages: [systemMessage, ...messages],
       }),
     });
 
-    const data = await r.json();
-    if (!r.ok) {
-      const msg =
-        (data && (data.error?.message || data.message)) ||
-        `OpenAI error (status ${r.status})`;
-      return res.status(r.status).json({ error: msg });
+    const data = await resp.json();
+
+    if (!resp.ok) {
+      return res
+        .status(500)
+        .json({ ok: false, error: data.error?.message || "OpenAI request failed" });
     }
 
-    const reply =
-      data?.choices?.[0]?.message?.content || "⚠️ No response from model.";
-
-    return res.status(200).json({ ok: true, reply });
+    const reply = data.choices?.[0]?.message?.content || "(no reply)";
+    res.status(200).json({ ok: true, reply });
   } catch (err: any) {
-    console.error("Chat API error:", err);
-    return res.status(500).json({ error: err?.message || "Server error" });
+    res.status(500).json({ ok: false, error: err.message || "Server error" });
   }
 }
