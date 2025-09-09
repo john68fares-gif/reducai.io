@@ -7,7 +7,7 @@ import {
   Search, Plus, Folder, FolderOpen, Check, Trash2, Copy, Edit3, Sparkles,
   ChevronDown, ChevronRight, FileText, Mic2, BookOpen, SlidersHorizontal,
   PanelLeft, Bot, UploadCloud, RefreshCw, X, ChevronLeft, ChevronRight as ChevronRightIcon,
-  Phone as PhoneIcon, Rocket, PhoneCall, PhoneOff, MessageSquare, ListTree, AudioLines, Volume2
+  Phone as PhoneIcon, Rocket, PhoneCall, PhoneOff, MessageSquare, ListTree, AudioLines, Volume2, Save
 } from 'lucide-react';
 
 /* =============================================================================
@@ -288,30 +288,7 @@ function useAppSidebarWidth(scopeRef: React.RefObject<HTMLDivElement>, fallbackC
 
 /* =============================================================================
    SIMPLE WEB VOICE (no Vapi, no server required)
-   + iOS/Safari safe audio + ElevenLabs playback (via /api/tts/elevenlabs)
 ============================================================================= */
-let _audioCtx: AudioContext | null = null;
-async function unlockAudio() {
-  try {
-    const Ctx: any = (window as any).AudioContext || (window as any).webkitAudioContext;
-    if (!Ctx) return;
-    if (!_audioCtx) _audioCtx = new Ctx();
-    if (_audioCtx.state !== 'running') {
-      await _audioCtx.resume().catch(() => {});
-    }
-  } catch {}
-}
-async function ensureVoicesReady(timeoutMs = 1500) {
-  const have = window.speechSynthesis.getVoices();
-  if (have && have.length) return have;
-  await new Promise<void>(res => {
-    const t = setTimeout(() => res(), timeoutMs);
-    const on = () => { clearTimeout(t); window.speechSynthesis.removeEventListener('voiceschanged', on); res(); };
-    window.speechSynthesis.addEventListener('voiceschanged', on);
-  });
-  return window.speechSynthesis.getVoices();
-}
-
 function makeRecognizer(onFinalText: (text:string)=>void) {
   const SR: any = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
   if (!SR) return null;
@@ -330,75 +307,134 @@ function makeRecognizer(onFinalText: (text:string)=>void) {
   return r;
 }
 
-async function speakWithVoice(voiceCfg: Assistant['config']['voice'], text: string) {
-  await unlockAudio();
-
-  const playBlob = async (blob: Blob) => {
-    await unlockAudio();
-    const url = URL.createObjectURL(blob);
-    try {
-      const a = new Audio();
-      a.src = url;
-      a.preload = 'auto';
-      // Avoid autoplay block by ensuring this is called from a user gesture.
-      await a.play();
-      a.onended = () => URL.revokeObjectURL(url);
-    } catch {
-      URL.revokeObjectURL(url);
-      // fallback to web speech if autoplay blocked
-      await webSpeech(text, voiceCfg.voiceLabel);
-    }
-  };
-
-  const webSpeech = async (t: string, preferLabel?: string) => {
-    const synth = window.speechSynthesis;
-    try { synth.resume(); } catch {}
-    const voices = await ensureVoicesReady();
-    const u = new SpeechSynthesisUtterance(t);
-    u.rate = 1;
-    u.pitch = 0.95;      // slightly lower => more natural
-    u.volume = 1;
-    if (voices && voices.length) {
-      const byLabel = preferLabel ? voices.find(v => v.name.toLowerCase().includes(preferLabel.toLowerCase())) : undefined;
-      const en = voices.find(v => /en-|english/i.test(`${v.lang} ${v.name}`));
-      u.voice = byLabel || en || voices[0];
-    }
-    synth.cancel();
-    synth.speak(u);
-  };
-
-  // If ElevenLabs is selected, try your API, else fallback to Web Speech
-  if (voiceCfg.provider === 'elevenlabs') {
-    try {
-      const r = await fetch('/api/tts/elevenlabs', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ voiceId: voiceCfg.voiceId, text })
-      });
-      if (r.ok) {
-        const blob = await r.blob();
-        return playBlob(blob);
-      }
-    } catch {}
-    return webSpeech(text, voiceCfg.voiceLabel);
-  }
-
-  // OpenAI/Generic → use Web Speech in-browser
-  return webSpeech(text, voiceCfg.voiceLabel);
+/* ---------- Browser TTS, honoring selected voice label ---------- */
+async function ensureVoicesReady(): Promise<SpeechSynthesisVoice[]> {
+  const synth = window.speechSynthesis;
+  let voices = synth.getVoices();
+  if (voices.length) return voices;
+  await new Promise(res => {
+    const t = setInterval(() => {
+      voices = synth.getVoices();
+      if (voices.length) { clearInterval(t); res(null); }
+    }, 50);
+    setTimeout(() => { clearInterval(t); res(null); }, 1500);
+  });
+  return synth.getVoices();
 }
 
-async function tryLLM(system: string, message: string): Promise<string> {
-  try {
-    const r = await fetch('/api/llm', { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ system, message }) });
-    if (r.ok) { const j = await r.json(); if (j?.reply) return String(j.reply); }
-  } catch {}
-  // Mock: quick professional-ish replies for local tests
-  const m = message.toLowerCase();
-  if (/hello|hi|hey/.test(m)) return 'Hello—happy to help. What would you like to accomplish today?';
-  if (/book|schedule|appointment/.test(m)) return 'Absolutely. What date and time work best? I’ll also need your full name and a callback number.';
-  if (/name is|i am/.test(m)) return 'Thanks, noted. What’s the best phone number for confirmations?';
-  if (/phone|number|digits/.test(m)) return 'Perfect—got it. Anything else I should know before I confirm?';
-  return 'Understood. Could you share a bit more detail so I can move this forward?';
+async function speakWithVoice(text: string, voiceLabel: string){
+  const synth = window.speechSynthesis;
+  try { synth.resume(); } catch {}
+  const voices = await ensureVoicesReady();
+
+  const prefs = (voiceLabel || '').toLowerCase().includes('ember')
+    ? ['Samantha','Google US English','Serena','Victoria','Alex','Microsoft Aria']
+    : (voiceLabel || '').toLowerCase().includes('alloy')
+      ? ['Alex','Daniel','Google UK English Male','Microsoft David','Fred','Samantha']
+      : (voiceLabel || '').toLowerCase().includes('rachel')
+        ? ['Samantha','Microsoft Aria','Google US English','Victoria','Alex']
+        : (voiceLabel || '').toLowerCase().includes('adam')
+          ? ['Daniel','Alex','Google UK English Male','Microsoft David']
+          : (voiceLabel || '').toLowerCase().includes('bella')
+            ? ['Victoria','Samantha','Google US English','Serena']
+            : ['Google US English','Samantha','Alex','Daniel'];
+
+  const pick = () => {
+    for (const p of prefs) {
+      const v = voices.find(v => v.name.toLowerCase().includes(p.toLowerCase()));
+      if (v) return v;
+    }
+    return voices.find(v => /en-|english/i.test(`${v.lang} ${v.name}`)) || voices[0];
+  };
+
+  const u = new SpeechSynthesisUtterance(text);
+  u.voice = pick();
+  u.rate = 1;
+  u.pitch = 0.95;
+  u.volume = 1;
+
+  synth.cancel();
+  synth.speak(u);
+}
+
+/* =============================================================================
+   LOCAL PROMPT-DRIVEN AGENT (no server, follows [Data to Collect])
+============================================================================= */
+function parseCollectFields(prompt: string): string[] {
+  const m = prompt.match(/\[Data\s*to\s*Collect\]\s*([\s\S]*?)(?=\n\[|$)/i);
+  if (!m) return ['Full Name','Phone Number','Email','Appointment Date/Time'];
+  const lines = m[1].split(/\r?\n/).map(s => s.replace(/^\s*[-*]\s*/, '').trim()).filter(Boolean);
+  return lines.length ? lines : ['Full Name','Phone Number','Email','Appointment Date/Time'];
+}
+
+function extractName(s: string){ const m = s.match(/\b(?:i am|i'm|my name is|this is)\s+([a-z][a-z '-]+(?:\s+[a-z][a-z '-]+){0,2})/i); return m?.[1]?.trim(); }
+function extractPhone(s: string){ const m = s.replace(/[^\d+]/g,'').match(/(\+?\d{10,15})/); return m?.[1]; }
+function extractEmail(s: string){ const m = s.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i); return m?.[0]; }
+function extractDateTime(s: string){
+  const m = s.match(/\b(?:mon|tue|wed|thu|fri|sat|sun|tomorrow|today)\b.*?\b(\d{1,2}(:\d{2})?\s?(am|pm)?)|\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\s+\d{1,2}(:\d{2})?\s?(am|pm)?/i);
+  return m?.[0];
+}
+
+function makePromptAgent(systemPrompt: string){
+  const fields = parseCollectFields(systemPrompt);
+  const state: Record<string, string> = {};
+
+  function nextMissing(): string | null {
+    for (const f of fields) {
+      if (!state[f.toLowerCase()]) return f;
+    }
+    return null;
+  }
+
+  function tryAutoFill(user: string){
+    const map: Array<{keys: string[], val?: string|null}> = [
+      { keys:['full name','name'],              val: extractName(user) || null },
+      { keys:['phone number','phone','digits'], val: extractPhone(user) || null },
+      { keys:['email'],                          val: extractEmail(user) || null },
+      { keys:['appointment date/time','date/time','date','time'], val: extractDateTime(user) || null },
+    ];
+    for (const f of fields) {
+      const k = f.toLowerCase();
+      if (state[k]) continue;
+      const hit = map.find(m => m.keys.includes(k));
+      if (hit?.val) state[k] = hit.val;
+    }
+  }
+
+  function professionalTone(text: string){
+    return text.replace(/\s+/g,' ').replace(/\bi am\b/gi,'I’m').trim();
+  }
+
+  function askFor(fieldLabel: string){
+    const k = fieldLabel.toLowerCase();
+    const cue =
+      k.includes('name') ? 'your full name'
+    : k.includes('phone') ? 'the best phone number to reach you'
+    : k.includes('email') ? 'your email (optional)'
+    : k.includes('date') || k.includes('time') ? 'a preferred date and time'
+    : fieldLabel.toLowerCase();
+    return `Got it. What’s ${cue}?`;
+  }
+
+  function confirmationLine(){
+    const parts = fields.map(f => {
+      const k = f.toLowerCase();
+      return `${f}: ${state[k] ? state[k] : '—'}`;
+    });
+    return parts.join(' • ');
+  }
+
+  return {
+    reply(userText: string){
+      tryAutoFill(userText);
+      const missing = nextMissing();
+      if (missing) return professionalTone(askFor(missing));
+      return professionalTone(`Thanks. Here’s what I have: ${confirmationLine()}. Should I confirm or change anything?`);
+    },
+    summary(){
+      return professionalTone(`Summary — ${confirmationLine()}.`);
+    }
+  };
 }
 
 /* =============================================================================
@@ -573,7 +609,7 @@ export default function VoiceAgentSection() {
   };
   const declineTyping = () => { setTyping(null); setPendingFirstMsg(undefined); };
 
-  /* ---------- Voices (options + SAVE) ---------- */
+  /* ---------- Voices (static options) + SAVE / TEST ---------- */
   const openaiVoices = [
     { value: 'alloy', label: 'Alloy (OpenAI)' },
     { value: 'ember', label: 'Ember (OpenAI)' },
@@ -584,39 +620,52 @@ export default function VoiceAgentSection() {
     { value: 'bella',  label: 'Bella (ElevenLabs)'  },
   ];
 
-  // Local draft for voice selection (needs explicit Save)
-  const [voiceDraft, setVoiceDraft] = useState<{provider: VoiceProvider; voiceId: string; voiceLabel: string} | null>(null);
+  const [pendingVoiceId, setPendingVoiceId] = useState<string | null>(null);
+  const [pendingVoiceLabel, setPendingVoiceLabel] = useState<string | null>(null);
+
   useEffect(() => {
+    // whenever active changes, reset pending to current saved voice
+    if (active) {
+      setPendingVoiceId(active.config.voice.voiceId);
+      setPendingVoiceLabel(active.config.voice.voiceLabel);
+    }
+  }, [active?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleVoiceProviderChange = (v: string) => {
+    const list = v==='elevenlabs' ? elevenVoices : openaiVoices;
+    // set pending to the first available of that provider
+    setPendingVoiceId(list[0].value);
+    setPendingVoiceLabel(list[0].label);
+    updateActive(a => ({ ...a, config:{ ...a.config, voice:{ provider: v as VoiceProvider, voiceId: list[0].value, voiceLabel: list[0].label } } }));
+  };
+
+  const handleVoiceIdChange = (v: string) => {
     if (!active) return;
-    setVoiceDraft({ ...active.config.voice });
-  }, [active?.id, rev]); // reload when assistant changes or saved
+    const list = active.config.voice.provider==='elevenlabs' ? elevenVoices : openaiVoices;
+    const found = list.find(x=>x.value===v);
+    setPendingVoiceId(v);
+    setPendingVoiceLabel(found?.label || v);
+  };
 
   const saveVoice = async () => {
-    if (!active || !voiceDraft) return;
+    if (!active || !pendingVoiceId) return;
     updateActive(a => ({
       ...a,
-      config: { ...a.config, voice: { ...voiceDraft } }
+      config: { ...a.config, voice: { ...a.config.voice, voiceId: pendingVoiceId, voiceLabel: pendingVoiceLabel || pendingVoiceId } }
     }));
-    // quick audible confirmation using the newly saved settings
-    await speakWithVoice(voiceDraft, 'Voice saved.');
+    await speakWithVoice('Voice saved.', pendingVoiceLabel || pendingVoiceId);
   };
 
-  const setDraftProvider = (p: VoiceProvider) => {
-    if (!voiceDraft) return;
-    const list = p==='elevenlabs' ? elevenVoices : openaiVoices;
-    setVoiceDraft({ provider: p, voiceId: list[0].value, voiceLabel: list[0].label });
-  };
-  const setDraftVoiceId = (id: string) => {
-    if (!voiceDraft) return;
-    const list = voiceDraft.provider==='elevenlabs' ? elevenVoices : openaiVoices;
-    const found = list.find(v => v.value === id);
-    setVoiceDraft({ ...voiceDraft, voiceId: id, voiceLabel: found?.label || id });
+  const testVoice = async () => {
+    if (!pendingVoiceLabel) return;
+    await speakWithVoice('This is a quick preview of the selected voice.', pendingVoiceLabel);
   };
 
   /* ---------- Web call + logs ---------- */
   const [currentCallId, setCurrentCallId] = useState<string | null>(null);
   const [transcript, setTranscript] = useState<TranscriptTurn[]>([]);
   const recogRef = useRef<any | null>(null);
+  const agentRef = useRef<ReturnType<typeof makePromptAgent> | null>(null);
 
   function pushTurn(role: 'assistant'|'user', text: string) {
     const turn = { role, text, ts: Date.now() };
@@ -630,10 +679,9 @@ export default function VoiceAgentSection() {
       return next;
     });
   }
+
   async function startCall() {
     if (!active) return;
-    await unlockAudio(); // ensure iOS unblocked on first click
-
     const id = `call_${crypto.randomUUID?.() || Math.random().toString(36).slice(2)}`;
     setCurrentCallId(id);
     setTranscript([]);
@@ -643,26 +691,31 @@ export default function VoiceAgentSection() {
     calls.unshift({ id, assistantId: active.id, assistantName: active.name, startedAt: Date.now(), type: 'Web', assistantPhoneNumber: linkedNum, transcript: [] });
     writeLS(LS_CALLS, calls);
 
+    // Build prompt-driven agent fresh from current System Prompt
+    agentRef.current = makePromptAgent(active.config.model.systemPrompt || '');
+
     const greet = active.config.model.firstMessage || 'Hello. How may I help you today?';
     if (active.config.model.firstMessageMode === 'assistant_first') {
       pushTurn('assistant', greet);
-      await speakWithVoice(active.config.voice, greet);
+      await speakWithVoice(greet, active.config.voice.voiceLabel);
     }
 
     const rec = makeRecognizer(async (finalText) => {
       pushTurn('user', finalText);
-      const reply = await tryLLM(active.config.model.systemPrompt, finalText);
+
+      const reply = agentRef.current?.reply(finalText) || 'Understood.';
       pushTurn('assistant', reply);
-      await speakWithVoice(active.config.voice, reply);
+      await speakWithVoice(reply, active.config.voice.voiceLabel);
     });
     if (!rec) {
       const msg = 'Browser speech recognition is not available here. Use Chrome or Edge.';
       pushTurn('assistant', msg);
-      await speakWithVoice(active.config.voice, msg);
+      await speakWithVoice(msg, active.config.voice.voiceLabel);
       return;
     }
     recogRef.current = rec; try { rec.start(); } catch {}
   }
+
   function endCall(reason: string) {
     if (recogRef.current) { try { recogRef.current.stop(); } catch {} recogRef.current = null; }
     window.speechSynthesis.cancel();
@@ -671,9 +724,10 @@ export default function VoiceAgentSection() {
     writeLS(LS_CALLS, calls);
     setCurrentCallId(null);
   }
+
   const callsForAssistant = (readLS<CallLog[]>(LS_CALLS) || []).filter(c => c.assistantId === active?.id);
 
-  if (!active || !voiceDraft) {
+  if (!active) {
     return (
       <div ref={scopeRef} className={SCOPE} style={{ color:'var(--text)' }}>
         <div className="px-6 py-10 opacity-70">Create your first assistant.</div>
@@ -744,7 +798,7 @@ export default function VoiceAgentSection() {
         data-collapsed={railCollapsed ? 'true' : 'false'}
         style={{
           position:'fixed',
-          left:'calc(var(--app-sidebar-w, 248px) - 1px)', // fuse with main sidebar
+          left:'calc(var(--app-sidebar-w, 248px) - 1px)',
           top:'var(--app-header-h, 64px)',
           width: railCollapsed ? '72px' : 'var(--va-rail-w, 360px)',
           height:'calc(100vh - var(--app-header-h, 64px))',
@@ -780,21 +834,23 @@ export default function VoiceAgentSection() {
 
         <div className="p-3 min-h-0 flex-1 overflow-y-auto" style={{ scrollbarWidth:'thin' }}>
           {!railCollapsed && (
-            <>
-              <div
-                className="flex items-center gap-2 rounded-lg px-2.5 py-2 mb-2"
-                style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)' }}
-              >
-                <Search className="w-4 h-4 icon" />
-                <input
-                  value={query}
-                  onChange={(e)=> setQuery(e.target.value)}
-                  placeholder="Search assistants"
-                  className="w-full bg-transparent outline-none text-sm"
-                  style={{ color:'var(--text)' }}
-                />
-              </div>
+            <div
+              className="flex items-center gap-2 rounded-lg px-2.5 py-2 mb-2"
+              style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)' }}
+            >
+              <Search className="w-4 h-4 icon" />
+              <input
+                value={query}
+                onChange={(e)=> setQuery(e.target.value)}
+                placeholder="Search assistants"
+                className="w-full bg-transparent outline-none text-sm"
+                style={{ color:'var(--text)' }}
+              />
+            </div>
+          )}
 
+          {!railCollapsed && (
+            <>
               <div className="text-xs font-semibold flex items-center gap-2 mt-3 mb-1" style={{ color:'var(--text-muted)' }}>
                 <Folder className="w-3.5 h-3.5 icon" /> Folders
               </div>
@@ -1007,7 +1063,7 @@ export default function VoiceAgentSection() {
                     }}
                   >
                     {(() => {
-                      const slice = typing!.slice(0, typedCount);
+                      const slice = typing.slice(0, typedCount);
                       const out: JSX.Element[] = [];
                       let buf = '';
                       let added = slice.length ? slice[0].added : false;
@@ -1043,8 +1099,8 @@ export default function VoiceAgentSection() {
             <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(2, minmax(360px, 1fr))' }}>
               <Field label="Provider">
                 <Select
-                  value={voiceDraft.provider}
-                  onChange={(v)=> setDraftProvider(v as VoiceProvider)}
+                  value={active.config.voice.provider}
+                  onChange={handleVoiceProviderChange}
                   items={[
                     { value:'openai', label:'OpenAI' },
                     { value:'elevenlabs', label:'ElevenLabs' },
@@ -1053,22 +1109,19 @@ export default function VoiceAgentSection() {
               </Field>
               <Field label="Voice">
                 <Select
-                  value={voiceDraft.voiceId}
-                  onChange={(v)=> setDraftVoiceId(v)}
-                  items={voiceDraft.provider==='elevenlabs' ? elevenVoices : openaiVoices}
+                  value={pendingVoiceId || active.config.voice.voiceId}
+                  onChange={handleVoiceIdChange}
+                  items={active.config.voice.provider==='elevenlabs' ? elevenVoices : openaiVoices}
                 />
               </Field>
             </div>
 
             <div className="mt-3 flex items-center gap-2">
-              <button onClick={saveVoice} className="btn btn--green">
-                <Check className="w-4 h-4 text-white" /><span className="text-white">Save Voice</span>
-              </button>
-              <button
-                onClick={()=> speakWithVoice(voiceDraft, 'This is how I will sound—clear, natural, and professional.')}
-                className="btn btn--ghost"
-              >
+              <button onClick={testVoice} className="btn btn--ghost">
                 <Volume2 className="w-4 h-4 icon" /> Test Voice
+              </button>
+              <button onClick={saveVoice} className="btn btn--green">
+                <Save className="w-4 h-4 text-white" /> <span className="text-white">Save Voice</span>
               </button>
               <button
                 onClick={()=> { window.dispatchEvent(new CustomEvent('voiceagent:import-11labs')); alert('Hook “voiceagent:import-11labs” to your importer.'); }}
@@ -1580,7 +1633,7 @@ function Select({ value, items, onChange, placeholder, leftIcon }: {
                   className="w-full flex items-center gap-3 px-3 py-2 rounded-[10px] text-left"
                   style={{ color:'var(--text)' }}
                   onMouseEnter={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='rgba(16,185,129,.10)'; (e.currentTarget as HTMLButtonElement).style.border='1px solid rgba(16,185,129,.35)'; }}
-                  onMouseLeave={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='transparent'; (e.currentTarget as HTMLButtonElement).style.border='1px solid transparent'; }}
+                  onMouseLeave={(e)=>{ (e.currentTarget as any).style.background='transparent'; (e.currentTarget as any).style.border='1px solid transparent'; }}
                 >
                   {it.icon}{it.label}
                 </button>
