@@ -3,328 +3,297 @@
 @tailwind utilities;
 
 /* ---------------- Font ---------------- */
-@font-face{
-  font-family:"Movatif Bold";
-  src:url("/fonts/Movatif-Bold.ttf") format("truetype");
-  font-weight:700;
-  font-style:normal;
-  font-display:swap;
+@font-face {
+  font-family: "Movatif";
+  src: url("/fonts/Movatif-Regular.woff2") format("woff2"),
+       url("/fonts/Movatif-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Movatif";
+  src: url("/fonts/Movatif-Bold.woff2") format("woff2"),
+       url("/fonts/Movatif-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
 }
 
 /* =====================================================
    THEME TOKENS
    ===================================================== */
-:root{
+:root {
   /* Brand */
-  --brand:#00ffc2;
-  --brand-weak:rgba(0,255,194,.28);
+  --brand: #00ffc2;
+  --brand-weak: rgba(0,255,194,.28);
 
   /* Text */
-  --text:#0b0c10;
-  --text-muted:rgba(11,12,16,.65);
+  --text: #0b0c10;
+  --text-muted: rgba(11,12,16,.65);
 
   /* Surfaces */
-  --bg:#f6f8f9;          /* page */
-  --panel:#ffffff;       /* big panels / shells */
-  --card:#ffffff;        /* cards */
-  --border:rgba(11,12,16,.10);
-  --ring:rgba(0,0,0,.06);
+  --bg: #f6f8f9;          /* page */
+  --panel: #ffffff;       /* big panels / shells */
+  --card: #ffffff;        /* cards */
+  --border: rgba(11,12,16,.10);
+  --ring: rgba(0,0,0,.06);
 
   /* Shadows (light) */
-  --shadow-soft:0 14px 34px rgba(15,23,42,.10);
-  --shadow-card:0 1px 0 rgba(0,0,0,.04), 0 10px 26px rgba(0,0,0,.07);
+  --shadow-soft: 0 14px 34px rgba(15,23,42,.10);
+  --shadow-card: 0 1px 0 rgba(0,0,0,.04), 0 10px 26px rgba(0,0,0,.07);
 
   /* Sidebar — LIGHT */
-  --sidebar-bg:#ffffff;
-  --sidebar-border:rgba(11,12,16,.10);
-  --sidebar-text:#0b0c10;
-  --sidebar-muted:rgba(11,12,16,.55);
+  --sidebar-bg: #ffffff;
+  --sidebar-border: rgba(11,12,16,.10);
+  --sidebar-text: #0b0c10;
+  --sidebar-muted: rgba(11,12,16,.55);
 
   /* Sidebar icon boxes */
-  --sb-icon-bg:#fff;
-  --sb-icon-border:rgba(11,12,16,.10);
+  --sb-icon-bg: #fff;
+  --sb-icon-border: rgba(11,12,16,.10);
 
   /* Account chip (sidebar) */
-  --acct-bg:#ffffff;
-  --acct-border:rgba(11,12,16,.10);
+  --acct-bg: #ffffff;
+  --acct-border: rgba(11,12,16,.10);
 
   /* Motion */
-  --ease:cubic-bezier(.22,.61,.36,1);
-  --dur-quick:160ms;
-  --dur:260ms;
+  --ease: cubic-bezier(.22,.61,.36,1);
+  --dur-quick: 160ms;
+  --dur: 260ms;
 }
 
-[data-theme="dark"]{
-  --text:#ffffff;
-  --text-muted:rgba(255,255,255,.72);
-  --bg:#0b0c10;
-  --panel:#0f1214;
-  --card:#101314;
-  --border:rgba(255,255,255,.09);
-  --ring:rgba(0,255,194,.10);
+[data-theme="dark"] {
+  --text: #ffffff;
+  --text-muted: rgba(255,255,255,.72);
+  --bg: #0b0c10;
+  --panel: #0f1214;
+  --card: #101314;
+  --border: rgba(255,255,255,.09);
+  --ring: rgba(0,255,194,.10);
 
-  --shadow-soft:0 12px 36px rgba(0,0,0,.45);
-  --shadow-card:inset 0 0 22px rgba(0,0,0,.28), 0 0 20px rgba(0,255,194,.06);
+  --shadow-soft: 0 12px 36px rgba(0,0,0,.45);
+  --shadow-card: inset 0 0 22px rgba(0,0,0,.28), 0 0 20px rgba(0,255,194,.06);
 
-  --sidebar-bg:#0f1214;
-  --sidebar-border:rgba(255,255,255,.06);
-  --sidebar-text:#ffffff;
-  --sidebar-muted:rgba(255,255,255,.60);
+  --sidebar-bg: #0f1214;
+  --sidebar-border: rgba(255,255,255,.06);
+  --sidebar-text: #ffffff;
+  --sidebar-muted: rgba(255,255,255,.60);
 
-  --sb-icon-bg:#0f1214;
-  --sb-icon-border:rgba(255,255,255,.08);
+  --sb-icon-bg: #0f1214;
+  --sb-icon-border: rgba(255,255,255,.08);
 
-  --acct-bg:#0f1214;
-  --acct-border:rgba(255,255,255,.08);
+  --acct-bg: #0f1214;
+  --acct-border: rgba(255,255,255,.08);
 }
 
 /* =====================================================
    BASE & SHELL
    ===================================================== */
-html,body{
-  background:var(--bg);
-  color:var(--text);
-  font-family:"Movatif Bold", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
-  -webkit-font-smoothing:antialiased;
-  -moz-osx-font-smoothing:grayscale;
-  min-height:100%;
+html, body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Movatif", "Manrope", ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-height: 100%;
 }
-a{ color:inherit; text-decoration:none; }
-.page-shell{ min-height:100vh; background:var(--bg); }
+a { color: inherit; text-decoration: none; }
+.page-shell { min-height: 100vh; background: var(--bg); }
 
 /* =====================================================
    SURFACES
    ===================================================== */
-.panel{
-  background:var(--panel);
-  border:1px solid var(--border);
-  box-shadow:var(--shadow-soft);
-  border-radius:18px;
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-soft);
+  border-radius: 18px;
 }
-.card{
-  background:var(--card);
-  border:1px solid var(--border);
-  box-shadow:var(--shadow-card);
-  border-radius:16px;
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-card);
+  border-radius: 16px;
 }
-.card-hover{ transition:transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
-.card-hover:hover{ transform:translateY(-2px); }
+.card-hover { transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
+.card-hover:hover { transform: translateY(-2px); }
 
 /* =====================================================
    SIDEBAR
    ===================================================== */
-.sidebar{
-  background:var(--sidebar-bg);
-  color:var(--sidebar-text);
-  border-right:1px solid var(--sidebar-border);
-  box-shadow:inset 0 0 18px rgba(0,0,0,0.28); /* subtle edge separator for dark + light */
+.sidebar {
+  background: var(--sidebar-bg);
+  color: var(--sidebar-text);
+  border-right: 1px solid var(--sidebar-border);
+  box-shadow: inset 0 0 18px rgba(0,0,0,0.28);
 }
-.sidebar .muted{ color:var(--sidebar-muted); }
+.sidebar .muted { color: var(--sidebar-muted); }
 
 /* =====================================================
    INPUTS & BUTTONS
    ===================================================== */
-.input{
-  background:var(--card);
-  color:var(--text);
-  border:1px solid var(--border);
-  border-radius:12px;
-  outline:none;
-  transition:border var(--dur-quick) var(--ease), box-shadow var(--dur-quick) var(--ease);
-  padding:.65rem .85rem;
+.input {
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  outline: none;
+  transition: border var(--dur-quick) var(--ease), box-shadow var(--dur-quick) var(--ease);
+  padding: .65rem .85rem;
 }
-.input:focus{ border-color:var(--brand-weak); box-shadow:0 0 0 4px var(--ring); }
+.input:focus { border-color: var(--brand-weak); box-shadow: 0 0 0 4px var(--ring); }
 
-.btn{ border-radius:12px; font-weight:600; transition:filter var(--dur-quick) var(--ease), transform var(--dur-quick) var(--ease); }
-.btn:active{ transform:translateY(1px); }
-.btn-brand{ background:var(--brand); color:#000; }
-.btn-brand:hover{ filter:brightness(1.06); }
-.btn-ghost{ background:var(--card); color:var(--text); border:1px solid var(--border); }
+.btn { border-radius: 12px; font-weight: 600; transition: filter var(--dur-quick) var(--ease), transform var(--dur-quick) var(--ease); }
+.btn:active { transform: translateY(1px); }
+.btn-brand { background: var(--brand); color: #000; }
+.btn-brand:hover { filter: brightness(1.06); }
+.btn-ghost { background: var(--card); color: var(--text); border: 1px solid var(--border); }
 
 /* =====================================================
    ANIMATION HELPERS
    ===================================================== */
-.fade-up{ animation:fadeUp var(--dur) var(--ease) both; }
-@keyframes fadeUp{ from{ opacity:0; transform:translateY(10px);} to{ opacity:1; transform:translateY(0);} }
+.fade-up { animation: fadeUp var(--dur) var(--ease) both; }
+@keyframes fadeUp { from { opacity: 0; transform: translateY(10px);} to { opacity: 1; transform: translateY(0);} }
 
-.sheen{ position:relative; overflow:hidden; }
-.sheen::after{
-  content:""; position:absolute; inset:0; translate:-120% 0;
-  background:linear-gradient(110deg, transparent 0%, rgba(255,255,255,.08) 45%, rgba(255,255,255,.18) 50%, transparent 55%);
-  animation:sheen 900ms var(--ease) forwards;
+.sheen { position: relative; overflow: hidden; }
+.sheen::after {
+  content: ""; position: absolute; inset: 0; translate: -120% 0;
+  background: linear-gradient(110deg, transparent 0%, rgba(255,255,255,.08) 45%, rgba(255,255,255,.18) 50%, transparent 55%);
+  animation: sheen 900ms var(--ease) forwards;
 }
-@keyframes sheen{ to{ translate:120% 0; } }
+@keyframes sheen { to { translate: 120% 0; } }
 
-.skeleton{
-  background:linear-gradient(90deg, var(--card) 25%, var(--panel) 37%, var(--card) 63%);
-  background-size:200% 100%;
-  animation:shimmer 1200ms linear infinite;
-  border-radius:16px;
-  border:1px solid var(--border);
-  box-shadow:var(--shadow-card);
+.skeleton {
+  background: linear-gradient(90deg, var(--card) 25%, var(--panel) 37%, var(--card) 63%);
+  background-size: 200% 100%;
+  animation: shimmer 1200ms linear infinite;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-card);
 }
-@keyframes shimmer{ from{ background-position:-200% 0; } to{ background-position:200% 0; } }
+@keyframes shimmer { from { background-position: -200% 0; } to { background-position: 200% 0; } }
 
 /* =====================================================
    OVERLAY
    ===================================================== */
-.backdrop{ background:rgba(0,0,0,.55); }
+.backdrop { background: rgba(0,0,0,.55); }
 
 /* =====================================================
-   BUILDER / COLLECTIONS LOOK (matches Phone Numbers / API Keys)
+   BUILDER / COLLECTIONS LOOK
    ===================================================== */
-
-/* A slim bar at the very top of the content area with the section title */
-.section-bar{
-  position:relative;
-  display:flex; align-items:center; gap:.75rem;
-  height:56px;
-  padding:0 18px;
-  background:var(--panel);
-  color:var(--text);
-  border-bottom:1px solid var(--border);
-  box-shadow:0 12px 24px rgba(0,0,0,.04); /* light pop in light mode */
-  border-top-left-radius:16px; border-top-right-radius:16px;
+.section-bar {
+  position: relative;
+  display: flex; align-items: center; gap: .75rem;
+  height: 56px;
+  padding: 0 18px;
+  background: var(--panel);
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+  box-shadow: 0 12px 24px rgba(0,0,0,.04);
+  border-top-left-radius: 16px; border-top-right-radius: 16px;
 }
-.section-pill{
-  display:inline-flex; align-items:center; gap:.5rem;
-  padding:.36rem .8rem; border-radius:999px;
-  background:var(--brand-weak); color:var(--text);
-  border:1px solid var(--border);
-  box-shadow:var(--shadow-card);
-  font-size:13px; font-weight:600;
+.section-pill {
+  display: inline-flex; align-items: center; gap: .5rem;
+  padding: .36rem .8rem; border-radius: 999px;
+  background: var(--brand-weak); color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-card);
+  font-size: 13px; font-weight: 600;
 }
-.section-body{
-  /* cards sit directly on page; no big white panel wrapper */
-  padding:18px 18px 28px 18px;
+.section-body {
+  padding: 18px 18px 28px 18px;
 }
-
-/* Search box and cards */
-.builder-input{
-  background:var(--card);
-  color:var(--text);
-  border:1px solid var(--border);
-  border-radius:12px;
-  box-shadow:var(--shadow-card);
+.builder-input {
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-card);
 }
-.builder-card{
-  background:var(--card);
-  border:1px solid var(--border);
-  border-radius:16px;
-  box-shadow:var(--shadow-card);
-  transition:transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+.builder-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--shadow-card);
+  transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
 }
-.builder-card:hover{ transform:translateY(-2px); }
-
-.builder-card.dashed{
-  border:2px dashed var(--brand-weak);
-  box-shadow:inset 0 0 18px rgba(0,0,0,.06), 0 10px 24px rgba(0,0,0,.06);
+.builder-card:hover { transform: translateY(-2px); }
+.builder-card.dashed {
+  border: 2px dashed var(--brand-weak);
+  box-shadow: inset 0 0 18px rgba(0,0,0,.06), 0 10px 24px rgba(0,0,0,.06);
 }
-
-.builder-spot{
-  background:radial-gradient(320px 240px at 20% 20%, var(--brand-weak), transparent 55%);
-  filter:blur(6px);
-  pointer-events:none;
-  border-radius:999px;
+.builder-spot {
+  background: radial-gradient(320px 240px at 20% 20%, var(--brand-weak), transparent 55%);
+  filter: blur(6px);
+  pointer-events: none;
+  border-radius: 999px;
 }
 
 /* =====================================================
-   ELEVATION & GLOW HELPERS (non-destructive)
-   Append-only utilities (don’t change colors)
+   ELEVATION & GLOW HELPERS
    ===================================================== */
-
-/* Light defaults (inherit your existing brand + ring) */
-:root{
-  /* stronger but tasteful depth */
+:root {
   --shadow-strong: 0 28px 70px rgba(0,0,0,.12), 0 10px 26px rgba(0,0,0,.08), 0 0 0 1px rgba(0,0,0,.02);
-  /* faint neon ring that won’t shift surface colors */
   --ring-brand-soft: rgba(0,255,194,.10);
   --ring-brand-line: rgba(0,255,194,.06);
 }
-
-/* Dark tune-up */
-[data-theme="dark"]{
+[data-theme="dark"] {
   --shadow-strong: 0 36px 90px rgba(0,0,0,.60), 0 14px 34px rgba(0,0,0,.45), 0 0 0 1px rgba(0,255,194,.08);
   --ring-brand-soft: rgba(0,255,194,.14);
   --ring-brand-line: rgba(0,255,194,.10);
 }
-
-/* Make any surface pop more (cards, panels, modals) */
-.elevate{ box-shadow: var(--shadow-strong) !important; }
-
-/* Add a subtle brand ring on the element’s edge */
-.ring-brand{ box-shadow: 0 0 0 1px var(--ring-brand-line), 0 0 0 4px var(--ring) !important; }
-
-/* Hover lift (pairs well with .builder-card / .card-hover) */
-.lift-hover{ transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
-.lift-hover:hover{ transform: translateY(-2px); box-shadow: var(--shadow-strong); }
-
-/* Soft radial brand glow *behind* the element (no color shift on surface) */
-.glow-spot{ position: relative; overflow: hidden; }
-.glow-spot::before{
-  content:""; position:absolute; inset:auto; width:70%; height:70%;
-  left:-28%; top:-28%; pointer-events:none; border-radius:999px;
+.elevate { box-shadow: var(--shadow-strong) !important; }
+.ring-brand { box-shadow: 0 0 0 1px var(--ring-brand-line), 0 0 0 4px var(--ring) !important; }
+.lift-hover { transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
+.lift-hover:hover { transform: translateY(-2px); box-shadow: var(--shadow-strong); }
+.glow-spot { position: relative; overflow: hidden; }
+.glow-spot::before {
+  content: ""; position: absolute; inset: auto; width: 70%; height: 70%;
+  left: -28%; top: -28%; pointer-events: none; border-radius: 999px;
   background: radial-gradient(circle, var(--ring-brand-soft) 0%, transparent 70%);
   filter: blur(40px);
 }
-
-/* Inner hairline so dark cards feel crisp without changing their color */
-.inner-line{ position: relative; }
-.inner-line::after{
-  content:""; position:absolute; inset:0; border-radius:inherit; pointer-events:none;
+.inner-line { position: relative; }
+.inner-line::after {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
   box-shadow: inset 0 0 0 1px rgba(255,255,255,.04);
 }
-[data-theme="dark"] .inner-line::after{ box-shadow: inset 0 0 0 1px rgba(255,255,255,.06); }
-
-/* Inputs: slightly deeper focus without altering your brand token */
-.input.input-elevated{ box-shadow: var(--shadow-card), 0 10px 22px rgba(0,0,0,.06); }
-.input.input-elevated:focus{
+[data-theme="dark"] .inner-line::after { box-shadow: inset 0 0 0 1px rgba(255,255,255,.06); }
+.input.input-elevated { box-shadow: var(--shadow-card), 0 10px 22px rgba(0,0,0,.06); }
+.input.input-elevated:focus {
   border-color: var(--brand-weak);
   box-shadow: 0 0 0 4px var(--ring), 0 10px 22px rgba(0,0,0,.08);
 }
-[data-theme="dark"] .input.input-elevated{
+[data-theme="dark"] .input.input-elevated {
   box-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 12px 30px rgba(0,0,0,.38);
 }
-[data-theme="dark"] .input.input-elevated:focus{
+[data-theme="dark"] .input.input-elevated:focus {
   box-shadow: 0 0 0 2px rgba(0,255,194,.24), inset 0 1px 0 rgba(255,255,255,.04), 0 12px 30px rgba(0,0,0,.42);
 }
-
-/* Buttons: optional soft halo on brand buttons (doesn’t change the fill color) */
-.btn-brand.halo{ box-shadow: 0 0 0 1px var(--ring-brand-line), 0 12px 28px rgba(0,0,0,.12); }
-[data-theme="dark"] .btn-brand.halo{ box-shadow: 0 0 0 1px var(--ring-brand-line), 0 16px 36px rgba(0,0,0,.45); }
-
-/* Cards/Panel presets: compose helpers for convenience */
-.card.depth, .panel.depth, .builder-card.depth{ box-shadow: var(--shadow-strong); }
-.card.glow, .panel.glow, .builder-card.glow{ position:relative; overflow:hidden; }
-.card.glow::before, .panel.glow::before, .builder-card.glow::before{
-  content:""; position:absolute; left:-28%; top:-28%; width:70%; height:70%; pointer-events:none; border-radius:999px;
+.btn-brand.halo { box-shadow: 0 0 0 1px var(--ring-brand-line), 0 12px 28px rgba(0,0,0,.12); }
+[data-theme="dark"] .btn-brand.halo { box-shadow: 0 0 0 1px var(--ring-brand-line), 0 16px 36px rgba(0,0,0,.45); }
+.card.depth, .panel.depth, .builder-card.depth { box-shadow: var(--shadow-strong); }
+.card.glow, .panel.glow, .builder-card.glow { position: relative; overflow: hidden; }
+.card.glow::before, .panel.glow::before, .builder-card.glow::before {
+  content: ""; position: absolute; left: -28%; top: -28%; width: 70%; height: 70%; pointer-events: none; border-radius: 999px;
   background: radial-gradient(circle, var(--ring-brand-soft) 0%, transparent 70%);
   filter: blur(40px);
 }
-
-/* Optional: subtle foreground highlight line for very flat light cards */
-.card.edge, .panel.edge, .builder-card.edge{
+.card.edge, .panel.edge, .builder-card.edge {
   box-shadow: var(--shadow-card), 0 0 0 1px var(--ring-brand-line);
 }
 
 /* =====================================================
-   VOICE STUDIO HELPERS (layout + match API Keys roundness)
+   VOICE STUDIO HELPERS
    ===================================================== */
-
-/* Mirrors the page padding used by your ContentWrapper so we can cancel it on the left */
-.voice-studio{ --page-x-pad: 1rem; }
-@media (min-width:640px){ .voice-studio{ --page-x-pad: 1.5rem; } }  /* sm */
-@media (min-width:1024px){ .voice-studio{ --page-x-pad: 2rem; } }   /* lg */
-
-/* Pull the assistant list column left so it touches the main app sidebar.
-   Uses --app-sidebar-w if your app sets it; falls back to 248px. */
-.voice-studio .flush-left{
+.voice-studio { --page-x-pad: 1rem; }
+@media (min-width:640px){ .voice-studio{ --page-x-pad: 1.5rem; } }
+@media (min-width:1024px){ .voice-studio{ --page-x-pad: 2rem; } }
+.voice-studio .flush-left {
   margin-left: calc((var(--page-x-pad) + var(--app-sidebar-w, 248px)) * -1);
   padding-left: var(--app-sidebar-w, 248px);
 }
-
-/* Keep the editor column aligned with the inner gutter */
-.voice-studio .editor-gutter{ padding-left: var(--page-x-pad); }
-
-/* Round buttons to match API Keys page look */
-.btn-round{ border-radius:18px !important; }
+.voice-studio .editor-gutter { padding-left: var(--page-x-pad); }
+.btn-round { border-radius: 18px !important; }
