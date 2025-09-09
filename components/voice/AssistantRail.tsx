@@ -85,7 +85,7 @@ export default function AssistantRail({
 
   useAppSidebarWidth(scopeRef, sbCollapsed);
 
-  const [railCollapsed, setRailCollapsed] = useState(false);
+  const [railCollapsed, setRailCollapsed] = useState(defaultCollapsed);
   const [query, setQuery] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [tempName, setTempName] = useState('');
