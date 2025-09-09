@@ -8,8 +8,14 @@ import {
 } from 'lucide-react';
 
 /* =============================================================================
-   SAFE STORAGE (local to this file)
-   - SSR/Edge safe; falls back to memory if localStorage unavailable
+   SAFE STORAGE (SSR/Edge safe) + ACCOUNT SCOPING
+   - Saves per account by prefixing keys with an account id.
+   - Where the account id comes from (first hit wins):
+     1) window.__ACCOUNT_ID__ (or __USER_ID__)
+     2) URL ?acc=YOUR_ID
+     3) cookie accid=YOUR_ID
+     4) localStorage("account:id")
+     5) "anon" fallback
 ============================================================================= */
 type Backend = {
   getItem: (k: string) => string | null;
@@ -30,22 +36,44 @@ function resolveBackend(): Backend {
   if (ls && typeof ls.getItem === 'function' && typeof ls.setItem === 'function') return ls as Backend;
   return makeMemoryBackend();
 }
+function getAccountKey(): string {
+  if (typeof window === 'undefined') return 'anon';
+  try {
+    const g = (window as any).__ACCOUNT_ID__ || (window as any).__USER_ID__;
+    if (g) return String(g);
+  } catch {}
+  try {
+    const u = new URL(window.location.href);
+    const p = u.searchParams.get('acc');
+    if (p) return p;
+  } catch {}
+  try {
+    const m = document.cookie.match(/(?:^|;\s*)accid=([^;]+)/);
+    if (m) return decodeURIComponent(m[1]);
+  } catch {}
+  try {
+    const id = (window as any).localStorage?.getItem('account:id');
+    if (id) return id;
+  } catch {}
+  return 'anon';
+}
 function createScopedStorage(scope: string) {
   const backend = resolveBackend();
-  const key = (k: string) => `${scope}:${k}`;
+  const account = getAccountKey();
+  const prefix = `${account}:${scope}:`;
   return {
     getItem<T = any>(k: string): T | null {
       try {
-        const raw = backend.getItem(key(k));
+        const raw = backend.getItem(prefix + k);
         if (!raw) return null;
         return JSON.parse(raw) as T;
       } catch { return null; }
     },
     setItem<T = any>(k: string, v: T): void {
-      try { backend.setItem(key(k), JSON.stringify(v)); } catch {}
+      try { backend.setItem(prefix + k, JSON.stringify(v)); } catch {}
     },
     removeItem(k: string): void {
-      try { backend.removeItem(key(k)); } catch {}
+      try { backend.removeItem(prefix + k); } catch {}
     },
   };
 }
@@ -76,7 +104,7 @@ const MODEL_OPTIONS: Array<{ value: ModelId; label: string }> = [
   { value: 'o3-mini',      label: 'o3-mini (reasoning, fast)' },
 ];
 
-// storage keys
+// storage keys (scoped per account by the helper above)
 const K_SELECTED_AGENT_ID = `${SCOPE}:selectedAgentId`;
 const K_AGENT_LIST = `${SCOPE}:agents`;
 const K_AGENT_STATE_PREFIX = `${SCOPE}:agent:`;
@@ -182,7 +210,7 @@ export default function ImprovePage() {
   const [state, setState] = useState<AgentState | null>(null);
 
   const [input, setInput] = useState('');
-  const [addingRefine, setAddingRefine] = useState('');
+  the [addingRefine, setAddingRefine] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showWhyFor, setShowWhyFor] = useState<string | null>(null);
@@ -377,7 +405,7 @@ export default function ImprovePage() {
   }
 
   /* =============================================================================
-     UI (color-tokens everywhere)
+     UI (color tokens + explicit “applies to agent” copy)
   ============================================================================= */
   return (
     <div className={`${SCOPE} min-h-screen font-sans`} style={{ background: 'var(--bg)', color: 'var(--text)' }}>
@@ -394,6 +422,7 @@ export default function ImprovePage() {
               style={{ borderColor: 'var(--border)' }}
               value={selectedAgent.id}
               onChange={e => selectAgent(e.target.value)}
+              title="Pick which agent you want to change"
             >
               {agents.map(a => (
                 <option key={a.id} value={a.id}>{a.name}</option>
@@ -422,7 +451,9 @@ export default function ImprovePage() {
           <div className="mx-auto w-full max-w-[1400px] px-4 pb-3">
             <div className="grid md:grid-cols-3 gap-3">
               <div className="rounded-lg p-3 border" style={{ borderColor: 'var(--border)', background: 'var(--panel)' }}>
-                <div className="text-xs opacity-70 mb-1">Model</div>
+                <div className="text-xs opacity-70 mb-1">
+                  Model <span className="opacity-60">(applies to <strong>{selectedAgent.name}</strong>)</span>
+                </div>
                 <select
                   className="w-full rounded-md px-2 py-2 border bg-transparent"
                   style={{ borderColor: 'var(--border)' }}
@@ -434,7 +465,7 @@ export default function ImprovePage() {
                   ))}
                 </select>
                 <div className="mt-2 text-xs opacity-60">
-                  Only valid, supported options are shown. Your choice is saved to this agent.
+                  Your choice is saved per account and per agent.
                 </div>
               </div>
 
