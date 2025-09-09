@@ -1,30 +1,28 @@
-// components/voice/VoiceAgentSection.tsx
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search, Plus, Folder, FolderOpen, Check, Trash2, Copy, Edit3, Sparkles,
-  ChevronDown, ChevronRight, FileText, Mic2, BookOpen, SlidersHorizontal,
-  PanelLeft, Bot, UploadCloud, RefreshCw, X, ChevronLeft, ChevronRight as ChevronRightIcon,
-  Phone as PhoneIcon, Rocket, PhoneCall, PhoneOff, MessageSquare, ListTree, AudioLines, Volume2, Save
+  ChevronLeft, ChevronRight as ChevronRightIcon,
+  FileText, Mic2, BookOpen, SlidersHorizontal, PanelLeft, Bot, UploadCloud,
+  RefreshCw, X, Phone as PhoneIcon, Rocket, PhoneCall, PhoneOff,
+  MessageSquare, ListTree, AudioLines, Volume2, Save
 } from 'lucide-react';
 
 import TelephonyEditor, { PhoneNum } from '@/components/voice/TelephonyEditor';
 import {
-  SCOPE, ACCENT, ACCENT_HOVER, BTN_SHADOW,
-  Field, Section, Select, DeleteModal, StyleBlock, useAppSidebarWidth
+  SCOPE, Field, Section, Select, DeleteModal, StyleBlock, useAppSidebarWidth
 } from '@/components/voice/ui';
 
 /* =============================================================================
-   CONFIG
+   SIMPLE CONFIG
 ============================================================================= */
-const TICK_MS = 10;
-const CHUNK_SIZE = 6;
+const LS_LIST = 'voice:assistants.v1';
+const LS_CALLS = 'voice:calls.v1';
+const LS_ROUTES = 'voice:phoneRoutes.v1';
+const ak = (id: string) => `voice:assistant:${id}`;
 
-/* =============================================================================
-   TYPES + STORAGE
-============================================================================= */
 type Provider = 'openai';
 type ModelId = 'gpt-4o' | 'gpt-4o-mini' | 'gpt-4.1' | 'gpt-3.5-turbo';
 type VoiceProvider = 'openai' | 'elevenlabs';
@@ -68,14 +66,9 @@ type Assistant = {
     };
     tools: { enableEndCall: boolean; dialKeypad: boolean };
     telephony?: { numbers: PhoneNum[]; linkedNumberId?: string };
+    keys?: { openai?: string; elevenlabs?: string }; // per-assistant keys
   };
 };
-
-const LS_LIST = 'voice:assistants.v1';
-const ak = (id: string) => `voice:assistant:${id}`;
-
-const LS_CALLS = 'voice:calls.v1';
-const LS_ROUTES = 'voice:phoneRoutes.v1';
 
 const readLS = <T,>(k: string): T | null => {
   try { const r = localStorage.getItem(k); return r ? (JSON.parse(r) as T) : null; }
@@ -84,14 +77,14 @@ const readLS = <T,>(k: string): T | null => {
 const writeLS = <T,>(k: string, v: T) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 
 /* =============================================================================
-   PROMPT HELPERS
+   DEFAULT PROMPT
 ============================================================================= */
 const BASE_PROMPT = `[Identity]
 You are an intelligent and responsive assistant designed to help users with a wide range of inquiries and tasks.
 
 [Style]
-* Maintain a professional and approachable demeanor.
-* Use clear and concise language, avoiding overly technical jargon.
+* Professional, approachable, concise.
+* Ask one question at a time and confirm critical details.
 
 [System Behaviors]
 * Summarize & confirm before finalizing.
@@ -113,140 +106,89 @@ You are an intelligent and responsive assistant designed to help users with a wi
 [Handover]
 * When done, summarize details and hand off if needed.`.trim();
 
-function toTitle(s: string) {
-  return s
-    .replace(/\s+/g, ' ')
-    .split(' ')
-    .map(w => (w.length ? w[0].toUpperCase() + w.slice(1) : ''))
-    .join(' ')
-    .replace(/\b(Id|Url|Dob)\b/gi, m => m.toUpperCase());
-}
-
-function buildDefaultsFromHint(hint: string) {
-  const short = hint.trim().split(/\s+/).length <= 3 ? hint.trim() : 'Assistant';
-  const collectMatch = hint.match(/collect[:\-\s]+(.+)$/i);
-  const fields = collectMatch
-    ? collectMatch[1].split(/[,\n;]/).map(s => s.trim()).filter(Boolean)
-    : [];
-
-  const collectList = fields.length
-    ? fields.map(f => `- ${toTitle(f)}`).join('\n')
-    : `- Full Name
-- Phone Number
-- Email (if provided)
-- Appointment Date/Time (if applicable)`;
-
-  return [
-    `[Identity]
-You are a helpful, fast, and accurate ${short.toLowerCase()} that completes tasks and collects information.`,
-
-    `[Style]
-* Friendly, concise, affirmative.
-* Ask one question at a time and confirm critical details.`,
-
-    `[System Behaviors]
-* Summarize & confirm before finalizing.
-* Offer next steps when appropriate.`,
-
-    `[Task & Goals]
-* Understand intent, collect required details, and provide guidance.`,
-
-    `[Data to Collect]
-${collectList}`,
-
-    `[Safety]
-* No medical/legal/financial advice beyond high-level pointers.
-* Decline restricted actions, suggest alternatives.`,
-
-    `[Handover]
-* When done, summarize details and hand off if needed.`
-  ].join('\n\n');
-}
-
-/** Replace or add a named section like [Identity] ... */
-function setSection(prompt: string, name: string, body: string) {
-  const section = name.replace(/^\[|\]$/g, '');
-  const re = new RegExp(String.raw`$begin:math:display$${section}$end:math:display$\s*([\s\S]*?)(?=\n\[|$)`, 'i');
-  if (re.test(prompt)) {
-    return prompt.replace(re, `[${section}]\n${body.trim()}\n`);
-  }
-  const nl = prompt.endsWith('\n') ? '' : '\n';
-  return `${prompt}${nl}\n[${section}]\n${body.trim()}\n`;
-}
-
-/** Parse quick "first message:" directive */
-function parseFirstMessage(raw: string): string | null {
-  const m = raw.match(/^(?:first\s*message|greeting)\s*[:\-]\s*(.+)$/i);
-  return m ? m[1].trim() : null;
-}
-
-/** Merge free-text into prompt smartly: section-aware, "first message", collect, or refinements */
-function mergeInput(genText: string, currentPrompt: string) {
-  const raw = (genText || '').trim();
-  const out = { prompt: currentPrompt || BASE_PROMPT, firstMessage: undefined as string | undefined };
-  if (!raw) return out;
-
-  // 1) first message
-  const fm = parseFirstMessage(raw);
-  if (fm) {
-    out.firstMessage = fm;
-    return out;
-  }
-
-  // 2) Explicit sections
-  const sectionBlocks = [...raw.matchAll(/\[(Identity|Style|System Behaviors|Task & Goals|Data to Collect|Safety|Handover|Refinements)\]\s*([\s\S]*?)(?=\n\[|$)/gi)];
-  if (sectionBlocks.length) {
-    let next = out.prompt;
-    sectionBlocks.forEach((m) => {
-      const sec = m[1];
-      const body = m[2];
-      next = setSection(next, `[${sec}]`, body);
-    });
-    out.prompt = next;
-    return out;
-  }
-
-  // 3) Short hint / collect
-  if (raw.split(/\s+/).length <= 3 || /(^|\s)collect(\s|:)/i.test(raw)) {
-    out.prompt = buildDefaultsFromHint(raw);
-    return out;
-  }
-
-  // 4) Refinements
-  const hasRef = /\[Refinements\]/i.test(out.prompt);
-  const bullet = `- ${raw.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim()}`;
-  out.prompt = hasRef
-    ? out.prompt.replace(/\[Refinements\]\s*([\s\S]*?)(?=\n\[|$)/i, (m, body) => `[Refinements]\n${(body || '').trim()}\n${bullet}\n`)
-    : `${out.prompt}\n\n[Refinements]\n${bullet}\n`;
-  return out;
-}
-
 /* =============================================================================
-   DIFF (character-level) for live typing overlay
+   PROMPT AGENT (STATEFUL, NO REPEATS, SMALL-TALK AWARE)
 ============================================================================= */
-type CharTok = { ch: string; added: boolean };
-function charDiffAdded(oldStr: string, newStr: string): CharTok[] {
-  const o = [...oldStr];
-  const n = [...newStr];
-  const dp: number[][] = Array(o.length + 1).fill(0).map(() => Array(n.length + 1).fill(0));
-  for (let i = o.length - 1; i >= 0; i--) {
-    for (let j = n.length - 1; j >= 0; j--) {
-      dp[i][j] = o[i] === n[j] ? 1 + dp[i + 1][j + 1] : Math.max(dp[i + 1][j], dp[i][j + 1]);
+function parseCollectFields(prompt: string): string[] {
+  const m = prompt.match(/\[Data\s*to\s*Collect\]\s*([\s\S]*?)(?=\n\[|$)/i);
+  if (!m) return ['Full Name','Phone Number','Email','Appointment Date/Time'];
+  const lines = m[1].split(/\r?\n/).map(s => s.replace(/^\s*[-*]\s*/, '').trim()).filter(Boolean);
+  return lines.length ? lines : ['Full Name','Phone Number','Email','Appointment Date/Time'];
+}
+
+function extractName(s: string){ const m = s.match(/\b(?:i am|i'm|my name is|this is)\s+([a-z][a-z '-]+(?:\s+[a-z][a-z '-]+){0,2})/i); return m?.[1]?.trim(); }
+function extractPhone(s: string){ const m = s.replace(/[^\d+]/g,'').match(/(\+?\d{10,15})/); return m?.[1]; }
+function extractEmail(s: string){ const m = s.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i); return m?.[0]; }
+function extractDateTime(s: string){
+  const m = s.match(/\b(?:mon|tue|wed|thu|fri|sat|sun|tomorrow|today)\b.*?\b(\d{1,2}(:\d{2})?\s?(am|pm)?)|\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\s+\d{1,2}(:\d{2})?\s?(am|pm)?/i);
+  return m?.[0];
+}
+
+function makePromptAgent(systemPrompt: string){
+  const fields = parseCollectFields(systemPrompt).map(s => s.trim()).filter(Boolean);
+  const state: Record<string, string> = {};
+  const asked = new Set<string>();
+  const norm = (f: string) => f.toLowerCase();
+
+  const smallTalk = (s: string) =>
+    /\b(how are you|who are you|what can you do|you sound|robotic|hello|hi|hey|what's up)\b/i.test(s);
+
+  function nextMissing(): string | null {
+    for (const f of fields) if (!state[norm(f)]) return f;
+    return null;
+  }
+  function tryAutoFill(user: string){
+    const map: Array<{keys: string[], val?: string|null}> = [
+      { keys:['full name','name'],              val: extractName(user) || null },
+      { keys:['phone number','phone','digits'], val: extractPhone(user) || null },
+      { keys:['email'],                          val: extractEmail(user) || null },
+      { keys:['appointment date/time','date/time','date','time'], val: extractDateTime(user) || null },
+    ];
+    for (const f of fields) {
+      const k = norm(f);
+      if (state[k]) continue;
+      const hit = map.find(m => m.keys.includes(k));
+      if (hit?.val) state[k] = hit.val;
     }
   }
-  const out: CharTok[] = [];
-  let i = 0, j = 0;
-  while (i < o.length && j < n.length) {
-    if (o[i] === n[j]) { out.push({ ch: n[j], added: false }); i++; j++; }
-    else if (dp[i + 1][j] >= dp[i][j + 1]) { i++; }
-    else { out.push({ ch: n[j], added: true }); j++; }
+  function confirmationLine(){
+    return fields.map(f => `${f}: ${state[norm(f)] ?? '—'}`).join(' • ');
   }
-  while (j < n.length) out.push({ ch: n[j++], added: true });
-  return out;
+
+  return {
+    reply(userText: string){
+      const user = userText.trim();
+
+      if (smallTalk(user)) {
+        return `I’m doing well—thanks! I can help get you set up. ${nextMissing() ? 'Let’s get a couple details.' : ''}`;
+      }
+
+      tryAutoFill(user);
+      const miss = nextMissing();
+      if (miss) {
+        if (!asked.has(miss)) {
+          asked.add(miss);
+          const k = norm(miss);
+          const cue =
+            k.includes('name') ? 'your full name' :
+            k.includes('phone') ? 'the best phone number to reach you' :
+            k.includes('email') ? 'your email (optional)' :
+            k.includes('date') || k.includes('time') ? 'a preferred date and time' :
+            miss;
+          return `Got it. What’s ${cue}?`;
+        }
+        return `Whenever you’re ready—${miss} is the next thing I need.`;
+      }
+
+      return `Great—here’s what I have: ${confirmationLine()}. Should I confirm or change anything?`;
+    },
+    summary(){ return `Summary — ${confirmationLine()}.`; },
+    get data(){ return { ...state }; }
+  };
 }
 
 /* =============================================================================
-   SIMPLE WEB VOICE (no Vapi, no server required)
+   WEB SPEECH (FALLBACK) + ELEVENLABS TTS
 ============================================================================= */
 function makeRecognizer(onFinalText: (text:string)=>void) {
   const SR: any = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
@@ -280,7 +222,8 @@ async function ensureVoicesReady(): Promise<SpeechSynthesisVoice[]> {
   return synth.getVoices();
 }
 
-async function speakWithVoice(text: string, voiceLabel: string){
+// Browser fallback
+async function speakWithVoiceBrowser(text: string, voiceLabel: string){
   const synth = window.speechSynthesis;
   try { synth.resume(); } catch {}
   const voices = await ensureVoicesReady();
@@ -315,88 +258,37 @@ async function speakWithVoice(text: string, voiceLabel: string){
   synth.speak(u);
 }
 
-/* =============================================================================
-   LOCAL PROMPT-DRIVEN AGENT (no server, follows [Data to Collect])
-============================================================================= */
-function parseCollectFields(prompt: string): string[] {
-  const m = prompt.match(/\[Data\s*to\s*Collect\]\s*([\s\S]*?)(?=\n\[|$)/i);
-  if (!m) return ['Full Name','Phone Number','Email','Appointment Date/Time'];
-  const lines = m[1].split(/\r?\n/).map(s => s.replace(/^\s*[-*]\s*/, '').trim()).filter(Boolean);
-  return lines.length ? lines : ['Full Name','Phone Number','Email','Appointment Date/Time'];
-}
-
-function extractName(s: string){ const m = s.match(/\b(?:i am|i'm|my name is|this is)\s+([a-z][a-z '-]+(?:\s+[a-z][a-z '-]+){0,2})/i); return m?.[1]?.trim(); }
-function extractPhone(s: string){ const m = s.replace(/[^\d+]/g,'').match(/(\+?\d{10,15})/); return m?.[1]; }
-function extractEmail(s: string){ const m = s.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i); return m?.[0]; }
-function extractDateTime(s: string){
-  const m = s.match(/\b(?:mon|tue|wed|thu|fri|sat|sun|tomorrow|today)\b.*?\b(\d{1,2}(:\d{2})?\s?(am|pm)?)|\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\s+\d{1,2}(:\d{2})?\s?(am|pm)?/i);
-  return m?.[0];
-}
-
-function makePromptAgent(systemPrompt: string){
-  const fields = parseCollectFields(systemPrompt);
-  const state: Record<string, string> = {};
-
-  function nextMissing(): string | null {
-    for (const f of fields) {
-      if (!state[f.toLowerCase()]) return f;
-    }
-    return null;
-  }
-
-  function tryAutoFill(user: string){
-    const map: Array<{keys: string[], val?: string|null}> = [
-      { keys:['full name','name'],              val: extractName(user) || null },
-      { keys:['phone number','phone','digits'], val: extractPhone(user) || null },
-      { keys:['email'],                          val: extractEmail(user) || null },
-      { keys:['appointment date/time','date/time','date','time'], val: extractDateTime(user) || null },
-    ];
-    for (const f of fields) {
-      const k = f.toLowerCase();
-      if (state[k]) continue;
-      const hit = map.find(m => m.keys.includes(k));
-      if (hit?.val) state[k] = hit.val;
+// Smart: use ElevenLabs when selected + key present; otherwise fall back
+async function speakWithVoiceSmart(
+  text: string,
+  voiceLabel: string,
+  provider: VoiceProvider,
+  voiceId: string,
+  keys?: { elevenlabs?: string }
+) {
+  if (provider === 'elevenlabs' && keys?.elevenlabs) {
+    try {
+      const r = await fetch('/api/tts/elevenlabs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, voiceId, apiKey: keys.elevenlabs }),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = new Audio(url);
+      await a.play();
+      a.onended = () => URL.revokeObjectURL(url);
+      return;
+    } catch (e) {
+      console.warn('ElevenLabs TTS failed, falling back to browser TTS:', e);
     }
   }
-
-  function professionalTone(text: string){
-    return text.replace(/\s+/g,' ').replace(/\bi am\b/gi,'I’m').trim();
-  }
-
-  function askFor(fieldLabel: string){
-    const k = fieldLabel.toLowerCase();
-    const cue =
-      k.includes('name') ? 'your full name'
-    : k.includes('phone') ? 'the best phone number to reach you'
-    : k.includes('email') ? 'your email (optional)'
-    : k.includes('date') || k.includes('time') ? 'a preferred date and time'
-    : fieldLabel.toLowerCase();
-    return `Got it. What’s ${cue}?`;
-  }
-
-  function confirmationLine(){
-    const parts = fields.map(f => {
-      const k = f.toLowerCase();
-      return `${f}: ${state[k] ? state[k] : '—'}`;
-    });
-    return parts.join(' • ');
-  }
-
-  return {
-    reply(userText: string){
-      tryAutoFill(userText);
-      const missing = nextMissing();
-      if (missing) return professionalTone(askFor(missing));
-      return professionalTone(`Thanks. Here’s what I have: ${confirmationLine()}. Should I confirm or change anything?`);
-    },
-    summary(){
-      return professionalTone(`Summary — ${confirmationLine()}.`);
-    }
-  };
+  await speakWithVoiceBrowser(text, voiceLabel);
 }
 
 /* =============================================================================
-   COMPONENT
+   MAIN COMPONENT
 ============================================================================= */
 export default function VoiceAgentSection() {
   const scopeRef = useRef<HTMLDivElement | null>(null);
@@ -445,13 +337,21 @@ export default function VoiceAgentSection() {
           voice: { provider:'openai', voiceId:'alloy', voiceLabel:'Alloy (OpenAI)' },
           transcriber: { provider:'deepgram', model:'nova-2', language:'en', denoise:false, confidenceThreshold:0.4, numerals:false },
           tools: { enableEndCall:true, dialKeypad:true },
-          telephony: { numbers: [], linkedNumberId: undefined }
+          telephony: { numbers: [], linkedNumberId: undefined },
+          keys: { openai:'', elevenlabs:'' }
         }
       };
       writeLS(ak(seed.id), seed); writeLS(LS_LIST, [seed]);
       setAssistants([seed]); setActiveId(seed.id);
     } else {
-      const fixed = list.map(a => ({ ...a, config:{ ...a.config, telephony: a.config.telephony || { numbers: [], linkedNumberId: undefined } } }));
+      const fixed = list.map(a => ({
+        ...a,
+        config:{
+          ...a.config,
+          telephony: a.config.telephony || { numbers: [], linkedNumberId: undefined },
+          keys: a.config.keys || { openai:'', elevenlabs:'' }
+        }
+      }));
       writeLS(LS_LIST, fixed);
       setAssistants(fixed); setActiveId(fixed[0].id);
     }
@@ -475,7 +375,7 @@ export default function VoiceAgentSection() {
   const [creating, setCreating] = useState(false);
   const addAssistant = async () => {
     setCreating(true);
-    await new Promise(r => setTimeout(r, 360));
+    await new Promise(r => setTimeout(r, 260));
     const id = `agent_${Math.random().toString(36).slice(2, 8)}`;
     const a: Assistant = {
       id, name:'New Assistant', updatedAt: Date.now(), published: false,
@@ -484,15 +384,15 @@ export default function VoiceAgentSection() {
         voice: { provider:'openai', voiceId:'alloy', voiceLabel:'Alloy (OpenAI)' },
         transcriber: { provider:'deepgram', model:'nova-2', language:'en', denoise:false, confidenceThreshold:0.4, numerals:false },
         tools: { enableEndCall:true, dialKeypad:true },
-        telephony: { numbers: [], linkedNumberId: undefined }
+        telephony: { numbers: [], linkedNumberId: undefined },
+        keys: { openai:'', elevenlabs:'' }
       }
     };
     writeLS(ak(id), a);
     const list = [...assistants, a]; writeLS(LS_LIST, list);
     setAssistants(list); setActiveId(id);
     setCreating(false);
-    setEditingId(id);
-    setTempName('New Assistant');
+    setEditingId(id); setTempName('New Assistant');
   };
 
   const removeAssistant = (id: string) => {
@@ -504,68 +404,8 @@ export default function VoiceAgentSection() {
     setRev(r => r + 1);
   };
 
-  /* ---------- Rail collapse/expand ---------- */
+  /* ---------- Rail ---------- */
   const [railCollapsed, setRailCollapsed] = useState(false);
-
-  /* ---------- Generate (live type + accept/decline) ---------- */
-  const [genOpen, setGenOpen] = useState(false);
-  const [genText, setGenText] = useState('');
-  const [typing, setTyping] = useState<CharTok[] | null>(null);
-  const [typedCount, setTypedCount] = useState(0);
-  const [lastNew, setLastNew] = useState('');
-  const [pendingFirstMsg, setPendingFirstMsg] = useState<string | undefined>(undefined);
-  const typingBoxRef = useRef<HTMLDivElement | null>(null);
-  const typingTimer = useRef<number | null>(null);
-
-  const startTyping = (tokens: CharTok[]) => {
-    setTyping(tokens);
-    setTypedCount(0);
-    if (typingTimer.current) window.clearInterval(typingTimer.current);
-    typingTimer.current = window.setInterval(() => {
-      setTypedCount(c => {
-        const next = Math.min(c + CHUNK_SIZE, tokens.length);
-        if (next >= tokens.length && typingTimer.current) {
-          window.clearInterval(typingTimer.current);
-          typingTimer.current = null;
-        }
-        return next;
-      });
-    }, TICK_MS);
-  };
-
-  useEffect(() => {
-    if (!typingBoxRef.current) return;
-    typingBoxRef.current.scrollTop = typingBoxRef.current.scrollHeight;
-  }, [typedCount]);
-
-  const handleGenerate = () => {
-    if (!active) return;
-    const current = active.config.model.systemPrompt || '';
-    const { prompt, firstMessage } = mergeInput(genText, current || BASE_PROMPT);
-    setLastNew(prompt);
-    setPendingFirstMsg(firstMessage);
-    startTyping(charDiffAdded(current, prompt));
-    setGenOpen(false);
-    setGenText('');
-  };
-
-  const acceptTyping = () => {
-    if (!active) return;
-    updateActive(a => ({
-      ...a,
-      config: {
-        ...a.config,
-        model: {
-          ...a.config.model,
-          systemPrompt: lastNew || a.config.model.systemPrompt,
-          firstMessage: typeof pendingFirstMsg === 'string' ? pendingFirstMsg : a.config.model.firstMessage
-        }
-      }
-    }));
-    setTyping(null);
-    setPendingFirstMsg(undefined);
-  };
-  const declineTyping = () => { setTyping(null); setPendingFirstMsg(undefined); };
 
   /* ---------- Voices ---------- */
   const openaiVoices = [
@@ -609,12 +449,12 @@ export default function VoiceAgentSection() {
       ...a,
       config: { ...a.config, voice: { ...a.config.voice, voiceId: pendingVoiceId, voiceLabel: pendingVoiceLabel || pendingVoiceId } }
     }));
-    await speakWithVoice('Voice saved.', pendingVoiceLabel || pendingVoiceId);
+    await speakWithVoiceSmart('Voice saved.', pendingVoiceLabel || pendingVoiceId, active.config.voice.provider, pendingVoiceId, active.config.keys);
   };
 
   const testVoice = async () => {
-    if (!pendingVoiceLabel) return;
-    await speakWithVoice('This is a quick preview of the selected voice.', pendingVoiceLabel);
+    if (!active || !pendingVoiceLabel || !pendingVoiceId) return;
+    await speakWithVoiceSmart('This is a quick preview of the selected voice.', pendingVoiceLabel, active.config.voice.provider, pendingVoiceId, active.config.keys);
   };
 
   /* ---------- Web call + logs ---------- */
@@ -652,20 +492,19 @@ export default function VoiceAgentSection() {
     const greet = active.config.model.firstMessage || 'Hello. How may I help you today?';
     if (active.config.model.firstMessageMode === 'assistant_first') {
       pushTurn('assistant', greet);
-      await speakWithVoice(greet, active.config.voice.voiceLabel);
+      await speakWithVoiceSmart(greet, active.config.voice.voiceLabel, active.config.voice.provider, active.config.voice.voiceId, active.config.keys);
     }
 
     const rec = makeRecognizer(async (finalText) => {
       pushTurn('user', finalText);
-
       const reply = agentRef.current?.reply(finalText) || 'Understood.';
       pushTurn('assistant', reply);
-      await speakWithVoice(reply, active.config.voice.voiceLabel);
+      await speakWithVoiceSmart(reply, active.config.voice.voiceLabel, active.config.voice.provider, active.config.voice.voiceId, active.config.keys);
     });
     if (!rec) {
       const msg = 'Browser speech recognition is not available here. Use Chrome or Edge.';
       pushTurn('assistant', msg);
-      await speakWithVoice(msg, active.config.voice.voiceLabel);
+      await speakWithVoiceSmart(msg, active.config.voice.voiceLabel, active.config.voice.provider, active.config.voice.voiceId, active.config.keys);
       return;
     }
     recogRef.current = rec; try { rec.start(); } catch {}
@@ -761,16 +600,15 @@ export default function VoiceAgentSection() {
           borderRight:'1px solid var(--va-border)',
           background:'var(--va-sidebar)',
           boxShadow:'var(--va-shadow-side)',
-          zIndex: 10,
-          willChange: 'left'
+          zIndex: 10
         }}
       >
         <div className="px-3 py-3 flex items-center justify-between" style={{ borderBottom:'1px solid var(--va-border)' }}>
           <div className="flex items-center gap-2 text-sm font-semibold">
-            <PanelLeft className="w-4 h-4 icon" />
+            <PanelLeft className="w-4 h-4" />
             {!railCollapsed && <span>Assistants</span>}
           </div>
-          <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2">
             {!railCollapsed && (
               <button onClick={addAssistant} className="btn btn--green">
                 {creating ? <span className="w-3.5 h-3.5 rounded-full border-2 border-white/50 border-t-transparent animate-spin" /> : <Plus className="w-3.5 h-3.5 text-white" />}
@@ -782,18 +620,16 @@ export default function VoiceAgentSection() {
               className="btn btn--ghost"
               onClick={() => setRailCollapsed(v => !v)}
             >
-              {railCollapsed ? <ChevronRightIcon className="w-4 h-4 icon" /> : <ChevronLeft className="w-4 h-4 icon" />}
+              {railCollapsed ? <ChevronRightIcon className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
             </button>
           </div>
         </div>
 
         <div className="p-3 min-h-0 flex-1 overflow-y-auto" style={{ scrollbarWidth:'thin' }}>
           {!railCollapsed && (
-            <div
-              className="flex items-center gap-2 rounded-lg px-2.5 py-2 mb-2"
-              style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)' }}
-            >
-              <Search className="w-4 h-4 icon" />
+            <div className="flex items-center gap-2 rounded-lg px-2.5 py-2 mb-2"
+                 style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)' }}>
+              <Search className="w-4 h-4" />
               <input
                 value={query}
                 onChange={(e)=> setQuery(e.target.value)}
@@ -807,10 +643,10 @@ export default function VoiceAgentSection() {
           {!railCollapsed && (
             <>
               <div className="text-xs font-semibold flex items-center gap-2 mt-3 mb-1" style={{ color:'var(--text-muted)' }}>
-                <Folder className="w-3.5 h-3.5 icon" /> Folders
+                <Folder className="w-3.5 h-3.5" /> Folders
               </div>
               <button className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/5">
-                <FolderOpen className="w-4 h-4 icon" /> All
+                <FolderOpen className="w-4 h-4" /> All
               </button>
             </>
           )}
@@ -828,29 +664,24 @@ export default function VoiceAgentSection() {
                     style={{
                       background: isActive ? 'color-mix(in oklab, var(--accent) 10%, transparent)' : 'var(--va-card)',
                       border: `1px solid ${isActive ? 'color-mix(in oklab, var(--accent) 35%, var(--va-border))' : 'var(--va-border)'}`,
-                      boxShadow:'var(--va-shadow-sm)'
                     }}
                     title={a.name}
                   >
-                    <Bot className="w-4 h-4 icon" />
+                    <Bot className="w-4 h-4" />
                   </button>
                 );
               }
               return (
-                <div
-                  key={a.id}
-                  className="w-full rounded-xl p-3"
-                  style={{
-                    background: isActive ? 'color-mix(in oklab, var(--accent) 10%, transparent)' : 'var(--va-card)',
-                    border: `1px solid ${isActive ? 'color-mix(in oklab, var(--accent) 35%, var(--va-border))' : 'var(--va-border)'}`,
-                    boxShadow:'var(--va-shadow-sm)'
-                  }}
-                >
+                <div key={a.id} className="w-full rounded-xl p-3"
+                     style={{
+                       background: isActive ? 'color-mix(in oklab, var(--accent) 10%, transparent)' : 'var(--va-card)',
+                       border: `1px solid ${isActive ? 'color-mix(in oklab, var(--accent) 35%, var(--va-border))' : 'var(--va-border)'}`
+                     }}>
                   <button className="w-full text-left flex items-center justify-between"
                           onClick={()=> setActiveId(a.id)}>
                     <div className="min-w-0">
                       <div className="font-medium truncate flex items-center gap-2">
-                        <Bot className="w-4 h-4 icon" />
+                        <Bot className="w-4 h-4" />
                         {!isEdit ? (
                           <span className="truncate">{a.name}</span>
                         ) : (
@@ -868,13 +699,13 @@ export default function VoiceAgentSection() {
                         {a.folder || 'Unfiled'} • {new Date(a.updatedAt).toLocaleDateString()}
                       </div>
                     </div>
-                    {isActive ? <Check className="w-4 h-4 icon" /> : null}
+                    {isActive ? <Check className="w-4 h-4" /> : null}
                   </button>
 
                   <div className="mt-2 flex items-center gap-2">
                     {!isEdit ? (
                       <>
-                        <button onClick={(e)=> { e.stopPropagation(); beginRename(a); }} className="btn btn--ghost text-xs"><Edit3 className="w-3.5 h-3.5 icon" /> Rename</button>
+                        <button onClick={(e)=> { e.stopPropagation(); beginRename(a); }} className="btn btn--ghost text-xs"><Edit3 className="w-3.5 h-3.5" /> Rename</button>
                         <button onClick={(e)=> { e.stopPropagation(); setDeleting({ id:a.id, name:a.name }); }} className="btn btn--danger text-xs"><Trash2 className="w-3.5 h-3.5" /> Delete</button>
                       </>
                     ) : (
@@ -915,7 +746,7 @@ export default function VoiceAgentSection() {
               </button>
             )}
             <button onClick={()=> window.dispatchEvent(new CustomEvent('voiceagent:open-chat', { detail:{ id: active.id } }))} className="btn btn--ghost">
-              <MessageSquare className="w-4 h-4 icon" /> Chat
+              <MessageSquare className="w-4 h-4" /> Chat
             </button>
           </div>
           <div className="flex items-center gap-2">
@@ -923,7 +754,7 @@ export default function VoiceAgentSection() {
               onClick={()=> navigator.clipboard.writeText(active.config.model.systemPrompt || '').catch(()=>{})}
               className="btn btn--ghost"
             >
-              <Copy className="w-4 h-4 icon" /> Copy Prompt
+              <Copy className="w-4 h-4" /> Copy Prompt
             </button>
             <button onClick={()=> setDeleting({ id: active.id, name: active.name })} className="btn btn--danger">
               <Trash2 className="w-4 h-4" /> Delete
@@ -936,8 +767,8 @@ export default function VoiceAgentSection() {
 
         {/* content body */}
         <div className="mx-auto grid grid-cols-12 gap-10" style={{ maxWidth:'min(2400px, 98vw)' }}>
-          <Section title="Model" icon={<FileText className="w-4 h-4 icon" />}>
-            <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(4, minmax(360px, 1fr))' }}>
+          <Section title="Model" icon={<FileText className="w-4 h-4" />}>
+            <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(4, minmax(320px, 1fr))' }}>
               <Field label="Provider">
                 <Select
                   value={active.config.model.provider}
@@ -974,84 +805,58 @@ export default function VoiceAgentSection() {
               </Field>
             </div>
 
+            {/* API Keys (per assistant) */}
+            <div className="mt-4 grid gap-6" style={{ gridTemplateColumns:'repeat(2, minmax(320px, 1fr))' }}>
+              <Field label="OpenAI API Key (per assistant)">
+                <input
+                  type="password"
+                  value={active.config.keys?.openai || ''}
+                  onChange={(e)=> updateActive(a => ({ ...a, config:{ ...a.config, keys:{ ...(a.config.keys||{}), openai: e.target.value } } }))}
+                  placeholder="sk-..."
+                  className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
+                  style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)', color:'var(--text)' }}
+                />
+              </Field>
+              <Field label="ElevenLabs API Key (for TTS)">
+                <input
+                  type="password"
+                  value={active.config.keys?.elevenlabs || ''}
+                  onChange={(e)=> updateActive(a => ({ ...a, config:{ ...a.config, keys:{ ...(a.config.keys||{}), elevenlabs: e.target.value } } }))}
+                  placeholder="elevenlabs_api_key"
+                  className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
+                  style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)', color:'var(--text)' }}
+                />
+              </Field>
+            </div>
+
             {/* System Prompt */}
             <div className="mt-6">
               <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="w-4 h-4 icon" /> System Prompt</div>
+                <div className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="w-4 h-4" /> System Prompt</div>
                 <div className="flex items-center gap-2">
                   <button
                     onClick={()=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, systemPrompt: BASE_PROMPT } } }))}
                     className="btn btn--ghost"
-                  ><RefreshCw className="w-4 h-4 icon" /> Reset</button>
-                  <button onClick={()=> setGenOpen(true)} className="btn btn--green">
-                    <Sparkles className="w-4 h-4 text-white" /> <span className="text-white">Generate / Edit</span>
-                  </button>
+                  ><RefreshCw className="w-4 h-4" /> Reset</button>
                 </div>
               </div>
-
-              {!typing ? (
-                <textarea
-                  rows={26}
-                  value={active.config.model.systemPrompt || ''}
-                  onChange={(e)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, systemPrompt: e.target.value } } }))}
-                  className="w-full rounded-2xl px-3 py-3 text-[14px] leading-6 outline-none"
-                  style={{
-                    background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)',
-                    boxShadow:'var(--va-shadow), inset 0 1px 0 rgba(255,255,255,.03)', color:'var(--text)',
-                    fontFamily:'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-                    minHeight: 560
-                  }}
-                />
-              ) : (
-                <div>
-                  <div
-                    ref={typingBoxRef}
-                    className="w-full rounded-2xl px-3 py-3 text-[14px] leading-6 outline-none"
-                    style={{
-                      background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)',
-                      boxShadow:'var(--va-shadow), inset 0 1px 0 rgba(255,255,255,.03)', color:'var(--text)',
-                      fontFamily:'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-                      whiteSpace:'pre-wrap',
-                      minHeight: 560,
-                      maxHeight: 680,
-                      overflowY:'auto'
-                    }}
-                  >
-                    {(() => {
-                      const slice = typing.slice(0, typedCount);
-                      const out: JSX.Element[] = [];
-                      let buf = '';
-                      let added = slice.length ? slice[0].added : false;
-                      slice.forEach((t, i) => {
-                        if (t.added !== added) {
-                          out.push(added
-                            ? <ins key={`ins-${i}`} style={{ background:'rgba(16,185,129,.18)', padding:'1px 2px', borderRadius:4 }}>{buf}</ins>
-                            : <span key={`nor-${i}`}>{buf}</span>);
-                          buf = t.ch;
-                          added = t.added;
-                        } else {
-                          buf += t.ch;
-                        }
-                      });
-                      if (buf) out.push(added
-                        ? <ins key="tail-ins" style={{ background:'rgba(16,185,129,.18)', padding:'1px 2px', borderRadius:4 }}>{buf}</ins>
-                        : <span key="tail-nor">{buf}</span>);
-                      if (typedCount < (typing?.length || 0)) out.push(<span key="caret" className="animate-pulse"> ▌</span>);
-                      return out;
-                    })()}
-                  </div>
-
-                  <div className="flex items-center gap-2 justify-end mt-3">
-                    <button onClick={()=>{ setTyping(null); setPendingFirstMsg(undefined); }} className="btn btn--ghost"><X className="w-4 h-4 icon" /> Decline</button>
-                    <button onClick={acceptTyping} className="btn btn--green"><Check className="w-4 h-4 text-white" /><span className="text-white">Accept</span></button>
-                  </div>
-                </div>
-              )}
+              <textarea
+                rows={20}
+                value={active.config.model.systemPrompt || ''}
+                onChange={(e)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, systemPrompt: e.target.value } } }))}
+                className="w-full rounded-2xl px-3 py-3 text-[14px] leading-6 outline-none"
+                style={{
+                  background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)',
+                  boxShadow:'var(--va-shadow), inset 0 1px 0 rgba(255,255,255,.03)', color:'var(--text)',
+                  fontFamily:'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+                  minHeight: 420
+                }}
+              />
             </div>
           </Section>
 
-          <Section title="Voice" icon={<Mic2 className="w-4 h-4 icon" />}>
-            <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(2, minmax(360px, 1fr))' }}>
+          <Section title="Voice" icon={<Mic2 className="w-4 h-4" />}>
+            <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(2, minmax(320px, 1fr))' }}>
               <Field label="Provider">
                 <Select
                   value={active.config.voice.provider}
@@ -1073,7 +878,7 @@ export default function VoiceAgentSection() {
 
             <div className="mt-3 flex items-center gap-2">
               <button onClick={testVoice} className="btn btn--ghost">
-                <Volume2 className="w-4 h-4 icon" /> Test Voice
+                <Volume2 className="w-4 h-4" /> Test Voice
               </button>
               <button onClick={saveVoice} className="btn btn--green">
                 <Save className="w-4 h-4 text-white" /> <span className="text-white">Save Voice</span>
@@ -1081,12 +886,12 @@ export default function VoiceAgentSection() {
               <button
                 onClick={()=> { window.dispatchEvent(new CustomEvent('voiceagent:import-11labs')); alert('Hook “voiceagent:import-11labs” to your importer.'); }}
                 className="btn btn--ghost"
-              ><UploadCloud className="w-4 h-4 icon" /> Import from ElevenLabs</button>
+              ><UploadCloud className="w-4 h-4" /> Import from ElevenLabs</button>
             </div>
           </Section>
 
-          <Section title="Transcriber" icon={<BookOpen className="w-4 h-4 icon" />}>
-            <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(3, minmax(360px, 1fr))' }}>
+          <Section title="Transcriber" icon={<BookOpen className="w-4 h-4" />}>
+            <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(3, minmax(320px, 1fr))' }}>
               <Field label="Provider">
                 <Select
                   value={active.config.transcriber.provider}
@@ -1136,8 +941,8 @@ export default function VoiceAgentSection() {
             </div>
           </Section>
 
-          <Section title="Tools" icon={<SlidersHorizontal className="w-4 h-4 icon" />}>
-            <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(2, minmax(360px, 1fr))' }}>
+          <Section title="Tools" icon={<SlidersHorizontal className="w-4 h-4" />}>
+            <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(2, minmax(320px, 1fr))' }}>
               <Field label="Enable End Call Function">
                 <Select
                   value={String(active.config.tools.enableEndCall)}
@@ -1155,7 +960,7 @@ export default function VoiceAgentSection() {
             </div>
           </Section>
 
-          <Section title="Telephony" icon={<PhoneIcon className="w-4 h-4 icon" />}>
+          <Section title="Telephony" icon={<PhoneIcon className="w-4 h-4" />}>
             <TelephonyEditor
               numbers={active.config.telephony?.numbers ?? []}
               linkedId={active.config.telephony?.linkedNumberId}
@@ -1165,7 +970,7 @@ export default function VoiceAgentSection() {
             />
           </Section>
 
-          <Section title="Call Assistant (Web test)" icon={<AudioLines className="w-4 h-4 icon" />}>
+          <Section title="Call Assistant (Web test)" icon={<AudioLines className="w-4 h-4" />}>
             <div className="flex items-center gap-2 mb-3">
               {!currentCallId ? (
                 <button onClick={startCall} className="btn btn--green">
@@ -1194,14 +999,14 @@ export default function VoiceAgentSection() {
             </div>
           </Section>
 
-          <Section title="Call Logs" icon={<ListTree className="w-4 h-4 icon" />}>
+          <Section title="Call Logs" icon={<ListTree className="w-4 h-4" />}>
             <div className="space-y-3">
               {callsForAssistant.length === 0 && <div className="text-sm opacity-60">No calls yet.</div>}
               {callsForAssistant.map(log => (
                 <details key={log.id} className="rounded-xl" style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)' }}>
                   <summary className="cursor-pointer px-3 py-2 flex items-center justify-between">
                     <div className="text-sm flex items-center gap-2">
-                      <PhoneIcon className="w-4 h-4 icon" />
+                      <PhoneIcon className="w-4 h-4" />
                       <span>{new Date(log.startedAt).toLocaleString()}</span>
                       {log.assistantPhoneNumber ? <span className="opacity-70">• {log.assistantPhoneNumber}</span> : null}
                       {log.endedAt ? <span className="opacity-70">• {(Math.max(1, Math.round((log.endedAt - log.startedAt)/1000)))}s</span> : null}
@@ -1225,44 +1030,6 @@ export default function VoiceAgentSection() {
           </Section>
         </div>
       </div>
-
-      {/* ---------------- Generate overlay ---------------- */}
-      <AnimatePresence>
-        {genOpen && (
-          <motion.div className="fixed inset-0 z-[999] flex items-center justify-center p-4"
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            style={{ background:'rgba(0,0,0,.45)' }}>
-            <motion.div
-              initial={{ y:10, opacity:0, scale:.98 }} animate={{ y:0, opacity:1, scale:1 }} exit={{ y:8, opacity:0, scale:.985 }}
-              className="w-full max-w-2xl rounded-2xl"
-              style={{ background:'var(--va-card)', border:'1px solid var(--va-border)', boxShadow:'var(--va-shadow-lg)' }}
-            >
-              <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom:'1px solid var(--va-border)' }}>
-                <div className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="w-4 h-4 icon" /> Generate / Edit Prompt</div>
-                <button onClick={()=> setGenOpen(false)} className="p-2 rounded-lg hover:opacity-80"><X className="w-4 h-4 icon" /></button>
-              </div>
-              <div className="p-4">
-                <input
-                  value={genText}
-                  onChange={(e)=> setGenText(e.target.value)}
-                  placeholder={`Examples:
-• assistant
-• collect full name, phone, date
-• [Identity] AI Sales Agent for roofers
-• first message: Hey—quick question to get you booked…`}
-                  className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
-                  style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)', color:'var(--text)' }}
-                />
-
-                <div className="mt-3 flex items-center justify-between gap-2">
-                  <button onClick={()=> setGenOpen(false)} className="btn btn--ghost">Cancel</button>
-                  <button onClick={handleGenerate} className="btn btn--green"><span className="text-white">Generate</span></button>
-                </div>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       {/* Delete overlay */}
       <AnimatePresence>
