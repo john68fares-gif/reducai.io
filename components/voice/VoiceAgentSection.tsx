@@ -10,14 +10,15 @@ import {
   Phone as PhoneIcon, Rocket, PhoneCall, PhoneOff, MessageSquare, ListTree, AudioLines, Volume2, Save
 } from 'lucide-react';
 
-/* =============================================================================
-   CONFIG / TOKENS
-============================================================================= */
-const SCOPE = 'va-scope';
-const ACCENT = '#10b981';
-const ACCENT_HOVER = '#0ea371';
-const BTN_SHADOW = '0 10px 24px rgba(16,185,129,.22)';
+import TelephonyEditor, { PhoneNum } from '@/components/voice/TelephonyEditor';
+import {
+  SCOPE, ACCENT, ACCENT_HOVER, BTN_SHADOW,
+  Field, Section, Select, DeleteModal, StyleBlock, useAppSidebarWidth
+} from '@/components/voice/ui';
 
+/* =============================================================================
+   CONFIG
+============================================================================= */
 const TICK_MS = 10;
 const CHUNK_SIZE = 6;
 
@@ -27,8 +28,6 @@ const CHUNK_SIZE = 6;
 type Provider = 'openai';
 type ModelId = 'gpt-4o' | 'gpt-4o-mini' | 'gpt-4.1' | 'gpt-3.5-turbo';
 type VoiceProvider = 'openai' | 'elevenlabs';
-
-type PhoneNum = { id: string; label?: string; e164: string };
 
 type TranscriptTurn = { role: 'assistant'|'user'; text: string; ts: number };
 type CallLog = {
@@ -167,7 +166,7 @@ ${collectList}`,
 /** Replace or add a named section like [Identity] ... */
 function setSection(prompt: string, name: string, body: string) {
   const section = name.replace(/^\[|\]$/g, '');
-  const re = new RegExp(String.raw`\[${section}\]\s*([\s\S]*?)(?=\n\[|$)`, 'i');
+  const re = new RegExp(String.raw`$begin:math:display$${section}$end:math:display$\s*([\s\S]*?)(?=\n\[|$)`, 'i');
   if (re.test(prompt)) {
     return prompt.replace(re, `[${section}]\n${body.trim()}\n`);
   }
@@ -223,7 +222,7 @@ function mergeInput(genText: string, currentPrompt: string) {
 }
 
 /* =============================================================================
-   DIFF (character-level)
+   DIFF (character-level) for live typing overlay
 ============================================================================= */
 type CharTok = { ch: string; added: boolean };
 function charDiffAdded(oldStr: string, newStr: string): CharTok[] {
@@ -247,46 +246,6 @@ function charDiffAdded(oldStr: string, newStr: string): CharTok[] {
 }
 
 /* =============================================================================
-   FIX THE DRIFT: Measure real app sidebar width
-============================================================================= */
-function useAppSidebarWidth(scopeRef: React.RefObject<HTMLDivElement>, fallbackCollapsed: boolean) {
-  useEffect(() => {
-    const scope = scopeRef.current;
-    if (!scope) return;
-
-    const setVar = (w: number) => scope.style.setProperty('--app-sidebar-w', `${Math.round(w)}px`);
-
-    const findSidebar = () =>
-      (document.querySelector('[data-app-sidebar]') as HTMLElement) ||
-      (document.querySelector('#app-sidebar') as HTMLElement) ||
-      (document.querySelector('.app-sidebar') as HTMLElement) ||
-      (document.querySelector('aside.sidebar') as HTMLElement) ||
-      null;
-
-    let target = findSidebar();
-    if (!target) { setVar(fallbackCollapsed ? 72 : 248); return; }
-
-    // Initial read
-    setVar(target.getBoundingClientRect().width);
-
-    const ro = new ResizeObserver(() => setVar(target!.getBoundingClientRect().width));
-    ro.observe(target);
-
-    const mo = new MutationObserver(() => setVar(target!.getBoundingClientRect().width));
-    mo.observe(target, { attributes: true, attributeFilter: ['class', 'style'] });
-
-    const onTransitionEnd = () => setVar(target!.getBoundingClientRect().width);
-    target.addEventListener('transitionend', onTransitionEnd);
-
-    return () => {
-      ro.disconnect();
-      mo.disconnect();
-      target.removeEventListener('transitionend', onTransitionEnd);
-    };
-  }, [scopeRef, fallbackCollapsed]);
-}
-
-/* =============================================================================
    SIMPLE WEB VOICE (no Vapi, no server required)
 ============================================================================= */
 function makeRecognizer(onFinalText: (text:string)=>void) {
@@ -307,7 +266,6 @@ function makeRecognizer(onFinalText: (text:string)=>void) {
   return r;
 }
 
-/* ---------- Browser TTS, honoring selected voice label ---------- */
 async function ensureVoicesReady(): Promise<SpeechSynthesisVoice[]> {
   const synth = window.speechSynthesis;
   let voices = synth.getVoices();
@@ -438,7 +396,7 @@ function makePromptAgent(systemPrompt: string){
 }
 
 /* =============================================================================
-   PAGE
+   COMPONENT
 ============================================================================= */
 export default function VoiceAgentSection() {
   const scopeRef = useRef<HTMLDivElement | null>(null);
@@ -546,7 +504,7 @@ export default function VoiceAgentSection() {
     setRev(r => r + 1);
   };
 
-  /* ---------- Rail collapse/expand (manual) ---------- */
+  /* ---------- Rail collapse/expand ---------- */
   const [railCollapsed, setRailCollapsed] = useState(false);
 
   /* ---------- Generate (live type + accept/decline) ---------- */
@@ -609,7 +567,7 @@ export default function VoiceAgentSection() {
   };
   const declineTyping = () => { setTyping(null); setPendingFirstMsg(undefined); };
 
-  /* ---------- Voices (static options) + SAVE / TEST ---------- */
+  /* ---------- Voices ---------- */
   const openaiVoices = [
     { value: 'alloy', label: 'Alloy (OpenAI)' },
     { value: 'ember', label: 'Ember (OpenAI)' },
@@ -624,7 +582,6 @@ export default function VoiceAgentSection() {
   const [pendingVoiceLabel, setPendingVoiceLabel] = useState<string | null>(null);
 
   useEffect(() => {
-    // whenever active changes, reset pending to current saved voice
     if (active) {
       setPendingVoiceId(active.config.voice.voiceId);
       setPendingVoiceLabel(active.config.voice.voiceLabel);
@@ -633,7 +590,6 @@ export default function VoiceAgentSection() {
 
   const handleVoiceProviderChange = (v: string) => {
     const list = v==='elevenlabs' ? elevenVoices : openaiVoices;
-    // set pending to the first available of that provider
     setPendingVoiceId(list[0].value);
     setPendingVoiceLabel(list[0].label);
     updateActive(a => ({ ...a, config:{ ...a.config, voice:{ provider: v as VoiceProvider, voiceId: list[0].value, voiceLabel: list[0].label } } }));
@@ -691,7 +647,6 @@ export default function VoiceAgentSection() {
     calls.unshift({ id, assistantId: active.id, assistantName: active.name, startedAt: Date.now(), type: 'Web', assistantPhoneNumber: linkedNum, transcript: [] });
     writeLS(LS_CALLS, calls);
 
-    // Build prompt-driven agent fresh from current System Prompt
     agentRef.current = makePromptAgent(active.config.model.systemPrompt || '');
 
     const greet = active.config.model.firstMessage || 'Hello. How may I help you today?';
@@ -1087,7 +1042,7 @@ export default function VoiceAgentSection() {
                   </div>
 
                   <div className="flex items-center gap-2 justify-end mt-3">
-                    <button onClick={declineTyping} className="btn btn--ghost"><X className="w-4 h-4 icon" /> Decline</button>
+                    <button onClick={()=>{ setTyping(null); setPendingFirstMsg(undefined); }} className="btn btn--ghost"><X className="w-4 h-4 icon" /> Decline</button>
                     <button onClick={acceptTyping} className="btn btn--green"><Check className="w-4 h-4 text-white" /><span className="text-white">Accept</span></button>
                   </div>
                 </div>
@@ -1323,326 +1278,5 @@ export default function VoiceAgentSection() {
 
       <StyleBlock />
     </div>
-  );
-}
-
-/* =============================================================================
-   Delete Modal
-============================================================================= */
-function DeleteModal({ open, name, onCancel, onConfirm }:{
-  open: boolean; name: string; onCancel: () => void; onConfirm: () => void;
-}) {
-  if (!open) return null;
-  return (
-    <motion.div className="fixed inset-0 z-[9998] flex items-center justify-center p-4"
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      style={{ background:'rgba(0,0,0,.55)' }}>
-      <motion.div initial={{ y: 10, opacity: .9, scale:.98 }} animate={{ y:0, opacity:1, scale:1 }}
-        className="w-full max-w-md rounded-2xl"
-        style={{ background:'var(--va-card)', border:'1px solid var(--va-border)', boxShadow:'var(--va-shadow-lg)' }}>
-        <div className="px-5 py-4 flex items-center justify-between" style={{ borderBottom:'1px solid var(--va-border)' }}>
-          <div className="text-sm font-semibold" style={{ color:'var(--text)' }}>Delete Assistant</div>
-          <button onClick={onCancel} className="p-2 rounded-lg hover:opacity-80"><X className="w-4 h-4 icon" /></button>
-        </div>
-        <div className="px-5 py-4 text-sm" style={{ color:'var(--text-muted)' }}>
-          Are you sure you want to delete <span style={{ color:'var(--text)' }}>“{name}”</span>? This cannot be undone.
-        </div>
-        <div className="px-5 pb-5 flex gap-2 justify-end">
-          <button onClick={onCancel} className="btn btn--ghost">Cancel</button>
-          <button onClick={onConfirm} className="btn btn--danger"><Trash2 className="w-4 h-4" /> Delete</button>
-        </div>
-      </motion.div>
-    </motion.div>
-  );
-}
-
-/* =============================================================================
-   Atoms
-============================================================================= */
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <div className="mb-1.5 text-[13px] font-medium" style={{ color:'var(--text)' }}>{label}</div>
-      {children}
-    </div>
-  );
-}
-
-function Section({ title, icon, children }:{ title: string; icon: React.ReactNode; children: React.ReactNode }) {
-  const [open, setOpen] = useState(true);
-  return (
-    <div
-      className="col-span-12 rounded-xl relative"
-      style={{
-        background:'var(--va-card)',
-        border:'1px solid var(--va-border)',
-        boxShadow:'var(--va-shadow)',
-      }}
-    >
-      <div aria-hidden className="pointer-events-none absolute -top-[22%] -left-[22%] w-[70%] h-[70%] rounded-full"
-           style={{ background:'radial-gradient(circle, color-mix(in oklab, var(--accent) 14%, transparent) 0%, transparent 70%)', filter:'blur(40px)' }} />
-      <button type="button" onClick={()=> setOpen(v=>!v)} className="w-full flex items-center justify-between px-5 py-4">
-        <span className="flex items-center gap-2 text-sm font-semibold">{icon}{title}</span>
-        {open ? <ChevronDown className="w-4 h-4 icon" /> : <ChevronRight className="w-4 h-4 icon" />}
-      </button>
-      <AnimatePresence initial={false}>
-        {open && (
-          <motion.div initial={{ height:0, opacity:0 }} animate={{ height:'auto', opacity:1 }} exit={{ height:0, opacity:0 }} transition={{ duration:.18 }} className="px-5 pb-5">
-            {children}
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
-
-/* =============================================================================
-   Telephony editor
-============================================================================= */
-function TelephonyEditor({ numbers, linkedId, onLink, onAdd, onRemove }:{
-  numbers: PhoneNum[];
-  linkedId?: string;
-  onLink: (id?: string) => void;
-  onAdd: (e164: string, label?: string) => void;
-  onRemove: (id: string) => void;
-}) {
-  const [e164, setE164] = useState('');
-  const [label, setLabel] = useState('');
-
-  return (
-    <div className="space-y-4">
-      <div className="grid gap-4" style={{ gridTemplateColumns:'repeat(3, minmax(240px, 1fr))' }}>
-        <div>
-          <div className="mb-1.5 text-[13px] font-medium" style={{ color:'var(--text)' }}>Phone Number (E.164)</div>
-          <input
-            value={e164}
-            onChange={(e)=> setE164(e.target.value)}
-            placeholder="+1xxxxxxxxxx"
-            className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
-            style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)', color:'var(--text)' }}
-          />
-        </div>
-        <div>
-          <div className="mb-1.5 text-[13px] font-medium" style={{ color:'var(--text)' }}>Label</div>
-          <input
-            value={label}
-            onChange={(e)=> setLabel(e.target.value)}
-            placeholder="Support line"
-            className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
-            style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)', color:'var(--text)' }}
-          />
-        </div>
-        <div className="flex items-end">
-          <button
-            onClick={()=> { onAdd(e164, label); setE164(''); setLabel(''); }}
-            className="btn btn--green w-full justify-center"
-          >
-            <PhoneIcon className="w-4 h-4 text-white" /><span className="text-white">Add Number</span>
-          </button>
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        {numbers.length === 0 && (
-          <div className="text-sm opacity-70">No phone numbers added yet.</div>
-        )}
-        {numbers.map(n => (
-          <div key={n.id} className="flex items-center justify-between rounded-xl px-3 py-2"
-               style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)' }}>
-            <div className="min-w-0">
-              <div className="font-medium truncate">{n.label || 'Untitled'}</div>
-              <div className="text-xs opacity-70">{n.e164}</div>
-            </div>
-            <div className="flex items-center gap-2">
-              <label className="flex items-center gap-1 text-xs">
-                <input type="radio" name="linked_number" checked={linkedId===n.id} onChange={()=> onLink(n.id)} />
-                Linked
-              </label>
-              <button onClick={()=> onRemove(n.id)} className="btn btn--danger text-xs"><Trash2 className="w-4 h-4" /> Remove</button>
-            </div>
-          </div>
-        ))}
-        {numbers.length > 0 && (
-          <div className="text-xs opacity-70">The number marked as <b>Linked</b> will be attached to this assistant on <i>Publish</i>.</div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/* =============================================================================
-   Scoped CSS
-============================================================================= */
-function StyleBlock() {
-  return (
-    <style jsx global>{`
-.${SCOPE}{
-  --accent:${ACCENT};
-  --bg:#0b0c10;
-  --text:#eef2f5;
-  --text-muted:color-mix(in oklab, var(--text) 65%, transparent);
-  --va-card:#0f1315;
-  --va-topbar:#0e1214;
-  --va-sidebar:linear-gradient(180deg,#0d1113 0%,#0b0e10 100%);
-  --va-chip:rgba(255,255,255,.03);
-  --va-border:rgba(255,255,255,.10);
-  --va-input-bg:rgba(255,255,255,.03);
-  --va-input-border:rgba(255,255,255,.14);
-  --va-input-shadow:inset 0 1px 0 rgba(255,255,255,.06);
-  --va-menu-bg:#101314;
-  --va-menu-border:rgba(255,255,255,.16);
-  --va-shadow:0 24px 70px rgba(0,0,0,.55), 0 10px 28px rgba(0,0,0,.4);
-  --va-shadow-lg:0 42px 110px rgba(0,0,0,.66), 0 20px 48px rgba(0,0,0,.5);
-  --va-shadow-sm:0 12px 26px rgba(0,0,0,.35);
-  --va-shadow-side:8px 0 28px rgba(0,0,0,.42);
-  --va-rail-w:360px;
-}
-:root:not([data-theme="dark"]) .${SCOPE}{
-  --bg:#f7f9fb;
-  --text:#101316;
-  --text-muted:color-mix(in oklab, var(--text) 55%, transparent);
-  --va-card:#ffffff;
-  --va-topbar:#ffffff;
-  --va-sidebar:linear-gradient(180deg,#ffffff 0%,#f7f9fb 100%);
-  --va-chip:#ffffff;
-  --va-border:rgba(0,0,0,.10);
-  --va-input-bg:#ffffff;
-  --va-input-border:rgba(0,0,0,.12);
-  --va-input-shadow:inset 0 1px 0 rgba(255,255,255,.85);
-  --va-menu-bg:#ffffff;
-  --va-menu-border:rgba(0,0,0,.10);
-  --va-shadow:0 28px 70px rgba(0,0,0,.12), 0 12px 28px rgba(0,0,0,.08);
-  --va-shadow-lg:0 42px 110px rgba(0,0,0,.16), 0 22px 54px rgba(0,0,0,.10);
-  --va-shadow-sm:0 12px 26px rgba(0,0,0,.10);
-  --va-shadow-side:8px 0 26px rgba(0,0,0,.08);
-}
-
-/* main */
-.${SCOPE} .va-main{ max-width: none !important; }
-.${SCOPE} .icon{ color: var(--accent); }
-
-/* unified button sizing + style parity */
-.${SCOPE} .btn{
-  display:inline-flex; align-items:center; gap:.5rem;
-  border-radius:14px; padding:.65rem 1rem; font-size:14px; line-height:1;
-  border:1px solid var(--va-border);
-}
-.${SCOPE} .btn--green{
-  background:${ACCENT}; color:#fff; box-shadow:${BTN_SHADOW};
-  transition:transform .04s ease, background .18s ease;
-}
-.${SCOPE} .btn--green:hover{ background:${ACCENT_HOVER}; }
-.${SCOPE} .btn--green:active{ transform:translateY(1px); }
-.${SCOPE} .btn--ghost{
-  background:var(--va-card); color:var(--text);
-  box-shadow:var(--va-shadow-sm);
-}
-.${SCOPE} .btn--danger{
-  background:rgba(220,38,38,.12); color:#fca5a5;
-  box-shadow:0 10px 24px rgba(220,38,38,.15);
-  border-color:rgba(220,38,38,.35);
-}
-
-.${SCOPE} .va-range{ -webkit-appearance:none; height:4px; background:color-mix(in oklab, var(--accent) 24%, #0000); border-radius:999px; outline:none; }
-.${SCOPE} .va-range::-webkit-slider-thumb{ -webkit-appearance:none; width:14px;height:14px;border-radius:50%;background:var(--accent); border:2px solid #fff; box-shadow:0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent); }
-.${SCOPE} .va-range::-moz-range-thumb{ width:14px;height:14px;border:0;border-radius:50%;background:var(--accent); box-shadow:0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent); }
-
-/* no transitions on left so Safari/iPad won't jitter during sidebar animation */
-.${SCOPE} aside{ transition:none !important; }
-
-@media (max-width: 1180px){
-  .${SCOPE}{ --va-rail-w: 320px; }
-}
-`}</style>
-  );
-}
-
-/* =============================================================================
-   Minimal Select
-============================================================================= */
-type Item = { value: string; label: string; icon?: React.ReactNode };
-function usePortalPos(open: boolean, ref: React.RefObject<HTMLElement>) {
-  const [rect, setRect] = useState<{ top: number; left: number; width: number; up: boolean } | null>(null);
-  useLayoutEffect(() => {
-    if (!open) return;
-    const r = ref.current?.getBoundingClientRect(); if (!r) return;
-    const up = r.bottom + 320 > window.innerHeight;
-    setRect({ top: up ? r.top : r.bottom, left: r.left, width: r.width, up });
-  }, [open]);
-  return rect;
-}
-function Select({ value, items, onChange, placeholder, leftIcon }: {
-  value: string; items: Item[]; onChange: (v: string) => void; placeholder?: string; leftIcon?: React.ReactNode;
-}) {
-  const [open, setOpen] = useState(false);
-  const [q, setQ] = useState('');
-  const btn = useRef<HTMLButtonElement | null>(null);
-  const portal = useRef<HTMLDivElement | null>(null);
-  const rect = usePortalPos(open, btn);
-
-  useEffect(() => {
-    if (!open) return;
-    const on = (e: MouseEvent) => {
-      if (btn.current?.contains(e.target as Node) || portal.current?.contains(e.target as Node)) return;
-      setOpen(false);
-    };
-    window.addEventListener('mousedown', on);
-    return () => window.removeEventListener('mousedown', on);
-  }, [open]);
-
-  const filtered = items.filter(i => i.label.toLowerCase().includes(q.trim().toLowerCase()));
-  const sel = items.find(i => i.value === value) || null;
-
-  return (
-    <>
-      <button
-        ref={btn}
-        type="button"
-        onClick={() => setOpen(v => !v)}
-        className="w-full flex items-center gap-3 px-3 py-3 rounded-2xl text-[15px]"
-        style={{ background:'var(--va-input-bg)', color:'var(--text)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)' }}
-      >
-        {leftIcon ? <span className="shrink-0">{leftIcon}</span> : null}
-        {sel ? <span className="flex items-center gap-2 min-w-0">{sel.icon}<span className="truncate">{sel.label}</span></span> : <span className="opacity-70">{placeholder || 'Select…'}</span>}
-        <span className="ml-auto" />
-        <ChevronDown className="w-4 h-4 icon" />
-      </button>
-
-      <AnimatePresence>
-        {open && rect && (
-          <motion.div
-            ref={portal}
-            initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 4 }}
-            className="fixed z-[9999] p-3 rounded-xl"
-            style={{
-              top: rect.up ? rect.top - 8 : rect.top + 8,
-              left: rect.left, width: rect.width, transform: rect.up ? 'translateY(-100%)' : 'none',
-              background:'var(--va-menu-bg)', border:'1px solid var(--va-menu-border)', boxShadow:'var(--va-shadow-lg)'
-            }}
-          >
-            <div className="flex items-center gap-2 mb-3 px-2 py-2 rounded-lg"
-              style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)' }}>
-              <Search className="w-4 h-4 icon" />
-              <input value={q} onChange={(e)=> setQ(e.target.value)} placeholder="Filter…" className="w-full bg-transparent outline-none text-sm" style={{ color:'var(--text)' }}/>
-            </div>
-            <div className="max-h-72 overflow-y-auto pr-1" style={{ scrollbarWidth:'thin' }}>
-              {filtered.map(it => (
-                <button
-                  key={it.value}
-                  onClick={() => { onChange(it.value); setOpen(false); }}
-                  className="w-full flex items-center gap-3 px-3 py-2 rounded-[10px] text-left"
-                  style={{ color:'var(--text)' }}
-                  onMouseEnter={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='rgba(16,185,129,.10)'; (e.currentTarget as HTMLButtonElement).style.border='1px solid rgba(16,185,129,.35)'; }}
-                  onMouseLeave={(e)=>{ (e.currentTarget as any).style.background='transparent'; (e.currentTarget as any).style.border='1px solid transparent'; }}
-                >
-                  {it.icon}{it.label}
-                </button>
-              ))}
-              {filtered.length === 0 && <div className="px-3 py-6 text-sm" style={{ color:'var(--text-muted)' }}>No matches.</div>}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </>
   );
 }
