@@ -3,13 +3,12 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Bot, Copy, History, Info, Loader2, Plus, Send, Settings2,
+  Bot, Check, Copy, History, Info, Loader2, Plus, Send, Settings2,
   Sparkles, Trash2, Undo2, Redo2, ChevronDown, ChevronUp, HelpCircle, X
 } from 'lucide-react';
 
 /* =============================================================================
    SAFE STORAGE (SSR/Edge safe) + ACCOUNT SCOPING
-   - All keys are prefixed with an account id.
 ============================================================================= */
 type Backend = {
   getItem: (k: string) => string | null;
@@ -69,7 +68,6 @@ function createScopedStorage(scope: string) {
     removeItem(k: string): void {
       try { backend.removeItem(prefix + k); } catch {}
     },
-    // raw access for scanning keys (browser only)
     _allKeys(): string[] {
       try {
         if (typeof window === 'undefined') return [];
@@ -111,11 +109,11 @@ const MODEL_OPTIONS: Array<{ value: ModelId; label: string }> = [
   { value: 'o3-mini',      label: 'o3-mini (reasoning, fast)' },
 ];
 
-/* Canonical keys */
+/* Canonical keys shared with the rest of app */
 const K_SELECTED_AGENT_ID = `${SCOPE}:selectedAgentId`;
-const K_AGENT_LIST        = `agents:all`;                  // canonical list of agents (shared)
-const K_AGENT_META_PREFIX = `agents:meta:`;               // per-agent tuning (shared)
-const K_IMPROVE_STATE     = `${SCOPE}:agent:`;            // Improve's full per-agent state (history, etc.)
+const K_AGENT_LIST        = `agents:all`;          // list of agents
+const K_AGENT_META_PREFIX = `agents:meta:`;        // per-agent tuning (model/temp/rules)
+const K_IMPROVE_STATE     = `${SCOPE}:agent:`;     // Improve’s per-agent (history/versions)
 
 /* =============================================================================
    TYPES
@@ -166,43 +164,33 @@ function normalizeAgents(list: any): Agent[] {
       temperature: typeof a.temperature === 'number' ? a.temperature : DEFAULT_TEMPERATURE
     }));
 }
-
-/* Discover agents that may have been created elsewhere and write them to K_AGENT_LIST */
 function discoverAgents(): Agent[] {
-  // primary
   const main = normalizeAgents(store.getItem(K_AGENT_LIST));
   if (main.length) return main;
 
-  // try a few common alternates to pick up existing agents
   const altKeys = [
-    `${SCOPE}:agents`,                // old Improve list
+    `${SCOPE}:agents`,
     `assistants:list`,
     `builder:agents`,
     `voice:assistants`,
-    `chat:agents`
+    `chat:agents`,
   ];
   for (const k of altKeys) {
     const list = normalizeAgents(store.getItem(k));
     if (list.length) { store.setItem(K_AGENT_LIST, list); return list; }
   }
 
-  // last resort: scan storage for arrays that look like agents
   try {
     for (const k of store._allKeys()) {
-      const val = store.getItem(k);
-      const list = normalizeAgents(val);
+      const list = normalizeAgents(store.getItem(k));
       if (list.length) { store.setItem(K_AGENT_LIST, list); return list; }
     }
   } catch {}
-
   return [];
 }
-
 function loadAgents(): Agent[] {
   const list = discoverAgents();
   if (list.length) return list;
-
-  // create one if nothing exists
   const fallback = [{
     id: uid('agent'),
     name: 'My First Agent',
@@ -237,14 +225,14 @@ function pickLatestAgent(agents: Agent[]): Agent | null {
 }
 
 /* Reason text for the "Why?" modal */
-function buildReasonFromRefinements(refs: Refinement[]): string {
+function reasonFrom(refs: Refinement[]): string {
   const active = refs.filter(r => r.enabled);
   if (!active.length) return 'No special requests are active—using a default helpful tone.';
   const bullets = active.slice(0, 3).map(r => r.text);
   return `Following your active refinements: ${bullets.join('; ')}.`;
 }
 
-/* Smarter default replies so it doesn’t feel same-y */
+/* Smarter default replies */
 function defaultAnswerFor(text: string, history: ChatMessage[]): string {
   const t = text.trim().toLowerCase();
   if (!t) return "Sure—what would you like to do?";
@@ -299,6 +287,10 @@ export default function ImprovePage() {
   const [showSettings, setShowSettings] = useState(false);
   const [showWhyFor, setShowWhyFor] = useState<string | null>(null);
 
+  // tiny visual save indicator
+  const [isSaving, setIsSaving] = useState(false);
+  const [justSavedAt, setJustSavedAt] = useState<number>(0);
+
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Boot
@@ -319,7 +311,6 @@ export default function ImprovePage() {
     const agent = list.find(a => a.id === id);
     if (!agent) return;
 
-    // Start with Improve state (history etc)
     const base: AgentState = loadImproveState(id) ?? {
       model: agent.model,
       temperature: agent.temperature ?? DEFAULT_TEMPERATURE,
@@ -335,31 +326,31 @@ export default function ImprovePage() {
       redo: [],
     };
 
-    // Overlay agent meta tuning if it exists (source of truth for tuning)
     const meta = loadAgentMeta(id);
     if (meta) {
       base.model = meta.model;
       base.temperature = meta.temperature;
       base.refinements = meta.refinements ?? base.refinements;
     }
-
-    // guard invalid model
     if (!MODEL_OPTIONS.some(m => m.value === base.model)) base.model = 'gpt-4o';
 
     setState(base);
     saveImproveState(id, base);
   }
 
-  // Persist Improve state
+  // Persist Improve state (history etc.)
   useEffect(() => {
     if (!agentId || !state) return;
     saveImproveState(agentId, state);
   }, [agentId, state]);
 
-  // Auto-sync tuning back to the agent’s own record (so other pages see it)
+  // Auto-save tuning to the agent + show "Saving…/Saved"
   useEffect(() => {
     if (!agentId || !state) return;
-    // update meta
+    // visual feedback
+    setIsSaving(true);
+
+    // persist tuning to agent meta
     const meta: AgentMeta = {
       model: state.model,
       temperature: state.temperature,
@@ -368,13 +359,17 @@ export default function ImprovePage() {
     };
     saveAgentMeta(agentId, meta);
 
-    // also reflect model/temperature on the agent list
+    // also reflect on agents list
     setAgents(prev => {
       const next = prev.map(a => a.id === agentId ? { ...a, model: state.model, temperature: state.temperature } : a);
       saveAgents(next);
       return next;
     });
-  }, [agentId, state?.model, state?.temperature, state?.refinements]);
+
+    // settle the "Saving…" indicator quickly
+    const t = setTimeout(() => { setIsSaving(false); setJustSavedAt(Date.now()); }, 300);
+    return () => clearTimeout(t);
+  }, [agentId, state?.model, state?.temperature, JSON.stringify(state?.refinements || [])]);
 
   // Scroll
   useEffect(() => {
@@ -463,7 +458,7 @@ export default function ImprovePage() {
     setState({ ...state, ...last, redo: newRedo, undo: [...state.undo, undoSnap] } as AgentState);
   }
 
-  // New agent (optional)
+  // Optional: quick new agent
   function createAgent() {
     const a: Agent = {
       id: uid('agent'),
@@ -527,7 +522,7 @@ export default function ImprovePage() {
       id: uid('m'),
       role: 'assistant',
       content: reply,
-      reason: buildReasonFromRefinements(state.refinements),
+      reason: reasonFrom(state.refinements),
       createdAt: now(),
     };
     setState(prev => prev ? { ...prev, history: [...prev.history, aiMsg] } : prev);
@@ -573,6 +568,7 @@ export default function ImprovePage() {
             <span className="font-semibold">Improve</span>
             <span className="opacity-60">/</span>
 
+            <label className="text-sm opacity-70">AI to tune</label>
             <select
               className="rounded-md px-2 py-1 text-sm border bg-transparent"
               style={{ borderColor: 'var(--border)' }}
@@ -596,6 +592,19 @@ export default function ImprovePage() {
             >
               + New
             </button>
+
+            {/* Save indicator */}
+            <div className="ml-2 text-xs flex items-center gap-1 opacity-80">
+              {isSaving ? (
+                <>
+                  <Loader2 size={14} className="animate-spin" /> Saving…
+                </>
+              ) : (
+                <>
+                  <Check size={14} /> Saved
+                </>
+              )}
+            </div>
           </div>
 
           <div className="flex items-center gap-2">
@@ -742,7 +751,7 @@ export default function ImprovePage() {
                style={{ borderColor: 'var(--border)', background: 'var(--panel)' }}>
             <div className="flex items-center gap-2 font-semibold"><HelpCircle size={16} /> Tips</div>
             <ul className="mt-2 text-sm opacity-80 list-disc pl-5 space-y-1">
-              <li>Tuning (model, temperature, rules) is auto-saved onto the selected agent.</li>
+              <li>Pick the **AI to tune** from the top bar. All changes auto-save to that agent.</li>
               <li>“Save &amp; Rerun” happens when you send a message.</li>
               <li>Use <em>Versions</em> to snapshot settings + chat for quick rollback.</li>
             </ul>
@@ -831,7 +840,7 @@ export default function ImprovePage() {
               <div className="font-semibold flex items-center gap-2"><Info size={16} /> Why this reply?</div>
               <button onClick={() => setShowWhyFor(null)} className="opacity-60 hover:opacity-100"><X size={16} /></button>
             </div>
-            <div className="mt-3 text-sm leading-relaxed">{buildReasonFromRefinements(state.refinements)}</div>
+            <div className="mt-3 text-sm leading-relaxed">{reasonFrom(state.refinements)}</div>
             <div className="mt-4 flex justify-end">
               <button onClick={() => setShowWhyFor(null)}
                       className="px-3 py-2 rounded-md text-sm border"
