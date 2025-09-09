@@ -441,7 +441,7 @@ export default function ImprovePage() {
   ============================================================================= */
 
   return (
-    <div className={`${SCOPE} min-h-screen`} style={{ background: 'var(--bg)', color: 'var(--text)' }}>
+    <div className={`${SCOPE} min-h-screen font-sans`} style={{ background: 'var(--bg)', color: 'var(--text)' }}>
       {/* Top bar */}
       <div className="sticky top-0 z-20 border-b border-white/5 backdrop-blur-sm"
            style={{ background: 'color-mix(in oklab, var(--bg) 90%, transparent)' }}>
