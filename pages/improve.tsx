@@ -3,23 +3,21 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Settings2, Send } from "lucide-react";
+import { AgentProvider } from "@/components/agents/AgentContext"; // ✅ NEW
 
-/** ================= Types ================= */
 type Msg = { role: "user" | "assistant"; text: string };
 
 type Agent = {
   id: string;
   name: string;
   prompt: string;
-  // optional fields if present in your project
-  phoneNumberId?: string;   // -> enables server-side per-agent key on /api/chat
-  firstMessage?: string;    // -> seeds first assistant message on new thread
+  phoneNumberId?: string;
+  firstMessage?: string;
 };
 
-const STORAGE_KEY = "chatbots";                // your existing agents list in localStorage
-const THREAD_KEY = (agentId: string) => `improve:thread:${agentId}`; // per-agent thread (session)
+const STORAGE_KEY = "chatbots";
+const THREAD_KEY = (agentId: string) => `improve:thread:${agentId}`;
 
-/** Tiny helpers */
 const clamp = (s: string, n = 8000) => String(s ?? "").slice(0, n);
 const hash = (s: string) => {
   let h = 0;
@@ -27,7 +25,7 @@ const hash = (s: string) => {
   return String(h);
 };
 
-export default function ImprovePage() {
+function ImproveInner() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -38,14 +36,11 @@ export default function ImprovePage() {
   const [loading, setLoading] = useState(false);
   const lastAssistantHashRef = useRef<string | null>(null);
 
-  /** Load agents once */
   useEffect(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
       if (Array.isArray(saved)) setAgents(saved);
-    } catch {
-      // ignore
-    }
+    } catch {}
   }, []);
 
   const selectedAgent = useMemo(
@@ -53,7 +48,6 @@ export default function ImprovePage() {
     [agents, selectedId]
   );
 
-  /** Load thread when agent changes; seed firstMessage if provided */
   useEffect(() => {
     lastAssistantHashRef.current = null;
 
@@ -67,16 +61,12 @@ export default function ImprovePage() {
       if (raw) {
         const parsed: Msg[] = JSON.parse(raw);
         setMessages(parsed);
-        // reset last hash to the last assistant message (if any)
         const lastA = [...parsed].reverse().find((m) => m.role === "assistant");
         lastAssistantHashRef.current = lastA ? hash(lastA.text) : null;
         return;
       }
-    } catch {
-      // ignore
-    }
+    } catch {}
 
-    // No existing thread → seed with firstMessage if present
     if (selectedAgent.firstMessage?.trim()) {
       const fm = selectedAgent.firstMessage.trim();
       setMessages([{ role: "assistant", text: fm }]);
@@ -86,17 +76,13 @@ export default function ImprovePage() {
     }
   }, [selectedAgent?.id]);
 
-  /** Persist the thread per-agent in sessionStorage */
   useEffect(() => {
     if (!selectedAgent) return;
     try {
       sessionStorage.setItem(THREAD_KEY(selectedAgent.id), JSON.stringify(messages));
-    } catch {
-      // ignore
-    }
+    } catch {}
   }, [messages, selectedAgent?.id]);
 
-  /** Send message */
   const send = async () => {
     const value = input.trim();
     if (!value || !selectedAgent || loading) return;
@@ -107,7 +93,6 @@ export default function ImprovePage() {
 
     try {
       const bodyForNewRoute = {
-        // Preferred path: uses your new /api/chat that looks up agent by phoneNumberId and uses per-agent key
         phoneNumberId: selectedAgent.phoneNumberId,
         model,
         temperature,
@@ -118,7 +103,6 @@ export default function ImprovePage() {
       };
 
       const bodyForLegacyRoute = {
-        // Fallback path: old shape you previously had
         agent: {
           name: selectedAgent.name,
           prompt: clamp(selectedAgent.prompt, 12000),
@@ -131,7 +115,6 @@ export default function ImprovePage() {
         ],
       };
 
-      // Decide which body to send: if agent has phoneNumberId → use new shape, else legacy
       const useNewShape = Boolean(selectedAgent.phoneNumberId);
       const resp = await fetch("/api/chat", {
         method: "POST",
@@ -150,7 +133,6 @@ export default function ImprovePage() {
         const candidate: string = String(data.reply || "").trim();
         const candHash = hash(candidate);
         if (lastAssistantHashRef.current && candHash === lastAssistantHashRef.current) {
-          // Anti-loop guard
           const guarded =
             candidate +
             "\n\n(Thanks—I'll avoid repeating myself. Could you share one new detail so I can move you forward?)";
@@ -161,7 +143,7 @@ export default function ImprovePage() {
           lastAssistantHashRef.current = candHash;
         }
       }
-    } catch (err: any) {
+    } catch {
       setMessages((prev) => [
         ...prev,
         { role: "assistant", text: "⚠️ Failed to reach server." },
@@ -174,18 +156,15 @@ export default function ImprovePage() {
   return (
     <div className="min-h-screen px-6 py-10 md:pl-[260px] bg-[var(--bg)] text-[var(--text)]">
       <div className="max-w-6xl mx-auto space-y-6">
-        {/* Header */}
         <h1 className="text-2xl font-semibold flex items-center gap-2">
           <Settings2 className="w-5 h-5" /> Tuning Lab
         </h1>
 
-        {/* Agent selector + Settings */}
         <div className="flex flex-wrap items-center gap-4">
           <select
             value={selectedId || ""}
             onChange={(e) => setSelectedId(e.target.value || null)}
             className="px-3 py-2 rounded-md border border-gray-700 bg-[#0d0f11] text-white"
-            aria-label="Select agent"
           >
             <option value="">Select an agent…</option>
             {agents.map((a) => (
@@ -199,7 +178,6 @@ export default function ImprovePage() {
             value={model}
             onChange={(e) => setModel(e.target.value)}
             className="px-3 py-2 rounded-md border border-gray-700 bg-[#0d0f11] text-white"
-            aria-label="Model"
           >
             <option value="gpt-4o-mini">GPT-4o Mini</option>
             <option value="gpt-4o">GPT-4o</option>
@@ -209,7 +187,6 @@ export default function ImprovePage() {
           <div className="flex items-center gap-2 text-sm">
             <span>Temp:</span>
             <input
-              aria-label="Temperature"
               type="range"
               min={0}
               max={1}
@@ -221,7 +198,6 @@ export default function ImprovePage() {
           </div>
         </div>
 
-        {/* Chat area */}
         <div className="rounded-xl border border-gray-700 bg-[#0d0f11] p-4 h-[500px] overflow-y-auto space-y-3">
           {messages.map((m, i) => (
             <div
@@ -243,7 +219,6 @@ export default function ImprovePage() {
           )}
         </div>
 
-        {/* Input */}
         <div className="flex gap-2">
           <input
             value={input}
@@ -256,7 +231,6 @@ export default function ImprovePage() {
             onClick={send}
             disabled={loading || !selectedAgent}
             className="px-4 py-2 rounded-md bg-[var(--brand)] text-black font-semibold hover:opacity-90 disabled:opacity-50"
-            aria-label="Send message"
           >
             <Send className="w-4 h-4" />
           </button>
@@ -266,7 +240,14 @@ export default function ImprovePage() {
   );
 }
 
-/** Simple typing indicator (3 bouncing dots) — CSS-only */
+export default function ImprovePage() {
+  return (
+    <AgentProvider>
+      <ImproveInner />
+    </AgentProvider>
+  );
+}
+
 function TypingDots() {
   return (
     <span className="inline-flex items-center gap-1">
@@ -289,7 +270,6 @@ function Dot({ delay }: { delay: string }) {
   );
 }
 
-/** keyframes for the dots (scoped, won’t affect global styles) */
 const style = `
 @keyframes improve-bounce {
   0%, 80%, 100% { transform: scale(0.66); opacity: .6; }
