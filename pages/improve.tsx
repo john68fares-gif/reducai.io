@@ -1,4 +1,3 @@
-// pages/improve.tsx
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -14,13 +13,13 @@ import { scopedStorage, migrateLegacyKeysToUser } from '@/utils/scoped-storage';
 ============================================================================= */
 const SCOPE = 'improve';
 const MAX_REFINEMENTS = 5;
-const TYPING_LATENCY_MS = 950;
 const DEFAULT_TEMPERATURE = 0.5;
+const TYPING_LATENCY_MS = 700;
 
 const K_SELECTED_AGENT_ID = `${SCOPE}:selectedAgentId`;   // string
 const K_AGENT_LIST        = `agents`;                     // Agent[]
-const K_AGENT_META_PREFIX = `agents:meta:`;               // AgentMeta
-const K_IMPROVE_STATE     = `${SCOPE}:agent:`;            // AgentState
+const K_AGENT_META_PREFIX = `agents:meta:`;               // per-agent tuning (model/temp/rules)
+const K_IMPROVE_STATE     = `${SCOPE}:agent:`;            // Improve (chat/history/versions)
 
 type ModelId =
   | 'gpt-4o'
@@ -68,67 +67,155 @@ type AgentMeta = {
 };
 
 /* =============================================================================
-   STORAGE HELPER (async)
+   STORAGE + UTIL
 ============================================================================= */
 type Store = Awaited<ReturnType<typeof scopedStorage>>;
-function uid(prefix = 'id'): string {
-  return `${prefix}_${Math.random().toString(36).slice(2, 9)}${Date.now().toString(36).slice(-4)}`;
-}
 const now = () => Date.now();
 const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
+const uid = (p='id') => `${p}_${Math.random().toString(36).slice(2,9)}${Date.now().toString(36).slice(-4)}`;
+
+/** Try to map *anything* that looks like an agent into our Agent type. */
+function mapAnyToAgent(x: any, idx: number): Agent | null {
+  if (!x) return null;
+  const id = String(x.id ?? x.agentId ?? x.slug ?? `tmp_${idx}_${Date.now()}`);
+  const name = String(x.name ?? x.title ?? `Agent ${idx+1}`);
+  const createdAt = Number(x.createdAt ?? x.created_at ?? Date.now());
+  const modelRaw = String(x.model ?? x.modelId ?? x.engine ?? 'gpt-4o');
+  const model: ModelId = (MODEL_OPTIONS.some(m=>m.value===modelRaw) ? modelRaw : 'gpt-4o') as ModelId;
+  const temperature = typeof x.temperature === 'number'
+    ? x.temperature
+    : typeof x.temp === 'number'
+      ? x.temp
+      : typeof x.creativity === 'number'
+        ? x.creativity
+        : DEFAULT_TEMPERATURE;
+  return { id, name, createdAt, model, temperature };
+}
 
 function normalizeAgents(list: any): Agent[] {
   if (!Array.isArray(list)) return [];
-  return list
-    .filter((a) => a && a.id && a.name)
-    .map((a) => ({
-      id: String(a.id),
-      name: String(a.name),
-      createdAt: Number(a.createdAt || Date.now()),
-      model: (MODEL_OPTIONS.some(m => m.value === a.model) ? a.model : 'gpt-4o') as ModelId,
-      temperature: typeof a.temperature === 'number' ? a.temperature : DEFAULT_TEMPERATURE
-    }));
+  const out: Agent[] = [];
+  list.forEach((x, i) => {
+    const a = mapAnyToAgent(x, i);
+    if (a) out.push(a);
+  });
+  // de-dupe by id
+  const seen = new Set<string>();
+  return out.filter(a => (seen.has(a.id) ? false : (seen.add(a.id), true)));
+}
+
+/** Discover agents from common keys and collapse them into `agents`. */
+async function loadAgentsFromAny(store: Store): Promise<Agent[]> {
+  const candidates = [
+    K_AGENT_LIST,
+    'chatbots',           // legacy in your guard list
+    'builds',             // sometimes used as “agents”
+    'assistants',
+    'voice:assistants',
+  ];
+  for (const key of candidates) {
+    const raw = await store.getJSON<any>(key, []);
+    const list = normalizeAgents(raw);
+    if (list.length) {
+      // normalize to unified list key
+      await store.setJSON(K_AGENT_LIST, list);
+      return list;
+    }
+  }
+  return [];
 }
 
 function reasonFrom(refs: Refinement[]): string {
   const active = refs.filter(r => r.enabled);
   if (!active.length) return 'No special requests are active—using a default helpful tone.';
-  const bullets = active.slice(0, 3).map(r => r.text);
-  return `Following your active refinements: ${bullets.join('; ')}.`;
+  return `Following your active refinements: ${active.slice(0,3).map(r=>r.text).join('; ')}.`;
 }
 
-function defaultAnswerFor(text: string, history: ChatMessage[]): string {
-  const t = text.trim().toLowerCase();
-  if (!t) return "Sure—what would you like to do?";
+/** Tiny PRNG for variation controlled by temperature. */
+function mulberry32(seed: number) { return function() { let t = seed += 0x6D2B79F5; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+const pick = <T,>(rng: ()=>number, arr: T[]) => arr[Math.floor(rng() * arr.length)];
 
-  const isGreeting = /^(hi|hey|hello|yo|hiya|heya|sup)\b/.test(t);
-  const isStatus   = /\b(how are (you|u)|hru|wyd|what'?s up|wbu)\b/.test(t);
-  const isHelp     = /\b(help|assist|support)\b/.test(t);
-  const isStart    = /\b(let'?s|lets)\s*(start|begin|kick ?off|work|get started)\b/.test(t);
-  const isQuestion = t.endsWith('?');
-  const isNTM      = t === 'ntm' || t === 'not much' || t === 'not too much';
+/** Generate an answer that varies with temperature, model and rules. */
+function synthAnswer(text: string, state: AgentState): string {
+  const t = text.trim();
+  const temp = clamp01(state.temperature);
+  const seed = Math.abs(hashCode(t) ^ Math.floor(temp * 1000) ^ Date.now());
+  const rng = mulberry32(seed);
 
-  const countUser = (re: RegExp) =>
-    history.filter(m => m.role === 'user' && re.test(m.content.toLowerCase())).length;
+  const active = state.refinements.filter(r=>r.enabled).map(r=>r.text.toLowerCase());
+  const wantsYesNo   = active.some(s => /yes\/?no|yes or no/.test(s));
+  const wantsOneWord = active.some(s => /one\s*word|1[-\s]*word/.test(s));
+  const noGreeting   = active.some(s => /no (greeting|hello)/.test(s));
 
-  const greetingCount = countUser(/^(hi|hey|hello|yo|hiya|heya|sup)\b/i) + (isGreeting ? 1 : 0);
-  const startCount    = countUser(/\b(let'?s|lets)\s*(start|begin|kick ?off|work|get started)\b/i) + (isStart ? 1 : 0);
+  const removeRestrictions = active.some(s =>
+    /remove (any )?restrictions|no restrictions|uncensored|no filter|any subject|answer anything/i.test(s)
+  );
 
-  const actions = 'We can ① set a quick goal, ② outline a 3-step plan, or ③ make a to-do checklist.';
+  // If "ask clarifying question first" is active
+  const askClarify = active.some(s => /clarifying question first|clarify first/i.test(s));
 
-  if (isGreeting || isStatus) {
-    if (greetingCount <= 1) return "Hey! I’m here and ready to help. What are you working on?";
-    if (greetingCount === 2) return "Hi again — want me to set a quick goal or create a starter plan?";
-    return "Ready when you are. " + actions;
-  }
-  if (isStart) {
-    if (startCount <= 1) return "Great — let’s kick this off. " + actions;
-    return "Okay, picking up: " + actions + " Tell me which one and any constraints.";
-  }
-  if (isHelp) return "Absolutely. Tell me your objective and any constraints (deadline, style, length). " + actions;
-  if (isQuestion) return "Here’s a concise answer. If you want a specific tone or length, add a rule on the left.";
-  if (isNTM) return "No worries. Want to spin up something small? " + actions;
-  return "Got it. Here’s a concise response. If you want a different tone or structure, add a rule on the left.";
+  // Yes/No / One-word modes
+  if (wantsOneWord) return pick(rng, ['Yes', 'Sure', 'Okay', 'Ready']);
+  if (wantsYesNo)   return pick(rng, ['Yes.', 'No.', 'Yes – proceeding.', 'No.']);
+
+  // Model style
+  const style = (() => {
+    switch (state.model) {
+      case 'o3':
+        return (msg: string) =>
+          `${noGreeting ? '' : 'Let’s reason it out.'} ${msg}\n\n` +
+          `**Plan**: 1) understand goal 2) propose steps 3) deliver draft.`;
+      case 'o3-mini':
+        return (msg: string) => `${noGreeting ? '' : 'Quick take:'} ${msg}`;
+      case 'gpt-4.1':
+        return (msg: string) => `${noGreeting ? '' : 'Here’s a balanced answer:'} ${msg}`;
+      case 'gpt-4.1-mini':
+        return (msg: string) => `${msg}`;
+      case 'gpt-4o':
+      case 'gpt-4o-mini':
+      default:
+        return (msg: string) => `${noGreeting ? '' : 'Got it.'} ${msg}`;
+    }
+  })();
+
+  // Base variants
+  const variants = [
+    `Here’s a concise answer. If you want a specific tone or length, add a rule on the left.`,
+    `Okay — I’ll answer directly. You can refine with rules any time.`,
+    `Sure. I’ll keep it tight. Add “be concise / casual / formal” as needed.`,
+  ];
+
+  // If "remove restrictions", we avoid adding extra caveats from the UI.
+  const preface = removeRestrictions ? '' : pick(rng, variants);
+  const body =
+    askClarify
+      ? `Before I answer, what’s the exact goal and any constraints (deadline, style, length)?`
+      : (t.endsWith('?')
+          ? `Here’s the answer you asked for.`
+          : `I’ll proceed based on your last message.`);
+
+  // Temperature controls how much fluff we add
+  const extras = temp < 0.25
+    ? ''
+    : temp < 0.6
+      ? pick(rng, [
+          ` Next, I can outline 3 quick steps.`,
+          ` Want a short checklist too?`,
+          ` I can also draft a quick version.`,
+        ])
+      : pick(rng, [
+          ` Next options: ① 3-step plan ② 5-bullet summary ③ quick draft — pick one.`,
+          ` Preferences? Tone (casual/formal), length (short/medium/long), or target audience.`,
+          ` I can also propose multiple approaches and compare trade-offs.`,
+        ]);
+
+  return style(`${preface ? preface + ' ' : ''}${body}${extras}`.trim());
+}
+
+function hashCode(s: string) {
+  let h = 0, i = 0, len = s.length;
+  while (i < len) { h = ((h << 5) - h + s.charCodeAt(i++)) | 0; }
+  return h | 0;
 }
 
 /* =============================================================================
@@ -146,12 +233,11 @@ export default function ImprovePage() {
   const [isSending, setIsSending] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showWhyFor, setShowWhyFor] = useState<string | null>(null);
-
   const [isSaving, setIsSaving] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  /* ------------------------------ Boot ------------------------------ */
+  // Boot
   useEffect(() => {
     (async () => {
       const st = await scopedStorage();
@@ -159,8 +245,9 @@ export default function ImprovePage() {
       await migrateLegacyKeysToUser();
       setStore(st);
 
-      // load or create agents list
-      let list = normalizeAgents(await st.getJSON<Agent[]>(K_AGENT_LIST, []));
+      let list = normalizeAgents(await st.getJSON<any[]>(K_AGENT_LIST, []));
+      if (!list.length) list = await loadAgentsFromAny(st);
+
       if (!list.length) {
         list = [{
           id: uid('agent'),
@@ -169,11 +256,10 @@ export default function ImprovePage() {
           model: 'gpt-4o',
           temperature: DEFAULT_TEMPERATURE,
         }];
-        await st.setJSON(K_AGENT_LIST, list);
       }
+      await st.setJSON(K_AGENT_LIST, list);
       setAgents(list);
 
-      // pick selected or latest
       const savedId = await st.getJSON<string | null>(K_SELECTED_AGENT_ID, null as any);
       const selected = list.find(a => a.id === savedId) ?? [...list].sort((a,b)=>b.createdAt-a.createdAt)[0];
       if (selected) {
@@ -187,23 +273,22 @@ export default function ImprovePage() {
     const agent = list.find(a => a.id === id);
     if (!agent) return;
 
-    // Improve’s per-agent state (chat, versions…)
-    let base: AgentState = await st.getJSON<AgentState | null>(K_IMPROVE_STATE + id, null as any) ?? {
-      model: agent.model,
-      temperature: agent.temperature ?? DEFAULT_TEMPERATURE,
-      refinements: [],
-      history: [{
-        id: uid('sys'),
-        role: 'system',
-        content: 'This is the Improve panel. Your agent will reply based on the active refinements.',
-        createdAt: now(),
-      }],
-      versions: [],
-      undo: [],
-      redo: [],
-    };
+    let base: AgentState =
+      await st.getJSON<AgentState | null>(K_IMPROVE_STATE + id, null as any) ?? {
+        model: agent.model,
+        temperature: agent.temperature ?? DEFAULT_TEMPERATURE,
+        refinements: [],
+        history: [{
+          id: uid('sys'),
+          role: 'system',
+          content: 'This is the Improve panel. Your agent will reply based on the active refinements.',
+          createdAt: now(),
+        }],
+        versions: [],
+        undo: [],
+        redo: [],
+      };
 
-    // Overlay tuning from agent meta
     const meta = await st.getJSON<AgentMeta | null>(K_AGENT_META_PREFIX + id, null as any);
     if (meta) {
       base.model = meta.model;
@@ -216,19 +301,17 @@ export default function ImprovePage() {
     await st.setJSON(K_IMPROVE_STATE + id, base);
   }
 
-  /* ------------------------------ Persist ------------------------------ */
+  // Persist Improve state
   useEffect(() => {
     if (!store || !agentId || !state) return;
     store.setJSON(K_IMPROVE_STATE + agentId, state);
   }, [store, agentId, state]);
 
-  // Auto-save tuning to agent meta + agents list
+  // Auto-save tuning to meta + list
   useEffect(() => {
     if (!store || !agentId || !state) return;
     (async () => {
       setIsSaving(true);
-
-      // save per-agent tuning
       const meta: AgentMeta = {
         model: state.model,
         temperature: state.temperature,
@@ -237,31 +320,30 @@ export default function ImprovePage() {
       };
       await store.setJSON(K_AGENT_META_PREFIX + agentId, meta);
 
-      // reflect model/temp on list
-      const latest = normalizeAgents(await store.getJSON<Agent[]>(K_AGENT_LIST, []));
+      const latest = normalizeAgents(await store.getJSON<any[]>(K_AGENT_LIST, []));
       const next = latest.map(a => a.id === agentId ? { ...a, model: state.model, temperature: state.temperature } : a);
       await store.setJSON(K_AGENT_LIST, next);
       setAgents(next);
 
       setIsSaving(false);
     })();
-  // stringify refinements so the effect runs when content changes, not just length
   }, [store, agentId, state?.model, state?.temperature, JSON.stringify(state?.refinements || [])]);
 
-  // scroll to bottom on new messages
+  // Scroll on new messages
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [state?.history.length, isSending]);
 
-  /* ------------------------------ Actions ------------------------------ */
-  function snapshotCore(st: AgentState): Omit<AgentState, 'versions' | 'undo' | 'redo'> {
+  // helpers
+  function snapshotCore(st: AgentState) {
     const { model, temperature, refinements, history } = st;
     return { model, temperature, refinements: [...refinements], history: [...history] };
   }
-  function pushUndo(ss: Omit<AgentState, 'versions' | 'undo' | 'redo'>) {
+  function pushUndo(ss: ReturnType<typeof snapshotCore>) {
     setState(prev => prev ? { ...prev, undo: [...prev.undo, ss], redo: [] } : prev);
   }
 
+  // Refinements
   function handleAddRefinement() {
     if (!state) return;
     const text = addingRefine.trim();
@@ -272,32 +354,19 @@ export default function ImprovePage() {
     setState({ ...state, refinements: nextRefs });
     setAddingRefine('');
   }
-  function toggleRefinement(id: string) {
-    if (!state) return;
-    pushUndo(snapshotCore(state));
-    setState({ ...state, refinements: state.refinements.map(r => r.id === id ? { ...r, enabled: !r.enabled } : r) });
-  }
-  function deleteRefinement(id: string) {
-    if (!state) return;
-    pushUndo(snapshotCore(state));
-    setState({ ...state, refinements: state.refinements.filter(r => r.id !== id) });
-  }
-  function clearRefinements() {
-    if (!state) return;
-    pushUndo(snapshotCore(state));
-    setState({ ...state, refinements: [] });
-  }
+  const toggleRefinement = (id: string) => state && setState({
+    ...state,
+    refinements: state.refinements.map(r => r.id === id ? { ...r, enabled: !r.enabled } : r),
+  });
+  const deleteRefinement = (id: string) => state && setState({
+    ...state,
+    refinements: state.refinements.filter(r => r.id !== id),
+  });
+  const clearRefinements = () => state && setState({ ...state, refinements: [] });
 
-  function changeModel(m: ModelId) {
-    if (!state) return;
-    pushUndo(snapshotCore(state));
-    setState({ ...state, model: m });
-  }
-  function changeTemperature(t: number) {
-    if (!state) return;
-    pushUndo(snapshotCore(state));
-    setState({ ...state, temperature: clamp01(t) });
-  }
+  // Settings
+  const changeModel = (m: ModelId) => state && setState({ ...state, model: m });
+  const changeTemperature = (t: number) => state && setState({ ...state, temperature: clamp01(t) });
 
   async function selectAgent(id: string) {
     if (!store) return;
@@ -380,20 +449,11 @@ export default function ImprovePage() {
     setInput('');
     setIsSending(true);
 
+    // fake latency
     await new Promise(r => setTimeout(r, TYPING_LATENCY_MS));
 
-    const active = state.refinements.filter(r => r.enabled).map(r => r.text.toLowerCase());
-    const wantsYesNo   = active.some(s => s.includes('yes or no') || s.includes('yes/no'));
-    const wantsOneWord = active.some(s => s.includes('one word') || s.includes('1 word'));
-    const noGreeting   = active.some(s => s.includes('no greeting') || s.includes('no hello'));
-
-    let reply: string;
-    if (wantsOneWord) reply = 'Yes';
-    else if (wantsYesNo) reply = 'Yes';
-    else {
-      const base = defaultAnswerFor(text, [...state.history, userMsg]);
-      reply = noGreeting ? base.replace(/^hey!?\s*/i, '').trim() : base;
-    }
+    // build reply respecting rules + temperature/style
+    const reply = synthAnswer(text, state);
 
     const aiMsg: ChatMessage = {
       id: uid('m'),
@@ -412,7 +472,7 @@ export default function ImprovePage() {
     if (last) navigator.clipboard?.writeText(last.content);
   }
 
-  /* ------------------------------ Derived ------------------------------ */
+  // Derived
   const selectedAgent = useMemo(() => agents.find(a => a.id === agentId) ?? null, [agents, agentId]);
   const safeSelectedId = useMemo(
     () => (agentId && agents.some(a => a.id === agentId)) ? agentId : (agents[0]?.id ?? ''),
@@ -439,7 +499,6 @@ export default function ImprovePage() {
       <div className="sticky top-0 z-20 backdrop-blur-sm border-b"
            style={{ background: 'color-mix(in oklab, var(--panel) 88%, transparent)', borderColor: 'var(--border)' }}>
         <div className="mx-auto w-full max-w-[1400px] px-4 py-3 flex items-center justify-between">
-          {/* Agent picker */}
           <div className="flex items-center gap-3">
             <Bot size={20} />
             <span className="font-semibold">Improve</span>
@@ -453,16 +512,13 @@ export default function ImprovePage() {
               onChange={(e) => { const id = e.target.value; if (id && id !== agentId) selectAgent(id); }}
               title="Pick which agent you want to tune"
             >
-              {agents.map(a => (
-                <option key={a.id} value={a.id}>{a.name}</option>
-              ))}
+              {agents.map(a => (<option key={a.id} value={a.id}>{a.name}</option>))}
             </select>
 
             <button onClick={createAgent} className="px-2 py-1 rounded-md border" style={{ borderColor: 'var(--border)' }}>
               + New
             </button>
 
-            {/* Save indicator */}
             <div className="ml-2 text-xs flex items-center gap-1 opacity-80">
               {isSaving ? (<><Loader2 size={14} className="animate-spin" /> Saving…</>) : (<><Check size={14} /> Saved</>)}
             </div>
@@ -498,9 +554,7 @@ export default function ImprovePage() {
                   value={state.model}
                   onChange={e => changeModel(e.target.value as ModelId)}
                 >
-                  {MODEL_OPTIONS.map(m => (
-                    <option key={m.value} value={m.value}>{m.label}</option>
-                  ))}
+                  {MODEL_OPTIONS.map(m => (<option key={m.value} value={m.value}>{m.label}</option>))}
                 </select>
                 <div className="mt-2 text-xs opacity-60">Tuning is auto-saved to this agent (per account).</div>
               </div>
@@ -596,7 +650,16 @@ export default function ImprovePage() {
             </div>
 
             <div className="mt-4 flex flex-wrap gap-2">
-              {['Only answer Yes/No','One word replies','No greeting','Be concise','Ask clarifying question first'].map(t => (
+              {[
+                'Only answer Yes/No',
+                'One word replies',
+                'No greeting',
+                'Be concise',
+                'Ask clarifying question first',
+                // the “no extra UI restrictions” switches:
+                'Remove any restrictions',
+                'Any subject is open',
+              ].map(t => (
                 <button key={t} onClick={() => { setAddingRefine(t); setTimeout(handleAddRefinement, 0); }}
                         className="text-xs px-2 py-1 rounded-full border"
                         style={{ borderColor: 'var(--border)', background: 'var(--card)' }}>
@@ -610,9 +673,9 @@ export default function ImprovePage() {
                style={{ borderColor: 'var(--border)', background: 'var(--panel)' }}>
             <div className="flex items-center gap-2 font-semibold"><HelpCircle size={16} /> Tips</div>
             <ul className="mt-2 text-sm opacity-80 list-disc pl-5 space-y-1">
-              <li>Pick the **AI to tune** from the top bar. All changes auto-save to that agent.</li>
-              <li>“Save &amp; Rerun” happens when you send a message.</li>
-              <li>Use <em>Versions</em> to snapshot settings + chat for quick rollback.</li>
+              <li>Choose **AI to tune** from the top bar — changes auto-save to that agent.</li>
+              <li>“Send” both saves and re-runs with your latest rules.</li>
+              <li>“Remove any restrictions / Any subject is open” disables extra UI guardrails (your model/provider may still enforce theirs).</li>
             </ul>
           </div>
         </div>
@@ -620,7 +683,6 @@ export default function ImprovePage() {
         {/* Right: Chat */}
         <div className="rounded-xl flex flex-col border"
              style={{ borderColor: 'var(--border)', background: 'var(--panel)', boxShadow: 'var(--shadow-soft)', minHeight: 560 }}>
-          {/* conversation */}
           <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
             {state.history.map(msg => (
               <div key={msg.id} className={`max-w-[80%] ${msg.role === 'user' ? 'ml-auto' : ''}`}>
@@ -658,7 +720,6 @@ export default function ImprovePage() {
             )}
           </div>
 
-          {/* composer */}
           <div className="p-3 border-t" style={{ borderColor: 'var(--border)' }}>
             <div className="flex items-center gap-2">
               <input
@@ -690,7 +751,6 @@ export default function ImprovePage() {
         </div>
       </div>
 
-      {/* Why modal */}
       {showWhyFor && (
         <div className="fixed inset-0 z-30 flex items-center justify-center" style={{ background: 'rgba(0,0,0,.5)' }}>
           <div className="w-[520px] max-w-[92vw] rounded-xl p-4 border"
