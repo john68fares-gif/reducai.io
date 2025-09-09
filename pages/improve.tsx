@@ -6,16 +6,73 @@ import {
   Bot, Check, Copy, History, Info, Loader2, Plus, RefreshCw, Send, Settings2,
   Sparkles, Trash2, Undo2, Redo2, ChevronDown, ChevronUp, HelpCircle, X
 } from 'lucide-react';
-import { scopedStorage } from '@/utils/scoped-storage';
+// NOTE: We intentionally avoid importing your scoped-storage util here to
+// prevent "getItem is not a function" crashes. This file has its own safe shim.
+
+/* =============================================================================
+   SAFE STORAGE (local to this file)
+   - JSON-safe
+   - SSR/Edge safe (falls back to in-memory)
+   - Same shape as your previous helper for this page's needs
+============================================================================= */
+
+type Backend = {
+  getItem: (k: string) => string | null;
+  setItem: (k: string, v: string) => void;
+  removeItem: (k: string) => void;
+};
+
+function makeMemoryBackend(): Backend {
+  const m = new Map<string, string>();
+  return {
+    getItem: (k) => (m.has(k) ? m.get(k)! : null),
+    setItem: (k, v) => { m.set(k, v); },
+    removeItem: (k) => { m.delete(k); },
+  };
+}
+
+function resolveBackend(): Backend {
+  if (typeof window === 'undefined') return makeMemoryBackend();
+  const ls: any = (window as any).localStorage;
+  if (ls && typeof ls.getItem === 'function' && typeof ls.setItem === 'function') {
+    return ls as Backend;
+  }
+  // Some environments shim localStorage incorrectly → fail gracefully
+  return makeMemoryBackend();
+}
+
+function createScopedStorage(scope: string) {
+  const backend = resolveBackend();
+  const key = (k: string) => `${scope}:${k}`;
+  return {
+    getItem<T = any>(k: string): T | null {
+      try {
+        const raw = backend.getItem(key(k));
+        if (!raw) return null;
+        return JSON.parse(raw) as T;
+      } catch { return null; }
+    },
+    setItem<T = any>(k: string, v: T): void {
+      try {
+        backend.setItem(key(k), JSON.stringify(v));
+      } catch { /* ignore quota/serialization errors */ }
+    },
+    removeItem(k: string): void {
+      try { backend.removeItem(key(k)); } catch {}
+    },
+  };
+}
+
+const scopedStorage = createScopedStorage('reduc'); // namespaced for your app
 
 /* =============================================================================
    CONFIG
 ============================================================================= */
 
 const SCOPE = 'improve';
-const BRAND = '#00ffc2';              // respects your theme variables but used for accents
-const MAX_REFINEMENTS = 5;            // last 5 suggestions
-const TYPING_LATENCY_MS = 950;        // typing indicator timing
+const BRAND = '#00ffc2';
+const MAX_REFINEMENTS = 5;
+const TYPING_LATENCY_MS = 950;
 const DEFAULT_TEMPERATURE = 0.5;
 
 type ModelId =
@@ -88,7 +145,7 @@ function uid(prefix = 'id'): string {
 function now() { return Date.now(); }
 
 function loadAgents(): Agent[] {
-  return scopedStorage.getItem(K_AGENT_LIST) ?? [];
+  return scopedStorage.getItem<Agent[]>(K_AGENT_LIST) ?? [];
 }
 
 function saveAgents(list: Agent[]) {
@@ -96,7 +153,7 @@ function saveAgents(list: Agent[]) {
 }
 
 function loadAgentState(agentId: string): AgentState | null {
-  return scopedStorage.getItem(`${K_AGENT_STATE_PREFIX}${agentId}`);
+  return scopedStorage.getItem<AgentState>(`${K_AGENT_STATE_PREFIX}${agentId}`);
 }
 
 function saveAgentState(agentId: string, state: AgentState) {
@@ -104,7 +161,7 @@ function saveAgentState(agentId: string, state: AgentState) {
 }
 
 function loadSelectedAgentId(): string | null {
-  return scopedStorage.getItem(K_SELECTED_AGENT_ID);
+  return scopedStorage.getItem<string>(K_SELECTED_AGENT_ID);
 }
 function saveSelectedAgentId(agentId: string) {
   scopedStorage.setItem(K_SELECTED_AGENT_ID, agentId);
@@ -172,7 +229,7 @@ export default function ImprovePage() {
     if (selected) {
       setAgentId(selected.id);
       // hydrate state
-      const st = loadAgentState(selected.id) ?? {
+      const st: AgentState = loadAgentState(selected.id) ?? {
         model: selected.model,
         temperature: selected.temperature ?? DEFAULT_TEMPERATURE,
         refinements: [],
@@ -185,7 +242,7 @@ export default function ImprovePage() {
         versions: [],
         undo: [],
         redo: [],
-      } as AgentState;
+      };
 
       // Ensure model is valid (no ghost options)
       if (!MODEL_OPTIONS.some(m => m.value === st.model)) {
@@ -293,7 +350,7 @@ export default function ImprovePage() {
     setAgentId(a.id);
 
     // hydrate state (keep existing if found)
-    const loaded = loadAgentState(a.id) ?? {
+    const loaded: AgentState = loadAgentState(a.id) ?? {
       model: a.model,
       temperature: a.temperature ?? DEFAULT_TEMPERATURE,
       refinements: [],
@@ -306,7 +363,7 @@ export default function ImprovePage() {
       versions: [],
       undo: [],
       redo: [],
-    } as AgentState;
+    };
 
     if (!MODEL_OPTIONS.some(m => m.value === loaded.model)) {
       loaded.model = 'gpt-4o';
@@ -411,8 +468,6 @@ export default function ImprovePage() {
 
     setState(prev => prev ? { ...prev, history: [...prev.history, aiMsg] } : prev);
 
-    // auto-save + rerun effect (no extra save button)
-    // (Already persisted by effect)
     setIsSending(false);
   }
 
