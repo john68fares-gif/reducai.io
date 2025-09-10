@@ -1,104 +1,69 @@
-// pages/api/voice/improve-prompt.ts
-import type { NextApiRequest, NextApiResponse } from 'next';
+// /app/api/generate-prompt/route.ts
+import { NextRequest, NextResponse } from 'next/server';
 
-/**
- * Minimal "Improve for Voice" endpoint.
- * - No external API needed.
- * - Takes: { raw: string, company?: string, language?: string }
- * - Returns: { ok: true, data: { prompt: string } }
- *
- * This just reshapes the prompt you already wrote in Builder into a
- * voice-friendly system prompt (clear persona, goals, guardrails).
- */
+const SYS = `You are an expert prompt engineer.
+You will receive:
+- [Current] the current system prompt
+- [Change Request] a short note of improvements
 
-type Body = {
-  raw?: string;
-  company?: string;
-  language?: string; // BCP-47 like "en-US"
-};
+Return ONLY a revised, production-ready system prompt that keeps these sections and order:
+[Identity]
+[Style]
+[Response Guidelines]
+[Task & Goals]
+[Error Handling / Fallback]
 
-type Resp =
-  | { ok: true; data: { prompt: string } }
-  | { ok: false; error: string };
+Rules:
+- Merge improvements from the note; don't copy note text verbatim.
+- Keep it concise, actionable, and consistent.
+- If a first message is desired, append a final line exactly:
+FirstMessage: <text>
+- No extra commentary. Output just the prompt (and the FirstMessage line if relevant).`;
 
-export default function handler(req: NextApiRequest, res: NextApiResponse<Resp>) {
-  if (req.method !== 'POST') {
-    res.status(405).json({ ok: false, error: 'Method not allowed' });
-    return;
-  }
-
+export async function POST(req: NextRequest) {
   try {
-    const { raw = '', company = 'the company', language = 'en-US' } = (req.body || {}) as Body;
+    const { model, currentPrompt, userNote } = await req.json();
+    const key = req.headers.get('x-openai-key') || process.env.OPENAI_API_KEY;
+    if (!key) return NextResponse.json({ error: 'missing key' }, { status: 401 });
 
-    const trimmed = (raw || '').toString().trim();
-    if (!trimmed) {
-      res.status(400).json({ ok: false, error: 'Missing "raw" prompt text.' });
-      return;
-    }
+    const r = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'authorization': `Bearer ${key}` },
+      body: JSON.stringify({
+        model: model || 'gpt-4o',
+        temperature: 0.4,
+        messages: [
+          { role: 'system', content: SYS },
+          { role: 'user', content:
+`[Current]
+${String(currentPrompt || '').trim()}
 
-    // Heuristic: split out any “Step 1/Step 3” or “Company/Industry/Language” blocks if present.
-    const lines = trimmed.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+[Change Request]
+${String(userNote || '').trim()}
 
-    // A tiny cleaner to remove superfluous headings we often see pasted from Builder.
-    const cleaned = lines
-      .filter((l) => !/^step\s*\d+/i.test(l))
-      .filter((l) => !/^(company|industry|language)\s*:/i.test(l))
-      .join('\n');
-
-    // Build a voice-oriented system prompt.
-    const voicePrompt = buildVoicePrompt({
-      language,
-      company,
-      core: cleaned || trimmed,
+Remember: return only the new prompt with the exact section headers above.
+Optionally include "FirstMessage: ..." as the very last line if appropriate.` },
+        ],
+      }),
     });
 
-    res.status(200).json({ ok: true, data: { prompt: voicePrompt } });
+    if (!r.ok) {
+      const txt = await r.text();
+      return NextResponse.json({ error: txt || 'upstream error' }, { status: 502 });
+    }
+
+    const j = await r.json();
+    const raw = (j?.choices?.[0]?.message?.content || '').trim();
+
+    let prompt = raw;
+    let firstMessage: string | undefined;
+    const fm = raw.match(/^\s*FirstMessage:\s*(.+)$/m);
+    if (fm) {
+      firstMessage = fm[1].trim();
+      prompt = raw.replace(/^\s*FirstMessage:\s*.+$/m, '').trim();
+    }
+    return NextResponse.json({ prompt, firstMessage });
   } catch (e: any) {
-    res.status(500).json({ ok: false, error: e?.message || 'Internal error' });
+    return NextResponse.json({ error: e?.message || 'gen error' }, { status: 500 });
   }
-}
-
-function buildVoicePrompt({
-  language,
-  company,
-  core,
-}: {
-  language: string;
-  company: string;
-  core: string;
-}) {
-  // Guidance & defaults tuned for phone voice agents (Twilio/Vapi/etc).
-  return `You are a real-time voice assistant for ${company}.
-Speak ${language}. Keep responses concise (1–2 sentences).
-Sound natural, friendly, and decisive. Avoid filler words. Never mention being an AI.
-
-### Goals
-- Help the caller quickly with accurate, helpful answers.
-- Follow the company guidelines and policies below.
-- Ask one question at a time. Confirm important details briefly.
-- If you don't know something, say so and offer an alternative.
-
-### Style
-- Conversational, warm, confident.
-- Use plain language; avoid jargon.
-- Keep sentences short for TTS clarity.
-- Pause briefly (",") between clauses when reading numbers or URLs.
-
-### Guardrails
-- Never share secrets, tokens, or internal notes.
-- Do not invent policies, prices, or availability.
-- If asked to perform actions you can’t do, explain limits and provide the best available next step.
-- If the user asks to speak with a human, collect their name, phone, and reason, then confirm.
-
-### Core Domain Instructions
-${core.trim()}
-
-### Behaviors for Phone Calls
-- If caller is silent, politely prompt once, then ask if they want to continue.
-- When collecting numbers or emails, read back to confirm.
-- If call quality is poor, summarize and offer a follow-up.
-
-### Closing
-- Summarize concisely and confirm the next step.
-- Thank the caller and end gracefully.`;
 }
