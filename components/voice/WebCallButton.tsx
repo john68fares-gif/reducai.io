@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { PhoneCall, PhoneOff } from 'lucide-react';
 
 type SR = SpeechRecognition & { start: () => void; stop: () => void };
@@ -8,18 +8,18 @@ type SR = SpeechRecognition & { start: () => void; stop: () => void };
 export type WebCallButtonProps = {
   greet: string;
   voiceLabel: string;
-  systemPrompt: string;          // sent to server exactly as-is
-  model: string;                 // e.g. "gpt-4o" / "gpt-4o-mini"
-  onTurn: (role: 'user'|'assistant', text: string) => void; // transcript sink
+  systemPrompt: string;
+  model: string;
+  onTurn: (role: 'user'|'assistant', text: string) => void;
+  apiKey?: string; // <-- NEW: selected OpenAI key
 };
 
 export default function WebCallButton({
-  greet, voiceLabel, systemPrompt, model, onTurn,
+  greet, voiceLabel, systemPrompt, model, onTurn, apiKey,
 }: WebCallButtonProps) {
   const [live, setLive] = useState(false);
   const recRef = useRef<SR | null>(null);
 
-  // --- SR factory
   function makeRecognizer(onFinal: (t: string) => void): SR | null {
     const C: any = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
     if (!C) return null;
@@ -72,15 +72,13 @@ export default function WebCallButton({
   }
 
   async function askLLM(userText: string): Promise<string> {
-    // send ONLY systemPrompt + userText — nothing else leaks
     const r = await fetch('/api/chat', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        system: systemPrompt,
-        user: userText,
-      }),
+      headers: {
+        'content-type': 'application/json',
+        ...(apiKey ? { 'x-openai-key': apiKey } : {}),
+      },
+      body: JSON.stringify({ model, system: systemPrompt, user: userText }),
     });
     if (!r.ok) throw new Error('chat failed');
     const j = await r.json();
@@ -88,11 +86,9 @@ export default function WebCallButton({
   }
 
   async function start() {
-    // greet
     onTurn('assistant', greet);
     await speak(greet);
 
-    // SR
     const rec = makeRecognizer(async (finalText) => {
       onTurn('user', finalText);
       try {
