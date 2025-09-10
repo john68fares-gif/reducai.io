@@ -9,7 +9,6 @@ import {
   PanelLeft, Bot, UploadCloud, RefreshCw, X, ChevronLeft, ChevronRight as ChevronRightIcon,
   Phone as PhoneIcon, Rocket, PhoneCall, PhoneOff, MessageSquare, ListTree, AudioLines, Volume2, Save
 } from 'lucide-react';
-import { scopedStorage } from '@/utils/scoped-storage'; // <-- added
 
 /* =============================================================================
    CONFIG / TOKENS
@@ -78,26 +77,6 @@ const ak = (id: string) => `voice:assistant:${id}`;
 
 const LS_CALLS = 'voice:calls.v1';
 const LS_ROUTES = 'voice:phoneRoutes.v1';
-
-// ---- Step 2 / API Keys buckets (unchanged from your builder) ----
-const LS_KEYS = 'apiKeys.v1';
-const LS_SELECTED = 'apiKeys.selectedId';
-
-// helper to read the **selected** OpenAI key from scoped storage
-async function loadSelectedApiKey(): Promise<string | null> {
-  try {
-    const ss = await scopedStorage();
-    await ss.ensureOwnerGuard();
-
-    const all = (await ss.getJSON<Array<{ id: string; name: string; key: string }>>(LS_KEYS, [])) || [];
-    const selectedId = await ss.getJSON<string>(LS_SELECTED, '');
-    const chosen = (selectedId && all.find(k => k.id === selectedId)) || all[0];
-    const k = chosen?.key?.trim();
-    return k || null;
-  } catch {
-    return null;
-  }
-}
 
 const readLS = <T,>(k: string): T | null => {
   try { const r = localStorage.getItem(k); return r ? (JSON.parse(r) as T) : null; }
@@ -374,7 +353,7 @@ async function speakWithVoice(text: string, voiceLabel: string){
 }
 
 /* =============================================================================
-   LOCAL PROMPT-DRIVEN AGENT (fallback)
+   LOCAL PROMPT-DRIVEN AGENT (no server)
 ============================================================================= */
 function parseCollectFields(prompt: string): string[] {
   const m = prompt.match(/\[Data\s*to\s*Collect\]\s*([\s\S]*?)(?=\n\[|$)/i);
@@ -463,6 +442,10 @@ export default function VoiceAgentSection() {
     return document.body.getAttribute('data-sb-collapsed') === 'true';
   });
 
+  // --- IMPORTANT: client gate to avoid SSR localStorage access
+  const [isClient, setIsClient] = useState(false);
+  useEffect(() => { setIsClient(true); }, []);
+
   useEffect(() => {
     const onEvt = (e: Event) => {
       const detail = (e as CustomEvent).detail || {};
@@ -480,21 +463,10 @@ export default function VoiceAgentSection() {
 
   useAppSidebarWidth(scopeRef, sbCollapsed);
 
-  // ====== NEW: load the user's selected OpenAI API key from scoped storage ======
-  const [userApiKey, setUserApiKey] = useState<string | null>(null);
-  const [keyLoaded, setKeyLoaded] = useState(false);
-  useEffect(() => {
-    (async () => {
-      const k = await loadSelectedApiKey();
-      setUserApiKey(k);
-      setKeyLoaded(true);
-    })();
-  }, []);
-  // ==============================================================================
-
   /* ---------- Assistants ---------- */
   const [assistants, setAssistants] = useState<Assistant[]>([]);
   const [activeId, setActiveId] = useState('');
+  const [active, setActive] = useState<Assistant | null>(null); // replaced useMemo+readLS
   const [query, setQuery] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [tempName, setTempName] = useState('');
@@ -502,6 +474,7 @@ export default function VoiceAgentSection() {
   const [rev, setRev] = useState(0);
 
   useEffect(() => {
+    if (!isClient) return;
     const list = readLS<Assistant[]>(LS_LIST) || [];
     if (!list.length) {
       const seed: Assistant = {
@@ -527,9 +500,13 @@ export default function VoiceAgentSection() {
     }
     if (!readLS<CallLog[]>(LS_CALLS)) writeLS(LS_CALLS, []);
     if (!readLS<Record<string,string>>(LS_ROUTES)) writeLS(LS_ROUTES, {});
-  }, []);
+  }, [isClient]);
 
-  const active = useMemo(() => activeId ? readLS<Assistant>(ak(activeId)) : null, [activeId, rev]);
+  // Load active assistant safely on client
+  useEffect(() => {
+    if (!isClient || !activeId) { setActive(null); return; }
+    setActive(readLS<Assistant>(ak(activeId)));
+  }, [isClient, activeId, rev]);
 
   const updateActive = (mut: (a: Assistant) => Assistant) => {
     if (!active) return;
@@ -539,6 +516,7 @@ export default function VoiceAgentSection() {
       x.id === next.id ? { ...x, name: next.name, folder: next.folder, updatedAt: Date.now(), published: next.published } : x);
     writeLS(LS_LIST, list);
     setAssistants(list);
+    setActive(next);
     setRev(r => r + 1);
   };
 
@@ -706,45 +684,6 @@ export default function VoiceAgentSection() {
     });
   }
 
-  // ====== NEW: chat via your /api/chat using the user's stored OpenAI key ======
-  async function chatReplyWithOpenAI(userText: string): Promise<string | null> {
-    if (!active || !userApiKey) return null;
-
-    // Build conversation: prepend system, then transcript turns so far, then the new user turn.
-    const messages = [
-      { role: 'system', content: active.config.model.systemPrompt || BASE_PROMPT },
-      ...transcript.map(t => ({ role: t.role, content: t.text })),
-      { role: 'user', content: userText },
-    ] as Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
-
-    try {
-      const r = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          agent: {
-            name: active.name,
-            prompt: active.config.model.systemPrompt || BASE_PROMPT,
-            model: active.config.model.model,
-            temperature: 0.6,
-            apiKey: userApiKey, // <<<<<< USE THE USER'S KEY
-          },
-          messages, // server will re-inject system too; harmless
-        }),
-      });
-      const j = await r.json();
-      if (!r.ok || !j?.ok) throw new Error(j?.error || 'Chat failed');
-      const reply = String(j.reply || '').trim();
-      return reply || null;
-    } catch (e) {
-      // fall back quietly; also surface a one-time console error for debugging
-      // eslint-disable-next-line no-console
-      console.warn('OpenAI chat failed, falling back to local prompt agent:', e);
-      return null;
-    }
-  }
-  // ============================================================================
-
   async function startCall() {
     if (!active) return;
     const id = `call_${crypto.randomUUID?.() || Math.random().toString(36).slice(2)}`;
@@ -756,7 +695,6 @@ export default function VoiceAgentSection() {
     calls.unshift({ id, assistantId: active.id, assistantName: active.name, startedAt: Date.now(), type: 'Web', assistantPhoneNumber: linkedNum, transcript: [] });
     writeLS(LS_CALLS, calls);
 
-    // Build prompt-driven agent as fallback from current System Prompt
     agentRef.current = makePromptAgent(active.config.model.systemPrompt || '');
 
     const greet = active.config.model.firstMessage || 'Hello. How may I help you today?';
@@ -768,10 +706,7 @@ export default function VoiceAgentSection() {
     const rec = makeRecognizer(async (finalText) => {
       pushTurn('user', finalText);
 
-      // Prefer OpenAI with the stored user key; if missing or failed, fallback to local prompt agent.
-      const replyFromAPI = await chatReplyWithOpenAI(finalText);
-      const reply = replyFromAPI || agentRef.current?.reply(finalText) || 'Understood.';
-
+      const reply = agentRef.current?.reply(finalText) || 'Understood.';
       pushTurn('assistant', reply);
       await speakWithVoice(reply, active.config.voice.voiceLabel);
     });
@@ -793,7 +728,22 @@ export default function VoiceAgentSection() {
     setCurrentCallId(null);
   }
 
-  const callsForAssistant = (readLS<CallLog[]>(LS_CALLS) || []).filter(c => c.assistantId === active?.id);
+  // --- SAFE client-side loader for calls list (instead of reading in render)
+  const [callsForAssistant, setCallsForAssistant] = useState<CallLog[]>([]);
+  useEffect(() => {
+    if (!isClient || !active?.id) { setCallsForAssistant([]); return; }
+    const list = readLS<CallLog[]>(LS_CALLS) || [];
+    setCallsForAssistant(list.filter(c => c.assistantId === active.id));
+  }, [isClient, active?.id, currentCallId, transcript.length, rev]);
+
+  if (!isClient) {
+    return (
+      <div ref={scopeRef} className={SCOPE} style={{ background:'var(--bg)', color:'var(--text)' }}>
+        <StyleBlock />
+        <div className="px-6 py-10 opacity-70 text-sm">Loading…</div>
+      </div>
+    );
+  }
 
   if (!active) {
     return (
@@ -860,13 +810,6 @@ export default function VoiceAgentSection() {
 
   return (
     <div ref={scopeRef} className={SCOPE} style={{ background:'var(--bg)', color:'var(--text)' }}>
-      {/* ===== NEW: key status banner (only if loaded and missing) ===== */}
-      {keyLoaded && !userApiKey && (
-        <div className="px-4 py-2 text-sm"
-             style={{ background:'color-mix(in oklab, #f59e0b 15%, var(--va-card))', border:'1px solid color-mix(in oklab, #f59e0b 35%, var(--va-border))' }}>
-          No OpenAI API key found. Add one on the <b>API Keys</b> page — we’ll use it automatically. Until then, web calls use a basic local agent.
-        </div>
-      )}
       {/* ================= ASSISTANTS RAIL ================= */}
       <aside
         className="hidden lg:flex flex-col"
@@ -1055,19 +998,669 @@ export default function VoiceAgentSection() {
         </div>
 
         {/* content body */}
-        {/* …——— EVERYTHING BELOW IS UNCHANGED (visuals/controls exactly as you posted) ——… */}
+        <div className="mx-auto grid grid-cols-12 gap-10" style={{ maxWidth:'min(2400px, 98vw)' }}>
+          <Section title="Model" icon={<FileText className="w-4 h-4 icon" />}>
+            <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(4, minmax(360px, 1fr))' }}>
+              <Field label="Provider">
+                <Select
+                  value={active.config.model.provider}
+                  onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, provider: v as Provider } } }))}
+                  items={[{ value:'openai', label:'OpenAI' }]}
+                />
+              </Field>
+              <Field label="Model">
+                <Select
+                  value={active.config.model.model}
+                  onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, model: v as ModelId } } }))}
+                  items={[
+                    { value:'gpt-4o', label:'GPT-4o' },
+                    { value:'gpt-4o-mini', label:'GPT-4o mini' },
+                    { value:'gpt-4.1', label:'GPT-4.1' },
+                    { value:'gpt-3.5-turbo', label:'GPT-3.5 Turbo' },
+                  ]}
+                />
+              </Field>
+              <Field label="First Message Mode">
+                <Select
+                  value={active.config.model.firstMessageMode}
+                  onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, firstMessageMode: v as any } } }))}
+                  items={[{ value:'assistant_first', label:'Assistant speaks first' }, { value:'user_first', label:'User speaks first' }]}
+                />
+              </Field>
+              <Field label="First Message">
+                <input
+                  value={active.config.model.firstMessage}
+                  onChange={(e)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, firstMessage: e.target.value } } }))}
+                  className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
+                  style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)', color:'var(--text)' }}
+                />
+              </Field>
+            </div>
 
-        {/* ===== Model / Prompt / Voice / Transcriber / Tools / Telephony / Call test / Logs ===== */}
-        {/* The rest of your component remains exactly the same; omitted here only for brevity.
-            Keep all sections, fields, CSS, Select, TelephonyEditor, StyleBlock, DeleteModal, etc.
-            (No pixel changes were made.) */}
+            {/* System Prompt */}
+            <div className="mt-6">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="w-4 h-4 icon" /> System Prompt</div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={()=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, systemPrompt: BASE_PROMPT } } }))}
+                    className="btn btn--ghost"
+                  ><RefreshCw className="w-4 h-4 icon" /> Reset</button>
+                  <button onClick={()=> setGenOpen(true)} className="btn btn--green">
+                    <Sparkles className="w-4 h-4 text-white" /> <span className="text-white">Generate / Edit</span>
+                  </button>
+                </div>
+              </div>
+
+              {!typing ? (
+                <textarea
+                  rows={26}
+                  value={active.config.model.systemPrompt || ''}
+                  onChange={(e)=> updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, systemPrompt: e.target.value } } }))}
+                  className="w-full rounded-2xl px-3 py-3 text-[14px] leading-6 outline-none"
+                  style={{
+                    background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)',
+                    boxShadow:'var(--va-shadow), inset 0 1px 0 rgba(255,255,255,.03)', color:'var(--text)',
+                    fontFamily:'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+                    minHeight: 560
+                  }}
+                />
+              ) : (
+                <div>
+                  <div
+                    ref={typingBoxRef}
+                    className="w-full rounded-2xl px-3 py-3 text-[14px] leading-6 outline-none"
+                    style={{
+                      background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)',
+                      boxShadow:'var(--va-shadow), inset 0 1px 0 rgba(255,255,255,.03)', color:'var(--text)',
+                      fontFamily:'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+                      whiteSpace:'pre-wrap',
+                      minHeight: 560,
+                      maxHeight: 680,
+                      overflowY:'auto'
+                    }}
+                  >
+                    {(() => {
+                      const slice = typing.slice(0, typedCount);
+                      const out: JSX.Element[] = [];
+                      let buf = '';
+                      let added = slice.length ? slice[0].added : false;
+                      slice.forEach((t, i) => {
+                        if (t.added !== added) {
+                          out.push(added
+                            ? <ins key={`ins-${i}`} style={{ background:'rgba(16,185,129,.18)', padding:'1px 2px', borderRadius:4 }}>{buf}</ins>
+                            : <span key={`nor-${i}`}>{buf}</span>);
+                          buf = t.ch;
+                          added = t.added;
+                        } else {
+                          buf += t.ch;
+                        }
+                      });
+                      if (buf) out.push(added
+                        ? <ins key="tail-ins" style={{ background:'rgba(16,185,129,.18)', padding:'1px 2px', borderRadius:4 }}>{buf}</ins>
+                        : <span key="tail-nor">{buf}</span>);
+                      if (typedCount < (typing?.length || 0)) out.push(<span key="caret" className="animate-pulse"> ▌</span>);
+                      return out;
+                    })()}
+                  </div>
+
+                  <div className="flex items-center gap-2 justify-end mt-3">
+                    <button onClick={declineTyping} className="btn btn--ghost"><X className="w-4 h-4 icon" /> Decline</button>
+                    <button onClick={acceptTyping} className="btn btn--green"><Check className="w-4 h-4 text-white" /><span className="text-white">Accept</span></button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </Section>
+
+          <Section title="Voice" icon={<Mic2 className="w-4 h-4 icon />}>
+            <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(2, minmax(360px, 1fr))' }}>
+              <Field label="Provider">
+                <Select
+                  value={active.config.voice.provider}
+                  onChange={handleVoiceProviderChange}
+                  items={[
+                    { value:'openai', label:'OpenAI' },
+                    { value:'elevenlabs', label:'ElevenLabs' },
+                  ]}
+                />
+              </Field>
+              <Field label="Voice">
+                <Select
+                  value={pendingVoiceId || active.config.voice.voiceId}
+                  onChange={handleVoiceIdChange}
+                  items={active.config.voice.provider==='elevenlabs' ? elevenVoices : openaiVoices}
+                />
+              </Field>
+            </div>
+
+            <div className="mt-3 flex items-center gap-2">
+              <button onClick={testVoice} className="btn btn--ghost">
+                <Volume2 className="w-4 h-4 icon" /> Test Voice
+              </button>
+              <button onClick={saveVoice} className="btn btn--green">
+                <Save className="w-4 h-4 text-white" /> <span className="text-white">Save Voice</span>
+              </button>
+              <button
+                onClick={()=> { window.dispatchEvent(new CustomEvent('voiceagent:import-11labs')); alert('Hook “voiceagent:import-11labs” to your importer.'); }}
+                className="btn btn--ghost"
+              ><UploadCloud className="w-4 h-4 icon" /> Import from ElevenLabs</button>
+            </div>
+          </Section>
+
+          <Section title="Transcriber" icon={<BookOpen className="w-4 h-4 icon" />}>
+            <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(3, minmax(360px, 1fr))' }}>
+              <Field label="Provider">
+                <Select
+                  value={active.config.transcriber.provider}
+                  onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, transcriber:{ ...a.config.transcriber, provider: v as any } } }))}
+                  items={[{ value:'deepgram', label:'Deepgram' }]}
+                />
+              </Field>
+              <Field label="Model">
+                <Select
+                  value={active.config.transcriber.model}
+                  onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, transcriber:{ ...a.config.transcriber, model: v as any } } }))}
+                  items={[{ value:'nova-2', label:'Nova 2' }, { value:'nova-3', label:'Nova 3' }]}
+                />
+              </Field>
+              <Field label="Language">
+                <Select
+                  value={active.config.transcriber.language}
+                  onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, transcriber:{ ...a.config.transcriber, language: v as any } } }))}
+                  items={[{ value:'en', label:'English' }, { value:'multi', label:'Multi' }]}
+                />
+              </Field>
+              <Field label="Confidence Threshold">
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range" min={0} max={1} step={0.01}
+                    value={active.config.transcriber.confidenceThreshold}
+                    onChange={(e)=> updateActive(a => ({ ...a, config:{ ...a.config, transcriber:{ ...a.config.transcriber, confidenceThreshold: Number(e.target.value) } } }))}
+                    className="va-range w-full"
+                  />
+                  <span className="text-xs" style={{ color:'var(--text-muted)' }}>{active.config.transcriber.confidenceThreshold.toFixed(2)}</span>
+                </div>
+              </Field>
+              <Field label="Denoise">
+                <Select
+                  value={String(active.config.transcriber.denoise)}
+                  onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, transcriber:{ ...a.config.transcriber, denoise: v==='true' } } }))}
+                  items={[{ value:'false', label:'Off' }, { value:'true', label:'On' }]}
+                />
+              </Field>
+              <Field label="Use Numerals">
+                <Select
+                  value={String(active.config.transcriber.numerals)}
+                  onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, transcriber:{ ...a.config.transcriber, numerals: v==='true' } } }))}
+                  items={[{ value:'false', label:'No' }, { value:'true', label:'Yes' }]}
+                />
+              </Field>
+            </div>
+          </Section>
+
+          <Section title="Tools" icon={<SlidersHorizontal className="w-4 h-4 icon" />}>
+            <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(2, minmax(360px, 1fr))' }}>
+              <Field label="Enable End Call Function">
+                <Select
+                  value={String(active.config.tools.enableEndCall)}
+                  onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, tools:{ ...a.config.tools, enableEndCall: v==='true' } } }))}
+                  items={[{ value:'true', label:'Enabled' }, { value:'false', label:'Disabled' }]}
+                />
+              </Field>
+              <Field label="Dial Keypad">
+                <Select
+                  value={String(active.config.tools.dialKeypad)}
+                  onChange={(v)=> updateActive(a => ({ ...a, config:{ ...a.config, tools:{ ...a.config.tools, dialKeypad: v==='true' } } }))}
+                  items={[{ value:'true', label:'Enabled' }, { value:'false', label:'Disabled' }]}
+                />
+              </Field>
+            </div>
+          </Section>
+
+          <Section title="Telephony" icon={<PhoneIcon className="w-4 h-4 icon" />}>
+            <TelephonyEditor
+              numbers={active.config.telephony?.numbers ?? []}
+              linkedId={active.config.telephony?.linkedNumberId}
+              onLink={setLinkedNumber}
+              onAdd={addPhone}
+              onRemove={removePhone}
+            />
+          </Section>
+
+          <Section title="Call Assistant (Web test)" icon={<AudioLines className="w-4 h-4 icon" />}>
+            <div className="flex items-center gap-2 mb-3">
+              {!currentCallId ? (
+                <button onClick={startCall} className="btn btn--green">
+                  <PhoneCall className="w-4 h-4 text-white" /><span className="text-white">Start Web Call</span>
+                </button>
+              ) : (
+                <button onClick={()=> endCall('Ended by user')} className="btn btn--danger">
+                  <PhoneOff className="w-4 h-4" /> End Call
+                </button>
+              )}
+              <div className="text-xs opacity-70">Talk to the assistant using your browser mic. No phone carrier, no Vapi.</div>
+            </div>
+            <div className="rounded-2xl p-3" style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)' }}>
+              {transcript.length === 0 && <div className="text-sm opacity-60">No transcript yet.</div>}
+              <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1" style={{ scrollbarWidth:'thin' }}>
+                {transcript.map((t, idx) => (
+                  <div key={idx} className="flex gap-2">
+                    <div className="text-xs px-2 py-0.5 rounded-full" style={{
+                      background: t.role==='assistant' ? 'rgba(16,185,129,.15)' : 'rgba(255,255,255,.06)',
+                      border: '1px solid var(--va-border)'
+                    }}>{t.role==='assistant' ? 'AI' : 'You'}</div>
+                    <div className="text-sm">{t.text}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </Section>
+
+          <Section title="Call Logs" icon={<ListTree className="w-4 h-4 icon" />}>
+            <div className="space-y-3">
+              {callsForAssistant.length === 0 && <div className="text-sm opacity-60">No calls yet.</div>}
+              {callsForAssistant.map(log => (
+                <details key={log.id} className="rounded-xl" style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)' }}>
+                  <summary className="cursor-pointer px-3 py-2 flex items-center justify-between">
+                    <div className="text-sm flex items-center gap-2">
+                      <PhoneIcon className="w-4 h-4 icon" />
+                      <span>{new Date(log.startedAt).toLocaleString()}</span>
+                      {log.assistantPhoneNumber ? <span className="opacity-70">• {log.assistantPhoneNumber}</span> : null}
+                      {log.endedAt ? <span className="opacity-70">• {(Math.max(1, Math.round((log.endedAt - log.startedAt)/1000)))}s</span> : null}
+                    </div>
+                    <div className="text-xs opacity-60">{log.endedReason || (log.endedAt ? 'Completed' : 'Live')}</div>
+                  </summary>
+                  <div className="px-3 pb-3 space-y-2">
+                    {log.transcript.map((t, i) => (
+                      <div key={i} className="flex gap-2">
+                        <div className="text-xs px-2 py-0.5 rounded-full" style={{
+                          background: t.role==='assistant' ? 'rgba(16,185,129,.15)' : 'rgba(255,255,255,.06)',
+                          border: '1px solid var(--va-border)'
+                        }}>{t.role==='assistant' ? 'AI' : 'User'}</div>
+                        <div className="text-sm">{t.text}</div>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              ))}
+            </div>
+          </Section>
+        </div>
       </div>
 
-      {/* overlays and style block remain exactly as in your file */}
-      {/* … keep Generate overlay, Delete overlay, and <StyleBlock /> here … */}
+      {/* ---------------- Generate overlay ---------------- */}
+      <AnimatePresence>
+        {genOpen && (
+          <motion.div className="fixed inset-0 z-[999] flex items-center justify-center p-4"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            style={{ background:'rgba(0,0,0,.45)' }}>
+            <motion.div
+              initial={{ y:10, opacity:0, scale:.98 }} animate={{ y:0, opacity:1, scale:1 }} exit={{ y:8, opacity:0, scale:.985 }}
+              className="w-full max-w-2xl rounded-2xl"
+              style={{ background:'var(--va-card)', border:'1px solid var(--va-border)', boxShadow:'var(--va-shadow-lg)' }}
+            >
+              <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom:'1px solid var(--va-border)' }}>
+                <div className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="w-4 h-4 icon" /> Generate / Edit Prompt</div>
+                <button onClick={()=> setGenOpen(false)} className="p-2 rounded-lg hover:opacity-80"><X className="w-4 h-4 icon" /></button>
+              </div>
+              <div className="p-4">
+                <input
+                  value={genText}
+                  onChange={(e)=> setGenText(e.target.value)}
+                  placeholder={`Examples:
+• assistant
+• collect full name, phone, date
+• [Identity] AI Sales Agent for roofers
+• first message: Hey—quick question to get you booked…`}
+                  className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
+                  style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)', color:'var(--text)' }}
+                />
+
+                <div className="mt-3 flex items-center justify-between gap-2">
+                  <button onClick={()=> setGenOpen(false)} className="btn btn--ghost">Cancel</button>
+                  <button onClick={handleGenerate} className="btn btn--green"><span className="text-white">Generate</span></button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Delete overlay */}
+      <AnimatePresence>
+        {deleting && (
+          <DeleteModal
+            open={true}
+            name={deleting.name}
+            onCancel={()=> setDeleting(null)}
+            onConfirm={()=> { removeAssistant(deleting.id); setDeleting(null); }}
+          />
+        )}
+      </AnimatePresence>
+
+      <StyleBlock />
     </div>
   );
 }
 
-/* ===== Keep your DeleteModal, Field, Section, TelephonyEditor, StyleBlock, Select
-         EXACTLY as in your file (unchanged) ===== */
+/* =============================================================================
+   Delete Modal
+============================================================================= */
+function DeleteModal({ open, name, onCancel, onConfirm }:{
+  open: boolean; name: string; onCancel: () => void; onConfirm: () => void;
+}) {
+  if (!open) return null;
+  return (
+    <motion.div className="fixed inset-0 z-[9998] flex items-center justify-center p-4"
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      style={{ background:'rgba(0,0,0,.55)' }}>
+      <motion.div initial={{ y: 10, opacity: .9, scale:.98 }} animate={{ y:0, opacity:1, scale:1 }}
+        className="w-full max-w-md rounded-2xl"
+        style={{ background:'var(--va-card)', border:'1px solid var(--va-border)', boxShadow:'var(--va-shadow-lg)' }}>
+        <div className="px-5 py-4 flex items-center justify-between" style={{ borderBottom:'1px solid var(--va-border)' }}>
+          <div className="text-sm font-semibold" style={{ color:'var(--text)' }}>Delete Assistant</div>
+          <button onClick={onCancel} className="p-2 rounded-lg hover:opacity-80"><X className="w-4 h-4 icon" /></button>
+        </div>
+        <div className="px-5 py-4 text-sm" style={{ color:'var(--text-muted)' }}>
+          Are you sure you want to delete <span style={{ color:'var(--text)' }}>“{name}”</span>? This cannot be undone.
+        </div>
+        <div className="px-5 pb-5 flex gap-2 justify-end">
+          <button onClick={onCancel} className="btn btn--ghost">Cancel</button>
+          <button onClick={onConfirm} className="btn btn--danger"><Trash2 className="w-4 h-4" /> Delete</button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+/* =============================================================================
+   Atoms
+============================================================================= */
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <div className="mb-1.5 text-[13px] font-medium" style={{ color:'var(--text)' }}>{label}</div>
+      {children}
+    </div>
+  );
+}
+
+function Section({ title, icon, children }:{ title: string; icon: React.ReactNode; children: React.ReactNode }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <div
+      className="col-span-12 rounded-xl relative"
+      style={{
+        background:'var(--va-card)',
+        border:'1px solid var(--va-border)',
+        boxShadow:'var(--va-shadow)',
+      }}
+    >
+      <div aria-hidden className="pointer-events-none absolute -top-[22%] -left-[22%] w-[70%] h-[70%] rounded-full"
+           style={{ background:'radial-gradient(circle, color-mix(in oklab, var(--accent) 14%, transparent) 0%, transparent 70%)', filter:'blur(40px)' }} />
+      <button type="button" onClick={()=> setOpen(v=>!v)} className="w-full flex items-center justify-between px-5 py-4">
+        <span className="flex items-center gap-2 text-sm font-semibold">{icon}{title}</span>
+        {open ? <ChevronDown className="w-4 h-4 icon" /> : <ChevronRight className="w-4 h-4 icon" />}
+      </button>
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div initial={{ height:0, opacity:0 }} animate={{ height:'auto', opacity:1 }} exit={{ height:0, opacity:0 }} transition={{ duration:.18 }} className="px-5 pb-5">
+            {children}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+/* =============================================================================
+   Telephony editor
+============================================================================= */
+function TelephonyEditor({ numbers, linkedId, onLink, onAdd, onRemove }:{
+  numbers: PhoneNum[];
+  linkedId?: string;
+  onLink: (id?: string) => void;
+  onAdd: (e164: string, label?: string) => void;
+  onRemove: (id: string) => void;
+}) {
+  const [e164, setE164] = useState('');
+  const [label, setLabel] = useState('');
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-4" style={{ gridTemplateColumns:'repeat(3, minmax(240px, 1fr))' }}>
+        <div>
+          <div className="mb-1.5 text-[13px] font-medium" style={{ color:'var(--text)' }}>Phone Number (E.164)</div>
+          <input
+            value={e164}
+            onChange={(e)=> setE164(e.target.value)}
+            placeholder="+1xxxxxxxxxx"
+            className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
+            style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)', color:'var(--text)' }}
+          />
+        </div>
+        <div>
+          <div className="mb-1.5 text-[13px] font-medium" style={{ color:'var(--text)' }}>Label</div>
+          <input
+            value={label}
+            onChange={(e)=> setLabel(e.target.value)}
+            placeholder="Support line"
+            className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
+            style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)', color:'var(--text)' }}
+          />
+        </div>
+        <div className="flex items-end">
+          <button
+            onClick={()=> { onAdd(e164, label); setE164(''); setLabel(''); }}
+            className="btn btn--green w-full justify-center"
+          >
+            <PhoneIcon className="w-4 h-4 text-white" /><span className="text-white">Add Number</span>
+          </button>
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        {numbers.length === 0 && (
+          <div className="text-sm opacity-70">No phone numbers added yet.</div>
+        )}
+        {numbers.map(n => (
+          <div key={n.id} className="flex items-center justify-between rounded-xl px-3 py-2"
+               style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)' }}>
+            <div className="min-w-0">
+              <div className="font-medium truncate">{n.label || 'Untitled'}</div>
+              <div className="text-xs opacity-70">{n.e164}</div>
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="flex items-center gap-1 text-xs">
+                <input type="radio" name="linked_number" checked={linkedId===n.id} onChange={()=> onLink(n.id)} />
+                Linked
+              </label>
+              <button onClick={()=> onRemove(n.id)} className="btn btn--danger text-xs"><Trash2 className="w-4 h-4" /> Remove</button>
+            </div>
+          </div>
+        ))}
+        {numbers.length > 0 && (
+          <div className="text-xs opacity-70">The number marked as <b>Linked</b> will be attached to this assistant on <i>Publish</i>.</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* =============================================================================
+   Scoped CSS
+============================================================================= */
+function StyleBlock() {
+  return (
+    <style jsx global>{`
+.${SCOPE}{
+  --accent:${ACCENT};
+  --bg:#0b0c10;
+  --text:#eef2f5;
+  --text-muted:color-mix(in oklab, var(--text) 65%, transparent);
+  --va-card:#0f1315;
+  --va-topbar:#0e1214;
+  --va-sidebar:linear-gradient(180deg,#0d1113 0%,#0b0e10 100%);
+  --va-chip:rgba(255,255,255,.03);
+  --va-border:rgba(255,255,255,.10);
+  --va-input-bg:rgba(255,255,255,.03);
+  --va-input-border:rgba(255,255,255,.14);
+  --va-input-shadow:inset 0 1px 0 rgba(255,255,255,.06);
+  --va-menu-bg:#101314;
+  --va-menu-border:rgba(255,255,255,.16);
+  --va-shadow:0 24px 70px rgba(0,0,0,.55), 0 10px 28px rgba(0,0,0,.4);
+  --va-shadow-lg:0 42px 110px rgba(0,0,0,.66), 0 20px 48px rgba(0,0,0,.5);
+  --va-shadow-sm:0 12px 26px rgba(0,0,0,.35);
+  --va-shadow-side:8px 0 28px rgba(0,0,0,.42);
+  --va-rail-w:360px;
+}
+:root:not([data-theme="dark"]) .${SCOPE}{
+  --bg:#f7f9fb;
+  --text:#101316;
+  --text-muted:color-mix(in oklab, var(--text) 55%, transparent);
+  --va-card:#ffffff;
+  --va-topbar:#ffffff;
+  --va-sidebar:linear-gradient(180deg,#ffffff 0%,#f7f9fb 100%);
+  --va-chip:#ffffff;
+  --va-border:rgba(0,0,0,.10);
+  --va-input-bg:#ffffff;
+  --va-input-border:rgba(0,0,0,.12);
+  --va-input-shadow:inset 0 1px 0 rgba(255,255,255,.85);
+  --va-menu-bg:#ffffff;
+  --va-menu-border:rgba(0,0,0,.10);
+  --va-shadow:0 28px 70px rgba(0,0,0,.12), 0 12px 28px rgba(0,0,0,.08);
+  --va-shadow-lg:0 42px 110px rgba(0,0,0,.16), 0 22px 54px rgba(0,0,0,.10);
+  --va-shadow-sm:0 12px 26px rgba(0,0,0,.10);
+  --va-shadow-side:8px 0 26px rgba(0,0,0,.08);
+}
+
+/* main */
+.${SCOPE} .va-main{ max-width: none !important; }
+.${SCOPE} .icon{ color: var(--accent); }
+
+/* unified button sizing + style parity */
+.${SCOPE} .btn{
+  display:inline-flex; align-items:center; gap:.5rem;
+  border-radius:14px; padding:.65rem 1rem; font-size:14px; line-height:1;
+  border:1px solid var(--va-border);
+}
+.${SCOPE} .btn--green{
+  background:${ACCENT}; color:#fff; box-shadow:${BTN_SHADOW};
+  transition:transform .04s ease, background .18s ease;
+}
+.${SCOPE} .btn--green:hover{ background:${ACCENT_HOVER}; }
+.${SCOPE} .btn--green:active{ transform:translateY(1px); }
+.${SCOPE} .btn--ghost{
+  background:var(--va-card); color:var(--text);
+  box-shadow:var(--va-shadow-sm);
+}
+.${SCOPE} .btn--danger{
+  background:rgba(220,38,38,.12); color:#fca5a5;
+  box-shadow:0 10px 24px rgba(220,38,38,.15);
+  border-color:rgba(220,38,38,.35);
+}
+
+.${SCOPE} .va-range{ -webkit-appearance:none; height:4px; background:color-mix(in oklab, var(--accent) 24%, #0000); border-radius:999px; outline:none; }
+.${SCOPE} .va-range::-webkit-slider-thumb{ -webkit-appearance:none; width:14px;height:14px;border-radius:50%;background:var(--accent); border:2px solid #fff; box-shadow:0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent); }
+.${SCOPE} .va-range::-moz-range-thumb{ width:14px;height:14px;border:0;border-radius:50%;background:var(--accent); box-shadow:0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent); }
+
+/* no transitions on left so Safari/iPad won't jitter during sidebar animation */
+.${SCOPE} aside{ transition:none !important; }
+
+@media (max-width: 1180px){
+  .${SCOPE}{ --va-rail-w: 320px; }
+}
+`}</style>
+  );
+}
+
+/* =============================================================================
+   Minimal Select
+============================================================================= */
+type Item = { value: string; label: string; icon?: React.ReactNode };
+function usePortalPos(open: boolean, ref: React.RefObject<HTMLElement>) {
+  const [rect, setRect] = useState<{ top: number; left: number; width: number; up: boolean } | null>(null);
+  useLayoutEffect(() => {
+    if (!open) return;
+    const r = ref.current?.getBoundingClientRect(); if (!r) return;
+    const up = r.bottom + 320 > window.innerHeight;
+    setRect({ top: up ? r.top : r.bottom, left: r.left, width: r.width, up });
+  }, [open]);
+  return rect;
+}
+function Select({ value, items, onChange, placeholder, leftIcon }: {
+  value: string; items: Item[]; onChange: (v: string) => void; placeholder?: string; leftIcon?: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const btn = useRef<HTMLButtonElement | null>(null);
+  const portal = useRef<HTMLDivElement | null>(null);
+  const rect = usePortalPos(open, btn);
+
+  useEffect(() => {
+    if (!open) return;
+    const on = (e: MouseEvent) => {
+      if (btn.current?.contains(e.target as Node) || portal.current?.contains(e.target as Node)) return;
+      setOpen(false);
+    };
+    window.addEventListener('mousedown', on);
+    return () => window.removeEventListener('mousedown', on);
+  }, [open]);
+
+  const filtered = items.filter(i => i.label.toLowerCase().includes(q.trim().toLowerCase()));
+  const sel = items.find(i => i.value === value) || null;
+
+  return (
+    <>
+      <button
+        ref={btn}
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center gap-3 px-3 py-3 rounded-2xl text-[15px]"
+        style={{ background:'var(--va-input-bg)', color:'var(--text)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)' }}
+      >
+        {leftIcon ? <span className="shrink-0">{leftIcon}</span> : null}
+        {sel ? <span className="flex items-center gap-2 min-w-0">{sel.icon}<span className="truncate">{sel.label}</span></span> : <span className="opacity-70">{placeholder || 'Select…'}</span>}
+        <span className="ml-auto" />
+        <ChevronDown className="w-4 h-4 icon" />
+      </button>
+
+      <AnimatePresence>
+        {open && rect && (
+          <motion.div
+            ref={portal}
+            initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 4 }}
+            className="fixed z-[9999] p-3 rounded-xl"
+            style={{
+              top: rect.up ? rect.top - 8 : rect.top + 8,
+              left: rect.left, width: rect.width, transform: rect.up ? 'translateY(-100%)' : 'none',
+              background:'var(--va-menu-bg)', border:'1px solid var(--va-menu-border)', boxShadow:'var(--va-shadow-lg)'
+            }}
+          >
+            <div className="flex items-center gap-2 mb-3 px-2 py-2 rounded-lg"
+              style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)' }}>
+              <Search className="w-4 h-4 icon" />
+              <input value={q} onChange={(e)=> setQ(e.target.value)} placeholder="Filter…" className="w-full bg-transparent outline-none text-sm" style={{ color:'var(--text)' }}/>
+            </div>
+            <div className="max-h-72 overflow-y-auto pr-1" style={{ scrollbarWidth:'thin' }}>
+              {filtered.map(it => (
+                <button
+                  key={it.value}
+                  onClick={() => { onChange(it.value); setOpen(false); }}
+                  className="w-full flex items-center gap-3 px-3 py-2 rounded-[10px] text-left"
+                  style={{ color:'var(--text)' }}
+                  onMouseEnter={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='rgba(16,185,129,.10)'; (e.currentTarget as HTMLButtonElement).style.border='1px solid rgba(16,185,129,.35)'; }}
+                  onMouseLeave={(e)=>{ (e.currentTarget as any).style.background='transparent'; (e.currentTarget as any).style.border='1px solid transparent'; }}
+                >
+                  {it.icon}{it.label}
+                </button>
+              ))}
+              {filtered.length === 0 && <div className="px-3 py-6 text-sm" style={{ color:'var(--text-muted)' }}>No matches.</div>}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>
+  );
+}
