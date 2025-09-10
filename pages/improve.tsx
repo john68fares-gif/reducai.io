@@ -4,20 +4,33 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Bot, Check, Copy, History, Info, Loader2, Plus, Send, Settings2,
-  Sparkles, Trash2, Undo2, Redo2, ChevronDown, ChevronUp, HelpCircle, X
+  Sparkles, Trash2, Undo2, Redo2, ChevronDown, ChevronUp, HelpCircle, X,
+  RefreshCw, Search
 } from 'lucide-react';
 import { scopedStorage, migrateLegacyKeysToUser } from '@/utils/scoped-storage';
 
+/* =============================================================================
+   CONSTANTS / KEYS
+============================================================================= */
 const SCOPE = 'improve';
 const MAX_REFINEMENTS = 5;
 const DEFAULT_TEMPERATURE = 0.5;
 
 const K_SELECTED_AGENT_ID = `${SCOPE}:selectedAgentId`;
-const K_AGENT_LIST        = `agents`;            // your builder’s agents list
-const K_AGENT_META_PREFIX = `agents:meta:`;      // per-agent tuning (model/temp/rules)
-const K_IMPROVE_STATE     = `${SCOPE}:agent:`;   // Improve’s per-agent chat/history
+const K_AGENT_LIST        = `agents`;           // builder’s agents list (shared)
+const K_AGENT_META_PREFIX = `agents:meta:`;     // per-agent tuning (model/temp/rules)
+const K_IMPROVE_STATE     = `${SCOPE}:agent:`;  // Improve’s per-agent chat/history
 
-type ModelId = 'gpt-4o' | 'gpt-4o-mini' | 'gpt-4.1' | 'gpt-4.1-mini' | 'o3' | 'o3-mini';
+/* =============================================================================
+   TYPES
+============================================================================= */
+type ModelId =
+  | 'gpt-4o'
+  | 'gpt-4o-mini'
+  | 'gpt-4.1'
+  | 'gpt-4.1-mini'
+  | 'o3'
+  | 'o3-mini';
 
 const MODEL_OPTIONS: Array<{ value: ModelId; label: string }> = [
   { value: 'gpt-4o',       label: 'GPT-4o' },
@@ -39,23 +52,52 @@ type AgentState = {
 type AgentMeta = { model: ModelId; temperature: number; refinements: Refinement[]; updatedAt: number; };
 type Store = Awaited<ReturnType<typeof scopedStorage>>;
 
+/* =============================================================================
+   UTILS
+============================================================================= */
 const now = () => Date.now();
 const uid = (p='id') => `${p}_${Math.random().toString(36).slice(2,9)}${Date.now().toString(36).slice(-4)}`;
 const clamp01 = (n:number)=>Math.max(0,Math.min(1,n));
 
+/** Prefer assistant-like ids if present. */
+function chooseAgentId(x:any, i:number){
+  const candidates = [
+    x.assistant_id,
+    x.openai_assistant_id,
+    x.openai_id,
+    x.asst_id,
+    x.id,
+    x.agentId,
+    x.slug,
+  ].filter(Boolean);
+  const id = String(candidates[0] ?? `tmp_${i}_${Date.now()}`);
+  return id;
+}
+
 function mapAnyToAgent(x:any,i:number):Agent|null{
   if(!x) return null;
-  const id=String(x.id??x.agentId??x.slug??`tmp_${i}_${Date.now()}`);
-  const name=String(x.name??x.title??x.displayName??x.botName??x.meta?.name??`Agent ${i+1}`);
-  const createdAt=Number(x.createdAt??x.created_at??x.updatedAt??x.updated_at??Date.now());
-  const modelRaw=String(x.model??x.modelId??x.engine??'gpt-4o');
-  const model=(MODEL_OPTIONS.some(m=>m.value===modelRaw)?modelRaw:'gpt-4o') as ModelId;
-  const temperature=typeof x.temperature==='number'?x.temperature:
-                    typeof x.temp==='number'?x.temp:
-                    typeof x.creativity==='number'?x.creativity:DEFAULT_TEMPERATURE;
-  return {id,name,createdAt,model,temperature};
+  const id = chooseAgentId(x, i);
+  const name = String(
+    x.name ?? x.title ?? x.displayName ?? x.botName ?? x.meta?.name ?? `Agent ${i+1}`
+  );
+  const createdAt = Number(
+    x.createdAt ?? x.created_at ?? x.updatedAt ?? x.updated_at ?? Date.now()
+  );
+  const modelRaw = String(x.model ?? x.modelId ?? x.engine ?? 'gpt-4o');
+  const model = (MODEL_OPTIONS.some(m => m.value === modelRaw) ? modelRaw : 'gpt-4o') as ModelId;
+  const temperature =
+    typeof x.temperature === 'number' ? x.temperature :
+    typeof x.temp === 'number'        ? x.temp :
+    typeof x.creativity === 'number'  ? x.creativity :
+    DEFAULT_TEMPERATURE;
+
+  return { id, name, createdAt, model, temperature };
 }
-function normalizeAgents(list:any):Agent[]{ if(!Array.isArray(list)) return []; const seen=new Set<string>(); return list.map(mapAnyToAgent).filter(Boolean) as Agent[]; }
+
+function normalizeAgents(list:any):Agent[]{
+  if(!Array.isArray(list)) return [];
+  return list.map(mapAnyToAgent).filter(Boolean) as Agent[];
+}
 
 async function loadAgentsFromAny(store:Store):Promise<Agent[]>{
   const candidates=[K_AGENT_LIST,'chatbots','builds','assistants','voice:assistants'];
@@ -67,12 +109,12 @@ async function loadAgentsFromAny(store:Store):Promise<Agent[]>{
   return [];
 }
 
-/* ---- NEW: builder-agent fetch/merge helpers ---- */
 function dedupeAgentsById(arr: Agent[]): Agent[] {
   const m = new Map<string, Agent>();
   for (const a of arr) if (!m.has(a.id)) m.set(a.id, a);
   return [...m.values()];
 }
+
 function pickList(data: any): any[] {
   if (Array.isArray(data)) return data;
   for (const k of ['items','data','bots','rows','list']) {
@@ -80,6 +122,7 @@ function pickList(data: any): any[] {
   }
   return [];
 }
+
 async function fetchBuilderAgentsFromAPI(): Promise<Agent[]> {
   try {
     const res = await fetch('/api/chatbots', { method: 'GET' });
@@ -87,9 +130,10 @@ async function fetchBuilderAgentsFromAPI(): Promise<Agent[]> {
     const raw = await res.json();
     const list = pickList(raw);
     return (list.map(mapAnyToAgent).filter(Boolean) as Agent[]);
-  } catch { return []; }
+  } catch {
+    return [];
+  }
 }
-/* ----------------------------------------------- */
 
 function reasonFrom(refs:Refinement[]):string{
   const active=refs.filter(r=>r.enabled);
@@ -136,6 +180,9 @@ async function chatWithAgent(payload:{
   return await res.json();
 }
 
+/* =============================================================================
+   MAIN
+============================================================================= */
 export default function ImprovePage(){
   const [store,setStore]=useState<Store|null>(null);
   const [agents,setAgents]=useState<Agent[]>([]);
@@ -148,26 +195,26 @@ export default function ImprovePage(){
   const [showSettings,setShowSettings]=useState(false);
   const [showWhyFor,setShowWhyFor]=useState<string|null>(null);
   const [isSaving,setIsSaving]=useState(false);
+  const [isRefreshing,setIsRefreshing]=useState(false);
 
   const scrollRef=useRef<HTMLDivElement>(null);
 
+  /* ---------- bootstrap ---------- */
   useEffect(()=>{(async()=>{
     const st=await scopedStorage();
     await st.ensureOwnerGuard();
     await migrateLegacyKeysToUser();
     setStore(st);
 
-    // Load local/legacy agents
+    // Local/legacy
     let list=normalizeAgents(await st.getJSON<any[]>(K_AGENT_LIST,[]));
     if(!list.length) list=await loadAgentsFromAny(st);
 
-    // NEW: merge builder agents from /api/chatbots
+    // Merge builder agents
     const remote = await fetchBuilderAgentsFromAPI();
-    if (remote.length) {
-      list = dedupeAgentsById([...remote, ...list]);
-    }
+    if (remote.length) list = dedupeAgentsById([...remote, ...list]);
 
-    // Seed a default if still empty
+    // Seed if empty
     if(!list.length){
       list=[{id:uid('agent'),name:'My First Agent',createdAt:now(),model:'gpt-4o',temperature:DEFAULT_TEMPERATURE}];
     }
@@ -194,8 +241,10 @@ export default function ImprovePage(){
     await st.setJSON(K_IMPROVE_STATE+id,base);
   }
 
+  /* ---------- persist ---------- */
   useEffect(()=>{ if(!store||!agentId||!state) return; store.setJSON(K_IMPROVE_STATE+agentId,state); },[store,agentId,state]);
 
+  // keep agent meta + list in sync
   useEffect(()=>{ if(!store||!agentId||!state) return; (async()=>{
     setIsSaving(true);
     const meta:AgentMeta={model:state.model,temperature:state.temperature,refinements:state.refinements,updatedAt:now()};
@@ -209,6 +258,7 @@ export default function ImprovePage(){
 
   useEffect(()=>{ if(scrollRef.current) scrollRef.current.scrollTop=scrollRef.current.scrollHeight; },[state?.history.length,isSending]);
 
+  /* ---------- actions ---------- */
   function snapshotCore(s:AgentState){ const {model,temperature,refinements,history}=s; return {model,temperature,refinements:[...refinements],history:[...history]}; }
   function pushUndo(ss:ReturnType<typeof snapshotCore>){ setState(p=>p?{...p,undo:[...p.undo,ss],redo:[]}:p); }
 
@@ -232,10 +282,31 @@ export default function ImprovePage(){
     await store.setJSON(K_SELECTED_AGENT_ID,id); setAgentId(id); await hydrateFromAgent(store,id);
   }
 
+  async function refreshAgents(){
+    if(!store) return;
+    try{
+      setIsRefreshing(true);
+      const remote = await fetchBuilderAgentsFromAPI();
+      if(remote.length){
+        const merged = dedupeAgentsById([...remote, ...agents]);
+        await store.setJSON(K_AGENT_LIST, merged);
+        setAgents(merged);
+        if(merged.length && !merged.find(a=>a.id===agentId)){
+          const pick = merged[0];
+          await store.setJSON(K_SELECTED_AGENT_ID, pick.id);
+          setAgentId(pick.id);
+          await hydrateFromAgent(store, pick.id, merged);
+        }
+      }
+    } finally {
+      setIsRefreshing(false);
+    }
+  }
+
   function saveVersion(){ if(!state) return; const ver={id:uid('ver'),label:new Date().toLocaleString(),createdAt:now(),snapshot:snapshotCore(state)}; setState({...state,versions:[ver,...state.versions]}); }
   function loadVersion(vid:string){ if(!state) return; const v=state.versions.find(x=>x.id===vid); if(!v) return; pushUndo(snapshotCore(state)); setState({...state,...v.snapshot}); }
-  function undo(){ if(!state||!state.undo.length) return; const last=state.undo.at(-1)!; const newUndo=state.undo.slice(0,-1); const redoSnap=snapshotCore(state); setState({...state,...last,undo:newUndo,redo:[...state.redo,redoSnap]} as AgentState); }
-  function redo(){ if(!state||!state.redo.length) return; const last=state.redo.at(-1)!; const newRedo=state.redo.slice(0,-1); const undoSnap=snapshotCore(state); setState({...state,...last,redo:newRedo,undo:[...state.undo,undoSnap]} as AgentState); }
+  function undo(){ if(!state||!state.undo.length) return; const last=state.undo[state.undo.length-1]; const newUndo=state.undo.slice(0,-1); const redoSnap=snapshotCore(state); setState({...state,...last,undo:newUndo,redo:[...state.redo,redoSnap]} as AgentState); }
+  function redo(){ if(!state||!state.redo.length) return; const last=state.redo[state.redo.length-1]; const newRedo=state.redo.slice(0,-1); const undoSnap=snapshotCore(state); setState({...state,...last,redo:newRedo,undo:[...state.undo,undoSnap]} as AgentState); }
 
   async function sendMessage(){
     if(!state||!store||!agentId) return;
@@ -271,10 +342,7 @@ export default function ImprovePage(){
     }
   }
 
-  function copyLast(){ if(!state) return; const last=[...state.history].reverse().find(m=>m.role==='assistant'); if(last) navigator.clipboard?.writeText(last.content); }
-
   const selectedAgent=useMemo(()=>agents.find(a=>a.id===agentId)??null,[agents,agentId]);
-  const safeSelectedId=useMemo(()=> (agentId&&agents.some(a=>a.id===agentId))?agentId:(agents[0]?.id??''),[agentId,agents]);
 
   if(!state||!selectedAgent){
     return (<div className="min-h-screen flex items-center justify-center font-sans" style={{background:'var(--bg)',color:'var(--text)'}}>
@@ -289,15 +357,22 @@ export default function ImprovePage(){
         <div className="mx-auto w-full max-w-[1400px] px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Bot size={20}/><span className="font-semibold">Improve</span><span className="opacity-60">/</span>
-            <label className="text-sm opacity-70">AI to tune</label>
-            <select className="rounded-md px-2 py-1 text-sm border bg-transparent" style={{borderColor:'var(--border)'}}
-              value={safeSelectedId} onChange={(e)=>{ const id=e.target.value; if(id&&id!==agentId) selectAgent(id); }}>
-              {agents.map(a=>(<option key={a.id} value={a.id}>{a.name}</option>))}
-            </select>
-            <div className="ml-2 text-xs flex items-center gap-1 opacity-80">
-              {isSaving ? (<><Loader2 size={14} className="animate-spin"/> Saving…</>) : (<><Check size={14}/> Saved</>)}
+
+            <div className="flex items-center gap-2">
+              <span className="text-sm opacity-70">AI to tune</span>
+              <AgentPicker
+                agents={agents}
+                selectedId={selectedAgent.id}
+                onSelect={selectAgent}
+                onRefresh={refreshAgents}
+                isRefreshing={isRefreshing}
+              />
+              <div className="ml-1 text-xs flex items-center gap-1 opacity-80">
+                {isSaving ? (<><Loader2 size={14} className="animate-spin"/> Saving…</>) : (<><Check size={14}/> Saved</>)}
+              </div>
             </div>
           </div>
+
           <div className="flex items-center gap-2">
             <button onClick={undo} className="px-2 py-1 rounded-md border" style={{borderColor:'var(--border)'}}><Undo2 size={16}/></button>
             <button onClick={redo} className="px-2 py-1 rounded-md border" style={{borderColor:'var(--border)'}}><Redo2 size={16}/></button>
@@ -478,6 +553,109 @@ export default function ImprovePage(){
   );
 }
 
+/* =============================================================================
+   Agent Picker (themed dropdown)
+============================================================================= */
+function AgentPicker({
+  agents,
+  selectedId,
+  onSelect,
+  onRefresh,
+  isRefreshing
+}:{
+  agents: Agent[];
+  selectedId: string;
+  onSelect: (id:string)=>void;
+  onRefresh: ()=>void;
+  isRefreshing: boolean;
+}){
+  const [open,setOpen]=useState(false);
+  const [query,setQuery]=useState('');
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(()=>{
+    function onDoc(e:MouseEvent){
+      if(!wrapRef.current) return;
+      if(!wrapRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    function onEsc(e:KeyboardEvent){ if(e.key==='Escape') setOpen(false); }
+    document.addEventListener('mousedown',onDoc);
+    document.addEventListener('keydown',onEsc);
+    return ()=>{ document.removeEventListener('mousedown',onDoc); document.removeEventListener('keydown',onEsc); };
+  },[]);
+
+  const selected = agents.find(a=>a.id===selectedId);
+  const filtered = agents.filter(a => a.name.toLowerCase().includes(query.toLowerCase()));
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <button
+        onClick={()=>setOpen(v=>!v)}
+        className="px-2.5 py-1.5 rounded-md border inline-flex items-center gap-2 text-sm"
+        style={{borderColor:'var(--border)',background:'var(--card)'}}
+        title="Choose AI"
+      >
+        <span className="truncate max-w-[180px]">{selected?.name ?? 'Choose agent'}</span>
+        <ChevronDown size={14} />
+      </button>
+
+      {open && (
+        <div
+          className="absolute mt-2 w-[280px] rounded-lg border shadow-lg z-20"
+          style={{borderColor:'var(--border)',background:'var(--panel)',boxShadow:'var(--shadow-soft)'}}
+        >
+          <div className="p-2 border-b" style={{borderColor:'var(--border)'}}>
+            <div className="flex items-center gap-2">
+              <Search size={14} className="opacity-70"/>
+              <input
+                value={query}
+                onChange={e=>setQuery(e.target.value)}
+                placeholder="Search agents…"
+                className="flex-1 bg-transparent outline-none text-sm"
+              />
+              <button
+                onClick={onRefresh}
+                className="px-2 py-1 rounded-md border text-xs inline-flex items-center gap-1"
+                style={{borderColor:'var(--border)'}}
+                title="Sync from Builder"
+              >
+                {isRefreshing ? <Loader2 size={12} className="animate-spin"/> : <RefreshCw size={12}/>}
+                Sync
+              </button>
+            </div>
+          </div>
+
+          <div className="max-h-[260px] overflow-y-auto">
+            {filtered.map(a=>(
+              <button
+                key={a.id}
+                onClick={()=>{ onSelect(a.id); setOpen(false); }}
+                className={`w-full text-left px-3 py-2 text-sm border-b hover:opacity-100 transition ${a.id===selectedId?'opacity-100':'opacity-90'}`}
+                style={{borderColor:'var(--border)'}}
+                title={a.name}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="truncate">{a.name}</span>
+                  {a.id===selectedId && <Check size={14}/>}
+                </div>
+                <div className="text-xs opacity-60 mt-0.5">
+                  {a.model} • {new Date(a.createdAt).toLocaleDateString()}
+                </div>
+              </button>
+            ))}
+            {!filtered.length && (
+              <div className="px-3 py-6 text-sm opacity-70">No agents found.</div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* =============================================================================
+   Small UI
+============================================================================= */
 function QuickChip({icon,label,onClick}:{icon?:React.ReactNode;label:string;onClick:()=>void}){
   return (
     <button onClick={onClick} className="text-xs px-2 py-1 rounded-full inline-flex items-center gap-1 border" style={{borderColor:'var(--border)',background:'var(--card)'}} title="Add as refinement">
