@@ -4,17 +4,19 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Bot, Check, Copy, Phone as PhoneIcon, PhoneCall, PhoneOff, RefreshCw,
-  Rocket, Search, Sparkles, Trash2, X
+  Rocket, Search, Sparkles, Trash2, X, KeyRound
 } from 'lucide-react';
 import { scopedStorage } from '@/utils/scoped-storage';
 
-/* ------------ shared keys (exactly what your other pages use) ----------- */
+/* -------- storage keys -------- */
 const K_ASSISTANTS = 'voice:assistants.v2';
 const K_SELECTED   = 'voice:assistants:selected';
-const K_STEP2      = 'voicebuilder:step2';       // { fromE164, apiKeyId } saved by StepV2
-const K_APIKEY_SEL = 'apiKeys.selectedId';       // selected OpenAI key id
 
-/* ------------ types ----------------------------------------------------- */
+/* where telephony step saves */
+const K_STEP2      = 'voicebuilder:step2';            // { fromE164, apiKeyId }
+const K_APIKEY_SEL = 'apiKeys.selectedId';            // selected key id
+const K_APIKEYS    = 'apiKeys.v1';                    // [{id,name,key}] (fallback: 'apiKeys')
+
 type ModelId = 'gpt-4o' | 'gpt-4o-mini' | 'gpt-4.1' | 'gpt-3.5-turbo';
 type Assistant = {
   id: string;
@@ -28,9 +30,12 @@ type Assistant = {
 type Token = { t:'same'|'add'|'del'; ch:string };
 type SR = SpeechRecognition & { start:()=>void; stop:()=>void };
 
-/* ------------ helpers --------------------------------------------------- */
+type ApiKey = { id:string; name:string; key?:string };
+type NumberItem = { id:string; e164?:string; label?:string; provider?:string; status?:string };
+
 const uid = (p='a') => `${p}_${Math.random().toString(36).slice(2,9)}`;
 
+/* ---------------- diff ---------------- */
 function diffChars(a:string,b:string):Token[]{
   const A=[...a], B=[...b];
   const dp=Array(A.length+1).fill(0).map(()=>Array(B.length+1).fill(0));
@@ -38,19 +43,20 @@ function diffChars(a:string,b:string):Token[]{
     dp[i][j]=A[i]===B[j]?1+dp[i+1][j+1]:Math.max(dp[i+1][j],dp[i][j+1]);
   const out:Token[]=[]; let i=0,j=0;
   while(i<A.length&&j<B.length){
-    if(A[i]===B[j]){out.push({t:'same',ch:B[j]});i++;j++;}
-    else if(dp[i+1][j]>=dp[i][j+1]){out.push({t:'del',ch:A[i++]});}
-    else {out.push({t:'add',ch:B[j++]});}
+    if(A[i]===B[j]){out.push({t:'same',ch:B[j]}); i++; j++;}
+    else if(dp[i+1][j]>=dp[i][j+1]){ out.push({t:'del',ch:A[i++]}); }
+    else { out.push({t:'add',ch:B[j++]}); }
   }
   while(i<A.length) out.push({t:'del',ch:A[i++]});
   while(j<B.length) out.push({t:'add',ch:B[j++]});
   return out;
 }
 
+/* ---------------- tiny select ---------------- */
 function Select({value,items,onChange,placeholder}:{value:string;items:{value:string;label:string}[];onChange:(v:string)=>void;placeholder?:string}){
   return (
     <select value={value} onChange={(e)=>onChange(e.target.value)}
-      className="rounded-[12px] px-3 py-2 text-sm border bg-transparent"
+      className="w-full rounded-[12px] px-3 py-2 text-sm border bg-transparent"
       style={{borderColor:'var(--border)',color:'var(--text)'}}>
       {placeholder?<option value="">{placeholder}</option>:null}
       {items.map(it=><option key={it.value} value={it.value}>{it.label}</option>)}
@@ -59,18 +65,18 @@ function Select({value,items,onChange,placeholder}:{value:string;items:{value:st
 }
 
 /* ====================================================================== */
-/* ============================ MAIN FILE =============================== */
-/* ====================================================================== */
 export default function VoiceStudioOne(){
   const [assistants,setAssistants]=useState<Assistant[]>([]);
   const [activeId,setActiveId]=useState('');
   const active=useMemo(()=>assistants.find(a=>a.id===activeId)||null,[assistants,activeId]);
 
-  // key + phone auto-load from storage
-  const [apiKeyId,setApiKeyId]=useState('');     // read-only here; badge only
+  /* --- explicit dropdowns --- */
+  const [apiKeys,setApiKeys]=useState<ApiKey[]>([]);
+  const [apiKeyId,setApiKeyId]=useState('');
+  const [numbers,setNumbers]=useState<NumberItem[]>([]);
   const [fromE164,setFromE164]=useState('');
 
-  // generate overlay + diff typing
+  /* --- generate / diff --- */
   const [genOpen,setGenOpen]=useState(false);
   const [genText,setGenText]=useState('');
   const [typing,setTyping]=useState<Token[]|null>(null);
@@ -78,13 +84,12 @@ export default function VoiceStudioOne(){
   const [pendingPrompt,setPendingPrompt]=useState('');
   const timerRef=useRef<number|null>(null);
 
-  // transcript (right now we just log)
   const [turns,setTurns]=useState<Array<{role:'user'|'assistant'; text:string}>>([]);
 
   useEffect(()=>{(async()=>{
     const ss=await scopedStorage(); await ss.ensureOwnerGuard();
 
-    // assistants
+    /* assistants */
     let list=await ss.getJSON<Assistant[]>(K_ASSISTANTS, []);
     if(!Array.isArray(list)||!list.length){
       list=[{
@@ -94,21 +99,39 @@ export default function VoiceStudioOne(){
       await ss.setJSON(K_ASSISTANTS,list);
     }
     setAssistants(list);
-
-    // selection
     const sel=await ss.getJSON<string>(K_SELECTED, list[0].id);
     setActiveId(list.some(a=>a.id===sel)?sel:list[0].id);
 
-    // key + phone
-    const step2=await ss.getJSON<{fromE164?:string;apiKeyId?:string}>(K_STEP2, {} as any);
-    const globalKey=await ss.getJSON<string>(K_APIKEY_SEL,'');
-    setApiKeyId(step2?.apiKeyId || globalKey || '');
+    /* keys list (and selection) */
+    const stored = await ss.getJSON<ApiKey[]>(K_APIKEYS, []);
+    const legacy = await ss.getJSON<ApiKey[]>('apiKeys', []);
+    const keys = (stored?.length?stored:legacy||[]).map(k=>({id:String(k.id||''),name:String(k.name||''),key:k.key}));
+    setApiKeys(keys.filter(k=>k.id&&k.name));
+
+    const savedKey = await ss.getJSON<string>(K_APIKEY_SEL,'');
+    const step2 = await ss.getJSON<{fromE164?:string;apiKeyId?:string}>(K_STEP2, {} as any);
+    setApiKeyId(step2?.apiKeyId || savedKey || '');
+
+    /* numbers */
+    try{
+      const r=await fetch('/api/telephony/phone-numbers',{cache:'no-store'});
+      const j=await r.json();
+      const listNum: NumberItem[] = j?.ok ? j.data : j;
+      setNumbers(Array.isArray(listNum)?listNum:[]);
+    }catch{ setNumbers([]); }
     setFromE164(step2?.fromE164 || '');
   })();},[]);
 
+  /* persist assistants */
+  useEffect(()=>{(async()=>{ const ss=await scopedStorage(); await ss.setJSON(K_ASSISTANTS,assistants); })();},[assistants]);
+
+  /* persist selections */
   useEffect(()=>{(async()=>{
-    const ss=await scopedStorage(); await ss.setJSON(K_ASSISTANTS,assistants);
-  })();},[assistants]);
+    const ss=await scopedStorage();
+    await ss.setJSON(K_APIKEY_SEL, apiKeyId || '');
+    const prev = await ss.getJSON<any>(K_STEP2, {} as any);
+    await ss.setJSON(K_STEP2, { ...prev, apiKeyId, fromE164 });
+  })();},[apiKeyId,fromE164]);
 
   const patch=(mut:(a:Assistant)=>Assistant)=>setAssistants(arr=>arr.map(a=>a.id===activeId?mut(a):a));
   const create=async()=>{ const a:Assistant={id:uid('agent'),name:'New Assistant',createdAt:Date.now(),
@@ -153,15 +176,16 @@ Summarize and confirm before ending.`.trim();
   const acceptDiff=()=>{ if(!active) return; patch(a=>({...a,config:{...a.config,model:{...a.config.model,systemPrompt:pendingPrompt}}})); setTyping(null); setPendingPrompt(''); };
   const declineDiff=()=>{ setTyping(null); setPendingPrompt(''); };
 
+  /* badge colors reflect selection, not auto-pick */
   const badges=(
     <div className="flex flex-wrap gap-2">
       <span className="px-2.5 py-1 rounded-full text-xs border"
         style={{borderColor:'var(--border)', background: apiKeyId?'rgba(0,255,194,.10)':'rgba(255,0,0,.12)'}}>
-        {apiKeyId?'OpenAI key loaded':'OpenAI key missing'}
+        {apiKeyId?'OpenAI key selected':'OpenAI key — pick one'}
       </span>
       <span className="px-2.5 py-1 rounded-full text-xs border"
         style={{borderColor:'var(--border)', background: fromE164?'rgba(0,255,194,.10)':'rgba(255,0,0,.12)'}}>
-        {fromE164?`Phone ${fromE164}`:'Phone missing'}
+        {fromE164?`Phone ${fromE164}`:'Phone number — pick one'}
       </span>
     </div>
   );
@@ -190,13 +214,12 @@ Summarize and confirm before ending.`.trim();
 
       {/* body */}
       <div className="mx-auto max-w-[1400px] px-4 py-6 grid lg:grid-cols-[340px,1fr] gap-6">
-        {/* LEFT: inline rail */}
+        {/* LEFT rail */}
         <aside className="hidden lg:flex flex-col gap-3">
           <div className="rounded-xl p-3 border" style={{borderColor:'var(--border)',background:'var(--panel)'}}>
             <div className="flex items-center gap-2 text-sm font-semibold"><Bot className="w-4 h-4"/> Assistants</div>
             <div className="mt-2 flex items-center gap-2 rounded-md px-2 py-1.5 border" style={{borderColor:'var(--border)'}}>
-              <Search className="w-4 h-4 opacity-70"/><input placeholder="Search"
-                onChange={(e)=>{/* local filter optional */}} className="flex-1 bg-transparent outline-none text-sm" />
+              <Search className="w-4 h-4 opacity-70"/><input placeholder="Search" className="flex-1 bg-transparent outline-none text-sm" />
             </div>
             <div className="mt-3 space-y-2">
               {assistants.map(a=>{
@@ -219,9 +242,44 @@ Summarize and confirm before ending.`.trim();
           </div>
         </aside>
 
-        {/* RIGHT: editor */}
+        {/* RIGHT editor */}
         <section className="rounded-xl p-4 border space-y-4" style={{borderColor:'var(--border)',background:'var(--panel)'}}>
-          {/* row: model / first message / voice */}
+
+          {/* NEW: Connections row */}
+          <div className="grid md:grid-cols-2 gap-3">
+            <div>
+              <div className="text-xs opacity-70 mb-1">OpenAI API Key</div>
+              <div className="relative">
+                <Select
+                  value={apiKeyId}
+                  onChange={setApiKeyId}
+                  placeholder="Select an API key…"
+                  items={(apiKeys||[]).map(k=>({
+                    value:k.id,
+                    label:`${k.name}${k.key?` ••••${String(k.key).slice(-4).toUpperCase()}`:''}`
+                  }))}
+                />
+                <KeyRound className="w-4 h-4 absolute right-3 top-2.5 opacity-70" />
+              </div>
+              <div className="mt-1 text-[11px] opacity-60">Keys come from your API Keys page (scoped storage).</div>
+            </div>
+
+            <div>
+              <div className="text-xs opacity-70 mb-1">From Number</div>
+              <Select
+                value={fromE164}
+                onChange={setFromE164}
+                placeholder={numbers.length ? '— Choose —' : 'No numbers imported'}
+                items={(numbers||[]).map(n=>({
+                  value:String(n.e164||''),
+                  label:`${n.e164 || n.id}${n.label?` — ${n.label}`:''}${n.provider?` (${n.provider})`:''}`
+                }))}
+              />
+              <div className="mt-1 text-[11px] opacity-60">Numbers fetched from /api/telephony/phone-numbers.</div>
+            </div>
+          </div>
+
+          {/* Model / First message / Voice */}
           <div className="grid md:grid-cols-3 gap-3">
             <div>
               <div className="text-xs opacity-70 mb-1">Model</div>
@@ -250,7 +308,7 @@ Summarize and confirm before ending.`.trim();
             </div>
           </div>
 
-          {/* prompt header + actions */}
+          {/* Prompt header + actions */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 font-semibold text-sm"><Sparkles size={16}/> System Prompt</div>
             <div className="flex items-center gap-2">
@@ -261,7 +319,7 @@ Summarize and confirm before ending.`.trim();
             </div>
           </div>
 
-          {/* prompt body (typing diff) */}
+          {/* Prompt body (diff typing) */}
           {!typing ? (
             <textarea rows={18}
               value={active.config.model.systemPrompt || '(empty)'}
@@ -291,7 +349,7 @@ Summarize and confirm before ending.`.trim();
             </div>
           )}
 
-          {/* web call */}
+          {/* Web Call */}
           <WebCallInline
             greet={active.config.model.firstMessage || 'Hello. How may I help you today?'}
             voiceLabel={active.config.voice.voiceLabel}
@@ -315,7 +373,7 @@ Summarize and confirm before ending.`.trim();
           <div className="flex items-center gap-2 justify-end">
             <button onClick={()=>navigator.clipboard.writeText(active.config.model.systemPrompt||'')}
               className="px-3 py-2 rounded-md border text-sm" style={{borderColor:'var(--border)'}}><Copy size={14}/> Copy Prompt</button>
-            <button onClick={()=>alert('Publish = server link your number to this assistant.')}
+            <button onClick={()=>alert('Publish = server links this number to this assistant.')}
               className="px-3 py-2 rounded-md border text-sm" style={{borderColor:'var(--border)'}}><Rocket size={14}/> Publish</button>
             <button onClick={()=>remove(active.id)} className="px-3 py-2 rounded-md border text-sm" style={{borderColor:'var(--border)'}}><Trash2 size={14}/> Delete</button>
           </div>
@@ -344,7 +402,7 @@ Summarize and confirm before ending.`.trim();
         </div>
       )}
 
-      {/* theme close to your Improve page */}
+      {/* theme */}
       <style jsx global>{`
         :root:not([data-theme="dark"]) { --bg:#f7f9fb; --text:#101316; --panel:#ffffff; --border:rgba(0,0,0,.12); }
         [data-theme="dark"]          { --bg:#0b0c10; --text:#eef2f5; --panel:#0f1315; --border:rgba(255,255,255,.10); }
@@ -353,7 +411,7 @@ Summarize and confirm before ending.`.trim();
   );
 }
 
-/* ==================== Inline WebCall (no extra files) ==================== */
+/* ==================== Inline WebCall (unchanged, uses selections) ==================== */
 function WebCallInline({
   greet, voiceLabel, systemPrompt, model, apiKeyId, fromE164, onTurn
 }:{
@@ -385,7 +443,6 @@ function WebCallInline({
   async function speak(text:string){ const s=window.speechSynthesis; try{s.cancel();}catch{}; const u=new SpeechSynthesisUtterance(text); const vs=await voices(); u.voice=pick(vs); u.rate=1; u.pitch=.95; s.speak(u); }
 
   async function ask(userText:string):Promise<string>{
-    // This expects a tiny pages route at /api/voice/chat that uses the real key server-side.
     const r=await fetch('/api/voice/chat',{ method:'POST', headers:{'content-type':'application/json','x-apikey-id':apiKeyId||''},
       body:JSON.stringify({ model, system:systemPrompt, user:userText, fromE164 }) });
     if(!r.ok) throw new Error('I could not reach the model. Check your OpenAI key.');
@@ -393,7 +450,7 @@ function WebCallInline({
   }
 
   async function start(){
-    if(!apiKeyId){ const msg='OpenAI key is missing. Add it in API Keys.'; onTurn('assistant',msg); await speak(msg); return; }
+    if(!apiKeyId){ const msg='OpenAI key is missing. Pick a key above.'; onTurn('assistant',msg); await speak(msg); return; }
     const hello=greet||'Hello. How may I help you today?'; onTurn('assistant',hello); await speak(hello);
     const rec=SRFactory(async (final)=>{
       onTurn('user',final);
