@@ -11,7 +11,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const upstream = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
-      headers: { 'authorization': `Bearer ${key}`, 'content-type': 'application/json' },
+      headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
       body: JSON.stringify({
         model,
         messages: [
