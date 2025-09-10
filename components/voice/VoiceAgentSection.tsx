@@ -1,402 +1,431 @@
-// pages/voice-agent.tsx
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import Head from 'next/head';
-import { Sparkles, RefreshCw, Check, X } from 'lucide-react';
-import AssistantRail, { type AssistantLite } from '@/components/voice/AssistantRail';
-import WebCallButton from '@/components/voice/WebCallButton';
-import { useSettings } from '@/utils/settings';
+import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
+import dynamic from 'next/dynamic';
+import {
+  Bot, Check, Copy, Mic2, Phone as PhoneIcon, Rocket, Sparkles, Trash2,
+  RefreshCw, X, ChevronDown, ChevronRight
+} from 'lucide-react';
+import { scopedStorage } from '@/utils/scoped-storage';
 
-/* ---- look tokens ---- */
-const ACCENT = '#10b981';
-const card = { background: 'rgba(255,255,255,.03)', border: '1px solid rgba(255,255,255,.14)' };
+const AssistantRail = dynamic(() => import('./AssistantRail'), { ssr: false });
+const WebCallButton = dynamic(() => import('./WebCallButton'), { ssr: false });
 
-/* ---- minimal types & storage ---- */
-type Assistant = AssistantLite & {
-  systemPrompt: string;
-  firstMessage: string;
-  model: 'gpt-4o'|'gpt-4o-mini'|'gpt-4.1'|'gpt-3.5-turbo';
-  voiceLabel: string;
+/* ====== storage keys shared with the rest of your app ====== */
+const K_ASSISTANTS = 'voice:assistants.v2';
+const K_SELECTED   = 'voice:assistants:selected';
+const K_STEP2      = 'voicebuilder:step2';       // { fromE164, apiKeyId } (from your StepV2 page)
+const K_APIKEY_SEL = 'apiKeys.selectedId';       // selected OpenAI key id (scopedStorage)
+
+type Provider = 'openai';
+type ModelId = 'gpt-4o' | 'gpt-4o-mini' | 'gpt-4.1' | 'gpt-3.5-turbo';
+
+type Assistant = {
+  id: string;
+  name: string;
+  createdAt: number;
+  config: {
+    model: { provider: Provider; model: ModelId; firstMessage: string; systemPrompt: string };
+    voice: { provider: 'openai'|'elevenlabs'; voiceId: string; voiceLabel: string };
+  };
 };
 
-const LS = 'va:assistants.v2';
+type Token = { t: 'same'|'add'|'del'; ch: string };
 
-function readList(): Assistant[] {
-  try {
-    const raw = localStorage.getItem(LS);
-    if (!raw) return [];
-    return JSON.parse(raw);
-  } catch { return []; }
-}
-function writeList(list: Assistant[]) {
-  localStorage.setItem(LS, JSON.stringify(list));
-}
+const uid = (p='a') => `${p}_${Math.random().toString(36).slice(2, 9)}`;
 
-/* ---- default prompt (used only when you want) ---- */
-const BASE_PROMPT = `[Identity]
-You are a helpful assistant that books appointments.
-
-[Style]
-- Friendly, concise, confirms critical details.
-
-[System Behaviors]
-- Ask for missing details one at a time.
-- Summarize before finalizing.
-
-[Data to Collect]
-- Full Name
-- Phone Number
-- Email (optional)
-- Appointment Date/Time
-
-[Safety]
-- No medical/legal/financial advice beyond high-level pointers.
-
-[Handover]
-- Provide a short summary and next steps.`;
-
-/* ---- diff (LCS) for typing view: add=green, del=red ---- */
-type Seg = { t: 'same'|'add'|'del'; s: string };
-
-function diff(a: string, b: string): Seg[] {
+/* ---------- character diff (add+del) ---------- */
+function diffChars(a: string, b: string): Token[] {
   const A = [...a], B = [...b];
-  const dp = Array(A.length+1).fill(0).map(()=>Array(B.length+1).fill(0));
-  for (let i=A.length-1;i>=0;i--)
-    for (let j=B.length-1;j>=0;j--)
-      dp[i][j] = A[i]===B[j] ? dp[i+1][j+1]+1 : Math.max(dp[i+1][j], dp[i][j+1]);
-
-  const out: Seg[] = [];
-  let i=0, j=0, buf='', mode:'same'|'add'|'del'='same';
-
-  const flush = () => { if (buf) out.push({ t: mode, s: buf }); buf=''; };
-
-  while (i<A.length && j<B.length) {
-    if (A[i] === B[j]) {
-      if (mode!=='same') { flush(); mode='same'; }
-      buf += B[j]; i++; j++;
-    } else if (dp[i+1][j] >= dp[i][j+1]) {
-      if (mode!=='del') { flush(); mode='del'; }
-      buf += A[i]; i++;
-    } else {
-      if (mode!=='add') { flush(); mode='add'; }
-      buf += B[j]; j++;
-    }
+  const dp = Array(A.length+1).fill(0).map(() => Array(B.length+1).fill(0));
+  for (let i=A.length-1;i>=0;i--) for (let j=B.length-1;j>=0;j--) {
+    dp[i][j] = A[i]===B[j] ? 1 + dp[i+1][j+1] : Math.max(dp[i+1][j], dp[i][j+1]);
   }
-  while (i<A.length) { if (mode!=='del') { flush(); mode='del'; } buf += A[i++]; }
-  while (j<B.length) { if (mode!=='add') { flush(); mode='add'; } buf += B[j++]; }
-  flush();
+  const out: Token[] = [];
+  let i=0,j=0;
+  while (i<A.length && j<B.length) {
+    if (A[i]===B[j]) { out.push({t:'same', ch:B[j]}); i++; j++; }
+    else if (dp[i+1][j] >= dp[i][j+1]) { out.push({t:'del', ch:A[i++]}); }
+    else { out.push({t:'add', ch:B[j++]}); }
+  }
+  while (i<A.length) out.push({t:'del', ch:A[i++]});
+  while (j<B.length) out.push({t:'add', ch:B[j++]});
   return out;
 }
 
-function TypingDiff({ oldText, newText, onAccept, onDecline }:{
-  oldText: string; newText: string; onAccept: ()=>void; onDecline: ()=>void;
-}) {
-  const segs = useMemo(()=>diff(oldText, newText), [oldText, newText]);
-  const [idx, setIdx] = useState(0);
+/* ---------- small select control ---------- */
+function Select({
+  value, items, onChange, placeholder
+}:{ value:string; items:{value:string;label:string}[]; onChange:(v:string)=>void; placeholder?:string }) {
+  return (
+    <select
+      value={value}
+      onChange={(e)=>onChange(e.target.value)}
+      className="rounded-[12px] px-3 py-2 text-sm border bg-transparent"
+      style={{borderColor:'var(--border)', color:'var(--text)'}}
+    >
+      {placeholder ? <option value="" disabled>{placeholder}</option> : null}
+      {items.map(it => <option key={it.value} value={it.value}>{it.label}</option>)}
+    </select>
+  );
+}
+
+/* ===================================== PAGE ===================================== */
+export default function VoiceAgentSection() {
+  const [assistants, setAssistants] = useState<Assistant[]>([]);
+  const [activeId, setActiveId] = useState<string>('');
+  const active = useMemo(() => assistants.find(a => a.id === activeId) || null, [assistants, activeId]);
+
+  /* badges: api key + from number (imported from StepV2) */
+  const [apiKeyId, setApiKeyId] = useState<string>('');
+  const [fromE164, setFromE164] = useState<string>('');
+
+  /* generate overlay state */
+  const [genOpen, setGenOpen] = useState(false);
+  const [genText, setGenText] = useState('');
+  const [typing, setTyping] = useState<Token[] | null>(null);
+  const [typed, setTyped] = useState(0);
+  const timerRef = useRef<number | null>(null);
+  const [nextPrompt, setNextPrompt] = useState('');
+
+  /* hydrate */
   useEffect(() => {
-    setIdx(0);
-    const timer = setInterval(()=> setIdx(i=> Math.min(i+1, segs.length)), 18);
-    return () => clearInterval(timer);
-  }, [oldText, newText]);
+    const boot = async () => {
+      const ss = await scopedStorage();
+      await ss.ensureOwnerGuard();
+
+      // assistants
+      const list = (await ss.getJSON<Assistant[]>(K_ASSISTANTS, [])) || [];
+      const seeded = list.length ? list : [{
+        id: uid('agent'),
+        name: 'New Assistant',
+        createdAt: Date.now(),
+        config: {
+          model: { provider:'openai', model:'gpt-4o', firstMessage: '', systemPrompt: '' }, // EMPTY
+          voice: { provider:'openai', voiceId:'alloy', voiceLabel:'Alloy (OpenAI)' }
+        }
+      }];
+      if (!list.length) await ss.setJSON(K_ASSISTANTS, seeded);
+      setAssistants(seeded);
+
+      // selection
+      const sel = await ss.getJSON<string>(K_SELECTED, seeded[0].id);
+      setActiveId(seeded.some(a=>a.id===sel) ? sel : seeded[0].id);
+
+      // key + number (from StepV2 + Keys page)
+      const step2 = await ss.getJSON<{fromE164?:string;apiKeyId?:string}>(K_STEP2, {} as any);
+      const chosenKey = step2?.apiKeyId || await ss.getJSON<string>(K_APIKEY_SEL, '');
+      setApiKeyId(chosenKey || '');
+      setFromE164(step2?.fromE164 || '');
+    };
+    boot();
+  }, []);
+
+  /* persist on change */
+  useEffect(() => { (async () => {
+    const ss = await scopedStorage(); await ss.setJSON(K_ASSISTANTS, assistants);
+  })(); }, [assistants]);
+
+  /* ---------------- actions ---------------- */
+  const createAssistant = async () => {
+    const a: Assistant = {
+      id: uid('agent'),
+      name: 'New Assistant',
+      createdAt: Date.now(),
+      config: {
+        model: { provider:'openai', model:'gpt-4o', firstMessage:'', systemPrompt:'' }, // EMPTY
+        voice: { provider:'openai', voiceId:'alloy', voiceLabel:'Alloy (OpenAI)' }
+      }
+    };
+    setAssistants(p => [...p, a]);
+    setActiveId(a.id);
+    const ss = await scopedStorage(); await ss.setJSON(K_SELECTED, a.id);
+  };
+
+  const renameAssistant = (id:string, name:string) =>
+    setAssistants(list => list.map(a => a.id===id ? {...a, name: name || 'Untitled'} : a));
+
+  const deleteAssistant = (id:string) => {
+    setAssistants(list => {
+      const next = list.filter(a => a.id!==id);
+      if (activeId===id && next.length) setActiveId(next[0].id);
+      return next;
+    });
+  };
+
+  const patchActive = (mut:(a:Assistant)=>Assistant) =>
+    setAssistants(list => list.map(a => a.id===activeId ? mut(a) : a));
+
+  /* -------------- generate with diff typing -------------- */
+  function startTypingDiff(oldText: string, newText: string) {
+    const toks = diffChars(oldText, newText);
+    setTyping(toks);
+    setTyped(0);
+    setNextPrompt(newText);
+    if (timerRef.current) window.clearInterval(timerRef.current);
+    timerRef.current = window.setInterval(() => {
+      setTyped(c => {
+        const n = Math.min(toks.length, c+6);
+        if (n >= toks.length && timerRef.current) { window.clearInterval(timerRef.current); timerRef.current = null; }
+        return n;
+      });
+    }, 12);
+  }
+
+  const handleGenerate = () => {
+    if (!active) return;
+    const hint = genText.trim();
+    if (!hint) { setGenOpen(false); return; }
+
+    // super simple composer – you can plug your smarter builder here
+    const base = (active.config.model.systemPrompt || '').trim();
+    const newPrompt =
+`[Identity]
+You are ${active.name}, a helpful voice assistant.
+
+[Style]
+Friendly, concise, on-task.
+
+[Task]
+${hint}
+
+[Collect]
+- Full Name
+- Phone Number
+- Email (optional)
+- Preferred date/time
+
+[Handover]
+Summarize and confirm before ending.`.trim();
+
+    startTypingDiff(base || '(empty)', newPrompt);
+    setGenOpen(false);
+    setGenText('');
+  };
+
+  const acceptTyping = () => {
+    if (!active) return;
+    const final = nextPrompt.replace(/^\(empty\)\n?/, ''); // drop placeholder
+    patchActive(a => ({...a, config:{...a.config, model:{...a.config.model, systemPrompt: final}}}));
+    setTyping(null);
+    setNextPrompt('');
+  };
+  const declineTyping = () => { setTyping(null); setNextPrompt(''); };
+
+  /* badges */
+  const badges = (
+    <div className="flex flex-wrap gap-2">
+      <span className="px-2.5 py-1 rounded-full text-xs border"
+        style={{borderColor:'var(--border)', background: apiKeyId ? 'rgba(0,255,194,.10)':'rgba(255,0,0,.10)', color:'var(--text)'}}>
+        {apiKeyId ? 'OpenAI key loaded' : 'OpenAI key missing'}
+      </span>
+      <span className="px-2.5 py-1 rounded-full text-xs border"
+        style={{borderColor:'var(--border)', background: fromE164 ? 'rgba(0,255,194,.10)':'rgba(255,0,0,.10)', color:'var(--text)'}}>
+        {fromE164 ? `Phone ${fromE164}` : 'Phone missing'}
+      </span>
+    </div>
+  );
+
+  if (!active) {
+    return (
+      <div className="p-6 space-y-4">
+        {badges}
+        <button onClick={createAssistant} className="px-3 py-2 rounded-md border" style={{borderColor:'var(--border)'}}>
+          <Bot className="w-4 h-4 inline mr-2" /> Create Assistant
+        </button>
+      </div>
+    );
+  }
 
   return (
-    <div>
-      <div
-        style={{
-          ...card, borderRadius:16, padding:12, maxHeight:680, overflowY:'auto',
-          fontFamily:'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace', lineHeight:'1.45', whiteSpace:'pre-wrap'
-        }}
-      >
-        {segs.slice(0, idx).map((g, i) => {
-          if (g.t === 'same') return <span key={i}>{g.s}</span>;
-          if (g.t === 'add')  return <ins key={i} style={{ background:'rgba(16,185,129,.18)', padding:'1px 2px', borderRadius:4 }}>{g.s}</ins>;
-          return <del key={i} style={{ background:'rgba(239,68,68,.12)', color:'#fca5a5', textDecorationColor:'#ef4444', padding:'1px 2px', borderRadius:4 }}>{g.s}</del>;
-        })}
-        {idx < segs.length ? <span className="animate-pulse"> ▌</span> : null}
+    <div className="min-h-screen font-sans" style={{background:'var(--bg)', color:'var(--text)'}}>
+      {/* top bar */}
+      <div className="sticky top-0 z-10 border-b" style={{background:'color-mix(in oklab, var(--panel) 88%, transparent)', borderColor:'var(--border)'}}>
+        <div className="mx-auto max-w-[1400px] px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Bot size={18}/><span className="font-semibold">Voice Studio</span><span className="opacity-50">/</span>
+            <span className="text-sm">{active.name}</span>
+          </div>
+          {badges}
+        </div>
       </div>
-      <div style={{ display:'flex', gap:8, justifyContent:'flex-end', marginTop:12 }}>
-        <button onClick={onDecline} style={btnGhost}><X size={16} color="#aaa"/>&nbsp;Decline</button>
-        <button onClick={onAccept} style={btnGreen}><Check size={16} color="#fff"/><span style={{color:'#fff'}}>Accept</span></button>
+
+      <div className="mx-auto max-w-[1400px] px-4 py-6 grid lg:grid-cols-[360px,1fr] gap-6">
+        {/* left rail */}
+        <div>
+          <AssistantRail
+            assistants={assistants.map(a => ({id:a.id, name:a.name, folder:'Unfiled', updatedAt:a.createdAt}))}
+            activeId={activeId}
+            onSelect={async(id)=>{ setActiveId(id); const ss=await scopedStorage(); await ss.setJSON(K_SELECTED,id); }}
+            onCreate={createAssistant}
+            onRename={renameAssistant}
+            onDelete={deleteAssistant}
+            defaultCollapsed={false}
+          />
+        </div>
+
+        {/* editor */}
+        <div className="rounded-xl p-4 border space-y-4" style={{borderColor:'var(--border)', background:'var(--panel)'}}>
+          {/* model line */}
+          <div className="grid md:grid-cols-3 gap-3">
+            <div>
+              <div className="text-xs opacity-70 mb-1">Model</div>
+              <Select
+                value={active.config.model.model}
+                onChange={(v)=>patchActive(a=>({...a, config:{...a.config, model:{...a.config.model, model: v as ModelId}}}))}
+                items={[
+                  {value:'gpt-4o', label:'GPT-4o'},
+                  {value:'gpt-4o-mini', label:'GPT-4o mini'},
+                  {value:'gpt-4.1', label:'GPT-4.1'},
+                  {value:'gpt-3.5-turbo', label:'GPT-3.5 Turbo'},
+                ]}
+              />
+            </div>
+            <div>
+              <div className="text-xs opacity-70 mb-1">First Message</div>
+              <input
+                value={active.config.model.firstMessage}
+                onChange={(e)=>patchActive(a=>({...a, config:{...a.config, model:{...a.config.model, firstMessage:e.target.value}}}))}
+                placeholder="(empty = default greeting)"
+                className="w-full rounded-[12px] px-3 py-2 text-sm border bg-transparent"
+                style={{borderColor:'var(--border)', color:'var(--text)'}}
+              />
+            </div>
+            <div>
+              <div className="text-xs opacity-70 mb-1">Voice</div>
+              <Select
+                value={active.config.voice.voiceId}
+                onChange={(v)=>patchActive(a=>({...a, config:{...a.config, voice:{...a.config.voice, voiceId:v, voiceLabel: v==='alloy'?'Alloy (OpenAI)':v}}}))}
+                items={[{value:'alloy',label:'Alloy (OpenAI)'},{value:'ember',label:'Ember (OpenAI)'}]}
+              />
+            </div>
+          </div>
+
+          {/* prompt header */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 font-semibold text-sm"><Sparkles size={16}/> System Prompt</div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={()=>patchActive(a=>({...a, config:{...a.config, model:{...a.config.model, systemPrompt:''}}}))}
+                className="px-3 py-2 rounded-md border text-sm"
+                style={{borderColor:'var(--border)'}}
+              ><RefreshCw size={14}/> Reset</button>
+              <button
+                onClick={()=>setGenOpen(true)}
+                className="px-3 py-2 rounded-md border text-sm"
+                style={{borderColor:'var(--border)'}}
+              ><Sparkles size={14}/> Generate / Edit</button>
+            </div>
+          </div>
+
+          {/* prompt body */}
+          {!typing ? (
+            <textarea
+              rows={18}
+              value={active.config.model.systemPrompt || '(empty)'}
+              onChange={(e)=>patchActive(a=>({...a, config:{...a.config, model:{...a.config.model, systemPrompt:e.target.value}}}))}
+              className="w-full rounded-[14px] px-3 py-3 text-[14px] leading-6 outline-none"
+              style={{background:'var(--panel)', border:'1px solid var(--border)', fontFamily:'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace', color:'var(--text)'}}
+            />
+          ) : (
+            <div>
+              <div
+                className="w-full rounded-[14px] px-3 py-3 text-[14px] leading-6"
+                style={{background:'var(--panel)', border:'1px solid var(--border)', fontFamily:'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace', color:'var(--text)'}}
+              >
+                {(() => {
+                  const slice = (typing || []).slice(0, typed);
+                  const out: React.ReactNode[] = [];
+                  let buf = ''; let mode: Token['t'] = slice[0]?.t || 'same';
+
+                  const flush = (key:string) => {
+                    if (!buf) return;
+                    if (mode==='add') out.push(<ins key={key} style={{background:'rgba(0,255,194,.15)', textDecoration:'none', borderRadius:4, padding:'1px 2px'}}>{buf}</ins>);
+                    else if (mode==='del') out.push(<del key={key} style={{background:'rgba(255,0,0,.12)', color:'#fda4a4', borderRadius:4, padding:'1px 2px'}}>{buf}</del>);
+                    else out.push(<span key={key}>{buf}</span>);
+                    buf = '';
+                  };
+
+                  slice.forEach((tk, i) => {
+                    if (tk.t !== mode) { flush(`f-${i}`); mode = tk.t; buf = tk.ch; }
+                    else { buf += tk.ch; }
+                  });
+                  flush('tail');
+                  if (typed < (typing?.length || 0)) out.push(<span key="caret" className="animate-pulse"> ▌</span>);
+
+                  return out;
+                })()}
+              </div>
+
+              <div className="mt-3 flex items-center gap-2 justify-end">
+                <button onClick={declineTyping} className="px-3 py-2 rounded-md border text-sm" style={{borderColor:'var(--border)'}}><X size={14}/> Decline</button>
+                <button onClick={acceptTyping} className="px-3 py-2 rounded-md border text-sm" style={{borderColor:'var(--border)'}}><Check size={14}/> Accept</button>
+              </div>
+            </div>
+          )}
+
+          {/* web call */}
+          <div className="pt-2 flex items-center gap-3">
+            <WebCallButton
+              greet={active.config.model.firstMessage || 'Hello. How may I help you today?'}
+              voiceLabel={active.config.voice.voiceLabel}
+              systemPrompt={(active.config.model.systemPrompt || '').trim() || 'You are a helpful assistant.'}
+              model={active.config.model.model}
+              apiKeyId={apiKeyId}
+              fromE164={fromE164}
+              onTurn={(role, text)=>console.log(role==='assistant'?'AI:':'You:', text)}
+            />
+            <div className="text-xs opacity-70">Uses your selected OpenAI key + “From” number (badges above).</div>
+          </div>
+
+          {/* footer actions */}
+          <div className="flex items-center gap-2 justify-end pt-2">
+            <button
+              onClick={()=>navigator.clipboard.writeText(active.config.model.systemPrompt || '')}
+              className="px-3 py-2 rounded-md border text-sm" style={{borderColor:'var(--border)'}}
+            ><Copy size={14}/> Copy Prompt</button>
+            <button className="px-3 py-2 rounded-md border text-sm" style={{borderColor:'var(--border)'}} onClick={()=>alert('Publish connects your linked number to this assistant server-side.')}>
+              <Rocket size={14}/> Publish
+            </button>
+            <button onClick={()=>deleteAssistant(active.id)} className="px-3 py-2 rounded-md border text-sm" style={{borderColor:'var(--border)'}}><Trash2 size={14}/> Delete</button>
+          </div>
+        </div>
       </div>
+
+      {/* generate overlay */}
+      {genOpen && (
+        <div className="fixed inset-0 z-50 grid place-items-center p-4" style={{background:'rgba(0,0,0,.45)'}}>
+          <div className="w-full max-w-2xl rounded-2xl border" style={{background:'var(--panel)', borderColor:'var(--border)'}}>
+            <div className="px-4 py-3 flex items-center justify-between border-b" style={{borderColor:'var(--border)'}}>
+              <div className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="w-4 h-4"/> Generate / Edit Prompt</div>
+              <button onClick={()=>setGenOpen(false)} className="p-2 rounded-lg hover:opacity-80"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="p-4">
+              <input
+                value={genText}
+                onChange={(e)=>setGenText(e.target.value)}
+                placeholder="e.g., Booking assistant for dental clinic, confirm name/phone/date"
+                className="w-full rounded-[12px] px-3 py-3 text-[15px] border bg-transparent"
+                style={{borderColor:'var(--border)', color:'var(--text)'}}
+              />
+              <div className="mt-3 flex items-center justify-end gap-2">
+                <button onClick={()=>setGenOpen(false)} className="px-3 py-2 rounded-md border text-sm" style={{borderColor:'var(--border)'}}>Cancel</button>
+                <button onClick={handleGenerate} className="px-3 py-2 rounded-md border text-sm" style={{borderColor:'var(--border)'}}><Sparkles size={14}/> Generate</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* page theming similar to Improve */}
+      <style jsx global>{`
+        :root:not([data-theme="dark"]) {
+          --bg:#f7f9fb; --text:#101316; --panel:#ffffff; --border:rgba(0,0,0,.12);
+        }
+        [data-theme="dark"] {
+          --bg:#0b0c10; --text:#eef2f5; --panel:#0f1315; --border:rgba(255,255,255,.10);
+        }
+      `}</style>
     </div>
   );
 }
-
-/* ---- page ---- */
-export default function VoiceAgentPage() {
-  const { openaiKey, phoneE164 } = useSettings(); // ← imported from your API Key section
-  const [list, setList] = useState<Assistant[]>([]);
-  const [activeId, setActiveId] = useState<string>('');
-
-  // hydrate
-  useEffect(() => {
-    const l = readList();
-    setList(l);
-    if (l.length) setActiveId(l[0].id);
-  }, []);
-
-  // helpers
-  const active = useMemo(()=> list.find(a => a.id === activeId) || null, [list, activeId]);
-  const updateActive = (mut: (a: Assistant)=>Assistant) => {
-    if (!active) return;
-    const next = mut(active);
-    const newer = list.map(x => x.id === active.id ? next : x);
-    setList(newer); writeList(newer);
-  };
-
-  // create = EMPTY as requested
-  const onCreate = () => {
-    const a: Assistant = {
-      id: `agent_${Math.random().toString(36).slice(2,8)}`,
-      name: 'New Assistant',
-      folder: 'Unfiled',
-      updatedAt: Date.now(),
-      systemPrompt: '',         // ← empty
-      firstMessage: '',         // ← empty
-      model: 'gpt-4o',
-      voiceLabel: 'Alloy (OpenAI)',
-    };
-    const newer = [...list, a];
-    setList(newer); writeList(newer);
-    setActiveId(a.id);
-  };
-  const onSelect  = (id: string) => setActiveId(id);
-  const onRename  = (id: string, name: string) => {
-    const newer = list.map(a => a.id===id ? { ...a, name, updatedAt: Date.now() } : a);
-    setList(newer); writeList(newer);
-  };
-  const onDelete  = (id: string) => {
-    const newer = list.filter(a => a.id !== id);
-    setList(newer); writeList(newer);
-    if (activeId === id) setActiveId(newer[0]?.id || '');
-  };
-
-  // Generate overlay (with typing diff)
-  const [genOpen, setGenOpen] = useState(false);
-  const [genText, setGenText] = useState('');
-  const [diffTarget, setDiffTarget] = useState<{ oldText: string; newText: string } | null>(null);
-
-  function applyGenerate() {
-    if (!active) return;
-    const oldText = active.systemPrompt || '';
-    const input = (genText || '').trim();
-    if (!input) { setGenOpen(false); return; }
-
-    // quick modes:
-    const m = input.match(/^first\s*message\s*:\s*(.+)$/i);
-    if (m) {
-      updateActive(a => ({ ...a, firstMessage: m[1].trim(), updatedAt: Date.now() }));
-      setGenOpen(false); setGenText('');
-      return;
-    }
-
-    // simple improve/append rule
-    let next = oldText;
-    if (!oldText) {
-      // starting empty? make a compact base using your BASE_PROMPT
-      next = BASE_PROMPT;
-    }
-    const bullet = `- ${input.replace(/\n+/g,' ').replace(/\s{2,}/g,' ')}`;
-    if (/\[Refinements\]/i.test(next)) next = next.replace(/\[Refinements\][\s\S]*$/i, s => s + `\n${bullet}`);
-    else next = `${next}\n\n[Refinements]\n${bullet}\n`;
-
-    setDiffTarget({ oldText, newText: next });
-    setGenOpen(false);
-    setGenText('');
-  }
-
-  function acceptDiff() {
-    if (!active || !diffTarget) return;
-    updateActive(a => ({ ...a, systemPrompt: diffTarget.newText, updatedAt: Date.now() }));
-    setDiffTarget(null);
-  }
-
-  return (
-    <>
-      <Head><title>Voice Agent</title></Head>
-
-      {/* Assistant sidebar (your component) */}
-      <AssistantRail
-        assistants={list.map(({ id, name, folder, updatedAt }) => ({ id, name, folder, updatedAt }))}
-        activeId={activeId}
-        onSelect={onSelect}
-        onCreate={onCreate}
-        onRename={onRename}
-        onDelete={onDelete}
-      />
-
-      <div
-        style={{
-          minHeight:'100vh', background:'#0b0c10', color:'#eef2f5',
-          paddingTop:'calc(var(--app-header-h, 64px) + 12px)',
-          marginLeft:`calc(var(--app-sidebar-w, 248px) + var(--va-rail-w, 360px))`,
-          paddingRight:'clamp(20px, 4vw, 40px)', paddingBottom:88
-        }}
-      >
-        {!active ? (
-          <div style={{ opacity:.7, padding:24 }}>Create your first assistant.</div>
-        ) : (
-          <div className="grid grid-cols-12 gap-10" style={{ maxWidth:'min(2400px, 98vw)' }}>
-            {/* Top action row: Start call + settings status */}
-            <div className="col-span-12" style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-              <div style={{ display:'flex', gap:12 }}>
-                <WebCallButton
-                  greet={active.firstMessage || 'Hello. How may I help you today?'}
-                  voiceLabel={active.voiceLabel}
-                  systemPrompt={active.systemPrompt || BASE_PROMPT}
-                  model={active.model}
-                  onTurn={(role, text) => {
-                    // simple live transcript sink (you can store if you want)
-                    console.log(role.toUpperCase(), text);
-                  }}
-                  // patched to use the voice endpoint + send key
-                  // (make sure your WebCallButton posts to /api/va-chat with { key } – see earlier file)
-                />
-              </div>
-              <div style={{ display:'flex', gap:8, alignItems:'center', fontSize:12 }}>
-                <StatusPill ok={!!openaiKey} label={openaiKey ? 'OpenAI key loaded' : 'OpenAI key missing'} />
-                <StatusPill ok={!!phoneE164} label={phoneE164 ? `Phone ${phoneE164}` : 'Phone missing'} />
-              </div>
-            </div>
-
-            {/* Model + First message */}
-            <div className="col-span-12" style={{ ...card, borderRadius:16, padding:16, boxShadow:'0 20px 60px rgba(0,0,0,.35)' }}>
-              <div style={{ display:'grid', gap:16, gridTemplateColumns:'repeat(4, minmax(220px, 1fr))' }}>
-                <Field label="Model">
-                  <select
-                    value={active.model}
-                    onChange={(e)=> updateActive(a => ({ ...a, model: e.target.value as Assistant['model'], updatedAt: Date.now() }))}
-                    style={inp}
-                  >
-                    <option value="gpt-4o">GPT-4o</option>
-                    <option value="gpt-4o-mini">GPT-4o mini</option>
-                    <option value="gpt-4.1">GPT-4.1</option>
-                    <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
-                  </select>
-                </Field>
-                <Field label="First Message">
-                  <input
-                    value={active.firstMessage}
-                    onChange={(e)=> updateActive(a => ({ ...a, firstMessage: e.target.value, updatedAt: Date.now() }))}
-                    placeholder="(empty = default greeting)"
-                    style={inp}
-                  />
-                </Field>
-                <Field label="Voice">
-                  <input
-                    value={active.voiceLabel}
-                    onChange={(e)=> updateActive(a => ({ ...a, voiceLabel: e.target.value, updatedAt: Date.now() }))}
-                    placeholder="Alloy (OpenAI)"
-                    style={inp}
-                  />
-                </Field>
-              </div>
-
-              {/* System prompt header */}
-              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:16, marginBottom:8 }}>
-                <div style={{ fontSize:14, fontWeight:600, display:'flex', alignItems:'center', gap:8, color:ACCENT }}>
-                  <Sparkles size={16} color={ACCENT}/> System Prompt
-                </div>
-                <div style={{ display:'flex', gap:8 }}>
-                  <button onClick={()=> updateActive(a => ({ ...a, systemPrompt: BASE_PROMPT, updatedAt: Date.now() }))} style={btnGhost}>
-                    <RefreshCw size={16} color={ACCENT}/>Reset
-                  </button>
-                  <button onClick={()=> setGenOpen(true)} style={btnGreen}>
-                    <Sparkles size={16} color="#fff"/><span style={{color:'#fff'}}>Generate / Edit</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* either plain textarea or diff-typing overlay */}
-              {!diffTarget ? (
-                <textarea
-                  rows={22}
-                  value={active.systemPrompt}
-                  onChange={(e)=> updateActive(a => ({ ...a, systemPrompt: e.target.value, updatedAt: Date.now() }))}
-                  placeholder="(empty)"
-                  style={{
-                    ...inp, minHeight:420, lineHeight:'1.45', fontSize:14,
-                    fontFamily:'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace'
-                  }}
-                />
-              ) : (
-                <TypingDiff
-                  oldText={diffTarget.oldText}
-                  newText={diffTarget.newText}
-                  onAccept={acceptDiff}
-                  onDecline={()=> setDiffTarget(null)}
-                />
-              )}
-            </div>
-
-            {/* Generate overlay */}
-            {genOpen && (
-              <div style={{
-                position:'fixed', inset:0, background:'rgba(0,0,0,.45)', display:'grid', placeItems:'center', zIndex:9999, padding:16
-              }}>
-                <div style={{ width:'100%', maxWidth:640, ...card, borderRadius:14, background:'#0f1315' }}>
-                  <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'12px 14px', borderBottom:'1px solid rgba(255,255,255,.1)' }}>
-                    <div style={{ fontWeight:600, fontSize:14, display:'flex', gap:8, alignItems:'center', color:ACCENT }}>
-                      <Sparkles size={16} color={ACCENT}/>Generate / Edit Prompt
-                    </div>
-                    <button onClick={()=> setGenOpen(false)} style={{ ...btnGhost, padding:'6px 10px' }}>Close</button>
-                  </div>
-                  <div style={{ padding:14 }}>
-                    <input
-                      value={genText}
-                      onChange={(e)=> setGenText(e.target.value)}
-                      placeholder={`Examples:
-- assistant
-- collect full name, phone, date
-- [Identity] AI Sales Agent for roofers
-- first message: Hey—quick question to get you booked…`}
-                      style={{ ...inp, minHeight:48 }}
-                    />
-                    <div style={{ display:'flex', justifyContent:'flex-end', gap:8, marginTop:12 }}>
-                      <button onClick={()=> setGenOpen(false)} style={btnGhost}>Cancel</button>
-                      <button onClick={applyGenerate} style={btnGreen}><span style={{color:'#fff'}}>Generate</span></button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    </>
-  );
-}
-
-/* ---- tiny atoms ---- */
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label style={{ display:'grid', gap:6 }}>
-      <span style={{ fontSize:13, fontWeight:600 }}>{label}</span>
-      {children}
-    </label>
-  );
-}
-function StatusPill({ ok, label }:{ ok: boolean; label: string }) {
-  return (
-    <span style={{
-      fontSize:12, padding:'4px 10px', borderRadius:999,
-      border: `1px solid ${ok ? 'rgba(16,185,129,.5)' : 'rgba(239,68,68,.5)'}`,
-      background: ok ? 'rgba(16,185,129,.15)' : 'rgba(239,68,68,.15)',
-      color: ok ? '#a7f3d0' : '#fecaca'
-    }}>{label}</span>
-  );
-}
-
-const inp: React.CSSProperties = {
-  width:'100%', borderRadius:12, padding:'12px 12px', background:'rgba(255,255,255,.03)',
-  border:'1px solid rgba(255,255,255,.14)', outline:'none', color:'#eef2f5', fontSize:14,
-  boxShadow:'inset 0 1px 0 rgba(255,255,255,.06)'
-};
-const btnBase: React.CSSProperties = {
-  display:'inline-flex', alignItems:'center', gap:8, padding:'10px 14px', borderRadius:12,
-  border:'1px solid rgba(255,255,255,.14)', background:'rgba(255,255,255,.03)', color:'#eef2f5',
-  boxShadow:'0 12px 26px rgba(0,0,0,.35)', cursor:'pointer'
-};
-const btnGhost = btnBase;
-const btnGreen: React.CSSProperties = { ...btnBase, background:ACCENT, borderColor:ACCENT, boxShadow:'0 10px 24px rgba(16,185,129,.22)' };
