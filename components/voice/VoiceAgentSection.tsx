@@ -351,7 +351,42 @@ async function speakWithVoice(text: string, voiceLabel: string){
   synth.cancel();
   synth.speak(u);
 }
+// --- Real TTS switch: ElevenLabs (server) or browser synth fallback
+async function speak(
+  text: string,
+  opts: { provider: 'openai'|'elevenlabs'; voiceId: string; voiceLabel: string; userKey?: string }
+) {
+  try { window.speechSynthesis.cancel(); } catch {}
 
+  if (opts.provider === 'elevenlabs') {
+    const r = await fetch('/api/tts', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...(opts.userKey ? { 'x-11labs-key': opts.userKey } : {}),
+      },
+      body: JSON.stringify({ voiceId: opts.voiceId, text }),
+    });
+
+    if (!r.ok) {
+      await speakWithVoice(text, opts.voiceLabel);
+      return;
+    }
+
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    (audio as any).playsInline = true;
+    try {
+      await audio.play();
+    } catch {
+      await speakWithVoice(text, opts.voiceLabel);
+    }
+    return;
+  }
+
+  await speakWithVoice(text, opts.voiceLabel);
+}
 /* =============================================================================
    LOCAL PROMPT-DRIVEN AGENT (no server)
 ============================================================================= */
