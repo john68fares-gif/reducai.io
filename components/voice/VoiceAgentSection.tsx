@@ -3,6 +3,7 @@
 
 import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { scopedStorage } from '@/utils/scoped-storage';
 import {
   Search, Plus, Folder, FolderOpen, Check, Trash2, Copy, Edit3, Sparkles,
   ChevronDown, ChevronRight, FileText, Mic2, BookOpen, SlidersHorizontal,
