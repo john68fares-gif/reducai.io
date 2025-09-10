@@ -1,3 +1,4 @@
+// pages/improve.tsx
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -45,8 +46,8 @@ const clamp01 = (n:number)=>Math.max(0,Math.min(1,n));
 function mapAnyToAgent(x:any,i:number):Agent|null{
   if(!x) return null;
   const id=String(x.id??x.agentId??x.slug??`tmp_${i}_${Date.now()}`);
-  const name=String(x.name??x.title??`Agent ${i+1}`);
-  const createdAt=Number(x.createdAt??x.created_at??Date.now());
+  const name=String(x.name??x.title??x.displayName??x.botName??x.meta?.name??`Agent ${i+1}`);
+  const createdAt=Number(x.createdAt??x.created_at??x.updatedAt??x.updated_at??Date.now());
   const modelRaw=String(x.model??x.modelId??x.engine??'gpt-4o');
   const model=(MODEL_OPTIONS.some(m=>m.value===modelRaw)?modelRaw:'gpt-4o') as ModelId;
   const temperature=typeof x.temperature==='number'?x.temperature:
@@ -65,6 +66,30 @@ async function loadAgentsFromAny(store:Store):Promise<Agent[]>{
   }
   return [];
 }
+
+/* ---- NEW: builder-agent fetch/merge helpers ---- */
+function dedupeAgentsById(arr: Agent[]): Agent[] {
+  const m = new Map<string, Agent>();
+  for (const a of arr) if (!m.has(a.id)) m.set(a.id, a);
+  return [...m.values()];
+}
+function pickList(data: any): any[] {
+  if (Array.isArray(data)) return data;
+  for (const k of ['items','data','bots','rows','list']) {
+    if (Array.isArray(data?.[k])) return data[k];
+  }
+  return [];
+}
+async function fetchBuilderAgentsFromAPI(): Promise<Agent[]> {
+  try {
+    const res = await fetch('/api/chatbots', { method: 'GET' });
+    if (!res.ok) return [];
+    const raw = await res.json();
+    const list = pickList(raw);
+    return (list.map(mapAnyToAgent).filter(Boolean) as Agent[]);
+  } catch { return []; }
+}
+/* ----------------------------------------------- */
 
 function reasonFrom(refs:Refinement[]):string{
   const active=refs.filter(r=>r.enabled);
@@ -132,11 +157,21 @@ export default function ImprovePage(){
     await migrateLegacyKeysToUser();
     setStore(st);
 
+    // Load local/legacy agents
     let list=normalizeAgents(await st.getJSON<any[]>(K_AGENT_LIST,[]));
     if(!list.length) list=await loadAgentsFromAny(st);
+
+    // NEW: merge builder agents from /api/chatbots
+    const remote = await fetchBuilderAgentsFromAPI();
+    if (remote.length) {
+      list = dedupeAgentsById([...remote, ...list]);
+    }
+
+    // Seed a default if still empty
     if(!list.length){
       list=[{id:uid('agent'),name:'My First Agent',createdAt:now(),model:'gpt-4o',temperature:DEFAULT_TEMPERATURE}];
     }
+
     await st.setJSON(K_AGENT_LIST,list);
     setAgents(list);
 
@@ -368,8 +403,8 @@ export default function ImprovePage(){
           <div className="mt-4 rounded-xl p-4 border" style={{borderColor:'var(--border)',background:'var(--panel)'}}>
             <div className="flex items-center gap-2 font-semibold"><HelpCircle size={16}/> Tips</div>
             <ul className="mt-2 text-sm opacity-80 list-disc pl-5 space-y-1">
-              <li>Choose the **AI to tune** at the top — every change auto-saves to that agent.</li>
-              <li>“Remove any restrictions / Any subject is open” = no **extra** app guardrails (provider safety still applies).</li>
+              <li>Choose the <strong>AI to tune</strong> at the top — every change auto-saves to that agent.</li>
+              <li>“Remove any restrictions / Any subject is open” = no <em>extra</em> app guardrails (provider safety still applies).</li>
               <li>Use <em>Versions</em> to snapshot settings + chat for quick rollback.</li>
             </ul>
           </div>
