@@ -8,10 +8,10 @@ type SR = SpeechRecognition & { start: () => void; stop: () => void };
 export type WebCallButtonProps = {
   greet: string;
   voiceLabel: string;
-  systemPrompt: string;
-  model: string;
-  onTurn: (role: 'user'|'assistant', text: string) => void;
-  apiKey?: string; // <-- NEW: selected OpenAI key
+  systemPrompt: string;          // sent to server exactly as-is
+  model: string;                 // e.g. "gpt-4o" / "gpt-4o-mini"
+  onTurn: (role: 'user' | 'assistant', text: string) => void; // transcript sink
+  apiKey?: string;               // <-- selected OpenAI key
 };
 
 export default function WebCallButton({
@@ -20,6 +20,7 @@ export default function WebCallButton({
   const [live, setLive] = useState(false);
   const recRef = useRef<SR | null>(null);
 
+  // --- SR
   function makeRecognizer(onFinal: (t: string) => void): SR | null {
     const C: any = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
     if (!C) return null;
@@ -39,6 +40,7 @@ export default function WebCallButton({
     return r;
   }
 
+  // --- Browser TTS
   async function ensureVoicesReady(): Promise<SpeechSynthesisVoice[]> {
     const synth = window.speechSynthesis;
     let v = synth.getVoices(); if (v.length) return v;
@@ -71,12 +73,13 @@ export default function WebCallButton({
     synth.speak(u);
   }
 
+  // --- LLM call (uses selected key)
   async function askLLM(userText: string): Promise<string> {
     const r = await fetch('/api/chat', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        ...(apiKey ? { 'x-openai-key': apiKey } : {}),
+        ...(apiKey ? { 'x-openai-key': apiKey } : {}), // <— pass selected key
       },
       body: JSON.stringify({ model, system: systemPrompt, user: userText }),
     });
