@@ -1113,7 +1113,7 @@ export default function VoiceAgentSection() {
             </div>
           </Section>
 
-          <Section title="Voice" icon={<Mic2 className="w-4 h-4 icon />}>
+          <Section title="Voice" icon={<Mic2 className="w-4 h-4 icon" />}>
             <div className="grid gap-6" style={{ gridTemplateColumns:'repeat(2, minmax(360px, 1fr))' }}>
               <Field label="Provider">
                 <Select
