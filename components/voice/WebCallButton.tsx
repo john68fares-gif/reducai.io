@@ -14,8 +14,7 @@ type SavedKey = {
   provider?: 'openai' | 'elevenlabs' | 'deepgram';
 };
 
-const LS_KEYS = 'apiKeys.v1';         // where keys are stored
-const LS_SELECTED = 'apiKeys.selectedId'; // for completeness (not required here)
+const LS_KEYS = 'apiKeys.v1';
 
 export default function WebCallButton({
   greet, voiceLabel, systemPrompt, model, apiKeyId, fromE164, onTurn,
@@ -29,19 +28,22 @@ export default function WebCallButton({
   onTurn: (role:'user'|'assistant', text:string) => void;
 }) {
   const [live, setLive] = useState(false);
-  const recRef = useRef<SR | null>(null);
+  const [starting, setStarting] = useState(false);
+  const [errMsg, setErrMsg] = useState<string | null>(null);
 
-  // ---- NEW: resolve the actual secret key from the selected id (or fallbacks)
+  const recRef = useRef<SR | null>(null);
+  const interimBufRef = useRef<string>('');
+  const idleTimerRef = useRef<any>(null);
+
+  // ---- resolve the actual secret key from the selected id (or fallbacks)
   const [resolvedKey, setResolvedKey] = useState<string>('');
-  const [keyError, setKeyError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      setKeyError(null);
       let key = '';
 
-      // 1) Try to load from scoped storage by apiKeyId
+      // 1) Try scoped storage by id
       if (apiKeyId) {
         try {
           const ss = await scopedStorage();
@@ -49,49 +51,102 @@ export default function WebCallButton({
           const all = (await ss.getJSON<SavedKey[]>(LS_KEYS, [])) || [];
           const match = all.find(k => (k.provider === 'openai' || !k.provider) && k.id === apiKeyId);
           if (match?.key) key = String(match.key).trim();
-        } catch (e) {
-          // swallow – will fall back
-        }
+        } catch {}
       }
 
-      // 2) Fallback to window.__OPENAI_KEY if set elsewhere
+      // 2) Fallbacks
       if (!key && typeof window !== 'undefined' && (window as any).__OPENAI_KEY) {
         key = String((window as any).__OPENAI_KEY || '').trim();
       }
-
-      // 3) Fallback to public env key (dev/local)
       // @ts-ignore
       if (!key && typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_OPENAI_API_KEY) {
         // @ts-ignore
         key = String(process.env.NEXT_PUBLIC_OPENAI_API_KEY || '').trim();
       }
 
-      if (!cancelled) {
-        setResolvedKey(key);
-        if (!key) {
-          setKeyError('OpenAI key is missing. Select one on the Voice page (API Key dropdown).');
-        }
-      }
+      if (!cancelled) setResolvedKey(key);
     })();
     return () => { cancelled = true; };
   }, [apiKeyId]);
 
-  function makeRecognizer(onFinal:(t:string)=>void): SR | null {
+  function makeRecognizer(onFinal:(t:string)=>void, onInterim?:(t:string)=>void): SR | null {
     const C: any = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
     if (!C) return null;
-    const r: SR = new C(); r.continuous = true; r.interimResults = true; r.lang = 'en-US';
-    r.onresult = (e: SpeechRecognitionEvent) => {
-      let fin=''; for (let i=e.resultIndex;i<e.results.length;i++){ const res=e.results[i]; if(res.isFinal) fin+=res[0].transcript; }
-      if (fin.trim()) onFinal(fin.trim());
+    const r: SR = new C();
+    r.continuous = true;
+    r.interimResults = true;
+    r.lang = navigator.language || 'en-US';
+
+    r.onstart = () => {
+      setErrMsg(null);
+      setLive(true);
     };
-    (r as any)._shouldRestart = true;
-    r.onend = () => { if ((r as any)._shouldRestart) { try { r.start(); } catch {} } };
+
+    r.onerror = (e: any) => {
+      const code = e?.error || 'recognition_error';
+      const map: Record<string,string> = {
+        'no-speech': 'No speech detected. Check your microphone.',
+        'audio-capture': 'No microphone found or permission denied.',
+        'not-allowed': 'Microphone permission denied. Allow mic access and try again.',
+        'service-not-allowed': 'Speech service not allowed in this context.',
+      };
+      setErrMsg(map[code] || `Speech recognition error: ${code}`);
+    };
+
+    r.onend = () => {
+      // If we’re live because of a user session, auto-restart to keep listening
+      if (live) {
+        try { r.start(); } catch {}
+      } else {
+        setLive(false);
+      }
+    };
+
+    r.onresult = (e: SpeechRecognitionEvent) => {
+      let finalText = '';
+      let interimText = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const res = e.results[i];
+        if (res.isFinal) finalText += res[0].transcript;
+        else interimText += res[0].transcript;
+      }
+
+      // Handle final chunks immediately
+      if (finalText.trim()) {
+        interimBufRef.current = '';
+        onFinal(finalText.trim());
+        return;
+      }
+
+      // Debounce interim: if user pauses ~900ms, treat interim as final
+      if (interimText && onInterim) onInterim(interimText);
+      if (interimText.trim()) {
+        interimBufRef.current = interimText.trim();
+        if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+        idleTimerRef.current = setTimeout(() => {
+          const t = interimBufRef.current.trim();
+          if (t) {
+            interimBufRef.current = '';
+            onFinal(t);
+          }
+        }, 900);
+      }
+    };
+
     return r;
   }
 
   async function ensureVoices(): Promise<SpeechSynthesisVoice[]> {
-    const s = window.speechSynthesis; let v = s.getVoices(); if (v.length) return v;
-    await new Promise<void>(res=>{const t=setInterval(()=>{v=s.getVoices(); if(v.length){clearInterval(t);res();}},50); setTimeout(res,1200);});
+    const s = window.speechSynthesis;
+    let v = s.getVoices();
+    if (v.length) return v;
+    await new Promise<void>(res => {
+      const t = setInterval(() => {
+        v = s.getVoices();
+        if (v.length) { clearInterval(t); res(); }
+      }, 50);
+      setTimeout(() => { clearInterval(t); res(); }, 1200);
+    });
     return s.getVoices();
   }
   function pickVoice(vs:SpeechSynthesisVoice[]) {
@@ -108,7 +163,6 @@ export default function WebCallButton({
     u.voice = pickVoice(v); u.rate = 1; u.pitch = .95; s.speak(u);
   }
 
-  // ---- patched: send Authorization header with the resolved key; keep x-apikey-id for logging/back-compat
   async function ask(userText:string): Promise<string> {
     const r = await fetch('/api/voice/chat', {
       method: 'POST',
@@ -126,7 +180,6 @@ export default function WebCallButton({
     const j = await r.json();
     return (j?.text || 'Understood.').trim();
   }
-
   async function safeError(r: Response): Promise<string> {
     try {
       const t = await r.text();
@@ -142,39 +195,89 @@ export default function WebCallButton({
   }
 
   async function start() {
-    if (!resolvedKey) {
-      const msg = keyError || 'OpenAI key is missing. Add it in API Keys.';
-      onTurn('assistant', msg); await speak(msg); return;
-    }
-    onTurn('assistant', greet || 'Hello. How may I help you today?'); await speak(greet || 'Hello. How may I help you today?');
+    if (starting || live) return;      // debounce to prevent double greet
+    setStarting(true);
+    setErrMsg(null);
 
-    const rec = makeRecognizer(async (finalText) => {
-      onTurn('user', finalText);
-      try { const reply = await ask(finalText); onTurn('assistant', reply); await speak(reply); }
-      catch (e:any) { const msg = (e?.message || 'Model unavailable.'); onTurn('assistant', msg); await speak(msg); }
-    });
+    // Resolve key first
+    if (!resolvedKey) {
+      const msg = 'OpenAI key is missing. Select one on the Voice page (API Key dropdown).';
+      onTurn('assistant', msg); await speak(msg); setStarting(false); return;
+    }
+
+    // Prompt mic permission (required on Safari/iOS/Chrome HTTPS)
+    try {
+      await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      const msg = 'Microphone access was denied. Please allow mic permissions and try again.';
+      onTurn('assistant', msg); await speak(msg); setStarting(false); return;
+    }
+
+    // Greet once
+    const hello = greet || 'Hello. How may I help you today?';
+    onTurn('assistant', hello);
+    await speak(hello);
+
+    // Create recognizer
+    const rec = makeRecognizer(
+      async (finalText) => {
+        onTurn('user', finalText);
+        try {
+          const reply = await ask(finalText);
+          onTurn('assistant', reply);
+          await speak(reply);
+        } catch (e:any) {
+          const msg = (e?.message || 'Model unavailable.');
+          onTurn('assistant', msg);
+          await speak(msg);
+        }
+      },
+      // optional: track interim (you can surface it if you want)
+      undefined
+    );
 
     if (!rec) {
-      const msg='Speech recognition not available in this browser.'; onTurn('assistant', msg); await speak(msg); return;
+      const msg='Speech recognition is not available in this browser.';
+      onTurn('assistant', msg); await speak(msg); setStarting(false); return;
     }
-    recRef.current = rec; try { rec.start(); } catch {}
+
+    recRef.current = rec;
+
+    try { rec.start(); } catch (e:any) {
+      setErrMsg('Could not start recognition.');
+      setStarting(false);
+      return;
+    }
+
     setLive(true);
+    setStarting(false);
   }
+
   function stop(){
-    const r = recRef.current; if (r) { (r as any)._shouldRestart=false; try { r.stop(); } catch {} }
-    recRef.current = null; try { window.speechSynthesis.cancel(); } catch {}
     setLive(false);
+    const r = recRef.current;
+    if (r) { try { r.stop(); } catch {} }
+    recRef.current = null;
+    interimBufRef.current = '';
+    if (idleTimerRef.current) { clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
+    try { window.speechSynthesis.cancel(); } catch {}
   }
 
   return !live ? (
     <div className="inline-flex items-center gap-2">
-      <button onClick={start} className="btn btn--green px-3 py-2 rounded-md border" style={{borderColor:'var(--border)'}}>
-        <PhoneCall className="w-4 h-4 text-white"/><span className="text-white">Start Web Call</span>
+      <button
+        onClick={start}
+        disabled={starting}
+        className="btn btn--green px-3 py-2 rounded-md border"
+        style={{ borderColor: 'var(--border)' }}
+      >
+        <PhoneCall className="w-4 h-4 text-white"/>
+        <span className="text-white">{starting ? 'Starting…' : 'Start Web Call'}</span>
       </button>
-      {!resolvedKey && (
+      {(!resolvedKey || errMsg) && (
         <span className="text-xs px-2 py-1 rounded-lg"
               style={{ background:'rgba(220,38,38,.12)', border:'1px solid rgba(220,38,38,.35)', color:'#fca5a5' }}>
-          OpenAI key not loaded
+          {errMsg || 'OpenAI key not loaded'}
         </span>
       )}
     </div>
