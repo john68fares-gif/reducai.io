@@ -8,6 +8,7 @@ import {
   RefreshCw, Search
 } from 'lucide-react';
 import { scopedStorage, migrateLegacyKeysToUser } from '@/utils/scoped-storage';
+import { supabase } from '@/lib/supabase-client';
 
 /* =============================================================================
    CONSTANTS / KEYS
@@ -229,14 +230,14 @@ export default function ImprovePage(){
   async function hydrateFromAgent(st:Store, id:string, list:Agent[]=agents){
     const a=list.find(x=>x.id===id); if(!a) return;
 
-    // 1) Pull real agent server state
+    // 1) Pull real agent server state (if route exists; otherwise ignore)
     let serverBot:any = null;
     try {
       const res = await fetch(`/api/chatbots/${id}`, { method:'GET', cache:'no-store' });
       if (res.ok) serverBot = await res.json();
     } catch {}
 
-    // 2) Load any local Improve state (history, versions, refinements), prefer server meta
+    // 2) Load Improve-local state; prefer server meta where available
     let base:AgentState=await st.getJSON<AgentState|null>(K_IMPROVE_STATE+id,null as any) ?? {
       model:a.model, temperature:a.temperature ?? DEFAULT_TEMPERATURE,
       refinements:[], history:[{id:uid('sys'),role:'system',content:'This is the Improve panel. Your agent will reply based on the active refinements.',createdAt:now()}],
@@ -246,7 +247,6 @@ export default function ImprovePage(){
     if (serverBot) {
       if (serverBot.model) base.model = serverBot.model;
       if (typeof serverBot.temperature === 'number') base.temperature = serverBot.temperature;
-      // If desired, map serverBot.prompt into refinements here.
     }
 
     if(!MODEL_OPTIONS.some(m=>m.value===base.model)) base.model='gpt-4o';
@@ -254,7 +254,7 @@ export default function ImprovePage(){
     await st.setJSON(K_IMPROVE_STATE+id,base);
   }
 
-  /* ---------- persist: debounced PATCH real agent ---------- */
+  /* ---------- persist: debounced SAVE to existing agent via /api/chatbots/save ---------- */
   useEffect(() => {
     if (!store || !agentId || !state) return;
     let to: any;
@@ -262,19 +262,28 @@ export default function ImprovePage(){
     async function run() {
       setIsSaving(true);
       try {
-        // 1) Patch real agent (no create)
-        await fetch(`/api/chatbots/${agentId}`, {
-          method: 'PATCH',
+        // Get current user (for required userId in /api/chatbots/save)
+        const { data: { user } } = await supabase.auth.getUser();
+        const selected = agents.find(a => a.id === agentId);
+        if (!user?.id || !selected) return;
+
+        await fetch('/api/chatbots/save', {
+          method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            userId: user.id,
+            assistantId: agentId,
+            name: selected.name,
             model: state.model,
-            temperature: state.temperature,
-            // If you want refinements to impact server prompt, map them here:
-            // prompt: buildPromptFromRefinements(state.refinements, existingPrompt)
+            // optional extras your saver accepts:
+            language: 'English',
+            industry: null,
+            prompt: '',       // map refinements to prompt if you want
+            appearance: null,
           })
         });
 
-        // 2) Keep local meta + list in sync for UI responsiveness
+        // Keep local meta + list in sync for UI responsiveness
         const meta:AgentMeta={model:state.model,temperature:state.temperature,refinements:state.refinements,updatedAt:now()};
         await store.setJSON(K_AGENT_META_PREFIX+agentId,meta);
         const latest=normalizeAgents(await store.getJSON<any[]>(K_AGENT_LIST,[]));
@@ -288,7 +297,7 @@ export default function ImprovePage(){
 
     to = setTimeout(run, 500); // debounce
     return () => clearTimeout(to);
-  }, [store, agentId, state?.model, state?.temperature /* refinements remain local unless mapped */]);
+  }, [store, agentId, state?.model, state?.temperature, agents]);
 
   useEffect(()=>{ if(scrollRef.current) scrollRef.current.scrollTop=scrollRef.current.scrollHeight; },[state?.history.length,isSending]);
 
@@ -714,7 +723,6 @@ function QuickChip({icon,label,onClick}:{icon?:React.ReactNode;label:string;onCl
 
 function copyLast(){
   try{
-    const sel = document.querySelector('.'+SCOPE+' [data-last-assistant]') as HTMLElement | null;
-    // (optioneel: je kunt in de map van berichten data-last-assistant toevoegen)
+    // placeholder for copying last assistant message if you add a data-last-assistant hook
   }catch{}
 }
