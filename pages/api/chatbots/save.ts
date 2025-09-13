@@ -17,7 +17,9 @@ const supabase = createClient(
 );
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Method not allowed' });
+  if (req.method !== 'POST') {
+    return res.status(405).json({ ok: false, error: 'Method not allowed' });
+  }
 
   try {
     const {
@@ -31,26 +33,41 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       appearance,
     } = req.body || {};
 
-    if (!userId) return res.status(400).json({ ok: false, error: 'Missing userId' });
-    if (!assistantId) return res.status(400).json({ ok: false, error: 'Missing assistantId' });
-    if (!name) return res.status(400).json({ ok: false, error: 'Missing name' });
+    if (!userId)       return res.status(400).json({ ok: false, error: 'Missing userId' });
+    if (!assistantId)  return res.status(400).json({ ok: false, error: 'Missing assistantId' });
+    if (!name)         return res.status(400).json({ ok: false, error: 'Missing name' });
 
     const payload = {
       model: model || 'gpt-4o-mini',
-      industry: industry || null,
+      industry: industry ?? null,
       language: language || 'English',
-      prompt: prompt || '',
-      appearance: appearance || null,
+      prompt: typeof prompt === 'string' ? prompt : (prompt ?? ''),
+      appearance: appearance ?? null,
     };
+
+    // ---- UPDATE ONLY (no insert): require an existing row for this user+assistant ----
+    const { data: existing, error: findErr } = await supabase
+      .from('chatbots')
+      .select('id')
+      .eq('assistant_id', String(assistantId))
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (findErr) throw findErr;
+    if (!existing) {
+      return res.status(404).json({ ok: false, error: 'Chatbot not found for this user/assistantId' });
+    }
 
     const { data, error } = await supabase
       .from('chatbots')
-      .insert({
-        assistant_id: String(assistantId),
-        user_id: userId,
+      .update({
         name: String(name),
         payload,
+        // if you have an updated_at column handled by trigger, you can omit it
+        // updated_at: new Date().toISOString(),
       })
+      .eq('assistant_id', String(assistantId))
+      .eq('user_id', userId)
       .select('*')
       .single();
 
