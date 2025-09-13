@@ -11,6 +11,13 @@ import Sidebar from "@/components/ui/Sidebar";
 import { ThemeProvider } from "@/components/providers/ThemeProvider";
 import GlobalRouteLoader from "@/components/ui/GlobalRouteLoader";
 
+// ✅ ADDED: self-hosted Google Font (no third-party requests)
+import { Inter } from "next/font/google";
+const inter = Inter({
+  subsets: ["latin"],
+  weight: ["400", "600", "700"],
+});
+
 const PUBLIC_ROUTES = ["/", "/auth", "/auth/callback"];
 
 /** Section titles (used in the top rail) */
@@ -100,87 +107,93 @@ export default function App({ Component, pageProps }: AppProps) {
 
   return (
     <ThemeProvider>
-      <Head>
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>Reduc AI</title>
-      </Head>
+      {/* ✅ ADDED: apply Inter font to entire app with one wrapper */}
+      <div className={inter.className}>
+        <Head>
+          <meta name="viewport" content="width=device-width, initial-scale=1" />
+          <title>Reduc AI</title>
+        </Head>
 
-      <GlobalRouteLoader />
+        <GlobalRouteLoader />
 
-      {isPublic ? (
-        <div style={{ minHeight: "100vh", background: "var(--bg)", color: "var(--text)" }}>
-          <Component {...pageProps} />
-        </div>
-      ) : checking ? (
-        <div className="min-h-screen grid place-items-center" style={{ background: "var(--bg)", color: "var(--text)" }}>
-          <div className="flex items-center gap-3">
-            <span
-              className="w-6 h-6 rounded-full border-2 animate-spin"
-              style={{
-                borderColor: "color-mix(in oklab, var(--text) 40%, transparent)",
-                borderTopColor: "var(--brand)",
-              }}
-            />
-            <span>Checking session…</span>
+        {isPublic ? (
+          <div style={{ minHeight: "100vh", background: "var(--bg)", color: "var(--text)" }}>
+            <Component {...pageProps} />
           </div>
-        </div>
-      ) : !authed ? null : (
-        <div style={{ minHeight: "100vh", background: "var(--bg)", color: "var(--text)" }}>
-          {/* Layout grid: sidebar + content */}
-          <div className="min-h-screen grid" style={{ gridTemplateColumns: "var(--sidebar-w,260px) 1fr" }}>
-            <aside className="sidebar">
-              <Sidebar />
-            </aside>
-
-            <div className="min-w-0 relative">
-              {/* ===== TOP RAIL (fixed, title only) ===== */}
-              <div
-                className="z-40 font-movatif"
+        ) : checking ? (
+          <div
+            className="min-h-screen grid place-items-center"
+            style={{ background: "var(--bg)", color: "var(--text)" }}
+          >
+            <div className="flex items-center gap-3">
+              <span
+                className="w-6 h-6 rounded-full border-2 animate-spin"
                 style={{
-                  position: "fixed",
-                  top: 0,
-                  left: "var(--sidebar-w, 260px)",
-                  width: "calc(100% - var(--sidebar-w,260px))",
-                  height: RAIL_H,
-                  background: "var(--card)",       // match card surface
-                  borderBottom: "1px solid var(--border)",
-                  boxShadow: "var(--shadow-card)", // same depth as cards
+                  borderColor: "color-mix(in oklab, var(--text) 40%, transparent)",
+                  borderTopColor: "var(--brand)",
                 }}
-              >
-                {/* subtle accent glow */}
+              />
+              <span>Checking session…</span>
+            </div>
+          </div>
+        ) : !authed ? null : (
+          <div style={{ minHeight: "100vh", background: "var(--bg)", color: "var(--text)" }}>
+            {/* Layout grid: sidebar + content */}
+            <div className="min-h-screen grid" style={{ gridTemplateColumns: "var(--sidebar-w,260px) 1fr" }}>
+              <aside className="sidebar">
+                <Sidebar />
+              </aside>
+
+              <div className="min-w-0 relative">
+                {/* ===== TOP RAIL (fixed, title only) ===== */}
                 <div
-                  aria-hidden
-                  className="pointer-events-none absolute -top-[36%] -left-[22%] w-[60%] h-[120%] rounded-full"
+                  className="z-40 font-movatif"
                   style={{
-                    background: `radial-gradient(circle, color-mix(in oklab, ${accent} 14%, transparent) 0%, transparent 70%)`,
-                    filter: "blur(40px)",
+                    position: "fixed",
+                    top: 0,
+                    left: "var(--sidebar-w, 260px)",
+                    width: "calc(100% - var(--sidebar-w,260px))",
+                    height: RAIL_H,
+                    background: "var(--card)",       // match card surface
+                    borderBottom: "1px solid var(--border)",
+                    boxShadow: "var(--shadow-card)", // same depth as cards
                   }}
-                />
-                {/* Title only, thinner font, centered vertically with extra height */}
-                <div className="relative h-full flex items-center px-6">
-                  <div className="min-w-0">
-                    <div
-                      className="text-[24px] leading-tight font-medium tracking-tight truncate"
-                      style={{ color: "var(--text)", maxWidth: "min(860px, 100%)" }}
-                      title={sectionTitle}
-                    >
-                      {sectionTitle}
+                >
+                  {/* subtle accent glow */}
+                  <div
+                    aria-hidden
+                    className="pointer-events-none absolute -top-[36%] -left-[22%] w-[60%] h-[120%] rounded-full"
+                    style={{
+                      background: `radial-gradient(circle, color-mix(in oklab, ${accent} 14%, transparent) 0%, transparent 70%)`,
+                      filter: "blur(40px)",
+                    }}
+                  />
+                  {/* Title only, thinner font, centered vertically with extra height */}
+                  <div className="relative h-full flex items-center px-6">
+                    <div className="min-w-0">
+                      <div
+                        className="text-[24px] leading-tight font-medium tracking-tight truncate"
+                        style={{ color: "var(--text)", maxWidth: "min(860px, 100%)" }}
+                        title={sectionTitle}
+                      >
+                        {sectionTitle}
+                      </div>
                     </div>
                   </div>
                 </div>
+
+                {/* spacer so page content sits below the fixed rail */}
+                <div style={{ height: RAIL_H }} />
+
+                {/* page content */}
+                <main className="min-w-0 px-6 lg:px-10 py-8">
+                  <Component {...pageProps} />
+                </main>
               </div>
-
-              {/* spacer so page content sits below the fixed rail */}
-              <div style={{ height: RAIL_H }} />
-
-              {/* page content */}
-              <main className="min-w-0 px-6 lg:px-10 py-8">
-                <Component {...pageProps} />
-              </main>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </ThemeProvider>
   );
 }
