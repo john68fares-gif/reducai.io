@@ -8,7 +8,6 @@ import {
   RefreshCw, Search
 } from 'lucide-react';
 import { scopedStorage, migrateLegacyKeysToUser } from '@/utils/scoped-storage';
-import { supabase } from '@/lib/supabase-client';
 
 /* =============================================================================
    CONSTANTS / KEYS
@@ -207,19 +206,19 @@ export default function ImprovePage(){
     await migrateLegacyKeysToUser();
     setStore(st);
 
-    // Local/legacy
+    // 1) Local/legacy
     let list=normalizeAgents(await st.getJSON<any[]>(K_AGENT_LIST,[]));
     if(!list.length) list=await loadAgentsFromAny(st);
 
-    // Merge builder agents from API
+    // 2) Merge builder agents from API if beschikbaar (anders leeg)
     const remote = await fetchBuilderAgentsFromAPI();
     if (remote.length) list = dedupeAgentsById([...remote, ...list]);
 
-    // No seeding here — Improve must never create agents
+    // 3) Geen seeding — Improve mag nooit een agent aanmaken
     await st.setJSON(K_AGENT_LIST,list);
     setAgents(list);
 
-    // If no agents at all → user must go to Builder
+    // 4) Als er geen agents zijn → lege staat
     if (list.length === 0) return;
 
     const savedId=await st.getJSON<string|null>(K_SELECTED_AGENT_ID,null as any);
@@ -230,23 +229,18 @@ export default function ImprovePage(){
   async function hydrateFromAgent(st:Store, id:string, list:Agent[]=agents){
     const a=list.find(x=>x.id===id); if(!a) return;
 
-    // 1) Pull real agent server state (if route exists; otherwise ignore)
-    let serverBot:any = null;
-    try {
-      const res = await fetch(`/api/chatbots/${id}`, { method:'GET', cache:'no-store' });
-      if (res.ok) serverBot = await res.json();
-    } catch {}
-
-    // 2) Load Improve-local state; prefer server meta where available
+    // Alleen lokale Improve-state + eventueel eerder opgeslagen meta
     let base:AgentState=await st.getJSON<AgentState|null>(K_IMPROVE_STATE+id,null as any) ?? {
       model:a.model, temperature:a.temperature ?? DEFAULT_TEMPERATURE,
       refinements:[], history:[{id:uid('sys'),role:'system',content:'This is the Improve panel. Your agent will reply based on the active refinements.',createdAt:now()}],
       versions:[], undo:[], redo:[]
     };
 
-    if (serverBot) {
-      if (serverBot.model) base.model = serverBot.model;
-      if (typeof serverBot.temperature === 'number') base.temperature = serverBot.temperature;
+    const meta=await st.getJSON<AgentMeta|null>(K_AGENT_META_PREFIX+id,null as any);
+    if(meta){
+      base.model = meta.model;
+      base.temperature = meta.temperature;
+      base.refinements = meta.refinements ?? base.refinements;
     }
 
     if(!MODEL_OPTIONS.some(m=>m.value===base.model)) base.model='gpt-4o';
@@ -254,50 +248,50 @@ export default function ImprovePage(){
     await st.setJSON(K_IMPROVE_STATE+id,base);
   }
 
-  /* ---------- persist: debounced SAVE to existing agent via /api/chatbots/save ---------- */
+  /* ---------- persist chat/history panel state ---------- */
+  useEffect(()=>{ if(!store||!agentId||!state) return; store.setJSON(K_IMPROVE_STATE+agentId,state); },[store,agentId,state]);
+
+  /* ---------- persist: update existing agent in local + scoped storage (no API) ---------- */
   useEffect(() => {
     if (!store || !agentId || !state) return;
     let to: any;
 
-    async function run() {
+    async function saveToStores() {
       setIsSaving(true);
       try {
-        // Get current user (for required userId in /api/chatbots/save)
-        const { data: { user } } = await supabase.auth.getUser();
-        const selected = agents.find(a => a.id === agentId);
-        if (!user?.id || !selected) return;
+        // 1) Pak de meest recente lijst (scoped)
+        const latest = normalizeAgents(await store.getJSON<any[]>(K_AGENT_LIST, []));
+        // 2) Fallback/legacy: ook 'chatbots' (veel views lezen die nog)
+        let legacy = normalizeAgents(await store.getJSON<any[]>('chatbots', []));
 
-        await fetch('/api/chatbots/save', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userId: user.id,
-            assistantId: agentId,
-            name: selected.name,
-            model: state.model,
-            // optional extras your saver accepts:
-            language: 'English',
-            industry: null,
-            prompt: '',       // map refinements to prompt if you want
-            appearance: null,
-          })
-        });
+        // 3) Update alléén de geselecteerde agent (bestaande entry, geen nieuwe!)
+        const updateOne = (arr: Agent[]) =>
+          arr.map(a =>
+            a.id === agentId
+              ? { ...a, model: state.model, temperature: state.temperature }
+              : a
+          );
 
-        // Keep local meta + list in sync for UI responsiveness
-        const meta:AgentMeta={model:state.model,temperature:state.temperature,refinements:state.refinements,updatedAt:now()};
-        await store.setJSON(K_AGENT_META_PREFIX+agentId,meta);
-        const latest=normalizeAgents(await store.getJSON<any[]>(K_AGENT_LIST,[]));
-        const next=latest.map(a=>a.id===agentId?{...a,model:state.model,temperature:state.temperature}:a);
-        await store.setJSON(K_AGENT_LIST,next);
-        setAgents(next);
+        const nextScoped = updateOne(latest);
+        const nextLegacy = legacy.length ? updateOne(legacy) : nextScoped;
+
+        // 4) Schrijf terug naar beide keys
+        await store.setJSON(K_AGENT_LIST, nextScoped);
+        await store.setJSON('chatbots', nextLegacy);
+
+        // 5) Broadcast zodat andere tabs/pagina’s refreshen
+        try { window.dispatchEvent(new Event('builds:updated')); } catch {}
+
+        // 6) Lokale UI in sync
+        setAgents(nextScoped);
       } finally {
         setIsSaving(false);
       }
     }
 
-    to = setTimeout(run, 500); // debounce
+    to = setTimeout(saveToStores, 500); // debounce zodat slider/model wissel niet spamt
     return () => clearTimeout(to);
-  }, [store, agentId, state?.model, state?.temperature, agents]);
+  }, [store, agentId, state?.model, state?.temperature]);
 
   useEffect(()=>{ if(scrollRef.current) scrollRef.current.scrollTop=scrollRef.current.scrollHeight; },[state?.history.length,isSending]);
 
@@ -331,8 +325,12 @@ export default function ImprovePage(){
     if(!store) return;
     try{
       setIsRefreshing(true);
+      // Probeer te syncen met eventuele serverlijst; anders herlaad lokale lijst
       const remote = await fetchBuilderAgentsFromAPI();
-      let merged = dedupeAgentsById([...remote, ...agents]);
+      let merged = remote.length
+        ? dedupeAgentsById([...remote, ...agents])
+        : normalizeAgents(await store.getJSON<any[]>(K_AGENT_LIST, []));
+
       await store.setJSON(K_AGENT_LIST, merged);
       setAgents(merged);
 
@@ -723,6 +721,6 @@ function QuickChip({icon,label,onClick}:{icon?:React.ReactNode;label:string;onCl
 
 function copyLast(){
   try{
-    // placeholder for copying last assistant message if you add a data-last-assistant hook
+    // optional: add a [data-last-assistant] hook if you want to implement this
   }catch{}
 }
