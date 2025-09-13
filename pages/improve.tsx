@@ -125,7 +125,7 @@ function pickList(data: any): any[] {
 
 async function fetchBuilderAgentsFromAPI(): Promise<Agent[]> {
   try {
-    const res = await fetch('/api/chatbots', { method: 'GET' });
+    const res = await fetch('/api/chatbots', { method: 'GET', cache: 'no-store' });
     if (!res.ok) return [];
     const raw = await res.json();
     const list = pickList(raw);
@@ -141,7 +141,7 @@ function reasonFrom(refs:Refinement[]):string{
   return `Following your active refinements: ${active.slice(0,3).map(r=>r.text).join('; ')}.`;
 }
 
-/** Compose a system prompt from builder data + active refinements. */
+/** Compose a system prompt from builder data + active refinements (local only). */
 async function composeSystemForAgent(store:Store, agent:Agent, refinements:Refinement[]){
   const wantsProviderOnly = refinements.some(r=>r.enabled && /remove (any )?restrictions|no restrictions|uncensored|no filter|any subject/i.test(r.text));
   const [sys, profile, builder] = await Promise.all([
@@ -210,51 +210,85 @@ export default function ImprovePage(){
     let list=normalizeAgents(await st.getJSON<any[]>(K_AGENT_LIST,[]));
     if(!list.length) list=await loadAgentsFromAny(st);
 
-    // Merge builder agents
+    // Merge builder agents from API
     const remote = await fetchBuilderAgentsFromAPI();
     if (remote.length) list = dedupeAgentsById([...remote, ...list]);
 
-    // Seed if empty
-    if(!list.length){
-      list=[{id:uid('agent'),name:'My First Agent',createdAt:now(),model:'gpt-4o',temperature:DEFAULT_TEMPERATURE}];
-    }
-
+    // No seeding here — Improve must never create agents
     await st.setJSON(K_AGENT_LIST,list);
     setAgents(list);
+
+    // If no agents at all → user must go to Builder
+    if (list.length === 0) return;
 
     const savedId=await st.getJSON<string|null>(K_SELECTED_AGENT_ID,null as any);
     const sel=list.find(a=>a.id===savedId) ?? [...list].sort((a,b)=>b.createdAt-a.createdAt)[0];
     if(sel){ setAgentId(sel.id); await hydrateFromAgent(st,sel.id,list); }
   })();},[]);
 
-  async function hydrateFromAgent(st:Store,id:string,list:Agent[]=agents){
+  async function hydrateFromAgent(st:Store, id:string, list:Agent[]=agents){
     const a=list.find(x=>x.id===id); if(!a) return;
+
+    // 1) Pull real agent server state
+    let serverBot:any = null;
+    try {
+      const res = await fetch(`/api/chatbots/${id}`, { method:'GET', cache:'no-store' });
+      if (res.ok) serverBot = await res.json();
+    } catch {}
+
+    // 2) Load any local Improve state (history, versions, refinements), prefer server meta
     let base:AgentState=await st.getJSON<AgentState|null>(K_IMPROVE_STATE+id,null as any) ?? {
       model:a.model, temperature:a.temperature ?? DEFAULT_TEMPERATURE,
       refinements:[], history:[{id:uid('sys'),role:'system',content:'This is the Improve panel. Your agent will reply based on the active refinements.',createdAt:now()}],
       versions:[], undo:[], redo:[]
     };
-    const meta=await st.getJSON<AgentMeta|null>(K_AGENT_META_PREFIX+id,null as any);
-    if(meta){ base.model=meta.model; base.temperature=meta.temperature; base.refinements=meta.refinements ?? base.refinements; }
+
+    if (serverBot) {
+      if (serverBot.model) base.model = serverBot.model;
+      if (typeof serverBot.temperature === 'number') base.temperature = serverBot.temperature;
+      // If desired, map serverBot.prompt into refinements here.
+    }
+
     if(!MODEL_OPTIONS.some(m=>m.value===base.model)) base.model='gpt-4o';
     setState(base);
     await st.setJSON(K_IMPROVE_STATE+id,base);
   }
 
-  /* ---------- persist ---------- */
-  useEffect(()=>{ if(!store||!agentId||!state) return; store.setJSON(K_IMPROVE_STATE+agentId,state); },[store,agentId,state]);
+  /* ---------- persist: debounced PATCH real agent ---------- */
+  useEffect(() => {
+    if (!store || !agentId || !state) return;
+    let to: any;
 
-  // keep agent meta + list in sync
-  useEffect(()=>{ if(!store||!agentId||!state) return; (async()=>{
-    setIsSaving(true);
-    const meta:AgentMeta={model:state.model,temperature:state.temperature,refinements:state.refinements,updatedAt:now()};
-    await store.setJSON(K_AGENT_META_PREFIX+agentId,meta);
-    const latest=normalizeAgents(await store.getJSON<any[]>(K_AGENT_LIST,[]));
-    const next=latest.map(a=>a.id===agentId?{...a,model:state.model,temperature:state.temperature}:a);
-    await store.setJSON(K_AGENT_LIST,next);
-    setAgents(next);
-    setIsSaving(false);
-  })(); },[store,agentId,state?.model,state?.temperature,JSON.stringify(state?.refinements||[])]);
+    async function run() {
+      setIsSaving(true);
+      try {
+        // 1) Patch real agent (no create)
+        await fetch(`/api/chatbots/${agentId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: state.model,
+            temperature: state.temperature,
+            // If you want refinements to impact server prompt, map them here:
+            // prompt: buildPromptFromRefinements(state.refinements, existingPrompt)
+          })
+        });
+
+        // 2) Keep local meta + list in sync for UI responsiveness
+        const meta:AgentMeta={model:state.model,temperature:state.temperature,refinements:state.refinements,updatedAt:now()};
+        await store.setJSON(K_AGENT_META_PREFIX+agentId,meta);
+        const latest=normalizeAgents(await store.getJSON<any[]>(K_AGENT_LIST,[]));
+        const next=latest.map(a=>a.id===agentId?{...a,model:state.model,temperature:state.temperature}:a);
+        await store.setJSON(K_AGENT_LIST,next);
+        setAgents(next);
+      } finally {
+        setIsSaving(false);
+      }
+    }
+
+    to = setTimeout(run, 500); // debounce
+    return () => clearTimeout(to);
+  }, [store, agentId, state?.model, state?.temperature /* refinements remain local unless mapped */]);
 
   useEffect(()=>{ if(scrollRef.current) scrollRef.current.scrollTop=scrollRef.current.scrollHeight; },[state?.history.length,isSending]);
 
@@ -279,7 +313,9 @@ export default function ImprovePage(){
   async function selectAgent(id:string){
     if(!store) return;
     const a=agents.find(x=>x.id===id); if(!a) return;
-    await store.setJSON(K_SELECTED_AGENT_ID,id); setAgentId(id); await hydrateFromAgent(store,id);
+    await store.setJSON(K_SELECTED_AGENT_ID,id);
+    setAgentId(id);
+    await hydrateFromAgent(store,id);
   }
 
   async function refreshAgents(){
@@ -287,16 +323,15 @@ export default function ImprovePage(){
     try{
       setIsRefreshing(true);
       const remote = await fetchBuilderAgentsFromAPI();
-      if(remote.length){
-        const merged = dedupeAgentsById([...remote, ...agents]);
-        await store.setJSON(K_AGENT_LIST, merged);
-        setAgents(merged);
-        if(merged.length && !merged.find(a=>a.id===agentId)){
-          const pick = merged[0];
-          await store.setJSON(K_SELECTED_AGENT_ID, pick.id);
-          setAgentId(pick.id);
-          await hydrateFromAgent(store, pick.id, merged);
-        }
+      let merged = dedupeAgentsById([...remote, ...agents]);
+      await store.setJSON(K_AGENT_LIST, merged);
+      setAgents(merged);
+
+      if(merged.length && agentId && !merged.find(a=>a.id===agentId)){
+        const pick = merged[0];
+        await store.setJSON(K_SELECTED_AGENT_ID, pick.id);
+        setAgentId(pick.id);
+        await hydrateFromAgent(store, pick.id, merged);
       }
     } finally {
       setIsRefreshing(false);
@@ -344,6 +379,19 @@ export default function ImprovePage(){
 
   const selectedAgent=useMemo(()=>agents.find(a=>a.id===agentId)??null,[agents,agentId]);
 
+  // EMPTY STATE: geen agents → naar Builder
+  if(agents.length === 0){
+    return (
+      <div className="min-h-screen flex items-center justify-center font-sans" style={{background:'var(--bg)',color:'var(--text)'}}>
+        <div className="text-center space-y-3">
+          <div className="text-lg font-semibold">No agents yet</div>
+          <div className="opacity-70 text-sm">Create an agent in the Builder first, then come back to Improve.</div>
+          <a href="/builder" className="inline-block px-4 py-2 rounded-md border" style={{borderColor:'var(--border)'}}>Go to Builder</a>
+        </div>
+      </div>
+    );
+  }
+
   if(!state||!selectedAgent){
     return (<div className="min-h-screen flex items-center justify-center font-sans" style={{background:'var(--bg)',color:'var(--text)'}}>
       <div className="opacity-80 flex items-center gap-3"><Loader2 className="animate-spin"/>&nbsp;Loading Improve…</div>
@@ -377,7 +425,7 @@ export default function ImprovePage(){
             <button onClick={undo} className="px-2 py-1 rounded-md border" style={{borderColor:'var(--border)'}}><Undo2 size={16}/></button>
             <button onClick={redo} className="px-2 py-1 rounded-md border" style={{borderColor:'var(--border)'}}><Redo2 size={16}/></button>
             <button onClick={()=>setShowSettings(v=>!v)} className="px-2 py-1 rounded-md flex items-center gap-2 border" style={{borderColor:'var(--border)'}}>
-              <Settings2 size={16}/> Settings {showSettings ? <ChevronUp size={16}/> : <ChevronDown size={16}/>}
+              <Settings2 size={16}/> Settings {showSettings ? <ChevronUp size={16}/> : <ChevronDown size={16}/> }
             </button>
           </div>
         </div>
@@ -662,4 +710,11 @@ function QuickChip({icon,label,onClick}:{icon?:React.ReactNode;label:string;onCl
       {icon}{label}
     </button>
   );
+}
+
+function copyLast(){
+  try{
+    const sel = document.querySelector('.'+SCOPE+' [data-last-assistant]') as HTMLElement | null;
+    // (optioneel: je kunt in de map van berichten data-last-assistant toevoegen)
+  }catch{}
 }
