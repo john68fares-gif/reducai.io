@@ -9,9 +9,7 @@ import {
 } from 'lucide-react';
 import { scopedStorage } from '@/utils/scoped-storage';
 
-/* =============================================================================
-   Shared look (matches pages/api-keys.tsx)
-============================================================================= */
+/* ───────────────────────────  look & feel (match API Keys) ─────────────────────────── */
 const FRAME: React.CSSProperties = {
   background: 'var(--frame-bg, var(--panel))',
   border: '1px solid var(--border)',
@@ -27,9 +25,7 @@ const CARD: React.CSSProperties = {
 const BTN_GREEN = '#10b981';
 const BTN_GREEN_HOVER = '#0ea473';
 
-/* =============================================================================
-   Types / storage shapes
-============================================================================= */
+/* ───────────────────────────────────── types ───────────────────────────────────── */
 type Provider = 'openai';
 type ModelId = 'gpt-4o' | 'gpt-4o-mini' | 'gpt-4.1' | 'gpt-3.5-turbo';
 type Assistant = {
@@ -55,13 +51,11 @@ const CLOUD_CHATBOTS = 'chatbots.v1';
 const LS_KEYS = 'apiKeys.v1';
 const LS_SELECTED = 'apiKeys.selectedId';
 
+/* ────────────────────────────── helpers / normalizers ────────────────────────────── */
 const normalizeAssistant = (a: any): Assistant => ({
   id: String(a?.assistantId || a?.id || (typeof crypto !== 'undefined' ? crypto.randomUUID() : Date.now())),
   name: String(a?.name || 'Untitled Assistant'),
-  updatedAt:
-    Number(a?.updatedAt) ||
-    Date.parse(a?.updatedAt || a?.createdAt || '') ||
-    Date.now(),
+  updatedAt: Number(a?.updatedAt) || Date.now(),
   config: {
     model: {
       provider: (a?.provider as Provider) || 'openai',
@@ -74,65 +68,8 @@ const normalizeAssistant = (a: any): Assistant => ({
   },
 });
 const sortNewest = (arr: Assistant[]) => arr.slice().sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-const mergeNewest = (a: Assistant[], b: Assistant[]) => {
-  const map = new Map<string, Assistant>();
-  const put = (x: Assistant) => {
-    const id = x.id;
-    const old = map.get(id);
-    if (!old || x.updatedAt > old.updatedAt) map.set(id, x);
-  };
-  a.forEach(put); b.forEach(put);
-  return sortNewest([...map.values()]);
-};
 
-/* =============================================================================
-   Diff typing renderer
-============================================================================= */
-type Tok = { ch: string; added: boolean; removed?: boolean };
-function charDiff(oldStr: string, newStr: string): Tok[] {
-  const o = [...oldStr], n = [...newStr];
-  const dp = Array(o.length + 1).fill(0).map(() => Array(n.length + 1).fill(0));
-  for (let i = o.length - 1; i >= 0; i--)
-    for (let j = n.length - 1; j >= 0; j--)
-      dp[i][j] = o[i] === n[j] ? 1 + dp[i + 1][j + 1] : Math.max(dp[i + 1][j], dp[i][j + 1]);
-  const out: Tok[] = []; let i = 0, j = 0;
-  while (i < o.length && j < n.length) {
-    if (o[i] === n[j]) { out.push({ ch: n[j], added: false }); i++; j++; }
-    else if (dp[i + 1][j] >= dp[i][j + 1]) { out.push({ ch: o[i], added: false, removed: true }); i++; }
-    else { out.push({ ch: n[j], added: true }); j++; }
-  }
-  while (i < o.length) { out.push({ ch: o[i], added: false, removed: true }); i++; }
-  while (j < n.length) { out.push({ ch: n[j], added: true }); j++; }
-  return out;
-}
-
-/* =============================================================================
-   Rail alignment: read your app sidebar width so the rail touches it
-============================================================================= */
-function useAppSidebarWidth(scopeRef: React.RefObject<HTMLDivElement>) {
-  useEffect(() => {
-    const scope = scopeRef.current; if (!scope) return;
-    const setVar = (w: number) => scope.style.setProperty('--app-sidebar-w', `${Math.round(w)}px`);
-    const find = () =>
-      (document.querySelector('[data-app-sidebar]') as HTMLElement) ||
-      (document.querySelector('#app-sidebar') as HTMLElement) ||
-      (document.querySelector('.app-sidebar') as HTMLElement) ||
-      (document.querySelector('aside.sidebar') as HTMLElement) ||
-      null;
-    let el = find();
-    if (!el) { setVar(248); return; }
-    setVar(el.getBoundingClientRect().width);
-    const ro = new ResizeObserver(() => setVar(el!.getBoundingClientRect().width));
-    ro.observe(el);
-    const onEnd = () => setVar(el!.getBoundingClientRect().width);
-    el.addEventListener('transitionend', onEnd);
-    return () => { ro.disconnect(); el.removeEventListener('transitionend', onEnd); };
-  }, [scopeRef]);
-}
-
-/* =============================================================================
-   InlineSelect (API Keys & Numbers) — same feel as api-keys
-============================================================================= */
+/* ─────────────────────────────── inline select (API Keys / Numbers) ─────────────────────────────── */
 function InlineSelect({
   value, onChange, options, placeholder = '— Choose —', left,
 }: {
@@ -148,7 +85,7 @@ function InlineSelect({
   const sel = useMemo(() => options.find((o) => o.value === value) || null, [options, value]);
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase(); if (!s) return options;
-    return options.filter(o => (o.label + ' ' + (o.sub || '')).toLowerCase().includes(s));
+    return options.filter((o) => (o.label + ' ' + (o.sub || '')).toLowerCase().includes(s));
   }, [options, q]);
 
   useLayoutEffect(() => {
@@ -171,7 +108,7 @@ function InlineSelect({
     <>
       <button
         ref={btnRef}
-        onClick={() => setOpen(v => !v)}
+        onClick={() => setOpen((v) => !v)}
         className="w-full flex items-center justify-between gap-3 px-4 h-[46px] rounded-[14px] text-sm outline-none transition hover:-translate-y-[1px]"
         style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)', boxShadow: 'var(--chip-shadow, none)' }}
       >
@@ -189,10 +126,10 @@ function InlineSelect({
           <div className="mb-2 flex items-center gap-2 rounded-[10px] px-2 py-1"
                style={{ background: 'var(--panel)', border: '1px solid var(--border)' }}>
             <Search className="w-4 h-4" style={{ color: 'var(--brand)' }} />
-            <input className="bg-transparent outline-none text-sm w-full" placeholder="Search…" value={q} onChange={e => setQ(e.target.value)} />
+            <input className="bg-transparent outline-none text-sm w-full" placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
           <div className="max-h-72 overflow-y-auto pr-1" style={{ scrollbarWidth: 'thin' }}>
-            {filtered.map(o => (
+            {filtered.map((o) => (
               <button key={o.value || o.label} onClick={() => { onChange(o.value); setOpen(false); }}
                       className="w-full text-left px-3 py-2 rounded-[10px] flex items-center gap-2 hover:bg-[rgba(0,255,194,.10)]">
                 <span className="flex-1 truncate">{o.label}</span>
@@ -207,123 +144,107 @@ function InlineSelect({
   );
 }
 
-/* =============================================================================
-   Assistant Rail — flush with main sidebar
-============================================================================= */
+/* ─────────────────────────── assistants rail (TOUCHES SIDEBAR) ───────────────────────────
+   NOTE: This rail is NOT position:fixed anymore. It sits immediately to the right of your
+   app sidebar because this whole component is rendered in the page content area.
+   We keep it sticky so it tracks scroll but there is ZERO gap.
+----------------------------------------------------------------------------------------- */
 function AssistantRail({
   items, activeId, onSelect, onCreate, onRename, onDelete,
 }: {
   items: Assistant[]; activeId: string;
   onSelect: (id: string) => void; onCreate: () => void; onRename: (id: string, name: string) => void; onDelete: (id: string) => void;
 }) {
-  const scopeRef = useRef<HTMLDivElement | null>(null);
-  useAppSidebarWidth(scopeRef);
   const [collapsed, setCollapsed] = useState(false);
   const [q, setQ] = useState('');
   const visible = useMemo(() => items.filter(a => a.name.toLowerCase().includes(q.trim().toLowerCase())), [items, q]);
 
   return (
-    <div ref={scopeRef}>
-      <aside
-        className="hidden lg:flex flex-col"
-        style={{
-          position: 'fixed',
-          left: 'var(--app-sidebar-w, 248px)',   // ← touches your main app sidebar
-          top: 64,
-          width: collapsed ? 68 : 320,
-          height: 'calc(100vh - 64px)',
-          ...CARD,
-          borderTopLeftRadius: 0,
-          borderBottomLeftRadius: 0,
-          borderRight: '1px solid var(--border)',
-          zIndex: 10,
-          padding: 12,
-        }}
-      >
-        <div className="flex items-center justify-between pb-3" style={{ borderBottom: '1px solid var(--border)' }}>
-          <div className="flex items-center gap-2 font-semibold">
-            <Bot className="w-4 h-4" style={{ color: 'var(--brand)' }} />
-            {!collapsed && <span>Assistants</span>}
-          </div>
-          <div className="flex items-center gap-2">
-            {!collapsed && (
-              <button onClick={onCreate}
-                      className="inline-flex items-center gap-2 px-3 h-[36px] rounded-[12px] text-sm"
-                      style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
-                <Plus className="w-4 h-4" /> New
-              </button>
-            )}
-            <button onClick={() => setCollapsed(v => !v)}
-                    className="inline-flex items-center gap-2 px-3 h-[36px] rounded-[12px] text-sm"
-                    style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
-                    title={collapsed ? 'Expand' : 'Collapse'}>
-              {collapsed ? <ChevronRightIcon className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
-            </button>
-          </div>
+    <aside className="hidden lg:flex flex-col"
+           style={{ ...CARD, borderTopLeftRadius: 0, borderBottomLeftRadius: 0, width: collapsed ? 76 : 320, position: 'sticky', top: 80, height: 'calc(100vh - 100px)' }}>
+      <div className="p-3 pb-2 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
+        <div className="flex items-center gap-2 font-semibold">
+          <Bot className="w-4 h-4" style={{ color: 'var(--brand)' }} />
+          {!collapsed && <span>Assistants</span>}
         </div>
+        <div className="flex items-center gap-2">
+          {!collapsed && (
+            <button onClick={onCreate}
+                    className="inline-flex items-center gap-2 px-3 h-[34px] rounded-[12px] text-sm"
+                    style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
+              <Plus className="w-4 h-4" /> New
+            </button>
+          )}
+          <button onClick={() => setCollapsed(v => !v)}
+                  className="inline-flex items-center gap-2 px-3 h-[34px] rounded-[12px] text-sm"
+                  style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+                  title={collapsed ? 'Expand' : 'Collapse'}>
+            {collapsed ? <ChevronRightIcon className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+          </button>
+        </div>
+      </div>
 
-        {!collapsed && (
-          <>
-            <div className="mt-3 flex items-center gap-2 rounded-[14px] px-3 h-[40px]"
+      {!collapsed && (
+        <>
+          <div className="px-3 pt-3">
+            <div className="flex items-center gap-2 rounded-[14px] px-3 h-[40px]"
                  style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
               <Search className="w-4 h-4" style={{ color: 'var(--brand)' }} />
-              <input className="bg-transparent outline-none text-sm w-full" placeholder="Search…" value={q} onChange={e => setQ(e.target.value)} />
+              <input className="bg-transparent outline-none text-sm w-full" placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} />
             </div>
+          </div>
 
-            <div className="mt-3 space-y-2 min-h-0 overflow-y-auto pr-1" style={{ scrollbarWidth: 'thin' }}>
-              {visible.map(a => {
-                const isActive = a.id === activeId;
-                return (
-                  <div key={a.id} className="p-3 rounded-[14px] transition"
-                       style={{
-                         ...CARD,
-                         borderColor: isActive ? 'var(--brand-weak)' : 'var(--border)',
-                         background: isActive ? 'color-mix(in oklab, var(--brand) 10%, var(--card))' : undefined
-                       }}>
-                    <button className="w-full text-left flex items-center gap-2" onClick={() => onSelect(a.id)}>
-                      <Bot className="w-4 h-4" style={{ color: 'var(--brand)' }} />
-                      <div className="min-w-0 flex-1">
-                        <div className="font-medium truncate">{a.name}</div>
-                        <div className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                          {new Date(a.updatedAt).toLocaleDateString()}
-                        </div>
+          <div className="mt-3 px-3 pb-3 space-y-2 min-h-0 overflow-y-auto pr-2" style={{ scrollbarWidth: 'thin' }}>
+            {visible.map(a => {
+              const isActive = a.id === activeId;
+              return (
+                <div key={a.id} className="p-3 rounded-[14px] transition"
+                     style={{
+                       ...CARD,
+                       borderColor: isActive ? 'var(--brand-weak)' : 'var(--border)',
+                       background: isActive ? 'color-mix(in oklab, var(--brand) 10%, var(--card))' : undefined
+                     }}>
+                  <button className="w-full text-left flex items-center gap-2" onClick={() => onSelect(a.id)}>
+                    <Bot className="w-4 h-4" style={{ color: 'var(--brand)' }} />
+                    <div className="min-w-0 flex-1">
+                      <div className="font-medium truncate">{a.name}</div>
+                      <div className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                        {new Date(a.updatedAt).toLocaleDateString()}
                       </div>
-                      {isActive && <Check className="w-4 h-4" style={{ color: 'var(--brand)' }} />}
-                    </button>
-
-                    <div className="mt-2 flex items-center gap-2">
-                      <button
-                        onClick={() => {
-                          const n = prompt('Rename assistant', a.name) || a.name;
-                          onRename(a.id, (n || '').trim() || 'Untitled');
-                        }}
-                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-[10px] text-xs"
-                        style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
-                      >
-                        <Edit3 className="w-3.5 h-3.5" /> Rename
-                      </button>
-                      <button
-                        onClick={() => onDelete(a.id)}
-                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-[10px] text-xs"
-                        style={{ background: 'rgba(220,38,38,.10)', border: '1px solid rgba(220,38,38,.28)', color: '#fda4af' }}
-                      >
-                        <Trash2 className="w-3.5 h-3.5" /> Delete
-                      </button>
                     </div>
+                    {isActive && <Check className="w-4 h-4" style={{ color: 'var(--brand)' }} />}
+                  </button>
+
+                  <div className="mt-2 flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        const n = prompt('Rename assistant', a.name) || a.name;
+                        onRename(a.id, (n || '').trim() || 'Untitled');
+                      }}
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-[10px] text-xs"
+                      style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
+                    >
+                      <Edit3 className="w-3.5 h-3.5" /> Rename
+                    </button>
+                    <button
+                      onClick={() => onDelete(a.id)}
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-[10px] text-xs"
+                      style={{ background: 'rgba(220,38,38,.10)', border: '1px solid rgba(220,38,38,.28)', color: '#fda4af' }}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" /> Delete
+                    </button>
                   </div>
-                );
-              })}
-            </div>
-          </>
-        )}
-      </aside>
-    </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </aside>
   );
 }
 
-/* =============================================================================
-   Main section — wider editor; keys + numbers imported like StepV2Telephony
-============================================================================= */
+/* ───────────────────────────── main section (WIDER editor) ───────────────────────────── */
 export default function VoiceAgentSection({
   onStartCall,
   onStopCall,
@@ -333,36 +254,35 @@ export default function VoiceAgentSection({
   }) => Promise<void> | void;
   onStopCall?: () => Promise<void> | void;
 }) {
-  /* Assistants */
+  /* assistants */
   const [assistants, setAssistants] = useState<Assistant[]>([]);
   const [activeId, setActiveId] = useState('');
   const active = useMemo(() => assistants.find(a => a.id === activeId) || null, [assistants, activeId]);
 
   useEffect(() => {
-    let alive = true;
+    let merged: Assistant[] = [];
+    try {
+      const raw = localStorage.getItem(LS_CHATBOTS);
+      if (raw) {
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr)) merged = arr.map(normalizeAssistant);
+      }
+    } catch {}
     (async () => {
-      let local: Assistant[] = [];
-      try {
-        const raw = localStorage.getItem(LS_CHATBOTS);
-        if (raw) {
-          const arr = JSON.parse(raw);
-          if (Array.isArray(arr)) local = arr.map(normalizeAssistant);
-        }
-      } catch {}
-      let cloud: Assistant[] = [];
       try {
         const ss = await scopedStorage(); await ss.ensureOwnerGuard();
         const arr = await ss.getJSON<any[]>(CLOUD_CHATBOTS, []);
-        if (Array.isArray(arr)) cloud = arr.map(normalizeAssistant);
+        if (Array.isArray(arr)) {
+          const cloud = arr.map(normalizeAssistant);
+          const map = new Map<string, Assistant>();
+          [...merged, ...cloud].forEach(x => map.set(x.id, (map.get(x.id)?.updatedAt || 0) > x.updatedAt ? map.get(x.id)! : x));
+          merged = sortNewest([...map.values()]);
+        }
       } catch {}
-      let merged = mergeNewest(local, cloud);
-      if (!merged.length) {
-        merged = [normalizeAssistant({ id: (typeof crypto !== 'undefined' ? crypto.randomUUID() : String(Date.now())), name: 'My First Voice Agent', firstMessage: 'Hello.', prompt: '' })];
-      }
-      if (alive) { setAssistants(merged); setActiveId(merged[0].id); }
+      if (!merged.length) merged = [normalizeAssistant({ name: 'My First Voice Agent', firstMessage: 'Hello.' })];
+      setAssistants(merged); setActiveId(merged[0].id);
       try { localStorage.setItem(LS_CHATBOTS, JSON.stringify(merged)); } catch {}
     })();
-    return () => { alive = false; };
   }, []);
 
   const saveAssistant = (next: Assistant) => {
@@ -393,7 +313,7 @@ export default function VoiceAgentSection({
     });
   };
   const createAssistant = () => {
-    const a = normalizeAssistant({ id: (typeof crypto !== 'undefined' ? crypto.randomUUID() : String(Date.now())), name: 'Untitled Agent', firstMessage: 'Hello.', prompt: '' });
+    const a = normalizeAssistant({ name: 'Untitled Agent', firstMessage: 'Hello.' });
     setAssistants(prev => { const upd = [a, ...prev]; try { localStorage.setItem(LS_CHATBOTS, JSON.stringify(upd)); } catch {}; return upd; });
     setActiveId(a.id);
   };
@@ -416,7 +336,7 @@ export default function VoiceAgentSection({
     });
   };
 
-  /* Keys & phone numbers (import like StepV2Telephony) */
+  /* keys & numbers (exactly like StepV2Telephony) */
   const [apiKeys, setApiKeys] = useState<StoredKey[]>([]);
   const [apiKeyId, setApiKeyId] = useState('');
   const [apiKey, setApiKey] = useState('');
@@ -428,8 +348,6 @@ export default function VoiceAgentSection({
       try {
         const ss = await scopedStorage();
         await ss.ensureOwnerGuard();
-
-        // prefer v1; fallback to legacy
         const v1 = await ss.getJSON<StoredKey[]>(LS_KEYS, []);
         const legacy = await ss.getJSON<StoredKey[]>('apiKeys', []);
         const merged = Array.isArray(v1) && v1.length ? v1 : Array.isArray(legacy) ? legacy : [];
@@ -439,7 +357,6 @@ export default function VoiceAgentSection({
           .filter(k => k.id && k.name);
         setApiKeys(cleaned);
 
-        // choose default id: prior selection -> global selected -> first
         const prev = await ss.getJSON<string>(LS_SELECTED, '');
         const chosen = (apiKeyId && cleaned.some(k => k.id === apiKeyId)) ? apiKeyId
           : (prev && cleaned.some(k => k.id === prev)) ? prev
@@ -463,8 +380,7 @@ export default function VoiceAgentSection({
   useEffect(() => {
     (async () => {
       try {
-        const ss = await scopedStorage();
-        await ss.ensureOwnerGuard();
+        const ss = await scopedStorage(); await ss.ensureOwnerGuard();
         const all = await ss.getJSON<StoredKey[]>(LS_KEYS, []);
         const sel = (Array.isArray(all) ? all : []).find(k => k.id === apiKeyId);
         setApiKey(sel?.key || '');
@@ -482,45 +398,19 @@ export default function VoiceAgentSection({
     [numbers]
   );
 
-  /* Generate + typing diff */
-  const [genInput, setGenInput] = useState('');
-  const [typing, setTyping] = useState<Tok[] | null>(null);
-  const [typedCount, setTypedCount] = useState(0);
-  const [previewPrompt, setPreviewPrompt] = useState('');
-  const typingBoxRef = useRef<HTMLDivElement | null>(null);
-  const typingTimer = useRef<number | null>(null);
-  useEffect(() => {
-    if (!typing) return;
-    setTypedCount(0);
-    if (typingTimer.current) window.clearInterval(typingTimer.current);
-    typingTimer.current = window.setInterval(() => {
-      setTypedCount(c => {
-        const step = 6; const n = Math.min(c + step, typing.length);
-        if (n >= typing.length && typingTimer.current) { window.clearInterval(typingTimer.current); typingTimer.current = null; }
-        return n;
-      });
-    }, 12);
-  }, [typing]);
-  useEffect(() => { if (typingBoxRef.current) typingBoxRef.current.scrollTop = typingBoxRef.current.scrollHeight; }, [typedCount]);
-
-  function handleGenerate() {
+  /* generate / diff (simple) */
+  const [seed, setSeed] = useState('');
+  const applySeed = () => {
     if (!active) return;
-    const before = active.config.model.systemPrompt || '';
-    const ask = genInput.trim(); if (!ask) return;
-    const next = ask.split(/\s+/).length <= 6
-      ? `You are a ${ask.toLowerCase()}. Keep responses concise. Confirm key details. Politely decline restricted requests.`
-      : ask;
-    setPreviewPrompt(next);
-    setTyping(charDiff(before, next));
-    setGenInput('');
-  }
-  const acceptTyping = () => {
-    if (!active) return;
-    saveAssistant({ ...active, updatedAt: Date.now(), config: { model: { ...active.config.model, systemPrompt: previewPrompt } } });
-    setTyping(null);
+    const next =
+      seed.trim().split(/\s+/).length <= 6
+        ? `You are a ${seed.trim().toLowerCase()}. Keep responses concise. Confirm key details.`
+        : seed.trim();
+    setSeed('');
+    saveAssistant({ ...active, updatedAt: Date.now(), config: { model: { ...active.config.model, systemPrompt: next } } });
   };
 
-  /* Calls */
+  /* call controls */
   const [inCall, setInCall] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(null), 2200); return () => clearTimeout(t); }, [toast]);
@@ -529,55 +419,48 @@ export default function VoiceAgentSection({
     if (!active) return;
     if (!apiKey) { setToast('Select an OpenAI API Key first.'); return; }
     try {
-      if (onStartCall) {
-        await onStartCall({
-          apiKey,
-          phoneFrom: fromE164,
-          prompt: active.config.model.systemPrompt || '',
-          firstMessage: active.config.model.firstMessage || 'Hello.',
-          model: active.config.model.model,
-          temperature: active.config.model.temperature ?? 0.5,
-        });
-      } else {
-        setToast('Wire your call provider (Vapi/WebRTC) to onStartCall.');
-      }
+      await onStartCall?.({
+        apiKey,
+        phoneFrom: fromE164,
+        prompt: active.config.model.systemPrompt || '',
+        firstMessage: active.config.model.firstMessage || 'Hello.',
+        model: active.config.model.model,
+        temperature: active.config.model.temperature ?? 0.5,
+      });
       setInCall(true);
     } catch (e: any) {
       setToast(e?.message || 'Failed to start call.');
     }
   }
-  async function stopCall() { try { if (onStopCall) await onStopCall(); } finally { setInCall(false); } }
+  async function stopCall() { try { await onStopCall?.(); } finally { setInCall(false); } }
 
   if (!active) return null;
 
   return (
     <div className="px-6 py-10 voice-panel" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
-      {/* Section label like api-keys */}
-      <div className="mx-auto w-full max-w-[1400px] mb-3">
+      <div className="mx-auto w-full max-w-[1600px] mb-3">
         <div className="text-xs font-semibold tracking-[.12em] opacity-70" style={{ color: 'var(--text-muted)' }}>
-          VOICE AGENTS
+          VOICE STUDIO
         </div>
       </div>
 
-      <div className="mx-auto w-full max-w-[1400px]">
+      <div className="mx-auto w-full max-w-[1600px]">
         <div className="relative" style={FRAME}>
-          {/* Header */}
+          {/* header */}
           <div className="flex items-start justify-between px-6 lg:px-8 py-6">
             <div>
-              <h1 className="text-2xl font-semibold">Voice Agents</h1>
-              <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
-                Build, tune, and call your agents.
-              </p>
+              <h1 className="text-2xl font-semibold">Voice Studio</h1>
+              <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>Calls & persona</p>
             </div>
             <div className="w-10 h-10 rounded-2xl grid place-items-center" style={{ background: 'var(--brand-weak)' }}>
               <Bot className="w-5 h-5" style={{ color: 'var(--brand)' }} />
             </div>
           </div>
 
-          {/* Body: rail that touches app sidebar + WIDE editor (spaced like v0.dev/vapi shots) */}
+          {/* layout: rail touching sidebar + WIDE editor */}
           <div className="px-4 lg:px-6 pb-8">
             <div className="grid grid-cols-1 lg:grid-cols-[320px_minmax(0,1fr)] gap-6">
-              {/* Flush rail */}
+              {/* assistants rail (touches app sidebar because page content already starts after it) */}
               <AssistantRail
                 items={assistants}
                 activeId={activeId}
@@ -587,8 +470,8 @@ export default function VoiceAgentSection({
                 onDelete={deleteAssistant}
               />
 
-              {/* Main editor column (wider) */}
-              <div className="lg:ml-[calc(var(--app-sidebar-w,248px)+320px)]">
+              {/* main editor (wide) */}
+              <div className="min-w-0">
                 <div className="grid gap-6">
                   {/* PROMPT */}
                   <section style={CARD} className="p-5">
@@ -612,7 +495,6 @@ export default function VoiceAgentSection({
                       </div>
                     </div>
 
-                    {/* Generate row */}
                     <div className="mt-4 p-3 rounded-[14px]" style={{ background: 'var(--panel)', border: '1px solid var(--border)' }}>
                       <div className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>Generate / Edit</div>
                       <div className="flex gap-2">
@@ -620,12 +502,12 @@ export default function VoiceAgentSection({
                           className="w-full rounded-[14px] px-3 h-[44px] outline-none"
                           style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }}
                           placeholder='e.g. "sales agent for roofers" or paste a full prompt'
-                          value={genInput}
-                          onChange={(e) => setGenInput(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === 'Enter') handleGenerate(); }}
+                          value={seed}
+                          onChange={(e) => setSeed(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter') applySeed(); }}
                         />
                         <button
-                          onClick={handleGenerate}
+                          onClick={applySeed}
                           className="inline-flex items-center gap-2 px-4 h-[44px] rounded-[18px] font-semibold"
                           style={{ background: BTN_GREEN, color: '#fff' }}
                           onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER)}
@@ -636,84 +518,29 @@ export default function VoiceAgentSection({
                       </div>
                     </div>
 
-                    {/* Editor / Diff */}
-                    {!typing ? (
-                      <div className="mt-4">
-                        <div className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>System Prompt</div>
-                        <textarea
-                          rows={20}
-                          className="w-full rounded-[18px] outline-none"
-                          style={{
-                            background: 'var(--card)',
-                            border: '1px solid var(--border)',
-                            color: 'var(--text)',
-                            padding: '1rem',
-                            minHeight: 460,
-                            boxShadow: 'var(--card-shadow)'
-                          }}
-                          placeholder="(Empty)"
-                          value={active.config.model.systemPrompt}
-                          onChange={(e) => saveAssistant({ ...active, updatedAt: Date.now(), config: { model: { ...active.config.model, systemPrompt: e.target.value } } })}
-                        />
-                        <div className="mt-2 flex gap-2 justify-end">
-                          <button
-                            className="inline-flex items-center gap-2 px-3 h-[38px] rounded-[12px] text-sm"
-                            style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }}
-                            onClick={() => navigator.clipboard.writeText(active.config.model.systemPrompt || '').catch(() => {})}
-                          >
-                            <Copy className="w-4 h-4" /> Copy
-                          </button>
-                        </div>
+                    <div className="mt-4">
+                      <div className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>System Prompt</div>
+                      <textarea
+                        rows={20}
+                        className="w-full rounded-[18px] outline-none"
+                        style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)', padding: '1rem', minHeight: 520, boxShadow: 'var(--card-shadow)' }}
+                        placeholder="(Empty)"
+                        value={active.config.model.systemPrompt}
+                        onChange={(e) => saveAssistant({ ...active, updatedAt: Date.now(), config: { model: { ...active.config.model, systemPrompt: e.target.value } } })}
+                      />
+                      <div className="mt-2 flex gap-2 justify-end">
+                        <button
+                          className="inline-flex items-center gap-2 px-3 h-[38px] rounded-[12px] text-sm"
+                          style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }}
+                          onClick={() => navigator.clipboard.writeText(active.config.model.systemPrompt || '').catch(() => {})}
+                        >
+                          <Copy className="w-4 h-4" /> Copy
+                        </button>
                       </div>
-                    ) : (
-                      <div className="mt-4">
-                        <div className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>Proposed Changes (typing + diff)</div>
-                        <div ref={typingBoxRef}
-                             className="w-full rounded-[18px]"
-                             style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)', padding: '1rem', whiteSpace: 'pre-wrap', maxHeight: 560, overflowY: 'auto' }}>
-                          {(() => {
-                            const slice = typing.slice(0, typedCount);
-                            const out: JSX.Element[] = []; let buf = ''; let mode: 'add'|'del'|'norm' = 'norm';
-                            const flush = () => {
-                              if (!buf) return;
-                              if (mode === 'add') out.push(<ins key={out.length} style={{ background: 'rgba(0,255,194,.16)', textDecoration: 'none' }}>{buf}</ins>);
-                              else if (mode === 'del') out.push(<del key={out.length} style={{ background: 'rgba(244,63,94,.14)' }}>{buf}</del>);
-                              else out.push(<span key={out.length}>{buf}</span>);
-                              buf = '';
-                            };
-                            for (const t of slice) {
-                              const m = t.added ? 'add' : t.removed ? 'del' : 'norm';
-                              if (m !== mode) { flush(); mode = m as any; }
-                              buf += t.ch;
-                            }
-                            flush();
-                            if (typedCount < typing.length) out.push(<span key="caret" className="animate-pulse"> ▌</span>);
-                            return out;
-                          })()}
-                        </div>
-                        <div className="mt-3 flex items-center gap-2 justify-end">
-                          <button
-                            className="inline-flex items-center gap-2 px-3 h-[40px] rounded-[12px] text-sm"
-                            style={{ background: 'var(--card)', border: '1px solid var(--border)' }}
-                            onClick={() => setTyping(null)}
-                          >
-                            <X className="w-4 h-4" /> Decline
-                          </button>
-                          <button
-                            onClick={acceptTyping}
-                            className="inline-flex items-center gap-2 px-4 h-[40px] rounded-[18px] font-semibold"
-                            style={{ background: BTN_GREEN, color: '#fff' }}
-                            onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER)}
-                            onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN)}
-                          >
-                            <Check className="w-4 h-4" /> Accept
-                          </button>
-                        </div>
-                      </div>
-                    )}
+                    </div>
                   </section>
 
-                  {/* Conversation Setup */}
+                  {/* CONVERSATION SETUP */}
                   <section style={CARD} className="p-5">
                     <div className="flex items-center gap-2 font-semibold">
                       <MessageSquare className="w-4 h-4" style={{ color: 'var(--brand)' }} />
@@ -780,7 +607,7 @@ export default function VoiceAgentSection({
                     </div>
                   </section>
 
-                  {/* Credentials + Call (dropdowns & green buttons like api-keys; keys/numbers wired like StepV2) */}
+                  {/* CREDENTIALS + CALL — same green buttons + dropdowns as API Keys; keys/numbers imported */}
                   <section style={CARD} className="p-5">
                     <div className="flex items-center gap-2 font-semibold">
                       <KeyRound className="w-4 h-4" style={{ color: 'var(--brand)' }} />
@@ -847,14 +674,14 @@ export default function VoiceAgentSection({
                     </div>
                   </section>
 
-                  {/* Transcript placeholder */}
+                  {/* transcript placeholder */}
                   <section style={CARD} className="p-5">
                     <div className="flex items-center gap-2 font-semibold">
                       <MessageSquare className="w-4 h-4" style={{ color: 'var(--brand)' }} />
                       Session Transcript
                     </div>
                     <div className="mt-3 p-3 rounded-[14px]" style={{ background: 'var(--panel)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>
-                      Connect your backend (Vapi/WebRTC) to stream live transcript here.
+                      Hook your Vapi/WebRTC client to stream live transcript here.
                     </div>
                   </section>
                 </div>
@@ -862,7 +689,7 @@ export default function VoiceAgentSection({
             </div>
           </div>
 
-          {/* Page-scoped dark cosmetics (mirror api-keys) */}
+          {/* page-scoped dark cosmetics (same as API Keys) */}
           <style jsx global>{`
             [data-theme="dark"] .voice-panel{
               --frame-bg:
@@ -884,7 +711,7 @@ export default function VoiceAgentSection({
         </div>
       </div>
 
-      {/* Toast */}
+      {/* toast */}
       {toast && (
         <div className="fixed inset-0 z-[9997] pointer-events-none flex items-center justify-center">
           <div className="pointer-events-auto flex items-center gap-3 px-5 py-3 rounded-2xl animate-[popIn_120ms_ease]"
