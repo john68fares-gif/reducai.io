@@ -72,10 +72,10 @@ const ak = (id: string) => `voice:assistant:${id}`;
 const LS_CALLS = 'voice:calls.v1';
 const LS_ROUTES = 'voice:phoneRoutes.v1';
 
-// API Keys (scoped storage)
+// ---- API Keys (scoped storage) ----
 const LS_KEYS = 'apiKeys.v1';
 const LS_SELECTED = 'apiKeys.selectedId';
-type SavedKey = { id: string; name?: string; key: string; provider?: 'openai'|'elevenlabs'|'deepgram' };
+type SavedKey = { id: string; name?: string; key: string; provider?: 'openai' | 'elevenlabs' | 'deepgram' };
 
 declare global {
   interface Window { __OPENAI_KEY?: string }
@@ -449,13 +449,11 @@ export default function VoiceAgentSection() {
   const handleGenerate = () => {
     if (!active) return;
     const current = active.config.model.systemPrompt || '';
-    the: {
-      const { prompt, firstMessage } = mergeInput(genText, current || BASE_PROMPT);
-      setTypingPreview(prompt);
-      setPendingFirstMsg(firstMessage);
-      setGenOpen(false);
-      setGenText('');
-    }
+    const { prompt, firstMessage } = mergeInput(genText, current || BASE_PROMPT);
+    setTypingPreview(prompt);
+    setPendingFirstMsg(firstMessage);
+    setGenOpen(false);
+    setGenText('');
   };
   const acceptGenerate = () => {
     if (!active) return;
@@ -619,7 +617,7 @@ export default function VoiceAgentSection() {
                 voiceLabel={active.config.voice.voiceLabel}
                 systemPrompt={active.config.model.systemPrompt || BASE_PROMPT}
                 model={active.config.model.model}
-                apiKey={openaiKey || undefined}   // <---- pass key
+                apiKey={openaiKey || undefined}   // <-- pass key to the button
                 onTurn={onTurn}
               />
             ) : (
