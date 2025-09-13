@@ -12,6 +12,7 @@ import {
 
 import AssistantRail, { type AssistantLite } from '@/components/voice/AssistantRail';
 import WebCallButton from '@/components/voice/WebCallButton';
+import { scopedStorage } from '@/utils/scoped-storage';
 
 const SCOPE = 'va-scope';
 const ACCENT = '#10b981';
@@ -70,6 +71,15 @@ const LS_LIST = 'voice:assistants.v1';
 const ak = (id: string) => `voice:assistant:${id}`;
 const LS_CALLS = 'voice:calls.v1';
 const LS_ROUTES = 'voice:phoneRoutes.v1';
+
+// API Keys (scoped storage)
+const LS_KEYS = 'apiKeys.v1';
+const LS_SELECTED = 'apiKeys.selectedId';
+type SavedKey = { id: string; name?: string; key: string; provider?: 'openai'|'elevenlabs'|'deepgram' };
+
+declare global {
+  interface Window { __OPENAI_KEY?: string }
+}
 
 const readLS = <T,>(k: string): T | null => {
   try { const r = localStorage.getItem(k); return r ? (JSON.parse(r) as T) : null; } catch { return null; }
@@ -306,6 +316,42 @@ export default function VoiceAgentSection() {
   const [isClient, setIsClient] = useState(false);
   useEffect(() => { setIsClient(true); }, []);
 
+  // ---- OpenAI key wiring (scoped storage + env fallback) ----
+  const [openaiKey, setOpenaiKey] = useState<string | null>(null);
+  const [openaiKeyLabel, setOpenaiKeyLabel] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isClient) return;
+    (async () => {
+      let key: string | null = null;
+      let label: string | null = null;
+      try {
+        const ss = await scopedStorage();
+        await ss.ensureOwnerGuard();
+        const all = (await ss.getJSON<SavedKey[]>(LS_KEYS, [])) || [];
+        const cleaned = all
+          .filter(Boolean)
+          .filter(k => (k.provider === 'openai' || !k.provider) && k.id && k.key);
+        let chosenId = await ss.getJSON<string>(LS_SELECTED, '');
+        if (chosenId && !cleaned.some(k => k.id === chosenId)) chosenId = '';
+        if (!chosenId && cleaned[0]) chosenId = cleaned[0].id;
+        const chosen = cleaned.find(k => k.id === chosenId);
+        if (chosen) { key = chosen.key; label = chosen.name || 'OpenAI key'; }
+      } catch { /* ignore */ }
+
+      // fallback to NEXT_PUBLIC for local/dev
+      if (!key && typeof process !== 'undefined') {
+        // @ts-ignore
+        const envKey = process.env.NEXT_PUBLIC_OPENAI_API_KEY as string | undefined;
+        if (envKey) { key = envKey; label = 'ENV: NEXT_PUBLIC_OPENAI_API_KEY'; }
+      }
+
+      setOpenaiKey(key || null);
+      setOpenaiKeyLabel(label || null);
+      if (key) window.__OPENAI_KEY = key;
+    })();
+  }, [isClient]);
+
   // assistants
   const [assistants, setAssistants] = useState<Assistant[]>([]);
   const [activeId, setActiveId] = useState('');
@@ -403,11 +449,13 @@ export default function VoiceAgentSection() {
   const handleGenerate = () => {
     if (!active) return;
     const current = active.config.model.systemPrompt || '';
-    const { prompt, firstMessage } = mergeInput(genText, current || BASE_PROMPT);
-    setTypingPreview(prompt);
-    setPendingFirstMsg(firstMessage);
-    setGenOpen(false);
-    setGenText('');
+    the: {
+      const { prompt, firstMessage } = mergeInput(genText, current || BASE_PROMPT);
+      setTypingPreview(prompt);
+      setPendingFirstMsg(firstMessage);
+      setGenOpen(false);
+      setGenText('');
+    }
   };
   const acceptGenerate = () => {
     if (!active) return;
@@ -571,6 +619,7 @@ export default function VoiceAgentSection() {
                 voiceLabel={active.config.voice.voiceLabel}
                 systemPrompt={active.config.model.systemPrompt || BASE_PROMPT}
                 model={active.config.model.model}
+                apiKey={openaiKey || undefined}   // <---- pass key
                 onTurn={onTurn}
               />
             ) : (
@@ -581,6 +630,14 @@ export default function VoiceAgentSection() {
 
             <button onClick={() => window.dispatchEvent(new CustomEvent('voiceagent:open-chat', { detail: { id: active.id } }))}
                     className="btn btn--ghost"><MessageSquare className="w-4 h-4 icon" /> Chat</button>
+
+            {/* Tiny key status chip */}
+            {!openaiKey && (
+              <span className="ml-2 text-xs px-2 py-1 rounded-lg"
+                    style={{ background:'rgba(220,38,38,.12)', border:'1px solid rgba(220,38,38,.35)', color:'#fca5a5' }}>
+                No OpenAI key loaded
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <button onClick={() => navigator.clipboard.writeText(active.config.model.systemPrompt || '').catch(() => {})} className="btn btn--ghost">
