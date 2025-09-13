@@ -1,9 +1,21 @@
+// components/voice/WebCallButton.tsx
 'use client';
 
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { PhoneCall, PhoneOff } from 'lucide-react';
+import { scopedStorage } from '@/utils/scoped-storage';
 
 type SR = SpeechRecognition & { start: () => void; stop: () => void };
+
+type SavedKey = {
+  id: string;
+  name?: string;
+  key: string;
+  provider?: 'openai' | 'elevenlabs' | 'deepgram';
+};
+
+const LS_KEYS = 'apiKeys.v1';         // where keys are stored
+const LS_SELECTED = 'apiKeys.selectedId'; // for completeness (not required here)
 
 export default function WebCallButton({
   greet, voiceLabel, systemPrompt, model, apiKeyId, fromE164, onTurn,
@@ -18,6 +30,51 @@ export default function WebCallButton({
 }) {
   const [live, setLive] = useState(false);
   const recRef = useRef<SR | null>(null);
+
+  // ---- NEW: resolve the actual secret key from the selected id (or fallbacks)
+  const [resolvedKey, setResolvedKey] = useState<string>('');
+  const [keyError, setKeyError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setKeyError(null);
+      let key = '';
+
+      // 1) Try to load from scoped storage by apiKeyId
+      if (apiKeyId) {
+        try {
+          const ss = await scopedStorage();
+          await ss.ensureOwnerGuard();
+          const all = (await ss.getJSON<SavedKey[]>(LS_KEYS, [])) || [];
+          const match = all.find(k => (k.provider === 'openai' || !k.provider) && k.id === apiKeyId);
+          if (match?.key) key = String(match.key).trim();
+        } catch (e) {
+          // swallow – will fall back
+        }
+      }
+
+      // 2) Fallback to window.__OPENAI_KEY if set elsewhere
+      if (!key && typeof window !== 'undefined' && (window as any).__OPENAI_KEY) {
+        key = String((window as any).__OPENAI_KEY || '').trim();
+      }
+
+      // 3) Fallback to public env key (dev/local)
+      // @ts-ignore
+      if (!key && typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_OPENAI_API_KEY) {
+        // @ts-ignore
+        key = String(process.env.NEXT_PUBLIC_OPENAI_API_KEY || '').trim();
+      }
+
+      if (!cancelled) {
+        setResolvedKey(key);
+        if (!key) {
+          setKeyError('OpenAI key is missing. Select one on the Voice page (API Key dropdown).');
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [apiKeyId]);
 
   function makeRecognizer(onFinal:(t:string)=>void): SR | null {
     const C: any = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
@@ -38,12 +95,12 @@ export default function WebCallButton({
     return s.getVoices();
   }
   function pickVoice(vs:SpeechSynthesisVoice[]) {
-    const want = voiceLabel.toLowerCase();
+    const want = (voiceLabel || '').toLowerCase();
     const prefs = want.includes('ember') ? ['Samantha','Google US English','Serena','Victoria','Alex']
                  : want.includes('alloy') ? ['Alex','Daniel','Google UK English Male','Samantha']
                  : ['Google US English','Samantha','Alex','Daniel'];
     for (const p of prefs) { const v = vs.find(v=>v.name.toLowerCase().includes(p.toLowerCase())); if (v) return v; }
-    return vs[0];
+    return vs[0] || undefined;
   }
   async function speak(text:string){
     const s = window.speechSynthesis; try { s.cancel(); } catch {}
@@ -51,20 +108,42 @@ export default function WebCallButton({
     u.voice = pickVoice(v); u.rate = 1; u.pitch = .95; s.speak(u);
   }
 
+  // ---- patched: send Authorization header with the resolved key; keep x-apikey-id for logging/back-compat
   async function ask(userText:string): Promise<string> {
     const r = await fetch('/api/voice/chat', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-apikey-id': apiKeyId || '' },
+      headers: {
+        'content-type': 'application/json',
+        ...(apiKeyId ? { 'x-apikey-id': apiKeyId } : {}),
+        ...(resolvedKey ? { Authorization: `Bearer ${resolvedKey}` } : {}),
+      },
       body: JSON.stringify({ model, system: systemPrompt, user: userText, fromE164 })
     });
-    if (!r.ok) throw new Error('I could not reach the model. Check your OpenAI key.');
+    if (!r.ok) {
+      const msg = await safeError(r);
+      throw new Error(msg || 'I could not reach the model. Check your OpenAI key.');
+    }
     const j = await r.json();
     return (j?.text || 'Understood.').trim();
   }
 
+  async function safeError(r: Response): Promise<string> {
+    try {
+      const t = await r.text();
+      try {
+        const j = JSON.parse(t);
+        return (j?.error || j?.message || t || '').toString();
+      } catch {
+        return (t || '').toString();
+      }
+    } catch {
+      return '';
+    }
+  }
+
   async function start() {
-    if (!apiKeyId) {
-      const msg = 'OpenAI key is missing. Add it in API Keys.';
+    if (!resolvedKey) {
+      const msg = keyError || 'OpenAI key is missing. Add it in API Keys.';
       onTurn('assistant', msg); await speak(msg); return;
     }
     onTurn('assistant', greet || 'Hello. How may I help you today?'); await speak(greet || 'Hello. How may I help you today?');
@@ -72,7 +151,7 @@ export default function WebCallButton({
     const rec = makeRecognizer(async (finalText) => {
       onTurn('user', finalText);
       try { const reply = await ask(finalText); onTurn('assistant', reply); await speak(reply); }
-      catch (e:any) { const msg = e?.message || 'Model unavailable.'; onTurn('assistant', msg); await speak(msg); }
+      catch (e:any) { const msg = (e?.message || 'Model unavailable.'); onTurn('assistant', msg); await speak(msg); }
     });
 
     if (!rec) {
@@ -88,9 +167,17 @@ export default function WebCallButton({
   }
 
   return !live ? (
-    <button onClick={start} className="btn btn--green px-3 py-2 rounded-md border" style={{borderColor:'var(--border)'}}>
-      <PhoneCall className="w-4 h-4 text-white"/><span className="text-white">Start Web Call</span>
-    </button>
+    <div className="inline-flex items-center gap-2">
+      <button onClick={start} className="btn btn--green px-3 py-2 rounded-md border" style={{borderColor:'var(--border)'}}>
+        <PhoneCall className="w-4 h-4 text-white"/><span className="text-white">Start Web Call</span>
+      </button>
+      {!resolvedKey && (
+        <span className="text-xs px-2 py-1 rounded-lg"
+              style={{ background:'rgba(220,38,38,.12)', border:'1px solid rgba(220,38,38,.35)', color:'#fca5a5' }}>
+          OpenAI key not loaded
+        </span>
+      )}
+    </div>
   ) : (
     <button onClick={stop} className="btn btn--danger px-3 py-2 rounded-md border" style={{borderColor:'var(--border)'}}>
       <PhoneOff className="w-4 h-4"/> End Call
