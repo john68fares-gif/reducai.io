@@ -1,172 +1,663 @@
+// components/voice/VoiceAgentSection.tsx
 'use client';
 
-import React, {
-  useEffect, useLayoutEffect, useMemo, useRef, useState,
-} from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Bot, Plus, Trash2, Edit3, Check, Search, ChevronLeft, ChevronRight as ChevronRightIcon,
-  FileText, Sparkles, RefreshCw, X, MessageSquare, Copy, ChevronDown,
-  KeyRound, Phone as PhoneIcon, Mic, MicOff, Volume2, SlidersHorizontal,
+  FileText, Sparkles, RefreshCw, X, MessageSquare, Copy, ChevronDown, KeyRound, Phone as PhoneIcon,
+  Phone, PhoneOff
 } from 'lucide-react';
 import { scopedStorage } from '@/utils/scoped-storage';
 
-/* =============================================================================
-   Shared types
-============================================================================= */
-type Provider = 'openai';
-type ModelId = 'gpt-4o'|'gpt-4o-mini'|'gpt-4.1'|'gpt-3.5-turbo';
-
-type Assistant = {
-  id: string; name: string; updatedAt: number;
-  config: {
-    model: {
-      provider: Provider; model: ModelId;
-      firstMessageMode: 'assistant_first'|'user_first';
-      firstMessage: string; systemPrompt: string;
-      temperature?: number; maxTokens?: number;
-    };
-    voice?: { provider: 'vapi'|'eleven'|'web'; voiceId?: string };
-    transcriber?: { enabled: boolean; engine: 'browser'|'deepgram'|'vapi'; interim: boolean };
-  };
+/* ======================================================================================
+   PROPS (provider-agnostic)
+   Wire your call stack (Vapi, custom WebRTC, etc.) with these optional callbacks.
+   If you don’t pass them, the UI still works and shows a toast instead of crashing.
+====================================================================================== */
+export type StartCallArgs = {
+  apiKey: string;
+  phoneFrom: string;
+  prompt: string;
+  firstMessage: string;
+  model: string;
+  temperature: number;
 };
+export default function VoiceAgentSection({
+  onStartCall,
+  onStopCall,
+}: {
+  onStartCall?: (args: StartCallArgs) => Promise<void> | void;
+  onStopCall?: () => Promise<void> | void;
+}) {
+  /* =========================================================================
+     DATA: assistants (same source-of-truth model as Builder)
+  ========================================================================= */
+  type Provider = 'openai';
+  type ModelId = 'gpt-4o' | 'gpt-4o-mini' | 'gpt-4.1' | 'gpt-3.5-turbo';
+  type Assistant = {
+    id: string;
+    name: string;
+    updatedAt: number;
+    config: {
+      model: {
+        provider: Provider;
+        model: ModelId;
+        temperature?: number;
+        firstMessageMode: 'assistant_first' | 'user_first';
+        firstMessage: string;
+        systemPrompt: string;
+      };
+    };
+  };
+  const now = () => Date.now();
+  const K_LIST = 'chatbots'; // matches your builder’s local primary key
+  const K_CLOUD = 'chatbots.v1';
 
-type Turn = { role:'user'|'assistant'; text:string; ts:number };
+  const normalize = (a: any): Assistant => ({
+    id: String(a?.assistantId || a?.id || crypto.randomUUID()),
+    name: String(a?.name || 'Untitled Assistant'),
+    updatedAt:
+      Number(a?.updatedAt) ||
+      Date.parse(a?.updatedAt || a?.createdAt || '') ||
+      now(),
+    config: {
+      model: {
+        provider: (a?.provider as Provider) || 'openai',
+        model: (a?.model as ModelId) || 'gpt-4o',
+        temperature:
+          typeof a?.temperature === 'number' ? a.temperature : 0.5,
+        firstMessageMode:
+          (a?.firstMessageMode as any) || 'assistant_first',
+        firstMessage: String(a?.firstMessage || 'Hello.'),
+        systemPrompt: String(a?.prompt || a?.systemPrompt || ''),
+      },
+    },
+  });
+  const sortNewest = (arr: Assistant[]) =>
+    arr
+      .slice()
+      .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  const mergeNewest = (a: Assistant[], b: Assistant[]) => {
+    const map = new Map<string, Assistant>();
+    const put = (x: Assistant) => {
+      const id = x.id;
+      const old = map.get(id);
+      if (!old || x.updatedAt > old.updatedAt) map.set(id, x);
+    };
+    a.forEach(put);
+    b.forEach(put);
+    return sortNewest([...map.values()]);
+  };
 
-/* =============================================================================
-   IDs + helpers
-============================================================================= */
-const SCOPE = 'voice-panel';               // reuse page-scoped CSS like API Keys page
-const K_LIST = 'voice:assistants.v2';
-const K_PREFIX = 'voice:assistant:';
-const k = (id:string)=> `${K_PREFIX}${id}`;
-const uid = (p='id') => `${p}_${Math.random().toString(36).slice(2,8)}${Date.now().toString(36).slice(-4)}`;
+  const [assistants, setAssistants] = useState<Assistant[]>([]);
+  const [activeId, setActiveId] = useState<string>('');
+  const active = useMemo(
+    () => assistants.find((a) => a.id === activeId) || null,
+    [assistants, activeId]
+  );
 
-/* =============================================================================
-   Diff typing (for generate preview)
-============================================================================= */
-type Tok = { ch:string; added:boolean; removed?:boolean };
-function charDiff(oldStr:string, newStr:string):Tok[] {
-  const o=[...oldStr], n=[...newStr];
-  const dp=Array(o.length+1).fill(0).map(()=>Array(n.length+1).fill(0));
-  for(let i=o.length-1;i>=0;i--)for(let j=n.length-1;j>=0;j--) dp[i][j]=o[i]===n[j]?1+dp[i+1][j+1]:Math.max(dp[i+1][j],dp[i][j+1]);
-  const out:Tok[]=[]; let i=0,j=0;
-  while(i<o.length && j<n.length){
-    if(o[i]===n[j]){ out.push({ch:n[j],added:false}); i++; j++; }
-    else if(dp[i+1][j]>=dp[i][j+1]){ out.push({ch:o[i],added:false,removed:true}); i++; }
-    else { out.push({ch:n[j],added:true}); j++; }
+  // Load both stores and merge (local + scopedStorage)
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      // local
+      let local: Assistant[] = [];
+      try {
+        const raw = localStorage.getItem(K_LIST);
+        if (raw) {
+          const arr = JSON.parse(raw);
+          if (Array.isArray(arr)) local = arr.map(normalize);
+        }
+      } catch {}
+      // cloud
+      let cloud: Assistant[] = [];
+      try {
+        const ss = await scopedStorage();
+        await ss.ensureOwnerGuard();
+        const arr = await ss.getJSON<any[]>(K_CLOUD, []);
+        if (Array.isArray(arr)) cloud = arr.map(normalize);
+      } catch {}
+      const merged = mergeNewest(local, cloud);
+      if (!merged.length) {
+        // seed one if totally empty (no prompt)
+        merged.push(
+          normalize({
+            id: crypto.randomUUID(),
+            name: 'My First Voice Agent',
+            firstMessage: 'Hello. How may I help you today?',
+            prompt: '',
+          })
+        );
+      }
+      if (alive) {
+        setAssistants(sortNewest(merged));
+        setActiveId((merged[0] && merged[0].id) || '');
+      }
+      try {
+        localStorage.setItem(K_LIST, JSON.stringify(merged));
+      } catch {}
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const saveAssistant = (next: Assistant) => {
+    setAssistants((prev) => {
+      const upd = prev.map((a) => (a.id === next.id ? next : a));
+      try {
+        localStorage.setItem(K_LIST, JSON.stringify(sortNewest(upd)));
+      } catch {}
+      (async () => {
+        try {
+          const ss = await scopedStorage();
+          await ss.ensureOwnerGuard();
+          const arr = await ss.getJSON<any[]>(K_CLOUD, []);
+          const cloud = Array.isArray(arr) ? arr : [];
+          const i = cloud.findIndex((x) => (x.assistantId || x.id) === next.id);
+          const payload = {
+            id: next.id,
+            name: next.name,
+            model: next.config.model.model,
+            temperature: next.config.model.temperature,
+            firstMessageMode: next.config.model.firstMessageMode,
+            firstMessage: next.config.model.firstMessage,
+            prompt: next.config.model.systemPrompt,
+            updatedAt: Date.now(),
+          };
+          if (i >= 0) cloud[i] = { ...(cloud[i] || {}), ...payload };
+          else cloud.unshift(payload);
+          await ss.setJSON(K_CLOUD, cloud);
+          try {
+            window.dispatchEvent(new Event('builds:updated'));
+          } catch {}
+        } catch {}
+      })();
+      return sortNewest(upd);
+    });
+  };
+
+  const createAssistant = () => {
+    const fresh = normalize({
+      id: crypto.randomUUID(),
+      name: 'Untitled Agent',
+      firstMessage: 'Hello.',
+      prompt: '',
+    });
+    setAssistants((prev) => {
+      const upd = [fresh, ...prev];
+      try {
+        localStorage.setItem(K_LIST, JSON.stringify(upd));
+      } catch {}
+      return upd;
+    });
+    setActiveId(fresh.id);
+  };
+  const renameAssistant = (id: string, name: string) => {
+    const cur = assistants.find((a) => a.id === id);
+    if (!cur) return;
+    saveAssistant({ ...cur, name, updatedAt: Date.now() });
+  };
+  const deleteAssistant = (id: string) => {
+    setAssistants((prev) => {
+      const upd = prev.filter((a) => a.id !== id);
+      try {
+        localStorage.setItem(K_LIST, JSON.stringify(upd));
+      } catch {}
+      (async () => {
+        try {
+          const ss = await scopedStorage();
+          await ss.ensureOwnerGuard();
+          const arr = await ss.getJSON<any[]>(K_CLOUD, []);
+          const cloud = Array.isArray(arr) ? arr : [];
+          const cut = cloud.filter((x) => (x.assistantId || x.id) !== id);
+          await ss.setJSON(K_CLOUD, cut);
+        } catch {}
+      })();
+      if (activeId === id && upd[0]) setActiveId(upd[0].id);
+      return upd;
+    });
+  };
+
+  /* =========================================================================
+     API KEYS & PHONE NUMBERS (no auto-select; matches your Api Keys page)
+  ========================================================================= */
+  type StoredKey = { id: string; name: string; key: string };
+  const [apiKeys, setApiKeys] = useState<StoredKey[]>([]);
+  const [apiKeyId, setApiKeyId] = useState('');
+  const [apiKey, setApiKey] = useState('');
+  const [numbers, setNumbers] = useState<Array<{ id: string; e164?: string; label?: string }>>([]);
+  const [fromE164, setFromE164] = useState('');
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const ss = await scopedStorage();
+        await ss.ensureOwnerGuard();
+        const arr = await ss.getJSON<StoredKey[]>('apiKeys.v1', []);
+        setApiKeys(Array.isArray(arr) ? arr.filter(Boolean) : []);
+      } catch {
+        setApiKeys([]);
+      }
+    })();
+    (async () => {
+      try {
+        const r = await fetch('/api/telephony/phone-numbers', { cache: 'no-store' });
+        const j = await r.json();
+        const list = j?.ok ? j.data : j;
+        setNumbers(Array.isArray(list) ? list : []);
+      } catch {
+        setNumbers([]);
+      }
+    })();
+  }, []);
+  useEffect(() => {
+    (async () => {
+      try {
+        const ss = await scopedStorage();
+        const arr = await ss.getJSON<StoredKey[]>('apiKeys.v1', []);
+        const hit = (Array.isArray(arr) ? arr : []).find((k) => k.id === apiKeyId);
+        setApiKey(hit?.key || '');
+        if (apiKeyId) await ss.setJSON('apiKeys.selectedId', apiKeyId);
+      } catch {
+        setApiKey('');
+      }
+    })();
+  }, [apiKeyId]);
+
+  const keyOptions = useMemo(
+    () =>
+      apiKeys.map((k) => ({
+        value: k.id,
+        label: k.name,
+        sub: (k.key || '').slice(-4).toUpperCase(),
+      })),
+    [apiKeys]
+  );
+  const numOptions = useMemo(
+    () =>
+      numbers.map((n) => ({
+        value: n.e164 || '',
+        label: (n.e164 || n.id || '').trim() + (n.label ? ` — ${n.label}` : ''),
+      })),
+    [numbers]
+  );
+
+  /* =========================================================================
+     Generate + Typing Diff (subtle, uses brand)
+  ========================================================================= */
+  type Tok = { ch: string; added: boolean; removed?: boolean };
+  const [genInput, setGenInput] = useState('');
+  const [typing, setTyping] = useState<Tok[] | null>(null);
+  const [typedCount, setTypedCount] = useState(0);
+  const [previewPrompt, setPreviewPrompt] = useState('');
+  const typingBoxRef = useRef<HTMLDivElement | null>(null);
+  const typingTimer = useRef<number | null>(null);
+
+  function charDiff(oldStr: string, newStr: string): Tok[] {
+    const o = [...oldStr],
+      n = [...newStr];
+    const dp = Array(o.length + 1)
+      .fill(0)
+      .map(() => Array(n.length + 1).fill(0));
+    for (let i = o.length - 1; i >= 0; i--)
+      for (let j = n.length - 1; j >= 0; j--)
+        dp[i][j] = o[i] === n[j] ? 1 + dp[i + 1][j + 1] : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    const out: Tok[] = [];
+    let i = 0,
+      j = 0;
+    while (i < o.length && j < n.length) {
+      if (o[i] === n[j]) {
+        out.push({ ch: n[j], added: false });
+        i++;
+        j++;
+      } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+        out.push({ ch: o[i], added: false, removed: true });
+        i++;
+      } else {
+        out.push({ ch: n[j], added: true });
+        j++;
+      }
+    }
+    while (i < o.length) {
+      out.push({ ch: o[i], added: false, removed: true });
+      i++;
+    }
+    while (j < n.length) {
+      out.push({ ch: n[j], added: true });
+      j++;
+    }
+    return out;
   }
-  while(i<o.length){ out.push({ch:o[i],added:false,removed:true}); i++; }
-  while(j<n.length){ out.push({ch:n[j],added:true}); j++; }
-  return out;
-}
 
-/* =============================================================================
-   Left Assistant Rail (touches your main app sidebar using --app-sidebar-w)
-============================================================================= */
-function useSidebarWidth(scopeRef: React.RefObject<HTMLDivElement>){
-  useEffect(()=> {
-    const scope=scopeRef.current; if(!scope) return;
-    const setVar=(w:number)=>scope.style.setProperty('--app-sidebar-w', `${Math.round(w)}px`);
-    const find=()=> (document.querySelector('[data-app-sidebar]') as HTMLElement) ||
-                   (document.querySelector('#app-sidebar') as HTMLElement) ||
-                   (document.querySelector('.app-sidebar') as HTMLElement) ||
-                   (document.querySelector('aside.sidebar') as HTMLElement) || null;
-    let el=find(); if(!el){ setVar(248); return; }
-    setVar(el.getBoundingClientRect().width);
-    const ro=new ResizeObserver(()=>setVar(el!.getBoundingClientRect().width));
-    ro.observe(el);
-    const onEnd=()=>setVar(el!.getBoundingClientRect().width);
-    el.addEventListener('transitionend', onEnd);
-    return ()=>{ ro.disconnect(); el.removeEventListener('transitionend', onEnd); };
-  },[scopeRef]);
-}
+  useEffect(() => {
+    if (!typing) return;
+    setTypedCount(0);
+    if (typingTimer.current) window.clearInterval(typingTimer.current);
+    typingTimer.current = window.setInterval(() => {
+      setTypedCount((c) => {
+        const step = 6;
+        const n = Math.min(c + step, typing.length);
+        if (n >= typing.length && typingTimer.current) {
+          window.clearInterval(typingTimer.current);
+          typingTimer.current = null;
+        }
+        return n;
+      });
+    }, 12);
+  }, [typing]);
+  useEffect(() => {
+    if (typingBoxRef.current) typingBoxRef.current.scrollTop = typingBoxRef.current.scrollHeight;
+  }, [typedCount]);
 
-function AssistantRail({
-  items, activeId, onSelect, onCreate, onRename, onDelete
-}:{
-  items: Assistant[]; activeId:string; onSelect:(id:string)=>void;
-  onCreate:()=>void; onRename:(id:string,name:string)=>void; onDelete:(id:string)=>void;
-}){
-  const scopeRef=useRef<HTMLDivElement|null>(null);
-  const [collapsed,setCollapsed]=useState(false);
-  const [q,setQ]=useState('');
-  const [editing,setEditing]=useState<string| null>(null);
-  const [temp,setTemp]=useState('');
-  useSidebarWidth(scopeRef);
-  const visible=useMemo(()=> items.filter(a=>a.name.toLowerCase().includes(q.trim().toLowerCase())),[items,q]);
+  function handleGenerate() {
+    if (!active) return;
+    const before = active.config.model.systemPrompt || '';
+    const ask = genInput.trim();
+    if (!ask) return;
+    const next =
+      ask.split(/\s+/).length <= 6
+        ? `You are a ${ask.toLowerCase()}. Keep responses concise. Confirm key details. Decline restricted requests.`
+        : ask;
+    setPreviewPrompt(next);
+    setTyping(charDiff(before, next));
+    setGenInput('');
+  }
+  const acceptTyping = () => {
+    if (!active) return;
+    saveAssistant({
+      ...active,
+      updatedAt: Date.now(),
+      config: { model: { ...active.config.model, systemPrompt: previewPrompt } },
+    });
+    setTyping(null);
+  };
+
+  /* =========================================================================
+     Call controls (provider-agnostic; show toast if not wired)
+  ========================================================================= */
+  const [inCall, setInCall] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 2400);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+  async function startCall() {
+    if (!active) return;
+    if (!apiKey) {
+      setToast('No API Key selected.');
+      return;
+    }
+    try {
+      if (onStartCall) {
+        await onStartCall({
+          apiKey,
+          phoneFrom: fromE164,
+          prompt: active.config.model.systemPrompt || '',
+          firstMessage: active.config.model.firstMessage || 'Hello.',
+          model: active.config.model.model,
+          temperature: active.config.model.temperature ?? 0.5,
+        });
+      } else {
+        setToast('No call provider wired yet.');
+      }
+      setInCall(true);
+    } catch (e: any) {
+      setToast(e?.message || 'Failed to start call.');
+    }
+  }
+  async function stopCall() {
+    try {
+      if (onStopCall) await onStopCall();
+    } finally {
+      setInCall(false);
+    }
+  }
+
+  /* =========================================================================
+     InlineSelect (same look as your API Keys page; compact)
+  ========================================================================= */
+  function InlineSelect({
+    value,
+    onChange,
+    options,
+    placeholder = '— Choose —',
+    left,
+  }: {
+    value: string;
+    onChange: (v: string) => void;
+    options: Array<{ value: string; label: string; sub?: string }>;
+    placeholder?: string;
+    left?: React.ReactNode;
+  }) {
+    const btnRef = useRef<HTMLButtonElement | null>(null);
+    const portalRef = useRef<HTMLDivElement | null>(null);
+    const [open, setOpen] = useState(false);
+    const [rect, setRect] = useState<{ top: number; left: number; width: number } | null>(null);
+    const [q, setQ] = useState('');
+    const sel = useMemo(() => options.find((o) => o.value === value) || null, [options, value]);
+    const filtered = useMemo(() => {
+      const s = q.trim().toLowerCase();
+      if (!s) return options;
+      return options.filter((o) => (o.label + ' ' + (o.sub || '')).toLowerCase().includes(s));
+    }, [options, q]);
+
+    useLayoutEffect(() => {
+      if (!open) return;
+      const r = btnRef.current?.getBoundingClientRect();
+      if (r) setRect({ top: r.bottom + 8, left: r.left, width: r.width });
+    }, [open]);
+
+    useEffect(() => {
+      if (!open) return;
+      const onClick = (e: MouseEvent) => {
+        if (btnRef.current?.contains(e.target as Node)) return;
+        if (portalRef.current?.contains(e.target as Node)) return;
+        setOpen(false);
+      };
+      window.addEventListener('mousedown', onClick);
+      return () => window.removeEventListener('mousedown', onClick);
+    }, [open]);
+
+    return (
+      <>
+        <button
+          ref={btnRef}
+          onClick={() => setOpen((v) => !v)}
+          className="w-full flex items-center justify-between gap-3 px-4 h-[46px] rounded-[14px] text-sm outline-none transition hover:-translate-y-[1px]"
+          style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }}
+        >
+          <span className="flex items-center gap-2 truncate">{left}</span>
+          <span className="flex-1 text-left truncate">
+            {sel ? (
+              <>
+                {sel.label}
+                {sel.sub ? (
+                  <span className="ml-2" style={{ color: 'var(--text-muted)' }}>
+                    ••••{sel.sub}
+                  </span>
+                ) : null}
+              </>
+            ) : (
+              <span style={{ color: 'var(--text-muted)' }}>{placeholder}</span>
+            )}
+          </span>
+          <ChevronDown className="w-4 h-4 opacity-80" style={{ color: 'var(--text-muted)' }} />
+        </button>
+
+        {open && rect && (
+          <div
+            ref={portalRef}
+            className="fixed z-[9999] p-3 rounded-[16px]"
+            style={{
+              left: rect.left,
+              top: rect.top,
+              width: rect.width,
+              background: 'var(--card)',
+              border: '1px solid var(--border)',
+              boxShadow: 'var(--shadow-card)',
+            }}
+          >
+            <div className="mb-2 flex items-center gap-2 rounded-[10px] px-2 py-1" style={{ background: 'var(--panel)', border: '1px solid var(--border)' }}>
+              <Search className="w-4 h-4" style={{ color: 'var(--brand)' }} />
+              <input className="bg-transparent outline-none text-sm w-full" placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} />
+            </div>
+            <div className="max-h-72 overflow-y-auto pr-1" style={{ scrollbarWidth: 'thin' }}>
+              {filtered.map((o) => (
+                <button
+                  key={o.value || o.label}
+                  onClick={() => {
+                    onChange(o.value);
+                    setOpen(false);
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-[10px] flex items-center gap-2 hover:bg-[rgba(0,255,194,.10)]"
+                >
+                  <span className="flex-1 truncate">{o.label}</span>
+                  {o.sub && (
+                    <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                      ••••{o.sub}
+                    </span>
+                  )}
+                </button>
+              ))}
+              {filtered.length === 0 && (
+                <div className="px-3 py-6 text-sm" style={{ color: 'var(--text-muted)' }}>
+                  No items.
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </>
+    );
+  }
+
+  /* =========================================================================
+     Assistant Rail (compact, left of main content)
+  ========================================================================= */
+  const [railCollapsed, setRailCollapsed] = useState(false);
+  const [q, setQ] = useState('');
+  const visible = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    return s ? assistants.filter((a) => a.name.toLowerCase().includes(s)) : assistants;
+  }, [assistants, q]);
+
+  /* =========================================================================
+     LAYOUT
+  ========================================================================= */
+  if (!active)
+    return (
+      <div className="min-h-screen page-shell grid place-items-center">
+        <div className="section p-8">
+          <div className="font-semibold">No assistants</div>
+          <div className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
+            Create one to get started.
+          </div>
+          <div className="mt-4">
+            <button className="btn" onClick={createAssistant}>
+              <Plus className="w-4 h-4" /> Create
+            </button>
+          </div>
+        </div>
+      </div>
+    );
 
   return (
-    <div ref={scopeRef} className="voice-studio">
-      <aside className="hidden lg:flex flex-col"
-        style={{position:'fixed', left:'calc(var(--app-sidebar-w, 248px) - 1px)', top:'64px',
-                width: collapsed ? 72 : 'var(--rail-w, 320px)', height:'calc(100vh - 64px)',
-                background:'var(--panel)', borderRight:'1px solid var(--border)', boxShadow:'var(--shadow-soft)', zIndex:10, borderTopLeftRadius:16}}>
-        <div className="section-bar" style={{borderTopLeftRadius:16, borderTopRightRadius:0}}>
+    <div className="min-h-screen page-shell font-sans">
+      {/* Left fixed rail */}
+      <aside
+        className="hidden lg:flex flex-col"
+        style={{
+          position: 'fixed',
+          left: 'var(--app-sidebar-w, 248px)',
+          top: 64,
+          width: railCollapsed ? 72 : 300,
+          height: 'calc(100vh - 64px)',
+          background: 'var(--panel)',
+          borderRight: '1px solid var(--border)',
+          boxShadow: 'var(--shadow-soft)',
+          zIndex: 10,
+          borderTopLeftRadius: 16,
+        }}
+      >
+        <div className="px-3 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
           <div className="flex items-center gap-2 font-semibold">
-            <Bot size={16} /><span>Assistants</span>
+            <Bot className="w-4 h-4" style={{ color: 'var(--brand)' }} />
+            {!railCollapsed && <span>Assistants</span>}
           </div>
-          <div className="ml-auto flex items-center gap-2">
-            {!collapsed && <button onClick={onCreate} className="btn btn-ghost"><Plus size={14}/> Create</button>}
-            <button onClick={()=>setCollapsed(v=>!v)} className="btn btn-ghost" title={collapsed?'Expand':'Collapse'}>
-              {collapsed ? <ChevronRightIcon size={16}/> : <ChevronLeft size={16}/>}
+          <div className="flex items-center gap-2">
+            {!railCollapsed && (
+              <button onClick={createAssistant} className="btn text-xs">
+                <Plus className="w-4 h-4" /> Create
+              </button>
+            )}
+            <button onClick={() => setRailCollapsed((v) => !v)} className="btn" title={railCollapsed ? 'Expand' : 'Collapse'}>
+              {railCollapsed ? <ChevronRightIcon className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
             </button>
           </div>
         </div>
 
-        <div className="section-body min-h-0 flex-1 overflow-y-auto">
-          {!collapsed && (
-            <div className="card p-2 mb-2">
-              <div className="flex items-center gap-2 builder-input px-2 py-1">
-                <Search size={14}/><input className="bg-transparent outline-none text-sm w-full" placeholder="Search…"
-                  value={q} onChange={e=>setQ(e.target.value)} />
-              </div>
+        <div className="p-3 min-h-0 flex-1 overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
+          {!railCollapsed && (
+            <div className="card p-2 mb-2 flex items-center gap-2">
+              <Search className="w-4 h-4" style={{ color: 'var(--brand)' }} />
+              <input className="bg-transparent outline-none text-sm w-full" placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} />
             </div>
           )}
 
           <div className="space-y-2">
-            {visible.map(a=>{
-              const isActive=a.id===activeId;
-              const isEdit=editing===a.id;
-              if(collapsed){
+            {visible.map((a) => {
+              const isActive = a.id === activeId;
+              if (railCollapsed) {
                 return (
-                  <button key={a.id} onClick={()=>onSelect(a.id)} title={a.name}
-                    className="w-full card p-3 grid place-items-center">
-                    <Bot size={16}/>
+                  <button
+                    key={a.id}
+                    onClick={() => setActiveId(a.id)}
+                    title={a.name}
+                    className="w-full rounded-xl p-3 grid place-items-center"
+                    style={{
+                      background: isActive ? 'color-mix(in oklab, var(--brand) 10%, var(--card))' : 'var(--card)',
+                      border: '1px solid var(--border)',
+                    }}
+                  >
+                    <Bot className="w-4 h-4" style={{ color: 'var(--brand)' }} />
                   </button>
                 );
               }
               return (
-                <div key={a.id} className={`card p-3 ${isActive?'edge':''}`}>
-                  <button onClick={()=>onSelect(a.id)} className="w-full text-left flex items-center justify-between">
+                <div key={a.id} className="card p-3 lift-hover" style={{ background: isActive ? 'color-mix(in oklab, var(--brand) 8%, var(--card))' : 'var(--card)' }}>
+                  <button onClick={() => setActiveId(a.id)} className="w-full text-left flex items-center justify-between">
                     <div className="min-w-0">
                       <div className="font-medium truncate flex items-center gap-2">
-                        <Bot size={16}/>
-                        {!isEdit ? <span className="truncate">{a.name}</span> : (
-                          <input autoFocus className="input px-2 py-1 w-full" value={temp}
-                            onChange={e=>setTemp(e.target.value)}
-                            onKeyDown={(e)=>{ if(e.key==='Enter'){ onRename(a.id, (temp||'').trim()||'Untitled'); setEditing(null); }
-                                              if(e.key==='Escape') setEditing(null); }} />
-                        )}
+                        <Bot className="w-4 h-4" style={{ color: 'var(--brand)' }} />
+                        <span className="truncate">{a.name}</span>
                       </div>
-                      <div className="text-xs" style={{color:'var(--text-muted)'}}>{new Date(a.updatedAt).toLocaleDateString()}</div>
+                      <div className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+                        {new Date(a.updatedAt).toLocaleDateString()}
+                      </div>
                     </div>
-                    {isActive ? <Check size={16}/> : null}
+                    {isActive ? <Check className="w-4 h-4" style={{ color: 'var(--brand)' }} /> : null}
                   </button>
 
                   <div className="mt-2 flex items-center gap-2">
-                    {!isEdit ? (
-                      <>
-                        <button onClick={()=>{ setEditing(a.id); setTemp(a.name); }} className="btn btn-ghost text-xs"><Edit3 size={14}/> Rename</button>
-                        <button onClick={()=>onDelete(a.id)} className="btn text-xs" style={{ background:'rgba(220,38,38,.10)', borderColor:'rgba(220,38,38,.28)', color:'#fda4af' }}>
-                          <Trash2 size={14}/> Delete
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <button onClick={()=>{ onRename(a.id, (temp||'').trim()||'Untitled'); setEditing(null); }} className="btn text-xs" style={{background:'var(--brand)', color:'#0b1112', borderColor:'transparent'}}><Check size={14}/> Save</button>
-                        <button onClick={()=>setEditing(null)} className="btn text-xs">Cancel</button>
-                      </>
-                    )}
+                    <button
+                      onClick={() => {
+                        const name = prompt('Rename assistant', a.name) || a.name;
+                        renameAssistant(a.id, name.trim() || 'Untitled');
+                      }}
+                      className="btn text-xs"
+                    >
+                      <Edit3 className="w-4 h-4" /> Rename
+                    </button>
+                    <button
+                      onClick={() => deleteAssistant(a.id)}
+                      className="btn text-xs"
+                      style={{ background: 'rgba(220,38,38,.10)', borderColor: 'rgba(220,38,38,.28)', color: '#fda4af' }}
+                    >
+                      <Trash2 className="w-4 h-4" /> Delete
+                    </button>
                   </div>
                 </div>
               );
@@ -174,411 +665,186 @@ function AssistantRail({
           </div>
         </div>
       </aside>
-    </div>
-  );
-}
 
-/* =============================================================================
-   InlineSelect
-============================================================================= */
-function InlineSelect({
-  value, onChange, options, placeholder='— Choose —', left
-}:{
-  value:string; onChange:(v:string)=>void;
-  options:Array<{value:string; label:string; sub?:string}>; placeholder?:string; left?:React.ReactNode;
-}){
-  const [open,setOpen]=useState(false);
-  const [rect,setRect]=useState<{top:number; left:number; width:number}|null>(null);
-  const [q,setQ]=useState('');
-  const btnRef=useRef<HTMLButtonElement|null>(null);
-  const filtered=useMemo(()=> {
-    const s=q.trim().toLowerCase();
-    if(!s) return options;
-    return options.filter(o=> (o.label+' '+(o.sub||'')).toLowerCase().includes(s));
-  },[options,q]);
-
-  useLayoutEffect(()=>{ if(!open) return; const r=btnRef.current?.getBoundingClientRect(); if(r) setRect({ top:r.bottom+8, left:r.left, width:r.width }); },[open]);
-  useEffect(()=>{ if(!open) return; const close=(e:MouseEvent)=>{ if(btnRef.current?.contains(e.target as Node)) return; setOpen(false); }; window.addEventListener('mousedown', close); return ()=>window.removeEventListener('mousedown', close); },[open]);
-
-  const sel=options.find(o=>o.value===value) || null;
-
-  return (
-    <>
-      <button ref={btnRef} className="w-full card px-3 h-[44px] flex items-center justify-between gap-2" onClick={()=>setOpen(v=>!v)}>
-        <span className="flex items-center gap-2 min-w-0">{left}<span className="truncate">{sel ? sel.label : <span style={{ color:'var(--text-muted)' }}>{placeholder}</span>}</span></span>
-        <span className="text-xs" style={{ color:'var(--text-muted)' }}>{sel?.sub || ''}</span>
-        <ChevronDown size={14}/>
-      </button>
-      {open && rect && (
-        <div className="fixed z-[9999] p-3 card" style={{ left:rect.left, top:rect.top, width:rect.width }}>
-          <div className="builder-input flex items-center gap-2 mb-3 px-2 py-1">
-            <Search size={14}/><input className="bg-transparent outline-none text-sm w-full" placeholder="Search…"
-              value={q} onChange={e=>setQ(e.target.value)} />
-          </div>
-          <div className="max-h-72 overflow-y-auto pr-1" style={{ scrollbarWidth:'thin' }}>
-            {filtered.map(o=>(
-              <button key={o.value||o.label} onClick={()=>{ onChange(o.value); setOpen(false); }}
-                      className="w-full text-left px-3 py-2 rounded-[10px] hover:bg-[rgba(0,0,0,.04)] dark:hover:bg-[rgba(255,255,255,.06)]"
-                      style={{ border:'1px solid transparent' }}>
-                <span className="flex-1 truncate">{o.label}</span>
-                {o.sub && <span className="text-xs" style={{ color:'var(--text-muted)' }}>••••{o.sub}</span>}
-              </button>
-            ))}
-            {filtered.length===0 && <div className="px-3 py-6 text-sm" style={{ color:'var(--text-muted)' }}>No items.</div>}
-          </div>
-        </div>
-      )}
-    </>
-  );
-}
-
-/* =============================================================================
-   Voice/Transcriber (browser demo)
-============================================================================= */
-function useBrowserSpeech({
-  enabled, interim,
-  onFinal,
-  onInterim,
-}:{
-  enabled: boolean; interim: boolean;
-  onFinal: (text:string)=>void; onInterim?:(text:string)=>void;
-}){
-  const recRef = useRef<any>(null);
-  const [listening,setListening]=useState(false);
-
-  useEffect(()=> {
-    if(!enabled){ stop(); return; }
-    // lazy ctor
-    // @ts-ignore
-    const SR = (window.SpeechRecognition || window.webkitSpeechRecognition) as any;
-    if(!SR) return; // not supported
-    const rec = new SR();
-    rec.lang = 'en-US';
-    rec.continuous = true;
-    rec.interimResults = interim;
-    rec.onresult = (e: any) => {
-      let interimText = '';
-      let finalText = '';
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        const t = e.results[i][0].transcript;
-        if (e.results[i].isFinal) finalText += t;
-        else interimText += t;
-      }
-      if (interim && interimText && onInterim) onInterim(interimText);
-      if (finalText) onFinal(finalText.trim());
-    };
-    rec.onend = () => setListening(false);
-    recRef.current = rec;
-    return ()=> { try{ rec.stop(); }catch{} recRef.current=null; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[enabled, interim]);
-
-  function start(){
-    if(!recRef.current) return;
-    try{ recRef.current.start(); setListening(true); }catch{}
-  }
-  function stop(){
-    try{ recRef.current?.stop(); }catch{} setListening(false);
-  }
-  return { listening, start, stop, supported: !!(typeof window!=='undefined' && ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition)) };
-}
-
-function speak(text:string){
-  try{
-    const u = new SpeechSynthesisUtterance(text);
-    u.rate = 1.0; u.pitch = 1.0;
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(u);
-  }catch{}
-}
-
-/* =============================================================================
-   Main Section
-============================================================================= */
-export default function VoiceAgentSection(){
-  const [assistants,setAssistants]=useState<Assistant[]>([]);
-  const [activeId,setActiveId]=useState('');
-  const active=useMemo(()=>assistants.find(a=>a.id===activeId) || null,[assistants,activeId]);
-
-  // demo “credentials” just to reflect status – you can wire actual pages later
-  const [apiKeys,setApiKeys]=useState<Array<{id:string;name:string;key:string}>>([]);
-  const [apiKeyId,setApiKeyId]=useState('');
-  const [apiKey,setApiKey]=useState('');
-  const [numbers,setNumbers]=useState<Array<{id:string;e164?:string;label?:string}>>([]);
-  const [fromE164,setFrom]=useState('');
-
-  // prompt gen/diff
-  const [genInput,setGenInput]=useState('');
-  const [typing,setTyping]=useState<Tok[]|null>(null);
-  const [typedCount,setTypedCount]=useState(0);
-  const [previewPrompt,setPreviewPrompt]=useState('');
-  const typingBoxRef=useRef<HTMLDivElement|null>(null);
-  const typingTimer=useRef<number| null>(null);
-
-  // chat/test
-  const [turns,setTurns]=useState<Turn[]>([]);
-  const [interim,setInterim]=useState('');
-
-  const transcriber = active?.config.transcriber || { enabled:true, engine:'browser' as const, interim:true };
-
-  const { listening, start, stop, supported } = useBrowserSpeech({
-    enabled: !!transcriber.enabled && transcriber.engine==='browser',
-    interim: !!transcriber.interim,
-    onInterim: setInterim,
-    onFinal: (text) => {
-      setInterim('');
-      appendTurn({ role:'user', text });
-      respond(text);
-    },
-  });
-
-  /* bootstrap */
-  useEffect(()=> {
-    const ls = typeof window!=='undefined' ? localStorage.getItem(K_LIST) : null;
-    let list:Assistant[]=[];
-    try{ list = ls ? JSON.parse(ls) : []; }catch{}
-    if(!list.length){
-      const seed:Assistant = {
-        id: uid('agent'),
-        name: 'New Assistant',
-        updatedAt: Date.now(),
-        config: {
-          model:{ provider:'openai', model:'gpt-4o', firstMessageMode:'assistant_first', firstMessage:'Hello.', systemPrompt:'', temperature:0.5, maxTokens:250 },
-          voice:{ provider:'vapi', voiceId:'Elliot' },
-          transcriber:{ enabled:true, engine:'browser', interim:true }
-        }
-      };
-      list=[seed];
-      localStorage.setItem(K_LIST, JSON.stringify(list));
-      localStorage.setItem(k(seed.id), JSON.stringify(seed));
-    }
-    setAssistants(list); setActiveId(list[0].id);
-
-    // api keys via scoped storage (no auto-select)
-    (async()=>{
-      try{
-        const ss=await scopedStorage(); await ss.ensureOwnerGuard();
-        const saved=await ss.getJSON<Array<{id:string;name:string;key:string}>>('apiKeys.v1', []);
-        const cleaned=(Array.isArray(saved)?saved:[]).map(x=>({id:String(x.id),name:String(x.name),key:String(x.key)}));
-        setApiKeys(cleaned);
-        const picked = await ss.getJSON<string>('apiKeys.selectedId','');
-        setApiKeyId(picked||''); // still not storing the secret here
-        const hit=cleaned.find(x=>x.id===picked); setApiKey(hit?.key||'');
-      }catch{}
-    })();
-
-    // numbers (mock load; replace with your API)
-    setNumbers([{ id:'n1', e164:'+1 415 555-0101', label:'Main' }]);
-  },[]);
-
-  // keep secret when dropdown changes
-  useEffect(()=>{ (async()=>{
-    try{
-      const ss=await scopedStorage();
-      const all=await ss.getJSON<Array<{id:string;name:string;key:string}>>('apiKeys.v1', []);
-      const hit=Array.isArray(all)?all.find(k=>k.id===apiKeyId):null;
-      setApiKey(hit?.key || '');
-      if(apiKeyId) await ss.setJSON('apiKeys.selectedId', apiKeyId);
-    }catch{ setApiKey(''); }
-  })(); },[apiKeyId]);
-
-  /* save helpers */
-  const saveAssistant=(a:Assistant)=>{
-    try{ localStorage.setItem(k(a.id), JSON.stringify(a)); }catch{}
-    setAssistants(prev=>{
-      const next=prev.map(x=>x.id===a.id?{...a,updatedAt:Date.now()}:x);
-      localStorage.setItem(K_LIST, JSON.stringify(next));
-      return next;
-    });
-  };
-  const createAssistant=()=>{
-    const fresh:Assistant = {
-      id: uid('agent'),
-      name: 'Untitled',
-      updatedAt: Date.now(),
-      config: {
-        model:{ provider:'openai', model:'gpt-4o', firstMessageMode:'assistant_first', firstMessage:'Hello.', systemPrompt:'', temperature:0.5, maxTokens:250 },
-        voice:{ provider:'vapi', voiceId:'Elliot' },
-        transcriber:{ enabled:true, engine:'browser', interim:true }
-      }
-    };
-    try{ localStorage.setItem(k(fresh.id), JSON.stringify(fresh)); }catch{}
-    const next=[fresh, ...assistants]; localStorage.setItem(K_LIST, JSON.stringify(next));
-    setAssistants(next); setActiveId(fresh.id);
-  };
-  const renameAssistant=(id:string, name:string)=>{
-    const cur=assistants.find(a=>a.id===id); if(!cur) return;
-    saveAssistant({ ...cur, name });
-  };
-  const deleteAssistant=(id:string)=>{
-    const next=assistants.filter(a=>a.id!==id);
-    try{ localStorage.removeItem(k(id)); localStorage.setItem(K_LIST, JSON.stringify(next)); }catch{}
-    setAssistants(next);
-    if(activeId===id && next[0]) setActiveId(next[0].id);
-  };
-
-  /* typing stream effect */
-  useEffect(()=>{ if(!typing) return; setTypedCount(0); if(typingTimer.current) window.clearInterval(typingTimer.current);
-    typingTimer.current = window.setInterval(()=> setTypedCount(c=> {
-      const step = 6; const n=Math.min(c+step, typing.length);
-      if(n>=typing.length && typingTimer.current){ window.clearInterval(typingTimer.current); typingTimer.current=null; }
-      return n;
-    }), 12);
-  },[typing]);
-  useEffect(()=>{ if(typingBoxRef.current) typingBoxRef.current.scrollTop=typingBoxRef.current.scrollHeight; },[typedCount]);
-
-  /* chat helpers */
-  function appendTurn(t:Turn){ setTurns(prev=>[...prev, {...t, ts: Date.now()}]); }
-
-  async function respond(userText:string){
-    // If you wire a backend, call it here with apiKey/number/etc.
-    // For now: tiny deterministic stub that uses system prompt context.
-    const sys = (active?.config.model.systemPrompt || '').trim();
-    const prefix = sys ? `Based on your setup: ${sys.slice(0,160)}. ` : '';
-    const reply = `${prefix}${userText ? `You said: “${userText}”.` : ''} I’m a demo voice assistant.`;
-    appendTurn({ role:'assistant', text: reply, ts: Date.now() });
-    speak(reply);
-  }
-
-  /* generate / diff */
-  function handleGenerate(){
-    if(!active) return;
-    const before = active.config.model.systemPrompt || '';
-    const ask = genInput.trim(); if(!ask) return;
-    const next = ask.split(/\s+/).length<=6
-      ? `You are a ${ask.toLowerCase()}. Keep responses concise. Confirm key details. Politely decline restricted requests.`
-      : ask;
-    setPreviewPrompt(next);
-    setTyping(charDiff(before, next));
-    setGenInput('');
-  }
-  function acceptTyping(){
-    if(!active) return;
-    const next={ ...active, config:{ ...active.config, model:{ ...active.config.model, systemPrompt: previewPrompt } } };
-    saveAssistant(next); setTyping(null);
-  }
-  function declineTyping(){ setTyping(null); }
-
-  function appendToPrompt(line:string){
-    if(!active) return;
-    const cur = active.config.model.systemPrompt || '';
-    const next = cur ? `${cur}\n${line}` : line;
-    saveAssistant({ ...active, config:{ ...active.config, model:{ ...active.config.model, systemPrompt: next } } });
-  }
-
-  const keyOptions = useMemo(()=> apiKeys.map(k=>({ value:k.id, label:`${k.name}`, sub:(k.key||'').slice(-4).toUpperCase() })), [apiKeys]);
-  const numOptions = useMemo(()=> numbers.map(n=>({ value:n.e164||'', label:(n.e164||n.id||'').trim() + (n.label?` — ${n.label}`:'') })), [numbers]);
-
-  if(!active){
-    return (
-      <div className="voice-studio min-h-screen page-shell grid place-items-center">
-        <div className="panel p-8">
-          <div className="text-sm font-semibold">No assistants</div>
-          <div className="text-xs" style={{color:'var(--text-muted)'}}>Create one to get started.</div>
-          <div className="mt-4"><button className="btn btn-ghost" onClick={createAssistant}><Plus size={16}/> Create</button></div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="voice-studio min-h-screen">
-      {/* Left rail */}
-      <AssistantRail items={assistants} activeId={activeId} onSelect={setActiveId} onCreate={createAssistant} onRename={renameAssistant} onDelete={deleteAssistant} />
-
-      {/* Main content */}
-      <main className="editor-gutter"
-        style={{ marginLeft:`calc(var(--app-sidebar-w, 248px) + var(--rail-w, 320px))`, padding:'76px clamp(18px,3vw,38px) 80px' }}>
-        <div className={`mx-auto w-full max-w-[1180px] ${SCOPE}`}>
-          {/* Header pills like vapi */}
-          <div className="mb-4 flex items-center gap-3">
-            <div className="section-pill">Model</div>
-            <div className="section-pill">Voice</div>
-            <div className="section-pill">Transcriber</div>
-          </div>
-
-          {/* ======== Model section ======== */}
-          <section className="panel p-6">
+      {/* Main */}
+      <main
+        className="px-4 sm:px-6"
+        style={{ marginLeft: 'calc(var(--app-sidebar-w, 248px) + 300px)', paddingTop: 76, paddingBottom: 80 }}
+      >
+        <div className="max-w-[1200px] mx-auto grid gap-8">
+          {/* SECTION: Prompt */}
+          <section className="section p-6">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 font-semibold"><FileText size={16}/> Model</div>
-              <div className="flex items-center gap-2">
-                <button onClick={()=> {
-                  const next={ ...active, config:{ ...active.config, model:{ ...active.config.model, systemPrompt:'' } } };
-                  saveAssistant(next);
-                }} className="btn btn-ghost"><RefreshCw size={16}/> Reset</button>
+              <div className="flex items-center gap-2 font-semibold">
+                <FileText className="w-4 h-4" style={{ color: 'var(--brand)' }} />
+                Prompt
               </div>
-            </div>
-
-            {/* Generate / Append row */}
-            <div className="card p-3 mt-4">
-              <div className="text-xs" style={{color:'var(--text-muted)'}}>Generate / Edit</div>
-              <div className="mt-2 flex gap-2">
-                <input className="input flex-1" placeholder='e.g. "sales agent for roofers" or paste a full prompt'
-                       value={genInput} onChange={e=>setGenInput(e.target.value)}
-                       onKeyDown={e=>{ if(e.key==='Enter') handleGenerate(); }}/>
-                <button className="btn btn-brand halo" onClick={handleGenerate}><Sparkles size={16}/> Generate</button>
-                <button className="btn btn-ghost" onClick={()=>{ const v=genInput.trim(); if(v) { appendToPrompt(v); setGenInput(''); }}}>
-                  <Plus size={16}/> Append
+              <div className="flex items-center gap-2">
+                <div className="section-pill">New agents start empty</div>
+                <button
+                  onClick={() =>
+                    saveAssistant({
+                      ...active,
+                      updatedAt: Date.now(),
+                      config: { model: { ...active.config.model, systemPrompt: '' } },
+                    })
+                  }
+                  className="btn"
+                >
+                  <RefreshCw className="w-4 h-4" /> Reset
                 </button>
               </div>
             </div>
 
-            {/* Editor OR diff */}
+            {/* Generate row */}
+            <div className="card p-3 mt-4">
+              <div className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>
+                Generate / Edit
+              </div>
+              <div className="flex gap-2">
+                <input
+                  className="input flex-1"
+                  placeholder='e.g. "sales agent for roofers" or paste a full prompt'
+                  value={genInput}
+                  onChange={(e) => setGenInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleGenerate();
+                  }}
+                />
+                <button className="btn btn-brand halo" onClick={handleGenerate}>
+                  <Sparkles className="w-4 h-4" /> Generate
+                </button>
+              </div>
+            </div>
+
+            {/* Editor or diff */}
             {!typing ? (
               <div className="mt-4">
-                <div className="text-xs mb-2" style={{color:'var(--text-muted)'}}>System Prompt</div>
-                <textarea rows={16} className="input input-elevated w-full" placeholder="(Empty)"
+                <div className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>
+                  System Prompt
+                </div>
+                <textarea
+                  rows={18}
+                  className="input input-elevated w-full"
+                  style={{ borderRadius: 18, padding: '1rem' }}
+                  placeholder="(Empty)"
                   value={active.config.model.systemPrompt}
-                  onChange={e=> saveAssistant({ ...active, config:{ ...active.config, model:{ ...active.config.model, systemPrompt:e.target.value } } }) }
-                  style={{ borderRadius: 16, padding:'1rem' }}/>
+                  onChange={(e) =>
+                    saveAssistant({
+                      ...active,
+                      updatedAt: Date.now(),
+                      config: { model: { ...active.config.model, systemPrompt: e.target.value } },
+                    })
+                  }
+                />
                 <div className="mt-2 flex gap-2 justify-end">
-                  <button className="btn btn-ghost" onClick={()=>navigator.clipboard.writeText(active.config.model.systemPrompt||'').catch(()=>{})}><Copy size={14}/> Copy</button>
+                  <button
+                    className="btn"
+                    onClick={() =>
+                      navigator.clipboard.writeText(active.config.model.systemPrompt || '').catch(() => {})
+                    }
+                  >
+                    <Copy className="w-4 h-4" /> Copy
+                  </button>
                 </div>
               </div>
             ) : (
               <div className="mt-4">
-                <div className="text-xs mb-2" style={{color:'var(--text-muted)'}}>Proposed Changes (typing + diff)</div>
-                <div ref={typingBoxRef} className="input input-elevated w-full" style={{ whiteSpace:'pre-wrap', maxHeight:560, overflowY:'auto', borderRadius:16, padding:'1rem' }}>
+                <div className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>
+                  Proposed Changes (typing + diff)
+                </div>
+                <div
+                  ref={typingBoxRef}
+                  className="input w-full"
+                  style={{ borderRadius: 18, padding: '1rem', whiteSpace: 'pre-wrap', maxHeight: 560, overflowY: 'auto' }}
+                >
                   {(() => {
-                    const slice=typing.slice(0, typedCount);
-                    const out: JSX.Element[]=[]; let buf=''; let mode:'add'|'del'|'norm'='norm';
-                    const flush=()=>{
-                      if(!buf) return;
-                      if(mode==='add') out.push(<ins key={out.length} style={{background:'rgba(0,255,194,.16)', textDecoration:'none', borderRadius:4, padding:'1px 2px'}}>{buf}</ins>);
-                      else if(mode==='del') out.push(<del key={out.length} style={{background:'rgba(244,63,94,.14)', borderRadius:4, padding:'1px 2px'}}>{buf}</del>);
+                    const slice = typing.slice(0, typedCount);
+                    const out: JSX.Element[] = [];
+                    let buf = '';
+                    let mode: 'add' | 'del' | 'norm' = 'norm';
+                    const flush = () => {
+                      if (!buf) return;
+                      if (mode === 'add')
+                        out.push(
+                          <ins key={out.length} style={{ background: 'rgba(0,255,194,.16)', textDecoration: 'none' }}>
+                            {buf}
+                          </ins>
+                        );
+                      else if (mode === 'del')
+                        out.push(
+                          <del key={out.length} style={{ background: 'rgba(244,63,94,.14)' }}>
+                            {buf}
+                          </del>
+                        );
                       else out.push(<span key={out.length}>{buf}</span>);
-                      buf='';
+                      buf = '';
                     };
-                    for(const t of slice){
+                    for (const t of slice) {
                       const m = t.added ? 'add' : t.removed ? 'del' : 'norm';
-                      if(m!==mode){ flush(); mode=m as any; }
-                      buf+=t.ch;
+                      if (m !== mode) {
+                        flush();
+                        mode = m as any;
+                      }
+                      buf += t.ch;
                     }
                     flush();
-                    if(typedCount < typing.length) out.push(<span key="caret" className="animate-pulse"> ▌</span>);
+                    if (typedCount < typing.length) out.push(<span key="caret" className="animate-pulse"> ▌</span>);
                     return out;
                   })()}
                 </div>
                 <div className="mt-3 flex items-center gap-2 justify-end">
-                  <button className="btn btn-ghost" onClick={declineTyping}><X size={16}/> Discard</button>
-                  <button className="btn btn-brand halo" onClick={acceptTyping}><Check size={16}/> Accept</button>
+                  <button className="btn" onClick={() => setTyping(null)}>
+                    <X className="w-4 h-4" /> Decline
+                  </button>
+                  <button className="btn btn-brand halo" onClick={acceptTyping}>
+                    <Check className="w-4 h-4" /> Accept
+                  </button>
                 </div>
               </div>
             )}
+          </section>
 
-            {/* Model sliders */}
-            <div className="grid gap-4 mt-6 md:grid-cols-3">
+          {/* SECTION: Conversation Setup */}
+          <section className="section p-6">
+            <div className="flex items-center gap-2 font-semibold">
+              <MessageSquare className="w-4 h-4" style={{ color: 'var(--brand)' }} />
+              Conversation Setup
+            </div>
+            <div className="grid gap-4 mt-4 md:grid-cols-3">
               <div className="card p-3">
-                <div className="text-xs mb-1" style={{color:'var(--text-muted)'}}>Provider</div>
-                <select className="input w-full" value={active.config.model.provider}
-                        onChange={e=> saveAssistant({ ...active, config:{ ...active.config, model:{ ...active.config.model, provider:e.target.value as Provider } } })}>
+                <div className="text-xs mb-1" style={{ color: 'var(--text-muted)' }}>
+                  Provider
+                </div>
+                <select
+                  className="input w-full"
+                  value={active.config.model.provider}
+                  onChange={(e) =>
+                    saveAssistant({
+                      ...active,
+                      updatedAt: Date.now(),
+                      config: { model: { ...active.config.model, provider: e.target.value as any } },
+                    })
+                  }
+                >
                   <option value="openai">OpenAI</option>
                 </select>
               </div>
               <div className="card p-3">
-                <div className="text-xs mb-1" style={{color:'var(--text-muted)'}}>Model</div>
-                <select className="input w-full" value={active.config.model.model}
-                        onChange={e=> saveAssistant({ ...active, config:{ ...active.config, model:{ ...active.config.model, model:e.target.value as ModelId } } })}>
+                <div className="text-xs mb-1" style={{ color: 'var(--text-muted)' }}>
+                  Model
+                </div>
+                <select
+                  className="input w-full"
+                  value={active.config.model.model}
+                  onChange={(e) =>
+                    saveAssistant({
+                      ...active,
+                      updatedAt: Date.now(),
+                      config: { model: { ...active.config.model, model: e.target.value as any } },
+                    })
+                  }
+                >
                   <option value="gpt-4o">GPT-4o</option>
                   <option value="gpt-4o-mini">GPT-4o mini</option>
                   <option value="gpt-4.1">GPT-4.1</option>
@@ -586,156 +852,166 @@ export default function VoiceAgentSection(){
                 </select>
               </div>
               <div className="card p-3">
-                <div className="text-xs mb-1" style={{color:'var(--text-muted)'}}>First Message Mode</div>
-                <select className="input w-full" value={active.config.model.firstMessageMode}
-                        onChange={e=> saveAssistant({ ...active, config:{ ...active.config, model:{ ...active.config.model, firstMessageMode:e.target.value as any } } })}>
+                <div className="text-xs mb-1" style={{ color: 'var(--text-muted)' }}>
+                  Temperature
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={active.config.model.temperature ?? 0.5}
+                  onChange={(e) =>
+                    saveAssistant({
+                      ...active,
+                      updatedAt: Date.now(),
+                      config: { model: { ...active.config.model, temperature: Number(e.target.value) } },
+                    })
+                  }
+                  className="w-full"
+                />
+              </div>
+            </div>
+            <div className="grid gap-4 mt-4 md:grid-cols-2">
+              <div className="card p-3">
+                <div className="text-xs mb-1" style={{ color: 'var(--text-muted)' }}>
+                  First Message Mode
+                </div>
+                <select
+                  className="input w-full"
+                  value={active.config.model.firstMessageMode}
+                  onChange={(e) =>
+                    saveAssistant({
+                      ...active,
+                      updatedAt: Date.now(),
+                      config: { model: { ...active.config.model, firstMessageMode: e.target.value as any } },
+                    })
+                  }
+                >
                   <option value="assistant_first">Assistant speaks first</option>
                   <option value="user_first">User speaks first</option>
                 </select>
               </div>
-            </div>
-
-            <div className="grid gap-4 mt-4 md:grid-cols-3">
               <div className="card p-3">
-                <div className="text-xs mb-1" style={{color:'var(--text-muted)'}}>First Message</div>
-                <input className="input w-full" value={active.config.model.firstMessage}
-                       onChange={e=> saveAssistant({ ...active, config:{ ...active.config, model:{ ...active.config.model, firstMessage:e.target.value } } })}/>
-              </div>
-              <div className="card p-3">
-                <div className="text-xs mb-2 flex items-center gap-2" style={{color:'var(--text-muted)'}}><SlidersHorizontal size={14}/> Temperature</div>
-                <input type="range" min={0} max={1} step={0.05}
-                       value={active.config.model.temperature ?? 0.5}
-                       onChange={(e)=> saveAssistant({ ...active, config:{ ...active.config, model:{ ...active.config.model, temperature: Number(e.target.value) } } })}
-                       className="w-full"/>
-                <div className="text-xs mt-1" style={{color:'var(--text-muted)'}}>{active.config.model.temperature?.toFixed(2)}</div>
-              </div>
-              <div className="card p-3">
-                <div className="text-xs mb-1" style={{color:'var(--text-muted)'}}>Max Tokens</div>
-                <input className="input w-full" inputMode="numeric"
-                       value={(active.config.model.maxTokens ?? 250).toString()}
-                       onChange={(e)=> saveAssistant({ ...active, config:{ ...active.config, model:{ ...active.config.model, maxTokens: Number(e.target.value || 0) } } })}/>
+                <div className="text-xs mb-1" style={{ color: 'var(--text-muted)' }}>
+                  First Message
+                </div>
+                <input
+                  className="input w-full"
+                  value={active.config.model.firstMessage}
+                  onChange={(e) =>
+                    saveAssistant({
+                      ...active,
+                      updatedAt: Date.now(),
+                      config: { model: { ...active.config.model, firstMessage: e.target.value } },
+                    })
+                  }
+                />
               </div>
             </div>
           </section>
 
-          {/* ======== Voice section ======== */}
-          <section className="panel p-6 mt-8">
-            <div className="flex items-center gap-2 font-semibold"><Volume2 size={16}/> Voice</div>
-            <div className="grid gap-4 mt-4 md:grid-cols-2">
-              <div className="card p-3">
-                <div className="text-xs mb-1" style={{color:'var(--text-muted)'}}>Provider</div>
-                <select className="input w-full" value={active.config.voice?.provider || 'vapi'}
-                        onChange={(e)=> saveAssistant({ ...active, config:{ ...active.config, voice:{ ...(active.config.voice||{}), provider:e.target.value as any } } })}>
-                  <option value="vapi">Vapi</option>
-                  <option value="web">Web</option>
-                  <option value="eleven">ElevenLabs</option>
-                </select>
-              </div>
-              <div className="card p-3">
-                <div className="text-xs mb-1" style={{color:'var(--text-muted)'}}>Voice</div>
-                <select className="input w-full" value={active.config.voice?.voiceId || 'Elliot'}
-                        onChange={(e)=> saveAssistant({ ...active, config:{ ...active.config, voice:{ ...(active.config.voice||{}), voiceId:e.target.value } } })}>
-                  <option value="Elliot">Elliot</option>
-                  <option value="Ava">Ava</option>
-                  <option value="James">James</option>
-                </select>
-              </div>
+          {/* SECTION: Credentials */}
+          <section className="section p-6">
+            <div className="flex items-center gap-2 font-semibold">
+              <KeyRound className="w-4 h-4" style={{ color: 'var(--brand)' }} />
+              Credentials
             </div>
-          </section>
-
-          {/* ======== Transcriber & Test (like vapi “Talk to Assistant”) ======== */}
-          <section className="panel p-6 mt-8">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 font-semibold"><MessageSquare size={16}/> Transcriber & Test</div>
-              <div className="flex items-center gap-2">
-                <div className="section-pill">{supported ? 'Browser STT Ready' : 'SpeechRecognition not supported'}</div>
-                {listening ? (
-                  <button className="btn btn-ghost" onClick={stop}><MicOff size={16}/> Stop</button>
-                ) : (
-                  <button className="btn btn-brand halo" onClick={start}><Mic size={16}/> Talk to Assistant</button>
-                )}
-              </div>
-            </div>
-
             <div className="grid gap-4 mt-4 md:grid-cols-3">
               <div className="card p-3">
-                <div className="text-xs mb-1" style={{color:'var(--text-muted)'}}>Transcriber</div>
-                <select className="input w-full" value={active.config.transcriber?.engine || 'browser'}
-                        onChange={(e)=> saveAssistant({ ...active, config:{ ...active.config, transcriber:{ ...(active.config.transcriber||{enabled:true,interim:true}), engine: e.target.value as any } } })}>
-                  <option value="browser">Browser (demo)</option>
-                  <option value="vapi">Vapi (server)</option>
-                  <option value="deepgram">Deepgram</option>
-                </select>
-                <label className="mt-3 flex items-center gap-2 text-sm">
-                  <input type="checkbox"
-                    checked={!!active.config.transcriber?.enabled}
-                    onChange={(e)=> saveAssistant({ ...active, config:{ ...active.config, transcriber:{ ...(active.config.transcriber||{engine:'browser', interim:true}), enabled: e.target.checked } } })}/>
-                  Enable
-                </label>
-                <label className="mt-2 flex items-center gap-2 text-sm">
-                  <input type="checkbox"
-                    checked={!!active.config.transcriber?.interim}
-                    onChange={(e)=> saveAssistant({ ...active, config:{ ...active.config, transcriber:{ ...(active.config.transcriber||{engine:'browser', enabled:true}), interim: e.target.checked } } })}/>
-                  Interim results
-                </label>
+                <div className="text-xs mb-1" style={{ color: 'var(--text-muted)' }}>
+                  OpenAI API Key
+                </div>
+                <InlineSelect
+                  value={apiKeyId}
+                  onChange={setApiKeyId}
+                  options={keyOptions}
+                  placeholder="Select an API Key…"
+                  left={<KeyRound className="w-4 h-4" style={{ color: 'var(--brand)' }} />}
+                />
+                <div className="text-xs mt-2" style={{ color: 'var(--text-muted)' }}>
+                  Loaded from your API Keys page (scoped).
+                </div>
               </div>
 
-              <div className="card p-3 md:col-span-2">
-                <div className="text-xs mb-1" style={{color:'var(--text-muted)'}}>Live Transcript</div>
-                <div className="builder-input p-3 max-h-[260px] overflow-y-auto" style={{whiteSpace:'pre-wrap'}}>
-                  {turns.length===0 && !interim ? (
-                    <div className="text-sm" style={{color:'var(--text-muted)'}}>Tap “Talk to Assistant”, then speak. Your words appear here.</div>
+              <div className="card p-3">
+                <div className="text-xs mb-1" style={{ color: 'var(--text-muted)' }}>
+                  From Number
+                </div>
+                <InlineSelect
+                  value={fromE164}
+                  onChange={setFromE164}
+                  options={numOptions}
+                  placeholder={numbers.length ? '— Choose —' : 'No numbers imported'}
+                  left={<PhoneIcon className="w-4 h-4" style={{ color: 'var(--brand)' }} />}
+                />
+                <div className="text-xs mt-2" style={{ color: 'var(--text-muted)' }}>
+                  Optional here; used by your telephony backend.
+                </div>
+              </div>
+
+              <div className="card p-3">
+                <div className="text-xs mb-1" style={{ color: 'var(--text-muted)' }}>
+                  Status
+                </div>
+                <div className="section-pill inline-flex items-center gap-2">
+                  <div
+                    style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: 999,
+                      background: apiKey ? 'var(--brand)' : '#f87171',
+                    }}
+                  />
+                  {apiKey ? 'API Key selected' : 'No API Key'}
+                </div>
+                <div className="mt-3 flex gap-2">
+                  {!inCall ? (
+                    <button onClick={startCall} className="btn btn-brand halo flex-1">
+                      <Phone className="w-4 h-4" /> Start Web Call
+                    </button>
                   ) : (
-                    <>
-                      {turns.map((t,i)=>(
-                        <div key={i} className="mb-2">
-                          <div className="text-xs section-pill inline-block">{t.role==='assistant'?'AI':'You'}</div>
-                          <div className="text-sm mt-1">{t.text}</div>
-                        </div>
-                      ))}
-                      {interim && (
-                        <div className="opacity-75">
-                          <div className="text-xs section-pill inline-block">…</div>
-                          <div className="text-sm mt-1">{interim}</div>
-                        </div>
-                      )}
-                    </>
+                    <button onClick={stopCall} className="btn flex-1" style={{ borderColor: 'rgba(255,120,120,.45)', color: 'salmon' }}>
+                      <PhoneOff className="w-4 h-4" /> Stop Call
+                    </button>
                   )}
                 </div>
               </div>
             </div>
+          </section>
 
-            {/* Credentials row (like vapi’s phone + key pickers) */}
-            <div className="grid gap-4 mt-6 md:grid-cols-3">
-              <div className="card p-3">
-                <div className="text-xs mb-1" style={{color:'var(--text-muted)'}}>OpenAI API Key</div>
-                <InlineSelect value={apiKeyId} onChange={setApiKeyId} options={keyOptions} placeholder="Select an API Key…" left={<KeyRound size={14}/>}/>
-                <div className="text-xs mt-2" style={{color:'var(--text-muted)'}}>Loaded from your API Keys page.</div>
-              </div>
-              <div className="card p-3">
-                <div className="text-xs mb-1" style={{color:'var(--text-muted)'}}>From Number</div>
-                <InlineSelect value={fromE164} onChange={setFrom} options={numOptions} placeholder="— Choose —" left={<PhoneIcon size={14}/>}/>
-              </div>
-              <div className="card p-3">
-                <div className="text-xs mb-1" style={{color:'var(--text-muted)'}}>Status</div>
-                <div className="section-pill inline-flex items-center gap-2">
-                  <div style={{width:8,height:8,borderRadius:999, background: apiKey ? 'var(--brand)' : '#f87171'}}/>
-                  {apiKey ? 'API Key selected' : 'No API Key'}
-                </div>
+          {/* SECTION: Transcript (placeholder log) */}
+          <section className="section p-6">
+            <div className="flex items-center gap-2 font-semibold">
+              <MessageSquare className="w-4 h-4" style={{ color: 'var(--brand)' }} />
+              Session Transcript
+            </div>
+            <div className="card p-3 mt-3">
+              <div className="text-sm" style={{ color: 'var(--text-muted)' }}>
+                Connect your backend to stream turns here.
               </div>
             </div>
           </section>
         </div>
-
-        {/* Page-scoped cosmetics (same approach as API Keys page) */}
-        <style jsx global>{`
-          [data-theme="dark"] .${SCOPE}{
-            --frame-bg: radial-gradient(120% 180% at 50% -40%, rgba(0,255,194,.06) 0%, rgba(12,16,18,1) 42%),
-                        linear-gradient(180deg, #0e1213 0%, #0c1012 100%);
-            --chip-shadow: 0 4px 14px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.05);
-          }
-        `}</style>
       </main>
+
+      {/* Toast */}
+      {toast && (
+        <div className="fixed inset-0 z-[9997] pointer-events-none flex items-center justify-center">
+          <div
+            className="pointer-events-auto flex items-center gap-3 px-5 py-3 rounded-2xl elevate animate-[popIn_120ms_ease]"
+            style={{ background: 'var(--panel)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-soft)' }}
+          >
+            <div className="w-8 h-8 rounded-xl grid place-items-center" style={{ background: 'var(--brand-weak)' }}>
+              <Bot className="w-4 h-4" style={{ color: 'var(--brand)' }} />
+            </div>
+            <div className="text-sm">{toast}</div>
+            <button onClick={() => setToast(null)} className="ml-2 p-1 rounded hover:opacity-70">
+              <X className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
