@@ -7,7 +7,7 @@ import {
   Search, Plus, Folder, FolderOpen, Check, Trash2, Copy, Edit3, Sparkles,
   ChevronDown, ChevronRight, FileText, Mic2, BookOpen, SlidersHorizontal,
   Bot, UploadCloud, RefreshCw, X, ChevronLeft, ChevronRight as ChevronRightIcon,
-  Phone as PhoneIcon, Rocket, PhoneCall, PhoneOff, MessageSquare, ListTree, AudioLines, Volume2, Save
+  Phone as PhoneIcon, Rocket, PhoneCall, PhoneOff, MessageSquare, ListTree, AudioLines, Volume2, Save, KeyRound
 } from 'lucide-react';
 
 import AssistantRail, { type AssistantLite } from '@/components/voice/AssistantRail';
@@ -72,7 +72,7 @@ const ak = (id: string) => `voice:assistant:${id}`;
 const LS_CALLS = 'voice:calls.v1';
 const LS_ROUTES = 'voice:phoneRoutes.v1';
 
-// ---- API Keys (scoped storage) ----
+// ==== API key storage ====
 const LS_KEYS = 'apiKeys.v1';
 const LS_SELECTED = 'apiKeys.selectedId';
 type SavedKey = { id: string; name?: string; key: string; provider?: 'openai' | 'elevenlabs' | 'deepgram' };
@@ -129,7 +129,7 @@ function mergeInput(freeText: string, current: string) {
   const raw = (freeText || '').trim();
   if (!raw) return out;
 
-  // quick directive: "first message: Hi..."
+  // "first message: Hi..."
   const m = raw.match(/^(?:first\s*message|greeting)\s*[:\-]\s*(.+)$/i);
   if (m) { out.firstMessage = m[1].trim(); return out; }
 
@@ -141,7 +141,7 @@ function mergeInput(freeText: string, current: string) {
     return out;
   }
 
-  // otherwise add as a refinement bullet
+  // otherwise add as refinement
   const hasRef = sectionRegex('Refinements').test(out.prompt);
   const bullet = `- ${raw.replace(/\s+/g, ' ').trim()}`;
   out.prompt = hasRef
@@ -299,6 +299,22 @@ function StyleBlock() {
   border-color:rgba(220,38,38,.35);
 }
 
+/* PATCH: normalize selects (Safari/WebKit glossy fix) */
+.${SCOPE} select{
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  background-image: none !important;
+  border-radius: 14px;
+  padding-right: 2.25rem;
+  background-clip: padding-box;
+}
+.${SCOPE} select:focus{
+  outline: 2px solid color-mix(in oklab, var(--accent) 55%, transparent);
+  outline-offset: 1px;
+}
+.${SCOPE} select::-ms-expand{ display:none; }
+
 /* no left transition to avoid jitter alongside app sidebar */
 .${SCOPE} aside{ transition: none !important; }
 @media (max-width: 1180px){ .${SCOPE}{ --va-rail-w: 320px; } }
@@ -316,28 +332,33 @@ export default function VoiceAgentSection() {
   const [isClient, setIsClient] = useState(false);
   useEffect(() => { setIsClient(true); }, []);
 
-  // ---- OpenAI key wiring (scoped storage + env fallback) ----
+  // ==== OpenAI key state/list ====
   const [openaiKey, setOpenaiKey] = useState<string | null>(null);
   const [openaiKeyLabel, setOpenaiKeyLabel] = useState<string | null>(null);
+  const [apiKeys, setApiKeys] = useState<SavedKey[]>([]);
+  const [apiKeyId, setApiKeyId] = useState<string>('');
 
   useEffect(() => {
     if (!isClient) return;
     (async () => {
       let key: string | null = null;
       let label: string | null = null;
+      let chosenId = '';
+
       try {
         const ss = await scopedStorage();
         await ss.ensureOwnerGuard();
         const all = (await ss.getJSON<SavedKey[]>(LS_KEYS, [])) || [];
-        const cleaned = all
-          .filter(Boolean)
-          .filter(k => (k.provider === 'openai' || !k.provider) && k.id && k.key);
-        let chosenId = await ss.getJSON<string>(LS_SELECTED, '');
-        if (chosenId && !cleaned.some(k => k.id === chosenId)) chosenId = '';
-        if (!chosenId && cleaned[0]) chosenId = cleaned[0].id;
+        const cleaned = all.filter(Boolean).filter(k => (k.provider === 'openai' || !k.provider) && k.id && k.key);
+        setApiKeys(cleaned);
+
+        let stored = await ss.getJSON<string>(LS_SELECTED, '');
+        if (stored && !cleaned.some(k => k.id === stored)) stored = '';
+        chosenId = stored || (cleaned[0]?.id || '');
+
         const chosen = cleaned.find(k => k.id === chosenId);
         if (chosen) { key = chosen.key; label = chosen.name || 'OpenAI key'; }
-      } catch { /* ignore */ }
+      } catch {}
 
       // fallback to NEXT_PUBLIC for local/dev
       if (!key && typeof process !== 'undefined') {
@@ -346,11 +367,26 @@ export default function VoiceAgentSection() {
         if (envKey) { key = envKey; label = 'ENV: NEXT_PUBLIC_OPENAI_API_KEY'; }
       }
 
+      setApiKeyId(chosenId);
       setOpenaiKey(key || null);
       setOpenaiKeyLabel(label || null);
       if (key) window.__OPENAI_KEY = key;
     })();
   }, [isClient]);
+
+  async function handleApiKeyChange(id: string){
+    setApiKeyId(id);
+    try {
+      const ss = await scopedStorage();
+      await ss.ensureOwnerGuard();
+      await ss.setJSON(LS_SELECTED, id);
+    } catch {}
+    const chosen = apiKeys.find(k => k.id === id) || null;
+    const nextKey = chosen?.key || null;
+    setOpenaiKey(nextKey);
+    setOpenaiKeyLabel(chosen?.name || (nextKey ? 'OpenAI key' : null));
+    if (nextKey) window.__OPENAI_KEY = nextKey;
+  }
 
   // assistants
   const [assistants, setAssistants] = useState<Assistant[]>([]);
@@ -587,7 +623,7 @@ export default function VoiceAgentSection() {
 
   return (
     <div ref={scopeRef} className={SCOPE} style={{ background: 'var(--bg)', color: 'var(--text)' }}>
-      {/* Assistant rail (separate file) */}
+      {/* Assistant rail */}
       <AssistantRail
         assistants={railData}
         activeId={activeId}
@@ -610,14 +646,13 @@ export default function VoiceAgentSection() {
         {/* Top actions */}
         <div className="px-2 pb-3 flex items-center justify-between sticky" style={{ top: 'calc(var(--app-header-h, 64px) + 8px)', zIndex: 2 }}>
           <div className="flex items-center gap-2">
-            {/* WebCall Button (separate file) */}
             {!currentCallId ? (
               <WebCallButton
                 greet={greet}
                 voiceLabel={active.config.voice.voiceLabel}
                 systemPrompt={active.config.model.systemPrompt || BASE_PROMPT}
                 model={active.config.model.model}
-                apiKey={openaiKey || undefined}   // <-- pass key to the button
+                apiKey={openaiKey || undefined}   // pass key
                 onTurn={onTurn}
               />
             ) : (
@@ -629,7 +664,6 @@ export default function VoiceAgentSection() {
             <button onClick={() => window.dispatchEvent(new CustomEvent('voiceagent:open-chat', { detail: { id: active.id } }))}
                     className="btn btn--ghost"><MessageSquare className="w-4 h-4 icon" /> Chat</button>
 
-            {/* Tiny key status chip */}
             {!openaiKey && (
               <span className="ml-2 text-xs px-2 py-1 rounded-lg"
                     style={{ background:'rgba(220,38,38,.12)', border:'1px solid rgba(220,38,38,.35)', color:'#fca5a5' }}>
@@ -651,6 +685,29 @@ export default function VoiceAgentSection() {
           {/* Model */}
           <Section title="Model" icon={<FileText className="w-4 h-4 icon" />}>
             <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(4, minmax(360px, 1fr))' }}>
+              {/* OpenAI API Key dropdown */}
+              <Field label="OpenAI API Key">
+                <div className="relative">
+                  <select
+                    value={apiKeyId}
+                    onChange={(e) => handleApiKeyChange(e.target.value)}
+                    className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
+                    style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)', color:'var(--text)' }}
+                  >
+                    <option value="">Select an API key…</option>
+                    {apiKeys.map((k) => (
+                      <option key={k.id} value={k.id}>
+                        {(k.name || 'OpenAI key')} ••••{(k.key || '').slice(-4).toUpperCase()}
+                      </option>
+                    ))}
+                  </select>
+                  <KeyRound className="w-4 h-4 absolute right-3 top-3.5 opacity-70" style={{ color:'var(--text-muted)' }} />
+                </div>
+                <div className="mt-2 text-xs" style={{ color:'var(--text-muted)' }}>
+                  Keys are stored per-account. Manage them in the API Keys page.
+                </div>
+              </Field>
+
               <Field label="Provider">
                 <select
                   value={active.config.model.provider}
