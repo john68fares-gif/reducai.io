@@ -16,10 +16,6 @@ import AssistantRail, { type AssistantLite } from '@/components/voice/AssistantR
 /* THEME / SIZING                                                              */
 /* ──────────────────────────────────────────────────────────────────────────── */
 const SCOPE = 'va-scope';
-const ACCENT = '#10b981';
-const ACCENT_HOVER = '#0ea371';
-const BTN_SHADOW = '0 10px 24px rgba(16,185,129,.22)';
-
 const EDGE_GUTTER = 24;      // 24px left/right breathing room
 const MAX_LANE_W = 1560;     // roomy clamp for big screens
 
@@ -166,45 +162,145 @@ function mergeInput(freeText: string, current: string) {
 }
 
 /* ──────────────────────────────────────────────────────────────────────────── */
-/* GLOBAL STYLE                                                                */
+/* GLOBAL STYLE (OKLCH theme from your screenshots)                            */
 /* ──────────────────────────────────────────────────────────────────────────── */
 function StyleBlock() {
   return (
     <style jsx global>{`
 .${SCOPE}{
-  --accent:${ACCENT};
-  --bg:#0b0c10; --text:#eef2f5;
-  --text-muted:color-mix(in oklab, var(--text) 65%, transparent);
-  --va-card:#0f1315; --va-topbar:#0e1214;
-  --va-sidebar:linear-gradient(180deg,#0d1113 0%,#0b0e10 100%);
-  --va-chip:rgba(255,255,255,.03); --va-border:rgba(255,255,255,.10);
-  --va-input-bg:rgba(255,255,255,.03); --va-input-border:rgba(255,255,255,.14);
-  --va-input-shadow:inset 0 1px 0 rgba(255,255,255,.06);
-  --va-menu-bg:#101314; --va-menu-border:rgba(255,255,255,.16);
-  --va-shadow:0 24px 70px rgba(0,0,0,.55), 0 10px 28px rgba(0,0,0,.4);
-  --va-shadow-lg:0 42px 110px rgba(0,0,0,.66), 0 20px 48px rgba(0,0,0,.5);
-  --va-shadow-sm:0 12px 26px rgba(0,0,0,.35);
-  --va-shadow-side:8px 0 28px rgba(0,0,0,.42);
+  /* ===== Core theme tokens (dark) – from your screenshots ===== */
+  --background: oklch(0.1743 0.0227 283.0);
+  --foreground: oklch(0.9185 0.0257 285.0);
 
-  --va-rail-w:320px;        /* updated live by AssistantRail */
-  --app-sidebar-w:248px;    /* updated if you have an app sidebar */
+  --card:       oklch(0.2284 0.0384 282.0);
+  --card-fg:    var(--foreground);
+
+  --popover:    oklch(0.2284 0.0384 282.0);
+  --popover-fg: var(--foreground);
+
+  --primary:    oklch(0.7162 0.1597 290.3962);
+  --primary-fg: oklch(0.1743 0.0227 283.0);
+
+  --secondary:    oklch(0.3139 0.0736 283.0);
+  --secondary-fg: oklch(0.8367 0.0849 285.0);
+
+  --accent:       oklch(0.3354 0.0828 280.0);       /* used for glows, we also map it below */
+  --accent-fg:    var(--foreground);
+
+  --muted:        oklch(0.2710 0.0621 281.4);
+  --muted-fg:     oklch(0.7166 0.0462 285.0);
+
+  --destructive:    oklch(0.6861 0.2061 14.99);
+  --destructive-fg: oklch(1 0 0);
+
+  --border: oklch(0.3261 0.0597 282.5832);
+  --input:  oklch(0.3261 0.0597 282.5832);
+  --ring:   var(--primary);
+
+  /* Sidebar */
+  --sidebar:                 oklch(0.2284 0.0384 282.0);
+  --sidebar-foreground:      var(--foreground);
+  --sidebar-primary:         var(--primary);
+  --sidebar-primary-foreground: var(--primary-fg);
+  --sidebar-accent:          var(--accent);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border:          var(--border);
+  --sidebar-ring:            var(--primary);
+
+  /* ===== Map into this page’s existing custom vars ===== */
+  --bg: var(--background);
+  --text: var(--foreground);
+  --text-muted: color-mix(in oklab, var(--foreground) 65%, transparent);
+
+  --va-card:    var(--card);
+  --va-topbar:  var(--card);
+  --va-sidebar: var(--sidebar);
+  --va-chip:    color-mix(in oklab, var(--card) 92%, transparent);
+  --va-border:  var(--border);
+
+  --va-input-bg:     var(--card);
+  --va-input-border: var(--input);
+  --va-input-shadow: inset 0 1px 0 color-mix(in oklab, white 6%, transparent);
+
+  --va-menu-bg:     var(--card);
+  --va-menu-border: var(--border);
+
+  --va-shadow:      0 24px 70px rgba(0,0,0,.55), 0 10px 28px rgba(0,0,0,.40);
+  --va-shadow-lg:   0 42px 110px rgba(0,0,0,.66), 0 20px 48px rgba(0,0,0,.5);
+  --va-shadow-sm:   0 12px 26px rgba(0,0,0,.35);
+  --va-shadow-side: 8px 0 28px rgba(0,0,0,.42);
+
+  --va-rail-w:320px;
+  --app-sidebar-w:248px;
   --va-edge-gutter:${EDGE_GUTTER}px;
 
-  overflow-x:hidden;        /* kill horizontal jiggle */
+  /* Make icons follow primary vibe */
+  --accent: var(--primary);
+
+  overflow-x:hidden;
 }
+
+/* Light mode mapping (kept minimal if user switches) */
 :root:not([data-theme="dark"]) .${SCOPE}{
-  --bg:#f7f9fb; --text:#101316;
-  --text-muted:color-mix(in oklab, var(--text) 55%, transparent);
-  --va-card:#ffffff; --va-topbar:#ffffff;
-  --va-sidebar:linear-gradient(180deg,#ffffff 0%,#f7f9fb 100%);
-  --va-chip:#ffffff; --va-border:rgba(0,0,0,.10);
-  --va-input-bg:#ffffff; --va-input-border:rgba(0,0,0,.12);
-  --va-input-shadow:inset 0 1px 0 rgba(255,255,255,.85);
-  --va-menu-bg:#ffffff; --va-menu-border:rgba(0,0,0,.10);
-  --va-shadow:0 28px 70px rgba(0,0,0,.12), 0 12px 28px rgba(0,0,0,.08);
-  --va-shadow-lg:0 42px 110px rgba(0,0,0,.16), 0 22px 54px rgba(0,0,0,.10);
-  --va-shadow-sm:0 12px 26px rgba(0,0,0,.10);
+  --background: oklch(0.973 0.0133 286.0);
+  --foreground: oklch(0.3015 0.0572 282.0);
+
+  --card:       oklch(1 0 0);
+  --card-fg:    var(--foreground);
+
+  --popover:    oklch(1 0 0);
+  --popover-fg: var(--foreground);
+
+  --primary:    oklch(0.5417 0.179 288.0332);
+  --primary-fg: oklch(1 0 0);
+
+  --secondary:    oklch(0.9174 0.0435 292.0);
+  --secondary-fg: oklch(0.4143 0.1039 288.1);
+
+  --accent:       oklch(0.9221 0.0373 262.0);
+  --accent-fg:    var(--foreground);
+
+  --muted:        oklch(0.9580 0.0133 286.0);
+  --muted-fg:     oklch(0.5426 0.0465 284.0);
+
+  --destructive:    oklch(0.6861 0.2061 14.99);
+  --destructive-fg: oklch(1 0 0);
+
+  --border: oklch(0.9115 0.0216 285.9625);
+  --input:  var(--border);
+  --ring:   oklch(0.5417 0.179 288.0332);
+
+  --sidebar:                 oklch(1 0 0);
+  --sidebar-foreground:      var(--foreground);
+  --sidebar-primary:         var(--primary);
+  --sidebar-primary-foreground: var(--primary-fg);
+  --sidebar-accent:          var(--accent);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border:          var(--border);
+  --sidebar-ring:            var(--ring);
+
+  /* remap */
+  --bg: var(--background);
+  --text: var(--foreground);
+  --text-muted: color-mix(in oklab, var(--foreground) 55%, transparent);
+
+  --va-card:    var(--card);
+  --va-topbar:  var(--card);
+  --va-sidebar: var(--sidebar);
+  --va-chip:    #ffffff;
+  --va-border:  var(--border);
+  --va-input-bg: var(--card);
+  --va-input-border: var(--input);
+  --va-input-shadow: inset 0 1px 0 rgba(255,255,255,.85);
+  --va-menu-bg: var(--card);
+  --va-menu-border: var(--border);
+
+  --va-shadow:    0 28px 70px rgba(0,0,0,.12), 0 12px 28px rgba(0,0,0,.08);
+  --va-shadow-lg: 0 42px 110px rgba(0,0,0,.16), 0 22px 54px rgba(0,0,0,.10);
+  --va-shadow-sm: 0 12px 26px rgba(0,0,0,.10);
 }
+
+/* Icons tinted by primary */
 .${SCOPE} .icon{ color: var(--accent); }
 
 /* Buttons */
@@ -212,16 +308,27 @@ function StyleBlock() {
   height:42px; padding:0 .95rem; border-radius:12px; display:inline-flex; align-items:center; gap:.5rem;
   border:1px solid var(--va-border); background:var(--va-card); color:var(--text);
 }
-.${SCOPE} .btn--green{ background:${ACCENT}; color:#fff; box-shadow:${BTN_SHADOW}; transition:transform .04s, background .18s; }
-.${SCOPE} .btn--green:hover{ background:${ACCENT_HOVER}; }
+.${SCOPE} .btn--green{ /* keep class name for compatibility; use primary to match theme */
+  background: var(--primary); color: var(--primary-fg);
+  box-shadow: 0 10px 24px color-mix(in oklab, var(--primary) 40%, transparent);
+  transition: transform .04s, background .18s, box-shadow .18s;
+}
+.${SCOPE} .btn--green:hover{
+  background: color-mix(in oklab, var(--primary) 88%, black);
+  box-shadow: 0 12px 28px color-mix(in oklab, var(--primary) 52%, transparent);
+}
 .${SCOPE} .btn--green:active{ transform:translateY(1px); }
-.${SCOPE} .btn--danger{ background:rgba(220,38,38,.12); color:#fca5a5; box-shadow:0 10px 24px rgba(220,38,38,.15); border-color:rgba(220,38,38,.35); }
+.${SCOPE} .btn--danger{
+  background: color-mix(in oklab, var(--destructive) 18%, transparent);
+  color: color-mix(in oklab, var(--destructive) 75%, white);
+  box-shadow: 0 10px 24px rgba(220,38,38,.15); border-color: color-mix(in oklab, var(--destructive) 35%, var(--va-border));
+}
 
 /* Inputs & selects */
 .${SCOPE} .va-input{ width:100%; min-width:0; height:42px; border-radius:12px; padding:0 .9rem; font-size:15px; outline:none;
   background:var(--va-input-bg); border:1px solid var(--va-input-border); box-shadow:var(--va-input-shadow); color:var(--text); }
-.${SCOPE} .va-input:focus{ border-color: color-mix(in oklab, var(--accent) 50%, var(--va-input-border));
-  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 18%, transparent), var(--va-input-shadow); }
+.${SCOPE} .va-input:focus{ border-color: color-mix(in oklab, var(--ring) 65%, var(--va-input-border));
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 22%, transparent), var(--va-input-shadow); }
 .${SCOPE} .va-select{
   width:100%; min-width:0; height:42px; font-size:15px; border-radius:12px; outline:none;
   padding:0 2.2rem 0 .9rem;
@@ -233,8 +340,8 @@ function StyleBlock() {
   background-repeat:no-repeat; background-position:right .7rem center;
 }
 .${SCOPE} .va-select:hover{ background:linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.03)), var(--va-input-bg); }
-.${SCOPE} .va-select:focus{ border-color: color-mix(in oklab, var(--accent) 50%, var(--va-input-border));
-  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 18%, transparent), var(--va-input-shadow); }
+.${SCOPE} .va-select:focus{ border-color: color-mix(in oklab, var(--ring) 65%, var(--va-input-border));
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 22%, transparent), var(--va-input-shadow); }
 
 /* Lane = content area that shifts with rail and expands */
 .${SCOPE} .va-lane{
@@ -362,7 +469,7 @@ export default function VoiceAgentSection() {
   };
 
   const [genOpen, setGenOpen] = useState(false);
-  const [genText, setGenText] = useState(''); // <-- fixed
+  const [genText, setGenText] = useState('');
   const [typingPreview, setTypingPreview] = useState<string | null>(null);
   const [pendingFirstMsg, setPendingFirstMsg] = useState<string | undefined>(undefined);
 
@@ -421,7 +528,7 @@ export default function VoiceAgentSection() {
           <div className="flex items-center gap-8">
             {!currentCallId ? (
               <button onClick={()=> onTurn('assistant', greet)} className="btn btn--green">
-                <span className="text-white">Start Web Call</span>
+                <span>Start Web Call</span>
               </button>
             ) : (
               <button onClick={endWebCallSession} className="btn btn--danger">
@@ -433,7 +540,7 @@ export default function VoiceAgentSection() {
           </div>
 
           <div className="flex items-center gap-8">
-            <button className="btn btn--green"><Rocket className="w-4 h-4 text-white" /><span className="text-white">Publish</span></button>
+            <button className="btn btn--green"><Rocket className="w-4 h-4" /><span>Publish</span></button>
           </div>
         </div>
 
@@ -495,7 +602,7 @@ export default function VoiceAgentSection() {
               <div className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="w-4 h-4 icon" /> System Prompt</div>
               <div className="flex items-center gap-2">
                 <button className="topbar-btn" onClick={()=> setTypingPreview(null)}><RefreshCw className="w-4 h-4 icon" /> Reset</button>
-                <button onClick={() => setGenOpen(true)} className="btn btn--green"><Sparkles className="w-4 h-4 text-white" /> <span className="text-white">Generate / Edit</span></button>
+                <button onClick={() => setGenOpen(true)} className="btn btn--green"><Sparkles className="w-4 h-4" /> <span>Generate / Edit</span></button>
               </div>
             </div>
 
@@ -523,7 +630,7 @@ export default function VoiceAgentSection() {
                 </div>
                 <div className="flex items-center gap-2 justify-end mt-3">
                   <button onClick={()=> { setTypingPreview(null); setPendingFirstMsg(undefined); }} className="topbar-btn"><X className="w-4 h-4 icon" /> Decline</button>
-                  <button onClick={acceptGenerate} className="btn btn--green"><Check className="w-4 h-4 text-white" /><span className="text-white">Accept</span></button>
+                  <button onClick={acceptGenerate} className="btn btn--green"><Check className="w-4 h-4" /><span>Accept</span></button>
                 </div>
               </div>
             )}
@@ -551,7 +658,7 @@ export default function VoiceAgentSection() {
             <button onClick={() => { try { const u = new SpeechSynthesisUtterance('This is a quick preview of the selected voice.'); window.speechSynthesis.cancel(); window.speechSynthesis.speak(u); } catch {} }} className="topbar-btn">
               <Volume2 className="w-4 h-4 icon" /> Test Voice
             </button>
-            <button className="btn btn--green"><Save className="w-4 h-4 text-white" /> <span className="text-white">Save Voice</span></button>
+            <button className="btn btn--green"><Save className="w-4 h-4" /> <span>Save Voice</span></button>
             <button onClick={() => alert('Hook “voiceagent:import-11labs” to your importer.')} className="topbar-btn">
               <UploadCloud className="w-4 h-4 icon" /> Import from ElevenLabs
             </button>
@@ -626,7 +733,7 @@ export default function VoiceAgentSection() {
               {transcript.map((t, idx) => (
                 <div key={idx} className="flex gap-2">
                   <div className="text-xs px-2 py-0.5 rounded-full" style={{
-                    background: t.role === 'assistant' ? 'rgba(16,185,129,.15)' : 'rgba(255,255,255,.06)',
+                    background: t.role === 'assistant' ? 'color-mix(in oklab, var(--primary) 22%, transparent)' : 'rgba(255,255,255,.06)',
                     border: '1px solid var(--va-border)'
                   }}>{t.role === 'assistant' ? 'AI' : 'You'}</div>
                   <div className="text-sm">{t.text}</div>
@@ -663,7 +770,7 @@ export default function VoiceAgentSection() {
                   className="va-input"/>
                 <div className="mt-3 flex items-center justify-between gap-2">
                   <button onClick={() => setGenOpen(false)} className="topbar-btn">Cancel</button>
-                  <button onClick={handleGenerate} className="btn btn--green"><span className="text-white">Generate</span></button>
+                  <button onClick={handleGenerate} className="btn btn--green"><span>Generate</span></button>
                 </div>
               </div>
             </motion.div>
