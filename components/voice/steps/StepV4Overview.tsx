@@ -4,7 +4,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Settings2, Sparkles, AlertCircle, ArrowLeft, Link as LinkIcon,
-  Loader2, Check, Cpu, BookText, FileText, KeyRound, Library, Phone
+  Loader2, Check, Cpu, BookText, FileText, Library, Phone
 } from 'lucide-react';
 
 /* ================== THEME / STYLES ================== */
@@ -34,7 +34,6 @@ const BTN_DISABLED = '#2e6f63';
 function safeGet<T>(k: string, f: T): T {
   try { const r = localStorage.getItem(k); return r ? (JSON.parse(r) as T) : f; } catch { return f; }
 }
-function cap(sv?: string) { return sv ? sv[0].toUpperCase() + sv.slice(1) : '—'; }
 function labelStyle(s?: string) {
   if (s === 'conversational') return 'Conversational';
   if (s === 'professional') return 'Professional';
