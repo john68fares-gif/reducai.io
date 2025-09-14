@@ -1,78 +1,66 @@
 // pages/api/chatbots/save.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
+import { upsert, type ChatBot, getById } from '@/lib/chatbots-store';
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY!;
-const OA = 'https://api.openai.com/v1';
+type Json = Record<string, any>;
 
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Method not allowed' });
-
-  if (!OPENAI_API_KEY) return res.status(500).json({ ok: false, error: 'Missing OPENAI_API_KEY' });
-
-  try {
-    const {
-      userId,           // REQUIRED (supabase user id)
-      assistantId,      // optional → update if provided
-      name,
-      model = 'gpt-4o-mini',
-      prompt = '',
-      industry,
-      language,
-      appearance,
-    } = req.body || {};
-
-    if (!userId) return res.status(400).json({ ok: false, error: 'Missing userId' });
-    if (!name)   return res.status(400).json({ ok: false, error: 'Missing name' });
-
-    const meta: Record<string, string> = {
-      ownerUserId: String(userId),
-    };
-    if (industry)  meta.industry = String(industry);
-    if (language)  meta.language = String(language);
-    if (appearance) meta.appearance = typeof appearance === 'string' ? appearance : JSON.stringify(appearance);
-
-    const payload = {
-      name: String(name),
-      model: String(model),
-      instructions: String(prompt || ''),
-      metadata: meta,
-    };
-
-    const url = assistantId ? `${OA}/assistants/${assistantId}` : `${OA}/assistants`;
-    const method = assistantId ? 'POST' : 'POST';
-
-    const r = await fetch(url, {
-      method,
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-        'OpenAI-Beta': 'assistants=v2',
-      },
-      body: JSON.stringify(payload),
-    });
-
-    if (!r.ok) {
-      const text = await r.text().catch(() => '');
-      return res.status(r.status).json({ ok: false, error: text || `Upstream ${r.status}` });
-    }
-
-    const a = await r.json();
-    return res.status(200).json({
-      ok: true,
-      chatbot: {
-        id: a.id,
-        name: a.name || 'Untitled Agent',
-        model: a.model || model,
-        createdAt: (a.created_at ? Number(a.created_at) * 1000 : Date.now()),
-        temperature: safeTemp(a?.metadata?.temperature, 0.5),
-      },
-    });
-  } catch (e: any) {
-    return res.status(500).json({ ok: false, error: e?.message || 'Failed to save chatbot' });
-  }
+function getOwnerId(req: NextApiRequest): string {
+  const h = (req.headers['x-owner-id'] || req.headers['x-user-id'] || '') as string;
+  if (h) return h;
+  if (typeof req.query.ownerId === 'string') return req.query.ownerId;
+  const cookie = req.headers.cookie || '';
+  const m = cookie.match(/(?:^|;\s*)ra_uid=([^;]+)/);
+  if (m) return decodeURIComponent(m[1]);
+  return 'anon';
 }
 
-function safeTemp(v: unknown, dflt: number) {
-  const n = typeof v === 'string' ? parseFloat(v) : typeof v === 'number' ? v : NaN;
-  return Number.isFinite(n) ? (n as number) : dflt;
+/**
+ * Builder posts here when you click "Generate" / "Save".
+ * This ONLY persists to the local store (no OpenAI calls).
+ * Returns { ok, data } with the saved bot.
+ */
+export default async function handler(req: NextApiRequest, res: NextApiResponse<Json>) {
+  res.setHeader('Cache-Control', 'no-store');
+
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', ['POST']);
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  const ownerId = getOwnerId(req);
+
+  const {
+    id,
+    name,
+    model = 'gpt-4o-mini',
+    temperature = 0.5,
+    system = '', // compiled personality/rules
+  } = (req.body || {}) as Partial<ChatBot>;
+
+  if (!name && !id) {
+    return res.status(400).json({ error: 'Missing "name" or existing "id".' });
+  }
+
+  // If an id is provided, ensure caller owns it before updating.
+  if (id) {
+    const existing = getById(id);
+    if (!existing) return res.status(404).json({ error: 'Not found' });
+    if (existing.ownerId !== ownerId) return res.status(403).json({ error: 'Forbidden' });
+  }
+
+  const saved = upsert({
+    id: id || '', // allow store to generate if empty
+    ownerId,
+    name: name || 'Untitled Agent',
+    model,
+    temperature: Number(temperature) || 0.5,
+    system: system || '',
+  });
+
+  // Safety: never leak cross-tenant data
+  if (saved.ownerId !== ownerId) {
+    return res.status(500).json({ error: 'Owner mismatch after save.' });
+  }
+
+  return res.status(200).json({ ok: true, data: saved });
 }
