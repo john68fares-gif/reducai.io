@@ -1,3 +1,4 @@
+// components/voice/VoiceAgentSection.tsx
 'use client';
 
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -6,23 +7,24 @@ import {
   Search, Plus, Folder, FolderOpen, Check, Trash2, Copy, Edit3, Sparkles,
   ChevronDown, ChevronRight, FileText, Mic2, BookOpen, SlidersHorizontal,
   Bot, UploadCloud, RefreshCw, X, Phone as PhoneIcon, Rocket, PhoneOff,
-  MessageSquare, ListTree, AudioLines, Volume2, Save
+  MessageSquare, ListTree, AudioLines, Volume2, Save, Gauge
 } from 'lucide-react';
 
 import AssistantRail, { type AssistantLite } from '@/components/voice/AssistantRail';
 import WebCallButton from '@/components/voice/WebCallButton';
 
 /* ──────────────────────────────────────────────────────────────────────────── */
-/* THEME / SIZING                                                              */
+/* THEME / SIZING – tuned to match the Vapi screenshots                        */
 /* ──────────────────────────────────────────────────────────────────────────── */
 const SCOPE = 'va-scope';
 const ACCENT = '#10b981';
 const ACCENT_HOVER = '#0ea371';
 const BTN_SHADOW = '0 10px 24px rgba(16,185,129,.22)';
 
-/* Page sizing knobs */
-const MAX_CONTENT_W = 1000;  // <- keeps cards/textarea from being crazy wide on laptops
-const EDGE_GUTTER = 4;       // <- your requested 4px edge space
+/** Vapi-ish content lane. Their main column on a 13.6" sits ~1100–1180px. */
+const MAX_CONTENT_W = 1180;
+/** Vapi uses comfy gutters (≈24px). Switching from 4 → 24 to match. */
+const EDGE_GUTTER = 24;
 
 /* ──────────────────────────────────────────────────────────────────────────── */
 /* TYPES                                                                       */
@@ -143,7 +145,7 @@ function mergeInput(freeText: string, current: string) {
 }
 
 /* ──────────────────────────────────────────────────────────────────────────── */
-/* SMALL UI ATOMS                                                              */
+/* SMALL UI ATOMS – Vapi proportions                                           */
 /* ──────────────────────────────────────────────────────────────────────────── */
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -175,59 +177,26 @@ function Section({ title, icon, children }: { title: string; icon: React.ReactNo
   );
 }
 
-/* ──────────────────────────────────────────────────────────────────────────── */
-/* TELEPHONY EDITOR                                                            */
-/* ──────────────────────────────────────────────────────────────────────────── */
-function TelephonyEditor({ numbers, linkedId, onLink, onAdd, onRemove }: {
-  numbers: PhoneNum[]; linkedId?: string; onLink: (id?: string) => void; onAdd: (e164: string, label?: string) => void; onRemove: (id: string) => void;
-}) {
-  const [e164, setE164] = useState(''); const [label, setLabel] = useState('');
+/** Stat card row (Cost / Latency) just like the screenshots */
+function StatCard({ title, value, bar }: { title: string; value: string; bar?: 'cost'|'latency' }) {
   return (
-    <div className="space-y-4" style={{ minWidth: 0 }}>
-      <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(3, minmax(240px, 1fr))' }}>
-        <div style={{ minWidth: 0 }}>
-          <div className="mb-1.5 text-[13px] font-medium" style={{ color: 'var(--text)' }}>Phone Number (E.164)</div>
-          <input value={e164} onChange={(e) => setE164(e.target.value)} placeholder="+1xxxxxxxxxx" className="va-input"
-                 style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)', boxShadow: 'var(--va-input-shadow)', color: 'var(--text)' }}/>
-        </div>
-        <div style={{ minWidth: 0 }}>
-          <div className="mb-1.5 text-[13px] font-medium" style={{ color: 'var(--text)' }}>Label</div>
-          <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Support line" className="va-input"
-                 style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)', boxShadow: 'var(--va-input-shadow)', color: 'var(--text)' }}/>
-        </div>
-        <div className="flex items-end">
-          <button onClick={() => { onAdd(e164, label); setE164(''); setLabel(''); }} className="btn btn--green w-full justify-center">
-            <PhoneIcon className="w-4 h-4 text-white" /><span className="text-white">Add Number</span>
-          </button>
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        {numbers.length === 0 && <div className="text-sm opacity-70">No phone numbers added yet.</div>}
-        {numbers.map(n => (
-          <div key={n.id} className="flex items-center justify-between rounded-xl px-3 py-2"
-               style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)' }}>
-            <div className="min-w-0">
-              <div className="font-medium truncate">{n.label || 'Untitled'}</div>
-              <div className="text-xs opacity-70">{n.e164}</div>
-            </div>
-            <div className="flex items-center gap-2">
-              <label className="flex items-center gap-1 text-xs">
-                <input type="radio" name="linked_number" checked={linkedId === n.id} onChange={() => onLink(n.id)} />
-                Linked
-              </label>
-              <button onClick={() => onRemove(n.id)} className="btn btn--danger text-xs"><Trash2 className="w-4 h-4" /> Remove</button>
-            </div>
-          </div>
-        ))}
-        {numbers.length > 0 && <div className="text-xs opacity-70">The number marked as <b>Linked</b> will be attached to this assistant on <i>Publish</i>.</div>}
+    <div className="rounded-xl p-4"
+      style={{ background: 'var(--va-card)', border: '1px solid var(--va-border)', boxShadow: 'var(--va-shadow)' }}>
+      <div className="text-[13px] opacity-80 mb-1.5">{title}</div>
+      <div className="text-[20px] font-semibold mb-3">{value}</div>
+      <div className="h-2 rounded-full overflow-hidden"
+           style={{ background:'rgba(255,255,255,.06)', border:'1px solid var(--va-border)' }}>
+        <div className="h-full" style={{
+          width: bar === 'latency' ? '78%' : '72%',
+          background: 'linear-gradient(90deg,#22d3ee,#fde047,#fb923c,#10b981)'
+        }} />
       </div>
     </div>
   );
 }
 
 /* ──────────────────────────────────────────────────────────────────────────── */
-/* SCOPED CSS (v0-like)                                                        */
+/* SCOPED CSS (v0/Vapi-like)                                                   */
 /* ──────────────────────────────────────────────────────────────────────────── */
 function StyleBlock() {
   return (
@@ -255,6 +224,7 @@ function StyleBlock() {
   --app-sidebar-w:248px;        /* updated at runtime */
   --va-edge-gutter:${EDGE_GUTTER}px;
 }
+
 :root:not([data-theme="dark"]) .${SCOPE}{
   --bg:#f7f9fb; --text:#101316; --text-muted:color-mix(in oklab, var(--text) 55%, transparent);
   --va-card:#ffffff; --va-topbar:#ffffff; --va-sidebar:linear-gradient(180deg,#ffffff 0%,#f7f9fb 100%);
@@ -264,27 +234,28 @@ function StyleBlock() {
   --va-shadow-lg:0 42px 110px rgba(0,0,0,.16), 0 22px 54px rgba(0,0,0,.10);
   --va-shadow-sm:0 12px 26px rgba(0,0,0,.10);
 }
+
 .${SCOPE} .icon{ color: var(--accent); }
 
-/* unified control sizing */
+/* Buttons */
 .${SCOPE} .topbar-btn,
-.${SCOPE} .btn{ height:42px; padding:0 .95rem; border-radius:14px; display:inline-flex; align-items:center; gap:.5rem; border:1px solid var(--va-border); }
+.${SCOPE} .btn{ height:42px; padding:0 .95rem; border-radius:12px; display:inline-flex; align-items:center; gap:.5rem; border:1px solid var(--va-border); }
 .${SCOPE} .btn--green{ background:${ACCENT}; color:#fff; box-shadow:${BTN_SHADOW}; transition:transform .04s ease, background .18s ease; }
 .${SCOPE} .btn--green:hover{ background:${ACCENT_HOVER}; }
 .${SCOPE} .btn--green:active{ transform:translateY(1px); }
 .${SCOPE} .btn--danger{ background:rgba(220,38,38,.12); color:#fca5a5; box-shadow:0 10px 24px rgba(220,38,38,.15); border-color:rgba(220,38,38,.35); }
 .${SCOPE} .btn--ghost{ background:var(--va-card); color:var(--text); box-shadow:var(--va-shadow-sm); }
 
-/* Inputs/selects consistent & never overflow */
+/* Inputs/selects */
 .${SCOPE} .va-input, .${SCOPE} select{
-  width:100%; min-width:0; height:42px; border-radius:14px; padding:0 .9rem; font-size:15px; outline:none;
+  width:100%; min-width:0; height:42px; border-radius:12px; padding:0 .9rem; font-size:15px; outline:none;
   background:var(--va-input-bg); border:1px solid var(--va-input-border); box-shadow:var(--va-input-shadow); color:var(--text);
 }
 
-/* Main grid never clamps too wide; centered lane feel */
+/* Lane width */
 .${SCOPE} .va-main { max-width: none !important; }
 
-/* small tweak for laptop */
+/* Laptop tweak like Vapi’s rail */
 @media (max-width: 1280px){ .${SCOPE}{ --va-rail-w: 320px; } }
 `}</style>
   );
@@ -298,12 +269,11 @@ export default function VoiceAgentSection() {
   const [isClient, setIsClient] = useState(false);
   useEffect(() => { setIsClient(true); }, []);
 
-  /* Measure app sidebar + the FIXED rail <aside> width so the lane expands/collapses correctly */
+  /* Measure app sidebar + fixed rail so the lane responds exactly like Vapi */
   useLayoutEffect(() => {
     if (!isClient) return;
 
     const root = document.documentElement;
-
     const getW = (el?: HTMLElement | null) =>
       el && el.offsetParent !== null ? Math.round(el.getBoundingClientRect().width) : 0;
 
@@ -314,15 +284,12 @@ export default function VoiceAgentSection() {
         document.querySelector<HTMLElement>('.app-sidebar') ||
         document.querySelector<HTMLElement>('aside.sidebar');
 
-      /* IMPORTANT: find the fixed rail <aside> inside AssistantRail */
+      /** IMPORTANT: fixed rail inside AssistantRail must be <aside data-collapsed="true|false">  */
       const railAside =
         document.querySelector<HTMLElement>(`.${SCOPE} aside[data-collapsed]`);
 
-      const appW = getW(appSidebar);
-      const railW = getW(railAside);
-
-      root.style.setProperty('--app-sidebar-w', `${appW}px`);
-      root.style.setProperty('--va-rail-w', `${railW}px`);
+      root.style.setProperty('--app-sidebar-w', `${getW(appSidebar)}px`);
+      root.style.setProperty('--va-rail-w', `${getW(railAside)}px`);
       root.style.setProperty('--va-edge-gutter', `${EDGE_GUTTER}px`);
     };
 
@@ -341,7 +308,7 @@ export default function VoiceAgentSection() {
     if (railAside)  ro.observe(railAside);
     window.addEventListener('resize', apply);
 
-    /* keep applying briefly after layout changes */
+    /* keep applying shortly after UI changes */
     let ticks = 40;
     const id = window.setInterval(() => { apply(); if (--ticks <= 0) window.clearInterval(id); }, 80);
 
@@ -559,24 +526,21 @@ export default function VoiceAgentSection() {
         onDelete={onDelete}
       />
 
-      {/* CONTENT LANE — always visible; expands/shrinks with sidebars */}
+      {/* CONTENT LANE — expands/shrinks with sidebars like Vapi */}
       <div
         className="va-main"
         style={{
-          /* Left offset = app sidebar + rail + 4px gutter */
-          marginLeft: 'calc(var(--app-sidebar-w, 0px) + var(--va-rail-w, 0px) + var(--va-edge-gutter, 4px))',
-          /* Available viewport width after subtracting left offset + right gutter */
-          width: `calc(100vw - var(--app-sidebar-w, 0px) - var(--va-rail-w, 0px) - (var(--va-edge-gutter, 4px) * 2))`,
-          /* Clamp max width for laptop so UI never looks stretched */
+          marginLeft: 'calc(var(--app-sidebar-w, 0px) + var(--va-rail-w, 0px) + var(--va-edge-gutter, 24px))',
+          width: `calc(100vw - var(--app-sidebar-w, 0px) - var(--va-rail-w, 0px) - (var(--va-edge-gutter, 24px) * 2))`,
           maxWidth: `${MAX_CONTENT_W}px`,
-          paddingRight: 'var(--va-edge-gutter, 4px)',
-          paddingLeft: 'var(--va-edge-gutter, 4px)',
+          paddingRight: 'var(--va-edge-gutter, 24px)',
+          paddingLeft: 'var(--va-edge-gutter, 24px)',
           paddingTop: 'calc(var(--app-header-h, 64px) + 12px)',
-          paddingBottom: '88px'
+          paddingBottom: '96px'
         }}
       >
-        {/* Top actions (uniform height) */}
-        <div className="px-2 pb-3 flex items-center justify-between sticky" style={{ top: 'calc(var(--app-header-h, 64px) + 8px)', zIndex: 2 }}>
+        {/* Top actions */}
+        <div className="px-1 pb-3 flex items-center justify-between sticky" style={{ top: 'calc(var(--app-header-h, 64px) + 8px)', zIndex: 2 }}>
           <div className="flex items-center gap-8">
             {!currentCallId ? (
               <WebCallButton
@@ -607,6 +571,12 @@ export default function VoiceAgentSection() {
               <Rocket className="w-4 h-4 text-white" /><span className="text-white">{active.published ? 'Republish' : 'Publish'}</span>
             </button>
           </div>
+        </div>
+
+        {/* Stats row – Cost & Latency like in Vapi */}
+        <div className="grid gap-6 md:gap-6 mb-6" style={{ gridTemplateColumns:'repeat(2, minmax(260px,1fr))' }}>
+          <StatCard title="Cost" value="~$0.1/min" bar="cost" />
+          <StatCard title="Latency" value="~1050 ms" bar="latency" />
         </div>
 
         {/* Body */}
@@ -671,7 +641,7 @@ export default function VoiceAgentSection() {
                   rows={24}
                   value={active.config.model.systemPrompt || ''}
                   onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, systemPrompt: e.target.value } } }))}
-                  className="w-full rounded-2xl px-3 py-3 text-[14px] leading-6 outline-none"
+                  className="w-full rounded-xl px-3 py-3 text-[14px] leading-6 outline-none"
                   style={{
                     background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)',
                     boxShadow: 'var(--va-shadow), inset 0 1px 0 rgba(255,255,255,.03)', color: 'var(--text)',
@@ -681,7 +651,7 @@ export default function VoiceAgentSection() {
                 />
               ) : (
                 <div>
-                  <div className="w-full rounded-2xl px-3 py-3 text-[14px] leading-6"
+                  <div className="w-full rounded-xl px-3 py-3 text-[14px] leading-6"
                        style={{
                          background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)',
                          boxShadow: 'var(--va-shadow), inset 0 1px 0 rgba(255,255,255,.03)', color: 'var(--text)',
@@ -807,7 +777,7 @@ export default function VoiceAgentSection() {
 
           {/* Web test + transcript */}
           <Section title="Call Assistant (Web test)" icon={<AudioLines className="w-4 h-4 icon" />}>
-            <div className="rounded-2xl p-3" style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)' }}>
+            <div className="rounded-xl p-3" style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)' }}>
               {transcript.length === 0 && <div className="text-sm opacity-60">No transcript yet.</div>}
               <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1" style={{ scrollbarWidth: 'thin' }}>
                 {transcript.map((t, idx) => (
@@ -864,7 +834,7 @@ export default function VoiceAgentSection() {
                       style={{ background: 'rgba(0,0,0,.45)' }}>
             <motion.div
               initial={{ y: 10, opacity: 0, scale: .98 }} animate={{ y: 0, opacity: 1, scale: 1 }} exit={{ y: 8, opacity: 0, scale: .985 }}
-              className="w-full max-w-2xl rounded-2xl"
+              className="w-full max-w-2xl rounded-xl"
               style={{ background: 'var(--va-card)', border: '1px solid var(--va-border)', boxShadow: 'var(--va-shadow-lg)' }}
             >
               <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid var(--va-border)' }}>
@@ -886,6 +856,57 @@ export default function VoiceAgentSection() {
       </AnimatePresence>
 
       <StyleBlock />
+    </div>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────────────────────── */
+/* Telephony Editor (unchanged from your version, just moved to bottom)        */
+/* ──────────────────────────────────────────────────────────────────────────── */
+function TelephonyEditor({ numbers, linkedId, onLink, onAdd, onRemove }: {
+  numbers: PhoneNum[]; linkedId?: string; onLink: (id?: string) => void; onAdd: (e164: string, label?: string) => void; onRemove: (id: string) => void;
+}) {
+  const [e164, setE164] = useState(''); const [label, setLabel] = useState('');
+  return (
+    <div className="space-y-4" style={{ minWidth: 0 }}>
+      <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(3, minmax(240px, 1fr))' }}>
+        <div style={{ minWidth: 0 }}>
+          <div className="mb-1.5 text-[13px] font-medium" style={{ color: 'var(--text)' }}>Phone Number (E.164)</div>
+          <input value={e164} onChange={(e) => setE164(e.target.value)} placeholder="+1xxxxxxxxxx" className="va-input"
+                 style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)', boxShadow: 'var(--va-input-shadow)', color: 'var(--text)' }}/>
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <div className="mb-1.5 text-[13px] font-medium" style={{ color: 'var(--text)' }}>Label</div>
+          <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Support line" className="va-input"
+                 style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)', boxShadow: 'var(--va-input-shadow)', color: 'var(--text)' }}/>
+        </div>
+        <div className="flex items-end">
+          <button onClick={() => { onAdd(e164, label); setE164(''); setLabel(''); }} className="btn btn--green w-full justify-center">
+            <PhoneIcon className="w-4 h-4 text-white" /><span className="text-white">Add Number</span>
+          </button>
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        {numbers.length === 0 && <div className="text-sm opacity-70">No phone numbers added yet.</div>}
+        {numbers.map(n => (
+          <div key={n.id} className="flex items-center justify-between rounded-xl px-3 py-2"
+               style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)' }}>
+            <div className="min-w-0">
+              <div className="font-medium truncate">{n.label || 'Untitled'}</div>
+              <div className="text-xs opacity-70">{n.e164}</div>
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="flex items-center gap-1 text-xs">
+                <input type="radio" name="linked_number" checked={linkedId === n.id} onChange={() => onLink(n.id)} />
+                Linked
+              </label>
+              <button onClick={() => onRemove(n.id)} className="btn btn--danger text-xs"><Trash2 className="w-4 h-4" /> Remove</button>
+            </div>
+          </div>
+        ))}
+        {numbers.length > 0 && <div className="text-xs opacity-70">The number marked as <b>Linked</b> will be attached to this assistant on <i>Publish</i>.</div>}
+      </div>
     </div>
   );
 }
