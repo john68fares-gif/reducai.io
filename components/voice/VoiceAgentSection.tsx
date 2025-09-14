@@ -1,7 +1,7 @@
 // components/voice/VoiceAgentSection.tsx
 'use client';
 
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Check, Copy, Sparkles, ChevronDown, ChevronRight,
@@ -142,6 +142,30 @@ function Section({ title, icon, children }: { title: string; icon: React.ReactNo
 }
 
 /* ──────────────────────────────────────────────────────────────────────────── */
+/* PROMPT HELPERS                                                              */
+/* ──────────────────────────────────────────────────────────────────────────── */
+const sectionRegex = (name: string) => new RegExp(String.raw`\[${name}\]\s*([\s\S]*?)(?=\n\[|$)`, 'i');
+const setSection = (p: string, name: string, body: string) => {
+  const re = sectionRegex(name);
+  if (re.test(p)) return p.replace(re, `[${name}]\n${body.trim()}\n`);
+  const nl = p.endsWith('\n') ? '' : '\n';
+  return `${p}${nl}\n[${name}]\n${body.trim()}\n`;
+};
+function mergeInput(freeText: string, current: string) {
+  const out = { prompt: current || BASE_PROMPT, firstMessage: undefined as string | undefined };
+  const raw = (freeText || '').trim(); if (!raw) return out;
+  const m = raw.match(/^(?:first\s*message|greeting)\s*[:\-]\s*(.+)$/i);
+  if (m) { out.firstMessage = m[1].trim(); return out; }
+  const blocks = [...raw.matchAll(/\[(Identity|Style|System Behaviors|Task & Goals|Data to Collect|Safety|Handover|Refinements)\]\s*([\s\S]*?)(?=\n\[|$)/gi)];
+  if (blocks.length) { let next = out.prompt; for (const b of blocks) next = setSection(next, b[1], b[2]); out.prompt = next; return out; }
+  const hasRef = sectionRegex('Refinements').test(out.prompt);
+  const bullet = `- ${raw.replace(/\s+/g, ' ').trim()}`;
+  out.prompt = hasRef ? out.prompt.replace(sectionRegex('Refinements'), (_m, body) => `[Refinements]\n${(body || '').trim()}\n${bullet}\n`)
+                      : `${out.prompt}\n\n[Refinements]\n${bullet}\n`;
+  return out;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────── */
 /* GLOBAL STYLE                                                                */
 /* ──────────────────────────────────────────────────────────────────────────── */
 function StyleBlock() {
@@ -212,7 +236,7 @@ function StyleBlock() {
 .${SCOPE} .va-select:focus{ border-color: color-mix(in oklab, var(--accent) 50%, var(--va-input-border));
   box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 18%, transparent), var(--va-input-shadow); }
 
-/* Lane = content area that shifts left/right with rail and expands */
+/* Lane = content area that shifts with rail and expands */
 .${SCOPE} .va-lane{
   position: relative;
   box-sizing: border-box;
@@ -220,10 +244,10 @@ function StyleBlock() {
   margin-left: calc(var(--app-sidebar-w,0px) + var(--va-rail-w,0px) + var(--va-edge-gutter,24px));
   width: calc(100vw - var(--app-sidebar-w,0px) - var(--va-rail-w,0px) - (var(--va-edge-gutter,24px) * 2));
   max-width: min(${MAX_LANE_W}px, 100vw - var(--app-sidebar-w,0px) - var(--va-rail-w,0px) - (var(--va-edge-gutter,24px) * 2));
-  overflow-x: hidden;  /* kill horizontal scroll completely */
+  overflow-x: hidden;
 }
 
-/* optional: when rail is collapsed, let the lane breathe a tiny bit more */
+/* When rail collapses, allow a little more width */
 @media (min-width: 1024px){
   html[data-va-rail-collapsed="true"] .${SCOPE} .va-lane{
     max-width: min(${MAX_LANE_W + 120}px, 100vw - var(--app-sidebar-w,0px) - var(--va-rail-w,0px) - (var(--va-edge-gutter,24px) * 2));
@@ -250,7 +274,7 @@ export default function VoiceAgentSection() {
   const [isClient, setIsClient] = useState(false);
   useEffect(() => { setIsClient(true); }, []);
 
-  /* reflect rail collapsed state on <html> for CSS (so lane can widen a bit) */
+  /* reflect rail collapsed state on <html> for CSS */
   useEffect(() => {
     const handler = () => {
       const rail = document.querySelector('aside[data-va-rail]') as HTMLElement | null;
@@ -267,7 +291,7 @@ export default function VoiceAgentSection() {
     return () => { ro.disconnect(); window.removeEventListener('resize', handler); window.removeEventListener('voice:layout:ping', handler as any); };
   }, []);
 
-  /* Data bootstrapping */
+  /* Data bootstrapping (localStorage demo) */
   const [assistants, setAssistants] = useState<Assistant[]>([]);
   const [activeId, setActiveId] = useState(''); const [active, setActive] = useState<Assistant | null>(null);
   const [rev, setRev] = useState(0);
@@ -310,7 +334,6 @@ export default function VoiceAgentSection() {
     writeLS(LS_LIST, list); setAssistants(list); setActive(next); setRev(r => r + 1);
   };
 
-  /* minimal handlers used in UI (rename/delete/generate omitted for brevity) */
   const onCreate = async () => {
     const id = `agent_${Math.random().toString(36).slice(2, 8)}`;
     const a: Assistant = {
@@ -343,26 +366,6 @@ export default function VoiceAgentSection() {
   const [typingPreview, setTypingPreview] = useState<string | null>(null);
   const [pendingFirstMsg, setPendingFirstMsg] = useState<string | undefined>(undefined);
 
-  const sectionRegex = (name: string) => new RegExp(String.raw`\[${name}\]\s*([\s\S]*?)(?=\n\[|$)`, 'i');
-  const setSection = (p: string, name: string, body: string) => {
-    const re = sectionRegex(name);
-    if (re.test(p)) return p.replace(re, `[${name}]\n${body.trim()}\n`);
-    const nl = p.endsWith('\n') ? '' : '\n'; return `${p}${nl}\n[${name}]\n${body.trim()}\n`;
-  };
-  const mergeInput = (freeText: string, current: string) => {
-    const out = { prompt: current || BASE_PROMPT, firstMessage: undefined as string | undefined };
-    const raw = (freeText || '').trim(); if (!raw) return out;
-    const m = raw.match(/^(?:first\s*message|greeting)\s*[:\-]\s*(.+)$/i);
-    if (m) { out.firstMessage = m[1].trim(); return out; }
-    const blocks = [...raw.matchAll(/\[(Identity|Style|System Behaviors|Task & Goals|Data to Collect|Safety|Handover|Refinements)\]\s*([\s\S]*?)(?=\n\[|$)/gi)];
-    if (blocks.length) { let next = out.prompt; for (const b of blocks) next = setSection(next, b[1], b[2]); out.prompt = next; return out; }
-    const hasRef = sectionRegex('Refinements').test(out.prompt);
-    const bullet = `- ${raw.replace(/\s+/g, ' ').trim()}`;
-    out.prompt = hasRef ? out.prompt.replace(sectionRegex('Refinements'), (_m, body) => `[Refinements]\n${(body || '').trim()}\n${bullet}\n`)
-                        : `${out.prompt}\n\n[Refinements]\n${bullet}\n`;
-    return out;
-  };
-
   const handleGenerate = () => {
     if (!active) return;
     const current = active.config.model.systemPrompt || '';
@@ -379,6 +382,7 @@ export default function VoiceAgentSection() {
   /* transcript + mock call controls (minimal for demo) */
   const [transcript, setTranscript] = useState<TranscriptTurn[]>([]);
   const [currentCallId, setCurrentCallId] = useState<string | null>(null);
+  const greet = 'Hello. How may I help you today?';
 
   const onTurn = (role: 'user' | 'assistant', text: string) => {
     const turn = { role, text, ts: Date.now() };
@@ -387,10 +391,16 @@ export default function VoiceAgentSection() {
   };
   const endWebCallSession = () => setCurrentCallId(null);
 
-  if (!isClient) return (<div ref={scopeRef} className={SCOPE} style={{ background: 'var(--bg)', color: 'var(--text)' }}><StyleBlock /><div className="px-6 py-10 opacity-70 text-sm">Loading…</div></div>);
+  if (!isClient) {
+    return (
+      <div ref={scopeRef} className={SCOPE} style={{ background: 'var(--bg)', color: 'var(--text)' }}>
+        <StyleBlock />
+        <div className="px-6 py-10 opacity-70 text-sm">Loading…</div>
+      </div>
+    );
+  }
 
   const railData: AssistantLite[] = assistants.map(a => ({ id: a.id, name: a.name, folder: a.folder, updatedAt: a.updatedAt }));
-  const greet = 'Hello. How may I help you today?';
 
   /* ─────────────────────────── RENDER ─────────────────────────── */
   return (
@@ -419,7 +429,6 @@ export default function VoiceAgentSection() {
                 <PhoneOff className="w-4 h-4" /> End Call
               </button>
             )}
-
             <button className="topbar-btn"><MessageSquare className="w-4 h-4 icon" /> Chat</button>
             <button className="topbar-btn" onClick={() => navigator.clipboard.writeText(BASE_PROMPT).catch(()=>{})}><Copy className="w-4 h-4 icon" /> Copy Prompt</button>
           </div>
@@ -611,7 +620,7 @@ export default function VoiceAgentSection() {
         </Section>
 
         {/* Transcript */}
-        <Section title="Call Assistant (Web test)" icon={<AudioLines className="w-4 h-4 icon" />}>
+        <Section title="Call Assistant (Web test)" icon={<AudioLines className="w-4 h-4 icon />"}>
           <div className="rounded-xl p-3" style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)' }}>
             {transcript.length === 0 && <div className="text-sm opacity-60">No transcript yet.</div>}
             <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1" style={{ scrollbarWidth: 'thin' }}>
@@ -655,7 +664,7 @@ export default function VoiceAgentSection() {
                   className="va-input"/>
                 <div className="mt-3 flex items-center justify-between gap-2">
                   <button onClick={() => setGenOpen(false)} className="topbar-btn">Cancel</button>
-                  <button onClick={() => { const { prompt, firstMessage } = (function mergeInput(freeText: string, current: string){ const out = { prompt: current || BASE_PROMPT, firstMessage: undefined as string|undefined }; const raw=(freeText||'').trim(); if(!raw) return out; const m=raw.match(/^(?:first\\s*message|greeting)\\s*[:\\-]\\s*(.+)$/i); if(m){ out.firstMessage=m[1].trim(); return out; } const blocks=[...raw.matchAll(/\\[(Identity|Style|System Behaviors|Task & Goals|Data to Collect|Safety|Handover|Refinements)\\]\\s*([\\s\\S]*?)(?=\\n\\[|$)/gi)]; const sectionRegex=(n:string)=>new RegExp(String.raw\\`\\\\[\\${n}\\]\\\\s*([\\\\s\\\\S]*?)(?=\\\\n\\\\[|$)\\`, 'i'); const setSection=(p:string,n:string,b:string)=>{ const re=sectionRegex(n); if(re.test(p)) return p.replace(re, \\`[\\${n}]\\n\\${b.trim()}\\n\\`); const nl=p.endsWith('\\n')?'':'\\n'; return \\`${p}\\${nl}\\n[\\${n}]\\n\\${b.trim()}\\n\\`; }; if(blocks.length){ let next=out.prompt; for(const b of blocks) next=setSection(next,b[1],b[2]); out.prompt=next; return out; } const hasRef=sectionRegex('Refinements').test(out.prompt); const bullet=\\`- \\${raw.replace(/\\s+/g,' ').trim()}\\`; out.prompt = hasRef ? out.prompt.replace(sectionRegex('Refinements'), (_m, body)=>\\`[Refinements]\\n\\${(body||'').trim()}\\n\\${bullet}\\n\\`) : \\`${out.prompt}\\n\\n[Refinements]\\n\\${bullet}\\n\\`; return out; })(genText, BASE_PROMPT); setTypingPreview(prompt); setPendingFirstMsg(firstMessage); setGenOpen(false); setGenText(''); }} className="btn btn--green"><span className="text-white">Generate</span></button>
+                  <button onClick={handleGenerate} className="btn btn--green"><span className="text-white">Generate</span></button>
                 </div>
               </div>
             </motion.div>
