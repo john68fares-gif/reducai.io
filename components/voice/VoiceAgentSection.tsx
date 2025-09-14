@@ -5,20 +5,36 @@ import React, { useState } from 'react';
 import dynamic from 'next/dynamic';
 import { Bot, Code2, Play, MessagesSquare, Phone, Wand2, ChevronDown, ChevronUp, Gauge, Timer } from 'lucide-react';
 
-/* ---- Dynamically load AssistantRail to avoid client-side crashes ---- */
+/* ---------- Safe dynamic import of AssistantRail (won’t crash if it fails) ---------- */
 const AssistantRail = dynamic(
-  () => import('@/components/voice/AssistantRail').then(m => m.default ?? m),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="px-3 py-4 text-sm opacity-70" style={{ color: 'var(--text)' }}>
-        Loading assistants…
-      </div>
-    ),
-  }
+  () =>
+    import('@/components/voice/AssistantRail')
+      .then((m) => m.default ?? m)
+      .catch(() => {
+        // Fallback component if import fails (path/props issues)
+        return () => (
+          <div className="px-3 py-4 text-sm opacity-70" style={{ color: 'var(--text)' }}>
+            Rail unavailable
+          </div>
+        );
+      }),
+  { ssr: false, loading: () => <div className="px-3 py-4 text-sm opacity-70">Loading assistants…</div> }
 );
 
-/* ===== Tokens (match api-keys.tsx sizes & feel) ===== */
+/* ------------------------------ Error Boundary ------------------------------ */
+class RailBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean }> {
+  constructor(props: any) { super(props); this.state = { hasError: false }; }
+  static getDerivedStateFromError() { return { hasError: true }; }
+  componentDidCatch() { /* no-op, we just show fallback */ }
+  render() {
+    if (this.state.hasError) {
+      return <div className="px-3 py-4 text-sm opacity-70">Rail crashed</div>;
+    }
+    return this.props.children;
+  }
+}
+
+/* ------------------------------ Local theme ------------------------------ */
 const GREEN = '#10b981';
 const GREEN_HOVER = '#0ea473';
 
@@ -69,14 +85,18 @@ export default function VoiceAgentSection() {
   const [openModel, setOpenModel] = useState(true);
   const [openTranscriber, setOpenTranscriber] = useState(true);
 
+  // —— Model state
   const [provider, setProvider] = useState('OpenAI');
   const [model, setModel] = useState('GPT 4o Cluster');
   const [firstMode, setFirstMode] = useState('Assistant speaks first');
   const [firstMsg, setFirstMsg] = useState('Hello.');
-  const [systemPrompt, setSystemPrompt] = useState('This is a blank template with minimal defaults, you can change the model, temperature, and messages.');
+  const [systemPrompt, setSystemPrompt] = useState(
+    'This is a blank template with minimal defaults, you can change the model, temperature, and messages.'
+  );
 
+  // —— Transcriber state (FIXED the crash here)
   const [asrProvider, setAsrProvider] = useState('Deepgram');
-  the [asrLang, setAsrLang] = useState('En');
+  const [asrLang, setAsrLang] = useState('En');        // ✅ removed the stray "the"
   const [asrModel, setAsrModel] = useState('Nova 2');
   const [denoise, setDenoise] = useState(false);
   const [numerals, setNumerals] = useState(false);
@@ -85,14 +105,18 @@ export default function VoiceAgentSection() {
   return (
     <div className="va w-full" style={{ background:'var(--bg)', color:'var(--text)' }}>
       <LocalTokens />
+
       <div className="grid w-full" style={{ gridTemplateColumns:'312px 1fr' }}>
-        {/* Left: Assistant Rail (now safe to mount) */}
+        {/* LEFT: rail, fully guarded */}
         <div className="border-r" style={{ borderColor:'var(--border)' }}>
-          <AssistantRail />
+          <RailBoundary>
+            <AssistantRail />
+          </RailBoundary>
         </div>
 
-        {/* Right: Main */}
+        {/* RIGHT: main */}
         <div className="px-4 md:px-6 lg:px-8 py-6 mx-auto w-full max-w-[1180px]">
+          {/* Header */}
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <span className="pill"><Bot size={16}/> Voice Studio</span>
@@ -106,6 +130,7 @@ export default function VoiceAgentSection() {
             </div>
           </div>
 
+          {/* Tabs (visual) */}
           <div className="mb-5 flex flex-wrap items-center gap-8">
             <div className="flex flex-wrap items-center gap-8">
               <span className="pill">Model</span>
@@ -119,12 +144,15 @@ export default function VoiceAgentSection() {
             <div className="flex items-center gap-2"><span className="label-xs">Web</span></div>
           </div>
 
+          {/* KPIs */}
           <div className="grid gap-4 md:grid-cols-2 mb-6">
             <div className="va-card kpi"><div className="kpi-title">Cost</div><div className="kpi-value">~$0.1/min</div></div>
             <div className="va-card kpi"><div className="kpi-title">Latency</div><div className="kpi-value">~1050 ms</div></div>
           </div>
 
+          {/* Panels */}
           <div className="va-panel overflow-hidden">
+            {/* Model */}
             <div className="acc-head" onClick={()=>setOpenModel(v=>!v)}>
               <div className="acc-title"><span className="pill" style={{height:30}}><Gauge size={14}/></span>Model</div>
               {openModel ? <ChevronUp size={18} style={{ color:'var(--muted)' }}/> : <ChevronDown size={18} style={{ color:'var(--muted)' }}/>}
@@ -171,6 +199,7 @@ export default function VoiceAgentSection() {
 
             <div className="sep" />
 
+            {/* Transcriber */}
             <div className="acc-head" onClick={()=>setOpenTranscriber(v=>!v)}>
               <div className="acc-title"><span className="pill" style={{height:30}}><Timer size={14}/></span>Transcriber</div>
               {openTranscriber ? <ChevronUp size={18} style={{ color:'var(--muted)' }}/> : <ChevronDown size={18} style={{ color:'var(--muted)' }}/>}
