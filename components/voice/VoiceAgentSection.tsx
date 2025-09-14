@@ -1,33 +1,32 @@
 // components/voice/VoiceAgentSection.tsx
 'use client';
 
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Search, Plus, Folder, FolderOpen, Check, Trash2, Copy, Edit3, Sparkles,
-  ChevronDown, ChevronRight, FileText, Mic2, BookOpen, SlidersHorizontal,
-  Bot, UploadCloud, RefreshCw, X, Phone as PhoneIcon, Rocket, PhoneOff,
-  MessageSquare, ListTree, AudioLines, Volume2, Save, Gauge
+  Check, Trash2, Copy, Sparkles, ChevronDown, ChevronRight,
+  FileText, Mic2, BookOpen, SlidersHorizontal, UploadCloud,
+  RefreshCw, X, Phone as PhoneIcon, Rocket, PhoneOff,
+  MessageSquare, ListTree, AudioLines, Volume2, Save
 } from 'lucide-react';
 
 import AssistantRail, { type AssistantLite } from '@/components/voice/AssistantRail';
 import WebCallButton from '@/components/voice/WebCallButton';
 
 /* ──────────────────────────────────────────────────────────────────────────── */
-/* THEME / SIZING – tuned to match the Vapi screenshots                        */
+/* THEME / SIZING                                                              */
 /* ──────────────────────────────────────────────────────────────────────────── */
 const SCOPE = 'va-scope';
 const ACCENT = '#10b981';
 const ACCENT_HOVER = '#0ea371';
 const BTN_SHADOW = '0 10px 24px rgba(16,185,129,.22)';
 
-/** Vapi-ish content lane. Their main column on a 13.6" sits ~1100–1180px. */
-const MAX_CONTENT_W = 1180;
-/** Vapi uses comfy gutters (≈24px). Switching from 4 → 24 to match. */
+/* roomy on 13–14" + expands when rail collapses */
+const MAX_CONTENT_W = 1380;
 const EDGE_GUTTER = 24;
 
 /* ──────────────────────────────────────────────────────────────────────────── */
-/* TYPES                                                                       */
+/* TYPES (trimmed)                                                             */
 /* ──────────────────────────────────────────────────────────────────────────── */
 type Provider = 'openai';
 type ModelId = 'gpt-4o' | 'gpt-4o-mini' | 'gpt-4.1' | 'gpt-3.5-turbo';
@@ -37,40 +36,23 @@ type PhoneNum = { id: string; label?: string; e164: string };
 type TranscriptTurn = { role: 'assistant' | 'user'; text: string; ts: number };
 
 type CallLog = {
-  id: string;
-  assistantId: string;
-  assistantName: string;
-  startedAt: number;
-  endedAt?: number;
-  endedReason?: string;
-  type: 'Web';
-  assistantPhoneNumber?: string;
-  transcript: TranscriptTurn[];
-  costUSD?: number;
+  id: string; assistantId: string; assistantName: string;
+  startedAt: number; endedAt?: number; endedReason?: string;
+  type: 'Web'; assistantPhoneNumber?: string; transcript: TranscriptTurn[]; costUSD?: number;
 };
 
 type Assistant = {
-  id: string;
-  name: string;
-  folder?: string;
-  updatedAt: number;
-  published?: boolean;
+  id: string; name: string; folder?: string; updatedAt: number; published?: boolean;
   config: {
     model: {
-      provider: Provider;
-      model: ModelId;
+      provider: Provider; model: ModelId;
       firstMessageMode: 'assistant_first' | 'user_first';
-      firstMessage: string;
-      systemPrompt: string;
+      firstMessage: string; systemPrompt: string;
     };
     voice: { provider: VoiceProvider; voiceId: string; voiceLabel: string };
     transcriber: {
-      provider: 'deepgram';
-      model: 'nova-2' | 'nova-3';
-      language: 'en' | 'multi';
-      denoise: boolean;
-      confidenceThreshold: number;
-      numerals: boolean;
+      provider: 'deepgram'; model: 'nova-2' | 'nova-3';
+      language: 'en' | 'multi'; denoise: boolean; confidenceThreshold: number; numerals: boolean;
     };
     tools: { enableEndCall: boolean; dialKeypad: boolean };
     telephony?: { numbers: PhoneNum[]; linkedNumberId?: string };
@@ -78,18 +60,15 @@ type Assistant = {
 };
 
 /* ──────────────────────────────────────────────────────────────────────────── */
-/* LOCAL STORAGE KEYS                                                          */
+/* STORAGE HELPERS                                                             */
 /* ──────────────────────────────────────────────────────────────────────────── */
 const LS_LIST = 'voice:assistants.v1';
 const ak = (id: string) => `voice:assistant:${id}`;
 const LS_CALLS = 'voice:calls.v1';
 const LS_ROUTES = 'voice:phoneRoutes.v1';
-
-const readLS = <T,>(k: string): T | null => { try { const r = localStorage.getItem(k); return r ? (JSON.parse(r) as T) : null; } catch { return null; } };
+const readLS = <T,>(k: string): T | null => { try { const r = localStorage.getItem(k); return r ? JSON.parse(r) as T : null; } catch { return null; } };
 const writeLS = <T,>(k: string, v: T) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 
-/* ──────────────────────────────────────────────────────────────────────────── */
-/* BASE PROMPT                                                                 */
 /* ──────────────────────────────────────────────────────────────────────────── */
 const BASE_PROMPT = `[Identity]
 You are an intelligent and responsive assistant designed to help users with a wide range of inquiries and tasks.
@@ -120,32 +99,7 @@ You are an intelligent and responsive assistant designed to help users with a wi
 - When done, summarize details and hand off if needed.`.trim();
 
 /* ──────────────────────────────────────────────────────────────────────────── */
-/* PROMPT HELPERS                                                              */
-/* ──────────────────────────────────────────────────────────────────────────── */
-function sectionRegex(name: string) { return new RegExp(String.raw`\[${name}\]\s*([\s\S]*?)(?=\n\[|$)`, 'i'); }
-function setSection(prompt: string, name: string, body: string) {
-  const re = sectionRegex(name);
-  if (re.test(prompt)) return prompt.replace(re, `[${name}]\n${body.trim()}\n`);
-  const nl = prompt.endsWith('\n') ? '' : '\n';
-  return `${prompt}${nl}\n[${name}]\n${body.trim()}\n`;
-}
-function mergeInput(freeText: string, current: string) {
-  const out = { prompt: current || BASE_PROMPT, firstMessage: undefined as string | undefined };
-  const raw = (freeText || '').trim(); if (!raw) return out;
-  const m = raw.match(/^(?:first\s*message|greeting)\s*[:\-]\s*(.+)$/i);
-  if (m) { out.firstMessage = m[1].trim(); return out; }
-  const blocks = [...raw.matchAll(/\[(Identity|Style|System Behaviors|Task & Goals|Data to Collect|Safety|Handover|Refinements)\]\s*([\s\S]*?)(?=\n\[|$)/gi)];
-  if (blocks.length) { let next = out.prompt; for (const b of blocks) next = setSection(next, b[1], b[2]); out.prompt = next; return out; }
-  const hasRef = sectionRegex('Refinements').test(out.prompt);
-  const bullet = `- ${raw.replace(/\s+/g, ' ').trim()}`;
-  out.prompt = hasRef
-    ? out.prompt.replace(sectionRegex('Refinements'), (_m, body) => `[Refinements]\n${(body || '').trim()}\n${bullet}\n`)
-    : `${out.prompt}\n\n[Refinements]\n${bullet}\n`;
-  return out;
-}
-
-/* ──────────────────────────────────────────────────────────────────────────── */
-/* SMALL UI ATOMS – Vapi proportions                                           */
+/* SMALL ATOMS                                                                 */
 /* ──────────────────────────────────────────────────────────────────────────── */
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -155,20 +109,47 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     </div>
   );
 }
+
 function Section({ title, icon, children }: { title: string; icon: React.ReactNode; children: React.ReactNode }) {
   const [open, setOpen] = useState(true);
   return (
-    <div className="col-span-12 rounded-xl relative"
-         style={{ background: 'var(--va-card)', border: '1px solid var(--va-border)', boxShadow: 'var(--va-shadow)' }}>
-      <div aria-hidden className="pointer-events-none absolute -top-[22%] -left-[22%] w-[70%] h-[70%] rounded-full"
-           style={{ background: 'radial-gradient(circle, color-mix(in oklab, var(--accent) 14%, transparent) 0%, transparent 70%)', filter: 'blur(40px)' }} />
-      <button type="button" onClick={() => setOpen(v => !v)} className="w-full flex items-center justify-between px-5 py-4">
-        <span className="flex items-center gap-2 text-sm font-semibold">{icon}{title}</span>
+    <div
+      className="col-span-12 group rounded-2xl relative transition-shadow"
+      style={{
+        background: 'linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,.01))',
+        border: '1px solid var(--va-border)',
+        boxShadow: '0 24px 70px rgba(0,0,0,.55), 0 10px 28px rgba(0,0,0,.40)',
+        overflow: 'hidden' // clip glow to avoid horizontal scroll
+      }}
+    >
+      {/* soft green aura (kept inside card bounds) */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -top-[20%] -left-[12%] w-[58%] h-[58%] rounded-full"
+        style={{
+          background: 'radial-gradient(circle, color-mix(in oklab, var(--accent) 16%, transparent) 0%, transparent 70%)',
+          filter: 'blur(42px)', opacity: .75
+        }}
+      />
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center justify-between px-5 py-4"
+        style={{ borderBottom: open ? '1px solid var(--va-border)' : 'none' }}
+      >
+        <span className="flex items-center gap-2 text-sm font-semibold tracking-wide">
+          <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: 'var(--accent)' }} />
+          {icon}{title}
+        </span>
         {open ? <ChevronDown className="w-4 h-4 icon" /> : <ChevronRight className="w-4 h-4 icon" />}
       </button>
       <AnimatePresence initial={false}>
         {open && (
-          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: .18 }} className="px-5 pb-5">
+          <motion.div
+            initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }} transition={{ duration: .18 }}
+            className="px-5 pb-5"
+          >
             {children}
           </motion.div>
         )}
@@ -177,85 +158,81 @@ function Section({ title, icon, children }: { title: string; icon: React.ReactNo
   );
 }
 
-/** Stat card row (Cost / Latency) just like the screenshots */
-function StatCard({ title, value, bar }: { title: string; value: string; bar?: 'cost'|'latency' }) {
-  return (
-    <div className="rounded-xl p-4"
-      style={{ background: 'var(--va-card)', border: '1px solid var(--va-border)', boxShadow: 'var(--va-shadow)' }}>
-      <div className="text-[13px] opacity-80 mb-1.5">{title}</div>
-      <div className="text-[20px] font-semibold mb-3">{value}</div>
-      <div className="h-2 rounded-full overflow-hidden"
-           style={{ background:'rgba(255,255,255,.06)', border:'1px solid var(--va-border)' }}>
-        <div className="h-full" style={{
-          width: bar === 'latency' ? '78%' : '72%',
-          background: 'linear-gradient(90deg,#22d3ee,#fde047,#fb923c,#10b981)'
-        }} />
-      </div>
-    </div>
-  );
-}
-
 /* ──────────────────────────────────────────────────────────────────────────── */
-/* SCOPED CSS (v0/Vapi-like)                                                   */
+/* CSS (added overflow-x guards + pretty selects)                              */
 /* ──────────────────────────────────────────────────────────────────────────── */
 function StyleBlock() {
   return (
     <style jsx global>{`
 .${SCOPE}{
   --accent:${ACCENT};
-  --bg:#0b0c10;
-  --text:#eef2f5;
+  --bg:#0b0c10; --text:#eef2f5;
   --text-muted:color-mix(in oklab, var(--text) 65%, transparent);
-  --va-card:#0f1315;
-  --va-topbar:#0e1214;
+  --va-card:#0f1315; --va-topbar:#0e1214;
   --va-sidebar:linear-gradient(180deg,#0d1113 0%,#0b0e10 100%);
-  --va-chip:rgba(255,255,255,.03);
-  --va-border:rgba(255,255,255,.10);
-  --va-input-bg:rgba(255,255,255,.03);
-  --va-input-border:rgba(255,255,255,.14);
+  --va-chip:rgba(255,255,255,.03); --va-border:rgba(255,255,255,.10);
+  --va-input-bg:rgba(255,255,255,.03); --va-input-border:rgba(255,255,255,.14);
   --va-input-shadow:inset 0 1px 0 rgba(255,255,255,.06);
-  --va-menu-bg:#101314;
-  --va-menu-border:rgba(255,255,255,.16);
+  --va-menu-bg:#101314; --va-menu-border:rgba(255,255,255,.16);
   --va-shadow:0 24px 70px rgba(0,0,0,.55), 0 10px 28px rgba(0,0,0,.4);
   --va-shadow-lg:0 42px 110px rgba(0,0,0,.66), 0 20px 48px rgba(0,0,0,.5);
   --va-shadow-sm:0 12px 26px rgba(0,0,0,.35);
   --va-shadow-side:8px 0 28px rgba(0,0,0,.42);
-  --va-rail-w:360px;            /* updated at runtime */
-  --app-sidebar-w:248px;        /* updated at runtime */
-  --va-edge-gutter:${EDGE_GUTTER}px;
-}
+  --va-rail-w:360px; --app-sidebar-w:248px; --va-edge-gutter:${EDGE_GUTTER}px;
 
+  /* prevent any horizontal scroll (glows, borders, etc.) */
+  overflow-x: hidden;
+}
 :root:not([data-theme="dark"]) .${SCOPE}{
-  --bg:#f7f9fb; --text:#101316; --text-muted:color-mix(in oklab, var(--text) 55%, transparent);
-  --va-card:#ffffff; --va-topbar:#ffffff; --va-sidebar:linear-gradient(180deg,#ffffff 0%,#f7f9fb 100%);
-  --va-chip:#ffffff; --va-border:rgba(0,0,0,.10); --va-input-bg:#ffffff; --va-input-border:rgba(0,0,0,.12);
-  --va-input-shadow:inset 0 1px 0 rgba(255,255,255,.85); --va-menu-bg:#ffffff; --va-menu-border:rgba(0,0,0,.10);
+  --bg:#f7f9fb; --text:#101316;
+  --text-muted:color-mix(in oklab, var(--text) 55%, transparent);
+  --va-card:#ffffff; --va-topbar:#ffffff;
+  --va-sidebar:linear-gradient(180deg,#ffffff 0%,#f7f9fb 100%);
+  --va-chip:#ffffff; --va-border:rgba(0,0,0,.10);
+  --va-input-bg:#ffffff; --va-input-border:rgba(0,0,0,.12);
+  --va-input-shadow:inset 0 1px 0 rgba(255,255,255,.85);
+  --va-menu-bg:#ffffff; --va-menu-border:rgba(0,0,0,.10);
   --va-shadow:0 28px 70px rgba(0,0,0,.12), 0 12px 28px rgba(0,0,0,.08);
   --va-shadow-lg:0 42px 110px rgba(0,0,0,.16), 0 22px 54px rgba(0,0,0,.10);
   --va-shadow-sm:0 12px 26px rgba(0,0,0,.10);
 }
-
 .${SCOPE} .icon{ color: var(--accent); }
 
 /* Buttons */
-.${SCOPE} .topbar-btn,
-.${SCOPE} .btn{ height:42px; padding:0 .95rem; border-radius:12px; display:inline-flex; align-items:center; gap:.5rem; border:1px solid var(--va-border); }
-.${SCOPE} .btn--green{ background:${ACCENT}; color:#fff; box-shadow:${BTN_SHADOW}; transition:transform .04s ease, background .18s ease; }
+.${SCOPE} .topbar-btn, .${SCOPE} .btn{
+  height:42px; padding:0 .95rem; border-radius:12px; display:inline-flex; align-items:center; gap:.5rem;
+  border:1px solid var(--va-border); background:var(--va-card); color:var(--text);
+}
+.${SCOPE} .btn--green{ background:${ACCENT}; color:#fff; box-shadow:${BTN_SHADOW}; transition:transform .04s, background .18s; }
 .${SCOPE} .btn--green:hover{ background:${ACCENT_HOVER}; }
 .${SCOPE} .btn--green:active{ transform:translateY(1px); }
 .${SCOPE} .btn--danger{ background:rgba(220,38,38,.12); color:#fca5a5; box-shadow:0 10px 24px rgba(220,38,38,.15); border-color:rgba(220,38,38,.35); }
-.${SCOPE} .btn--ghost{ background:var(--va-card); color:var(--text); box-shadow:var(--va-shadow-sm); }
 
-/* Inputs/selects */
-.${SCOPE} .va-input, .${SCOPE} select{
-  width:100%; min-width:0; height:42px; border-radius:12px; padding:0 .9rem; font-size:15px; outline:none;
-  background:var(--va-input-bg); border:1px solid var(--va-input-border); box-shadow:var(--va-input-shadow); color:var(--text);
+/* Inputs */
+.${SCOPE} .va-input{ width:100%; min-width:0; height:42px; border-radius:12px; padding:0 .9rem; font-size:15px; outline:none;
+  background:var(--va-input-bg); border:1px solid var(--va-input-border); box-shadow:var(--va-input-shadow); color:var(--text); }
+.${SCOPE} .va-input:focus{ border-color: color-mix(in oklab, var(--accent) 50%, var(--va-input-border));
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 18%, transparent), var(--va-input-shadow); }
+
+/* Pretty select */
+.${SCOPE} .va-select{
+  width:100%; min-width:0; height:42px; font-size:15px; border-radius:12px; outline:none;
+  padding:0 2.2rem 0 .9rem;
+  background:linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02)), var(--va-input-bg);
+  border:1px solid var(--va-input-border); color:var(--text);
+  -webkit-appearance:none; appearance:none; box-shadow:var(--va-input-shadow);
+  transition: border-color .15s, box-shadow .15s, background .15s;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%23A8B3BE' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat:no-repeat; background-position:right .7rem center;
 }
+.${SCOPE} .va-select:hover{ background:linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.03)), var(--va-input-bg); }
+.${SCOPE} .va-select:focus{ border-color: color-mix(in oklab, var(--accent) 50%, var(--va-input-border));
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 18%, transparent), var(--va-input-shadow); }
 
-/* Lane width */
-.${SCOPE} .va-main { max-width: none !important; }
+/* Main lane never x-scrolls */
+.${SCOPE} .va-main { max-width:none !important; overflow-x:hidden; }
 
-/* Laptop tweak like Vapi’s rail */
+/* small tweak for laptop */
 @media (max-width: 1280px){ .${SCOPE}{ --va-rail-w: 320px; } }
 `}</style>
   );
@@ -269,7 +246,7 @@ export default function VoiceAgentSection() {
   const [isClient, setIsClient] = useState(false);
   useEffect(() => { setIsClient(true); }, []);
 
-  /* Measure app sidebar + fixed rail so the lane responds exactly like Vapi */
+  /* Measure app sidebar + the rail; use the rail's data attribute */
   useLayoutEffect(() => {
     if (!isClient) return;
 
@@ -284,9 +261,8 @@ export default function VoiceAgentSection() {
         document.querySelector<HTMLElement>('.app-sidebar') ||
         document.querySelector<HTMLElement>('aside.sidebar');
 
-      /** IMPORTANT: fixed rail inside AssistantRail must be <aside data-collapsed="true|false">  */
       const railAside =
-        document.querySelector<HTMLElement>(`.${SCOPE} aside[data-collapsed]`);
+        document.querySelector<HTMLElement>(`.${SCOPE} aside[data-va-rail]`);
 
       root.style.setProperty('--app-sidebar-w', `${getW(appSidebar)}px`);
       root.style.setProperty('--va-rail-w', `${getW(railAside)}px`);
@@ -294,7 +270,6 @@ export default function VoiceAgentSection() {
     };
 
     apply();
-
     const ro = new ResizeObserver(apply);
     const appSidebar =
       document.querySelector<HTMLElement>('[data-app-sidebar]') ||
@@ -302,20 +277,17 @@ export default function VoiceAgentSection() {
       document.querySelector<HTMLElement>('.app-sidebar') ||
       document.querySelector<HTMLElement>('aside.sidebar');
     const railAside =
-      document.querySelector<HTMLElement>(`.${SCOPE} aside[data-collapsed]`);
-
+      document.querySelector<HTMLElement>(`.${SCOPE} aside[data-va-rail]`);
     if (appSidebar) ro.observe(appSidebar);
     if (railAside)  ro.observe(railAside);
     window.addEventListener('resize', apply);
 
-    /* keep applying shortly after UI changes */
     let ticks = 40;
     const id = window.setInterval(() => { apply(); if (--ticks <= 0) window.clearInterval(id); }, 80);
-
     return () => { ro.disconnect(); window.removeEventListener('resize', apply); window.clearInterval(id); };
   }, [isClient]);
 
-  /* ─────────────────────────── Assistants (LS) ─────────────────────────── */
+  /* Assistants state init (same as before)… */
   const [assistants, setAssistants] = useState<Assistant[]>([]);
   const [activeId, setActiveId] = useState(''); const [active, setActive] = useState<Assistant | null>(null);
   const [rev, setRev] = useState(0);
@@ -338,8 +310,7 @@ export default function VoiceAgentSection() {
       setAssistants([seed]); setActiveId(seed.id);
     } else {
       const fixed = list.map(a => ({ ...a, config: { ...a.config, telephony: a.config.telephony || { numbers: [], linkedNumberId: undefined } } }));
-      writeLS(LS_LIST, fixed);
-      setAssistants(fixed); setActiveId(fixed[0].id);
+      writeLS(LS_LIST, fixed); setAssistants(fixed); setActiveId(fixed[0].id);
     }
     if (!readLS<CallLog[]>(LS_CALLS)) writeLS(LS_CALLS, []);
     if (!readLS<Record<string, string>>(LS_ROUTES)) writeLS(LS_ROUTES, {});
@@ -359,7 +330,10 @@ export default function VoiceAgentSection() {
     writeLS(LS_LIST, list); setAssistants(list); setActive(next); setRev(r => r + 1);
   };
 
-  /* Create/Rename/Delete (for rail) */
+  /* CRUD, Generate, Voice, Telephony, Calls — unchanged from your version */
+  // (omitted here for brevity—keep your existing handlers)
+
+  // …BEGIN copied handlers (unchanged)…
   const onCreate = async () => {
     const id = `agent_${Math.random().toString(36).slice(2, 8)}`;
     const a: Assistant = {
@@ -387,11 +361,30 @@ export default function VoiceAgentSection() {
     setRev(r => r + 1);
   };
 
-  /* Generate overlay */
   const [genOpen, setGenOpen] = useState(false);
   const [genText, setGenText] = useState('');
   const [typingPreview, setTypingPreview] = useState<string | null>(null);
   const [pendingFirstMsg, setPendingFirstMsg] = useState<string | undefined>(undefined);
+
+  const sectionRegex = (name: string) => new RegExp(String.raw`\[${name}\]\s*([\s\S]*?)(?=\n\[|$)`, 'i');
+  const setSection = (p: string, name: string, body: string) => {
+    const re = sectionRegex(name);
+    if (re.test(p)) return p.replace(re, `[${name}]\n${body.trim()}\n`);
+    const nl = p.endsWith('\n') ? '' : '\n'; return `${p}${nl}\n[${name}]\n${body.trim()}\n`;
+  };
+  const mergeInput = (freeText: string, current: string) => {
+    const out = { prompt: current || BASE_PROMPT, firstMessage: undefined as string | undefined };
+    const raw = (freeText || '').trim(); if (!raw) return out;
+    const m = raw.match(/^(?:first\s*message|greeting)\s*[:\-]\s*(.+)$/i);
+    if (m) { out.firstMessage = m[1].trim(); return out; }
+    const blocks = [...raw.matchAll(/\[(Identity|Style|System Behaviors|Task & Goals|Data to Collect|Safety|Handover|Refinements)\]\s*([\s\S]*?)(?=\n\[|$)/gi)];
+    if (blocks.length) { let next = out.prompt; for (const b of blocks) next = setSection(next, b[1], b[2]); out.prompt = next; return out; }
+    const hasRef = sectionRegex('Refinements').test(out.prompt);
+    const bullet = `- ${raw.replace(/\s+/g, ' ').trim()}`;
+    out.prompt = hasRef ? out.prompt.replace(sectionRegex('Refinements'), (_m, body) => `[Refinements]\n${(body || '').trim()}\n${bullet}\n`)
+                        : `${out.prompt}\n\n[Refinements]\n${bullet}\n`;
+    return out;
+  };
 
   const handleGenerate = () => {
     if (!active) return;
@@ -401,22 +394,12 @@ export default function VoiceAgentSection() {
   };
   const acceptGenerate = () => {
     if (!active) return;
-    updateActive(a => ({
-      ...a,
-      config: {
-        ...a.config,
-        model: {
-          ...a.config.model,
-          systemPrompt: typingPreview || a.config.model.systemPrompt,
-          firstMessage: typeof pendingFirstMsg === 'string' ? pendingFirstMsg : a.config.model.firstMessage
-        }
-      }
-    }));
+    const nextFirst = typeof pendingFirstMsg === 'string' ? pendingFirstMsg : active.config.model.firstMessage;
+    updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, systemPrompt: typingPreview || a.config.model.systemPrompt, firstMessage: nextFirst } } }));
     setTypingPreview(null); setPendingFirstMsg(undefined);
   };
   const declineGenerate = () => { setTypingPreview(null); setPendingFirstMsg(undefined); };
 
-  /* Voices */
   const openaiVoices = [{ value: 'alloy', label: 'Alloy (OpenAI)' }, { value: 'ember', label: 'Ember (OpenAI)' }];
   const elevenVoices = [{ value: 'rachel', label: 'Rachel (ElevenLabs)' }, { value: 'adam', label: 'Adam (ElevenLabs)' }, { value: 'bella', label: 'Bella (ElevenLabs)' }];
   const [pendingVoiceId, setPendingVoiceId] = useState<string | null>(null);
@@ -437,7 +420,10 @@ export default function VoiceAgentSection() {
     try { const u = new SpeechSynthesisUtterance('Voice saved.'); window.speechSynthesis.cancel(); window.speechSynthesis.speak(u); } catch {}
   };
 
-  /* Telephony */
+  const [transcript, setTranscript] = useState<TranscriptTurn[]>([]);
+  const [currentCallId, setCurrentCallId] = useState<string | null>(null);
+  const [callsForAssistant, setCallsForAssistant] = useState<CallLog[]>([]);
+
   const addPhone = (e164: string, label?: string) => {
     const norm = e164.trim(); if (!norm) return;
     updateActive(a => {
@@ -464,11 +450,6 @@ export default function VoiceAgentSection() {
     alert(`Published! ${num.e164} is now linked to ${active.name}.`);
   };
 
-  /* Transcript + calls */
-  const [transcript, setTranscript] = useState<TranscriptTurn[]>([]);
-  const [currentCallId, setCurrentCallId] = useState<string | null>(null);
-  const [callsForAssistant, setCallsForAssistant] = useState<CallLog[]>([]);
-
   const ensureCall = () => {
     if (currentCallId || !active) return;
     const id = `call_${crypto.randomUUID?.() || Math.random().toString(36).slice(2)}`;
@@ -477,7 +458,6 @@ export default function VoiceAgentSection() {
     calls.unshift({ id, assistantId: active.id, assistantName: active.name, startedAt: Date.now(), type: 'Web', assistantPhoneNumber: linkedNum, transcript: [] });
     writeLS(LS_CALLS, calls); setCurrentCallId(id);
   };
-
   const onTurn = (role: 'user' | 'assistant', text: string) => {
     if (!active) return; ensureCall();
     const turn = { role, text, ts: Date.now() };
@@ -491,7 +471,6 @@ export default function VoiceAgentSection() {
       return next;
     });
   };
-
   const endWebCallSession = (reason = 'Ended by user') => {
     if (!currentCallId) return;
     const calls = (readLS<CallLog[]>(LS_CALLS) || []).map(c => c.id === currentCallId ? { ...c, endedAt: Date.now(), endedReason: reason } : c);
@@ -503,6 +482,7 @@ export default function VoiceAgentSection() {
     const list = readLS<CallLog[]>(LS_CALLS) || [];
     setCallsForAssistant(list.filter(c => c.assistantId === active.id));
   }, [isClient, active?.id, currentCallId, transcript.length, rev]);
+  // …END copied handlers…
 
   if (!isClient) return (<div ref={scopeRef} className={SCOPE} style={{ background: 'var(--bg)', color: 'var(--text)' }}><StyleBlock /><div className="px-6 py-10 opacity-70 text-sm">Loading…</div></div>);
   if (!active) return (<div ref={scopeRef} className={SCOPE} style={{ background: 'var(--bg)', color: 'var(--text)' }}><StyleBlock /><div className="px-6 py-10 opacity-70">Create your first assistant.</div></div>);
@@ -516,7 +496,6 @@ export default function VoiceAgentSection() {
   /* ─────────────────────────── RENDER ─────────────────────────── */
   return (
     <div ref={scopeRef} className={SCOPE} style={{ background: 'var(--bg)', color: 'var(--text)' }}>
-      {/* Assistant Rail (fixed). We rely on its fixed <aside> for measurement. */}
       <AssistantRail
         assistants={railData}
         activeId={activeId}
@@ -526,17 +505,18 @@ export default function VoiceAgentSection() {
         onDelete={onDelete}
       />
 
-      {/* CONTENT LANE — expands/shrinks with sidebars like Vapi */}
+      {/* CONTENT LANE */}
       <div
         className="va-main"
         style={{
           marginLeft: 'calc(var(--app-sidebar-w, 0px) + var(--va-rail-w, 0px) + var(--va-edge-gutter, 24px))',
-          width: `calc(100vw - var(--app-sidebar-w, 0px) - var(--va-rail-w, 0px) - (var(--va-edge-gutter, 24px) * 2))`,
-          maxWidth: `${MAX_CONTENT_W}px`,
+          width: 'calc(100vw - var(--app-sidebar-w, 0px) - var(--va-rail-w, 0px) - (var(--va-edge-gutter, 24px) * 2))',
+          maxWidth: 'min(1380px, 100vw - var(--app-sidebar-w,0px) - var(--va-rail-w,0px) - (var(--va-edge-gutter,24px) * 2))',
           paddingRight: 'var(--va-edge-gutter, 24px)',
           paddingLeft: 'var(--va-edge-gutter, 24px)',
           paddingTop: 'calc(var(--app-header-h, 64px) + 12px)',
-          paddingBottom: '96px'
+          paddingBottom: '96px',
+          overflowX: 'hidden'
         }}
       >
         {/* Top actions */}
@@ -561,9 +541,7 @@ export default function VoiceAgentSection() {
             <button onClick={() => window.dispatchEvent(new CustomEvent('voiceagent:open-chat', { detail: { id: active.id } }))}
                     className="topbar-btn"><MessageSquare className="w-4 h-4 icon" /> Chat</button>
             <button onClick={() => navigator.clipboard.writeText(active.config.model.systemPrompt || '').catch(() => {})}
-                    className="topbar-btn">
-              <Copy className="w-4 h-4 icon" /> Copy Prompt
-            </button>
+                    className="topbar-btn"><Copy className="w-4 h-4 icon" /> Copy Prompt</button>
           </div>
 
           <div className="flex items-center gap-8">
@@ -573,53 +551,67 @@ export default function VoiceAgentSection() {
           </div>
         </div>
 
-        {/* Stats row – Cost & Latency like in Vapi */}
+        {/* Stats row */}
         <div className="grid gap-6 md:gap-6 mb-6" style={{ gridTemplateColumns:'repeat(2, minmax(260px,1fr))' }}>
-          <StatCard title="Cost" value="~$0.1/min" bar="cost" />
-          <StatCard title="Latency" value="~1050 ms" bar="latency" />
+          <div className="rounded-xl p-4" style={{ background:'var(--va-card)', border:'1px solid var(--va-border)', boxShadow:'var(--va-shadow)' }}>
+            <div className="text-[13px] opacity-80 mb-1.5">Cost</div>
+            <div className="text-[20px] font-semibold mb-3">~$0.1/min</div>
+            <div className="h-2 rounded-full overflow-hidden" style={{ background:'rgba(255,255,255,.06)', border:'1px solid var(--va-border)' }}>
+              <div className="h-full" style={{ width:'72%', background:'linear-gradient(90deg,#22d3ee,#fde047,#fb923c,#10b981)' }} />
+            </div>
+          </div>
+          <div className="rounded-xl p-4" style={{ background:'var(--va-card)', border:'1px solid var(--va-border)', boxShadow:'var(--va-shadow)' }}>
+            <div className="text-[13px] opacity-80 mb-1.5">Latency</div>
+            <div className="text-[20px] font-semibold mb-3">~1050 ms</div>
+            <div className="h-2 rounded-full overflow-hidden" style={{ background:'rgba(255,255,255,.06)', border:'1px solid var(--va-border)' }}>
+              <div className="h-full" style={{ width:'78%', background:'linear-gradient(90deg,#22d3ee,#fde047,#fb923c,#10b981)' }} />
+            </div>
+          </div>
         </div>
 
         {/* Body */}
         <div className="grid gap-6 md:gap-8" style={{ gridTemplateColumns: '1fr', width: '100%', minWidth: 0 }}>
           {/* Model */}
           <Section title="Model" icon={<FileText className="w-4 h-4 icon" />}>
-            <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(4, minmax(220px, 1fr))' }}>
-              <Field label="Provider">
-                <select
-                  value={active.config.model.provider}
-                  onChange={e => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, provider: e.target.value as Provider } } }))}
-                >
-                  <option value="openai">OpenAI</option>
-                </select>
-              </Field>
-              <Field label="Model">
-                <select
-                  value={active.config.model.model}
-                  onChange={e => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, model: e.target.value as ModelId } } }))}
-                >
-                  <option value="gpt-4o">GPT-4o</option>
-                  <option value="gpt-4o-mini">GPT-4o mini</option>
-                  <option value="gpt-4.1">GPT-4.1</option>
-                  <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
-                </select>
-              </Field>
-              <Field label="First Message Mode">
-                <select
-                  value={active.config.model.firstMessageMode}
-                  onChange={e => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, firstMessageMode: e.target.value as any } } }))}
-                >
-                  <option value="assistant_first">Assistant speaks first</option>
-                  <option value="user_first">User speaks first</option>
-                </select>
-              </Field>
-              <Field label="First Message">
-                <input
-                  className="va-input"
-                  style={{ minWidth: 0 }}
-                  value={active.config.model.firstMessage}
-                  onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, firstMessage: e.target.value } } }))}
-                />
-              </Field>
+            {/* 12-col even grid to prevent overflow */}
+            <div className="grid gap-4 md:gap-6" style={{ gridTemplateColumns: 'repeat(12, minmax(0, 1fr))' }}>
+              <div style={{ gridColumn:'span 3 / span 3', minWidth:0 }}>
+                <Field label="Provider">
+                  <select className="va-select"
+                          value={active.config.model.provider}
+                          onChange={e => updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, provider: e.target.value as Provider } } }))}>
+                    <option value="openai">OpenAI</option>
+                  </select>
+                </Field>
+              </div>
+              <div style={{ gridColumn:'span 3 / span 3', minWidth:0 }}>
+                <Field label="Model">
+                  <select className="va-select"
+                          value={active.config.model.model}
+                          onChange={e => updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, model: e.target.value as ModelId } } }))}>
+                    <option value="gpt-4o">GPT-4o</option>
+                    <option value="gpt-4o-mini">GPT-4o mini</option>
+                    <option value="gpt-4.1">GPT-4.1</option>
+                    <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+                  </select>
+                </Field>
+              </div>
+              <div style={{ gridColumn:'span 3 / span 3', minWidth:0 }}>
+                <Field label="First Message Mode">
+                  <select className="va-select"
+                          value={active.config.model.firstMessageMode}
+                          onChange={e => updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, firstMessageMode: e.target.value as any } } }))}>
+                    <option value="assistant_first">Assistant speaks first</option>
+                    <option value="user_first">User speaks first</option>
+                  </select>
+                </Field>
+              </div>
+              <div style={{ gridColumn:'span 3 / span 3', minWidth:0 }}>
+                <Field label="First Message">
+                  <input className="va-input" style={{ minWidth:0 }} value={active.config.model.firstMessage}
+                         onChange={e => updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, firstMessage: e.target.value } } }))}/>
+                </Field>
+              </div>
             </div>
 
             {/* System Prompt */}
@@ -660,7 +652,7 @@ export default function VoiceAgentSection() {
                     {typingPreview}
                   </div>
                   <div className="flex items-center gap-2 justify-end mt-3">
-                    <button onClick={declineGenerate} className="topbar-btn"><X className="w-4 h-4 icon" /> Decline</button>
+                    <button onClick={() => { setTypingPreview(null); setPendingFirstMsg(undefined); }} className="topbar-btn"><X className="w-4 h-4 icon" /> Decline</button>
                     <button onClick={acceptGenerate} className="btn btn--green"><Check className="w-4 h-4 text-white" /><span className="text-white">Accept</span></button>
                   </div>
                 </div>
@@ -672,21 +664,29 @@ export default function VoiceAgentSection() {
           <Section title="Voice" icon={<Mic2 className="w-4 h-4 icon" />}>
             <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(2, minmax(220px, 1fr))' }}>
               <Field label="Provider">
-                <select value={active.config.voice.provider} onChange={(e) => handleVoiceProviderChange(e.target.value)}>
+                <select className="va-select" value={active.config.voice.provider} onChange={(e) => {
+                  const list = e.target.value === 'elevenlabs'
+                    ? [{ value: 'rachel', label: 'Rachel (ElevenLabs)' }, { value: 'adam', label: 'Adam (ElevenLabs)' }, { value: 'bella', label: 'Bella (ElevenLabs)' }]
+                    : [{ value: 'alloy', label: 'Alloy (OpenAI)' }, { value: 'ember', label: 'Ember (OpenAI)' }];
+                  updateActive(a => ({ ...a, config: { ...a.config, voice: { provider: e.target.value as VoiceProvider, voiceId: list[0].value, voiceLabel: list[0].label } } }));
+                }}>
                   <option value="openai">OpenAI</option>
                   <option value="elevenlabs">ElevenLabs</option>
                 </select>
               </Field>
               <Field label="Voice">
-                <select value={pendingVoiceId || active.config.voice.voiceId} onChange={(e) => handleVoiceIdChange(e.target.value)}>
-                  {(active.config.voice.provider === 'elevenlabs' ? [
-                    { value: 'rachel', label: 'Rachel (ElevenLabs)' },
-                    { value: 'adam', label: 'Adam (ElevenLabs)' },
-                    { value: 'bella', label: 'Bella (ElevenLabs)' },
-                  ] : [
-                    { value: 'alloy', label: 'Alloy (OpenAI)' },
-                    { value: 'ember', label: 'Ember (OpenAI)' },
-                  ]).map(v => (<option key={v.value} value={v.value}>{v.label}</option>))}
+                <select className="va-select" value={pendingVoiceId || active.config.voice.voiceId}
+                        onChange={(e) => {
+                          const v = e.target.value; const lbl = (active.config.voice.provider === 'elevenlabs'
+                            ? { rachel:'Rachel (ElevenLabs)', adam:'Adam (ElevenLabs)', bella:'Bella (ElevenLabs)' } as any
+                            : { alloy:'Alloy (OpenAI)', ember:'Ember (OpenAI)' } as any)[v] || v;
+                          setPendingVoiceId(v); setPendingVoiceLabel(lbl);
+                        }}>
+                  {(active.config.voice.provider === 'elevenlabs'
+                    ? [{ value: 'rachel', label: 'Rachel (ElevenLabs)' }, { value: 'adam', label: 'Adam (ElevenLabs)' }, { value: 'bella', label: 'Bella (ElevenLabs)' }]
+                    : [{ value: 'alloy', label: 'Alloy (OpenAI)' }, { value: 'ember', label: 'Ember (OpenAI)' }]).map(v => (
+                      <option key={v.value} value={v.value}>{v.label}</option>
+                    ))}
                 </select>
               </Field>
             </div>
@@ -706,18 +706,18 @@ export default function VoiceAgentSection() {
           <Section title="Transcriber" icon={<BookOpen className="w-4 h-4 icon" />}>
             <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(3, minmax(220px, 1fr))' }}>
               <Field label="Provider">
-                <select value={active.config.transcriber.provider} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, provider: e.target.value as any } } }))}>
+                <select className="va-select" value="deepgram" onChange={()=>{}}>
                   <option value="deepgram">Deepgram</option>
                 </select>
               </Field>
               <Field label="Model">
-                <select value={active.config.transcriber.model} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, model: e.target.value as any } } }))}>
+                <select className="va-select" value={active.config.transcriber.model} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, model: e.target.value as any } } }))}>
                   <option value="nova-2">Nova 2</option>
                   <option value="nova-3">Nova 3</option>
                 </select>
               </Field>
               <Field label="Language">
-                <select value={active.config.transcriber.language} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, language: e.target.value as any } } }))}>
+                <select className="va-select" value={active.config.transcriber.language} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, language: e.target.value as any } } }))}>
                   <option value="en">English</option>
                   <option value="multi">Multi</option>
                 </select>
@@ -732,13 +732,13 @@ export default function VoiceAgentSection() {
                 </div>
               </Field>
               <Field label="Denoise">
-                <select value={String(active.config.transcriber.denoise)} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, denoise: e.target.value === 'true' } } }))}>
+                <select className="va-select" value={String(active.config.transcriber.denoise)} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, denoise: e.target.value === 'true' } } }))}>
                   <option value="false">Off</option>
                   <option value="true">On</option>
                 </select>
               </Field>
               <Field label="Use Numerals">
-                <select value={String(active.config.transcriber.numerals)} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, numerals: e.target.value === 'true' } } }))}>
+                <select className="va-select" value={String(active.config.transcriber.numerals)} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, numerals: e.target.value === 'true' } } }))}>
                   <option value="false">No</option>
                   <option value="true">Yes</option>
                 </select>
@@ -750,13 +750,13 @@ export default function VoiceAgentSection() {
           <Section title="Tools" icon={<SlidersHorizontal className="w-4 h-4 icon" />}>
             <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(2, minmax(220px, 1fr))' }}>
               <Field label="Enable End Call Function">
-                <select value={String(active.config.tools.enableEndCall)} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, tools: { ...a.config.tools, enableEndCall: e.target.value === 'true' } } }))}>
+                <select className="va-select" value={String(active.config.tools.enableEndCall)} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, tools: { ...a.config.tools, enableEndCall: e.target.value === 'true' } } }))}>
                   <option value="true">Enabled</option>
                   <option value="false">Disabled</option>
                 </select>
               </Field>
               <Field label="Dial Keypad">
-                <select value={String(active.config.tools.dialKeypad)} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, tools: { ...a.config.tools, dialKeypad: e.target.value === 'true' } } }))}>
+                <select className="va-select" value={String(active.config.tools.dialKeypad)} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, tools: { ...a.config.tools, dialKeypad: e.target.value === 'true' } } }))}>
                   <option value="true">Enabled</option>
                   <option value="false">Disabled</option>
                 </select>
@@ -861,7 +861,7 @@ export default function VoiceAgentSection() {
 }
 
 /* ──────────────────────────────────────────────────────────────────────────── */
-/* Telephony Editor (unchanged from your version, just moved to bottom)        */
+/* Telephony Editor (unchanged)                                                */
 /* ──────────────────────────────────────────────────────────────────────────── */
 function TelephonyEditor({ numbers, linkedId, onLink, onAdd, onRemove }: {
   numbers: PhoneNum[]; linkedId?: string; onLink: (id?: string) => void; onAdd: (e164: string, label?: string) => void; onRemove: (id: string) => void;
