@@ -1,30 +1,25 @@
-// components/voice/WebCallButton.tsx
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { PhoneCall, PhoneOff } from 'lucide-react';
 import { scopedStorage } from '@/utils/scoped-storage';
 
 type SR = SpeechRecognition & { start: () => void; stop: () => void };
 
-type SavedKey = {
-  id: string;
-  name?: string;
-  key: string;
-  provider?: 'openai' | 'elevenlabs' | 'deepgram';
-};
+type SavedKey = { id: string; name?: string; key: string; provider?: 'openai'|'elevenlabs'|'deepgram' };
 
 const LS_KEYS = 'apiKeys.v1';
 
 export default function WebCallButton({
-  greet, voiceLabel, systemPrompt, model, apiKeyId, fromE164, onTurn,
+  greet, voiceLabel, systemPrompt, model, apiKeyId, apiKey, fromE164, onTurn,
 }: {
   greet: string;
   voiceLabel: string;
   systemPrompt: string;
   model: string;
-  apiKeyId: string;       // selected OpenAI key id (from scopedStorage)
-  fromE164: string;       // selected phone (for server logging / routing)
+  apiKeyId: string;        // selected key id (for logging/back-compat)
+  apiKey?: string;         // resolved secret (preferred)
+  fromE164: string;
   onTurn: (role:'user'|'assistant', text:string) => void;
 }) {
   const [live, setLive] = useState(false);
@@ -35,15 +30,15 @@ export default function WebCallButton({
   const interimBufRef = useRef<string>('');
   const idleTimerRef = useRef<any>(null);
 
-  // ---- resolve the actual secret key from the selected id (or fallbacks)
+  // Resolve key if not provided directly
   const [resolvedKey, setResolvedKey] = useState<string>('');
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      let key = '';
+      if (apiKey && apiKey.trim()) { setResolvedKey(apiKey.trim()); return; }
 
-      // 1) Try scoped storage by id
+      let key = '';
       if (apiKeyId) {
         try {
           const ss = await scopedStorage();
@@ -53,8 +48,6 @@ export default function WebCallButton({
           if (match?.key) key = String(match.key).trim();
         } catch {}
       }
-
-      // 2) Fallbacks
       if (!key && typeof window !== 'undefined' && (window as any).__OPENAI_KEY) {
         key = String((window as any).__OPENAI_KEY || '').trim();
       }
@@ -63,13 +56,12 @@ export default function WebCallButton({
         // @ts-ignore
         key = String(process.env.NEXT_PUBLIC_OPENAI_API_KEY || '').trim();
       }
-
       if (!cancelled) setResolvedKey(key);
     })();
     return () => { cancelled = true; };
-  }, [apiKeyId]);
+  }, [apiKey, apiKeyId]);
 
-  function makeRecognizer(onFinal:(t:string)=>void, onInterim?:(t:string)=>void): SR | null {
+  function makeRecognizer(onFinal:(t:string)=>void): SR | null {
     const C: any = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
     if (!C) return null;
     const r: SR = new C();
@@ -77,11 +69,7 @@ export default function WebCallButton({
     r.interimResults = true;
     r.lang = navigator.language || 'en-US';
 
-    r.onstart = () => {
-      setErrMsg(null);
-      setLive(true);
-    };
-
+    r.onstart = () => { setErrMsg(null); setLive(true); };
     r.onerror = (e: any) => {
       const code = e?.error || 'recognition_error';
       const map: Record<string,string> = {
@@ -92,16 +80,7 @@ export default function WebCallButton({
       };
       setErrMsg(map[code] || `Speech recognition error: ${code}`);
     };
-
-    r.onend = () => {
-      // If we’re live because of a user session, auto-restart to keep listening
-      if (live) {
-        try { r.start(); } catch {}
-      } else {
-        setLive(false);
-      }
-    };
-
+    r.onend = () => { if (live) { try { r.start(); } catch {} } else { setLive(false); } };
     r.onresult = (e: SpeechRecognitionEvent) => {
       let finalText = '';
       let interimText = '';
@@ -110,29 +89,17 @@ export default function WebCallButton({
         if (res.isFinal) finalText += res[0].transcript;
         else interimText += res[0].transcript;
       }
-
-      // Handle final chunks immediately
-      if (finalText.trim()) {
-        interimBufRef.current = '';
-        onFinal(finalText.trim());
-        return;
-      }
-
-      // Debounce interim: if user pauses ~900ms, treat interim as final
-      if (interimText && onInterim) onInterim(interimText);
-      if (interimText.trim()) {
+      // treat short pauses as final to catch quick phrases
+      if (finalText.trim()) onFinal(finalText.trim());
+      else if (interimText.trim()) {
         interimBufRef.current = interimText.trim();
         if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
         idleTimerRef.current = setTimeout(() => {
           const t = interimBufRef.current.trim();
-          if (t) {
-            interimBufRef.current = '';
-            onFinal(t);
-          }
+          if (t) { interimBufRef.current = ''; onFinal(t); }
         }, 900);
       }
     };
-
     return r;
   }
 
@@ -141,10 +108,7 @@ export default function WebCallButton({
     let v = s.getVoices();
     if (v.length) return v;
     await new Promise<void>(res => {
-      const t = setInterval(() => {
-        v = s.getVoices();
-        if (v.length) { clearInterval(t); res(); }
-      }, 50);
+      const t = setInterval(() => { v = s.getVoices(); if (v.length) { clearInterval(t); res(); } }, 50);
       setTimeout(() => { clearInterval(t); res(); }, 1200);
     });
     return s.getVoices();
@@ -174,89 +138,51 @@ export default function WebCallButton({
       body: JSON.stringify({ model, system: systemPrompt, user: userText, fromE164 })
     });
     if (!r.ok) {
-      const msg = await safeError(r);
+      const msg = await r.text().catch(()=> '');
       throw new Error(msg || 'I could not reach the model. Check your OpenAI key.');
     }
     const j = await r.json();
     return (j?.text || 'Understood.').trim();
   }
-  async function safeError(r: Response): Promise<string> {
-    try {
-      const t = await r.text();
-      try {
-        const j = JSON.parse(t);
-        return (j?.error || j?.message || t || '').toString();
-      } catch {
-        return (t || '').toString();
-      }
-    } catch {
-      return '';
-    }
-  }
 
   async function start() {
-    if (starting || live) return;      // debounce to prevent double greet
-    setStarting(true);
-    setErrMsg(null);
+    if (starting || live) return;
+    setStarting(true); setErrMsg(null);
 
-    // Resolve key first
     if (!resolvedKey) {
       const msg = 'OpenAI key is missing. Select one on the Voice page (API Key dropdown).';
       onTurn('assistant', msg); await speak(msg); setStarting(false); return;
     }
 
-    // Prompt mic permission (required on Safari/iOS/Chrome HTTPS)
-    try {
-      await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch {
-      const msg = 'Microphone access was denied. Please allow mic permissions and try again.';
+    try { await navigator.mediaDevices.getUserMedia({ audio: true }); }
+    catch {
+      const msg = 'Mic permission denied. Allow microphone and try again.';
       onTurn('assistant', msg); await speak(msg); setStarting(false); return;
     }
 
-    // Greet once
     const hello = greet || 'Hello. How may I help you today?';
-    onTurn('assistant', hello);
-    await speak(hello);
+    onTurn('assistant', hello); await speak(hello);
 
-    // Create recognizer
-    const rec = makeRecognizer(
-      async (finalText) => {
-        onTurn('user', finalText);
-        try {
-          const reply = await ask(finalText);
-          onTurn('assistant', reply);
-          await speak(reply);
-        } catch (e:any) {
-          const msg = (e?.message || 'Model unavailable.');
-          onTurn('assistant', msg);
-          await speak(msg);
-        }
-      },
-      // optional: track interim (you can surface it if you want)
-      undefined
-    );
+    const rec = makeRecognizer(async (finalText) => {
+      onTurn('user', finalText);
+      try { const reply = await ask(finalText); onTurn('assistant', reply); await speak(reply); }
+      catch (e:any) { const msg = e?.message || 'Model unavailable.'; onTurn('assistant', msg); await speak(msg); }
+    });
 
     if (!rec) {
-      const msg='Speech recognition is not available in this browser.';
+      const msg = 'Speech recognition is not available in this browser.';
       onTurn('assistant', msg); await speak(msg); setStarting(false); return;
     }
 
     recRef.current = rec;
-
-    try { rec.start(); } catch (e:any) {
-      setErrMsg('Could not start recognition.');
-      setStarting(false);
-      return;
-    }
-
-    setLive(true);
-    setStarting(false);
+    try { rec.start(); } catch { setErrMsg('Could not start recognition.'); setStarting(false); return; }
+    setLive(true); setStarting(false);
   }
 
   function stop(){
     setLive(false);
     const r = recRef.current;
-    if (r) { try { r.stop(); } catch {} }
+    if (r) { try { (r as any)._shouldRestart = false; r.stop(); } catch {} }
     recRef.current = null;
     interimBufRef.current = '';
     if (idleTimerRef.current) { clearTimeout(idleTimerRef.current); idleTimerRef.current = null; }
@@ -269,7 +195,7 @@ export default function WebCallButton({
         onClick={start}
         disabled={starting}
         className="btn btn--green px-3 py-2 rounded-md border"
-        style={{ borderColor: 'var(--border)' }}
+        style={{ borderColor: 'var(--va-border)' }}
       >
         <PhoneCall className="w-4 h-4 text-white"/>
         <span className="text-white">{starting ? 'Starting…' : 'Start Web Call'}</span>
@@ -282,7 +208,7 @@ export default function WebCallButton({
       )}
     </div>
   ) : (
-    <button onClick={stop} className="btn btn--danger px-3 py-2 rounded-md border" style={{borderColor:'var(--border)'}}>
+    <button onClick={stop} className="btn btn--danger px-3 py-2 rounded-md border" style={{borderColor:'var(--va-border)'}}>
       <PhoneOff className="w-4 h-4"/> End Call
     </button>
   );
