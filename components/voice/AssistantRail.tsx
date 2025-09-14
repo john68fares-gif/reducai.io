@@ -10,14 +10,12 @@ import {
 
 const SCOPE = 'va-scope';
 
-/* ──────────────────────────────────────────────────────────────────────────── */
-/* Vapi-like rail sizes + styles                                               */
-/* ──────────────────────────────────────────────────────────────────────────── */
-const RAIL_OPEN_W = 320;     // expanded width
-const RAIL_COLLAPSED_W = 72; // mini icon rail (never 0 so it doesn't disappear)
+/* Vapi-like rail sizes */
+const RAIL_OPEN_W = 320;         // expanded width
+const RAIL_COLLAPSED_W = 72;     // collapsed mini-rail (stays visible)
 const RAIL_BORDER = '1px solid var(--va-border)';
 
-/* === Keep the exact app-sidebar width sync logic === */
+/* === Keep the app-sidebar width in sync (if your app has a main sidebar) === */
 function useAppSidebarWidth(scopeRef: React.RefObject<HTMLDivElement>, fallbackCollapsed: boolean) {
   useEffect(() => {
     const scope = scopeRef.current;
@@ -35,15 +33,16 @@ function useAppSidebarWidth(scopeRef: React.RefObject<HTMLDivElement>, fallbackC
     let target = findSidebar();
     if (!target) { setVar(fallbackCollapsed ? 72 : 248); return; }
 
-    setVar(target.getBoundingClientRect().width);
+    const getW = () => target.getBoundingClientRect().width;
+    setVar(getW());
 
-    const ro = new ResizeObserver(() => setVar(target!.getBoundingClientRect().width));
+    const ro = new ResizeObserver(() => setVar(getW()));
     ro.observe(target);
 
-    const mo = new MutationObserver(() => setVar(target!.getBoundingClientRect().width));
+    const mo = new MutationObserver(() => setVar(getW()));
     mo.observe(target, { attributes: true, attributeFilter: ['class', 'style'] });
 
-    const onTransitionEnd = () => setVar(target!.getBoundingClientRect().width);
+    const onTransitionEnd = () => setVar(getW());
     target.addEventListener('transitionend', onTransitionEnd);
 
     return () => {
@@ -54,7 +53,7 @@ function useAppSidebarWidth(scopeRef: React.RefObject<HTMLDivElement>, fallbackC
   }, [scopeRef, fallbackCollapsed]);
 }
 
-/** Keep --va-rail-w synced to the <aside> width so the editor lane expands/shrinks live */
+/** Keep --va-rail-w synced to the <aside> width so the lane expands/shrinks live */
 function useRailWidthSync(asideRef: React.RefObject<HTMLElement>, railCollapsed: boolean) {
   useEffect(() => {
     const el = asideRef.current;
@@ -66,14 +65,10 @@ function useRailWidthSync(asideRef: React.RefObject<HTMLElement>, railCollapsed:
       root.style.setProperty('--va-rail-w', `${w}px`);
     };
 
-    apply(); // initial
+    apply();
     const ro = new ResizeObserver(apply);
     ro.observe(el);
     window.addEventListener('resize', apply);
-
-    // also update immediately when we toggle collapsed state
-    apply();
-
     return () => { ro.disconnect(); window.removeEventListener('resize', apply); };
   }, [asideRef, railCollapsed]);
 }
@@ -122,13 +117,13 @@ export default function AssistantRail({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [tempName, setTempName] = useState('');
 
-  // ping layout so main recomputes when we collapse/expand
+  // notify layout when toggling (for pages that listen)
   useEffect(() => {
     window.dispatchEvent(new CustomEvent('voice:layout:ping'));
   }, [railCollapsed]);
 
   const asideRef = useRef<HTMLElement | null>(null);
-  useRailWidthSync(asideRef, railCollapsed); // keeps --va-rail-w accurate
+  useRailWidthSync(asideRef, railCollapsed);
 
   const visible = useMemo(
     () => assistants.filter(a => a.name.toLowerCase().includes(query.trim().toLowerCase())),
@@ -149,7 +144,7 @@ export default function AssistantRail({
           position:'fixed',
           left:'calc(var(--app-sidebar-w, 248px) - 1px)',
           top:'var(--app-header-h, 64px)',
-          width: railCollapsed ? `${RAIL_COLLAPSED_W}px` : `${RAIL_OPEN_W}px`, // 👈 mini rail when collapsed
+          width: railCollapsed ? `${RAIL_COLLAPSED_W}px` : `${RAIL_OPEN_W}px`,
           height:'calc(100vh - var(--app-header-h, 64px))',
           borderRight: RAIL_BORDER,
           background:'var(--va-sidebar)',
@@ -158,7 +153,7 @@ export default function AssistantRail({
           overflow:'hidden'
         }}
       >
-        {/* Sticky header like Vapi */}
+        {/* Sticky header */}
         <div className="px-3 py-3 flex items-center justify-between sticky top-0 z-10"
              style={{ borderBottom: RAIL_BORDER, background:'var(--va-sidebar)' }}>
           <div className="flex items-center gap-2 text-sm font-semibold">
@@ -213,7 +208,6 @@ export default function AssistantRail({
               const isActive = a.id === activeId;
               const isEdit = editingId === a.id;
 
-              // Mini icon cards when collapsed
               if (railCollapsed) {
                 return (
                   <button
@@ -232,7 +226,6 @@ export default function AssistantRail({
                 );
               }
 
-              // Full list cards when expanded
               return (
                 <div
                   key={a.id}
