@@ -37,6 +37,9 @@ const ACCENTS: Record<string, string> = {
 
 const RAIL_H = 88; // taller header
 
+// routes that should NOT have page padding
+const NO_PAGE_PADDING_ROUTES = ["/voice-agent"];
+
 export default function App({ Component, pageProps }: AppProps) {
   const router = useRouter();
   const pathname = router.pathname;
@@ -97,6 +100,12 @@ export default function App({ Component, pageProps }: AppProps) {
       document.documentElement.style.setProperty("--rail-h", `${RAIL_H}px`);
     }
   }, []);
+
+  // whether to remove page padding for current route
+  const noPagePadding = useMemo(
+    () => NO_PAGE_PADDING_ROUTES.some((base) => pathname === base || pathname.startsWith(`${base}/`)),
+    [pathname]
+  );
 
   return (
     <ThemeProvider>
@@ -174,7 +183,7 @@ export default function App({ Component, pageProps }: AppProps) {
               <div style={{ height: RAIL_H }} />
 
               {/* page content */}
-              <main className="min-w-0 px-6 lg:px-10 py-8">
+              <main className={noPagePadding ? "min-w-0" : "min-w-0 px-6 lg:px-10 py-8"}>
                 <Component {...pageProps} />
               </main>
             </div>
