@@ -18,7 +18,13 @@ const GREEN_HOVER = '#0ea371';
 
 /* Storage helpers */
 async function loadAssistants(): Promise<AssistantLite[]> {
-  try { if (scopedStorageFn) { const ss = await scopedStorageFn(); const a=await ss.getJSON<AssistantLite[]>(STORAGE_KEY, []); return Array.isArray(a)?a:[]; } } catch {}
+  try {
+    if (scopedStorageFn) {
+      const ss = await scopedStorageFn();
+      const a = await ss.getJSON<AssistantLite[]>(STORAGE_KEY, []);
+      return Array.isArray(a) ? a : [];
+    }
+  } catch {}
   try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) return JSON.parse(raw); } catch {}
   return [];
 }
@@ -31,7 +37,16 @@ async function saveAssistants(list: AssistantLite[]) {
 function ModalShell({ children }:{ children:React.ReactNode }) {
   return (
     <div className="fixed inset-0 z-[9998] flex items-center justify-center px-4" style={{ background:'rgba(0,0,0,.60)' }}>
-      <div className="rounded-2xl overflow-hidden" style={{ background:'var(--panel)', border:'1px solid var(--border)', boxShadow:'var(--shadow-soft)', maxWidth: 520, width:'100%' }}>
+      <div
+        className="rounded-2xl overflow-hidden"
+        style={{
+          background:'var(--panel)',
+          border:'1px solid var(--border)',
+          boxShadow:'var(--shadow-soft)',
+          maxWidth: 520,
+          width:'100%',
+        }}
+      >
         {children}
       </div>
     </div>
@@ -51,7 +66,9 @@ function FrameHeader({ icon, title, subtitle, onClose }:{
           {subtitle && <div className="text-xs" style={{ color:'var(--text-muted)' }}>{subtitle}</div>}
         </div>
       </div>
-      <button onClick={onClose} className="p-2 rounded hover:opacity-70"><X className="w-4 h-4" style={{ color:'var(--text)' }}/></button>
+      <button onClick={onClose} className="p-2 rounded hover:opacity-70">
+        <X className="w-4 h-4" style={{ color:'var(--text)' }}/>
+      </button>
     </div>
   );
 }
@@ -178,7 +195,12 @@ export default function AssistantRail() {
   const [renId,setRenId] = useState<string|null>(null);
   const [createOpen,setCreateOpen] = useState(false);
 
-  useEffect(()=>{ (async()=>{ const list = await loadAssistants(); setAssistants(list); if(list[0]) setActiveId(list[0].id); })(); },[]);
+  useEffect(()=>{ (async()=>{
+    const list = await loadAssistants();
+    setAssistants(list);
+    if(list[0]) setActiveId(list[0].id);
+  })(); },[]);
+
   const filtered = useMemo(()=> {
     const s=q.trim().toLowerCase();
     return !s?assistants:assistants.filter(a=>a.name.toLowerCase().includes(s) || (a.purpose||'').toLowerCase().includes(s));
@@ -245,7 +267,7 @@ export default function AssistantRail() {
         </button>
       </div>
 
-      {/* Search (single input, no extra box) */}
+      {/* Search */}
       <div className="flex items-center gap-2 mb-4">
         <Search className="w-4 h-4" style={{ color:'var(--text-muted)' }} />
         <input
@@ -262,7 +284,7 @@ export default function AssistantRail() {
         )}
       </div>
 
-      {/* Assistants (no borders; soft glow; vertical) */}
+      {/* Assistants list */}
       <div className="space-y-3">
         <AnimatePresence initial={false}>
           {filtered.map(a=>(
