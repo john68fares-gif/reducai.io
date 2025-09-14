@@ -7,12 +7,25 @@ import {
   Search, Loader2, Save, Trash2, Settings2, Bot, RefreshCw,
   SlidersHorizontal, History, RotateCcw, ChevronDown, Send, Sparkles,
   Star, StarOff, Filter, Diff, FilePlus2, ToggleLeft, ToggleRight,
-  Undo2, Redo2, Info, X, Upload, Download, DiffIcon as Diff2, Shield, Code2,
-  Wand2, SplitSquareHorizontal, PanelLeftClose, PanelRightClose, Tag, HelpCircle,
+  Undo2, Redo2, Info, X, Upload, Download, Shield, Code2,
+  SplitSquareHorizontal, PanelLeftClose, PanelRightClose, Tag, HelpCircle, Copy, Check, PanelsTopLeft
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase-client';
 
-// ───────────────────────────────── TYPES ─────────────────────────────────
+/**
+ * IMPORTANT
+ * - No backend changes. Uses:
+ *   GET    /api/chatbots?ownerId=...    (header x-owner-id)
+ *   PATCH  /api/chatbots/[id]           (header x-owner-id)
+ *   DELETE /api/chatbots/[id]           (header x-owner-id)
+ *   POST   /api/chatbots                (header x-owner-id)  // duplicate/import
+ *   POST   /api/assistants/chat         (optional test endpoint; safe if missing)
+ *
+ * - Dense, featureful UI with smooth animations and site-matching colors.
+ * - All advanced features are client-side (localStorage) so nothing breaks.
+ */
+
+/* ─────────────────────────────────── Types ─────────────────────────────────── */
 type BotRow = {
   id: string;
   ownerId: string;
@@ -44,25 +57,29 @@ type AgentMeta = {
   promptStack?: { pre: string; main: string; post: string };
   conditional?: Array<{ when: string; rule: string }>;
   perFlowTemp?: { greeting: number; qa: number; actions: number };
+  theme?: 'auto' | 'dark' | 'light' | 'neon';
+  audit?: Array<{ at: number; action: string }>;
 };
 
-// ─────────────────────────────── STYLES ───────────────────────────────
+/* ─────────────────────────────────── Styles ─────────────────────────────────── */
 const PANEL: React.CSSProperties = {
   background: 'color-mix(in oklab, var(--panel) 96%, transparent)',
   border: '1px solid color-mix(in oklab, var(--border) 92%, transparent)',
   boxShadow: '0 6px 30px rgba(0,0,0,.25), inset 0 1px 0 rgba(255,255,255,.04)',
-  borderRadius: 18,
+  borderRadius: 20,
   backdropFilter: 'saturate(120%) blur(6px)',
 };
+
 const CARD: React.CSSProperties = {
   background: 'color-mix(in oklab, var(--card) 96%, transparent)',
   border: '1px solid color-mix(in oklab, var(--border) 92%, transparent)',
   boxShadow: '0 4px 18px rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.04)',
-  borderRadius: 12,
+  borderRadius: 14,
 };
+
 const DENSE_PAD = '12px';
 
-// animated background
+/* Subtle animated background grid with gradients */
 function BgFX() {
   return (
     <div
@@ -72,11 +89,11 @@ function BgFX() {
         background:
           'radial-gradient(1200px 600px at 10% -10%, color-mix(in oklab, var(--brand) 10%, transparent), transparent 60%), radial-gradient(1000px 800px at 110% 120%, color-mix(in oklab, var(--brand) 8%, transparent), transparent 60%)',
         maskImage:
-          'radial-gradient(1000px 800px at 0% 0%, #000 40%, transparent), radial-gradient(1000px 800px at 100% 100%, #000 40%, transparent)',
+          'radial-gradient(1200px 900px at 0% 0%, #000 40%, transparent), radial-gradient(1200px 900px at 100% 100%, #000 40%, transparent)',
       }}
     >
       <div
-        className="absolute inset-0 opacity-[.06] animate-[pan_28s_linear_infinite]"
+        className="absolute inset-0 opacity-[.06] animate-[gridpan_28s_linear_infinite]"
         style={{
           background:
             'linear-gradient(transparent 31px, color-mix(in oklab, var(--text) 7%, transparent) 32px), linear-gradient(90deg, transparent 31px, color-mix(in oklab, var(--text) 7%, transparent) 32px)',
@@ -84,7 +101,7 @@ function BgFX() {
         }}
       />
       <style jsx>{`
-        @keyframes pan {
+        @keyframes gridpan {
           0% { transform: translateX(0); }
           50% { transform: translateX(16px); }
           100% { transform: translateX(0); }
@@ -94,7 +111,7 @@ function BgFX() {
   );
 }
 
-// Windows logo (inline SVG)
+/* Windows logo (inline SVG) to display Win+S etc. */
 function WindowsIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" className={className} aria-hidden>
@@ -103,7 +120,7 @@ function WindowsIcon({ className }: { className?: string }) {
   );
 }
 
-// ─────────────────────────── CONSTANTS/HELPERS ───────────────────────────
+/* ───────────────────────────── Helpers / Constants ───────────────────────────── */
 const CHIP_LIBRARY = [
   { key: 'yes_no', group: 'Format', label: 'Only answer Yes/No', line: 'Respond strictly with “Yes” or “No” unless explicitly asked to elaborate.' },
   { key: 'concise', group: 'Tone', label: 'Be concise', line: 'Keep responses under 1–2 sentences unless more detail is requested.' },
@@ -140,7 +157,7 @@ function applyRefinementsToSystem(baseSystem: string, active: Record<string, boo
   return (block + stripped).trim();
 }
 
-// tiny line-diff for modal
+/* Tiny line diff for modal */
 type DiffLine = { type: 'same'|'add'|'del'; text: string };
 function simpleDiff(a: string, b: string): DiffLine[] {
   const A = (a || '').split('\n');
@@ -179,23 +196,23 @@ function makeUndoStack(initial: string) {
   };
 }
 
-// ─────────────────────────────── COMPONENT ───────────────────────────────
+/* ─────────────────────────────────── Component ─────────────────────────────────── */
 export default function Improve() {
   const [userId, setUserId] = useState<string | null>(null);
   const [list, setList] = useState<BotRow[]>([]);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
 
-  // rail collapse + split pane
+  /* Layout: rail collapse + split pane */
   const [leftCollapsed, setLeftCollapsed] = useState(false);
-  const [colRatio, setColRatio] = useState(0.58); // editor width ratio (0..1)
+  const [colRatio, setColRatio] = useState(0.60); // editor width ratio (0..1)
   const dragRef = useRef<{dragging:boolean; startX:number; startRatio:number}>({dragging:false,startX:0,startRatio:0});
 
-  // sorting/pin/tags
+  /* Sorting / tags */
   const [sort, setSort] = useState<'pinned_first'|'name_asc'|'name_desc'|'updated_desc'|'updated_asc'>('pinned_first');
   const [tagFilter, setTagFilter] = useState<string>('');
 
-  // editor state
+  /* Editor state */
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = useMemo(() => list.find(b => b.id === selectedId) || null, [list, selectedId]);
 
@@ -209,7 +226,7 @@ export default function Improve() {
   const [pinned, setPinned] = useState(false);
   const [tags, setTags] = useState<string[]>([]);
 
-  // prompt stack / guardrails / conditionals / per-flow temps
+  /* Stack / Guardrails / Conditionals / Flow temps */
   const [promptPre, setPromptPre] = useState('');
   const [promptPost, setPromptPost] = useState('');
   const [blockedPhrases, setBlockedPhrases] = useState<string>('');
@@ -218,30 +235,32 @@ export default function Improve() {
   const [conditionals, setConditionals] = useState<Array<{when:string;rule:string}>>([]);
   const [flowTemps, setFlowTemps] = useState({ greeting: 0.5, qa: 0.5, actions: 0.5 });
 
-  // save state
+  /* Save state + autosave */
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [autosave, setAutosave] = useState(true);
+  const autosaveTimer = useRef<number | null>(null);
 
-  // versions / diff
+  /* Versions / Diff */
   const [versions, setVersions] = useState<Version[]>([]);
   const [versionsOpen, setVersionsOpen] = useState(true);
   const [diffOpen, setDiffOpen] = useState(false);
   const [diffWith, setDiffWith] = useState<Version | null>(null);
 
-  // test
+  /* Test */
   const [testInput, setTestInput] = useState('');
   const [testLog, setTestLog] = useState<{role:'user'|'assistant', text:string}[]>([]);
   const [testing, setTesting] = useState(false);
-  const [showBeforeAfter, setShowBeforeAfter] = useState(false);
 
-  // status
-  const statusText = saving ? 'Saving…' : dirty ? 'Unsaved changes' : 'Saved';
+  /* Status / feedback */
+  const [copied, setCopied] = useState(false);
+  const statusText = saving ? 'Saving…' : dirty ? 'Unsaved changes' : 'Saved ✓';
 
-  // undo/redo
+  /* Undo/redo */
   const undoRef = useRef<ReturnType<typeof makeUndoStack> | null>(null);
   useEffect(() => { undoRef.current = makeUndoStack(''); }, []);
 
-  // ─────────────── boot: get user id ───────────────
+  /* Boot: user id */
   useEffect(() => {
     (async () => {
       const { data } = await supabase.auth.getUser();
@@ -250,7 +269,7 @@ export default function Improve() {
     })();
   }, []);
 
-  // ─────────────── fetch bots ───────────────
+  /* Fetch bots */
   async function fetchBots(uid: string) {
     setLoading(true);
     try {
@@ -266,7 +285,7 @@ export default function Improve() {
   }
   useEffect(() => { if (userId) fetchBots(userId); }, [userId]);
 
-  // ─────────────── load meta/versions on selection ───────────────
+  /* Load meta/versions on selection */
   useEffect(() => {
     if (!selected || !userId) return;
     setName(selected.name || '');
@@ -300,7 +319,9 @@ export default function Improve() {
       setEnforceJson(!!m.guardrails?.enforceJson);
       setJsonSchemaHint(m.guardrails?.jsonSchemaHint || '');
 
-      localStorage.setItem(metaKey(userId, selected.id), JSON.stringify({ ...m, lastOpenedAt: Date.now() }));
+      // soft theme & audit not used visually for now, but preserved
+      const audit = Array.isArray(m.audit) ? m.audit : [];
+      localStorage.setItem(metaKey(userId, selected.id), JSON.stringify({ ...m, lastOpenedAt: Date.now(), audit }));
     } catch {
       setPinned(false); setDraft(false); setNotes(''); setTags([]);
       setPromptPre(''); setPromptPost(''); setConditionals([]); setFlowTemps({greeting:0.5,qa:0.5,actions:0.5});
@@ -310,9 +331,9 @@ export default function Improve() {
     setDirty(false);
     setTestLog([]);
     if (undoRef.current) undoRef.current = makeUndoStack(selected.system || '');
-  }, [selectedId]);
+  }, [selectedId, userId, selected]);
 
-  // ─────────────── mark dirty on editor changes ───────────────
+  /* Mark dirty + autosave */
   useEffect(() => {
     if (!selected) return;
     const d =
@@ -326,9 +347,17 @@ export default function Improve() {
       (conditionals.length > 0) ||
       (Math.abs(flowTemps.greeting-0.5)>1e-9 || Math.abs(flowTemps.qa-0.5)>1e-9 || Math.abs(flowTemps.actions-0.5)>1e-9);
     setDirty(d);
-  }, [name, model, temperature, system, draft, pinned, notes, tags, promptPre, promptPost, blockedPhrases, enforceJson, jsonSchemaHint, conditionals, flowTemps, selected]);
 
-  // ─────────────── keyboard shortcuts (Win+S displayed, but also supports Ctrl/Cmd) ───────────────
+    // autosave debounce
+    if (autosave) {
+      if (autosaveTimer.current) window.clearTimeout(autosaveTimer.current);
+      autosaveTimer.current = window.setTimeout(() => {
+        if (d && !saving) saveEdits(true);
+      }, 1200) as any;
+    }
+  }, [name, model, temperature, system, draft, pinned, notes, tags, promptPre, promptPost, blockedPhrases, enforceJson, jsonSchemaHint, conditionals, flowTemps, selected, autosave, saving]);
+
+  /* Keyboard shortcuts (Win+S displayed; supports Ctrl/Cmd) */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
@@ -343,14 +372,26 @@ export default function Improve() {
 
   useEffect(() => { if (undoRef.current) undoRef.current.push(system); }, [system]);
 
-  // ─────────────── helpers ───────────────
+  function addAudit(action: string) {
+    if (!userId || !selected) return;
+    try {
+      const raw = localStorage.getItem(metaKey(userId, selected.id));
+      const m: AgentMeta = raw ? JSON.parse(raw) : {};
+      const audit = Array.isArray(m.audit) ? m.audit : [];
+      audit.unshift({ at: Date.now(), action });
+      localStorage.setItem(metaKey(userId, selected.id), JSON.stringify({ ...m, audit: audit.slice(0, 100) }));
+    } catch {}
+  }
+
+  /* Chips */
   function setChip(key: string, val: boolean) {
     const next = { ...chips, [key]: val };
     setChips(next);
     setSystem(s => applyRefinementsToSystem(s, next));
   }
-  function toggleChip(key: string) { setChip(key, !chips[key]); }
+  function toggleChip(key: string) { setChip(key, !chips[key]); addAudit(`toggle chip: ${key}`); }
 
+  /* Storage helpers */
   function storeVersions(owner: string, agent: string, arr: Version[]) {
     localStorage.setItem(versionsKey(owner, agent), JSON.stringify(arr));
   }
@@ -358,16 +399,17 @@ export default function Improve() {
     localStorage.setItem(metaKey(owner, agent), JSON.stringify(meta));
   }
 
-  // ─────────────── actions ───────────────
-  async function saveEdits() {
+  /* Actions */
+  async function saveEdits(silent = false) {
     if (!userId || !selectedId) return;
-    setSaving(true);
+    if (!silent) setSaving(true);
     try {
       const prev = list.find(b => b.id === selectedId) || null;
       const candidate: BotRow = {
         id: selectedId, ownerId: userId, name, model, temperature, system,
         createdAt: prev?.createdAt, updatedAt: new Date().toISOString()
       };
+      // version snapshot
       const v: Version = {
         id: `v_${Date.now()}`,
         ts: Date.now(),
@@ -379,6 +421,7 @@ export default function Improve() {
       setVersions(nextVersions);
       storeVersions(userId, selectedId, nextVersions);
 
+      // persist core fields
       const res = await fetch(`/api/chatbots/${selectedId}?ownerId=${encodeURIComponent(userId)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', 'x-owner-id': userId },
@@ -387,6 +430,7 @@ export default function Improve() {
       const json = await res.json();
       if (!res.ok || !json?.ok) throw new Error(json?.error || 'Failed to save');
 
+      // meta (client-only)
       const m: AgentMeta = {
         pinned, draft, notes, lastOpenedAt: Date.now(), tags,
         promptStack: { pre: promptPre, main: '', post: promptPost },
@@ -403,10 +447,11 @@ export default function Improve() {
       await fetchBots(userId);
       setSelectedId(selectedId);
       setDirty(false);
+      addAudit('save');
     } catch (e: any) {
       alert(e?.message || 'Failed to save');
     } finally {
-      setSaving(false);
+      if (!silent) setSaving(false);
     }
   }
 
@@ -425,6 +470,7 @@ export default function Improve() {
       await fetchBots(userId);
       setSelectedId(null);
       setDirty(false);
+      addAudit('delete');
     } catch (e: any) {
       alert(e?.message || 'Failed to delete');
     } finally {
@@ -450,6 +496,7 @@ export default function Improve() {
       if (!resp.ok || !json?.ok || !json?.data?.id) throw new Error(json?.error || 'Failed to duplicate');
       await fetchBots(userId);
       setSelectedId(json.data.id);
+      addAudit('duplicate');
     } catch (e: any) { alert(e?.message || 'Failed to duplicate'); }
   }
 
@@ -479,6 +526,7 @@ export default function Improve() {
     a.href = url; a.download = `${(name||'agent').replace(/\s+/g,'_')}.json`;
     a.click();
     URL.revokeObjectURL(url);
+    addAudit('export');
   }
 
   async function importAgent(file: File) {
@@ -504,26 +552,27 @@ export default function Improve() {
       storeMeta(userId, newId, meta);
       await fetchBots(userId);
       setSelectedId(newId);
+      addAudit('import');
     } catch (e: any) { alert(e?.message || 'Import failed'); }
   }
 
   function restoreVersion(v: Version) {
     setName(v.name); setModel(v.model); setTemperature(v.temperature); setSystem(v.system); setDirty(true);
+    addAudit(`restore version: ${v.label}`);
   }
   function openDiff(v: Version) { setDiffWith(v); setDiffOpen(true); }
 
-  // soft test (optional backend)
+  /* Test (optional backend) */
   async function runTest(message?: string) {
     const msg = (message ?? testInput).trim();
     if (!msg || !selected) return;
     setTesting(true);
-    const beforeSystem = system;
     setTestLog(l => [...l, { role: 'user', text: msg }]);
     try {
       const res = await fetch('/api/assistants/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: selected.model, system: beforeSystem, message: msg }),
+        body: JSON.stringify({ model: selected.model, system, message: msg }),
       });
       if (!res.ok) throw new Error('No test endpoint configured');
       const json = await res.json();
@@ -537,27 +586,27 @@ export default function Improve() {
     }
   }
 
-  // stress test (simulated, local)
+  /* Stress test (simulated, local so it never breaks) */
   async function stressTest() {
     if (!selected) return;
-    const prompts = Array.from({length: 50}, (_,i)=>`Test #${i+1}: ${name || 'Agent'} respond concisely to "Hello".`);
     setTesting(true);
-    setTestLog(l => [...l, { role: 'user', text: 'Running stress test (50 prompts)…' }]);
-    // local simulate
+    setTestLog(l => [...l, { role: 'user', text: 'Running stress test (×50)…' }]);
     await new Promise(r => setTimeout(r, 600));
-    setTestLog(l => [...l, { role: 'assistant', text: 'Consistency ~96%, avg length 12 words (simulated).' }]);
+    setTestLog(l => [...l, { role: 'assistant', text: 'Consistency ~95%, avg output 12 words (simulated).' }]);
     setTesting(false);
   }
 
-  // filters/sort
+  /* Filters/sort */
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     const withMeta = list.map(b => {
       let pinned = false, lastOpenedAt = 0, tags: string[] = [];
       try {
-        const raw = userId ? localStorage.getItem(metaKey(userId, b.id)) : null;
-        const m: AgentMeta = raw ? JSON.parse(raw) : {};
-        pinned = !!m.pinned; lastOpenedAt = m.lastOpenedAt || 0; tags = m.tags || [];
+        if (userId) {
+          const raw = localStorage.getItem(metaKey(userId, b.id));
+          const m: AgentMeta = raw ? JSON.parse(raw) : {};
+          pinned = !!m.pinned; lastOpenedAt = m.lastOpenedAt || 0; tags = m.tags || [];
+        }
       } catch {}
       return { b, pinned, lastOpenedAt, tags };
     }).filter(x => {
@@ -578,11 +627,11 @@ export default function Improve() {
     return withMeta.sort(sorters[sort]).map(x=>x.b);
   }, [list, query, sort, userId, tagFilter]);
 
-  // metrics
+  /* Metrics */
   const tokenEst = estimateTokens(system);
   const issues = lintPrompt(system);
 
-  // split drag handlers
+  /* Split drag handlers */
   function onDragStart(e: React.MouseEvent) {
     dragRef.current = { dragging: true, startX: e.clientX, startRatio: colRatio };
     window.addEventListener('mousemove', onDragMove as any);
@@ -591,7 +640,7 @@ export default function Improve() {
   function onDragMove(e: MouseEvent) {
     if (!dragRef.current.dragging) return;
     const delta = e.clientX - dragRef.current.startX;
-    const container = document.getElementById('improve-grid');
+    const container = document.getElementById('improve-split');
     if (!container) return;
     const w = container.getBoundingClientRect().width;
     const newRatio = Math.min(0.8, Math.max(0.35, dragRef.current.startRatio + (delta / w)));
@@ -602,29 +651,43 @@ export default function Improve() {
     window.removeEventListener('mousemove', onDragMove as any);
   }
 
-  // tags helpers
-  function addTag(t: string) { if (!t) return; if (!tags.includes(t)) setTags([...tags, t]); }
-  function removeTag(t: string) { setTags(tags.filter(x => x !== t)); }
+  /* Tag helpers */
+  function addTag(t: string) { if (!t) return; if (!tags.includes(t)) { setTags([...tags, t]); addAudit(`add tag: ${t}`); } }
+  function removeTag(t: string) { setTags(tags.filter(x => x !== t)); addAudit(`remove tag: ${t}`); }
 
-  // ─────────────────────────────── UI ───────────────────────────────
+  /* Copy ID helper */
+  async function copyId() {
+    if (!selected) return;
+    try { await navigator.clipboard.writeText(selected.id); setCopied(true); setTimeout(()=>setCopied(false), 1200); } catch {}
+  }
+
+  /* UI */
   return (
     <div className="min-h-screen relative" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
       <BgFX />
 
-      {/* Sticky head */}
-      <header className="sticky top-0 z-20 backdrop-blur px-6 py-3 border-b"
+      {/* Sticky header */}
+      <header className="sticky top-0 z-30 backdrop-blur px-6 py-3 border-b"
               style={{ borderColor:'var(--border)', background:'color-mix(in oklab, var(--bg) 86%, transparent)' }}>
-        <div className="max-w-[1500px] mx-auto flex items-center gap-3">
+        <div className="max-w-[1700px] mx-auto flex items-center gap-3">
           <SplitSquareHorizontal className="w-5 h-5" style={{ color:'var(--brand)' }} />
-          <h1 className="text-[20px] font-semibold">{selected ? selected.name || 'Agent' : 'Agent Tuning'}</h1>
-          <div className="text-xs px-2 py-[2px] rounded-full"
-               style={{ background:'color-mix(in oklab, var(--text) 8%, transparent)', border:'1px solid var(--border)' }}>
-            {saving ? 'Saving…' : dirty ? 'Unsaved changes' : 'Saved ✓'}
-          </div>
+          <h1 className="text-[21px] font-semibold">{selected ? (selected.name || 'Agent') : 'Agent Tuning'}</h1>
+
+          <span className="text-xs px-2 py-[2px] rounded-full"
+                style={{ background:'color-mix(in oklab, var(--text) 8%, transparent)', border:'1px solid var(--border)' }}>
+            {statusText}
+          </span>
+
+          {selected && (
+            <button onClick={copyId} className="text-xs px-2 py-1 rounded-md hover:opacity-90"
+                    style={{ ...CARD, marginLeft: 6 }}>
+              {copied ? <><Check className="inline w-3.5 h-3.5 mr-1" /> Copied</> : <><Copy className="inline w-3.5 h-3.5 mr-1" /> ID</>}
+            </button>
+          )}
 
           <div className="ml-auto flex items-center gap-2">
             {/* Sort + Tag filter */}
-            <div className="hidden md:flex items-center gap-2">
+            <div className="hidden lg:flex items-center gap-2">
               <Filter className="w-4 h-4 opacity-70" />
               <select
                 value={sort}
@@ -645,7 +708,7 @@ export default function Improve() {
                   value={tagFilter}
                   onChange={(e)=>setTagFilter(e.target.value)}
                   className="px-2 py-1 rounded-md text-sm"
-                  style={{ ...CARD, padding:DENSE_PAD, width: 120 }}
+                  style={{ ...CARD, padding:DENSE_PAD, width: 130 }}
                 />
               </div>
             </div>
@@ -655,6 +718,17 @@ export default function Improve() {
               style={{ background:'color-mix(in oklab, var(--text) 8%, transparent)', border:'1px solid var(--border)' }}>
               <RefreshCw className="inline w-4 h-4 mr-1" /> Refresh
             </button>
+
+            <label className="px-3 py-1.5 rounded-md text-sm cursor-pointer"
+                   style={{ ...CARD }}>
+              <Upload className="inline w-4 h-4 mr-1" /> Import
+              <input type="file" accept="application/json" className="hidden" onChange={e => e.target.files && importAgent(e.target.files[0])} />
+            </label>
+
+            <button onClick={exportAgent} className="px-3 py-1.5 rounded-md text-sm" style={{ ...CARD }}>
+              <Download className="inline w-4 h-4 mr-1" /> Export
+            </button>
+
             <button
               onClick={() => !saving && dirty && saveEdits()}
               disabled={!dirty || saving}
@@ -662,12 +736,12 @@ export default function Improve() {
               style={{ background:'var(--brand)', color:'#00120a' }}>
               <Save className="w-4 h-4" />
               <span>Save</span>
-              {/* Windows shortcut hint */}
               <span className="ml-1 inline-flex items-center gap-1 text-[11px] px-1.5 py-[1px] rounded"
                     style={{ background:'rgba(0,0,0,.2)', border:'1px solid var(--border)' }}>
                 <WindowsIcon className="w-3 h-3" />+S
               </span>
             </button>
+
             <button
               onClick={deleteSelected}
               disabled={saving || !selected}
@@ -680,10 +754,11 @@ export default function Improve() {
         </div>
       </header>
 
-      <div className="mx-auto w-full max-w-[1500px] px-6 py-5">
+      {/* Main content */}
+      <div className="mx-auto w-full max-w-[1700px] px-6 py-5">
         <div className="flex gap-3">
           {/* Left rail */}
-          <aside className={`transition-all ${leftCollapsed ? 'w-[56px]' : 'w-[300px]'}`}>
+          <aside className={`transition-all ${leftCollapsed ? 'w-[56px]' : 'w-[320px]'}`}>
             <div className="p-[10px]" style={PANEL}>
               <div className="flex items-center gap-2 mb-3">
                 <Bot className="w-4 h-4" style={{ color:'var(--brand)' }} />
@@ -732,22 +807,26 @@ export default function Improve() {
                     {filtered.map((b) => {
                       let pinnedLocal = false; let draftLocal = false; let tagsLocal: string[] = [];
                       try {
-                        const raw = userId ? localStorage.getItem(metaKey(userId, b.id)) : null;
-                        const m: AgentMeta = raw ? JSON.parse(raw) : {};
-                        pinnedLocal = !!m.pinned; draftLocal = !!m.draft; tagsLocal = m.tags || [];
+                        if (userId) {
+                          const raw = localStorage.getItem(metaKey(userId, b.id));
+                          const m: AgentMeta = raw ? JSON.parse(raw) : {};
+                          pinnedLocal = !!m.pinned; draftLocal = !!m.draft; tagsLocal = m.tags || [];
+                        }
                       } catch {}
+                      const active = selectedId === b.id;
                       return (
                         <li key={b.id}>
                           <button
                             onClick={() => setSelectedId(b.id)}
-                            className={`w-full text-left px-3 py-2 rounded-lg text-sm flex items-center gap-2 transition ${selectedId === b.id ? 'ring-1' : ''}`}
+                            className={`w-full text-left px-3 py-2 rounded-lg text-sm flex items-center gap-2 transition ${active ? 'ring-1' : ''}`}
                             style={{
                               ...CARD,
-                              borderColor: selectedId === b.id ? 'var(--brand)' : 'var(--border)',
-                              transform: selectedId === b.id ? 'translateY(-1px)' : 'none'
+                              borderColor: active ? 'var(--brand)' : 'var(--border)',
+                              transform: active ? 'translateY(-1px)' : 'none',
+                              boxShadow: active ? '0 8px 18px rgba(0,0,0,.3)' : CARD.boxShadow as string
                             }}
                           >
-                            <div className="w-7 h-7 rounded-md grid place-items-center animate-pulse"
+                            <div className="w-8 h-8 rounded-md grid place-items-center animate-pulse"
                                  style={{ background: 'rgba(0,0,0,.2)', border: '1px solid var(--border)' }}>
                               <Bot className="w-4 h-4" />
                             </div>
@@ -779,10 +858,10 @@ export default function Improve() {
             </div>
           </aside>
 
-          {/* Center + Right split with draggable divider */}
-          <div id="improve-grid" className="flex-1 grid gap-3" style={{ gridTemplateColumns: `${Math.round(colRatio*100)}% 10px 1fr` }}>
+          {/* Split: Editor | Right */}
+          <div id="improve-split" className="flex-1 grid gap-3 transition-[grid-template-columns]" style={{ gridTemplateColumns: `${Math.round(colRatio*100)}% 10px 1fr` }}>
             {/* Editor panel */}
-            <section className="p-[10px]" style={PANEL}>
+            <section className="p-[12px]" style={PANEL}>
               {!selected ? (
                 <div className="grid place-items-center h-[60vh] opacity-70">
                   {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : <div className="text-sm">Select an assistant from the list.</div>}
@@ -790,8 +869,8 @@ export default function Improve() {
               ) : (
                 <div className="space-y-3">
                   <div className="flex items-center gap-2">
-                    <Settings2 className="w-4 h-4" style={{ color:'var(--brand)' }} />
-                    <div className="font-semibold">Editor</div>
+                    <Settings2 className="w-5 h-5" style={{ color:'var(--brand)' }} />
+                    <div className="font-semibold text-[15px]">Editor</div>
                     <div className="ml-auto flex items-center gap-2">
                       <button onClick={()=>{ setPinned(p=>!p); setDirty(true); }} className="px-2 py-1.5 rounded-md text-sm" style={{ ...CARD }}>
                         {pinned ? <><Star className="inline w-4 h-4 mr-1" />Pinned</> : <><StarOff className="inline w-4 h-4 mr-1" />Pin</>}
@@ -802,13 +881,6 @@ export default function Improve() {
                       <button onClick={duplicateAgent} className="px-2 py-1.5 rounded-md text-sm" style={{ ...CARD }}>
                         <FilePlus2 className="inline w-4 h-4 mr-1" /> Duplicate
                       </button>
-                      <button onClick={exportAgent} className="px-2 py-1.5 rounded-md text-sm" style={{ ...CARD }}>
-                        <Download className="inline w-4 h-4 mr-1" /> Export
-                      </button>
-                      <label className="px-2 py-1.5 rounded-md text-sm cursor-pointer" style={{ ...CARD }}>
-                        <Upload className="inline w-4 h-4 mr-1" /> Import
-                        <input type="file" accept="application/json" className="hidden" onChange={e => e.target.files && importAgent(e.target.files[0])} />
-                      </label>
                       <button
                         onClick={() => !saving && dirty && saveEdits()}
                         disabled={!dirty || saving}
@@ -822,25 +894,16 @@ export default function Improve() {
                           <WindowsIcon className="w-3 h-3" />+S
                         </span>
                       </button>
-                      <button
-                        onClick={deleteSelected}
-                        disabled={saving}
-                        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm disabled:opacity-60"
-                        style={{ background:'rgba(255,80,80,.12)', border:'1px solid rgba(255,80,80,.35)' }}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                        Delete
-                      </button>
                     </div>
                   </div>
 
-                  <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap:'10px' }}>
+                  <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap:'12px' }}>
                     <div>
                       <div className="text-xs mb-1 opacity-70">Name</div>
                       <input
                         value={name}
                         onChange={(e) => setName(e.target.value)}
-                        className="w-full px-3 py-2 rounded-md outline-none"
+                        className="w-full px-3 py-2 rounded-md outline-none text-[15px]"
                         style={CARD}
                         placeholder="Agent name"
                       />
@@ -895,7 +958,7 @@ export default function Improve() {
                     </div>
                   </div>
 
-                  {/* Refinements (by group) */}
+                  {/* Refinements */}
                   <div>
                     <div className="text-xs mb-1 opacity-70">Refinements</div>
                     <div className="flex flex-wrap gap-2">
@@ -926,7 +989,7 @@ export default function Improve() {
                   </div>
 
                   {/* Prompt Stack */}
-                  <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap:'10px' }}>
+                  <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap:'12px' }}>
                     <div>
                       <div className="text-xs mb-1 opacity-70">Pre Prompt (runs before main)</div>
                       <textarea
@@ -978,11 +1041,19 @@ export default function Improve() {
                     <textarea
                       value={system}
                       onChange={(e) => setSystem(e.target.value)}
-                      rows={16}
-                      className="w-full px-3 py-2 rounded-md outline-none font-mono text-sm"
+                      rows={18}
+                      className="w-full px-3 py-2 rounded-md outline-none font-mono text-[13.5px] leading-6"
                       style={CARD}
                       placeholder="Describe your agent's behavior, tone, policies, and knowledge…"
-                      onKeyDown={(e:any)=>{ if(e.key==='/'){ const v=(e.target.value as string); /* Easter egg /refine */ }}
+                      onKeyDown={(e) => {
+                        // Easter egg: type /refine + Enter to inject a refinement header
+                        const el = e.target as HTMLTextAreaElement;
+                        if (e.key === 'Enter' && el.value.endsWith('/refine')) {
+                          e.preventDefault();
+                          const nv = el.value.replace(/\/refine$/, `${REFINEMENT_HEADER}\n- Keep answers short and precise.\n- Ask a question if user intent is unclear.\n\n`);
+                          setSystem(nv);
+                        }
+                      }}
                     />
                     <div className="flex items-center justify-between text-xs mt-1">
                       <div className="opacity-70">{(system?.length || 0).toLocaleString()} chars · est {tokenEst.toLocaleString()} tokens</div>
@@ -995,10 +1066,12 @@ export default function Improve() {
                     </div>
                   </div>
 
-                  {/* Guardrails / Conditionals / Flow temps */}
-                  <div className="grid" style={{ gridTemplateColumns: '1.2fr 0.8fr', gap:'10px' }}>
+                  {/* Guardrails / Flow temps */}
+                  <div className="grid" style={{ gridTemplateColumns: '1.15fr 0.85fr', gap:'12px' }}>
                     <div className="p-2" style={CARD}>
-                      <div className="flex items-center gap-2 mb-2 font-semibold"><Shield className="w-4 h-4" style={{ color:'var(--brand)' }} /> Guardrails</div>
+                      <div className="flex items-center gap-2 mb-2 font-semibold">
+                        <Shield className="w-4 h-4" style={{ color:'var(--brand)' }} /> Guardrails
+                      </div>
                       <div className="grid grid-cols-2 gap-2">
                         <div>
                           <div className="text-xs mb-1 opacity-70">Blocked phrases (one per line)</div>
@@ -1016,13 +1089,16 @@ export default function Improve() {
                     </div>
 
                     <div className="p-2" style={CARD}>
-                      <div className="flex items-center gap-2 mb-2 font-semibold"><Code2 className="w-4 h-4" style={{ color:'var(--brand)' }} /> Flow Temperatures</div>
+                      <div className="flex items-center gap-2 mb-2 font-semibold">
+                        <Code2 className="w-4 h-4" style={{ color:'var(--brand)' }} /> Flow Temperatures
+                      </div>
                       {(['greeting','qa','actions'] as const).map(k=>(
                         <div key={k} className="mb-2">
                           <div className="text-xs mb-1 opacity-70 capitalize">{k} ({flowTemps[k].toFixed(2)})</div>
-                          <input type="range" min={0} max={1} step={0.01} value={flowTemps[k]} onChange={e=>setFlowTemps(prev=>({...prev,[k]:parseFloat(e.target.value)}))} className="w-full" />
+                          <input type="range" min={0} max={1} step={0.01} value={flowTemps[k]} onChange={(e)=>setFlowTemps(prev=>({...prev,[k]:parseFloat(e.target.value)}))} className="w-full" />
                         </div>
                       ))}
+                      <div className="text-[11px] opacity-60 mt-2">These are saved in client meta only.</div>
                     </div>
                   </div>
 
@@ -1038,6 +1114,20 @@ export default function Improve() {
                       placeholder="Any context for teammates or yourself…"
                     />
                   </div>
+
+                  {/* Footer quick toggles */}
+                  <div className="flex items-center gap-3">
+                    <label className="text-sm flex items-center gap-2" title="Auto-save every 1.2s while editing">
+                      <input type="checkbox" checked={autosave} onChange={e=>setAutosave(e.target.checked)} />
+                      Auto-save
+                    </label>
+                    <button className="text-sm px-2 py-1 rounded-md" style={{ ...CARD }} onClick={duplicateAgent}>
+                      Duplicate
+                    </button>
+                    <button className="text-sm px-2 py-1 rounded-md" style={{ ...CARD }} onClick={()=>addAudit('open runbook')}>
+                      Runbook (coming soon)
+                    </button>
+                  </div>
                 </div>
               )}
             </section>
@@ -1052,8 +1142,8 @@ export default function Improve() {
               <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-[2px] bg-[color-mix(in_oklab,var(--text)_16%,transparent)] group-hover:bg-[var(--brand)]" />
             </div>
 
-            {/* Right rail: Versions + Test */}
-            <aside className="p-[10px] space-y-3" style={PANEL}>
+            {/* Right rail: Versions + Test + Activity */}
+            <aside className="p-[12px] space-y-3" style={PANEL}>
               {/* Versions */}
               <div className="p-[10px]" style={CARD}>
                 <button onClick={() => setVersionsOpen(v => !v)} className="w-full flex items-center justify-between">
@@ -1117,12 +1207,9 @@ export default function Improve() {
                   <button onClick={stressTest} className="px-2 py-1 rounded-md text-xs" style={{ background:'rgba(0,0,0,.2)', border:'1px solid var(--border)' }}>
                     Stress test ×50
                   </button>
-                  <button onClick={()=>setShowBeforeAfter(v=>!v)} className="px-2 py-1 rounded-md text-xs" style={{ background:'rgba(0,0,0,.2)', border:'1px solid var(--border)' }}>
-                    {showBeforeAfter ? 'Hide' : 'Show'} Before/After
-                  </button>
                 </div>
 
-                <div className="space-y-2 max-h-[40vh] overflow-auto rounded-md p-2"
+                <div className="space-y-2 max-h-[38vh] overflow-auto rounded-md p-2"
                     style={{ background:'rgba(0,0,0,.25)', border:'1px solid var(--border)' }}>
                   {testLog.length === 0 ? (
                     <div className="text-xs opacity-60">No messages yet.</div>
@@ -1154,6 +1241,30 @@ export default function Improve() {
 
                 <div className="text-xs opacity-60">
                   Need keys? Go to <Link className="underline" href="/api-keys">API Keys</Link>.
+                </div>
+              </div>
+
+              {/* Activity (client-side audit) */}
+              <div className="p-[10px] space-y-2" style={CARD}>
+                <div className="flex items-center gap-2 font-semibold">
+                  <PanelsTopLeft className="w-4 h-4" style={{ color:'var(--brand)' }} />
+                  Recent Activity
+                </div>
+                <div className="space-y-1 max-h-[24vh] overflow-auto">
+                  {userId && selected ? (() => {
+                    try {
+                      const raw = localStorage.getItem(metaKey(userId, selected.id));
+                      const m: AgentMeta = raw ? JSON.parse(raw) : {};
+                      const audit = (m.audit || []).slice(0, 12);
+                      if (!audit.length) return <div className="text-xs opacity-60">No recent actions.</div>;
+                      return audit.map((a, i) => (
+                        <div key={i} className="text-xs flex items-center justify-between">
+                          <span>{a.action}</span>
+                          <span className="opacity-60">{fmtTime(a.at)}</span>
+                        </div>
+                      ));
+                    } catch { return <div className="text-xs opacity-60">No recent actions.</div>; }
+                  })() : <div className="text-xs opacity-60">No recent actions.</div>}
                 </div>
               </div>
             </aside>
