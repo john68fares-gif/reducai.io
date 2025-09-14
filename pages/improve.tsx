@@ -3,35 +3,16 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Bot, Check, Copy, History, Info, Loader2, Plus, Send, Settings2,
-  Sparkles, Trash2, Undo2, Redo2, ChevronDown, ChevronUp, HelpCircle, X,
-  RefreshCw, Search
+  Bot, Check, ChevronDown, ChevronUp, Copy, History, Info, Loader2, Plus, Redo2,
+  RefreshCw, Search, Send, Settings2, Trash2, Undo2, X
 } from 'lucide-react';
-import { scopedStorage, migrateLegacyKeysToUser } from '@/utils/scoped-storage';
+import { supabase } from '@/lib/supabase-client';
 
-/* =============================================================================
-   CONSTANTS / KEYS
-============================================================================= */
-const SCOPE = 'improve';
-const MAX_REFINEMENTS = 5;
-const DEFAULT_TEMPERATURE = 0.5;
-
-const K_SELECTED_AGENT_ID = `${SCOPE}:selectedAgentId`;
-const K_AGENT_LIST        = `agents`;           // builder’s agents list (shared/local)
-const K_AGENT_META_PREFIX = `agents:meta:`;     // per-agent tuning (model/temp/rules)
-const K_IMPROVE_STATE     = `${SCOPE}:agent:`;  // Improve’s per-agent chat/history
-const K_OWNER_OVERRIDE    = `workspace:owner`;  // set by app shell / auth
-
-/* =============================================================================
-   TYPES
-============================================================================= */
+/** ────────────────────────────────────────────────────────────────────────────
+ * Types / constants
+ * ─────────────────────────────────────────────────────────────────────────── */
 type ModelId =
-  | 'gpt-4o'
-  | 'gpt-4o-mini'
-  | 'gpt-4.1'
-  | 'gpt-4.1-mini'
-  | 'o3'
-  | 'o3-mini';
+  | 'gpt-4o' | 'gpt-4o-mini' | 'gpt-4.1' | 'gpt-4.1-mini' | 'o3' | 'o3-mini';
 
 const MODEL_OPTIONS: Array<{ value: ModelId; label: string }> = [
   { value: 'gpt-4o',       label: 'GPT-4o' },
@@ -42,475 +23,401 @@ const MODEL_OPTIONS: Array<{ value: ModelId; label: string }> = [
   { value: 'o3-mini',      label: 'o3-mini (reasoning, fast)' },
 ];
 
-type Agent = { id: string; name: string; createdAt: number; model: ModelId; temperature?: number; };
-type Refinement = { id: string; text: string; enabled: boolean; createdAt: number; };
-type ChatMessage = { id: string; role: 'user' | 'assistant' | 'system'; content: string; reason?: string; createdAt: number; };
-type AgentState = {
-  model: ModelId; temperature: number; refinements: Refinement[];
-  history: ChatMessage[]; versions: Array<{ id: string; label: string; createdAt: number; snapshot: Omit<AgentState,'versions'> }>;
-  undo: Array<Omit<AgentState,'versions'|'undo'|'redo'>>; redo: Array<Omit<AgentState,'versions'|'undo'|'redo'>>;
+type Agent = {
+  id: string;
+  name: string;
+  model: ModelId;
+  temperature: number;
+  createdAt: number;
 };
-type AgentMeta = { model: ModelId; temperature: number; refinements: Refinement[]; updatedAt: number; };
-type Store = Awaited<ReturnType<typeof scopedStorage>>;
 
-/* =============================================================================
-   UTILS
-============================================================================= */
-const now = () => Date.now();
-const uid = (p='id') => `${p}_${Math.random().toString(36).slice(2,9)}${Date.now().toString(36).slice(-4)}`;
+type Refinement = { id: string; text: string; enabled: boolean };
+type ChatMsg   = { id: string; role: 'user' | 'assistant'; content: string };
+
+const uid = (p='id') => `${p}_${Math.random().toString(36).slice(2,8)}${Date.now().toString(36).slice(-3)}`;
 const clamp01 = (n:number)=>Math.max(0,Math.min(1,n));
 
-/** Prefer assistant-like ids if present. */
-function chooseAgentId(x:any, i:number){
-  const candidates = [
-    x.assistant_id,
-    x.openai_assistant_id,
-    x.openai_id,
-    x.asst_id,
-    x.id,
-    x.agentId,
-    x.slug,
-  ].filter(Boolean);
-  const id = String(candidates[0] ?? `tmp_${i}_${Date.now()}`);
-  return id;
-}
-
-function mapAnyToAgent(x:any,i:number):Agent|null{
-  if(!x) return null;
-  const id = chooseAgentId(x, i);
-  const name = String(
-    x.name ?? x.title ?? x.displayName ?? x.botName ?? x.meta?.name ?? `Agent ${i+1}`
-  );
-  const createdAt = Number(
-    x.createdAt ?? x.created_at ?? x.updatedAt ?? x.updated_at ?? Date.now()
-  );
-  const modelRaw = String(x.model ?? x.modelId ?? x.engine ?? 'gpt-4o');
-  const model = (MODEL_OPTIONS.some(m => m.value === modelRaw) ? modelRaw : 'gpt-4o') as ModelId;
-  const temperature =
-    typeof x.temperature === 'number' ? x.temperature :
-    typeof x.temp === 'number'        ? x.temp :
-    typeof x.creativity === 'number'  ? x.creativity :
-    DEFAULT_TEMPERATURE;
-
-  return { id, name, createdAt, model, temperature };
-}
-
-function normalizeAgents(list:any):Agent[]{
-  if(!Array.isArray(list)) return [];
-  return list.map(mapAnyToAgent).filter(Boolean) as Agent[];
-}
-
-function dedupeAgentsById(arr: Agent[]): Agent[] {
-  const m = new Map<string, Agent>();
-  for (const a of arr) if (!m.has(a.id)) m.set(a.id, a);
-  return [...m.values()];
-}
-
-function pickList(data: any): any[] {
-  if (Array.isArray(data)) return data;
-  for (const k of ['items','data','bots','rows','list']) {
-    if (Array.isArray(data?.[k])) return data[k];
-  }
-  return [];
-}
-
-function reasonFrom(refs:Refinement[]):string{
-  const active=refs.filter(r=>r.enabled);
-  if(!active.length) return 'No special requests are active—using a default helpful tone.';
-  return `Following your active refinements: ${active.slice(0,3).map(r=>r.text).join('; ')}.`;
-}
-
-/** Get the signed-in owner id (used to scope agent list + patch). */
-async function resolveOwnerId(): Promise<string> {
-  // Try app’s local storage flag first (set by your auth shell)
-  try {
-    const fromLS = localStorage.getItem(K_OWNER_OVERRIDE);
-    if (fromLS) return fromLS;
-  } catch {}
-
-  // Try a lightweight /api/me if your project has it
-  try {
-    const r = await fetch('/api/me', { method: 'GET', cache: 'no-store' });
-    if (r.ok) {
-      const j = await r.json();
-      const id = j?.user?.id || j?.id || j?.uid;
-      if (id) return String(id);
-    }
-  } catch {}
-
-  return 'anon';
-}
-
-/** Prefer server list (scoped by owner) but fall back to local keys if absent. */
-async function loadAgents(store: Store, ownerId: string): Promise<Agent[]> {
-  // 1) Server list (scoped)
-  try {
-    const r = await fetch(`/api/chatbots?ownerId=${encodeURIComponent(ownerId)}`, {
-      method: 'GET',
-      headers: { 'x-owner-id': ownerId },
-      cache: 'no-store',
-    });
-    if (r.ok) {
-      const raw = await r.json().catch(() => []);
-      const list = pickList(raw);
-      const arr = normalizeAgents(list);
-      if (arr.length) return arr;
-    }
-  } catch {}
-
-  // 2) Local / legacy
-  const candidates=[K_AGENT_LIST,'chatbots','builds','assistants','voice:assistants'];
-  for(const key of candidates){
-    const raw=await store.getJSON<any>(key,[]);
-    const list=normalizeAgents(raw);
-    if(list.length){ return list; }
-  }
-  return [];
-}
-
-/** Compose a system prompt from builder data + active refinements (local only). */
-async function composeSystemForAgent(store:Store, agent:Agent, refinements:Refinement[]){
-  const wantsProviderOnly = refinements.some(r=>r.enabled && /remove (any )?restrictions|no restrictions|uncensored|no filter|any subject/i.test(r.text));
-  const [sys, profile, builder] = await Promise.all([
-    store.getJSON<string|null>(`agents:system:${agent.id}`, null as any),
-    store.getJSON<string|null>(`agents:profile:${agent.id}`, null as any),
-    store.getJSON<string|null>(`builder:prompt:${agent.id}`, null as any),
-  ]);
-
-  const base = (sys||profile||builder||`You are ${agent.name}, a helpful, capable assistant.`).trim();
-  const active = refinements.filter(r=>r.enabled).map(r=>r.text).join('; ');
-  const refinementsLine = active ? `Active refinements: ${active}.` : '';
-
-  const policyLine = wantsProviderOnly
-    ? `Follow the user's instructions within legal and safety boundaries. Do not add extra disclaimers beyond provider requirements.`
-    : `Be helpful, precise, and safe. Respect the active refinements.`;
-
-  return {
-    guardLevel: wantsProviderOnly ? 'provider-only' : 'lenient',
-    systemPrompt: [base, refinementsLine, policyLine].filter(Boolean).join('\n\n')
-  } as const;
-}
-
-async function chatWithAgent(payload:{
-  agentId:string; model:ModelId; temperature:number;
-  system:string; messages:Array<{role:'user'|'assistant';content:string}>;
-  guardLevel:'provider-only'|'lenient'
-}):Promise<{content:string; modelUsed:string; finish_reason?:string; blocked?:boolean}>{
-  const res = await fetch('/api/improve/chat', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify(payload)
+/** ────────────────────────────────────────────────────────────────────────────
+ * API helpers (always send x-user-id)
+ * ─────────────────────────────────────────────────────────────────────────── */
+async function fetchAgents(userId: string): Promise<Agent[]> {
+  const res = await fetch('/api/chatbots', {
+    method: 'GET',
+    headers: { 'x-user-id': userId },
+    cache: 'no-store',
   });
-  if(!res.ok){
-    const text = await res.text().catch(()=>String(res.status));
-    throw new Error(text || `HTTP ${res.status}`);
+  if (!res.ok) return [];
+  const list = await res.json();
+  // Normalize to Agent shape
+  return (Array.isArray(list) ? list : []).map((a: any): Agent => ({
+    id: String(a.id),
+    name: String(a.name ?? 'Untitled Agent'),
+    createdAt: Number(a.createdAt ?? Date.now()),
+    model: (MODEL_OPTIONS.some(m => m.value === a.model) ? a.model : 'gpt-4o') as ModelId,
+    temperature: typeof a.temperature === 'number' ? a.temperature : 0.5,
+  }));
+}
+
+async function patchAgent(userId: string, id: string, data: Partial<Pick<Agent,'model'|'temperature'>> & { prompt?: string }) {
+  const res = await fetch(`/api/chatbots/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(()=>'');
+    throw new Error(text || `Failed to save (${res.status})`);
   }
   return await res.json();
 }
 
-/* =============================================================================
-   MAIN
-============================================================================= */
-export default function ImprovePage(){
-  const [store,setStore]=useState<Store|null>(null);
-  const [ownerId,setOwnerId]=useState<string>('anon');
-
-  const [agents,setAgents]=useState<Agent[]>([]);
-  const [agentId,setAgentId]=useState<string|null>(null);
-  const [state,setState]=useState<AgentState|null>(null);
-
-  const [input,setInput]=useState('');
-  const [addingRefine,setAddingRefine]=useState('');
-  const [isSending,setIsSending]=useState(false);
-  const [showSettings,setShowSettings]=useState(false);
-  const [showWhyFor,setShowWhyFor]=useState<string|null>(null);
-  const [isSaving,setIsSaving]=useState(false);
-  const [isRefreshing,setIsRefreshing]=useState(false);
-
-  const scrollRef=useRef<HTMLDivElement>(null);
-
-  /* ---------- bootstrap ---------- */
-  useEffect(()=>{(async()=>{
-    const st=await scopedStorage();
-    await st.ensureOwnerGuard();
-    await migrateLegacyKeysToUser();
-    setStore(st);
-
-    const oid = await resolveOwnerId();
-    setOwnerId(oid);
-
-    let list = await loadAgents(st, oid);
-
-    // Keep last local snapshot for UI responsiveness
-    await st.setJSON(K_AGENT_LIST, list);
-    setAgents(list);
-
-    if (list.length) {
-      const savedId=await st.getJSON<string|null>(K_SELECTED_AGENT_ID,null as any);
-      const sel=list.find(a=>a.id===savedId) ?? [...list].sort((a,b)=>b.createdAt-a.createdAt)[0];
-      if(sel){ setAgentId(sel.id); await hydrateFromAgent(st,sel.id,list); }
-    }
-  })();},[]);
-
-  async function hydrateFromAgent(st:Store,id:string,list:Agent[]=agents){
-    const a=list.find(x=>x.id===id); if(!a) return;
-    let base:AgentState=await st.getJSON<AgentState|null>(K_IMPROVE_STATE+id,null as any) ?? {
-      model:a.model, temperature:a.temperature ?? DEFAULT_TEMPERATURE,
-      refinements:[], history:[{id:uid('sys'),role:'system',content:'This is the Improve panel. Your agent will reply based on the active refinements.',createdAt:now()}],
-      versions:[], undo:[], redo:[]
-    };
-
-    // Guard model value
-    if(!MODEL_OPTIONS.some(m=>m.value===base.model)) base.model='gpt-4o';
-    setState(base);
-    await st.setJSON(K_IMPROVE_STATE+id,base);
+async function chatRelay(payload:{
+  agentId: string;
+  model: ModelId;
+  temperature: number;
+  system: string;
+  messages: Array<{ role: 'user'|'assistant'; content: string }>;
+}) {
+  const res = await fetch('/api/improve/chat', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ ...payload, guardLevel: 'lenient' as const })
+  });
+  if(!res.ok){
+    const t = await res.text().catch(()=>String(res.status));
+    throw new Error(t || `HTTP ${res.status}`);
   }
+  return await res.json() as { content: string; modelUsed: string; finish_reason?: string };
+}
 
-  /* ---------- persist: debounced PATCH real agent ---------- */
+/** ────────────────────────────────────────────────────────────────────────────
+ * Page
+ * ─────────────────────────────────────────────────────────────────────────── */
+export default function ImprovePage() {
+  const [userId, setUserId] = useState<string | null>(null);
+
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const selected = useMemo(() => agents.find(a => a.id === selectedId) || null, [agents, selectedId]);
+
+  // local tuning state per session (not persisted — the PATCH saves model/temp on the assistant)
+  const [model, setModel] = useState<ModelId>('gpt-4o');
+  const [temperature, setTemperature] = useState<number>(0.5);
+  const [refinements, setRefinements] = useState<Refinement[]>([]);
+  const [input, setInput] = useState('');
+  const [history, setHistory] = useState<ChatMsg[]>([
+    { id: uid('sys'), role: 'assistant', content: 'This is the Improve panel. Your agent will reply based on the active refinements.' }
+  ]);
+
+  const [loadingAgents, setLoadingAgents] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [openSettings, setOpenSettings] = useState(true);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const listRef = useRef<HTMLDivElement>(null);
+
+  // read current user once
   useEffect(() => {
-    if (!store || !agentId || !state) return;
-    let to: any;
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      setUserId(user?.id || null);
+    })();
+  }, []);
 
-    async function run() {
-      setIsSaving(true);
+  // load agents when userId is ready
+  useEffect(() => {
+    if (!userId) return;
+    (async () => {
+      setLoadingAgents(true);
       try {
-        // 1) Patch real agent (no create) — scoped by account
-        await fetch(`/api/chatbots/${agentId}`, {
-          method: 'PATCH',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-owner-id': ownerId || 'anon'
-          },
-          body: JSON.stringify({
-            model: state.model,
-            temperature: state.temperature,
-          })
-        }).catch(()=>{ /* ignore if route not present */ });
-
-        // 2) Keep local meta + list in sync for UI responsiveness
-        const meta:AgentMeta={model:state.model,temperature:state.temperature,refinements:state.refinements,updatedAt:now()};
-        await store.setJSON(K_AGENT_META_PREFIX+agentId,meta);
-        const latest=normalizeAgents(await store.getJSON<any[]>(K_AGENT_LIST,[]));
-        const next=latest.map(a=>a.id===agentId?{...a,model:state.model,temperature:state.temperature}:a);
-        await store.setJSON(K_AGENT_LIST,next);
-        setAgents(next);
+        const list = await fetchAgents(userId);
+        setAgents(list);
+        if (list.length) {
+          const first = list[0];
+          setSelectedId(first.id);
+          setModel(first.model);
+          setTemperature(first.temperature);
+        } else {
+          setSelectedId(null);
+        }
       } finally {
-        setIsSaving(false);
+        setLoadingAgents(false);
       }
-    }
+    })();
+  }, [userId]);
 
-    to = setTimeout(run, 500); // debounce saves
+  // auto-scroll chat
+  useEffect(() => {
+    if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
+  }, [history, sending]);
+
+  // debounced save when model/temperature changes
+  useEffect(() => {
+    if (!userId || !selected) return;
+    const to = setTimeout(async () => {
+      setSaving(true);
+      try {
+        await patchAgent(userId, selected.id, { model, temperature });
+      } catch (e) {
+        console.warn('Save failed:', e);
+      } finally {
+        setSaving(false);
+      }
+    }, 450);
     return () => clearTimeout(to);
-  }, [store, agentId, state?.model, state?.temperature, ownerId]);
+  }, [userId, selected?.id, model, temperature]);
 
-  useEffect(()=>{ if(scrollRef.current) scrollRef.current.scrollTop=scrollRef.current.scrollHeight; },[state?.history.length,isSending]);
+  const filteredAgents = useMemo(
+    () => agents.filter(a => a.name.toLowerCase().includes(query.toLowerCase())),
+    [agents, query]
+  );
 
-  /* ---------- actions ---------- */
-  function snapshotCore(s:AgentState){ const {model,temperature,refinements,history}=s; return {model,temperature,refinements:[...refinements],history:[...history]}; }
-  function pushUndo(ss:ReturnType<typeof snapshotCore>){ setState(p=>p?{...p,undo:[...p.undo,ss],redo:[]}:p); }
-
-  function handleAddRefinement(){
-    if(!state) return;
-    const text=addingRefine.trim(); if(!text) return;
-    const ref:Refinement={id:uid('ref'),text,enabled:true,createdAt:now()};
-    const next=[ref,...state.refinements].slice(0,MAX_REFINEMENTS);
-    pushUndo(snapshotCore(state)); setState({...state,refinements:next}); setAddingRefine('');
+  function addRef(text: string) {
+    if (!text.trim()) return;
+    setRefinements(prev => [{ id: uid('ref'), text: text.trim(), enabled: true }, ...prev].slice(0,5));
   }
-  const toggleRef=(id:string)=>state&&setState({...state,refinements:state.refinements.map(r=>r.id===id?{...r,enabled:!r.enabled}:r)});
-  const delRef=(id:string)=>state&&setState({...state,refinements:state.refinements.filter(r=>r.id!==id)});
-  const clearRefs=()=>state&&setState({...state,refinements:[]});
-
-  const changeModel=(m:ModelId)=>state&&setState({...state,model:m});
-  const changeTemperature=(t:number)=>state&&setState({...state,temperature:clamp01(t)});
-
-  async function selectAgent(id:string){
-    if(!store) return;
-    const a=agents.find(x=>x.id===id); if(!a) return;
-    await store.setJSON(K_SELECTED_AGENT_ID,id);
-    setAgentId(id);
-    await hydrateFromAgent(store,id);
+  function toggleRef(id: string) {
+    setRefinements(prev => prev.map(r => r.id === id ? { ...r, enabled: !r.enabled } : r));
   }
+  function delRef(id: string) {
+    setRefinements(prev => prev.filter(r => r.id !== id));
+  }
+  function clearRefs() { setRefinements([]); }
 
-  async function refreshAgents(){
-    if(!store) return;
-    try{
-      setIsRefreshing(true);
-      const list = await loadAgents(store, ownerId);
-      const merged = dedupeAgentsById([...list]); // no client-seeding here
-      await store.setJSON(K_AGENT_LIST, merged);
-      setAgents(merged);
+  const activeRefText = useMemo(() => {
+    const on = refinements.filter(r => r.enabled).map(r => r.text);
+    return on.length ? `Active refinements: ${on.join('; ')}.` : '';
+  }, [refinements]);
 
-      if(merged.length && agentId && !merged.find(a=>a.id===agentId)){
-        const pick = merged[0];
-        await store.setJSON(K_SELECTED_AGENT_ID, pick.id);
-        setAgentId(pick.id);
-        await hydrateFromAgent(store, pick.id, merged);
+  async function doSync() {
+    if (!userId) return;
+    setLoadingAgents(true);
+    try {
+      const list = await fetchAgents(userId);
+      setAgents(list);
+      // keep current selection if it still exists
+      if (selectedId && list.some(a => a.id === selectedId)) return;
+      if (list.length) {
+        setSelectedId(list[0].id);
+        setModel(list[0].model);
+        setTemperature(list[0].temperature);
+      } else {
+        setSelectedId(null);
       }
     } finally {
-      setIsRefreshing(false);
+      setLoadingAgents(false);
     }
   }
 
-  function saveVersion(){ if(!state) return; const ver={id:uid('ver'),label:new Date().toLocaleString(),createdAt:now(),snapshot:snapshotCore(state)}; setState({...state,versions:[ver,...state.versions]}); }
-  function loadVersion(vid:string){ if(!state) return; const v=state.versions.find(x=>x.id===vid); if(!v) return; pushUndo(snapshotCore(state)); setState({...state,...v.snapshot}); }
-  function undo(){ if(!state||!state.undo.length) return; const last=state.undo[state.undo.length-1]; const newUndo=state.undo.slice(0,-1); const redoSnap=snapshotCore(state); setState({...state,...last,undo:newUndo,redo:[...state.redo,redoSnap]} as AgentState); }
-  function redo(){ if(!state||!state.redo.length) return; const last=state.redo[state.redo.length-1]; const newRedo=state.redo.slice(0,-1); const undoSnap=snapshotCore(state); setState({...state,...last,redo:newRedo,undo:[...state.undo,undoSnap]} as AgentState); }
+  async function send() {
+    if (!selected || !input.trim()) return;
+    const text = input.trim();
+    setInput('');
+    const userMsg: ChatMsg = { id: uid('m'), role: 'user', content: text };
+    setHistory(prev => [...prev, userMsg]);
+    setSending(true);
+    try {
+      const sys = [
+        `You are ${selected.name}, a helpful assistant.`,
+        activeRefText || undefined
+      ].filter(Boolean).join('\n\n');
 
-  async function sendMessage(){
-    if(!state||!store||!agentId) return;
-    const text=input.trim(); if(!text) return;
-
-    const userMsg:ChatMessage={id:uid('m'),role:'user',content:text,createdAt:now()};
-    pushUndo(snapshotCore(state));
-    setState({...state,history:[...state.history,userMsg]});
-    setInput(''); setIsSending(true);
-
-    try{
-      const selected = agents.find(a=>a.id===agentId)!;
-      const { systemPrompt, guardLevel } = await composeSystemForAgent(store, selected, state.refinements);
-
-      // last 20 msgs without system
-      const msgs = [...state.history, userMsg]
-        .filter(m=>m.role!=='system')
+      const msgs = [...history, userMsg]
+        .filter(m => m.role === 'user' || m.role === 'assistant')
         .slice(-20)
-        .map(m=>({role: m.role==='assistant' ? 'assistant' as const : 'user' as const, content: m.content}));
+        .map(({role, content}) => ({ role, content }));
 
-      const result = await chatWithAgent({
-        agentId, model: state.model, temperature: state.temperature,
-        system: systemPrompt, messages: msgs, guardLevel: guardLevel as 'provider-only'|'lenient'
+      const out = await chatRelay({
+        agentId: selected.id,
+        model,
+        temperature,
+        system: sys,
+        messages: msgs,
       });
 
-      const aiMsg:ChatMessage={id:uid('m'),role:'assistant',content:result.content,reason:reasonFrom(state.refinements),createdAt:now()};
-      setState(prev=>prev?{...prev,history:[...prev.history,aiMsg]}:prev);
-    }catch(err:any){
-      const aiMsg:ChatMessage={id:uid('m'),role:'assistant',content:`(Error) ${err?.message||'Failed to reach AI service.'}`,createdAt:now()};
-      setState(prev=>prev?{...prev,history:[...prev.history,aiMsg]}:prev);
-    }finally{
-      setIsSending(false);
+      const ai: ChatMsg = { id: uid('m'), role: 'assistant', content: out.content || '(no content)' };
+      setHistory(prev => [...prev, ai]);
+    } catch (e: any) {
+      const ai: ChatMsg = { id: uid('m'), role: 'assistant', content: `(error) ${e?.message || 'failed'}` };
+      setHistory(prev => [...prev, ai]);
+    } finally {
+      setSending(false);
     }
   }
 
-  const selectedAgent=useMemo(()=>agents.find(a=>a.id===agentId)??null,[agents,agentId]);
+  async function copyLast() {
+    const last = [...history].reverse().find(m => m.role === 'assistant');
+    if (!last) return;
+    try {
+      await navigator.clipboard.writeText(last.content);
+    } catch {}
+  }
 
-  // EMPTY STATE: no agents → suggest Builder
-  if(agents.length === 0){
+  // Empty states
+  if (!userId) {
     return (
-      <div className="min-h-screen grid place-items-center font-sans" style={{background:'var(--bg)',color:'var(--text)'}}>
-        <div className="panel p-6 text-center" style={{maxWidth: 520}}>
-          <div className="text-lg font-semibold">No agents yet</div>
-          <div className="opacity-70 text-sm mt-2">Create an agent in the Builder first, then come back to Improve.</div>
-          <a href="/builder" className="inline-block mt-4 px-4 py-2 rounded-md border" style={{borderColor:'var(--border)'}}>Go to Builder</a>
+      <div className="min-h-screen grid place-items-center" style={{background:'var(--bg)', color:'var(--text)'}}>
+        <div className="flex items-center gap-3 opacity-80">
+          <Loader2 className="animate-spin" /> Getting your account…
         </div>
       </div>
     );
   }
 
-  if(!state||!selectedAgent){
-    return (<div className="min-h-screen flex items-center justify-center font-sans" style={{background:'var(--bg)',color:'var(--text)'}}>
-      <div className="opacity-80 flex items-center gap-3"><Loader2 className="animate-spin"/>&nbsp;Loading Improve…</div>
-    </div>);
+  if (!loadingAgents && agents.length === 0) {
+    return (
+      <div className="min-h-screen grid place-items-center" style={{background:'var(--bg)', color:'var(--text)'}}>
+        <div className="text-center space-y-3">
+          <div className="text-lg font-semibold">No agents yet</div>
+          <div className="opacity-70 text-sm max-w-[420px]">
+            Create an AI in the Builder first (this list only shows agents that belong to <strong>your</strong> account).
+          </div>
+          <a href="/builder" className="inline-block px-4 py-2 rounded-md border" style={{borderColor:'var(--border)'}}>Go to Builder</a>
+        </div>
+      </div>
+    );
+  }
+
+  if (!selected) {
+    return (
+      <div className="min-h-screen grid place-items-center" style={{background:'var(--bg)', color:'var(--text)'}}>
+        <div className="flex items-center gap-3 opacity-80">
+          <Loader2 className="animate-spin" /> Loading…
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div className={`${SCOPE} min-h-screen font-sans`} style={{ background:'var(--bg)', color:'var(--text)' }}>
-      {/* Top bar */}
-      <div className="sticky top-0 z-20 backdrop-blur-sm border-b" style={{ background:'color-mix(in oklab, var(--panel) 88%, transparent)', borderColor:'var(--border)' }}>
+    <div className="min-h-screen font-sans" style={{ background:'var(--bg)', color:'var(--text)' }}>
+      {/* Top rail */}
+      <div className="sticky top-0 z-30 backdrop-blur-sm border-b" style={{ background:'color-mix(in oklab, var(--panel) 88%, transparent)', borderColor:'var(--border)' }}>
         <div className="mx-auto w-full max-w-[1400px] px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <Bot size={20}/><span className="font-semibold">Improve</span><span className="opacity-60">/</span>
-
-            <div className="flex items-center gap-2">
-              <span className="text-sm opacity-70">AI to tune</span>
-              <AgentPicker
-                agents={agents}
-                selectedId={selectedAgent.id}
-                onSelect={selectAgent}
-                onRefresh={refreshAgents}
-                isRefreshing={isRefreshing}
-              />
-              <div className="ml-1 text-xs flex items-center gap-1 opacity-80">
-                {isSaving ? (<><Loader2 size={14} className="animate-spin"/> Saving…</>) : (<><Check size={14}/> Saved</>)}
-              </div>
+            <Bot size={18}/><span className="font-semibold">Improve</span><span className="opacity-60">/</span>
+            {/* Picker */}
+            <div className="relative">
+              <button
+                onClick={()=>setPickerOpen(v=>!v)}
+                className="px-2.5 py-1.5 rounded-md border inline-flex items-center gap-2 text-sm"
+                style={{borderColor:'var(--border)',background:'var(--card)'}}
+                title="Choose AI"
+              >
+                <span className="truncate max-w-[200px]">{selected?.name}</span>
+                <ChevronDown size={14}/>
+              </button>
+              {pickerOpen && (
+                <div className="absolute mt-2 w-[300px] rounded-lg border shadow-lg z-20"
+                     style={{borderColor:'var(--border)',background:'var(--panel)',boxShadow:'var(--shadow-soft)'}}>
+                  <div className="p-2 border-b" style={{borderColor:'var(--border)'}}>
+                    <div className="flex items-center gap-2">
+                      <Search size={14} className="opacity-70"/>
+                      <input
+                        value={query}
+                        onChange={(e)=>setQuery(e.target.value)}
+                        placeholder="Search agents…"
+                        className="flex-1 bg-transparent outline-none text-sm"
+                      />
+                      <button onClick={doSync} className="px-2 py-1 rounded-md border text-xs inline-flex items-center gap-1"
+                              style={{borderColor:'var(--border)'}}
+                              title="Refresh your agents">
+                        {loadingAgents ? <Loader2 size={12} className="animate-spin"/> : <RefreshCw size={12}/>}
+                        Sync
+                      </button>
+                    </div>
+                  </div>
+                  <div className="max-h-[280px] overflow-y-auto">
+                    {filteredAgents.map(a=>(
+                      <button
+                        key={a.id}
+                        onClick={()=>{ setSelectedId(a.id); setModel(a.model); setTemperature(a.temperature); setPickerOpen(false); }}
+                        className={`w-full text-left px-3 py-2 text-sm border-b hover:opacity-100 transition ${a.id===selected.id?'opacity-100':'opacity-90'}`}
+                        style={{borderColor:'var(--border)'}}
+                        title={a.name}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="truncate">{a.name}</span>
+                          {a.id===selected.id && <Check size={14}/>}
+                        </div>
+                        <div className="text-xs opacity-60 mt-0.5">
+                          {a.model} • {new Date(a.createdAt).toLocaleDateString()}
+                        </div>
+                      </button>
+                    ))}
+                    {!filteredAgents.length && <div className="px-3 py-6 text-sm opacity-70">No agents for your account.</div>}
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="ml-2 text-xs flex items-center gap-1 opacity-80">
+              {saving ? (<><Loader2 size={14} className="animate-spin"/> Saving…</>) : (<><Check size={14}/> Saved</>)}
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            <button onClick={undo} className="px-2 py-1 rounded-md border" style={{borderColor:'var(--border)'}}><Undo2 size={16}/></button>
-            <button onClick={redo} className="px-2 py-1 rounded-md border" style={{borderColor:'var(--border)'}}><Redo2 size={16}/></button>
-            <button onClick={()=>setShowSettings(v=>!v)} className="px-2 py-1 rounded-md flex items-center gap-2 border" style={{borderColor:'var(--border)'}}>
-              <Settings2 size={16}/> Settings {showSettings ? <ChevronUp size={16}/> : <ChevronDown size={16}/> }
+            <button className="px-2 py-1 rounded-md border" style={{borderColor:'var(--border)'}} title="Undo (local)">
+              <Undo2 size={16}/>
+            </button>
+            <button className="px-2 py-1 rounded-md border" style={{borderColor:'var(--border)'}} title="Redo (local)">
+              <Redo2 size={16}/>
+            </button>
+            <button onClick={()=>setOpenSettings(v=>!v)} className="px-2 py-1 rounded-md flex items-center gap-2 border" style={{borderColor:'var(--border)'}}>
+              <Settings2 size={16}/> Settings {openSettings ? <ChevronUp size={16}/> : <ChevronDown size={16}/> }
             </button>
           </div>
         </div>
 
-        {showSettings && (
+        {openSettings && (
           <div className="mx-auto w-full max-w-[1400px] px-4 pb-3">
             <div className="grid md:grid-cols-3 gap-3">
               <div className="rounded-lg p-3 border" style={{borderColor:'var(--border)',background:'var(--panel)'}}>
-                <div className="text-xs opacity-70 mb-1">Model <span className="opacity-60">(applies to <strong>{selectedAgent.name}</strong>)</span></div>
+                <div className="text-xs opacity-70 mb-1">Model <span className="opacity-60">(applies to <strong>{selected.name}</strong>)</span></div>
                 <select className="w-full rounded-md px-2 py-2 border bg-transparent" style={{borderColor:'var(--border)'}}
-                        value={state.model} onChange={e=>changeModel(e.target.value as ModelId)}>
-                  {MODEL_OPTIONS.map(m=>(<option key={m.value} value={m.value}>{m.label}</option>))}
+                        value={model} onChange={e=>setModel(e.target.value as ModelId)}>
+                  {MODEL_OPTIONS.map(m=> <option key={m.value} value={m.value}>{m.label}</option>)}
                 </select>
-                <div className="mt-2 text-xs opacity-60">Tuning is auto-saved to this agent (per account).</div>
+                <div className="mt-2 text-xs opacity-60">Saved per agent (account-scoped).</div>
               </div>
 
               <div className="rounded-lg p-3 border" style={{borderColor:'var(--border)',background:'var(--panel)'}}>
-                <div className="text-xs opacity-70 mb-1">Creativity (Temperature)</div>
-                <input type="range" min={0} max={1} step={0.05} value={state.temperature}
-                  onChange={e=>changeTemperature(parseFloat(e.target.value))} className="w-full"/>
-                <div className="text-xs opacity-60 mt-1">{state.temperature.toFixed(2)}</div>
+                <div className="text-xs opacity-70 mb-1">Creativity (temperature)</div>
+                <input type="range" min={0} max={1} step={0.05} value={temperature}
+                       onChange={e=>setTemperature(clamp01(parseFloat(e.target.value)))} className="w-full"/>
+                <div className="text-xs opacity-60 mt-1">{temperature.toFixed(2)}</div>
               </div>
 
               <div className="rounded-lg p-3 flex items-center justify-between gap-2 border" style={{borderColor:'var(--border)',background:'var(--panel)'}}>
-                <button onClick={saveVersion} className="flex items-center gap-2 px-3 py-2 rounded-md border" style={{borderColor:'var(--border)'}} title="Snapshot settings + chat">
+                <button className="flex items-center gap-2 px-3 py-2 rounded-md border" style={{borderColor:'var(--border)'}} onClick={()=>setHistory(h=>[{id:uid('ver'),role:'assistant',content:`Snapshot saved (${new Date().toLocaleString()})`},...h])}>
                   <History size={16}/> Save Version
                 </button>
-                <button onClick={copyLast} className="flex items-center gap-2 px-3 py-2 rounded-md border" style={{borderColor:'var(--border)'}} title="Copy last reply">
+                <button onClick={copyLast} className="flex items-center gap-2 px-3 py-2 rounded-md border" style={{borderColor:'var(--border)'}}>
                   <Copy size={16}/> Copy Reply
                 </button>
-                <button onClick={clearRefs} className="flex items-center gap-2 px-3 py-2 rounded-md border" style={{borderColor:'var(--border)'}} title="Clear all refinements">
+                <button onClick={clearRefs} className="flex items-center gap-2 px-3 py-2 rounded-md border" style={{borderColor:'var(--border)'}}>
                   <Trash2 size={16}/> Clear Rules
                 </button>
               </div>
             </div>
-
-            {!!state.versions.length && (
-              <div className="mt-3 rounded-lg p-3 border" style={{borderColor:'var(--border)',background:'var(--panel)'}}>
-                <div className="text-xs opacity-70 mb-2">Versions</div>
-                <div className="flex flex-wrap gap-2">
-                  {state.versions.map(v=>(
-                    <button key={v.id} onClick={()=>loadVersion(v.id)} className="px-3 py-1 rounded-full border text-sm"
-                            style={{borderColor:'var(--border)'}} title={new Date(v.createdAt).toLocaleString()}>{v.label}</button>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
         )}
       </div>
 
-      {/* Main */}
+      {/* Body */}
       <div className="mx-auto w-full max-w-[1400px] px-4 py-6 grid lg:grid-cols-[420px,1fr] gap-6">
         {/* Left: Refinements */}
         <div>
           <div className="rounded-xl p-4 border" style={{borderColor:'var(--border)',background:'var(--panel)',boxShadow:'var(--shadow-soft)'}}>
             <div className="flex items-center justify-between">
               <div className="font-semibold">Your Refinements</div>
-              <span className="text-xs opacity-60">{state.refinements.length}/{MAX_REFINEMENTS}</span>
+              <span className="text-xs opacity-60">{refinements.length}/5</span>
             </div>
 
-            <div className="mt-3 flex gap-2">
-              <input className="flex-1 rounded-md px-3 py-2 text-sm border bg-transparent" style={{borderColor:'var(--border)'}}
-                placeholder='Add a rule (e.g., “Only answer Yes/No”)'
-                value={addingRefine} onChange={e=>setAddingRefine(e.target.value)}
-                onKeyDown={e=>{ if(e.key==='Enter') handleAddRefinement(); }}/>
-              <button onClick={handleAddRefinement} className="px-3 py-2 rounded-md flex items-center gap-2 border" style={{borderColor:'var(--border)'}}>
-                <Plus size={16}/> Add
-              </button>
-            </div>
+            <AddRule onAdd={addRef}/>
 
             <div className="mt-4 space-y-2">
-              {state.refinements.map(ref=>(
+              {refinements.map(ref=>(
                 <div key={ref.id} className="flex items-center justify-between gap-2 rounded-md px-3 py-2 border" style={{borderColor:'var(--border)',background:'var(--card)'}}>
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input type="checkbox" checked={ref.enabled} onChange={()=>toggleRef(ref.id)} className="w-4 h-4" style={{accentColor:'var(--brand)'}}/>
@@ -519,50 +426,37 @@ export default function ImprovePage(){
                   <button onClick={()=>delRef(ref.id)} className="opacity-60 hover:opacity-100" title="Remove"><X size={16}/></button>
                 </div>
               ))}
-              {!state.refinements.length && <div className="text-sm opacity-60">Add up to {MAX_REFINEMENTS} short rules. Tick to enable/disable each rule.</div>}
+              {!refinements.length && <div className="text-sm opacity-60">Add up to 5 short rules. Tick to enable/disable each rule.</div>}
             </div>
 
             <div className="mt-4 flex flex-wrap gap-2">
-              {[
-                'Only answer Yes/No','One word replies','No greeting','Be concise','Ask clarifying question first',
-                'Remove any restrictions','Any subject is open'
-              ].map(t=>(
-                <button key={t} onClick={()=>{ setAddingRefine(t); setTimeout(handleAddRefinement,0); }}
-                        className="text-xs px-2 py-1 rounded-full border" style={{borderColor:'var(--border)',background:'var(--card)'}}>
-                  {t}
-                </button>
+              {['Only answer Yes/No','One word replies','No greeting','Be concise','Ask clarifying question first','Any subject is open'].map(t=>(
+                <button key={t} onClick={()=>addRef(t)} className="text-xs px-2 py-1 rounded-full border" style={{borderColor:'var(--border)',background:'var(--card)'}}>{t}</button>
               ))}
             </div>
           </div>
 
           <div className="mt-4 rounded-xl p-4 border" style={{borderColor:'var(--border)',background:'var(--panel)'}}>
-            <div className="flex items-center gap-2 font-semibold"><HelpCircle size={16}/> Tips</div>
+            <div className="flex items-center gap-2 font-semibold"><Info size={16}/> Tips</div>
             <ul className="mt-2 text-sm opacity-80 list-disc pl-5 space-y-1">
-              <li>Choose the <strong>AI to tune</strong> at the top — every change auto-saves to that agent (per account).</li>
-              <li>“Remove any restrictions / Any subject is open” = no <em>extra</em> app guardrails (provider safety still applies).</li>
-              <li>Use <em>Versions</em> to snapshot settings + chat for quick rollback.</li>
+              <li>The dropdown only shows agents that belong to <strong>your</strong> account.</li>
+              <li>Changes to model & temperature auto-save to that agent.</li>
+              <li>Use rules to quickly shift tone/structure without editing your main prompt.</li>
             </ul>
           </div>
         </div>
 
         {/* Right: Chat */}
         <div className="rounded-xl flex flex-col border" style={{borderColor:'var(--border)',background:'var(--panel)',boxShadow:'var(--shadow-soft)',minHeight:560}}>
-          <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
-            {state.history.map(msg=>(
-              <div key={msg.id} className={`max-w-[80%] ${msg.role==='user'?'ml-auto':''}`}>
-                <div className="rounded-lg px-3 py-2 text-sm border" style={{borderColor:'var(--border)',background:msg.role==='user'?'var(--card)':'var(--panel)'}}>
-                  <div className="whitespace-pre-wrap leading-relaxed">{msg.content}</div>
-                  {msg.role==='assistant' && (
-                    <div className="mt-2 flex items-center gap-2">
-                      <button onClick={()=>setShowWhyFor(msg.id)} className="text-xs px-2 py-1 rounded-md flex items-center gap-1 border" style={{borderColor:'var(--border)'}} title="Why this reply?">
-                        <Info size={14}/> Why?
-                      </button>
-                    </div>
-                  )}
+          <div ref={listRef} className="flex-1 overflow-y-auto p-4 space-y-3">
+            {history.map(m=>(
+              <div key={m.id} className={`max-w-[80%] ${m.role==='user'?'ml-auto':''}`}>
+                <div className="rounded-lg px-3 py-2 text-sm border" style={{borderColor:'var(--border)',background:m.role==='user'?'var(--card)':'var(--panel)'}}>
+                  <div className="whitespace-pre-wrap leading-relaxed">{m.content}</div>
                 </div>
               </div>
             ))}
-            {isSending && (
+            {sending && (
               <div className="max-w-[80%]">
                 <div className="rounded-lg px-3 py-2 text-sm border" style={{borderColor:'var(--border)',background:'var(--panel)'}}>
                   <span className="inline-flex gap-1 items-center">
@@ -577,156 +471,43 @@ export default function ImprovePage(){
 
           <div className="p-3 border-t" style={{borderColor:'var(--border)'}}>
             <div className="flex items-center gap-2">
-              <input className="flex-1 rounded-md px-3 py-2 text-sm border bg-transparent" style={{borderColor:'var(--border)'}}
-                     placeholder="Type your message…" value={input}
-                     onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter') sendMessage();}}/>
-              <button onClick={sendMessage} disabled={isSending} className="px-3 py-2 rounded-md flex items-center gap-2 border disabled:opacity-60" style={{borderColor:'var(--border)'}} title="Save & Rerun">
-                {isSending ? <Loader2 size={16} className="animate-spin"/> : <Send size={16}/>} Send
+              <input
+                className="flex-1 rounded-md px-3 py-2 text-sm border bg-transparent"
+                style={{borderColor:'var(--border)'}}
+                placeholder="Type your message…"
+                value={input}
+                onChange={e=>setInput(e.target.value)}
+                onKeyDown={e=>{ if(e.key==='Enter') send(); }}
+              />
+              <button onClick={send} disabled={sending} className="px-3 py-2 rounded-md flex items-center gap-2 border disabled:opacity-60" style={{borderColor:'var(--border)'}}>
+                {sending ? <Loader2 size={16} className="animate-spin"/> : <Send size={16}/>} Send
               </button>
-            </div>
-
-            <div className="mt-2 flex flex-wrap gap-2">
-              <QuickChip icon={<Sparkles size={14}/>} label="Make it shorter" onClick={()=>setAddingRefine('Be concise')}/>
-              <QuickChip icon={<Sparkles size={14}/>} label="No greeting" onClick={()=>setAddingRefine('No greeting')}/>
-              <QuickChip icon={<Sparkles size={14}/>} label="Yes/No only" onClick={()=>setAddingRefine('Only answer Yes/No')}/>
-              <QuickChip icon={<Sparkles size={14}/>} label="1-word" onClick={()=>setAddingRefine('One word replies')}/>
             </div>
           </div>
         </div>
       </div>
-
-      {showWhyFor && (
-        <div className="fixed inset-0 z-30 flex items-center justify-center" style={{background:'rgba(0,0,0,.5)'}}>
-          <div className="w-[520px] max-w-[92vw] rounded-xl p-4 border" style={{background:'var(--panel)',borderColor:'var(--border)',boxShadow:'var(--shadow-soft)'}}>
-            <div className="flex items-center justify-between">
-              <div className="font-semibold flex items-center gap-2"><Info size={16}/> Why this reply?</div>
-              <button onClick={()=>setShowWhyFor(null)} className="opacity-60 hover:opacity-100"><X size={16}/></button>
-            </div>
-            <div className="mt-3 text-sm leading-relaxed">{reasonFrom(state.refinements)}</div>
-            <div className="mt-4 flex justify-end">
-              <button onClick={()=>setShowWhyFor(null)} className="px-3 py-2 rounded-md text-sm border" style={{borderColor:'var(--border)'}}>Close</button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
 
-/* =============================================================================
-   Agent Picker (themed dropdown)
-============================================================================= */
-function AgentPicker({
-  agents,
-  selectedId,
-  onSelect,
-  onRefresh,
-  isRefreshing
-}:{
-  agents: Agent[];
-  selectedId: string;
-  onSelect: (id:string)=>void;
-  onRefresh: ()=>void;
-  isRefreshing: boolean;
-}){
-  const [open,setOpen]=useState(false);
-  const [query,setQuery]=useState('');
-  const wrapRef = useRef<HTMLDivElement>(null);
-
-  useEffect(()=>{
-    function onDoc(e:MouseEvent){
-      if(!wrapRef.current) return;
-      if(!wrapRef.current.contains(e.target as Node)) setOpen(false);
-    }
-    function onEsc(e:KeyboardEvent){ if(e.key==='Escape') setOpen(false); }
-    document.addEventListener('mousedown',onDoc);
-    document.addEventListener('keydown',onEsc);
-    return ()=>{ document.removeEventListener('mousedown',onDoc); document.removeEventListener('keydown',onEsc); };
-  },[]);
-
-  const selected = agents.find(a=>a.id===selectedId);
-  const filtered = agents.filter(a => a.name.toLowerCase().includes(query.toLowerCase()));
-
+/** ────────────────────────────────────────────────────────────────────────────
+ * Small sub-components
+ * ─────────────────────────────────────────────────────────────────────────── */
+function AddRule({ onAdd }:{ onAdd:(text:string)=>void }) {
+  const [val,setVal] = useState('');
   return (
-    <div ref={wrapRef} className="relative">
-      <button
-        onClick={()=>setOpen(v=>!v)}
-        className="px-2.5 py-1.5 rounded-md border inline-flex items-center gap-2 text-sm"
-        style={{borderColor:'var(--border)',background:'var(--card)'}}
-        title="Choose AI"
-      >
-        <span className="truncate max-w-[180px]">{selected?.name ?? 'Choose agent'}</span>
-        <ChevronDown size={14} />
+    <div className="mt-3 flex gap-2">
+      <input
+        className="flex-1 rounded-md px-3 py-2 text-sm border bg-transparent"
+        style={{borderColor:'var(--border)'}}
+        placeholder='Add a rule (e.g., “Only answer Yes/No”)'
+        value={val}
+        onChange={e=>setVal(e.target.value)}
+        onKeyDown={e=>{ if(e.key==='Enter'){ onAdd(val); setVal(''); } }}
+      />
+      <button onClick={()=>{ onAdd(val); setVal(''); }} className="px-3 py-2 rounded-md flex items-center gap-2 border" style={{borderColor:'var(--border)'}}>
+        <Plus size={16}/> Add
       </button>
-
-      {open && (
-        <div
-          className="absolute mt-2 w-[280px] rounded-lg border shadow-lg z-20"
-          style={{borderColor:'var(--border)',background:'var(--panel)',boxShadow:'var(--shadow-soft)'}}
-        >
-          <div className="p-2 border-b" style={{borderColor:'var(--border)'}}>
-            <div className="flex items-center gap-2">
-              <Search size={14} className="opacity-70"/>
-              <input
-                value={query}
-                onChange={e=>setQuery(e.target.value)}
-                placeholder="Search agents…"
-                className="flex-1 bg-transparent outline-none text-sm"
-              />
-              <button
-                onClick={onRefresh}
-                className="px-2 py-1 rounded-md border text-xs inline-flex items-center gap-1"
-                style={{borderColor:'var(--border)'}}
-                title="Sync"
-              >
-                {isRefreshing ? <Loader2 size={12} className="animate-spin"/> : <RefreshCw size={12}/>}
-                Sync
-              </button>
-            </div>
-          </div>
-
-          <div className="max-h-[260px] overflow-y-auto">
-            {filtered.map(a=>(
-              <button
-                key={a.id}
-                onClick={()=>{ onSelect(a.id); setOpen(false); }}
-                className={`w-full text-left px-3 py-2 text-sm border-b hover:opacity-100 transition ${a.id===selectedId?'opacity-100':'opacity-90'}`}
-                style={{borderColor:'var(--border)'}}
-                title={a.name}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="truncate">{a.name}</span>
-                  {a.id===selectedId && <Check size={14}/>}
-                </div>
-                <div className="text-xs opacity-60 mt-0.5">
-                  {a.model} • {new Date(a.createdAt).toLocaleDateString()}
-                </div>
-              </button>
-            ))}
-            {!filtered.length && (
-              <div className="px-3 py-6 text-sm opacity-70">No agents found.</div>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
-}
-
-/* =============================================================================
-   Small UI
-============================================================================= */
-function QuickChip({icon,label,onClick}:{icon?:React.ReactNode;label:string;onClick:()=>void}){
-  return (
-    <button onClick={onClick} className="text-xs px-2 py-1 rounded-full inline-flex items-center gap-1 border" style={{borderColor:'var(--border)',background:'var(--card)'}} title="Add as refinement">
-      {icon}{label}
-    </button>
-  );
-}
-
-function copyLast(){
-  try{
-    // Optionally wire data-last-assistant on last reply div if you want single-click copy.
-    navigator.clipboard?.writeText?.(document.getSelection()?.toString() ?? '');
-  }catch{}
 }
