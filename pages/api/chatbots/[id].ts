@@ -7,11 +7,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!id) return res.status(400).json({ error: 'Missing id' });
 
   try {
+    // READ
     if (req.method === 'GET') {
       if (!OPENAI_API_KEY) return res.status(404).json({ error: 'Not found' });
 
       const r = await fetch(`https://api.openai.com/v1/assistants/${id}`, {
-        headers: { Authorization: `Bearer ${OPENAI_API_KEY}` },
+        headers: {
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
+          'Content-Type': 'application/json',
+          'OpenAI-Beta': 'assistants=v2',   // <-- add here
+        },
         cache: 'no-store',
       });
       if (!r.ok) return res.status(r.status).json({ error: await r.text().catch(() => '') });
@@ -27,6 +32,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       });
     }
 
+    // UPDATE
     if (req.method === 'PATCH') {
       if (!OPENAI_API_KEY) return res.status(400).json({ error: 'OPENAI_API_KEY not set' });
 
@@ -40,12 +46,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         payload.metadata = { ...(payload.metadata || {}), temperature: String(temperature) };
       }
 
-      // OpenAI Assistants update uses POST to the resource path
+      // <-- THIS is the exact call you asked about (Assistants update is POST to the resource)
       const r = await fetch(`https://api.openai.com/v1/assistants/${id}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${OPENAI_API_KEY}`,
+          'OpenAI-Beta': 'assistants=v2',   // <-- add here
         },
         body: JSON.stringify(payload),
       });
