@@ -3,38 +3,27 @@
 
 import React, { useState } from 'react';
 import dynamic from 'next/dynamic';
-import { Bot, Code2, Play, MessagesSquare, Phone, Wand2, ChevronDown, ChevronUp, Gauge, Timer } from 'lucide-react';
+import {
+  Bot, Code2, Play, MessagesSquare, Phone, Wand2,
+  ChevronDown, ChevronUp, Gauge, Timer
+} from 'lucide-react';
 
-/* ---------- Safe dynamic import of AssistantRail (won’t crash if it fails) ---------- */
+/* Safe dynamic rail */
 const AssistantRail = dynamic(
   () =>
     import('@/components/voice/AssistantRail')
-      .then((m) => m.default ?? m)
-      .catch(() => {
-        // Fallback component if import fails (path/props issues)
-        return () => (
-          <div className="px-3 py-4 text-sm opacity-70" style={{ color: 'var(--text)' }}>
-            Rail unavailable
-          </div>
-        );
-      }),
-  { ssr: false, loading: () => <div className="px-3 py-4 text-sm opacity-70">Loading assistants…</div> }
+      .then(m => m.default ?? m)
+      .catch(() => () => <div className="px-3 py-3 text-xs opacity-70">Rail unavailable</div>),
+  { ssr: false, loading: () => <div className="px-3 py-3 text-xs opacity-70">Loading…</div> }
 );
 
-/* ------------------------------ Error Boundary ------------------------------ */
-class RailBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean }> {
-  constructor(props: any) { super(props); this.state = { hasError: false }; }
-  static getDerivedStateFromError() { return { hasError: true }; }
-  componentDidCatch() { /* no-op, we just show fallback */ }
-  render() {
-    if (this.state.hasError) {
-      return <div className="px-3 py-4 text-sm opacity-70">Rail crashed</div>;
-    }
-    return this.props.children;
-  }
+class RailBoundary extends React.Component<{children:React.ReactNode},{hasError:boolean}> {
+  constructor(p:any){ super(p); this.state={hasError:false}; }
+  static getDerivedStateFromError(){ return {hasError:true}; }
+  render(){ return this.state.hasError ? <div className="px-3 py-3 text-xs opacity-70">Rail crashed</div> : this.props.children; }
 }
 
-/* ------------------------------ Local theme ------------------------------ */
+/* ===== Compact tokens ===== */
 const GREEN = '#10b981';
 const GREEN_HOVER = '#0ea473';
 
@@ -42,42 +31,76 @@ function LocalTokens() {
   return (
     <style>{`
       .va { --panel: rgba(13,15,17,0.92); --card: rgba(18,20,23,0.88);
-            --border: rgba(106,247,209,0.18); --text: #E9FBF5; --muted: #9bb7ae; }
-      .va { color: var(--text); }
-      .va-panel{ background:var(--panel); border:1px solid var(--border); border-radius:30px;
-                 box-shadow: inset 0 0 22px rgba(0,0,0,.28), 0 0 18px rgba(106,247,209,.05), 0 0 22px rgba(0,255,194,.05); }
-      .va-card{ background:var(--card); border:1px solid var(--border); border-radius:20px;
-                box-shadow: 0 16px 36px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.07), 0 0 0 1px rgba(0,255,194,.05); }
-      .input,.select,.textarea{ width:100%; background:var(--card); border:1px solid var(--border); color:var(--text);
-                                border-radius:14px; padding:0 .9rem; outline:none; font-size:14px; }
-      .input,.select{ height:46px; }
-      .textarea{ min-height:160px; padding:.8rem .9rem; resize:vertical; line-height:1.5; }
-      .btn{ height:46px; padding:0 1rem; border-radius:14px; display:inline-flex; align-items:center; gap:.55rem;
-            background:var(--card); color:var(--text); border:1px solid var(--border); font-weight:600; font-size:14px; transition:transform .06s ease; }
+            --border: rgba(106,247,209,0.18); --text: #E9FBF5; --muted: #9bb7ae; --fg:#E9FBF5; }
+      .va { color: var(--fg); font-size:13px; } /* smaller body text */
+      .va-panel{ background:var(--panel); border:1px solid var(--border); border-radius:24px;
+                 box-shadow: inset 0 0 20px rgba(0,0,0,.28), 0 0 14px rgba(106,247,209,.05), 0 0 18px rgba(0,255,194,.05); }
+      .va-card{ background:var(--card); border:1px solid var(--border); border-radius:14px;
+                box-shadow: 0 14px 28px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.06), 0 0 0 1px rgba(0,255,194,.05); }
+
+      /* Compact controls */
+      .input,.select,.textarea{
+        width:100%; background:var(--card); border:1px solid var(--border); color:var(--fg);
+        border-radius:12px; padding:0 .7rem; outline:none; font-size:13px;
+      }
+      .input,.select{ height:34px; }            /* shorter height */
+      .textarea{ min-height:130px; padding:.6rem .7rem; line-height:1.45; font-size:13px; }
+
+      .btn{
+        height:34px; padding:0 .75rem; border-radius:12px; display:inline-flex; align-items:center; gap:.45rem;
+        background:var(--card); color:var(--fg); border:1px solid var(--border); font-weight:600; font-size:13px;
+        transition:transform .06s ease;
+      }
       .btn:hover{ transform:translateY(-1px); }
-      .btn-primary{ height:46px; padding:0 1.1rem; border-radius:18px; display:inline-flex; align-items:center; gap:.6rem;
-                    background:${GREEN}; border:1px solid ${GREEN}; color:#fff; font-weight:700; box-shadow:0 10px 24px rgba(16,185,129,.22); }
-      .btn-primary:hover{ background:${GREEN_HOVER}; box-shadow:0 12px 28px rgba(16,185,129,.32); }
-      .kpi{ padding:16px; } .kpi-title{ font-size:12.5px; color:var(--muted); margin-bottom:6px; } .kpi-value{ font-size:19px; font-weight:800; }
-      .label-xs{ font-size:12.5px; color:var(--muted); }
-      .pill{ height:34px; padding:0 .9rem; border-radius:10px; border:1px solid var(--border); background:var(--card); font-weight:650; }
-      .acc-head{ display:flex; align-items:center; justify-content:space-between; padding:16px 18px; cursor:pointer; }
-      .acc-title{ display:flex; align-items:center; gap:10px; font-weight:700; font-size:14px; }
+      .btn-primary{
+        height:34px; padding:0 .85rem; border-radius:14px; display:inline-flex; align-items:center; gap:.5rem;
+        background:${GREEN}; border:1px solid ${GREEN}; color:#0b1210; font-weight:700; font-size:13px;
+        box-shadow:0 8px 20px rgba(16,185,129,.20);
+      }
+      .btn-primary:hover{ background:${GREEN_HOVER}; box-shadow:0 10px 24px rgba(16,185,129,.28); }
+
+      .kpi{ padding:12px; }
+      .kpi-title{ font-size:11.5px; color:var(--muted); margin-bottom:4px; }
+      .kpi-value{ font-size:17px; font-weight:800; }
+
+      .label-xs{ font-size:11.5px; color:var(--muted); }
+      .pill{
+        height:30px; padding:0 .7rem; border-radius:9px;
+        border:1px solid var(--border); background:var(--card); font-weight:650; font-size:12.5px;
+        display:inline-flex; align-items:center; gap:.4rem;
+      }
+      .acc-head{ display:flex; align-items:center; justify-content:space-between; padding:14px 16px; cursor:pointer; }
+      .acc-title{ display:flex; align-items:center; gap:8px; font-weight:700; font-size:13px; }
       .sep{ border-top:1px solid var(--border); }
-      .row{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+      .row{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
       @media (max-width:980px){ .row{ grid-template-columns:1fr; } }
+
+      /* Make icons compact (≈14px) and aligned like API Keys */
+      .ico{ width:14px; height:14px; display:inline-block; }
     `}</style>
   );
 }
 
+/* Compact toggle */
 const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}) => (
   <button
     onClick={()=>onChange(!checked)}
     className="btn"
-    style={{ height:34, padding:'0 6px', borderRadius:999, background: checked ? 'rgba(16,185,129,.18)' : 'var(--card)', borderColor: checked ? GREEN : 'var(--border)', width:56, justifyContent:'flex-start' }}
+    style={{
+      height:28, width:50, padding:'0 6px', borderRadius:999,
+      justifyContent:'flex-start',
+      background: checked ? 'rgba(16,185,129,.18)' : 'var(--card)',
+      borderColor: checked ? GREEN : 'var(--border)'
+    }}
     aria-pressed={checked}
   >
-    <span style={{ width:22, height:22, borderRadius:999, background: checked ? GREEN : 'rgba(255,255,255,.12)', transform:`translateX(${checked?22:0}px)`, transition:'transform .18s ease', boxShadow: checked ? '0 0 10px rgba(16,185,129,.45)' : undefined }} />
+    <span
+      style={{
+        width:18, height:18, borderRadius:999, background: checked ? GREEN : 'rgba(255,255,255,.12)',
+        transform:`translateX(${checked?22:0}px)`, transition:'transform .18s ease',
+        boxShadow: checked ? '0 0 8px rgba(16,185,129,.45)' : undefined
+      }}
+    />
   </button>
 );
 
@@ -85,7 +108,7 @@ export default function VoiceAgentSection() {
   const [openModel, setOpenModel] = useState(true);
   const [openTranscriber, setOpenTranscriber] = useState(true);
 
-  // —— Model state
+  // state (unchanged)
   const [provider, setProvider] = useState('OpenAI');
   const [model, setModel] = useState('GPT 4o Cluster');
   const [firstMode, setFirstMode] = useState('Assistant speaks first');
@@ -93,10 +116,8 @@ export default function VoiceAgentSection() {
   const [systemPrompt, setSystemPrompt] = useState(
     'This is a blank template with minimal defaults, you can change the model, temperature, and messages.'
   );
-
-  // —— Transcriber state (FIXED the crash here)
   const [asrProvider, setAsrProvider] = useState('Deepgram');
-  const [asrLang, setAsrLang] = useState('En');        // ✅ removed the stray "the"
+  const [asrLang, setAsrLang] = useState('En');
   const [asrModel, setAsrModel] = useState('Nova 2');
   const [denoise, setDenoise] = useState(false);
   const [numerals, setNumerals] = useState(false);
@@ -106,33 +127,32 @@ export default function VoiceAgentSection() {
     <div className="va w-full" style={{ background:'var(--bg)', color:'var(--text)' }}>
       <LocalTokens />
 
-      <div className="grid w-full" style={{ gridTemplateColumns:'312px 1fr' }}>
-        {/* LEFT: rail, fully guarded */}
+      {/* 1px breathing room on the right edge */}
+      <div className="grid w-full pr-[1px]" style={{ gridTemplateColumns:'312px 1fr' }}>
+        {/* LEFT rail */}
         <div className="border-r" style={{ borderColor:'var(--border)' }}>
-          <RailBoundary>
-            <AssistantRail />
-          </RailBoundary>
+          <RailBoundary><AssistantRail /></RailBoundary>
         </div>
 
-        {/* RIGHT: main */}
-        <div className="px-4 md:px-6 lg:px-8 py-6 mx-auto w-full max-w-[1180px]">
-          {/* Header */}
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        {/* RIGHT content */}
+        <div className="px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w-[1160px]">
+          {/* header */}
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <span className="pill"><Bot size={16}/> Voice Studio</span>
+              <span className="pill"><Bot className="ico"/> Voice Studio</span>
             </div>
             <div className="flex items-center gap-2">
-              <button className="btn"><Code2 size={16}/> Code</button>
-              <button className="btn"><Play size={16}/> Test</button>
-              <button className="btn"><MessagesSquare size={16}/> Chat</button>
-              <button className="btn-primary"><Phone size={16}/> Talk to Assistant</button>
+              <button className="btn"><Code2 className="ico"/> Code</button>
+              <button className="btn"><Play className="ico"/> Test</button>
+              <button className="btn"><MessagesSquare className="ico"/> Chat</button>
+              <button className="btn-primary"><Phone className="ico"/> Talk to Assistant</button>
               <span className="pill">Published</span>
             </div>
           </div>
 
-          {/* Tabs (visual) */}
-          <div className="mb-5 flex flex-wrap items-center gap-8">
-            <div className="flex flex-wrap items-center gap-8">
+          {/* tabs */}
+          <div className="mb-4 flex flex-wrap items-center gap-6">
+            <div className="flex flex-wrap items-center gap-6">
               <span className="pill">Model</span>
               <span className="pill">Voice</span>
               <span className="pill">Transcriber</span>
@@ -145,20 +165,19 @@ export default function VoiceAgentSection() {
           </div>
 
           {/* KPIs */}
-          <div className="grid gap-4 md:grid-cols-2 mb-6">
+          <div className="grid gap-3 md:grid-cols-2 mb-5">
             <div className="va-card kpi"><div className="kpi-title">Cost</div><div className="kpi-value">~$0.1/min</div></div>
             <div className="va-card kpi"><div className="kpi-title">Latency</div><div className="kpi-value">~1050 ms</div></div>
           </div>
 
-          {/* Panels */}
           <div className="va-panel overflow-hidden">
             {/* Model */}
             <div className="acc-head" onClick={()=>setOpenModel(v=>!v)}>
-              <div className="acc-title"><span className="pill" style={{height:30}}><Gauge size={14}/></span>Model</div>
-              {openModel ? <ChevronUp size={18} style={{ color:'var(--muted)' }}/> : <ChevronDown size={18} style={{ color:'var(--muted)' }}/>}
+              <div className="acc-title"><span className="pill" style={{height:26}}><Gauge className="ico"/></span>Model</div>
+              {openModel ? <ChevronUp className="ico" style={{ color:'var(--muted)' }}/> : <ChevronDown className="ico" style={{ color:'var(--muted)' }}/>}
             </div>
             {openModel && (
-              <div className="px-5 pb-5">
+              <div className="px-4 pb-4">
                 <div className="row">
                   <div>
                     <label className="label-xs">Provider</label>
@@ -174,7 +193,7 @@ export default function VoiceAgentSection() {
                   </div>
                 </div>
 
-                <div className="row mt-3">
+                <div className="row mt-2.5">
                   <div>
                     <label className="label-xs">First Message Mode</label>
                     <select className="select" value={firstMode} onChange={e=>setFirstMode(e.target.value)}>
@@ -187,10 +206,10 @@ export default function VoiceAgentSection() {
                   </div>
                 </div>
 
-                <div className="mt-3">
-                  <div className="flex items-center justify-between mb-2">
+                <div className="mt-2.5">
+                  <div className="flex items-center justify-between mb-1.5">
                     <label className="label-xs">System Prompt</label>
-                    <div className="flex items-center gap-3"><button className="btn"><Wand2 size={16}/> Generate</button></div>
+                    <div className="flex items-center gap-2"><button className="btn"><Wand2 className="ico"/> Generate</button></div>
                   </div>
                   <textarea className="textarea" value={systemPrompt} onChange={e=>setSystemPrompt(e.target.value)} />
                 </div>
@@ -201,11 +220,11 @@ export default function VoiceAgentSection() {
 
             {/* Transcriber */}
             <div className="acc-head" onClick={()=>setOpenTranscriber(v=>!v)}>
-              <div className="acc-title"><span className="pill" style={{height:30}}><Timer size={14}/></span>Transcriber</div>
-              {openTranscriber ? <ChevronUp size={18} style={{ color:'var(--muted)' }}/> : <ChevronDown size={18} style={{ color:'var(--muted)' }}/>}
+              <div className="acc-title"><span className="pill" style={{height:26}}><Timer className="ico"/></span>Transcriber</div>
+              {openTranscriber ? <ChevronUp className="ico" style={{ color:'var(--muted)' }}/> : <ChevronDown className="ico" style={{ color:'var(--muted)' }}/>}
             </div>
             {openTranscriber && (
-              <div className="px-5 pb-6">
+              <div className="px-4 pb-5">
                 <div className="row">
                   <div>
                     <label className="label-xs">Provider</label>
@@ -221,31 +240,38 @@ export default function VoiceAgentSection() {
                   </div>
                 </div>
 
-                <div className="row mt-3">
+                <div className="row mt-2.5">
                   <div>
                     <label className="label-xs">Model</label>
                     <select className="select" value={asrModel} onChange={e=>setAsrModel(e.target.value)}>
                       <option>Nova 2</option><option>Nova</option><option>Whisper Large-V3</option>
                     </select>
                   </div>
-                  <div className="flex items-end gap-3">
+                  <div className="flex items-end gap-2">
                     <div className="flex-1">
                       <label className="label-xs">Confidence Threshold</label>
-                      <div className="flex items-center gap-3">
-                        <input type="range" min={0} max={1} step={0.01} value={confidence} onChange={(e)=>setConfidence(parseFloat(e.target.value))} style={{ width:'100%' }} />
-                        <div className="va-card px-3 py-2 rounded-md text-sm" style={{minWidth:54, textAlign:'center'}}>{confidence.toFixed(1)}</div>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="range" min={0} max={1} step={0.01}
+                          value={confidence}
+                          onChange={(e)=>setConfidence(parseFloat(e.target.value))}
+                          style={{ width:'100%' }}
+                        />
+                        <div className="va-card px-2.5 py-1.5 rounded-md text-xs" style={{minWidth:46, textAlign:'center'}}>
+                          {confidence.toFixed(1)}
+                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-10 mt-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-3">
                   <div className="flex items-center justify-between">
-                    <div><div className="font-semibold text-sm">Background Denoising Enabled</div><div className="label-xs">Filter background noise while the user is talking.</div></div>
+                    <div><div className="font-semibold text-[13px]">Background Denoising Enabled</div><div className="label-xs">Filter background noise while the user is talking.</div></div>
                     <Toggle checked={denoise} onChange={setDenoise} />
                   </div>
                   <div className="flex items-center justify-between">
-                    <div><div className="font-semibold text-sm">Use Numerals</div><div className="label-xs">Convert numbers from words to digits in transcription.</div></div>
+                    <div><div className="font-semibold text-[13px]">Use Numerals</div><div className="label-xs">Convert numbers from words to digits in transcription.</div></div>
                     <Toggle checked={numerals} onChange={setNumerals} />
                   </div>
                 </div>
@@ -253,6 +279,7 @@ export default function VoiceAgentSection() {
             )}
           </div>
         </div>
+
       </div>
     </div>
   );
