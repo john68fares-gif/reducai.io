@@ -186,6 +186,91 @@ function CreateModal({ open, onClose, onCreate }:{
   );
 }
 
+/* ---------- Card ---------- */
+function AssistantCard({
+  a, active, onClick, onRename, onDelete,
+}:{
+  a:AssistantLite;
+  active:boolean;
+  onClick:()=>void;
+  onRename:()=>void;
+  onDelete:()=>void;
+}) {
+  return (
+    <motion.div
+      layout
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -6 }}
+      onClick={onClick}
+      className="relative p-3 rounded-[14px] cursor-pointer transition-transform"
+      whileHover={{ y: -2 }}
+      style={{
+        background: 'var(--panel)',
+        color: 'var(--text)',
+        /* base soft lift */
+        boxShadow: active
+          ? '0 16px 36px rgba(0,0,0,.38), 0 0 0 1px rgba(0,255,194,.10)'
+          : '0 6px 18px rgba(0,0,0,.22), 0 0 0 1px rgba(255,255,255,.03)',
+      }}
+    >
+      {/* top shadow/glow strip */}
+      <div
+        className="pointer-events-none absolute left-0 right-0 rounded-t-[14px]"
+        style={{
+          top: -1,
+          height: 14,
+          background: active
+            ? 'linear-gradient(180deg, rgba(0,0,0,.55), rgba(0,0,0,0))'
+            : 'linear-gradient(180deg, rgba(0,0,0,.38), rgba(0,0,0,0))',
+          boxShadow: active ? '0 0 24px rgba(0,255,194,.20)' : undefined,
+        }}
+      />
+
+      <div className="flex items-center gap-3">
+        <div className="w-8 h-8 rounded-xl grid place-items-center"
+             style={{ background:'var(--brand-weak)', boxShadow: active ? '0 0 0 1px rgba(0,255,194,.18)' : undefined }}>
+          <Bot className="w-4 h-4" style={{ color:'var(--brand)' }} />
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <div className="font-semibold text-sm truncate">{a.name}</div>
+          <div className="text-[11.5px] truncate" style={{ color:'var(--text-muted)' }}>{a.purpose || '—'}</div>
+        </div>
+
+        <div className="flex items-center gap-1">
+          <button
+            className="px-2 h-[30px] rounded-[10px]"
+            style={{ background:'var(--card)', border:'1px solid var(--border)' }}
+            onClick={(e)=>{ e.stopPropagation(); onRename(); }}
+            aria-label="Rename"
+          >
+            <Edit3 className="w-4 h-4" />
+          </button>
+          <button
+            className="px-2 h-[30px] rounded-[10px]"
+            style={{ background:'var(--card)', border:'1px solid var(--border)' }}
+            onClick={(e)=>{ e.stopPropagation(); onDelete(); }}
+            aria-label="Delete"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+
+      {/* active rim (subtle) */}
+      {active && (
+        <div
+          className="pointer-events-none absolute inset-0 rounded-[14px]"
+          style={{
+            boxShadow: 'inset 0 0 0 1px rgba(0,255,194,.22), 0 0 30px rgba(0,255,194,.10)',
+          }}
+        />
+      )}
+    </motion.div>
+  );
+}
+
 /* ---------- Main ---------- */
 export default function AssistantRail() {
   const [assistants,setAssistants] = useState<AssistantLite[]>([]);
@@ -226,25 +311,27 @@ export default function AssistantRail() {
   const delName = assistants.find(a=>a.id===delId)?.name;
 
   return (
-    <div className="px-4 py-4">
+    <div className="px-3 py-4">
       {/* Label */}
-      <div className="text-[11px] font-semibold tracking-[.12em]" style={{ color:'var(--text-muted)' }}>ASSISTANTS</div>
+      <div className="text-[11px] font-semibold tracking-[.12em] mb-2" style={{ color:'var(--text-muted)' }}>
+        ASSISTANTS
+      </div>
 
-      {/* Header */}
-      <div className="flex items-center justify-between mt-2 mb-4">
+      {/* Header (tighter spacing like Vapi) */}
+      <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <div className="w-10 h-10 rounded-xl grid place-items-center shadow-md" style={{ background:'var(--brand-weak)' }}>
+          <div className="w-9 h-9 rounded-xl grid place-items-center shadow"
+               style={{ background:'var(--brand-weak)' }}>
             <Bot className="w-4 h-4" style={{ color:'var(--brand)' }} />
           </div>
           <span className="font-semibold text-sm" style={{ color:'var(--text)' }}>Assistants</span>
         </div>
 
-        {/* Vapi-style Create */}
         <button
           type="button"
           className="inline-flex items-center gap-2 select-none"
           style={{
-            height: 36,
+            height: 34,
             padding: '0 12px',
             borderRadius: 10,
             background: GREEN,
@@ -254,8 +341,6 @@ export default function AssistantRail() {
             fontSize: 13,
             fontWeight: 700,
             lineHeight: 1,
-            WebkitAppearance: 'none' as any,
-            appearance: 'none',
           }}
           onMouseEnter={(e)=> (e.currentTarget.style.background = GREEN_HOVER)}
           onMouseLeave={(e)=> (e.currentTarget.style.background = GREEN)}
@@ -263,73 +348,39 @@ export default function AssistantRail() {
           onMouseUp={(e)=> (e.currentTarget.style.transform = 'translateY(0)')}
           onClick={()=> setCreateOpen(true)}
         >
-          <Plus className="w-4 h-4" /> Create Assistant
+          <Plus className="w-4 h-4" /> Create
         </button>
       </div>
 
       {/* Search */}
-      <div className="flex items-center gap-2 mb-4">
+      <div className="flex items-center gap-2 mb-3">
         <Search className="w-4 h-4" style={{ color:'var(--text-muted)' }} />
         <input
           value={q}
           onChange={e=>setQ(e.target.value)}
           placeholder="Search assistants"
-          className="flex-1 h-[36px] rounded-[10px] px-3 text-sm outline-none"
+          className="flex-1 h-[34px] rounded-[10px] px-3 text-sm outline-none"
           style={{ background:'var(--card)', border:'1px solid var(--border)', color:'var(--text)' }}
         />
         {q && (
-          <button onClick={()=>setQ('')} className="px-2 h-[36px] rounded-[10px]" style={{ background:'var(--card)', border:'1px solid var(--border)' }}>
+          <button onClick={()=>setQ('')} className="px-2 h-[34px] rounded-[10px]" style={{ background:'var(--card)', border:'1px solid var(--border)' }}>
             <X className="w-4 h-4" style={{ color:'var(--text-muted)' }}/>
           </button>
         )}
       </div>
 
-      {/* Assistants list */}
-      <div className="space-y-3">
+      {/* Assistants list (tight vertical rhythm) */}
+      <div className="space-y-2.5">
         <AnimatePresence initial={false}>
           {filtered.map(a=>(
-            <motion.div
+            <AssistantCard
               key={a.id}
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              whileHover={{ y: -2, boxShadow: '0 10px 28px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.04)' }}
-              className="p-3 rounded-[14px] cursor-pointer transition-colors"
-              onClick={()=>setActiveId(a.id)}
-              style={{
-                background: 'var(--panel)',
-                boxShadow: '0 4px 14px rgba(0,0,0,.22)',
-                color: 'var(--text)',
-              }}
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-xl grid place-items-center" style={{ background:'var(--brand-weak)' }}>
-                  <Bot className="w-4 h-4" style={{ color:'var(--brand)' }} />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="font-semibold text-sm truncate">{a.name}</div>
-                  <div className="text-[11.5px] truncate" style={{ color:'var(--text-muted)' }}>{a.purpose || '—'}</div>
-                </div>
-                <div className="flex items-center gap-1">
-                  <button
-                    className="px-2 h-[30px] rounded-[10px]"
-                    style={{ background:'var(--card)', border:'1px solid var(--border)' }}
-                    onClick={(e)=>{ e.stopPropagation(); setRenId(a.id); }}
-                    aria-label="Rename"
-                  >
-                    <Edit3 className="w-4 h-4" />
-                  </button>
-                  <button
-                    className="px-2 h-[30px] rounded-[10px]"
-                    style={{ background:'var(--card)', border:'1px solid var(--border)' }}
-                    onClick={(e)=>{ e.stopPropagation(); setDelId(a.id); }}
-                    aria-label="Delete"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            </motion.div>
+              a={a}
+              active={a.id === activeId}
+              onClick={()=> setActiveId(a.id)}
+              onRename={()=> setRenId(a.id)}
+              onDelete={()=> setDelId(a.id)}
+            />
           ))}
         </AnimatePresence>
 
