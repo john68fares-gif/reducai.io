@@ -5,20 +5,17 @@ import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Copy, Sparkles, ChevronDown, ChevronRight, FileText, Mic2, BookOpen, SlidersHorizontal,
-  UploadCloud, RefreshCw, X, Phone as PhoneIcon, Rocket, PhoneOff, MessageSquare, ListTree,
-  AudioLines, Volume2, Save, Trash2, KeyRound
+  UploadCloud, RefreshCw, X, Phone as PhoneIcon, Rocket, PhoneOff, MessageSquare, ListTree, AudioLines, Volume2, Save, Trash2
 } from 'lucide-react';
 
 import AssistantRail, { type AssistantLite } from '@/components/voice/AssistantRail';
 import WebCallButton from '@/components/voice/WebCallButton';
 import { scopedStorage } from '@/utils/scoped-storage';
 
-/* ======= Theme (Cosmic Night from your screenshots) ======= */
 const SCOPE = 'va-scope';
-const ACCENT_DARK = 'oklch(0.5417 0.1790 288.0332)';     // purple
-const TEXT_DARK = 'oklch(0.3015 0.0572 282.8)';
-const CARD_DARK = '#0e1213';
-const BG_DARK   = '#0b0f12';
+const ACCENT = '#10b981';
+const ACCENT_HOVER = '#0ea371';
+const BTN_SHADOW = '0 10px 24px rgba(16,185,129,.22)';
 
 type Provider = 'openai';
 type ModelId = 'gpt-4o' | 'gpt-4o-mini' | 'gpt-4.1' | 'gpt-3.5-turbo';
@@ -68,17 +65,14 @@ type Assistant = {
   };
 };
 
-type ApiKey = { id: string; name: string; key: string; provider?: 'openai'|'elevenlabs'|'deepgram' };
-
 const LS_LIST = 'voice:assistants.v1';
 const ak = (id: string) => `voice:assistant:${id}`;
 const LS_CALLS = 'voice:calls.v1';
 const LS_ROUTES = 'voice:phoneRoutes.v1';
-const LS_KEYS = 'apiKeys.v1';
-const LS_SELECTED = 'apiKeys.selectedId';
 
-/* =================== small helpers/LS =================== */
-const readLS = <T,>(k: string): T | null => { try { const r = localStorage.getItem(k); return r ? (JSON.parse(r) as T) : null; } catch { return null; } };
+const readLS = <T,>(k: string): T | null => {
+  try { const r = localStorage.getItem(k); return r ? (JSON.parse(r) as T) : null; } catch { return null; }
+};
 const writeLS = <T,>(k: string, v: T) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 
 const BASE_PROMPT = `[Identity]
@@ -109,7 +103,7 @@ You are an intelligent and responsive assistant designed to help users with a wi
 [Handover]
 - When done, summarize details and hand off if needed.`.trim();
 
-/* -------------------- Prompt helpers -------------------- */
+/* -------------------- Prompt helpers (safe merge) -------------------- */
 function sectionRegex(name: string) {
   return new RegExp(String.raw`\[${name}\]\s*([\s\S]*?)(?=\n\[|$)`, 'i');
 }
@@ -123,8 +117,10 @@ function mergeInput(freeText: string, current: string) {
   const out = { prompt: current || BASE_PROMPT, firstMessage: undefined as string | undefined };
   const raw = (freeText || '').trim();
   if (!raw) return out;
+
   const m = raw.match(/^(?:first\s*message|greeting)\s*[:\-]\s*(.+)$/i);
   if (m) { out.firstMessage = m[1].trim(); return out; }
+
   const blocks = [...raw.matchAll(/\[(Identity|Style|System Behaviors|Task & Goals|Data to Collect|Safety|Handover|Refinements)\]\s*([\s\S]*?)(?=\n\[|$)/gi)];
   if (blocks.length) {
     let next = out.prompt;
@@ -132,6 +128,7 @@ function mergeInput(freeText: string, current: string) {
     out.prompt = next;
     return out;
   }
+
   const hasRef = sectionRegex('Refinements').test(out.prompt);
   const bullet = `- ${raw.replace(/\s+/g, ' ').trim()}`;
   out.prompt = hasRef
@@ -140,7 +137,7 @@ function mergeInput(freeText: string, current: string) {
   return out;
 }
 
-/* -------------------- UI atoms -------------------- */
+/* -------------------- Small UI atoms -------------------- */
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
@@ -155,7 +152,7 @@ function Section({ title, icon, children }: { title: string; icon: React.ReactNo
     <div className="col-span-12 rounded-xl relative"
          style={{ background: 'var(--va-card)', border: '1px solid var(--va-border)', boxShadow: 'var(--va-shadow)' }}>
       <div aria-hidden className="pointer-events-none absolute -top-[22%] -left-[22%] w-[70%] h-[70%] rounded-full"
-           style={{ background: 'radial-gradient(circle, color-mix(in oklab, var(--accent) 18%, transparent) 0%, transparent 70%)', filter: 'blur(46px)' }} />
+           style={{ background: 'radial-gradient(circle, color-mix(in oklab, var(--accent) 14%, transparent) 0%, transparent 70%)', filter: 'blur(40px)' }} />
       <button type="button" onClick={() => setOpen(v => !v)} className="w-full flex items-center justify-between px-5 py-4">
         <span className="flex items-center gap-2 text-sm font-semibold">{icon}{title}</span>
         {open ? <ChevronDown className="w-4 h-4 icon" /> : <ChevronRight className="w-4 h-4 icon" />}
@@ -187,14 +184,14 @@ function TelephonyEditor({ numbers, linkedId, onLink, onAdd, onRemove }: {
         <div>
           <div className="mb-1.5 text-[13px] font-medium" style={{ color: 'var(--text)' }}>Phone Number (E.164)</div>
           <input value={e164} onChange={(e) => setE164(e.target.value)} placeholder="+1xxxxxxxxxx"
-                 className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none native-input"
-                 style={{ color: 'var(--text)' }}/>
+                 className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
+                 style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)', boxShadow: 'var(--va-input-shadow)', color: 'var(--text)' }}/>
         </div>
         <div>
           <div className="mb-1.5 text-[13px] font-medium" style={{ color: 'var(--text)' }}>Label</div>
           <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Support line"
-                 className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none native-input"
-                 style={{ color: 'var(--text)' }}/>
+                 className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
+                 style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)', boxShadow: 'var(--va-input-shadow)', color: 'var(--text)' }}/>
         </div>
         <div className="flex items-end">
           <button onClick={() => { onAdd(e164, label); setE164(''); setLabel(''); }} className="btn btn--green w-full justify-center">
@@ -206,7 +203,8 @@ function TelephonyEditor({ numbers, linkedId, onLink, onAdd, onRemove }: {
       <div className="space-y-2">
         {numbers.length === 0 && <div className="text-sm opacity-70">No phone numbers added yet.</div>}
         {numbers.map(n => (
-          <div key={n.id} className="flex items-center justify-between rounded-xl px-3 py-2 native-surface">
+          <div key={n.id} className="flex items-center justify-between rounded-xl px-3 py-2"
+               style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)' }}>
             <div className="min-w-0">
               <div className="font-medium truncate">{n.label || 'Untitled'}</div>
               <div className="text-xs opacity-70">{n.e164}</div>
@@ -226,73 +224,83 @@ function TelephonyEditor({ numbers, linkedId, onLink, onAdd, onRemove }: {
   );
 }
 
-/* -------------------- Scoped CSS (Cosmic Night + select fix) -------------------- */
+/* -------------------- Scoped CSS (incl. inputs/selects polish) -------------------- */
 function StyleBlock() {
   return (
     <style jsx global>{`
 .${SCOPE}{
-  --accent:${ACCENT_DARK};
-  --bg:${BG_DARK};
-  --text:${TEXT_DARK};
+  --accent:${ACCENT};
+  --bg:#0b0c10;
+  --text:#eef2f5;
   --text-muted:color-mix(in oklab, var(--text) 65%, transparent);
-  --va-card:${CARD_DARK};
-  --va-topbar:${CARD_DARK};
-  --va-sidebar:linear-gradient(180deg,#0e1213 0%,#0b0f12 100%);
-  --va-chip:rgba(255,255,255,.04);
-  --va-border:oklch(0.9115 0.0216 285.9625 / .16);
+  --va-card:#0f1315;
+  --va-topbar:#0e1214;
+  --va-sidebar:linear-gradient(180deg,#0d1113 0%,#0b0e10 100%);
+  --va-chip:rgba(255,255,255,.03);
+  --va-border:rgba(255,255,255,.10);
   --va-input-bg:#101314;
-  --va-input-border:oklch(0.9115 0.0216 285.9625 / .22);
-  --va-input-shadow:inset 0 1px 0 rgba(255,255,255,.06);
+  --va-input-border:rgba(255,255,255,.14);
+  --va-input-shadow:inset 0 1px 0 rgba(255,255,255,.04), 0 12px 30px rgba(0,0,0,.38);
   --va-menu-bg:#101314;
-  --va-menu-border:oklch(0.9115 0.0216 285.9625 / .22);
-  --va-shadow:0 36px 90px rgba(0,0,0,.60), 0 14px 34px rgba(0,0,0,.45), 0 0 0 1px rgba(140,140,255,.10);
+  --va-menu-border:rgba(255,255,255,.16);
+  --va-shadow:0 24px 70px rgba(0,0,0,.55), 0 10px 28px rgba(0,0,0,.4);
+  --va-shadow-lg:0 42px 110px rgba(0,0,0,.66), 0 20px 48px rgba(0,0,0,.5);
   --va-shadow-sm:0 12px 26px rgba(0,0,0,.35);
+  --va-shadow-side:8px 0 28px rgba(0,0,0,.42);
   --va-rail-w:360px;
 }
-.${SCOPE} .va-main{ max-width: none !important; color:var(--text); }
+:root:not([data-theme="dark"]) .${SCOPE}{
+  --bg:#f7f9fb;
+  --text:#101316;
+  --text-muted:color-mix(in oklab, var(--text) 55%, transparent);
+  --va-card:#ffffff;
+  --va-topbar:#ffffff;
+  --va-sidebar:linear-gradient(180deg,#ffffff 0%,#f7f9fb 100%);
+  --va-chip:#ffffff;
+  --va-border:rgba(0,0,0,.10);
+  --va-input-bg:#ffffff;
+  --va-input-border:rgba(0,0,0,.12);
+  --va-input-shadow:inset 0 1px 0 rgba(255,255,255,.85);
+  --va-menu-bg:#ffffff;
+  --va-menu-border:rgba(0,0,0,.10);
+  --va-shadow:0 28px 70px rgba(0,0,0,.12), 0 12px 28px rgba(0,0,0,.08);
+  --va-shadow-lg:0 42px 110px rgba(0,0,0,.16), 0 22px 54px rgba(0,0,0,.10);
+  --va-shadow-sm:0 12px 26px rgba(0,0,0,.10);
+  --va-shadow-side:8px 0 26px rgba(0,0,0,.08);
+}
+.${SCOPE} .va-main{ max-width: none !important; }
 .${SCOPE} .icon{ color: var(--accent); }
+
+.${SCOPE} select,
+.${SCOPE} input,
+.${SCOPE} textarea{
+  -webkit-appearance: none;
+  appearance: none;
+  border-radius: 14px;
+  background: var(--va-input-bg);
+  border: 1px solid var(--va-input-border);
+  box-shadow: var(--va-input-shadow);
+  color: var(--text);
+}
+.${SCOPE} select{ padding-right: 2.2rem; background-image: none; }
 
 .${SCOPE} .btn{
   display:inline-flex; align-items:center; gap:.5rem;
   border-radius:14px; padding:.65rem 1rem; font-size:14px; line-height:1;
   border:1px solid var(--va-border);
-  background: var(--va-card); color: var(--text);
 }
-.${SCOPE} .btn--green{ background: var(--accent); color:#fff; box-shadow: 0 10px 24px color-mix(in oklab, var(--accent) 30%, transparent); }
-.${SCOPE} .btn--green:hover{ filter: brightness(1.06); }
-.${SCOPE} .btn--danger{ background:rgba(220,38,38,.12); color:#fca5a5; border-color:rgba(220,38,38,.35); }
-
-.${SCOPE} .native-input{
-  background: var(--va-input-bg);
-  border: 1px solid var(--va-input-border);
-  box-shadow: var(--va-input-shadow);
-  color: var(--text);
+.${SCOPE} .btn--green{ background:${ACCENT}; color:#fff; box-shadow:${BTN_SHADOW}; transition:transform .04s ease, background .18s ease; }
+.${SCOPE} .btn--green:hover{ background:${ACCENT_HOVER}; }
+.${SCOPE} .btn--green:active{ transform:translateY(1px); }
+.${SCOPE} .btn--ghost{ background:var(--va-card); color:var(--text); box-shadow:var(--va-shadow-sm); }
+.${SCOPE} .btn--danger{
+  background:rgba(220,38,38,.12); color:#fca5a5;
+  box-shadow:0 10px 24px rgba(220,38,38,.15);
+  border-color:rgba(220,38,38,.35);
 }
 
-/* fix native select look */
-.${SCOPE} select{
-  appearance:none; -webkit-appearance:none; -moz-appearance:none;
-  background: var(--va-input-bg);
-  border: 1px solid var(--va-input-border);
-  box-shadow: var(--va-input-shadow);
-  color: var(--text);
-  border-radius: 14px; padding: .75rem .9rem;
-}
-.${SCOPE} select:focus{
-  outline:none;
-  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 22%, transparent);
-}
-.${SCOPE} textarea{
-  background: var(--va-input-bg);
-  border: 1px solid var(--va-input-border);
-  box-shadow: var(--va-shadow), inset 0 1px 0 rgba(255,255,255,.03);
-  color: var(--text);
-}
-.${SCOPE} .native-surface{
-  background: var(--va-input-bg);
-  border: 1px solid var(--va-input-border);
-}
-
+/* no left transition to avoid jitter alongside app sidebar */
+.${SCOPE} aside{ transition: none !important; }
 @media (max-width: 1180px){ .${SCOPE}{ --va-rail-w: 320px; } }
 `}</style>
   );
@@ -314,12 +322,10 @@ export default function VoiceAgentSection() {
   const [active, setActive] = useState<Assistant | null>(null);
   const [rev, setRev] = useState(0);
 
-  // API Key state
-  const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
+  // 🔑 OpenAI key state
   const [apiKeyId, setApiKeyId] = useState<string>('');
   const [openaiKey, setOpenaiKey] = useState<string>('');
 
-  /* -------------------- bootstrap -------------------- */
   useEffect(() => {
     if (!isClient) return;
     const list = readLS<Assistant[]>(LS_LIST) || [];
@@ -347,36 +353,28 @@ export default function VoiceAgentSection() {
     }
     if (!readLS<CallLog[]>(LS_CALLS)) writeLS(LS_CALLS, []);
     if (!readLS<Record<string, string>>(LS_ROUTES)) writeLS(LS_ROUTES, {});
-
-    // Load API keys from scoped storage
-    (async () => {
-      try {
-        const ss = await scopedStorage();
-        await ss.ensureOwnerGuard();
-        const keys = await ss.getJSON<ApiKey[]>(LS_KEYS, []);
-        const cleaned = (keys || []).filter(k => k?.id && (k.provider === 'openai' || !k.provider)) as ApiKey[];
-        setApiKeys(cleaned);
-        const sel = await ss.getJSON<string>(LS_SELECTED, '');
-        const chosen = cleaned.find(k => k.id === sel) ? sel : (cleaned[0]?.id || '');
-        setApiKeyId(chosen);
-        const match = cleaned.find(k => k.id === chosen);
-        setOpenaiKey(match?.key ? String(match.key) : '');
-      } catch {
-        setApiKeys([]); setApiKeyId(''); setOpenaiKey('');
-      }
-    })();
   }, [isClient]);
 
-  // persist selected key id globally
+  // 🔑 Resolve OpenAI key (selected id -> secret)
   useEffect(() => {
+    if (!isClient) return;
     (async () => {
       try {
         const ss = await scopedStorage();
         await ss.ensureOwnerGuard();
-        if (apiKeyId) await ss.setJSON(LS_SELECTED, apiKeyId);
-      } catch {}
+        const sel = await ss.getJSON<string>('apiKeys.selectedId', '');
+        const keys = await ss.getJSON<any[]>('apiKeys.v1', []);
+        const chosen = sel || '';
+        setApiKeyId(chosen);
+        const match = Array.isArray(keys)
+          ? keys.find(k => k?.id === chosen && (k?.provider === 'openai' || !k?.provider))
+          : null;
+        setOpenaiKey(match?.key ? String(match.key) : '');
+      } catch {
+        setApiKeyId(''); setOpenaiKey('');
+      }
     })();
-  }, [apiKeyId]);
+  }, [isClient, activeId]);
 
   useEffect(() => {
     if (!isClient || !activeId) { setActive(null); return; }
@@ -491,7 +489,7 @@ export default function VoiceAgentSection() {
     } catch {}
   };
 
-  // Telephony helpers
+  // Telephony
   const addPhone = (e164: string, label?: string) => {
     const norm = e164.trim(); if (!norm) return;
     updateActive(a => {
@@ -523,7 +521,7 @@ export default function VoiceAgentSection() {
     alert(`Published! ${num.e164} is now linked to ${active.name}.`);
   };
 
-  // Transcript + call logs
+  // Transcript + call logs (driven by WebCallButton onTurn)
   const [transcript, setTranscript] = useState<TranscriptTurn[]>([]);
   const [currentCallId, setCurrentCallId] = useState<string | null>(null);
   const [callsForAssistant, setCallsForAssistant] = useState<CallLog[]>([]);
@@ -566,8 +564,8 @@ export default function VoiceAgentSection() {
     setCallsForAssistant(list.filter(c => c.assistantId === active.id));
   }, [isClient, active?.id, currentCallId, transcript.length, rev]);
 
-  if (!isClient) return (<div ref={scopeRef} className={SCOPE}><StyleBlock /><div className="px-6 py-10 opacity-70 text-sm">Loading…</div></div>);
-  if (!active) return (<div ref={scopeRef} className={SCOPE}><StyleBlock /><div className="px-6 py-10 opacity-70">Create your first assistant.</div></div>);
+  if (!isClient) return (<div ref={scopeRef} className={SCOPE} style={{ background: 'var(--bg)', color: 'var(--text)' }}><StyleBlock /><div className="px-6 py-10 opacity-70 text-sm">Loading…</div></div>);
+  if (!active) return (<div ref={scopeRef} className={SCOPE} style={{ background: 'var(--bg)', color: 'var(--text)' }}><StyleBlock /><div className="px-6 py-10 opacity-70">Create your first assistant.</div></div>);
 
   const railData: AssistantLite[] = assistants.map(a => ({ id: a.id, name: a.name, folder: a.folder, updatedAt: a.updatedAt }));
 
@@ -579,10 +577,26 @@ export default function VoiceAgentSection() {
 
   return (
     <div ref={scopeRef} className={SCOPE} style={{ background: 'var(--bg)', color: 'var(--text)' }}>
-      <AssistantRail assistants={railData} activeId={activeId} onSelect={setActiveId} onCreate={onCreate} onRename={onRename} onDelete={onDelete} />
+      {/* Assistant rail */}
+      <AssistantRail
+        assistants={railData}
+        activeId={activeId}
+        onSelect={setActiveId}
+        onCreate={onCreate}
+        onRename={onRename}
+        onDelete={onDelete}
+      />
 
-      <div className="va-main" style={{ marginLeft: `calc(var(--app-sidebar-w, 248px) + var(--va-rail-w, 360px))`, paddingRight: 'clamp(20px, 4vw, 40px)', paddingTop: 'calc(var(--app-header-h, 64px) + 12px)', paddingBottom: '88px' }}>
-
+      {/* Main */}
+      <div
+        className="va-main"
+        style={{
+          marginLeft: `calc(var(--app-sidebar-w, 248px) + var(--va-rail-w, 360px))`,
+          paddingRight: 'clamp(20px, 4vw, 40px)',
+          paddingTop: 'calc(var(--app-header-h, 64px) + 12px)',
+          paddingBottom: '88px'
+        }}
+      >
         {/* Top actions */}
         <div className="px-2 pb-3 flex items-center justify-between sticky" style={{ top: 'calc(var(--app-header-h, 64px) + 8px)', zIndex: 2 }}>
           <div className="flex items-center gap-2">
@@ -593,7 +607,7 @@ export default function VoiceAgentSection() {
                 systemPrompt={active.config.model.systemPrompt || BASE_PROMPT}
                 model={active.config.model.model}
                 apiKeyId={apiKeyId}
-                apiKey={openaiKey}
+                apiKey={openaiKey}         // pass resolved secret
                 fromE164={linkedE164}
                 onTurn={onTurn}
               />
@@ -602,40 +616,14 @@ export default function VoiceAgentSection() {
                 <PhoneOff className="w-4 h-4" /> End Call
               </button>
             )}
-
-            <button onClick={() => window.dispatchEvent(new CustomEvent('voiceagent:open-chat', { detail: { id: active.id } }))} className="btn">
-              <MessageSquare className="w-4 h-4 icon" /> Chat
-            </button>
+            <button onClick={() => window.dispatchEvent(new CustomEvent('voiceagent:open-chat', { detail: { id: active.id } }))}
+                    className="btn btn--ghost"><MessageSquare className="w-4 h-4 icon" /> Chat</button>
           </div>
-
           <div className="flex items-center gap-2">
-            {/* API Key dropdown */}
-            <div className="relative">
-              <select
-                value={apiKeyId}
-                onChange={(e) => {
-                  const id = e.target.value;
-                  setApiKeyId(id);
-                  const match = apiKeys.find(k => k.id === id);
-                  setOpenaiKey(match?.key ? String(match.key) : '');
-                }}
-                className="pr-9"
-                style={{ minWidth: 240 }}
-              >
-                <option value="">Select OpenAI key…</option>
-                {apiKeys.map(k => (
-                  <option key={k.id} value={k.id}>{k.name} ••••{(k.key || '').slice(-4).toUpperCase()}</option>
-                ))}
-              </select>
-              <KeyRound className="w-4 h-4 absolute right-3 top-3.5" style={{ color: 'var(--text-muted)' }} />
-            </div>
-
-            {/* Key badge */}
-            <span className="text-xs px-2 py-1 rounded-lg" style={{ border:'1px solid var(--va-border)' }}>
+            <span className="text-xs px-2 py-1 rounded-lg" style={{border:'1px solid var(--va-border)'}}>
               Key: {openaiKey ? `••••${openaiKey.slice(-4)}` : '—'}
             </span>
-
-            <button onClick={() => navigator.clipboard.writeText(active.config.model.systemPrompt || '').catch(()=>{})} className="btn">
+            <button onClick={() => navigator.clipboard.writeText(active.config.model.systemPrompt || '').catch(() => {})} className="btn btn--ghost">
               <Copy className="w-4 h-4 icon" /> Copy Prompt
             </button>
             <button onClick={() => onDelete(active.id)} className="btn btn--danger"><Trash2 className="w-4 h-4" /> Delete</button>
@@ -649,12 +637,22 @@ export default function VoiceAgentSection() {
           <Section title="Model" icon={<FileText className="w-4 h-4 icon" />}>
             <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(4, minmax(360px, 1fr))' }}>
               <Field label="Provider">
-                <select value={active.config.model.provider} onChange={e => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, provider: e.target.value as Provider } } }))}>
+                <select
+                  value={active.config.model.provider}
+                  onChange={e => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, provider: e.target.value as Provider } } }))}
+                  className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
+                  style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)', boxShadow: 'var(--va-input-shadow)', color: 'var(--text)' }}
+                >
                   <option value="openai">OpenAI</option>
                 </select>
               </Field>
               <Field label="Model">
-                <select value={active.config.model.model} onChange={e => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, model: e.target.value as ModelId } } }))}>
+                <select
+                  value={active.config.model.model}
+                  onChange={e => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, model: e.target.value as ModelId } } }))}
+                  className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
+                  style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)', boxShadow: 'var(--va-input-shadow)', color: 'var(--text)' }}
+                >
                   <option value="gpt-4o">GPT-4o</option>
                   <option value="gpt-4o-mini">GPT-4o mini</option>
                   <option value="gpt-4.1">GPT-4.1</option>
@@ -662,13 +660,23 @@ export default function VoiceAgentSection() {
                 </select>
               </Field>
               <Field label="First Message Mode">
-                <select value={active.config.model.firstMessageMode} onChange={e => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, firstMessageMode: e.target.value as any } } }))}>
+                <select
+                  value={active.config.model.firstMessageMode}
+                  onChange={e => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, firstMessageMode: e.target.value as any } } }))}
+                  className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
+                  style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)', boxShadow: 'var(--va-input-shadow)', color: 'var(--text)' }}
+                >
                   <option value="assistant_first">Assistant speaks first</option>
                   <option value="user_first">User speaks first</option>
                 </select>
               </Field>
               <Field label="First Message">
-                <input value={active.config.model.firstMessage} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, firstMessage: e.target.value } } }))} className="native-input" />
+                <input
+                  value={active.config.model.firstMessage}
+                  onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, firstMessage: e.target.value } } }))}
+                  className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
+                  style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)', boxShadow: 'var(--va-input-shadow)', color: 'var(--text)' }}
+                />
               </Field>
             </div>
 
@@ -677,7 +685,7 @@ export default function VoiceAgentSection() {
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="w-4 h-4 icon" /> System Prompt</div>
                 <div className="flex items-center gap-2">
-                  <button onClick={() => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, systemPrompt: BASE_PROMPT } } }))} className="btn">
+                  <button onClick={() => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, systemPrompt: BASE_PROMPT } } }))} className="btn btn--ghost">
                     <RefreshCw className="w-4 h-4 icon" /> Reset
                   </button>
                   <button onClick={() => setGenOpen(true)} className="btn btn--green">
@@ -687,16 +695,31 @@ export default function VoiceAgentSection() {
               </div>
 
               {!typingPreview ? (
-                <textarea rows={26} value={active.config.model.systemPrompt || ''} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, systemPrompt: e.target.value } } }))} />
+                <textarea
+                  rows={26}
+                  value={active.config.model.systemPrompt || ''}
+                  onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, systemPrompt: e.target.value } } }))}
+                  className="w-full rounded-2xl px-3 py-3 text-[14px] leading-6 outline-none"
+                  style={{
+                    background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)',
+                    boxShadow: 'var(--va-shadow), inset 0 1px 0 rgba(255,255,255,.03)', color: 'var(--text)',
+                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+                    minHeight: 560
+                  }}
+                />
               ) : (
                 <div>
                   <div className="w-full rounded-2xl px-3 py-3 text-[14px] leading-6"
-                       style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)', boxShadow: 'var(--va-shadow), inset 0 1px 0 rgba(255,255,255,.03)', color: 'var(--text)', whiteSpace: 'pre-wrap', minHeight: 560, maxHeight: 680, overflowY: 'auto' }}>
+                       style={{
+                         background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)',
+                         boxShadow: 'var(--va-shadow), inset 0 1px 0 rgba(255,255,255,.03)', color: 'var(--text)',
+                         whiteSpace: 'pre-wrap', minHeight: 560, maxHeight: 680, overflowY: 'auto'
+                       }}>
                     {typingPreview}
                   </div>
                   <div className="flex items-center gap-2 justify-end mt-3">
-                    <button onClick={() => { setTypingPreview(null); setPendingFirstMsg(undefined); }} className="btn"><X className="w-4 h-4 icon" /> Decline</button>
-                    <button onClick={acceptGenerate} className="btn btn--green"><span className="text-white"><ChevronRight /> Accept</span></button>
+                    <button onClick={() => { setTypingPreview(null); setPendingFirstMsg(undefined); }} className="btn btn--ghost"><X className="w-4 h-4 icon" /> Decline</button>
+                    <button onClick={acceptGenerate} className="btn btn--green"><Check className="w-4 h-4 text-white" /><span className="text-white">Accept</span></button>
                   </div>
                 </div>
               )}
@@ -707,33 +730,42 @@ export default function VoiceAgentSection() {
           <Section title="Voice" icon={<Mic2 className="w-4 h-4 icon" />}>
             <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(2, minmax(360px, 1fr))' }}>
               <Field label="Provider">
-                <select value={active.config.voice.provider} onChange={(e) => handleVoiceProviderChange(e.target.value)}>
+                <select
+                  value={active.config.voice.provider}
+                  onChange={(e) => handleVoiceProviderChange(e.target.value)}
+                  className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
+                  style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)', boxShadow: 'var(--va-input-shadow)', color: 'var(--text)' }}
+                >
                   <option value="openai">OpenAI</option>
                   <option value="elevenlabs">ElevenLabs</option>
                 </select>
               </Field>
               <Field label="Voice">
-                <select value={pendingVoiceId || active.config.voice.voiceId} onChange={(e) => handleVoiceIdChange(e.target.value)}>
-                  {(active.config.voice.provider === 'elevenlabs' ? [
-                    { value: 'rachel', label: 'Rachel (ElevenLabs)' },
-                    { value: 'adam', label: 'Adam (ElevenLabs)' },
-                    { value: 'bella', label: 'Bella (ElevenLabs)' },
-                  ] : [
-                    { value: 'alloy', label: 'Alloy (OpenAI)' },
-                    { value: 'ember', label: 'Ember (OpenAI)' },
-                  ]).map(v => (<option key={v.value} value={v.value}>{v.label}</option>))}
+                <select
+                  value={pendingVoiceId || active.config.voice.voiceId}
+                  onChange={(e) => handleVoiceIdChange(e.target.value)}
+                  className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
+                  style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)', boxShadow: 'var(--va-input-shadow)', color: 'var(--text)' }}
+                >
+                  {(active.config.voice.provider === 'elevenlabs' ? elevenVoices : openaiVoices).map(v => (
+                    <option key={v.value} value={v.value}>{v.label}</option>
+                  ))}
                 </select>
               </Field>
             </div>
 
             <div className="mt-3 flex items-center gap-2">
-              <button onClick={async () => { try { const u = new SpeechSynthesisUtterance('This is a quick preview of the selected voice.'); window.speechSynthesis.cancel(); window.speechSynthesis.speak(u); } catch {} }} className="btn">
+              <button
+                onClick={async () => { try { const u = new SpeechSynthesisUtterance('This is a quick preview of the selected voice.'); window.speechSynthesis.cancel(); window.speechSynthesis.speak(u); } catch {} }}
+                className="btn btn--ghost">
                 <Volume2 className="w-4 h-4 icon" /> Test Voice
               </button>
               <button onClick={saveVoice} className="btn btn--green">
                 <Save className="w-4 h-4 text-white" /> <span className="text-white">Save Voice</span>
               </button>
-              <button onClick={() => { window.dispatchEvent(new CustomEvent('voiceagent:import-11labs')); alert('Hook “voiceagent:import-11labs” to your importer.'); }} className="btn">
+              <button
+                onClick={() => { window.dispatchEvent(new CustomEvent('voiceagent:import-11labs')); alert('Hook “voiceagent:import-11labs” to your importer.'); }}
+                className="btn btn--ghost">
                 <UploadCloud className="w-4 h-4 icon" /> Import from ElevenLabs
               </button>
             </div>
@@ -743,18 +775,33 @@ export default function VoiceAgentSection() {
           <Section title="Transcriber" icon={<BookOpen className="w-4 h-4 icon" />}>
             <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(3, minmax(360px, 1fr))' }}>
               <Field label="Provider">
-                <select value={active.config.transcriber.provider} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, provider: e.target.value as any } } }))}>
+                <select
+                  value={active.config.transcriber.provider}
+                  onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, provider: e.target.value as any } } }))}
+                  className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
+                  style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)', boxShadow: 'var(--va-input-shadow)', color: 'var(--text)' }}
+                >
                   <option value="deepgram">Deepgram</option>
                 </select>
               </Field>
               <Field label="Model">
-                <select value={active.config.transcriber.model} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, model: e.target.value as any } } }))}>
+                <select
+                  value={active.config.transcriber.model}
+                  onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, model: e.target.value as any } } }))}
+                  className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
+                  style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)', boxShadow: 'var(--va-input-shadow)', color: 'var(--text)' }}
+                >
                   <option value="nova-2">Nova 2</option>
                   <option value="nova-3">Nova 3</option>
                 </select>
               </Field>
               <Field label="Language">
-                <select value={active.config.transcriber.language} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, language: e.target.value as any } } }))}>
+                <select
+                  value={active.config.transcriber.language}
+                  onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, language: e.target.value as any } } }))}
+                  className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
+                  style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)', boxShadow: 'var(--va-input-shadow)', color: 'var(--text)' }}
+                >
                   <option value="en">English</option>
                   <option value="multi">Multi</option>
                 </select>
@@ -762,19 +809,33 @@ export default function VoiceAgentSection() {
 
               <Field label="Confidence Threshold">
                 <div className="flex items-center gap-3">
-                  <input type="range" min={0} max={1} step={0.01} value={active.config.transcriber.confidenceThreshold}
-                         onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, confidenceThreshold: Number(e.target.value) } } }))} className="w-full" />
+                  <input
+                    type="range" min={0} max={1} step={0.01}
+                    value={active.config.transcriber.confidenceThreshold}
+                    onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, confidenceThreshold: Number(e.target.value) } } }))}
+                    className="w-full"
+                  />
                   <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{active.config.transcriber.confidenceThreshold.toFixed(2)}</span>
                 </div>
               </Field>
               <Field label="Denoise">
-                <select value={String(active.config.transcriber.denoise)} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, denoise: e.target.value === 'true' } } }))}>
+                <select
+                  value={String(active.config.transcriber.denoise)}
+                  onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, denoise: e.target.value === 'true' } } }))}
+                  className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
+                  style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)', boxShadow: 'var(--va-input-shadow)', color: 'var(--text)' }}
+                >
                   <option value="false">Off</option>
                   <option value="true">On</option>
                 </select>
               </Field>
               <Field label="Use Numerals">
-                <select value={String(active.config.transcriber.numerals)} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, numerals: e.target.value === 'true' } } }))}>
+                <select
+                  value={String(active.config.transcriber.numerals)}
+                  onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, numerals: e.target.value === 'true' } } }))}
+                  className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
+                  style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)', boxShadow: 'var(--va-input-shadow)', color: 'var(--text)' }}
+                >
                   <option value="false">No</option>
                   <option value="true">Yes</option>
                 </select>
@@ -786,13 +847,23 @@ export default function VoiceAgentSection() {
           <Section title="Tools" icon={<SlidersHorizontal className="w-4 h-4 icon" />}>
             <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(2, minmax(360px, 1fr))' }}>
               <Field label="Enable End Call Function">
-                <select value={String(active.config.tools.enableEndCall)} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, tools: { ...a.config.tools, enableEndCall: e.target.value === 'true' } } }))}>
+                <select
+                  value={String(active.config.tools.enableEndCall)}
+                  onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, tools: { ...a.config.tools, enableEndCall: e.target.value === 'true' } } }))}
+                  className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
+                  style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)', boxShadow: 'var(--va-input-shadow)', color: 'var(--text)' }}
+                >
                   <option value="true">Enabled</option>
                   <option value="false">Disabled</option>
                 </select>
               </Field>
               <Field label="Dial Keypad">
-                <select value={String(active.config.tools.dialKeypad)} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, tools: { ...a.config.tools, dialKeypad: e.target.value === 'true' } } }))}>
+                <select
+                  value={String(active.config.tools.dialKeypad)}
+                  onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, tools: { ...a.config.tools, dialKeypad: e.target.value === 'true' } } }))}
+                  className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
+                  style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)', boxShadow: 'var(--va-input-shadow)', color: 'var(--text)' }}
+                >
                   <option value="true">Enabled</option>
                   <option value="false">Disabled</option>
                 </select>
@@ -813,13 +884,13 @@ export default function VoiceAgentSection() {
 
           {/* Web test + transcript */}
           <Section title="Call Assistant (Web test)" icon={<AudioLines className="w-4 h-4 icon" />}>
-            <div className="rounded-2xl p-3 native-surface">
+            <div className="rounded-2xl p-3" style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)' }}>
               {transcript.length === 0 && <div className="text-sm opacity-60">No transcript yet.</div>}
               <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1" style={{ scrollbarWidth: 'thin' }}>
                 {transcript.map((t, idx) => (
                   <div key={idx} className="flex gap-2">
                     <div className="text-xs px-2 py-0.5 rounded-full" style={{
-                      background: t.role === 'assistant' ? 'color-mix(in oklab, var(--accent) 20%, transparent)' : 'rgba(255,255,255,.06)',
+                      background: t.role === 'assistant' ? 'rgba(16,185,129,.15)' : 'rgba(255,255,255,.06)',
                       border: '1px solid var(--va-border)'
                     }}>{t.role === 'assistant' ? 'AI' : 'You'}</div>
                     <div className="text-sm">{t.text}</div>
@@ -834,7 +905,7 @@ export default function VoiceAgentSection() {
             <div className="space-y-3">
               {callsForAssistant.length === 0 && <div className="text-sm opacity-60">No calls yet.</div>}
               {callsForAssistant.map(log => (
-                <details key={log.id} className="rounded-xl native-surface">
+                <details key={log.id} className="rounded-xl" style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)' }}>
                   <summary className="cursor-pointer px-3 py-2 flex items-center justify-between">
                     <div className="text-sm flex items-center gap-2">
                       <PhoneIcon className="w-4 h-4 icon" />
@@ -848,7 +919,7 @@ export default function VoiceAgentSection() {
                     {log.transcript.map((t, i) => (
                       <div key={i} className="flex gap-2">
                         <div className="text-xs px-2 py-0.5 rounded-full" style={{
-                          background: t.role === 'assistant' ? 'color-mix(in oklab, var(--accent) 20%, transparent)' : 'rgba(255,255,255,.06)',
+                          background: t.role === 'assistant' ? 'rgba(16,185,129,.15)' : 'rgba(255,255,255,.06)',
                           border: '1px solid var(--va-border)'
                         }}>{t.role === 'assistant' ? 'AI' : 'User'}</div>
                         <div className="text-sm">{t.text}</div>
@@ -868,6 +939,34 @@ export default function VoiceAgentSection() {
           <motion.div className="fixed inset-0 z-[999] flex items-center justify-center p-4"
                       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
                       style={{ background: 'rgba(0,0,0,.45)' }}>
-            <motion.div initial={{ y: 10, opacity: 0, scale: .98 }} animate={{ y: 0, opacity: 1, scale: 1 }} exit={{ y: 8, opacity: 0, scale: .985 }}
-                        className="w-full max-w-2xl rounded-2xl native-surface" style={{ boxShadow: 'var(--va-shadow)' }}>
-              <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid var(--va
+            <motion.div
+              initial={{ y: 10, opacity: 0, scale: .98 }} animate={{ y: 0, opacity: 1, scale: 1 }} exit={{ y: 8, opacity: 0, scale: .985 }}
+              className="w-full max-w-2xl rounded-2xl"
+              style={{ background: 'var(--va-card)', border: '1px solid var(--va-border)', boxShadow: 'var(--va-shadow-lg)' }}
+            >
+              <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid var(--va-border)' }}>
+                <div className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="w-4 h-4 icon" /> Generate / Edit Prompt</div>
+                <button onClick={() => setGenOpen(false)} className="p-2 rounded-lg hover:opacity-80"><X className="w-4 h-4 icon" /></button>
+              </div>
+              <div className="p-4">
+                <input
+                  value={genText}
+                  onChange={(e) => setGenText(e.target.value)}
+                  placeholder={`Examples:\n• assistant\n• collect full name, phone, date\n• [Identity] AI Sales Agent for roofers\n• first message: Hey—quick question to get you booked…`}
+                  className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
+                  style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)', boxShadow: 'var(--va-input-shadow)', color: 'var(--text)' }}
+                />
+                <div className="mt-3 flex items-center justify-between gap-2">
+                  <button onClick={() => setGenOpen(false)} className="btn btn--ghost">Cancel</button>
+                  <button onClick={handleGenerate} className="btn btn--green"><span className="text-white">Generate</span></button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <StyleBlock />
+    </div>
+  );
+}
