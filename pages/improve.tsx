@@ -17,9 +17,10 @@ const MAX_REFINEMENTS = 5;
 const DEFAULT_TEMPERATURE = 0.5;
 
 const K_SELECTED_AGENT_ID = `${SCOPE}:selectedAgentId`;
-const K_AGENT_LIST        = `agents`;           // builder’s agents list (shared)
+const K_AGENT_LIST        = `agents`;           // builder’s agents list (shared/local)
 const K_AGENT_META_PREFIX = `agents:meta:`;     // per-agent tuning (model/temp/rules)
 const K_IMPROVE_STATE     = `${SCOPE}:agent:`;  // Improve’s per-agent chat/history
+const K_OWNER_OVERRIDE    = `workspace:owner`;  // set by app shell / auth
 
 /* =============================================================================
    TYPES
@@ -58,7 +59,6 @@ type Store = Awaited<ReturnType<typeof scopedStorage>>;
 const now = () => Date.now();
 const uid = (p='id') => `${p}_${Math.random().toString(36).slice(2,9)}${Date.now().toString(36).slice(-4)}`;
 const clamp01 = (n:number)=>Math.max(0,Math.min(1,n));
-const ownerIdFromLS = () => (typeof window !== 'undefined' ? (localStorage.getItem('workspace:owner') || '') : '');
 
 /** Prefer assistant-like ids if present. */
 function chooseAgentId(x:any, i:number){
@@ -100,16 +100,6 @@ function normalizeAgents(list:any):Agent[]{
   return list.map(mapAnyToAgent).filter(Boolean) as Agent[];
 }
 
-async function loadAgentsFromAny(store:Store):Promise<Agent[]>{
-  const candidates=[K_AGENT_LIST,'chatbots','builds','assistants','voice:assistants'];
-  for(const key of candidates){
-    const raw=await store.getJSON<any>(key,[]);
-    const list=normalizeAgents(raw);
-    if(list.length){ await store.setJSON(K_AGENT_LIST,list); return list; }
-  }
-  return [];
-}
-
 function dedupeAgentsById(arr: Agent[]): Agent[] {
   const m = new Map<string, Agent>();
   for (const a of arr) if (!m.has(a.id)) m.set(a.id, a);
@@ -124,28 +114,58 @@ function pickList(data: any): any[] {
   return [];
 }
 
-/** A) GET list of agents for the **signed-in owner** only */
-async function fetchBuilderAgentsFromAPI(): Promise<Agent[]> {
-  try {
-    const owner = ownerIdFromLS();
-    const res = await fetch('/api/chatbots', {
-      method: 'GET',
-      cache: 'no-store',
-      headers: owner ? { 'x-owner-id': owner } : undefined,
-    });
-    if (!res.ok) return [];
-    const raw = await res.json();
-    const list = pickList(raw);
-    return (list.map(mapAnyToAgent).filter(Boolean) as Agent[]);
-  } catch {
-    return [];
-  }
-}
-
 function reasonFrom(refs:Refinement[]):string{
   const active=refs.filter(r=>r.enabled);
   if(!active.length) return 'No special requests are active—using a default helpful tone.';
   return `Following your active refinements: ${active.slice(0,3).map(r=>r.text).join('; ')}.`;
+}
+
+/** Get the signed-in owner id (used to scope agent list + patch). */
+async function resolveOwnerId(): Promise<string> {
+  // Try app’s local storage flag first (set by your auth shell)
+  try {
+    const fromLS = localStorage.getItem(K_OWNER_OVERRIDE);
+    if (fromLS) return fromLS;
+  } catch {}
+
+  // Try a lightweight /api/me if your project has it
+  try {
+    const r = await fetch('/api/me', { method: 'GET', cache: 'no-store' });
+    if (r.ok) {
+      const j = await r.json();
+      const id = j?.user?.id || j?.id || j?.uid;
+      if (id) return String(id);
+    }
+  } catch {}
+
+  return 'anon';
+}
+
+/** Prefer server list (scoped by owner) but fall back to local keys if absent. */
+async function loadAgents(store: Store, ownerId: string): Promise<Agent[]> {
+  // 1) Server list (scoped)
+  try {
+    const r = await fetch(`/api/chatbots?ownerId=${encodeURIComponent(ownerId)}`, {
+      method: 'GET',
+      headers: { 'x-owner-id': ownerId },
+      cache: 'no-store',
+    });
+    if (r.ok) {
+      const raw = await r.json().catch(() => []);
+      const list = pickList(raw);
+      const arr = normalizeAgents(list);
+      if (arr.length) return arr;
+    }
+  } catch {}
+
+  // 2) Local / legacy
+  const candidates=[K_AGENT_LIST,'chatbots','builds','assistants','voice:assistants'];
+  for(const key of candidates){
+    const raw=await store.getJSON<any>(key,[]);
+    const list=normalizeAgents(raw);
+    if(list.length){ return list; }
+  }
+  return [];
 }
 
 /** Compose a system prompt from builder data + active refinements (local only). */
@@ -192,6 +212,8 @@ async function chatWithAgent(payload:{
 ============================================================================= */
 export default function ImprovePage(){
   const [store,setStore]=useState<Store|null>(null);
+  const [ownerId,setOwnerId]=useState<string>('anon');
+
   const [agents,setAgents]=useState<Agent[]>([]);
   const [agentId,setAgentId]=useState<string|null>(null);
   const [state,setState]=useState<AgentState|null>(null);
@@ -213,56 +235,32 @@ export default function ImprovePage(){
     await migrateLegacyKeysToUser();
     setStore(st);
 
-    // Local/legacy
-    let list=normalizeAgents(await st.getJSON<any[]>(K_AGENT_LIST,[]));
-    if(!list.length) list=await loadAgentsFromAny(st);
+    const oid = await resolveOwnerId();
+    setOwnerId(oid);
 
-    // Merge builder agents from API (scoped by owner)
-    const remote = await fetchBuilderAgentsFromAPI();
-    if (remote.length) list = dedupeAgentsById([...remote, ...list]);
+    let list = await loadAgents(st, oid);
 
-    // No seeding here — Improve must never create agents
-    await st.setJSON(K_AGENT_LIST,list);
+    // Keep last local snapshot for UI responsiveness
+    await st.setJSON(K_AGENT_LIST, list);
     setAgents(list);
 
-    // If no agents at all → user must go to Builder
-    if (list.length === 0) return;
-
-    const savedId=await st.getJSON<string|null>(K_SELECTED_AGENT_ID,null as any);
-    const sel=list.find(a=>a.id===savedId) ?? [...list].sort((a,b)=>b.createdAt-a.createdAt)[0];
-    if(sel){ setAgentId(sel.id); await hydrateFromAgent(st,sel.id,list); }
+    if (list.length) {
+      const savedId=await st.getJSON<string|null>(K_SELECTED_AGENT_ID,null as any);
+      const sel=list.find(a=>a.id===savedId) ?? [...list].sort((a,b)=>b.createdAt-a.createdAt)[0];
+      if(sel){ setAgentId(sel.id); await hydrateFromAgent(st,sel.id,list); }
+    }
   })();},[]);
 
-  /** B) hydrate one agent (GET /api/chatbots/[id] with owner header) */
-  async function hydrateFromAgent(st:Store, id:string, list:Agent[]=agents){
+  async function hydrateFromAgent(st:Store,id:string,list:Agent[]=agents){
     const a=list.find(x=>x.id===id); if(!a) return;
-
-    // 1) Pull real agent server state (scoped by owner)
-    let serverBot:any = null;
-    try {
-      const owner = ownerIdFromLS();
-      const res = await fetch(`/api/chatbots/${id}`, {
-        method:'GET',
-        cache:'no-store',
-        headers: owner ? { 'x-owner-id': owner } : undefined,
-      });
-      if (res.ok) serverBot = await res.json();
-    } catch {}
-
-    // 2) Load any local Improve state (history, versions, refinements), prefer server meta
     let base:AgentState=await st.getJSON<AgentState|null>(K_IMPROVE_STATE+id,null as any) ?? {
       model:a.model, temperature:a.temperature ?? DEFAULT_TEMPERATURE,
       refinements:[], history:[{id:uid('sys'),role:'system',content:'This is the Improve panel. Your agent will reply based on the active refinements.',createdAt:now()}],
       versions:[], undo:[], redo:[]
     };
 
-    const data = serverBot?.data ?? serverBot;
-    if (data) {
-      if (data.model) base.model = data.model;
-      if (typeof data.temperature === 'number') base.temperature = data.temperature;
-      if (!MODEL_OPTIONS.some(m=>m.value===base.model)) base.model='gpt-4o';
-    }
-
+    // Guard model value
+    if(!MODEL_OPTIONS.some(m=>m.value===base.model)) base.model='gpt-4o';
     setState(base);
     await st.setJSON(K_IMPROVE_STATE+id,base);
   }
@@ -275,19 +273,18 @@ export default function ImprovePage(){
     async function run() {
       setIsSaving(true);
       try {
-        // C) Patch real agent (owner-scoped)
-        const owner = ownerIdFromLS();
+        // 1) Patch real agent (no create) — scoped by account
         await fetch(`/api/chatbots/${agentId}`, {
           method: 'PATCH',
           headers: {
             'Content-Type': 'application/json',
-            ...(owner ? { 'x-owner-id': owner } : {}),
+            'x-owner-id': ownerId || 'anon'
           },
           body: JSON.stringify({
             model: state.model,
             temperature: state.temperature,
           })
-        });
+        }).catch(()=>{ /* ignore if route not present */ });
 
         // 2) Keep local meta + list in sync for UI responsiveness
         const meta:AgentMeta={model:state.model,temperature:state.temperature,refinements:state.refinements,updatedAt:now()};
@@ -301,15 +298,15 @@ export default function ImprovePage(){
       }
     }
 
-    to = setTimeout(run, 500); // debounce
+    to = setTimeout(run, 500); // debounce saves
     return () => clearTimeout(to);
-  }, [store, agentId, state?.model, state?.temperature /* refinements are local unless mapped */]);
+  }, [store, agentId, state?.model, state?.temperature, ownerId]);
 
   useEffect(()=>{ if(scrollRef.current) scrollRef.current.scrollTop=scrollRef.current.scrollHeight; },[state?.history.length,isSending]);
 
   /* ---------- actions ---------- */
   function snapshotCore(s:AgentState){ const {model,temperature,refinements,history}=s; return {model,temperature,refinements:[...refinements],history:[...history]}; }
-  function pushUndo(ss:ReturnType<typeof snapshotCore>){ setState(p=>p?{...p,undo:[...p.undo,ss],redo[]}:p); }
+  function pushUndo(ss:ReturnType<typeof snapshotCore>){ setState(p=>p?{...p,undo:[...p.undo,ss],redo:[]}:p); }
 
   function handleAddRefinement(){
     if(!state) return;
@@ -337,8 +334,8 @@ export default function ImprovePage(){
     if(!store) return;
     try{
       setIsRefreshing(true);
-      const remote = await fetchBuilderAgentsFromAPI();
-      let merged = dedupeAgentsById([...remote, ...agents]);
+      const list = await loadAgents(store, ownerId);
+      const merged = dedupeAgentsById([...list]); // no client-seeding here
       await store.setJSON(K_AGENT_LIST, merged);
       setAgents(merged);
 
@@ -394,14 +391,14 @@ export default function ImprovePage(){
 
   const selectedAgent=useMemo(()=>agents.find(a=>a.id===agentId)??null,[agents,agentId]);
 
-  // EMPTY STATE: no agents → go to Builder
+  // EMPTY STATE: no agents → suggest Builder
   if(agents.length === 0){
     return (
-      <div className="min-h-screen flex items-center justify-center font-sans" style={{background:'var(--bg)',color:'var(--text)'}}>
-        <div className="text-center space-y-3">
+      <div className="min-h-screen grid place-items-center font-sans" style={{background:'var(--bg)',color:'var(--text)'}}>
+        <div className="panel p-6 text-center" style={{maxWidth: 520}}>
           <div className="text-lg font-semibold">No agents yet</div>
-          <div className="opacity-70 text-sm">Create an agent in the Builder first, then come back to Improve.</div>
-          <a href="/builder" className="inline-block px-4 py-2 rounded-md border" style={{borderColor:'var(--border)'}}>Go to Builder</a>
+          <div className="opacity-70 text-sm mt-2">Create an agent in the Builder first, then come back to Improve.</div>
+          <a href="/builder" className="inline-block mt-4 px-4 py-2 rounded-md border" style={{borderColor:'var(--border)'}}>Go to Builder</a>
         </div>
       </div>
     );
@@ -412,12 +409,6 @@ export default function ImprovePage(){
       <div className="opacity-80 flex items-center gap-3"><Loader2 className="animate-spin"/>&nbsp;Loading Improve…</div>
     </div>);
   }
-
-  // copy last assistant reply (for the button)
-  const copyLast = () => {
-    const last = [...state.history].reverse().find(m => m.role === 'assistant');
-    if (last?.content) navigator.clipboard.writeText(last.content).catch(()=>{});
-  };
 
   return (
     <div className={`${SCOPE} min-h-screen font-sans`} style={{ background:'var(--bg)', color:'var(--text)' }}>
@@ -456,7 +447,7 @@ export default function ImprovePage(){
             <div className="grid md:grid-cols-3 gap-3">
               <div className="rounded-lg p-3 border" style={{borderColor:'var(--border)',background:'var(--panel)'}}>
                 <div className="text-xs opacity-70 mb-1">Model <span className="opacity-60">(applies to <strong>{selectedAgent.name}</strong>)</span></div>
-                <select className="w-full rounded-md px-2 py-2 border bg-transparent" style={{borderColor:'var(--border')}}
+                <select className="w-full rounded-md px-2 py-2 border bg-transparent" style={{borderColor:'var(--border)'}}
                         value={state.model} onChange={e=>changeModel(e.target.value as ModelId)}>
                   {MODEL_OPTIONS.map(m=>(<option key={m.value} value={m.value}>{m.label}</option>))}
                 </select>
@@ -509,7 +500,7 @@ export default function ImprovePage(){
             </div>
 
             <div className="mt-3 flex gap-2">
-              <input className="flex-1 rounded-md px-3 py-2 text-sm border bg-transparent" style={{borderColor:'var(--border')}}
+              <input className="flex-1 rounded-md px-3 py-2 text-sm border bg-transparent" style={{borderColor:'var(--border)'}}
                 placeholder='Add a rule (e.g., “Only answer Yes/No”)'
                 value={addingRefine} onChange={e=>setAddingRefine(e.target.value)}
                 onKeyDown={e=>{ if(e.key==='Enter') handleAddRefinement(); }}/>
@@ -547,7 +538,7 @@ export default function ImprovePage(){
           <div className="mt-4 rounded-xl p-4 border" style={{borderColor:'var(--border)',background:'var(--panel)'}}>
             <div className="flex items-center gap-2 font-semibold"><HelpCircle size={16}/> Tips</div>
             <ul className="mt-2 text-sm opacity-80 list-disc pl-5 space-y-1">
-              <li>Choose the <strong>AI to tune</strong> at the top — every change auto-saves to that agent.</li>
+              <li>Choose the <strong>AI to tune</strong> at the top — every change auto-saves to that agent (per account).</li>
               <li>“Remove any restrictions / Any subject is open” = no <em>extra</em> app guardrails (provider safety still applies).</li>
               <li>Use <em>Versions</em> to snapshot settings + chat for quick rollback.</li>
             </ul>
@@ -686,7 +677,7 @@ function AgentPicker({
                 onClick={onRefresh}
                 className="px-2 py-1 rounded-md border text-xs inline-flex items-center gap-1"
                 style={{borderColor:'var(--border)'}}
-                title="Sync from Builder"
+                title="Sync"
               >
                 {isRefreshing ? <Loader2 size={12} className="animate-spin"/> : <RefreshCw size={12}/>}
                 Sync
@@ -733,3 +724,9 @@ function QuickChip({icon,label,onClick}:{icon?:React.ReactNode;label:string;onCl
   );
 }
 
+function copyLast(){
+  try{
+    // Optionally wire data-last-assistant on last reply div if you want single-click copy.
+    navigator.clipboard?.writeText?.(document.getSelection()?.toString() ?? '');
+  }catch{}
+}
