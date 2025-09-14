@@ -4,8 +4,11 @@
 import React, { useState } from 'react';
 import dynamic from 'next/dynamic';
 import {
-  Bot, Code2, Play, MessagesSquare, Phone, Wand2,
-  ChevronDown, ChevronUp, Gauge, Timer
+  Wand2,
+  ChevronDown,
+  ChevronUp,
+  Gauge,
+  Timer,
 } from 'lucide-react';
 
 /* Safe dynamic rail */
@@ -136,44 +139,27 @@ export default function VoiceAgentSection() {
 
         {/* RIGHT content */}
         <div className="px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w-[1160px]">
-          {/* header */}
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <span className="pill"><Bot className="ico"/> Voice Studio</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <button className="btn"><Code2 className="ico"/> Code</button>
-              <button className="btn"><Play className="ico"/> Test</button>
-              <button className="btn"><MessagesSquare className="ico"/> Chat</button>
-              <button className="btn-primary"><Phone className="ico"/> Talk to Assistant</button>
-              <span className="pill">Published</span>
-            </div>
-          </div>
-
-          {/* tabs */}
-          <div className="mb-4 flex flex-wrap items-center gap-6">
-            <div className="flex flex-wrap items-center gap-6">
-              <span className="pill">Model</span>
-              <span className="pill">Voice</span>
-              <span className="pill">Transcriber</span>
-              <span className="pill">Tools</span>
-              <span className="pill">Analysis</span>
-              <span className="pill">Advanced</span>
-              <span className="pill">Widget</span>
-            </div>
-            <div className="flex items-center gap-2"><span className="label-xs">Web</span></div>
-          </div>
+          {/* (Removed: header + action buttons + tabs) */}
 
           {/* KPIs */}
           <div className="grid gap-3 md:grid-cols-2 mb-5">
-            <div className="va-card kpi"><div className="kpi-title">Cost</div><div className="kpi-value">~$0.1/min</div></div>
-            <div className="va-card kpi"><div className="kpi-title">Latency</div><div className="kpi-value">~1050 ms</div></div>
+            <div className="va-card kpi">
+              <div className="kpi-title">Cost</div>
+              <div className="kpi-value">~$0.1/min</div>
+            </div>
+            <div className="va-card kpi">
+              <div className="kpi-title">Latency</div>
+              <div className="kpi-value">~1050 ms</div>
+            </div>
           </div>
 
           <div className="va-panel overflow-hidden">
             {/* Model */}
             <div className="acc-head" onClick={()=>setOpenModel(v=>!v)}>
-              <div className="acc-title"><span className="pill" style={{height:26}}><Gauge className="ico"/></span>Model</div>
+              <div className="acc-title">
+                <span className="pill" style={{height:26}}><Gauge className="ico"/></span>
+                Model
+              </div>
               {openModel ? <ChevronUp className="ico" style={{ color:'var(--muted)' }}/> : <ChevronDown className="ico" style={{ color:'var(--muted)' }}/>}
             </div>
             {openModel && (
@@ -209,7 +195,9 @@ export default function VoiceAgentSection() {
                 <div className="mt-2.5">
                   <div className="flex items-center justify-between mb-1.5">
                     <label className="label-xs">System Prompt</label>
-                    <div className="flex items-center gap-2"><button className="btn"><Wand2 className="ico"/> Generate</button></div>
+                    <div className="flex items-center gap-2">
+                      <button className="btn"><Wand2 className="ico"/> Generate</button>
+                    </div>
                   </div>
                   <textarea className="textarea" value={systemPrompt} onChange={e=>setSystemPrompt(e.target.value)} />
                 </div>
@@ -220,7 +208,10 @@ export default function VoiceAgentSection() {
 
             {/* Transcriber */}
             <div className="acc-head" onClick={()=>setOpenTranscriber(v=>!v)}>
-              <div className="acc-title"><span className="pill" style={{height:26}}><Timer className="ico"/></span>Transcriber</div>
+              <div className="acc-title">
+                <span className="pill" style={{height:26}}><Timer className="ico"/></span>
+                Transcriber
+              </div>
               {openTranscriber ? <ChevronUp className="ico" style={{ color:'var(--muted)' }}/> : <ChevronDown className="ico" style={{ color:'var(--muted)' }}/>}
             </div>
             {openTranscriber && (
@@ -267,11 +258,17 @@ export default function VoiceAgentSection() {
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-3">
                   <div className="flex items-center justify-between">
-                    <div><div className="font-semibold text-[13px]">Background Denoising Enabled</div><div className="label-xs">Filter background noise while the user is talking.</div></div>
+                    <div>
+                      <div className="font-semibold text-[13px]">Background Denoising Enabled</div>
+                      <div className="label-xs">Filter background noise while the user is talking.</div>
+                    </div>
                     <Toggle checked={denoise} onChange={setDenoise} />
                   </div>
                   <div className="flex items-center justify-between">
-                    <div><div className="font-semibold text-[13px]">Use Numerals</div><div className="label-xs">Convert numbers from words to digits in transcription.</div></div>
+                    <div>
+                      <div className="font-semibold text-[13px]">Use Numerals</div>
+                      <div className="label-xs">Convert numbers from words to digits in transcription.</div>
+                    </div>
                     <Toggle checked={numerals} onChange={setNumerals} />
                   </div>
                 </div>
