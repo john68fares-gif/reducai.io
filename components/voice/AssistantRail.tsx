@@ -1,3 +1,4 @@
+// components/voice/AssistantRail.tsx
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -8,14 +9,22 @@ import {
 } from 'lucide-react';
 
 const SCOPE = 'va-scope';
-const RAIL_OPEN_W = 320;   // Vapi-like width
+
+/* ──────────────────────────────────────────────────────────────────────────── */
+/* Vapi-like rail sizes + styles                                               */
+/* ──────────────────────────────────────────────────────────────────────────── */
+const RAIL_OPEN_W = 320;     // expanded width
+const RAIL_COLLAPSED_W = 72; // mini icon rail (never 0 so it doesn't disappear)
 const RAIL_BORDER = '1px solid var(--va-border)';
 
+/* === Keep the exact app-sidebar width sync logic === */
 function useAppSidebarWidth(scopeRef: React.RefObject<HTMLDivElement>, fallbackCollapsed: boolean) {
   useEffect(() => {
     const scope = scopeRef.current;
     if (!scope) return;
+
     const setVar = (w: number) => scope.style.setProperty('--app-sidebar-w', `${Math.round(w)}px`);
+
     const findSidebar = () =>
       (document.querySelector('[data-app-sidebar]') as HTMLElement) ||
       (document.querySelector('#app-sidebar') as HTMLElement) ||
@@ -25,6 +34,7 @@ function useAppSidebarWidth(scopeRef: React.RefObject<HTMLDivElement>, fallbackC
 
     let target = findSidebar();
     if (!target) { setVar(fallbackCollapsed ? 72 : 248); return; }
+
     setVar(target.getBoundingClientRect().width);
 
     const ro = new ResizeObserver(() => setVar(target!.getBoundingClientRect().width));
@@ -44,19 +54,28 @@ function useAppSidebarWidth(scopeRef: React.RefObject<HTMLDivElement>, fallbackC
   }, [scopeRef, fallbackCollapsed]);
 }
 
-/** Sync the CSS var --va-rail-w to the real <aside> width */
-function useRailWidthSync(asideRef: React.RefObject<HTMLElement>) {
+/** Keep --va-rail-w synced to the <aside> width so the editor lane expands/shrinks live */
+function useRailWidthSync(asideRef: React.RefObject<HTMLElement>, railCollapsed: boolean) {
   useEffect(() => {
     const el = asideRef.current;
     if (!el) return;
     const root = document.documentElement;
-    const apply = () => root.style.setProperty('--va-rail-w', `${Math.round(el.getBoundingClientRect().width)}px`);
-    apply();
+
+    const apply = () => {
+      const w = Math.round(el.getBoundingClientRect().width);
+      root.style.setProperty('--va-rail-w', `${w}px`);
+    };
+
+    apply(); // initial
     const ro = new ResizeObserver(apply);
     ro.observe(el);
     window.addEventListener('resize', apply);
+
+    // also update immediately when we toggle collapsed state
+    apply();
+
     return () => { ro.disconnect(); window.removeEventListener('resize', apply); };
-  }, [asideRef]);
+  }, [asideRef, railCollapsed]);
 }
 
 /* === Types (lite) === */
@@ -109,7 +128,7 @@ export default function AssistantRail({
   }, [railCollapsed]);
 
   const asideRef = useRef<HTMLElement | null>(null);
-  useRailWidthSync(asideRef); // <— keeps --va-rail-w accurate
+  useRailWidthSync(asideRef, railCollapsed); // keeps --va-rail-w accurate
 
   const visible = useMemo(
     () => assistants.filter(a => a.name.toLowerCase().includes(query.trim().toLowerCase())),
@@ -130,16 +149,16 @@ export default function AssistantRail({
           position:'fixed',
           left:'calc(var(--app-sidebar-w, 248px) - 1px)',
           top:'var(--app-header-h, 64px)',
-          width: railCollapsed ? 0 : `${RAIL_OPEN_W}px`,
+          width: railCollapsed ? `${RAIL_COLLAPSED_W}px` : `${RAIL_OPEN_W}px`, // 👈 mini rail when collapsed
           height:'calc(100vh - var(--app-header-h, 64px))',
-          borderRight: railCollapsed ? 'none' : RAIL_BORDER,
+          borderRight: RAIL_BORDER,
           background:'var(--va-sidebar)',
-          boxShadow: railCollapsed ? 'none' : 'var(--va-shadow-side)',
+          boxShadow: 'var(--va-shadow-side)',
           zIndex: 10,
           overflow:'hidden'
         }}
       >
-        {/* sticky top like Vapi */}
+        {/* Sticky header like Vapi */}
         <div className="px-3 py-3 flex items-center justify-between sticky top-0 z-10"
              style={{ borderBottom: RAIL_BORDER, background:'var(--va-sidebar)' }}>
           <div className="flex items-center gap-2 text-sm font-semibold">
@@ -194,6 +213,7 @@ export default function AssistantRail({
               const isActive = a.id === activeId;
               const isEdit = editingId === a.id;
 
+              // Mini icon cards when collapsed
               if (railCollapsed) {
                 return (
                   <button
@@ -212,6 +232,7 @@ export default function AssistantRail({
                 );
               }
 
+              // Full list cards when expanded
               return (
                 <div
                   key={a.id}
