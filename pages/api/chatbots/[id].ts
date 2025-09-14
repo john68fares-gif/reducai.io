@@ -3,89 +3,69 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
+/**
+ * GET  /api/chatbots/[id]   -> returns assistant meta (only if owned by user)
+ * PATCH /api/chatbots/[id]  -> update model/temperature/prompt; "claim" if no owner yet
+ *
+ * Requires: header x-user-id: <string>
+ */
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const id = req.query.id as string;
-  if (!id) return res.status(400).json({ error: 'id required' });
+  const id = String(req.query.id || '').trim();
+  if (!id || !id.startsWith('asst_')) return res.status(400).json({ error: 'Bad id' });
 
-  const ownerId =
-    (req.headers['x-owner-id'] as string) ||
-    (req.query.ownerId as string) ||
-    (req.body?.ownerId as string) ||
-    '';
+  const userId = String(req.headers['x-user-id'] || '').trim();
+  if (!userId) return res.status(401).json({ error: 'Missing x-user-id' });
 
-  if (!ownerId) return res.status(400).json({ error: 'ownerId required' });
-
-  if (!OPENAI_API_KEY) {
-    // In environments without a key, just noop so the UI doesn’t break
-    if (req.method === 'GET') return res.status(200).json(null);
-    if (req.method === 'PATCH') return res.status(204).end();
-    res.setHeader('Allow', ['GET', 'PATCH']);
-    return res.status(405).end('Method Not Allowed');
-  }
+  if (!OPENAI_API_KEY) return res.status(500).json({ error: 'OPENAI_API_KEY missing' });
 
   try {
-    // Always fetch the latest assistant so we can check metadata.ownerId and merge metadata.
-    const current = await fetch(`https://api.openai.com/v1/assistants/${id}`, {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-        'Content-Type': 'application/json',
-        'OpenAI-Beta': 'assistants=v2',
-      },
-      cache: 'no-store',
-    });
+    // Always fetch the assistant first so we can check ownership
+    const existing = await getAssistant(id);
+    if (!existing) return res.status(404).json({ error: 'Assistant not found' });
 
-    if (!current.ok) {
-      const t = await current.text().catch(() => '');
-      return res.status(current.status).json({ error: t || `Upstream ${current.status}` });
-    }
+    const owner = String(existing?.metadata?.ownerId || '');
 
-    const asst = await current.json();
-    const existingMeta = (asst?.metadata ?? {}) as Record<string, any>;
-    const existingOwner = existingMeta.ownerId ? String(existingMeta.ownerId) : '';
-
-    // Enforce ownership:
-    // - If assistant already has an owner and it's NOT this user → forbid.
-    // - If it has no owner, we'll stamp the current user on PATCH.
     if (req.method === 'GET') {
-      if (existingOwner && existingOwner !== String(ownerId)) {
-        return res.status(404).json({ error: 'Not found' }); // hide existence from other users
-      }
-
-      // Return a compact summary
+      if (owner !== userId) return res.status(404).json({ error: 'Chatbot not found for this user/assistantId' });
       return res.status(200).json({
-        id: asst.id,
-        name: asst.name || 'Untitled Agent',
-        model: asst.model || 'gpt-4o-mini',
-        createdAt: asst?.created_at ? Number(asst.created_at) * 1000 : Date.now(),
-        temperature: parseTemp(existingMeta.temperature, 0.5),
+        id: existing.id,
+        name: existing.name || 'Untitled Agent',
+        model: existing.model || 'gpt-4o-mini',
+        temperature: parseTemp(existing?.metadata?.temperature, 0.5),
+        createdAt: existing.created_at ? Number(existing.created_at) * 1000 : Date.now(),
       });
     }
 
     if (req.method === 'PATCH') {
-      const { model, temperature } = (req.body || {}) as {
+      const { model, temperature, prompt } = (req.body || {}) as {
         model?: string;
         temperature?: number;
+        prompt?: string;
       };
 
-      if (existingOwner && existingOwner !== String(ownerId)) {
-        return res.status(403).json({ error: 'Forbidden (different owner)' });
+      // Claim-on-first-update: if no ownerId set yet, assign it now.
+      let nextMeta = { ...(existing.metadata || {}) };
+      if (!owner) {
+        nextMeta.ownerId = userId;
+      } else if (owner !== userId) {
+        return res.status(403).json({ error: 'This assistant belongs to a different user' });
       }
 
-      // Merge metadata, stamp ownerId, and keep any other metadata keys
-      const nextMeta: Record<string, any> = { ...existingMeta, ownerId: String(ownerId) };
       if (typeof temperature === 'number') {
         nextMeta.temperature = String(temperature);
       }
 
-      const payload: Record<string, any> = { metadata: nextMeta };
-      if (typeof model === 'string' && model.trim()) payload.model = model.trim();
+      const payload: any = {
+        model: model || existing.model || 'gpt-4o-mini',
+        metadata: nextMeta,
+      };
+      if (typeof prompt === 'string') payload.instructions = prompt;
 
       const r = await fetch(`https://api.openai.com/v1/assistants/${id}`, {
-        method: 'POST', // update
+        method: 'POST', // v2 uses POST for update
         headers: {
-          Authorization: `Bearer ${OPENAI_API_KEY}`,
           'Content-Type': 'application/json',
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
           'OpenAI-Beta': 'assistants=v2',
         },
         body: JSON.stringify(payload),
@@ -95,15 +75,35 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         const text = await r.text().catch(() => '');
         return res.status(r.status).json({ error: text || `Upstream ${r.status}` });
       }
+      const a2 = await r.json();
 
-      return res.status(204).end();
+      return res.status(200).json({
+        id: a2.id,
+        name: a2.name || 'Untitled Agent',
+        model: a2.model || 'gpt-4o-mini',
+        temperature: parseTemp(a2?.metadata?.temperature, 0.5),
+        createdAt: a2.created_at ? Number(a2.created_at) * 1000 : Date.now(),
+      });
     }
 
     res.setHeader('Allow', ['GET', 'PATCH']);
-    return res.status(405).end('Method Not Allowed');
+    return res.status(405).json({ error: 'Method not allowed' });
   } catch (e: any) {
     return res.status(500).json({ error: e?.message || 'failed' });
   }
+}
+
+async function getAssistant(id: string) {
+  const r = await fetch(`https://api.openai.com/v1/assistants/${id}`, {
+    headers: {
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+      'Content-Type': 'application/json',
+      'OpenAI-Beta': 'assistants=v2',
+    },
+    cache: 'no-store',
+  });
+  if (!r.ok) return null;
+  return await r.json();
 }
 
 function parseTemp(v: unknown, dflt: number) {
