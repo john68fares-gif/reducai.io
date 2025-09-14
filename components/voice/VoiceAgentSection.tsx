@@ -16,8 +16,239 @@ import AssistantRail, { type AssistantLite } from '@/components/voice/AssistantR
 /* THEME / SIZING                                                              */
 /* ──────────────────────────────────────────────────────────────────────────── */
 const SCOPE = 'va-scope';
-const EDGE_GUTTER = 24;      // 24px left/right breathing room
-const MAX_LANE_W = 1560;     // roomy clamp for big screens
+const EDGE_GUTTER = 24;
+const MAX_LANE_W = 1560;
+
+/* ──────────────────────────────────────────────────────────────────────────── */
+/* GLOBAL STYLE (green theme + lighter typography/spacing)                     */
+/* ──────────────────────────────────────────────────────────────────────────── */
+function StyleBlock() {
+  return (
+    <style jsx global>{`
+/* Base: lighter weights & tighter rhythm like your screenshots */
+.${SCOPE}{
+  --fw-regular: 500;         /* less bold than 600/700 */
+  --fw-medium:  560;
+  --fw-semi:    600;
+
+  --radius: 12px;            /* consistent rounded radius */
+  --gap: 6px;                /* compact gaps */
+
+  /* ===== Dark theme – GREEN brand ===== */
+  --background: oklch(0.1743 0.0227 283);
+  --foreground: oklch(0.9185 0.0257 285);
+
+  --card:       oklch(0.2284 0.0384 282);
+  --card-fg:    var(--foreground);
+  --popover:    var(--card);
+  --popover-fg: var(--foreground);
+
+  /* Brand */
+  --primary:    #00ffc2;               /* neon mint */
+  --primary-fg: oklch(0.1743 0.0227 283);
+  --accent:     #10b981;               /* emerald */
+  --accent-fg:  var(--foreground);
+
+  --secondary:  oklch(0.3139 0.0736 283);
+  --secondary-fg: oklch(0.8367 0.0849 285);
+
+  --muted:      oklch(0.271 0.0621 281.4);
+  --muted-fg:   oklch(0.7166 0.0462 285);
+
+  --destructive:    oklch(0.6861 0.2061 15);
+  --destructive-fg: oklch(1 0 0);
+
+  --border: oklch(0.3261 0.0597 282.5832);
+  --input:  var(--border);
+  --ring:   var(--primary);
+
+  /* Sidebar */
+  --sidebar:                 var(--card);
+  --sidebar-foreground:      var(--foreground);
+  --sidebar-primary:         var(--primary);
+  --sidebar-primary-foreground: var(--primary-fg);
+  --sidebar-accent:          var(--accent);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border:          var(--border);
+  --sidebar-ring:            var(--primary);
+
+  /* Map to page tokens */
+  --bg: var(--background);
+  --text: var(--foreground);
+  --text-muted: color-mix(in oklab, var(--foreground) 60%, transparent);
+
+  --va-card:    var(--card);
+  --va-topbar:  var(--card);
+  --va-sidebar: var(--sidebar);
+  --va-chip:    color-mix(in oklab, var(--card) 92%, transparent);
+  --va-border:  var(--border);
+
+  --va-input-bg:     var(--card);
+  --va-input-border: var(--input);
+  --va-input-shadow: inset 0 1px 0 color-mix(in oklab, white 6%, transparent);
+
+  --va-menu-bg:     var(--card);
+  --va-menu-border: var(--border);
+
+  --va-shadow:      0 24px 70px rgba(0,0,0,.55), 0 10px 28px rgba(0,0,0,.40);
+  --va-shadow-lg:   0 42px 110px rgba(0,0,0,.66), 0 20px 48px rgba(0,0,0,.5);
+  --va-shadow-sm:   0 12px 26px rgba(0,0,0,.35);
+  --va-shadow-side: 8px 0 28px rgba(0,0,0,.42);
+
+  --va-rail-w:320px;
+  --app-sidebar-w:248px;
+  --va-edge-gutter:${EDGE_GUTTER}px;
+
+  font-weight: var(--fw-regular);
+  letter-spacing: .01em;               /* less cramped */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
+  overflow-x:hidden;
+}
+
+/* Light theme mapping if toggled */
+:root:not([data-theme="dark"]) .${SCOPE}{
+  --background: oklch(0.973 0.0133 286);
+  --foreground: oklch(0.3015 0.0572 282);
+
+  --card:       oklch(1 0 0);
+  --card-fg:    var(--foreground);
+  --popover:    var(--card);
+  --popover-fg: var(--foreground);
+
+  --primary:    #00ffc2;
+  --primary-fg: oklch(0.1743 0.0227 283);
+  --accent:     #10b981;
+  --accent-fg:  var(--foreground);
+
+  --secondary:  oklch(0.9174 0.0435 292);
+  --secondary-fg: oklch(0.4143 0.1039 288.1);
+
+  --muted:        oklch(0.958 0.0133 286);
+  --muted-fg:     oklch(0.5426 0.0465 284);
+
+  --destructive:    oklch(0.6861 0.2061 15);
+  --destructive-fg: oklch(1 0 0);
+
+  --border: oklch(0.9115 0.0216 285.9625);
+  --input:  var(--border);
+  --ring:   var(--primary);
+
+  --sidebar:                 var(--card);
+  --sidebar-foreground:      var(--foreground);
+  --sidebar-primary:         var(--primary);
+  --sidebar-primary-foreground: var(--primary-fg);
+  --sidebar-accent:          var(--accent);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border:          var(--border);
+  --sidebar-ring:            var(--ring);
+
+  --bg: var(--background);
+  --text: var(--foreground);
+  --text-muted: color-mix(in oklab, var(--foreground) 55%, transparent);
+
+  --va-card:    var(--card);
+  --va-topbar:  var(--card);
+  --va-sidebar: var(--sidebar);
+  --va-chip:    #ffffff;
+  --va-border:  var(--border);
+  --va-input-bg: var(--card);
+  --va-input-border: var(--input);
+  --va-input-shadow: inset 0 1px 0 rgba(255,255,255,.85);
+  --va-menu-bg: var(--card);
+  --va-menu-border: var(--border);
+
+  --va-shadow:    0 28px 70px rgba(0,0,0,.12), 0 12px 28px rgba(0,0,0,.08);
+  --va-shadow-lg: 0 42px 110px rgba(0,0,0,.16), 0 22px 54px rgba(0,0,0,.10);
+  --va-shadow-sm: 0 12px 26px rgba(0,0,0,.10);
+}
+
+/* Icon tint = emerald/green */
+.${SCOPE} .icon{ color: var(--accent); }
+
+/* Compact headings like the screenshots */
+.${SCOPE} h1,.${SCOPE} h2,.${SCOPE} h3,.${SCOPE} .title{
+  font-weight: var(--fw-semi);
+  letter-spacing: .005em;
+}
+
+/* Buttons: lighter weight & tighter padding */
+.${SCOPE} .topbar-btn, .${SCOPE} .btn{
+  height:40px; padding:0 .85rem; border-radius: var(--radius);
+  display:inline-flex; align-items:center; gap:.5rem;
+  border:1px solid var(--va-border); background:var(--va-card); color:var(--text);
+  font-weight: var(--fw-medium);
+}
+.${SCOPE} .btn--green{
+  background: var(--primary); color: var(--primary-fg);
+  box-shadow: 0 10px 24px color-mix(in oklab, var(--primary) 40%, transparent);
+  transition: transform .04s, background .18s, box-shadow .18s;
+}
+.${SCOPE} .btn--green:hover{
+  background: color-mix(in oklab, var(--primary) 88%, black);
+  box-shadow: 0 12px 28px color-mix(in oklab, var(--primary) 52%, transparent);
+}
+.${SCOPE} .btn--green:active{ transform:translateY(1px); }
+.${SCOPE} .btn--danger{
+  background: color-mix(in oklab, var(--destructive) 18%, transparent);
+  color: color-mix(in oklab, var(--destructive) 75%, white);
+  box-shadow: 0 10px 24px rgba(220,38,38,.15);
+  border-color: color-mix(in oklab, var(--destructive) 35%, var(--va-border));
+}
+
+/* Inputs & selects */
+.${SCOPE} .va-input{ width:100%; min-width:0; height:40px; border-radius: var(--radius); padding:0 .85rem; font-size:14.5px; outline:none;
+  background:var(--va-input-bg); border:1px solid var(--va-input-border); box-shadow:var(--va-input-shadow); color:var(--text);
+  font-weight: var(--fw-regular);
+}
+.${SCOPE} .va-input:focus{ border-color: color-mix(in oklab, var(--ring) 65%, var(--va-input-border));
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 22%, transparent), var(--va-input-shadow); }
+.${SCOPE} .va-select{
+  width:100%; min-width:0; height:40px; font-size:14.5px; border-radius: var(--radius); outline:none;
+  padding:0 2.1rem 0 .85rem;
+  background:linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02)), var(--va-input-bg);
+  border:1px solid var(--va-input-border); color:var(--text);
+  -webkit-appearance:none; appearance:none; box-shadow:var(--va-input-shadow);
+  transition: border-color .15s, box-shadow .15s, background .15s;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%23A8B3BE' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat:no-repeat; background-position:right .6rem center;
+}
+.${SCOPE} .va-select:hover{ background:linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.03)), var(--va-input-bg); }
+.${SCOPE} .va-select:focus{ border-color: color-mix(in oklab, var(--ring) 65%, var(--va-input-border));
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 22%, transparent), var(--va-input-shadow); }
+
+/* Cards/sections */
+.${SCOPE} .section{
+  border:1px solid var(--va-border);
+  background: linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,.01));
+  border-radius: 16px;
+  box-shadow: var(--va-shadow);
+}
+
+/* Lane that expands when rail collapses */
+.${SCOPE} .va-lane{
+  position: relative;
+  box-sizing: border-box;
+  padding: 10px var(--va-edge-gutter) 88px var(--va-edge-gutter);
+  margin-left: calc(var(--app-sidebar-w,0px) + var(--va-rail-w,0px) + var(--va-edge-gutter,24px));
+  width: calc(100vw - var(--app-sidebar-w,0px) - var(--va-rail-w,0px) - (var(--va-edge-gutter,24px) * 2));
+  max-width: min(${MAX_LANE_W}px, 100vw - var(--app-sidebar-w,0px) - var(--va-rail-w,0px) - (var(--va-edge-gutter,24px) * 2));
+  overflow-x: hidden;
+}
+@media (min-width: 1024px){
+  html[data-va-rail-collapsed="true"] .${SCOPE} .va-lane{
+    max-width: min(${MAX_LANE_W + 120}px, 100vw - var(--app-sidebar-w,0px) - var(--va-rail-w,0px) - (var(--va-edge-gutter,24px) * 2));
+  }
+}
+.${SCOPE} .va-lane .container{ max-width:none !important; padding-left:0 !important; padding-right:0 !important; }
+.${SCOPE} .va-lane [class*="max-w-"]{ max-width:none !important; }
+@media (max-width: 1280px){
+  .${SCOPE}{ --va-rail-w: 320px; }
+}
+`}</style>
+  );
+}
 
 /* ──────────────────────────────────────────────────────────────────────────── */
 /* TYPES (trimmed)                                                             */
@@ -79,12 +310,12 @@ You are an intelligent and responsive assistant designed to help users with a wi
 - When done, summarize details and hand off if needed.`.trim();
 
 /* ──────────────────────────────────────────────────────────────────────────── */
-/* REUSABLE UI                                                                 */
+/* SMALL UI HELPERS                                                            */
 /* ──────────────────────────────────────────────────────────────────────────── */
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div style={{ minWidth: 0 }}>
-      <div className="mb-1.5 text-[13px] font-medium" style={{ color: 'var(--text)' }}>{label}</div>
+      <div className="mb-1.5 text-[13px]" style={{ color: 'var(--text)', fontWeight: 560 }}>{label}</div>
       <div style={{ minWidth: 0 }}>{children}</div>
     </div>
   );
@@ -93,15 +324,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function Section({ title, icon, children }: { title: string; icon: React.ReactNode; children: React.ReactNode }) {
   const [open, setOpen] = useState(true);
   return (
-    <div
-      className="rounded-2xl relative transition-shadow"
-      style={{
-        background: 'linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,.01))',
-        border: '1px solid var(--va-border)',
-        boxShadow: '0 24px 70px rgba(0,0,0,.55), 0 10px 28px rgba(0,0,0,.40)',
-        overflow: 'hidden'
-      }}
-    >
+    <div className="section relative overflow-hidden">
       <div
         aria-hidden
         className="pointer-events-none absolute -top-[20%] -left-[12%] w-[58%] h-[58%] rounded-full"
@@ -113,10 +336,10 @@ function Section({ title, icon, children }: { title: string; icon: React.ReactNo
       <button
         type="button"
         onClick={() => setOpen(v => !v)}
-        className="w-full flex items-center justify-between px-5 py-4"
-        style={{ borderBottom: open ? '1px solid var(--va-border)' : 'none' }}
+        className="w-full flex items-center justify-between px-5 py-3.5"
+        style={{ borderBottom: open ? '1px solid var(--va-border)' : 'none', fontWeight: 560 }}
       >
-        <span className="flex items-center gap-2 text-sm font-semibold tracking-wide">
+        <span className="flex items-center gap-2 text-sm">
           <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: 'var(--accent)' }} />
           {icon}{title}
         </span>
@@ -138,7 +361,7 @@ function Section({ title, icon, children }: { title: string; icon: React.ReactNo
 }
 
 /* ──────────────────────────────────────────────────────────────────────────── */
-/* PROMPT HELPERS                                                              */
+/* PROMPT MERGE                                                                */
 /* ──────────────────────────────────────────────────────────────────────────── */
 const sectionRegex = (name: string) => new RegExp(String.raw`\[${name}\]\s*([\s\S]*?)(?=\n\[|$)`, 'i');
 const setSection = (p: string, name: string, body: string) => {
@@ -159,218 +382,6 @@ function mergeInput(freeText: string, current: string) {
   out.prompt = hasRef ? out.prompt.replace(sectionRegex('Refinements'), (_m, body) => `[Refinements]\n${(body || '').trim()}\n${bullet}\n`)
                       : `${out.prompt}\n\n[Refinements]\n${bullet}\n`;
   return out;
-}
-
-/* ──────────────────────────────────────────────────────────────────────────── */
-/* GLOBAL STYLE (OKLCH theme from your screenshots)                            */
-/* ──────────────────────────────────────────────────────────────────────────── */
-function StyleBlock() {
-  return (
-    <style jsx global>{`
-.${SCOPE}{
-  /* ===== Core theme tokens (dark) – from your screenshots ===== */
-  --background: oklch(0.1743 0.0227 283.0);
-  --foreground: oklch(0.9185 0.0257 285.0);
-
-  --card:       oklch(0.2284 0.0384 282.0);
-  --card-fg:    var(--foreground);
-
-  --popover:    oklch(0.2284 0.0384 282.0);
-  --popover-fg: var(--foreground);
-
-  --primary:    oklch(0.7162 0.1597 290.3962);
-  --primary-fg: oklch(0.1743 0.0227 283.0);
-
-  --secondary:    oklch(0.3139 0.0736 283.0);
-  --secondary-fg: oklch(0.8367 0.0849 285.0);
-
-  --accent:       oklch(0.3354 0.0828 280.0);       /* used for glows, we also map it below */
-  --accent-fg:    var(--foreground);
-
-  --muted:        oklch(0.2710 0.0621 281.4);
-  --muted-fg:     oklch(0.7166 0.0462 285.0);
-
-  --destructive:    oklch(0.6861 0.2061 14.99);
-  --destructive-fg: oklch(1 0 0);
-
-  --border: oklch(0.3261 0.0597 282.5832);
-  --input:  oklch(0.3261 0.0597 282.5832);
-  --ring:   var(--primary);
-
-  /* Sidebar */
-  --sidebar:                 oklch(0.2284 0.0384 282.0);
-  --sidebar-foreground:      var(--foreground);
-  --sidebar-primary:         var(--primary);
-  --sidebar-primary-foreground: var(--primary-fg);
-  --sidebar-accent:          var(--accent);
-  --sidebar-accent-foreground: var(--foreground);
-  --sidebar-border:          var(--border);
-  --sidebar-ring:            var(--primary);
-
-  /* ===== Map into this page’s existing custom vars ===== */
-  --bg: var(--background);
-  --text: var(--foreground);
-  --text-muted: color-mix(in oklab, var(--foreground) 65%, transparent);
-
-  --va-card:    var(--card);
-  --va-topbar:  var(--card);
-  --va-sidebar: var(--sidebar);
-  --va-chip:    color-mix(in oklab, var(--card) 92%, transparent);
-  --va-border:  var(--border);
-
-  --va-input-bg:     var(--card);
-  --va-input-border: var(--input);
-  --va-input-shadow: inset 0 1px 0 color-mix(in oklab, white 6%, transparent);
-
-  --va-menu-bg:     var(--card);
-  --va-menu-border: var(--border);
-
-  --va-shadow:      0 24px 70px rgba(0,0,0,.55), 0 10px 28px rgba(0,0,0,.40);
-  --va-shadow-lg:   0 42px 110px rgba(0,0,0,.66), 0 20px 48px rgba(0,0,0,.5);
-  --va-shadow-sm:   0 12px 26px rgba(0,0,0,.35);
-  --va-shadow-side: 8px 0 28px rgba(0,0,0,.42);
-
-  --va-rail-w:320px;
-  --app-sidebar-w:248px;
-  --va-edge-gutter:${EDGE_GUTTER}px;
-
-  /* Make icons follow primary vibe */
-  --accent: var(--primary);
-
-  overflow-x:hidden;
-}
-
-/* Light mode mapping (kept minimal if user switches) */
-:root:not([data-theme="dark"]) .${SCOPE}{
-  --background: oklch(0.973 0.0133 286.0);
-  --foreground: oklch(0.3015 0.0572 282.0);
-
-  --card:       oklch(1 0 0);
-  --card-fg:    var(--foreground);
-
-  --popover:    oklch(1 0 0);
-  --popover-fg: var(--foreground);
-
-  --primary:    oklch(0.5417 0.179 288.0332);
-  --primary-fg: oklch(1 0 0);
-
-  --secondary:    oklch(0.9174 0.0435 292.0);
-  --secondary-fg: oklch(0.4143 0.1039 288.1);
-
-  --accent:       oklch(0.9221 0.0373 262.0);
-  --accent-fg:    var(--foreground);
-
-  --muted:        oklch(0.9580 0.0133 286.0);
-  --muted-fg:     oklch(0.5426 0.0465 284.0);
-
-  --destructive:    oklch(0.6861 0.2061 14.99);
-  --destructive-fg: oklch(1 0 0);
-
-  --border: oklch(0.9115 0.0216 285.9625);
-  --input:  var(--border);
-  --ring:   oklch(0.5417 0.179 288.0332);
-
-  --sidebar:                 oklch(1 0 0);
-  --sidebar-foreground:      var(--foreground);
-  --sidebar-primary:         var(--primary);
-  --sidebar-primary-foreground: var(--primary-fg);
-  --sidebar-accent:          var(--accent);
-  --sidebar-accent-foreground: var(--foreground);
-  --sidebar-border:          var(--border);
-  --sidebar-ring:            var(--ring);
-
-  /* remap */
-  --bg: var(--background);
-  --text: var(--foreground);
-  --text-muted: color-mix(in oklab, var(--foreground) 55%, transparent);
-
-  --va-card:    var(--card);
-  --va-topbar:  var(--card);
-  --va-sidebar: var(--sidebar);
-  --va-chip:    #ffffff;
-  --va-border:  var(--border);
-  --va-input-bg: var(--card);
-  --va-input-border: var(--input);
-  --va-input-shadow: inset 0 1px 0 rgba(255,255,255,.85);
-  --va-menu-bg: var(--card);
-  --va-menu-border: var(--border);
-
-  --va-shadow:    0 28px 70px rgba(0,0,0,.12), 0 12px 28px rgba(0,0,0,.08);
-  --va-shadow-lg: 0 42px 110px rgba(0,0,0,.16), 0 22px 54px rgba(0,0,0,.10);
-  --va-shadow-sm: 0 12px 26px rgba(0,0,0,.10);
-}
-
-/* Icons tinted by primary */
-.${SCOPE} .icon{ color: var(--accent); }
-
-/* Buttons */
-.${SCOPE} .topbar-btn, .${SCOPE} .btn{
-  height:42px; padding:0 .95rem; border-radius:12px; display:inline-flex; align-items:center; gap:.5rem;
-  border:1px solid var(--va-border); background:var(--va-card); color:var(--text);
-}
-.${SCOPE} .btn--green{ /* keep class name for compatibility; use primary to match theme */
-  background: var(--primary); color: var(--primary-fg);
-  box-shadow: 0 10px 24px color-mix(in oklab, var(--primary) 40%, transparent);
-  transition: transform .04s, background .18s, box-shadow .18s;
-}
-.${SCOPE} .btn--green:hover{
-  background: color-mix(in oklab, var(--primary) 88%, black);
-  box-shadow: 0 12px 28px color-mix(in oklab, var(--primary) 52%, transparent);
-}
-.${SCOPE} .btn--green:active{ transform:translateY(1px); }
-.${SCOPE} .btn--danger{
-  background: color-mix(in oklab, var(--destructive) 18%, transparent);
-  color: color-mix(in oklab, var(--destructive) 75%, white);
-  box-shadow: 0 10px 24px rgba(220,38,38,.15); border-color: color-mix(in oklab, var(--destructive) 35%, var(--va-border));
-}
-
-/* Inputs & selects */
-.${SCOPE} .va-input{ width:100%; min-width:0; height:42px; border-radius:12px; padding:0 .9rem; font-size:15px; outline:none;
-  background:var(--va-input-bg); border:1px solid var(--va-input-border); box-shadow:var(--va-input-shadow); color:var(--text); }
-.${SCOPE} .va-input:focus{ border-color: color-mix(in oklab, var(--ring) 65%, var(--va-input-border));
-  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 22%, transparent), var(--va-input-shadow); }
-.${SCOPE} .va-select{
-  width:100%; min-width:0; height:42px; font-size:15px; border-radius:12px; outline:none;
-  padding:0 2.2rem 0 .9rem;
-  background:linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02)), var(--va-input-bg);
-  border:1px solid var(--va-input-border); color:var(--text);
-  -webkit-appearance:none; appearance:none; box-shadow:var(--va-input-shadow);
-  transition: border-color .15s, box-shadow .15s, background .15s;
-  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%23A8B3BE' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
-  background-repeat:no-repeat; background-position:right .7rem center;
-}
-.${SCOPE} .va-select:hover{ background:linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.03)), var(--va-input-bg); }
-.${SCOPE} .va-select:focus{ border-color: color-mix(in oklab, var(--ring) 65%, var(--va-input-border));
-  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 22%, transparent), var(--va-input-shadow); }
-
-/* Lane = content area that shifts with rail and expands */
-.${SCOPE} .va-lane{
-  position: relative;
-  box-sizing: border-box;
-  padding: 12px var(--va-edge-gutter) 96px var(--va-edge-gutter);
-  margin-left: calc(var(--app-sidebar-w,0px) + var(--va-rail-w,0px) + var(--va-edge-gutter,24px));
-  width: calc(100vw - var(--app-sidebar-w,0px) - var(--va-rail-w,0px) - (var(--va-edge-gutter,24px) * 2));
-  max-width: min(${MAX_LANE_W}px, 100vw - var(--app-sidebar-w,0px) - var(--va-rail-w,0px) - (var(--va-edge-gutter,24px) * 2));
-  overflow-x: hidden;
-}
-
-/* When rail collapses, allow a little more width */
-@media (min-width: 1024px){
-  html[data-va-rail-collapsed="true"] .${SCOPE} .va-lane{
-    max-width: min(${MAX_LANE_W + 120}px, 100vw - var(--app-sidebar-w,0px) - var(--va-rail-w,0px) - (var(--va-edge-gutter,24px) * 2));
-  }
-}
-
-/* guard against .container max-w from Tailwind etc */
-.${SCOPE} .va-lane .container{ max-width:none !important; padding-left:0 !important; padding-right:0 !important; }
-.${SCOPE} .va-lane [class*="max-w-"]{ max-width:none !important; }
-
-/* compact tweak for 13–14" laptops */
-@media (max-width: 1280px){
-  .${SCOPE}{ --va-rail-w: 320px; }
-}
-`}</style>
-  );
 }
 
 /* ──────────────────────────────────────────────────────────────────────────── */
@@ -485,7 +496,7 @@ export default function VoiceAgentSection() {
     setTypingPreview(null); setPendingFirstMsg(undefined);
   };
 
-  /* transcript + mock call controls (minimal for demo) */
+  /* transcript + mock call controls */
   const [transcript, setTranscript] = useState<TranscriptTurn[]>([]);
   const [currentCallId, setCurrentCallId] = useState<string | null>(null);
   const greet = 'Hello. How may I help you today?';
@@ -508,10 +519,8 @@ export default function VoiceAgentSection() {
 
   const railData: AssistantLite[] = assistants.map(a => ({ id: a.id, name: a.name, folder: a.folder, updatedAt: a.updatedAt }));
 
-  /* ─────────────────────────── RENDER ─────────────────────────── */
   return (
     <div ref={scopeRef} className={SCOPE} style={{ background: 'var(--bg)', color: 'var(--text)' }}>
-      {/* Fixed assistants rail (collapsible) */}
       <AssistantRail
         assistants={railData}
         activeId={activeId}
@@ -521,11 +530,11 @@ export default function VoiceAgentSection() {
         onDelete={onDelete}
       />
 
-      {/* CONTENT LANE — shifts left/right & widens when rail collapses */}
+      {/* CONTENT LANE */}
       <div className="va-lane">
         {/* Top actions */}
         <div className="pb-3 flex items-center justify-between sticky" style={{ top: 'calc(var(--app-header-h, 64px) + 8px)', zIndex: 2 }}>
-          <div className="flex items-center gap-8">
+          <div className="flex items-center gap-6">
             {!currentCallId ? (
               <button onClick={()=> onTurn('assistant', greet)} className="btn btn--green">
                 <span>Start Web Call</span>
@@ -539,7 +548,7 @@ export default function VoiceAgentSection() {
             <button className="topbar-btn" onClick={() => navigator.clipboard.writeText(BASE_PROMPT).catch(()=>{})}><Copy className="w-4 h-4 icon" /> Copy Prompt</button>
           </div>
 
-          <div className="flex items-center gap-8">
+          <div className="flex items-center gap-6">
             <button className="btn btn--green"><Rocket className="w-4 h-4" /><span>Publish</span></button>
           </div>
         </div>
@@ -547,24 +556,18 @@ export default function VoiceAgentSection() {
         {/* Stats row */}
         <div className="grid gap-6 md:gap-6 mb-6" style={{ gridTemplateColumns:'repeat(2, minmax(260px,1fr))' }}>
           <div className="rounded-xl p-4" style={{ background:'var(--va-card)', border:'1px solid var(--va-border)', boxShadow:'var(--va-shadow)' }}>
-            <div className="text-[13px] opacity-80 mb-1.5">Cost</div>
-            <div className="text-[20px] font-semibold mb-3">~$0.1/min</div>
-            <div className="h-2 rounded-full overflow-hidden" style={{ background:'rgba(255,255,255,.06)', border:'1px solid var(--va-border)' }}>
-              <div className="h-full" style={{ width:'72%', background:'linear-gradient(90deg,#22d3ee,#fde047,#fb923c,#10b981)' }} />
-            </div>
+            <div className="text-[12.5px] opacity-80 mb-1.5">Cost</div>
+            <div className="text-[19px]" style={{ fontWeight: 560 }}>~$0.1/min</div>
           </div>
           <div className="rounded-xl p-4" style={{ background:'var(--va-card)', border:'1px solid var(--va-border)', boxShadow:'var(--va-shadow)' }}>
-            <div className="text-[13px] opacity-80 mb-1.5">Latency</div>
-            <div className="text-[20px] font-semibold mb-3">~1050 ms</div>
-            <div className="h-2 rounded-full overflow-hidden" style={{ background:'rgba(255,255,255,.06)', border:'1px solid var(--va-border)' }}>
-              <div className="h-full" style={{ width:'78%', background:'linear-gradient(90deg,#22d3ee,#fde047,#fb923c,#10b981)' }} />
-            </div>
+            <div className="text-[12.5px] opacity-80 mb-1.5">Latency</div>
+            <div className="text-[19px]" style={{ fontWeight: 560 }}>~1050 ms</div>
           </div>
         </div>
 
         {/* Model */}
         <Section title="Model" icon={<FileText className="w-4 h-4 icon" />}>
-          <div className="grid gap-4 md:gap-6" style={{ gridTemplateColumns: 'repeat(12, minmax(0, 1fr))' }}>
+          <div className="grid gap-4 md:gap-5" style={{ gridTemplateColumns: 'repeat(12, minmax(0, 1fr))' }}>
             <div style={{ gridColumn:'span 3 / span 3', minWidth:0 }}>
               <Field label="Provider">
                 <select className="va-select" defaultValue="openai">
@@ -597,9 +600,9 @@ export default function VoiceAgentSection() {
             </div>
           </div>
 
-          <div className="mt-6" style={{ minWidth: 0 }}>
+          <div className="mt-5" style={{ minWidth: 0 }}>
             <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="w-4 h-4 icon" /> System Prompt</div>
+              <div className="flex items-center gap-2 text-sm" style={{ fontWeight: 560 }}><Sparkles className="w-4 h-4 icon" /> System Prompt</div>
               <div className="flex items-center gap-2">
                 <button className="topbar-btn" onClick={()=> setTypingPreview(null)}><RefreshCw className="w-4 h-4 icon" /> Reset</button>
                 <button onClick={() => setGenOpen(true)} className="btn btn--green"><Sparkles className="w-4 h-4" /> <span>Generate / Edit</span></button>
@@ -608,14 +611,14 @@ export default function VoiceAgentSection() {
 
             {!typingPreview ? (
               <textarea
-                rows={24}
+                rows={22}
                 defaultValue={BASE_PROMPT}
                 className="w-full rounded-xl px-3 py-3 text-[14px] leading-6 outline-none"
                 style={{
                   background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)',
                   boxShadow: 'var(--va-shadow), inset 0 1px 0 rgba(255,255,255,.03)', color: 'var(--text)',
                   fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-                  minHeight: 520
+                  minHeight: 480, fontWeight: 500
                 }}
               />
             ) : (
@@ -624,7 +627,7 @@ export default function VoiceAgentSection() {
                      style={{
                        background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)',
                        boxShadow: 'var(--va-shadow), inset 0 1px 0 rgba(255,255,255,.03)', color: 'var(--text)',
-                       whiteSpace: 'pre-wrap', minHeight: 520, maxHeight: 680, overflowY: 'auto'
+                       whiteSpace: 'pre-wrap', minHeight: 480, maxHeight: 680, overflowY: 'auto', fontWeight: 500
                      }}>
                   {typingPreview}
                 </div>
@@ -639,7 +642,7 @@ export default function VoiceAgentSection() {
 
         {/* Voice */}
         <Section title="Voice" icon={<Mic2 className="w-4 h-4 icon" />}>
-          <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(2, minmax(220px, 1fr))' }}>
+          <div className="grid gap-5" style={{ gridTemplateColumns: 'repeat(2, minmax(220px, 1fr))' }}>
             <Field label="Provider">
               <select className="va-select" defaultValue="openai">
                 <option value="openai">OpenAI</option>
@@ -667,7 +670,7 @@ export default function VoiceAgentSection() {
 
         {/* Transcriber */}
         <Section title="Transcriber" icon={<BookOpen className="w-4 h-4 icon" />}>
-          <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(3, minmax(220px, 1fr))' }}>
+          <div className="grid gap-5" style={{ gridTemplateColumns: 'repeat(3, minmax(220px, 1fr))' }}>
             <Field label="Provider">
               <select className="va-select" defaultValue="deepgram">
                 <option value="deepgram">Deepgram</option>
@@ -702,24 +705,6 @@ export default function VoiceAgentSection() {
               <select className="va-select" defaultValue="false">
                 <option value="false">No</option>
                 <option value="true">Yes</option>
-              </select>
-            </Field>
-          </div>
-        </Section>
-
-        {/* Tools */}
-        <Section title="Tools" icon={<SlidersHorizontal className="w-4 h-4 icon" />}>
-          <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(2, minmax(220px, 1fr))' }}>
-            <Field label="Enable End Call Function">
-              <select className="va-select" defaultValue="true">
-                <option value="true">Enabled</option>
-                <option value="false">Disabled</option>
-              </select>
-            </Field>
-            <Field label="Dial Keypad">
-              <select className="va-select" defaultValue="true">
-                <option value="true">Enabled</option>
-                <option value="false">Disabled</option>
               </select>
             </Field>
           </div>
@@ -760,8 +745,8 @@ export default function VoiceAgentSection() {
               className="w-full max-w-2xl rounded-xl"
               style={{ background: 'var(--va-card)', border: '1px solid var(--va-border)', boxShadow: 'var(--va-shadow-lg)' }}
             >
-              <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid var(--va-border)' }}>
-                <div className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="w-4 h-4 icon" /> Generate / Edit Prompt</div>
+              <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid var(--va-border)', fontWeight: 560 }}>
+                <div className="flex items-center gap-2 text-sm"><Sparkles className="w-4 h-4 icon" /> Generate / Edit Prompt</div>
                 <button onClick={() => setGenOpen(false)} className="p-2 rounded-lg hover:opacity-80"><X className="w-4 h-4 icon" /></button>
               </div>
               <div className="p-4">
