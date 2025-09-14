@@ -1,292 +1,912 @@
-// components/voice/AssistantRail.tsx
+// components/voice/VoiceAgentSection.tsx
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Search, Plus, Check, Trash2, Edit3,
-  PanelLeft, Bot, ChevronLeft, ChevronRight as ChevronRightIcon,
-  Folder, FolderOpen
+  Check, Trash2, Copy, Sparkles, ChevronDown, ChevronRight,
+  FileText, Mic2, BookOpen, SlidersHorizontal, UploadCloud,
+  RefreshCw, X, Phone as PhoneIcon, Rocket, PhoneOff,
+  MessageSquare, ListTree, AudioLines, Volume2, Save
 } from 'lucide-react';
 
+import AssistantRail, { type AssistantLite } from '@/components/voice/AssistantRail';
+import WebCallButton from '@/components/voice/WebCallButton';
+
+/* ──────────────────────────────────────────────────────────────────────────── */
+/* THEME / SIZING                                                              */
+/* ──────────────────────────────────────────────────────────────────────────── */
 const SCOPE = 'va-scope';
+const ACCENT = '#10b981';
+const ACCENT_HOVER = '#0ea371';
+const BTN_SHADOW = '0 10px 24px rgba(16,185,129,.22)';
+
+/* roomy on 13–14" + expands when rail collapses */
+const MAX_CONTENT_W = 1380;
+const EDGE_GUTTER = 24;
 
 /* ──────────────────────────────────────────────────────────────────────────── */
-/* Vapi-like rail sizes + styles                                               */
+/* TYPES (trimmed)                                                             */
 /* ──────────────────────────────────────────────────────────────────────────── */
-const RAIL_OPEN_W = 320;     // expanded width
-const RAIL_COLLAPSED_W = 72; // mini icon rail (never 0 so it doesn't disappear)
-const RAIL_BORDER = '1px solid var(--va-border)';
+type Provider = 'openai';
+type ModelId = 'gpt-4o' | 'gpt-4o-mini' | 'gpt-4.1' | 'gpt-3.5-turbo';
+type VoiceProvider = 'openai' | 'elevenlabs';
 
-/* === Keep the exact app-sidebar width sync logic === */
-function useAppSidebarWidth(scopeRef: React.RefObject<HTMLDivElement>, fallbackCollapsed: boolean) {
-  useEffect(() => {
-    const scope = scopeRef.current;
-    if (!scope) return;
+type PhoneNum = { id: string; label?: string; e164: string };
+type TranscriptTurn = { role: 'assistant' | 'user'; text: string; ts: number };
 
-    const setVar = (w: number) => scope.style.setProperty('--app-sidebar-w', `${Math.round(w)}px`);
-
-    const findSidebar = () =>
-      (document.querySelector('[data-app-sidebar]') as HTMLElement) ||
-      (document.querySelector('#app-sidebar') as HTMLElement) ||
-      (document.querySelector('.app-sidebar') as HTMLElement) ||
-      (document.querySelector('aside.sidebar') as HTMLElement) ||
-      null;
-
-    let target = findSidebar();
-    if (!target) { setVar(fallbackCollapsed ? 72 : 248); return; }
-
-    setVar(target.getBoundingClientRect().width);
-
-    const ro = new ResizeObserver(() => setVar(target!.getBoundingClientRect().width));
-    ro.observe(target);
-
-    const mo = new MutationObserver(() => setVar(target!.getBoundingClientRect().width));
-    mo.observe(target, { attributes: true, attributeFilter: ['class', 'style'] });
-
-    const onTransitionEnd = () => setVar(target!.getBoundingClientRect().width);
-    target.addEventListener('transitionend', onTransitionEnd);
-
-    return () => {
-      ro.disconnect();
-      mo.disconnect();
-      target.removeEventListener('transitionend', onTransitionEnd);
-    };
-  }, [scopeRef, fallbackCollapsed]);
-}
-
-/** Keep --va-rail-w synced to the <aside> width so the editor lane expands/shrinks live */
-function useRailWidthSync(asideRef: React.RefObject<HTMLElement>, railCollapsed: boolean) {
-  useEffect(() => {
-    const el = asideRef.current;
-    if (!el) return;
-    const root = document.documentElement;
-
-    const apply = () => {
-      const w = Math.round(el.getBoundingClientRect().width);
-      root.style.setProperty('--va-rail-w', `${w}px`);
-    };
-
-    apply(); // initial
-    const ro = new ResizeObserver(apply);
-    ro.observe(el);
-    window.addEventListener('resize', apply);
-
-    // also update immediately when we toggle collapsed state
-    apply();
-
-    return () => { ro.disconnect(); window.removeEventListener('resize', apply); };
-  }, [asideRef, railCollapsed]);
-}
-
-/* === Types (lite) === */
-export type AssistantLite = { id: string; name: string; folder?: string; updatedAt: number };
-
-type Props = {
-  assistants: AssistantLite[];
-  activeId: string;
-  onSelect: (id: string) => void;
-  onCreate: () => void;
-  onRename: (id: string, name: string) => void;
-  onDelete: (id: string) => void;
-  defaultCollapsed?: boolean;
+type CallLog = {
+  id: string; assistantId: string; assistantName: string;
+  startedAt: number; endedAt?: number; endedReason?: string;
+  type: 'Web'; assistantPhoneNumber?: string; transcript: TranscriptTurn[]; costUSD?: number;
 };
 
-export default function AssistantRail({
-  assistants, activeId, onSelect, onCreate, onRename, onDelete, defaultCollapsed = false,
-}: Props) {
-  const scopeRef = useRef<HTMLDivElement | null>(null);
-  const [sbCollapsed, setSbCollapsed] = useState<boolean>(() => {
-    if (typeof document === 'undefined') return false;
-    return document.body.getAttribute('data-sb-collapsed') === 'true';
-  });
-
-  useEffect(() => {
-    const onEvt = (e: Event) => {
-      const detail = (e as CustomEvent).detail || {};
-      if (typeof detail.collapsed === 'boolean') setSbCollapsed(!!detail.collapsed);
+type Assistant = {
+  id: string; name: string; folder?: string; updatedAt: number; published?: boolean;
+  config: {
+    model: {
+      provider: Provider; model: ModelId;
+      firstMessageMode: 'assistant_first' | 'user_first';
+      firstMessage: string; systemPrompt: string;
     };
-    window.addEventListener('layout:sidebar', onEvt as EventListener);
+    voice: { provider: VoiceProvider; voiceId: string; voiceLabel: string };
+    transcriber: {
+      provider: 'deepgram'; model: 'nova-2' | 'nova-3';
+      language: 'en' | 'multi'; denoise: boolean; confidenceThreshold: number; numerals: boolean;
+    };
+    tools: { enableEndCall: boolean; dialKeypad: boolean };
+    telephony?: { numbers: PhoneNum[]; linkedNumberId?: string };
+  };
+};
 
-    const mo = new MutationObserver(() => {
-      setSbCollapsed(document.body.getAttribute('data-sb-collapsed') === 'true');
-    });
-    mo.observe(document.body, { attributes: true, attributeFilter: ['data-sb-collapsed', 'class'] });
+/* ──────────────────────────────────────────────────────────────────────────── */
+/* STORAGE HELPERS                                                             */
+/* ──────────────────────────────────────────────────────────────────────────── */
+const LS_LIST = 'voice:assistants.v1';
+const ak = (id: string) => `voice:assistant:${id}`;
+const LS_CALLS = 'voice:calls.v1';
+const LS_ROUTES = 'voice:phoneRoutes.v1';
+const readLS = <T,>(k: string): T | null => { try { const r = localStorage.getItem(k); return r ? JSON.parse(r) as T : null; } catch { return null; } };
+const writeLS = <T,>(k: string, v: T) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 
-    return () => { window.removeEventListener('layout:sidebar', onEvt as EventListener); mo.disconnect(); };
-  }, []);
+/* ──────────────────────────────────────────────────────────────────────────── */
+const BASE_PROMPT = `[Identity]
+You are an intelligent and responsive assistant designed to help users with a wide range of inquiries and tasks.
 
-  useAppSidebarWidth(scopeRef, sbCollapsed);
+[Style]
+- Maintain a professional and approachable demeanor.
+- Use clear, concise language and avoid jargon.
 
-  const [railCollapsed, setRailCollapsed] = useState(defaultCollapsed);
-  const [query, setQuery] = useState('');
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [tempName, setTempName] = useState('');
+[System Behaviors]
+- Ask one question at a time.
+- Summarize & confirm before finalizing.
+- Offer next steps when appropriate.
 
-  // ping layout so main recomputes when we collapse/expand
-  useEffect(() => {
-    window.dispatchEvent(new CustomEvent('voice:layout:ping'));
-  }, [railCollapsed]);
+[Task & Goals]
+- Understand intent, collect required details, and provide guidance.
 
-  const asideRef = useRef<HTMLElement | null>(null);
-  useRailWidthSync(asideRef, railCollapsed); // keeps --va-rail-w accurate
+[Data to Collect]
+- Full Name
+- Phone Number
+- Email (optional)
+- Appointment Date/Time (if applicable)
 
-  const visible = useMemo(
-    () => assistants.filter(a => a.name.toLowerCase().includes(query.trim().toLowerCase())),
-    [assistants, query]
-  );
+[Safety]
+- No medical/legal/financial advice beyond high-level pointers.
+- Decline restricted actions; suggest alternatives.
 
-  const beginRename = (a: AssistantLite) => { setEditingId(a.id); setTempName(a.name); };
-  const saveRename = (a: AssistantLite) => { onRename(a.id, (tempName || '').trim() || 'Untitled'); setEditingId(null); };
+[Handover]
+- When done, summarize details and hand off if needed.`.trim();
 
+/* ──────────────────────────────────────────────────────────────────────────── */
+/* SMALL ATOMS                                                                 */
+/* ──────────────────────────────────────────────────────────────────────────── */
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div ref={scopeRef} className={SCOPE}>
-      <aside
-        ref={asideRef as any}
-        data-va-rail
-        data-va-collapsed={railCollapsed ? 'true' : 'false'}
-        className="hidden lg:flex flex-col"
+    <div style={{ minWidth: 0 }}>
+      <div className="mb-1.5 text-[13px] font-medium" style={{ color: 'var(--text)' }}>{label}</div>
+      <div style={{ minWidth: 0 }}>{children}</div>
+    </div>
+  );
+}
+
+function Section({ title, icon, children }: { title: string; icon: React.ReactNode; children: React.ReactNode }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <div
+      className="col-span-12 group rounded-2xl relative transition-shadow"
+      style={{
+        background: 'linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,.01))',
+        border: '1px solid var(--va-border)',
+        boxShadow: '0 24px 70px rgba(0,0,0,.55), 0 10px 28px rgba(0,0,0,.40)',
+        overflow: 'hidden' // clip glow to avoid horizontal scroll
+      }}
+    >
+      {/* soft green aura (kept inside card bounds) */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -top-[20%] -left-[12%] w-[58%] h-[58%] rounded-full"
         style={{
-          position:'fixed',
-          left:'calc(var(--app-sidebar-w, 248px) - 1px)',
-          top:'var(--app-header-h, 64px)',
-          width: railCollapsed ? `${RAIL_COLLAPSED_W}px` : `${RAIL_OPEN_W}px`, // 👈 mini rail when collapsed
-          height:'calc(100vh - var(--app-header-h, 64px))',
-          borderRight: RAIL_BORDER,
-          background:'var(--va-sidebar)',
-          boxShadow: 'var(--va-shadow-side)',
-          zIndex: 10,
-          overflow:'hidden'
+          background: 'radial-gradient(circle, color-mix(in oklab, var(--accent) 16%, transparent) 0%, transparent 70%)',
+          filter: 'blur(42px)', opacity: .75
+        }}
+      />
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center justify-between px-5 py-4"
+        style={{ borderBottom: open ? '1px solid var(--va-border)' : 'none' }}
+      >
+        <span className="flex items-center gap-2 text-sm font-semibold tracking-wide">
+          <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: 'var(--accent)' }} />
+          {icon}{title}
+        </span>
+        {open ? <ChevronDown className="w-4 h-4 icon" /> : <ChevronRight className="w-4 h-4 icon" />}
+      </button>
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }} transition={{ duration: .18 }}
+            className="px-5 pb-5"
+          >
+            {children}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────────────────────── */
+/* CSS (added overflow-x guards + pretty selects)                              */
+/* ──────────────────────────────────────────────────────────────────────────── */
+function StyleBlock() {
+  return (
+    <style jsx global>{`
+.${SCOPE}{
+  --accent:${ACCENT};
+  --bg:#0b0c10; --text:#eef2f5;
+  --text-muted:color-mix(in oklab, var(--text) 65%, transparent);
+  --va-card:#0f1315; --va-topbar:#0e1214;
+  --va-sidebar:linear-gradient(180deg,#0d1113 0%,#0b0e10 100%);
+  --va-chip:rgba(255,255,255,.03); --va-border:rgba(255,255,255,.10);
+  --va-input-bg:rgba(255,255,255,.03); --va-input-border:rgba(255,255,255,.14);
+  --va-input-shadow:inset 0 1px 0 rgba(255,255,255,.06);
+  --va-menu-bg:#101314; --va-menu-border:rgba(255,255,255,.16);
+  --va-shadow:0 24px 70px rgba(0,0,0,.55), 0 10px 28px rgba(0,0,0,.4);
+  --va-shadow-lg:0 42px 110px rgba(0,0,0,.66), 0 20px 48px rgba(0,0,0,.5);
+  --va-shadow-sm:0 12px 26px rgba(0,0,0,.35);
+  --va-shadow-side:8px 0 28px rgba(0,0,0,.42);
+  --va-rail-w:360px; --app-sidebar-w:248px; --va-edge-gutter:${EDGE_GUTTER}px;
+
+  /* prevent any horizontal scroll (glows, borders, etc.) */
+  overflow-x: hidden;
+}
+:root:not([data-theme="dark"]) .${SCOPE}{
+  --bg:#f7f9fb; --text:#101316;
+  --text-muted:color-mix(in oklab, var(--text) 55%, transparent);
+  --va-card:#ffffff; --va-topbar:#ffffff;
+  --va-sidebar:linear-gradient(180deg,#ffffff 0%,#f7f9fb 100%);
+  --va-chip:#ffffff; --va-border:rgba(0,0,0,.10);
+  --va-input-bg:#ffffff; --va-input-border:rgba(0,0,0,.12);
+  --va-input-shadow:inset 0 1px 0 rgba(255,255,255,.85);
+  --va-menu-bg:#ffffff; --va-menu-border:rgba(0,0,0,.10);
+  --va-shadow:0 28px 70px rgba(0,0,0,.12), 0 12px 28px rgba(0,0,0,.08);
+  --va-shadow-lg:0 42px 110px rgba(0,0,0,.16), 0 22px 54px rgba(0,0,0,.10);
+  --va-shadow-sm:0 12px 26px rgba(0,0,0,.10);
+}
+.${SCOPE} .icon{ color: var(--accent); }
+
+/* Buttons */
+.${SCOPE} .topbar-btn, .${SCOPE} .btn{
+  height:42px; padding:0 .95rem; border-radius:12px; display:inline-flex; align-items:center; gap:.5rem;
+  border:1px solid var(--va-border); background:var(--va-card); color:var(--text);
+}
+.${SCOPE} .btn--green{ background:${ACCENT}; color:#fff; box-shadow:${BTN_SHADOW}; transition:transform .04s, background .18s; }
+.${SCOPE} .btn--green:hover{ background:${ACCENT_HOVER}; }
+.${SCOPE} .btn--green:active{ transform:translateY(1px); }
+.${SCOPE} .btn--danger{ background:rgba(220,38,38,.12); color:#fca5a5; box-shadow:0 10px 24px rgba(220,38,38,.15); border-color:rgba(220,38,38,.35); }
+
+/* Inputs */
+.${SCOPE} .va-input{ width:100%; min-width:0; height:42px; border-radius:12px; padding:0 .9rem; font-size:15px; outline:none;
+  background:var(--va-input-bg); border:1px solid var(--va-input-border); box-shadow:var(--va-input-shadow); color:var(--text); }
+.${SCOPE} .va-input:focus{ border-color: color-mix(in oklab, var(--accent) 50%, var(--va-input-border));
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 18%, transparent), var(--va-input-shadow); }
+
+/* Pretty select */
+.${SCOPE} .va-select{
+  width:100%; min-width:0; height:42px; font-size:15px; border-radius:12px; outline:none;
+  padding:0 2.2rem 0 .9rem;
+  background:linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02)), var(--va-input-bg);
+  border:1px solid var(--va-input-border); color:var(--text);
+  -webkit-appearance:none; appearance:none; box-shadow:var(--va-input-shadow);
+  transition: border-color .15s, box-shadow .15s, background .15s;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%23A8B3BE' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat:no-repeat; background-position:right .7rem center;
+}
+.${SCOPE} .va-select:hover{ background:linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.03)), var(--va-input-bg); }
+.${SCOPE} .va-select:focus{ border-color: color-mix(in oklab, var(--accent) 50%, var(--va-input-border));
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 18%, transparent), var(--va-input-shadow); }
+
+/* Main lane never x-scrolls */
+.${SCOPE} .va-main { max-width:none !important; overflow-x:hidden; }
+
+/* small tweak for laptop */
+@media (max-width: 1280px){ .${SCOPE}{ --va-rail-w: 320px; } }
+`}</style>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────────────────────── */
+/* PAGE                                                                        */
+/* ──────────────────────────────────────────────────────────────────────────── */
+export default function VoiceAgentSection() {
+  const scopeRef = useRef<HTMLDivElement | null>(null);
+  const [isClient, setIsClient] = useState(false);
+  useEffect(() => { setIsClient(true); }, []);
+
+  /* Measure app sidebar + the rail; use the rail's data attribute */
+  useLayoutEffect(() => {
+    if (!isClient) return;
+
+    const root = document.documentElement;
+    const getW = (el?: HTMLElement | null) =>
+      el && el.offsetParent !== null ? Math.round(el.getBoundingClientRect().width) : 0;
+
+    const apply = () => {
+      const appSidebar =
+        document.querySelector<HTMLElement>('[data-app-sidebar]') ||
+        document.getElementById('app-sidebar') ||
+        document.querySelector<HTMLElement>('.app-sidebar') ||
+        document.querySelector<HTMLElement>('aside.sidebar');
+
+      const railAside =
+        document.querySelector<HTMLElement>(`.${SCOPE} aside[data-va-rail]`);
+
+      root.style.setProperty('--app-sidebar-w', `${getW(appSidebar)}px`);
+      root.style.setProperty('--va-rail-w', `${getW(railAside)}px`);
+      root.style.setProperty('--va-edge-gutter', `${EDGE_GUTTER}px`);
+    };
+
+    apply();
+    const ro = new ResizeObserver(apply);
+    const appSidebar =
+      document.querySelector<HTMLElement>('[data-app-sidebar]') ||
+      document.getElementById('app-sidebar') ||
+      document.querySelector<HTMLElement>('.app-sidebar') ||
+      document.querySelector<HTMLElement>('aside.sidebar');
+    const railAside =
+      document.querySelector<HTMLElement>(`.${SCOPE} aside[data-va-rail]`);
+    if (appSidebar) ro.observe(appSidebar);
+    if (railAside)  ro.observe(railAside);
+    window.addEventListener('resize', apply);
+
+    let ticks = 40;
+    const id = window.setInterval(() => { apply(); if (--ticks <= 0) window.clearInterval(id); }, 80);
+    return () => { ro.disconnect(); window.removeEventListener('resize', apply); window.clearInterval(id); };
+  }, [isClient]);
+
+  /* Assistants state init (same as before)… */
+  const [assistants, setAssistants] = useState<Assistant[]>([]);
+  const [activeId, setActiveId] = useState(''); const [active, setActive] = useState<Assistant | null>(null);
+  const [rev, setRev] = useState(0);
+
+  useEffect(() => {
+    if (!isClient) return;
+    const list = readLS<Assistant[]>(LS_LIST) || [];
+    if (!list.length) {
+      const seed: Assistant = {
+        id: 'riley', name: 'Riley', folder: 'Default', updatedAt: Date.now(), published: false,
+        config: {
+          model: { provider: 'openai', model: 'gpt-4o', firstMessageMode: 'assistant_first', firstMessage: 'Hello. How may I help you today?', systemPrompt: BASE_PROMPT },
+          voice: { provider: 'openai', voiceId: 'alloy', voiceLabel: 'Alloy (OpenAI)' },
+          transcriber: { provider: 'deepgram', model: 'nova-2', language: 'en', denoise: false, confidenceThreshold: 0.4, numerals: false },
+          tools: { enableEndCall: true, dialKeypad: true },
+          telephony: { numbers: [], linkedNumberId: undefined }
+        }
+      };
+      writeLS(ak(seed.id), seed); writeLS(LS_LIST, [seed]);
+      setAssistants([seed]); setActiveId(seed.id);
+    } else {
+      const fixed = list.map(a => ({ ...a, config: { ...a.config, telephony: a.config.telephony || { numbers: [], linkedNumberId: undefined } } }));
+      writeLS(LS_LIST, fixed); setAssistants(fixed); setActiveId(fixed[0].id);
+    }
+    if (!readLS<CallLog[]>(LS_CALLS)) writeLS(LS_CALLS, []);
+    if (!readLS<Record<string, string>>(LS_ROUTES)) writeLS(LS_ROUTES, {});
+  }, [isClient]);
+
+  useEffect(() => {
+    if (!isClient || !activeId) { setActive(null); return; }
+    setActive(readLS<Assistant>(ak(activeId)));
+  }, [isClient, activeId, rev]);
+
+  const updateActive = (mut: (a: Assistant) => Assistant) => {
+    if (!active) return;
+    const next = mut(active); writeLS(ak(next.id), next);
+    const list = (readLS<Assistant[]>(LS_LIST) || []).map(x =>
+      x.id === next.id ? { ...x, name: next.name, folder: next.folder, updatedAt: Date.now(), published: next.published } : x
+    );
+    writeLS(LS_LIST, list); setAssistants(list); setActive(next); setRev(r => r + 1);
+  };
+
+  /* CRUD, Generate, Voice, Telephony, Calls — unchanged from your version */
+  // (omitted here for brevity—keep your existing handlers)
+
+  // …BEGIN copied handlers (unchanged)…
+  const onCreate = async () => {
+    const id = `agent_${Math.random().toString(36).slice(2, 8)}`;
+    const a: Assistant = {
+      id, name: 'New Assistant', updatedAt: Date.now(), published: false,
+      config: {
+        model: { provider: 'openai', model: 'gpt-4o', firstMessageMode: 'assistant_first', firstMessage: 'Hello.', systemPrompt: BASE_PROMPT },
+        voice: { provider: 'openai', voiceId: 'alloy', voiceLabel: 'Alloy (OpenAI)' },
+        transcriber: { provider: 'deepgram', model: 'nova-2', language: 'en', denoise: false, confidenceThreshold: 0.4, numerals: false },
+        tools: { enableEndCall: true, dialKeypad: true },
+        telephony: { numbers: [], linkedNumberId: undefined }
+      }
+    };
+    writeLS(ak(id), a); const list = [...assistants, a]; writeLS(LS_LIST, list);
+    setAssistants(list); setActiveId(id);
+  };
+  const onRename = (id: string, name: string) => {
+    const cur = readLS<Assistant>(ak(id)); if (cur) writeLS(ak(id), { ...cur, name, updatedAt: Date.now() });
+    const list = (readLS<Assistant[]>(LS_LIST) || []).map(x => x.id === id ? { ...x, name, updatedAt: Date.now() } : x);
+    writeLS(LS_LIST, list); setAssistants(list); setRev(r => r + 1);
+  };
+  const onDelete = (id: string) => {
+    const list = assistants.filter(a => a.id !== id);
+    writeLS(LS_LIST, list); setAssistants(list); localStorage.removeItem(ak(id));
+    if (activeId === id && list.length) setActiveId(list[0].id); if (!list.length) setActiveId('');
+    setRev(r => r + 1);
+  };
+
+  const [genOpen, setGenOpen] = useState(false);
+  const [genText, setGenText] = useState('');
+  const [typingPreview, setTypingPreview] = useState<string | null>(null);
+  const [pendingFirstMsg, setPendingFirstMsg] = useState<string | undefined>(undefined);
+
+  const sectionRegex = (name: string) => new RegExp(String.raw`\[${name}\]\s*([\s\S]*?)(?=\n\[|$)`, 'i');
+  const setSection = (p: string, name: string, body: string) => {
+    const re = sectionRegex(name);
+    if (re.test(p)) return p.replace(re, `[${name}]\n${body.trim()}\n`);
+    const nl = p.endsWith('\n') ? '' : '\n'; return `${p}${nl}\n[${name}]\n${body.trim()}\n`;
+  };
+  const mergeInput = (freeText: string, current: string) => {
+    const out = { prompt: current || BASE_PROMPT, firstMessage: undefined as string | undefined };
+    const raw = (freeText || '').trim(); if (!raw) return out;
+    const m = raw.match(/^(?:first\s*message|greeting)\s*[:\-]\s*(.+)$/i);
+    if (m) { out.firstMessage = m[1].trim(); return out; }
+    const blocks = [...raw.matchAll(/\[(Identity|Style|System Behaviors|Task & Goals|Data to Collect|Safety|Handover|Refinements)\]\s*([\s\S]*?)(?=\n\[|$)/gi)];
+    if (blocks.length) { let next = out.prompt; for (const b of blocks) next = setSection(next, b[1], b[2]); out.prompt = next; return out; }
+    const hasRef = sectionRegex('Refinements').test(out.prompt);
+    const bullet = `- ${raw.replace(/\s+/g, ' ').trim()}`;
+    out.prompt = hasRef ? out.prompt.replace(sectionRegex('Refinements'), (_m, body) => `[Refinements]\n${(body || '').trim()}\n${bullet}\n`)
+                        : `${out.prompt}\n\n[Refinements]\n${bullet}\n`;
+    return out;
+  };
+
+  const handleGenerate = () => {
+    if (!active) return;
+    const current = active.config.model.systemPrompt || '';
+    const { prompt, firstMessage } = mergeInput(genText, current || BASE_PROMPT);
+    setTypingPreview(prompt); setPendingFirstMsg(firstMessage); setGenOpen(false); setGenText('');
+  };
+  const acceptGenerate = () => {
+    if (!active) return;
+    const nextFirst = typeof pendingFirstMsg === 'string' ? pendingFirstMsg : active.config.model.firstMessage;
+    updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, systemPrompt: typingPreview || a.config.model.systemPrompt, firstMessage: nextFirst } } }));
+    setTypingPreview(null); setPendingFirstMsg(undefined);
+  };
+  const declineGenerate = () => { setTypingPreview(null); setPendingFirstMsg(undefined); };
+
+  const openaiVoices = [{ value: 'alloy', label: 'Alloy (OpenAI)' }, { value: 'ember', label: 'Ember (OpenAI)' }];
+  const elevenVoices = [{ value: 'rachel', label: 'Rachel (ElevenLabs)' }, { value: 'adam', label: 'Adam (ElevenLabs)' }, { value: 'bella', label: 'Bella (ElevenLabs)' }];
+  const [pendingVoiceId, setPendingVoiceId] = useState<string | null>(null);
+  const [pendingVoiceLabel, setPendingVoiceLabel] = useState<string | null>(null);
+  useEffect(() => { if (active) { setPendingVoiceId(active.config.voice.voiceId); setPendingVoiceLabel(active.config.voice.voiceLabel); } }, [active?.id]);
+  const handleVoiceProviderChange = (v: string) => {
+    const list = v === 'elevenlabs' ? elevenVoices : openaiVoices;
+    setPendingVoiceId(list[0].value); setPendingVoiceLabel(list[0].label);
+    updateActive(a => ({ ...a, config: { ...a.config, voice: { provider: v as VoiceProvider, voiceId: list[0].value, voiceLabel: list[0].label } } }));
+  };
+  const handleVoiceIdChange = (v: string) => {
+    if (!active) return; const list = active.config.voice.provider === 'elevenlabs' ? elevenVoices : openaiVoices;
+    const found = list.find(x => x.value === v); setPendingVoiceId(v); setPendingVoiceLabel(found?.label || v);
+  };
+  const saveVoice = async () => {
+    if (!active || !pendingVoiceId) return;
+    updateActive(a => ({ ...a, config: { ...a.config, voice: { ...a.config.voice, voiceId: pendingVoiceId, voiceLabel: pendingVoiceLabel || pendingVoiceId } } }));
+    try { const u = new SpeechSynthesisUtterance('Voice saved.'); window.speechSynthesis.cancel(); window.speechSynthesis.speak(u); } catch {}
+  };
+
+  const [transcript, setTranscript] = useState<TranscriptTurn[]>([]);
+  const [currentCallId, setCurrentCallId] = useState<string | null>(null);
+  const [callsForAssistant, setCallsForAssistant] = useState<CallLog[]>([]);
+
+  const addPhone = (e164: string, label?: string) => {
+    const norm = e164.trim(); if (!norm) return;
+    updateActive(a => {
+      const nums = a.config.telephony?.numbers ?? [];
+      return { ...a, config: { ...a.config, telephony: { numbers: [...nums, { id: `ph_${Date.now().toString(36)}`, e164: norm, label: (label || '').trim() || undefined }], linkedNumberId: a.config.telephony?.linkedNumberId } } };
+    });
+  };
+  const removePhone = (id: string) => {
+    updateActive(a => {
+      const nums = a.config.telephony?.numbers ?? []; const linked = a.config.telephony?.linkedNumberId;
+      const nextLinked = linked === id ? undefined : linked;
+      return { ...a, config: { ...a.config, telephony: { numbers: nums.filter(n => n.id !== id), linkedNumberId: nextLinked } } };
+    });
+  };
+  const setLinkedNumber = (id?: string) => { updateActive(a => ({ ...a, config: { ...a.config, telephony: { numbers: a.config.telephony?.numbers || [], linkedNumberId: id } } })); };
+  const publish = () => {
+    if (!active) return;
+    const linkedId = active.config.telephony?.linkedNumberId;
+    const numbers = active.config.telephony?.numbers ?? [];
+    const num = numbers.find(n => n.id === linkedId);
+    if (!num) { alert('Pick a Phone Number (Linked) before publishing.'); return; }
+    const routes = readLS<Record<string, string>>(LS_ROUTES) || {};
+    routes[num.id] = active.id; writeLS(LS_ROUTES, routes); updateActive(a => ({ ...a, published: true }));
+    alert(`Published! ${num.e164} is now linked to ${active.name}.`);
+  };
+
+  const ensureCall = () => {
+    if (currentCallId || !active) return;
+    const id = `call_${crypto.randomUUID?.() || Math.random().toString(36).slice(2)}`;
+    const linkedNum = active.config.telephony?.numbers.find(n => n.id === active.config.telephony?.linkedNumberId)?.e164;
+    const calls = readLS<CallLog[]>(LS_CALLS) || [];
+    calls.unshift({ id, assistantId: active.id, assistantName: active.name, startedAt: Date.now(), type: 'Web', assistantPhoneNumber: linkedNum, transcript: [] });
+    writeLS(LS_CALLS, calls); setCurrentCallId(id);
+  };
+  const onTurn = (role: 'user' | 'assistant', text: string) => {
+    if (!active) return; ensureCall();
+    const turn = { role, text, ts: Date.now() };
+    setTranscript(t => {
+      const next = [...t, turn];
+      if (currentCallId) {
+        const calls = readLS<CallLog[]>(LS_CALLS) || [];
+        const idx = calls.findIndex(c => c.id === currentCallId);
+        if (idx >= 0) { calls[idx] = { ...calls[idx], transcript: [...calls[idx].transcript, turn] }; writeLS(LS_CALLS, calls); }
+      }
+      return next;
+    });
+  };
+  const endWebCallSession = (reason = 'Ended by user') => {
+    if (!currentCallId) return;
+    const calls = (readLS<CallLog[]>(LS_CALLS) || []).map(c => c.id === currentCallId ? { ...c, endedAt: Date.now(), endedReason: reason } : c);
+    writeLS(LS_CALLS, calls); setCurrentCallId(null);
+  };
+
+  useEffect(() => {
+    if (!isClient || !active?.id) { setCallsForAssistant([]); return; }
+    const list = readLS<CallLog[]>(LS_CALLS) || [];
+    setCallsForAssistant(list.filter(c => c.assistantId === active.id));
+  }, [isClient, active?.id, currentCallId, transcript.length, rev]);
+  // …END copied handlers…
+
+  if (!isClient) return (<div ref={scopeRef} className={SCOPE} style={{ background: 'var(--bg)', color: 'var(--text)' }}><StyleBlock /><div className="px-6 py-10 opacity-70 text-sm">Loading…</div></div>);
+  if (!active) return (<div ref={scopeRef} className={SCOPE} style={{ background: 'var(--bg)', color: 'var(--text)' }}><StyleBlock /><div className="px-6 py-10 opacity-70">Create your first assistant.</div></div>);
+
+  const railData: AssistantLite[] = assistants.map(a => ({ id: a.id, name: a.name, folder: a.folder, updatedAt: a.updatedAt }));
+  const greet = active.config.model.firstMessageMode === 'assistant_first'
+    ? (active.config.model.firstMessage || 'Hello. How may I help you today?')
+    : 'Listening…';
+  const linkedE164 = active.config.telephony?.numbers.find(n => n.id === active.config.telephony?.linkedNumberId)?.e164 || '';
+
+  /* ─────────────────────────── RENDER ─────────────────────────── */
+  return (
+    <div ref={scopeRef} className={SCOPE} style={{ background: 'var(--bg)', color: 'var(--text)' }}>
+      <AssistantRail
+        assistants={railData}
+        activeId={activeId}
+        onSelect={setActiveId}
+        onCreate={onCreate}
+        onRename={onRename}
+        onDelete={onDelete}
+      />
+
+      {/* CONTENT LANE */}
+      <div
+        className="va-main"
+        style={{
+          marginLeft: 'calc(var(--app-sidebar-w, 0px) + var(--va-rail-w, 0px) + var(--va-edge-gutter, 24px))',
+          width: 'calc(100vw - var(--app-sidebar-w, 0px) - var(--va-rail-w, 0px) - (var(--va-edge-gutter, 24px) * 2))',
+          maxWidth: 'min(1380px, 100vw - var(--app-sidebar-w,0px) - var(--va-rail-w,0px) - (var(--va-edge-gutter,24px) * 2))',
+          paddingRight: 'var(--va-edge-gutter, 24px)',
+          paddingLeft: 'var(--va-edge-gutter, 24px)',
+          paddingTop: 'calc(var(--app-header-h, 64px) + 12px)',
+          paddingBottom: '96px',
+          overflowX: 'hidden'
         }}
       >
-        {/* Sticky header like Vapi */}
-        <div className="px-3 py-3 flex items-center justify-between sticky top-0 z-10"
-             style={{ borderBottom: RAIL_BORDER, background:'var(--va-sidebar)' }}>
-          <div className="flex items-center gap-2 text-sm font-semibold">
-            <PanelLeft className="w-4 h-4 icon" />
-            {!railCollapsed && <span>Assistants</span>}
-          </div>
-          <div className="flex items-center gap-2">
-            {!railCollapsed && (
-              <button onClick={onCreate} className="btn btn--green va-topbtn">
-                <Plus className="w-4 h-4 text-white" />
-                <span className="text-white">Create</span>
+        {/* Top actions */}
+        <div className="px-1 pb-3 flex items-center justify-between sticky" style={{ top: 'calc(var(--app-header-h, 64px) + 8px)', zIndex: 2 }}>
+          <div className="flex items-center gap-8">
+            {!currentCallId ? (
+              <WebCallButton
+                greet={greet}
+                voiceLabel={active.config.voice.voiceLabel}
+                systemPrompt={active.config.model.systemPrompt || BASE_PROMPT}
+                model={active.config.model.model}
+                apiKeyId={''}
+                fromE164={linkedE164}
+                onTurn={onTurn}
+              />
+            ) : (
+              <button onClick={() => { endWebCallSession('Ended by user'); window.speechSynthesis?.cancel(); }} className="btn btn--danger">
+                <PhoneOff className="w-4 h-4" /> End Call
               </button>
             )}
-            <button
-              title={railCollapsed ? 'Expand assistants' : 'Collapse assistants'}
-              className="btn btn--ghost va-topbtn"
-              onClick={() => setRailCollapsed(v => !v)}
-            >
-              {railCollapsed ? <ChevronRightIcon className="w-4 h-4 icon" /> : <ChevronLeft className="w-4 h-4 icon" />}
+
+            <button onClick={() => window.dispatchEvent(new CustomEvent('voiceagent:open-chat', { detail: { id: active.id } }))}
+                    className="topbar-btn"><MessageSquare className="w-4 h-4 icon" /> Chat</button>
+            <button onClick={() => navigator.clipboard.writeText(active.config.model.systemPrompt || '').catch(() => {})}
+                    className="topbar-btn"><Copy className="w-4 h-4 icon" /> Copy Prompt</button>
+          </div>
+
+          <div className="flex items-center gap-8">
+            <button onClick={publish} className="btn btn--green">
+              <Rocket className="w-4 h-4 text-white" /><span className="text-white">{active.published ? 'Republish' : 'Publish'}</span>
             </button>
           </div>
         </div>
 
-        <div className="p-3 min-h-0 flex-1 overflow-y-auto" style={{ scrollbarWidth:'thin' }}>
-          {!railCollapsed && (
-            <>
-              <label
-                className="flex items-center gap-2 rounded-lg px-2.5 py-2 mb-2"
-                style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)' }}
-              >
-                <Search className="w-4 h-4 icon" />
-                <input
-                  value={query}
-                  onChange={(e)=> setQuery(e.target.value)}
-                  placeholder="Search assistants"
-                  className="w-full bg-transparent outline-none text-sm"
-                  style={{ color:'var(--text)' }}
-                />
-              </label>
-
-              <div className="text-xs font-semibold flex items-center gap-2 mt-3 mb-1" style={{ color:'var(--text-muted)' }}>
-                <Folder className="w-3.5 h-3.5 icon" /> Folders
-              </div>
-              <button className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm hover:bg-white/5">
-                <FolderOpen className="w-4 h-4 icon" /> All
-              </button>
-            </>
-          )}
-
-          <div className="mt-4 space-y-2">
-            {visible.map(a => {
-              const isActive = a.id === activeId;
-              const isEdit = editingId === a.id;
-
-              // Mini icon cards when collapsed
-              if (railCollapsed) {
-                return (
-                  <button
-                    key={a.id}
-                    onClick={()=> onSelect(a.id)}
-                    className="w-full rounded-xl p-3 grid place-items-center"
-                    style={{
-                      background: isActive ? 'color-mix(in oklab, var(--accent) 10%, transparent)' : 'var(--va-card)',
-                      border: `1px solid ${isActive ? 'color-mix(in oklab, var(--accent) 35%, var(--va-border))' : 'var(--va-border)'}`,
-                      boxShadow:'var(--va-shadow-sm)'
-                    }}
-                    title={a.name}
-                  >
-                    <Bot className="w-4 h-4 icon" />
-                  </button>
-                );
-              }
-
-              // Full list cards when expanded
-              return (
-                <div
-                  key={a.id}
-                  className="w-full rounded-xl p-3"
-                  style={{
-                    background: isActive ? 'color-mix(in oklab, var(--accent) 10%, transparent)' : 'var(--va-card)',
-                    border: `1px solid ${isActive ? 'color-mix(in oklab, var(--accent) 35%, var(--va-border))' : 'var(--va-border)'}`,
-                    boxShadow:'var(--va-shadow-sm)'
-                  }}
-                >
-                  <button className="w-full text-left flex items-center justify-between"
-                          onClick={()=> onSelect(a.id)}>
-                    <div className="min-w-0">
-                      <div className="font-medium truncate flex items-center gap-2">
-                        <Bot className="w-4 h-4 icon" />
-                        {!isEdit ? (
-                          <span className="truncate">{a.name}</span>
-                        ) : (
-                          <input
-                            autoFocus
-                            value={tempName}
-                            onChange={(e)=> setTempName(e.target.value)}
-                            onKeyDown={(e)=> { if (e.key==='Enter') saveRename(a); if (e.key==='Escape') setEditingId(null); }}
-                            className="bg-transparent rounded-md px-2 py-1 outline-none w-full"
-                            style={{ border:'1px solid var(--va-input-border)', color:'var(--text)' }}
-                          />
-                        )}
-                      </div>
-                      <div className="text-[11px] mt-0.5 opacity-70 truncate">
-                        {a.folder || 'Unfiled'} • {new Date(a.updatedAt).toLocaleDateString()}
-                      </div>
-                    </div>
-                    {isActive ? <Check className="w-4 h-4 icon" /> : null}
-                  </button>
-
-                  <div className="mt-2 flex items-center gap-2">
-                    {!isEdit ? (
-                      <>
-                        <button onClick={(e)=> { e.stopPropagation(); beginRename(a); }} className="btn btn--ghost text-xs"><Edit3 className="w-3.5 h-3.5 icon" /> Rename</button>
-                        <button onClick={(e)=> { e.stopPropagation(); onDelete(a.id); }} className="btn btn--danger text-xs"><Trash2 className="w-3.5 h-3.5" /> Delete</button>
-                      </>
-                    ) : (
-                      <>
-                        <button onClick={(e)=> { e.stopPropagation(); saveRename(a); }} className="btn btn--green text-xs"><Check className="w-3.5 h-3.5 text-white" /><span className="text-white">Save</span></button>
-                        <button onClick={(e)=> { e.stopPropagation(); setEditingId(null); }} className="btn btn--ghost text-xs">Cancel</button>
-                      </>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+        {/* Stats row */}
+        <div className="grid gap-6 md:gap-6 mb-6" style={{ gridTemplateColumns:'repeat(2, minmax(260px,1fr))' }}>
+          <div className="rounded-xl p-4" style={{ background:'var(--va-card)', border:'1px solid var(--va-border)', boxShadow:'var(--va-shadow)' }}>
+            <div className="text-[13px] opacity-80 mb-1.5">Cost</div>
+            <div className="text-[20px] font-semibold mb-3">~$0.1/min</div>
+            <div className="h-2 rounded-full overflow-hidden" style={{ background:'rgba(255,255,255,.06)', border:'1px solid var(--va-border)' }}>
+              <div className="h-full" style={{ width:'72%', background:'linear-gradient(90deg,#22d3ee,#fde047,#fb923c,#10b981)' }} />
+            </div>
+          </div>
+          <div className="rounded-xl p-4" style={{ background:'var(--va-card)', border:'1px solid var(--va-border)', boxShadow:'var(--va-shadow)' }}>
+            <div className="text-[13px] opacity-80 mb-1.5">Latency</div>
+            <div className="text-[20px] font-semibold mb-3">~1050 ms</div>
+            <div className="h-2 rounded-full overflow-hidden" style={{ background:'rgba(255,255,255,.06)', border:'1px solid var(--va-border)' }}>
+              <div className="h-full" style={{ width:'78%', background:'linear-gradient(90deg,#22d3ee,#fde047,#fb923c,#10b981)' }} />
+            </div>
           </div>
         </div>
-      </aside>
+
+        {/* Body */}
+        <div className="grid gap-6 md:gap-8" style={{ gridTemplateColumns: '1fr', width: '100%', minWidth: 0 }}>
+          {/* Model */}
+          <Section title="Model" icon={<FileText className="w-4 h-4 icon" />}>
+            {/* 12-col even grid to prevent overflow */}
+            <div className="grid gap-4 md:gap-6" style={{ gridTemplateColumns: 'repeat(12, minmax(0, 1fr))' }}>
+              <div style={{ gridColumn:'span 3 / span 3', minWidth:0 }}>
+                <Field label="Provider">
+                  <select className="va-select"
+                          value={active.config.model.provider}
+                          onChange={e => updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, provider: e.target.value as Provider } } }))}>
+                    <option value="openai">OpenAI</option>
+                  </select>
+                </Field>
+              </div>
+              <div style={{ gridColumn:'span 3 / span 3', minWidth:0 }}>
+                <Field label="Model">
+                  <select className="va-select"
+                          value={active.config.model.model}
+                          onChange={e => updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, model: e.target.value as ModelId } } }))}>
+                    <option value="gpt-4o">GPT-4o</option>
+                    <option value="gpt-4o-mini">GPT-4o mini</option>
+                    <option value="gpt-4.1">GPT-4.1</option>
+                    <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+                  </select>
+                </Field>
+              </div>
+              <div style={{ gridColumn:'span 3 / span 3', minWidth:0 }}>
+                <Field label="First Message Mode">
+                  <select className="va-select"
+                          value={active.config.model.firstMessageMode}
+                          onChange={e => updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, firstMessageMode: e.target.value as any } } }))}>
+                    <option value="assistant_first">Assistant speaks first</option>
+                    <option value="user_first">User speaks first</option>
+                  </select>
+                </Field>
+              </div>
+              <div style={{ gridColumn:'span 3 / span 3', minWidth:0 }}>
+                <Field label="First Message">
+                  <input className="va-input" style={{ minWidth:0 }} value={active.config.model.firstMessage}
+                         onChange={e => updateActive(a => ({ ...a, config:{ ...a.config, model:{ ...a.config.model, firstMessage: e.target.value } } }))}/>
+                </Field>
+              </div>
+            </div>
+
+            {/* System Prompt */}
+            <div className="mt-6" style={{ minWidth: 0 }}>
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="w-4 h-4 icon" /> System Prompt</div>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, systemPrompt: BASE_PROMPT } } }))} className="topbar-btn">
+                    <RefreshCw className="w-4 h-4 icon" /> Reset
+                  </button>
+                  <button onClick={() => setGenOpen(true)} className="btn btn--green">
+                    <Sparkles className="w-4 h-4 text-white" /> <span className="text-white">Generate / Edit</span>
+                  </button>
+                </div>
+              </div>
+
+              {!typingPreview ? (
+                <textarea
+                  rows={24}
+                  value={active.config.model.systemPrompt || ''}
+                  onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, systemPrompt: e.target.value } } }))}
+                  className="w-full rounded-xl px-3 py-3 text-[14px] leading-6 outline-none"
+                  style={{
+                    background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)',
+                    boxShadow: 'var(--va-shadow), inset 0 1px 0 rgba(255,255,255,.03)', color: 'var(--text)',
+                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+                    minHeight: 520
+                  }}
+                />
+              ) : (
+                <div>
+                  <div className="w-full rounded-xl px-3 py-3 text-[14px] leading-6"
+                       style={{
+                         background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)',
+                         boxShadow: 'var(--va-shadow), inset 0 1px 0 rgba(255,255,255,.03)', color: 'var(--text)',
+                         whiteSpace: 'pre-wrap', minHeight: 520, maxHeight: 680, overflowY: 'auto'
+                       }}>
+                    {typingPreview}
+                  </div>
+                  <div className="flex items-center gap-2 justify-end mt-3">
+                    <button onClick={() => { setTypingPreview(null); setPendingFirstMsg(undefined); }} className="topbar-btn"><X className="w-4 h-4 icon" /> Decline</button>
+                    <button onClick={acceptGenerate} className="btn btn--green"><Check className="w-4 h-4 text-white" /><span className="text-white">Accept</span></button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </Section>
+
+          {/* Voice */}
+          <Section title="Voice" icon={<Mic2 className="w-4 h-4 icon" />}>
+            <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(2, minmax(220px, 1fr))' }}>
+              <Field label="Provider">
+                <select className="va-select" value={active.config.voice.provider} onChange={(e) => {
+                  const list = e.target.value === 'elevenlabs'
+                    ? [{ value: 'rachel', label: 'Rachel (ElevenLabs)' }, { value: 'adam', label: 'Adam (ElevenLabs)' }, { value: 'bella', label: 'Bella (ElevenLabs)' }]
+                    : [{ value: 'alloy', label: 'Alloy (OpenAI)' }, { value: 'ember', label: 'Ember (OpenAI)' }];
+                  updateActive(a => ({ ...a, config: { ...a.config, voice: { provider: e.target.value as VoiceProvider, voiceId: list[0].value, voiceLabel: list[0].label } } }));
+                }}>
+                  <option value="openai">OpenAI</option>
+                  <option value="elevenlabs">ElevenLabs</option>
+                </select>
+              </Field>
+              <Field label="Voice">
+                <select className="va-select" value={pendingVoiceId || active.config.voice.voiceId}
+                        onChange={(e) => {
+                          const v = e.target.value; const lbl = (active.config.voice.provider === 'elevenlabs'
+                            ? { rachel:'Rachel (ElevenLabs)', adam:'Adam (ElevenLabs)', bella:'Bella (ElevenLabs)' } as any
+                            : { alloy:'Alloy (OpenAI)', ember:'Ember (OpenAI)' } as any)[v] || v;
+                          setPendingVoiceId(v); setPendingVoiceLabel(lbl);
+                        }}>
+                  {(active.config.voice.provider === 'elevenlabs'
+                    ? [{ value: 'rachel', label: 'Rachel (ElevenLabs)' }, { value: 'adam', label: 'Adam (ElevenLabs)' }, { value: 'bella', label: 'Bella (ElevenLabs)' }]
+                    : [{ value: 'alloy', label: 'Alloy (OpenAI)' }, { value: 'ember', label: 'Ember (OpenAI)' }]).map(v => (
+                      <option key={v.value} value={v.value}>{v.label}</option>
+                    ))}
+                </select>
+              </Field>
+            </div>
+
+            <div className="mt-3 flex items-center gap-2">
+              <button onClick={() => { try { const u = new SpeechSynthesisUtterance('This is a quick preview of the selected voice.'); window.speechSynthesis.cancel(); window.speechSynthesis.speak(u); } catch {} }} className="topbar-btn">
+                <Volume2 className="w-4 h-4 icon" /> Test Voice
+              </button>
+              <button onClick={saveVoice} className="btn btn--green"><Save className="w-4 h-4 text-white" /> <span className="text-white">Save Voice</span></button>
+              <button onClick={() => { window.dispatchEvent(new CustomEvent('voiceagent:import-11labs')); alert('Hook “voiceagent:import-11labs” to your importer.'); }} className="topbar-btn">
+                <UploadCloud className="w-4 h-4 icon" /> Import from ElevenLabs
+              </button>
+            </div>
+          </Section>
+
+          {/* Transcriber */}
+          <Section title="Transcriber" icon={<BookOpen className="w-4 h-4 icon" />}>
+            <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(3, minmax(220px, 1fr))' }}>
+              <Field label="Provider">
+                <select className="va-select" value="deepgram" onChange={()=>{}}>
+                  <option value="deepgram">Deepgram</option>
+                </select>
+              </Field>
+              <Field label="Model">
+                <select className="va-select" value={active.config.transcriber.model} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, model: e.target.value as any } } }))}>
+                  <option value="nova-2">Nova 2</option>
+                  <option value="nova-3">Nova 3</option>
+                </select>
+              </Field>
+              <Field label="Language">
+                <select className="va-select" value={active.config.transcriber.language} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, language: e.target.value as any } } }))}>
+                  <option value="en">English</option>
+                  <option value="multi">Multi</option>
+                </select>
+              </Field>
+
+              <Field label="Confidence Threshold">
+                <div className="flex items-center gap-3">
+                  <input type="range" min={0} max={1} step={0.01}
+                    value={active.config.transcriber.confidenceThreshold}
+                    onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, confidenceThreshold: Number(e.target.value) } } }))} className="w-full"/>
+                  <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{active.config.transcriber.confidenceThreshold.toFixed(2)}</span>
+                </div>
+              </Field>
+              <Field label="Denoise">
+                <select className="va-select" value={String(active.config.transcriber.denoise)} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, denoise: e.target.value === 'true' } } }))}>
+                  <option value="false">Off</option>
+                  <option value="true">On</option>
+                </select>
+              </Field>
+              <Field label="Use Numerals">
+                <select className="va-select" value={String(active.config.transcriber.numerals)} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, numerals: e.target.value === 'true' } } }))}>
+                  <option value="false">No</option>
+                  <option value="true">Yes</option>
+                </select>
+              </Field>
+            </div>
+          </Section>
+
+          {/* Tools */}
+          <Section title="Tools" icon={<SlidersHorizontal className="w-4 h-4 icon" />}>
+            <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(2, minmax(220px, 1fr))' }}>
+              <Field label="Enable End Call Function">
+                <select className="va-select" value={String(active.config.tools.enableEndCall)} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, tools: { ...a.config.tools, enableEndCall: e.target.value === 'true' } } }))}>
+                  <option value="true">Enabled</option>
+                  <option value="false">Disabled</option>
+                </select>
+              </Field>
+              <Field label="Dial Keypad">
+                <select className="va-select" value={String(active.config.tools.dialKeypad)} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, tools: { ...a.config.tools, dialKeypad: e.target.value === 'true' } } }))}>
+                  <option value="true">Enabled</option>
+                  <option value="false">Disabled</option>
+                </select>
+              </Field>
+            </div>
+          </Section>
+
+          {/* Telephony */}
+          <Section title="Telephony" icon={<PhoneIcon className="w-4 h-4 icon" />}>
+            <TelephonyEditor
+              numbers={active.config.telephony?.numbers ?? []}
+              linkedId={active.config.telephony?.linkedNumberId}
+              onLink={setLinkedNumber}
+              onAdd={addPhone}
+              onRemove={removePhone}
+            />
+          </Section>
+
+          {/* Web test + transcript */}
+          <Section title="Call Assistant (Web test)" icon={<AudioLines className="w-4 h-4 icon" />}>
+            <div className="rounded-xl p-3" style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)' }}>
+              {transcript.length === 0 && <div className="text-sm opacity-60">No transcript yet.</div>}
+              <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1" style={{ scrollbarWidth: 'thin' }}>
+                {transcript.map((t, idx) => (
+                  <div key={idx} className="flex gap-2">
+                    <div className="text-xs px-2 py-0.5 rounded-full" style={{
+                      background: t.role === 'assistant' ? 'rgba(16,185,129,.15)' : 'rgba(255,255,255,.06)',
+                      border: '1px solid var(--va-border)'
+                    }}>{t.role === 'assistant' ? 'AI' : 'You'}</div>
+                    <div className="text-sm">{t.text}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </Section>
+
+          {/* Logs */}
+          <Section title="Call Logs" icon={<ListTree className="w-4 h-4 icon" />}>
+            <div className="space-y-3">
+              {callsForAssistant.length === 0 && <div className="text-sm opacity-60">No calls yet.</div>}
+              {callsForAssistant.map(log => (
+                <details key={log.id} className="rounded-xl" style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)' }}>
+                  <summary className="cursor-pointer px-3 py-2 flex items-center justify-between">
+                    <div className="text-sm flex items-center gap-2">
+                      <PhoneIcon className="w-4 h-4 icon" />
+                      <span>{new Date(log.startedAt).toLocaleString()}</span>
+                      {log.assistantPhoneNumber ? <span className="opacity-70">• {log.assistantPhoneNumber}</span> : null}
+                      {log.endedAt ? <span className="opacity-70">• {(Math.max(1, Math.round((log.endedAt - log.startedAt) / 1000)))}s</span> : null}
+                    </div>
+                    <div className="text-xs opacity-60">{log.endedReason || (log.endedAt ? 'Completed' : 'Live')}</div>
+                  </summary>
+                  <div className="px-3 pb-3 space-y-2">
+                    {log.transcript.map((t, i) => (
+                      <div key={i} className="flex gap-2">
+                        <div className="text-xs px-2 py-0.5 rounded-full" style={{
+                          background: t.role === 'assistant' ? 'rgba(16,185,129,.15)' : 'rgba(255,255,255,.06)',
+                          border: '1px solid var(--va-border)'
+                        }}>{t.role === 'assistant' ? 'AI' : 'User'}</div>
+                        <div className="text-sm">{t.text}</div>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              ))}
+            </div>
+          </Section>
+        </div>
+      </div>
+
+      {/* Generate overlay */}
+      <AnimatePresence>
+        {genOpen && (
+          <motion.div className="fixed inset-0 z-[999] flex items-center justify-center p-4"
+                      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                      style={{ background: 'rgba(0,0,0,.45)' }}>
+            <motion.div
+              initial={{ y: 10, opacity: 0, scale: .98 }} animate={{ y: 0, opacity: 1, scale: 1 }} exit={{ y: 8, opacity: 0, scale: .985 }}
+              className="w-full max-w-2xl rounded-xl"
+              style={{ background: 'var(--va-card)', border: '1px solid var(--va-border)', boxShadow: 'var(--va-shadow-lg)' }}
+            >
+              <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid var(--va-border)' }}>
+                <div className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="w-4 h-4 icon" /> Generate / Edit Prompt</div>
+                <button onClick={() => setGenOpen(false)} className="p-2 rounded-lg hover:opacity-80"><X className="w-4 h-4 icon" /></button>
+              </div>
+              <div className="p-4">
+                <input value={genText} onChange={(e) => setGenText(e.target.value)}
+                  placeholder={`Examples:\n• assistant\n• collect full name, phone, date\n• [Identity] AI Sales Agent for roofers\n• first message: Hey—quick question to get you booked…`}
+                  className="va-input"/>
+                <div className="mt-3 flex items-center justify-between gap-2">
+                  <button onClick={() => setGenOpen(false)} className="topbar-btn">Cancel</button>
+                  <button onClick={handleGenerate} className="btn btn--green"><span className="text-white">Generate</span></button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <StyleBlock />
+    </div>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────────────────────── */
+/* Telephony Editor (unchanged)                                                */
+/* ──────────────────────────────────────────────────────────────────────────── */
+function TelephonyEditor({ numbers, linkedId, onLink, onAdd, onRemove }: {
+  numbers: PhoneNum[]; linkedId?: string; onLink: (id?: string) => void; onAdd: (e164: string, label?: string) => void; onRemove: (id: string) => void;
+}) {
+  const [e164, setE164] = useState(''); const [label, setLabel] = useState('');
+  return (
+    <div className="space-y-4" style={{ minWidth: 0 }}>
+      <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(3, minmax(240px, 1fr))' }}>
+        <div style={{ minWidth: 0 }}>
+          <div className="mb-1.5 text-[13px] font-medium" style={{ color: 'var(--text)' }}>Phone Number (E.164)</div>
+          <input value={e164} onChange={(e) => setE164(e.target.value)} placeholder="+1xxxxxxxxxx" className="va-input"
+                 style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)', boxShadow: 'var(--va-input-shadow)', color: 'var(--text)' }}/>
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <div className="mb-1.5 text-[13px] font-medium" style={{ color: 'var(--text)' }}>Label</div>
+          <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Support line" className="va-input"
+                 style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)', boxShadow: 'var(--va-input-shadow)', color: 'var(--text)' }}/>
+        </div>
+        <div className="flex items-end">
+          <button onClick={() => { onAdd(e164, label); setE164(''); setLabel(''); }} className="btn btn--green w-full justify-center">
+            <PhoneIcon className="w-4 h-4 text-white" /><span className="text-white">Add Number</span>
+          </button>
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        {numbers.length === 0 && <div className="text-sm opacity-70">No phone numbers added yet.</div>}
+        {numbers.map(n => (
+          <div key={n.id} className="flex items-center justify-between rounded-xl px-3 py-2"
+               style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)' }}>
+            <div className="min-w-0">
+              <div className="font-medium truncate">{n.label || 'Untitled'}</div>
+              <div className="text-xs opacity-70">{n.e164}</div>
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="flex items-center gap-1 text-xs">
+                <input type="radio" name="linked_number" checked={linkedId === n.id} onChange={() => onLink(n.id)} />
+                Linked
+              </label>
+              <button onClick={() => onRemove(n.id)} className="btn btn--danger text-xs"><Trash2 className="w-4 h-4" /> Remove</button>
+            </div>
+          </div>
+        ))}
+        {numbers.length > 0 && <div className="text-xs opacity-70">The number marked as <b>Linked</b> will be attached to this assistant on <i>Publish</i>.</div>}
+      </div>
     </div>
   );
 }
