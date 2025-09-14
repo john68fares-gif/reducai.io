@@ -20,69 +20,55 @@ const EDGE_GUTTER = 24;
 const MAX_LANE_W = 1560;
 
 /* ──────────────────────────────────────────────────────────────────────────── */
-/* GLOBAL STYLE (green theme + lighter typography/spacing)                     */
+/* GLOBAL STYLE – matches screenshots (Cosmic Night / purple, lighter type)    */
 /* ──────────────────────────────────────────────────────────────────────────── */
 function StyleBlock() {
   return (
     <style jsx global>{`
-/* Base: lighter weights & tighter rhythm like your screenshots */
 .${SCOPE}{
-  --fw-regular: 500;         /* less bold than 600/700 */
+  /* Typography like the screenshots: lighter and tighter */
+  --fw-regular: 500;
   --fw-medium:  560;
   --fw-semi:    600;
+  --radius: 12px;
 
-  --radius: 12px;            /* consistent rounded radius */
-  --gap: 6px;                /* compact gaps */
+  /* ===== Dark theme tokens (from your photos) ===== */
+  --background: oklch(0.1743 0.0227 283.0);
+  --foreground: oklch(0.9185 0.0257 285.0);
 
-  /* ===== Dark theme – GREEN brand ===== */
-  --background: oklch(0.1743 0.0227 283);
-  --foreground: oklch(0.9185 0.0257 285);
-
-  --card:       oklch(0.2284 0.0384 282);
+  --card:       oklch(0.2284 0.0384 282.0);
   --card-fg:    var(--foreground);
-  --popover:    var(--card);
+
+  --popover:    oklch(0.2284 0.0384 282.0);
   --popover-fg: var(--foreground);
 
-  /* Brand */
-  --primary:    #00ffc2;               /* neon mint */
-  --primary-fg: oklch(0.1743 0.0227 283);
-  --accent:     #10b981;               /* emerald */
-  --accent-fg:  var(--foreground);
+  --primary:    oklch(0.7162 0.1597 290.3962);      /* purple */
+  --primary-fg: oklch(0.1743 0.0227 283.0);
 
-  --secondary:  oklch(0.3139 0.0736 283);
-  --secondary-fg: oklch(0.8367 0.0849 285);
+  --secondary:    oklch(0.3139 0.0736 283.0);
+  --secondary-fg: oklch(0.8367 0.0849 285.0);
 
-  --muted:      oklch(0.271 0.0621 281.4);
-  --muted-fg:   oklch(0.7166 0.0462 285);
+  --accent:       oklch(0.3354 0.0828 280.0);
+  --accent-fg:    oklch(0.9185 0.0257 285.0);
 
-  --destructive:    oklch(0.6861 0.2061 15);
+  --muted:        oklch(0.2710 0.0621 281.4);
+  --muted-fg:     oklch(0.7166 0.0462 285.0);
+
+  --destructive:    oklch(0.6861 0.2061 14.99);
   --destructive-fg: oklch(1 0 0);
 
   --border: oklch(0.3261 0.0597 282.5832);
-  --input:  var(--border);
-  --ring:   var(--primary);
+  --input:  oklch(0.3261 0.0597 282.5832);
+  --ring:   oklch(0.7162 0.1597 290.3962);
 
-  /* Sidebar */
-  --sidebar:                 var(--card);
-  --sidebar-foreground:      var(--foreground);
-  --sidebar-primary:         var(--primary);
-  --sidebar-primary-foreground: var(--primary-fg);
-  --sidebar-accent:          var(--accent);
-  --sidebar-accent-foreground: var(--foreground);
-  --sidebar-border:          var(--border);
-  --sidebar-ring:            var(--primary);
-
-  /* Map to page tokens */
+  /* Map to component tokens */
   --bg: var(--background);
   --text: var(--foreground);
   --text-muted: color-mix(in oklab, var(--foreground) 60%, transparent);
 
   --va-card:    var(--card);
   --va-topbar:  var(--card);
-  --va-sidebar: var(--sidebar);
-  --va-chip:    color-mix(in oklab, var(--card) 92%, transparent);
   --va-border:  var(--border);
-
   --va-input-bg:     var(--card);
   --va-input-border: var(--input);
   --va-input-shadow: inset 0 1px 0 color-mix(in oklab, white 6%, transparent);
@@ -93,56 +79,48 @@ function StyleBlock() {
   --va-shadow:      0 24px 70px rgba(0,0,0,.55), 0 10px 28px rgba(0,0,0,.40);
   --va-shadow-lg:   0 42px 110px rgba(0,0,0,.66), 0 20px 48px rgba(0,0,0,.5);
   --va-shadow-sm:   0 12px 26px rgba(0,0,0,.35);
-  --va-shadow-side: 8px 0 28px rgba(0,0,0,.42);
 
   --va-rail-w:320px;
   --app-sidebar-w:248px;
   --va-edge-gutter:${EDGE_GUTTER}px;
 
   font-weight: var(--fw-regular);
-  letter-spacing: .01em;               /* less cramped */
+  letter-spacing: .005em;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-
+  background: var(--bg); color: var(--text);
   overflow-x:hidden;
 }
 
-/* Light theme mapping if toggled */
+/* Light theme tokens from your “light” screenshots */
 :root:not([data-theme="dark"]) .${SCOPE}{
-  --background: oklch(0.973 0.0133 286);
-  --foreground: oklch(0.3015 0.0572 282);
+  --background: oklch(0.9730 0.0133 286.0);
+  --foreground: oklch(0.3015 0.0572 282.0);
 
   --card:       oklch(1 0 0);
   --card-fg:    var(--foreground);
-  --popover:    var(--card);
+
+  --popover:    oklch(1 0 0);
   --popover-fg: var(--foreground);
 
-  --primary:    #00ffc2;
-  --primary-fg: oklch(0.1743 0.0227 283);
-  --accent:     #10b981;
-  --accent-fg:  var(--foreground);
+  --primary:    oklch(0.5417 0.1790 288.0332);
+  --primary-fg: oklch(1 0 0);
 
-  --secondary:  oklch(0.9174 0.0435 292);
+  --secondary:    oklch(0.9174 0.0435 292.0);
   --secondary-fg: oklch(0.4143 0.1039 288.1);
 
-  --muted:        oklch(0.958 0.0133 286);
-  --muted-fg:     oklch(0.5426 0.0465 284);
+  --accent:       oklch(0.9221 0.0373 262.0);
+  --accent-fg:    var(--foreground);
 
-  --destructive:    oklch(0.6861 0.2061 15);
+  --muted:        oklch(0.9580 0.0133 286.0);
+  --muted-fg:     oklch(0.5426 0.0465 284.0);
+
+  --destructive:    oklch(0.6861 0.2061 14.99);
   --destructive-fg: oklch(1 0 0);
 
   --border: oklch(0.9115 0.0216 285.9625);
   --input:  var(--border);
-  --ring:   var(--primary);
-
-  --sidebar:                 var(--card);
-  --sidebar-foreground:      var(--foreground);
-  --sidebar-primary:         var(--primary);
-  --sidebar-primary-foreground: var(--primary-fg);
-  --sidebar-accent:          var(--accent);
-  --sidebar-accent-foreground: var(--foreground);
-  --sidebar-border:          var(--border);
-  --sidebar-ring:            var(--ring);
+  --ring:   oklch(0.5417 0.1790 288.0332);
 
   --bg: var(--background);
   --text: var(--foreground);
@@ -150,12 +128,11 @@ function StyleBlock() {
 
   --va-card:    var(--card);
   --va-topbar:  var(--card);
-  --va-sidebar: var(--sidebar);
-  --va-chip:    #ffffff;
   --va-border:  var(--border);
   --va-input-bg: var(--card);
   --va-input-border: var(--input);
   --va-input-shadow: inset 0 1px 0 rgba(255,255,255,.85);
+
   --va-menu-bg: var(--card);
   --va-menu-border: var(--border);
 
@@ -164,46 +141,44 @@ function StyleBlock() {
   --va-shadow-sm: 0 12px 26px rgba(0,0,0,.10);
 }
 
-/* Icon tint = emerald/green */
-.${SCOPE} .icon{ color: var(--accent); }
+/* Icon tint = primary, like the shadcn preview */
+.${SCOPE} .icon{ color: var(--primary); }
 
-/* Compact headings like the screenshots */
-.${SCOPE} h1,.${SCOPE} h2,.${SCOPE} h3,.${SCOPE} .title{
-  font-weight: var(--fw-semi);
-  letter-spacing: .005em;
-}
-
-/* Buttons: lighter weight & tighter padding */
+/* Buttons – lighter weight, compact like screenshots */
 .${SCOPE} .topbar-btn, .${SCOPE} .btn{
   height:40px; padding:0 .85rem; border-radius: var(--radius);
   display:inline-flex; align-items:center; gap:.5rem;
   border:1px solid var(--va-border); background:var(--va-card); color:var(--text);
   font-weight: var(--fw-medium);
 }
-.${SCOPE} .btn--green{
+.${SCOPE} .btn--green{ /* class kept; brand = primary purple */
   background: var(--primary); color: var(--primary-fg);
-  box-shadow: 0 10px 24px color-mix(in oklab, var(--primary) 40%, transparent);
+  box-shadow: 0 10px 24px color-mix(in oklab, var(--primary) 35%, transparent);
   transition: transform .04s, background .18s, box-shadow .18s;
 }
 .${SCOPE} .btn--green:hover{
   background: color-mix(in oklab, var(--primary) 88%, black);
-  box-shadow: 0 12px 28px color-mix(in oklab, var(--primary) 52%, transparent);
+  box-shadow: 0 12px 28px color-mix(in oklab, var(--primary) 48%, transparent);
 }
 .${SCOPE} .btn--green:active{ transform:translateY(1px); }
 .${SCOPE} .btn--danger{
   background: color-mix(in oklab, var(--destructive) 18%, transparent);
   color: color-mix(in oklab, var(--destructive) 75%, white);
-  box-shadow: 0 10px 24px rgba(220,38,38,.15);
   border-color: color-mix(in oklab, var(--destructive) 35%, var(--va-border));
 }
 
-/* Inputs & selects */
-.${SCOPE} .va-input{ width:100%; min-width:0; height:40px; border-radius: var(--radius); padding:0 .85rem; font-size:14.5px; outline:none;
-  background:var(--va-input-bg); border:1px solid var(--va-input-border); box-shadow:var(--va-input-shadow); color:var(--text);
+/* Inputs/selects – compact like the UI builder */
+.${SCOPE} .va-input{
+  width:100%; min-width:0; height:40px; border-radius: var(--radius);
+  padding:0 .85rem; font-size:14.5px;
+  background:var(--va-input-bg); border:1px solid var(--va-input-border);
+  box-shadow:var(--va-input-shadow); color:var(--text); outline:none;
   font-weight: var(--fw-regular);
 }
-.${SCOPE} .va-input:focus{ border-color: color-mix(in oklab, var(--ring) 65%, var(--va-input-border));
-  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 22%, transparent), var(--va-input-shadow); }
+.${SCOPE} .va-input:focus{
+  border-color: color-mix(in oklab, var(--ring) 60%, var(--va-input-border));
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 22%, transparent), var(--va-input-shadow);
+}
 .${SCOPE} .va-select{
   width:100%; min-width:0; height:40px; font-size:14.5px; border-radius: var(--radius); outline:none;
   padding:0 2.1rem 0 .85rem;
@@ -215,10 +190,12 @@ function StyleBlock() {
   background-repeat:no-repeat; background-position:right .6rem center;
 }
 .${SCOPE} .va-select:hover{ background:linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.03)), var(--va-input-bg); }
-.${SCOPE} .va-select:focus{ border-color: color-mix(in oklab, var(--ring) 65%, var(--va-input-border));
-  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 22%, transparent), var(--va-input-shadow); }
+.${SCOPE} .va-select:focus{
+  border-color: color-mix(in oklab, var(--ring) 60%, var(--va-input-border));
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 22%, transparent), var(--va-input-shadow);
+}
 
-/* Cards/sections */
+/* Section card */
 .${SCOPE} .section{
   border:1px solid var(--va-border);
   background: linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,.01));
@@ -226,7 +203,7 @@ function StyleBlock() {
   box-shadow: var(--va-shadow);
 }
 
-/* Lane that expands when rail collapses */
+/* Content lane like the builder: compact and max width */
 .${SCOPE} .va-lane{
   position: relative;
   box-sizing: border-box;
@@ -243,9 +220,6 @@ function StyleBlock() {
 }
 .${SCOPE} .va-lane .container{ max-width:none !important; padding-left:0 !important; padding-right:0 !important; }
 .${SCOPE} .va-lane [class*="max-w-"]{ max-width:none !important; }
-@media (max-width: 1280px){
-  .${SCOPE}{ --va-rail-w: 320px; }
-}
 `}</style>
   );
 }
@@ -310,7 +284,7 @@ You are an intelligent and responsive assistant designed to help users with a wi
 - When done, summarize details and hand off if needed.`.trim();
 
 /* ──────────────────────────────────────────────────────────────────────────── */
-/* SMALL UI HELPERS                                                            */
+/* UI HELPERS                                                                  */
 /* ──────────────────────────────────────────────────────────────────────────── */
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -329,7 +303,7 @@ function Section({ title, icon, children }: { title: string; icon: React.ReactNo
         aria-hidden
         className="pointer-events-none absolute -top-[20%] -left-[12%] w-[58%] h-[58%] rounded-full"
         style={{
-          background: 'radial-gradient(circle, color-mix(in oklab, var(--accent) 16%, transparent) 0%, transparent 70%)',
+          background: 'radial-gradient(circle, color-mix(in oklab, var(--primary) 16%, transparent) 0%, transparent 70%)',
           filter: 'blur(42px)', opacity: .75
         }}
       />
@@ -340,7 +314,7 @@ function Section({ title, icon, children }: { title: string; icon: React.ReactNo
         style={{ borderBottom: open ? '1px solid var(--va-border)' : 'none', fontWeight: 560 }}
       >
         <span className="flex items-center gap-2 text-sm">
-          <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: 'var(--accent)' }} />
+          <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: 'var(--primary)' }} />
           {icon}{title}
         </span>
         {open ? <ChevronDown className="w-4 h-4 icon" /> : <ChevronRight className="w-4 h-4 icon" />}
@@ -510,7 +484,7 @@ export default function VoiceAgentSection() {
 
   if (!isClient) {
     return (
-      <div ref={scopeRef} className={SCOPE} style={{ background: 'var(--bg)', color: 'var(--text)' }}>
+      <div ref={scopeRef} className={SCOPE}>
         <StyleBlock />
         <div className="px-6 py-10 opacity-70 text-sm">Loading…</div>
       </div>
@@ -520,7 +494,7 @@ export default function VoiceAgentSection() {
   const railData: AssistantLite[] = assistants.map(a => ({ id: a.id, name: a.name, folder: a.folder, updatedAt: a.updatedAt }));
 
   return (
-    <div ref={scopeRef} className={SCOPE} style={{ background: 'var(--bg)', color: 'var(--text)' }}>
+    <div ref={scopeRef} className={SCOPE}>
       <AssistantRail
         assistants={railData}
         activeId={activeId}
@@ -532,13 +506,11 @@ export default function VoiceAgentSection() {
 
       {/* CONTENT LANE */}
       <div className="va-lane">
-        {/* Top actions */}
+        {/* Top actions (tighter gaps) */}
         <div className="pb-3 flex items-center justify-between sticky" style={{ top: 'calc(var(--app-header-h, 64px) + 8px)', zIndex: 2 }}>
           <div className="flex items-center gap-6">
             {!currentCallId ? (
-              <button onClick={()=> onTurn('assistant', greet)} className="btn btn--green">
-                <span>Start Web Call</span>
-              </button>
+              <button onClick={()=> onTurn('assistant', greet)} className="btn btn--green"><span>Start Web Call</span></button>
             ) : (
               <button onClick={endWebCallSession} className="btn btn--danger">
                 <PhoneOff className="w-4 h-4" /> End Call
@@ -553,13 +525,13 @@ export default function VoiceAgentSection() {
           </div>
         </div>
 
-        {/* Stats row */}
-        <div className="grid gap-6 md:gap-6 mb-6" style={{ gridTemplateColumns:'repeat(2, minmax(260px,1fr))' }}>
-          <div className="rounded-xl p-4" style={{ background:'var(--va-card)', border:'1px solid var(--va-border)', boxShadow:'var(--va-shadow)' }}>
+        {/* Stats row (clean, no bars like the preview cards) */}
+        <div className="grid gap-5 md:gap-5 mb-6" style={{ gridTemplateColumns:'repeat(2, minmax(260px,1fr))' }}>
+          <div className="rounded-xl p-4" style={{ background:'var(--va-card)', border:'1px solid var(--va-border)', boxShadow:'var(--va-shadow-sm)' }}>
             <div className="text-[12.5px] opacity-80 mb-1.5">Cost</div>
             <div className="text-[19px]" style={{ fontWeight: 560 }}>~$0.1/min</div>
           </div>
-          <div className="rounded-xl p-4" style={{ background:'var(--va-card)', border:'1px solid var(--va-border)', boxShadow:'var(--va-shadow)' }}>
+          <div className="rounded-xl p-4" style={{ background:'var(--va-card)', border:'1px solid var(--va-border)', boxShadow:'var(--va-shadow-sm)' }}>
             <div className="text-[12.5px] opacity-80 mb-1.5">Latency</div>
             <div className="text-[19px]" style={{ fontWeight: 560 }}>~1050 ms</div>
           </div>
@@ -602,7 +574,9 @@ export default function VoiceAgentSection() {
 
           <div className="mt-5" style={{ minWidth: 0 }}>
             <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2 text-sm" style={{ fontWeight: 560 }}><Sparkles className="w-4 h-4 icon" /> System Prompt</div>
+              <div className="flex items-center gap-2 text-sm" style={{ fontWeight: 560 }}>
+                <Sparkles className="w-4 h-4 icon" /> System Prompt
+              </div>
               <div className="flex items-center gap-2">
                 <button className="topbar-btn" onClick={()=> setTypingPreview(null)}><RefreshCw className="w-4 h-4 icon" /> Reset</button>
                 <button onClick={() => setGenOpen(true)} className="btn btn--green"><Sparkles className="w-4 h-4" /> <span>Generate / Edit</span></button>
