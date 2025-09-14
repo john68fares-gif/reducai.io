@@ -6,8 +6,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Check, Copy, Sparkles, ChevronDown, ChevronRight,
   FileText, Mic2, BookOpen, SlidersHorizontal, UploadCloud,
-  RefreshCw, X, Rocket, PhoneOff,
-  MessageSquare, ListTree, AudioLines, Volume2, Save
+  RefreshCw, X, Rocket, PhoneOff, MessageSquare,
+  ListTree, AudioLines, Volume2, Save
 } from 'lucide-react';
 
 import AssistantRail, { type AssistantLite } from '@/components/voice/AssistantRail';
@@ -20,13 +20,11 @@ const EDGE_GUTTER = 24;
 const MAX_LANE_W = 1560;
 
 /* ──────────────────────────────────────────────────────────────────────────── */
-/* GLOBAL STYLE – matches screenshots (Cosmic Night / purple, lighter type)    */
+/* GLOBAL STYLE (no styled-jsx; safe in any React/Next build)                  */
 /* ──────────────────────────────────────────────────────────────────────────── */
 function StyleBlock() {
-  return (
-    <style jsx global>{`
+  const css = `
 .${SCOPE}{
-  /* Typography like the screenshots: lighter and tighter */
   --fw-regular: 500;
   --fw-medium:  560;
   --fw-semi:    600;
@@ -42,14 +40,14 @@ function StyleBlock() {
   --popover:    oklch(0.2284 0.0384 282.0);
   --popover-fg: var(--foreground);
 
-  --primary:    oklch(0.7162 0.1597 290.3962);      /* purple */
+  --primary:    oklch(0.7162 0.1597 290.3962); /* purple brand from screenshots */
   --primary-fg: oklch(0.1743 0.0227 283.0);
 
   --secondary:    oklch(0.3139 0.0736 283.0);
   --secondary-fg: oklch(0.8367 0.0849 285.0);
 
   --accent:       oklch(0.3354 0.0828 280.0);
-  --accent-fg:    oklch(0.9185 0.0257 285.0);
+  --accent-fg:    var(--foreground);
 
   --muted:        oklch(0.2710 0.0621 281.4);
   --muted-fg:     oklch(0.7166 0.0462 285.0);
@@ -58,10 +56,9 @@ function StyleBlock() {
   --destructive-fg: oklch(1 0 0);
 
   --border: oklch(0.3261 0.0597 282.5832);
-  --input:  oklch(0.3261 0.0597 282.5832);
-  --ring:   oklch(0.7162 0.1597 290.3962);
+  --input:  var(--border);
+  --ring:   var(--primary);
 
-  /* Map to component tokens */
   --bg: var(--background);
   --text: var(--foreground);
   --text-muted: color-mix(in oklab, var(--foreground) 60%, transparent);
@@ -76,9 +73,9 @@ function StyleBlock() {
   --va-menu-bg:     var(--card);
   --va-menu-border: var(--border);
 
-  --va-shadow:      0 24px 70px rgba(0,0,0,.55), 0 10px 28px rgba(0,0,0,.40);
-  --va-shadow-lg:   0 42px 110px rgba(0,0,0,.66), 0 20px 48px rgba(0,0,0,.5);
-  --va-shadow-sm:   0 12px 26px rgba(0,0,0,.35);
+  --va-shadow:    0 24px 70px rgba(0,0,0,.55), 0 10px 28px rgba(0,0,0,.40);
+  --va-shadow-lg: 0 42px 110px rgba(0,0,0,.66), 0 20px 48px rgba(0,0,0,.5);
+  --va-shadow-sm: 0 12px 26px rgba(0,0,0,.35);
 
   --va-rail-w:320px;
   --app-sidebar-w:248px;
@@ -92,16 +89,13 @@ function StyleBlock() {
   overflow-x:hidden;
 }
 
-/* Light theme tokens from your “light” screenshots */
+/* Light theme tokens from your light screenshots */
 :root:not([data-theme="dark"]) .${SCOPE}{
   --background: oklch(0.9730 0.0133 286.0);
   --foreground: oklch(0.3015 0.0572 282.0);
 
   --card:       oklch(1 0 0);
-  --card-fg:    var(--foreground);
-
   --popover:    oklch(1 0 0);
-  --popover-fg: var(--foreground);
 
   --primary:    oklch(0.5417 0.1790 288.0332);
   --primary-fg: oklch(1 0 0);
@@ -110,13 +104,8 @@ function StyleBlock() {
   --secondary-fg: oklch(0.4143 0.1039 288.1);
 
   --accent:       oklch(0.9221 0.0373 262.0);
-  --accent-fg:    var(--foreground);
-
   --muted:        oklch(0.9580 0.0133 286.0);
   --muted-fg:     oklch(0.5426 0.0465 284.0);
-
-  --destructive:    oklch(0.6861 0.2061 14.99);
-  --destructive-fg: oklch(1 0 0);
 
   --border: oklch(0.9115 0.0216 285.9625);
   --input:  var(--border);
@@ -126,13 +115,12 @@ function StyleBlock() {
   --text: var(--foreground);
   --text-muted: color-mix(in oklab, var(--foreground) 55%, transparent);
 
-  --va-card:    var(--card);
-  --va-topbar:  var(--card);
-  --va-border:  var(--border);
+  --va-card: var(--card);
+  --va-topbar: var(--card);
+  --va-border: var(--border);
   --va-input-bg: var(--card);
   --va-input-border: var(--input);
   --va-input-shadow: inset 0 1px 0 rgba(255,255,255,.85);
-
   --va-menu-bg: var(--card);
   --va-menu-border: var(--border);
 
@@ -141,17 +129,63 @@ function StyleBlock() {
   --va-shadow-sm: 0 12px 26px rgba(0,0,0,.10);
 }
 
-/* Icon tint = primary, like the shadcn preview */
+/* Icon tint */
 .${SCOPE} .icon{ color: var(--primary); }
 
-/* Buttons – lighter weight, compact like screenshots */
+/* ---------------- Assistant rail (matches screenshots) ---------------- */
+aside[data-va-rail]{
+  position: fixed;
+  top: var(--app-header-h, 64px);
+  left: 0;
+  width: var(--va-rail-w);
+  height: calc(100dvh - var(--app-header-h, 64px));
+  background: linear-gradient(180deg, oklch(0.208 0.03 282) 0%, oklch(0.188 0.025 282) 100%);
+  border-right: 1px solid var(--va-border);
+  box-shadow: 8px 0 28px rgba(0,0,0,.42);
+  padding: 10px 10px 14px 10px;
+  display: flex; flex-direction: column; gap: 10px;
+  z-index: 10;
+}
+aside[data-va-rail] .va-rail__section-title{
+  font-size: 12.5px; letter-spacing: .02em; color: var(--text-muted);
+  padding: 6px 10px 2px 12px; font-weight: 560;
+}
+aside[data-va-rail] .va-rail__list{ overflow:auto; margin-top:4px; padding:6px; border-radius:10px; }
+aside[data-va-rail] .va-rail__item,
+aside[data-va-rail] :where(a,button)[data-va-item]{
+  display:grid; grid-template-columns: 1fr auto; align-items:center;
+  gap:8px; padding:9px 10px; border-radius:10px; color:var(--text);
+  background:transparent; border:1px solid transparent;
+  transition: background .15s, border-color .15s; font-weight:520; text-align:left;
+}
+aside[data-va-rail] .va-rail__item:hover,
+aside[data-va-rail] :where(a,button)[data-va-item]:hover{
+  background: color-mix(in oklab, var(--primary) 10%, transparent);
+  border-color: color-mix(in oklab, var(--primary) 18%, var(--va-border));
+}
+aside[data-va-rail] .va-rail__item[aria-current="true"],
+aside[data-va-rail] :where(a,button)[data-va-item][data-active="true"]{
+  background: color-mix(in oklab, var(--primary) 18%, transparent);
+  border-color: color-mix(in oklab, var(--primary) 28%, var(--va-border));
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--primary) 35%, transparent);
+}
+aside[data-va-rail] .va-rail__name{ font-size:13.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+aside[data-va-rail] .va-rail__meta{ font-size:11.5px; color:var(--text-muted); }
+aside[data-va-rail] .va-rail__dot{ width:6px; height:6px; border-radius:50%; background:var(--primary);
+  box-shadow:0 0 0 2px color-mix(in oklab, var(--primary) 18%, transparent); }
+aside[data-va-rail] .va-rail__footer{ margin-top:auto; padding-top:8px; border-top:1px dashed color-mix(in oklab, var(--va-border) 80%, transparent); }
+html[data-va-rail-collapsed="true"] aside[data-va-rail]{ width:72px; padding:10px 6px; }
+html[data-va-rail-collapsed="true"] aside[data-va-rail] .va-rail__name,
+html[data-va-rail-collapsed="true"] aside[data-va-rail] .va-rail__meta{ display:none; }
+
+/* ---------------- Inputs / Buttons ---------------- */
 .${SCOPE} .topbar-btn, .${SCOPE} .btn{
   height:40px; padding:0 .85rem; border-radius: var(--radius);
   display:inline-flex; align-items:center; gap:.5rem;
   border:1px solid var(--va-border); background:var(--va-card); color:var(--text);
   font-weight: var(--fw-medium);
 }
-.${SCOPE} .btn--green{ /* class kept; brand = primary purple */
+.${SCOPE} .btn--green{
   background: var(--primary); color: var(--primary-fg);
   box-shadow: 0 10px 24px color-mix(in oklab, var(--primary) 35%, transparent);
   transition: transform .04s, background .18s, box-shadow .18s;
@@ -160,14 +194,11 @@ function StyleBlock() {
   background: color-mix(in oklab, var(--primary) 88%, black);
   box-shadow: 0 12px 28px color-mix(in oklab, var(--primary) 48%, transparent);
 }
-.${SCOPE} .btn--green:active{ transform:translateY(1px); }
 .${SCOPE} .btn--danger{
   background: color-mix(in oklab, var(--destructive) 18%, transparent);
   color: color-mix(in oklab, var(--destructive) 75%, white);
   border-color: color-mix(in oklab, var(--destructive) 35%, var(--va-border));
 }
-
-/* Inputs/selects – compact like the UI builder */
 .${SCOPE} .va-input{
   width:100%; min-width:0; height:40px; border-radius: var(--radius);
   padding:0 .85rem; font-size:14.5px;
@@ -195,15 +226,13 @@ function StyleBlock() {
   box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 22%, transparent), var(--va-input-shadow);
 }
 
-/* Section card */
+/* ---------------- Section card & content lane ---------------- */
 .${SCOPE} .section{
   border:1px solid var(--va-border);
   background: linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,.01));
   border-radius: 16px;
   box-shadow: var(--va-shadow);
 }
-
-/* Content lane like the builder: compact and max width */
 .${SCOPE} .va-lane{
   position: relative;
   box-sizing: border-box;
@@ -220,12 +249,12 @@ function StyleBlock() {
 }
 .${SCOPE} .va-lane .container{ max-width:none !important; padding-left:0 !important; padding-right:0 !important; }
 .${SCOPE} .va-lane [class*="max-w-"]{ max-width:none !important; }
-`}</style>
-  );
+`;
+  return <style>{css}</style>;
 }
 
 /* ──────────────────────────────────────────────────────────────────────────── */
-/* TYPES (trimmed)                                                             */
+/* TYPES                                                                       */
 /* ──────────────────────────────────────────────────────────────────────────── */
 type Provider = 'openai';
 type ModelId = 'gpt-4o' | 'gpt-4o-mini' | 'gpt-4.1' | 'gpt-3.5-turbo';
@@ -294,7 +323,6 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     </div>
   );
 }
-
 function Section({ title, icon, children }: { title: string; icon: React.ReactNode; children: React.ReactNode }) {
   const [open, setOpen] = useState(true);
   return (
@@ -506,7 +534,7 @@ export default function VoiceAgentSection() {
 
       {/* CONTENT LANE */}
       <div className="va-lane">
-        {/* Top actions (tighter gaps) */}
+        {/* Top actions */}
         <div className="pb-3 flex items-center justify-between sticky" style={{ top: 'calc(var(--app-header-h, 64px) + 8px)', zIndex: 2 }}>
           <div className="flex items-center gap-6">
             {!currentCallId ? (
@@ -525,7 +553,7 @@ export default function VoiceAgentSection() {
           </div>
         </div>
 
-        {/* Stats row (clean, no bars like the preview cards) */}
+        {/* Stats row */}
         <div className="grid gap-5 md:gap-5 mb-6" style={{ gridTemplateColumns:'repeat(2, minmax(260px,1fr))' }}>
           <div className="rounded-xl p-4" style={{ background:'var(--va-card)', border:'1px solid var(--va-border)', boxShadow:'var(--va-shadow-sm)' }}>
             <div className="text-[12.5px] opacity-80 mb-1.5">Cost</div>
