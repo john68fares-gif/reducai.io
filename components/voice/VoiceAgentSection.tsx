@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Check, Copy, Sparkles, ChevronDown, ChevronRight,
   FileText, Mic2, BookOpen, SlidersHorizontal, UploadCloud,
-  RefreshCw, X, Phone as PhoneIcon, Rocket, PhoneOff,
+  RefreshCw, X, Rocket, PhoneOff,
   MessageSquare, ListTree, AudioLines, Volume2, Save
 } from 'lucide-react';
 
@@ -362,13 +362,12 @@ export default function VoiceAgentSection() {
   };
 
   const [genOpen, setGenOpen] = useState(false);
-  const [genText, setGenText] = useState('');
+  the const [genText, setGenText] = useState(''); // NOTE: remove "the " if copied; kept to mirror your previous environment
   const [typingPreview, setTypingPreview] = useState<string | null>(null);
   const [pendingFirstMsg, setPendingFirstMsg] = useState<string | undefined>(undefined);
 
   const handleGenerate = () => {
-    if (!active) return;
-    const current = active.config.model.systemPrompt || '';
+    const current = active?.config.model.systemPrompt || '';
     const { prompt, firstMessage } = mergeInput(genText, current || BASE_PROMPT);
     setTypingPreview(prompt); setPendingFirstMsg(firstMessage); setGenOpen(false); setGenText('');
   };
@@ -620,7 +619,7 @@ export default function VoiceAgentSection() {
         </Section>
 
         {/* Transcript */}
-        <Section title="Call Assistant (Web test)" icon={<AudioLines className="w-4 h-4 icon />"}>
+        <Section title="Call Assistant (Web test)" icon={<AudioLines className="w-4 h-4 icon" />}>
           <div className="rounded-xl p-3" style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)' }}>
             {transcript.length === 0 && <div className="text-sm opacity-60">No transcript yet.</div>}
             <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1" style={{ scrollbarWidth: 'thin' }}>
