@@ -1,79 +1,78 @@
 // pages/api/chatbots/save.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { createClient } from '@supabase/supabase-js';
 
-/**
- * SERVER-ONLY: uses the SERVICE ROLE key (bypasses RLS) but
- * we still require a userId from the client (taken from their
- * signed-in session on the client).
- *
- * ENV required on Vercel:
- *  - NEXT_PUBLIC_SUPABASE_URL
- *  - SUPABASE_SERVICE_ROLE_KEY  (do NOT expose publicly)
- */
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL as string,
-  process.env.SUPABASE_SERVICE_ROLE_KEY as string
-);
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY!;
+const OA = 'https://api.openai.com/v1';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ ok: false, error: 'Method not allowed' });
-  }
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Method not allowed' });
+
+  if (!OPENAI_API_KEY) return res.status(500).json({ ok: false, error: 'Missing OPENAI_API_KEY' });
 
   try {
     const {
-      userId,
-      assistantId,
+      userId,           // REQUIRED (supabase user id)
+      assistantId,      // optional → update if provided
       name,
-      model,
+      model = 'gpt-4o-mini',
+      prompt = '',
       industry,
       language,
-      prompt,
       appearance,
     } = req.body || {};
 
-    if (!userId)       return res.status(400).json({ ok: false, error: 'Missing userId' });
-    if (!assistantId)  return res.status(400).json({ ok: false, error: 'Missing assistantId' });
-    if (!name)         return res.status(400).json({ ok: false, error: 'Missing name' });
+    if (!userId) return res.status(400).json({ ok: false, error: 'Missing userId' });
+    if (!name)   return res.status(400).json({ ok: false, error: 'Missing name' });
+
+    const meta: Record<string, string> = {
+      ownerUserId: String(userId),
+    };
+    if (industry)  meta.industry = String(industry);
+    if (language)  meta.language = String(language);
+    if (appearance) meta.appearance = typeof appearance === 'string' ? appearance : JSON.stringify(appearance);
 
     const payload = {
-      model: model || 'gpt-4o-mini',
-      industry: industry ?? null,
-      language: language || 'English',
-      prompt: typeof prompt === 'string' ? prompt : (prompt ?? ''),
-      appearance: appearance ?? null,
+      name: String(name),
+      model: String(model),
+      instructions: String(prompt || ''),
+      metadata: meta,
     };
 
-    // ---- UPDATE ONLY (no insert): require an existing row for this user+assistant ----
-    const { data: existing, error: findErr } = await supabase
-      .from('chatbots')
-      .select('id')
-      .eq('assistant_id', String(assistantId))
-      .eq('user_id', userId)
-      .maybeSingle();
+    const url = assistantId ? `${OA}/assistants/${assistantId}` : `${OA}/assistants`;
+    const method = assistantId ? 'POST' : 'POST';
 
-    if (findErr) throw findErr;
-    if (!existing) {
-      return res.status(404).json({ ok: false, error: 'Chatbot not found for this user/assistantId' });
+    const r = await fetch(url, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        'OpenAI-Beta': 'assistants=v2',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!r.ok) {
+      const text = await r.text().catch(() => '');
+      return res.status(r.status).json({ ok: false, error: text || `Upstream ${r.status}` });
     }
 
-    const { data, error } = await supabase
-      .from('chatbots')
-      .update({
-        name: String(name),
-        payload,
-        // if you have an updated_at column handled by trigger, you can omit it
-        // updated_at: new Date().toISOString(),
-      })
-      .eq('assistant_id', String(assistantId))
-      .eq('user_id', userId)
-      .select('*')
-      .single();
-
-    if (error) throw error;
-    return res.status(200).json({ ok: true, chatbot: data });
+    const a = await r.json();
+    return res.status(200).json({
+      ok: true,
+      chatbot: {
+        id: a.id,
+        name: a.name || 'Untitled Agent',
+        model: a.model || model,
+        createdAt: (a.created_at ? Number(a.created_at) * 1000 : Date.now()),
+        temperature: safeTemp(a?.metadata?.temperature, 0.5),
+      },
+    });
   } catch (e: any) {
     return res.status(500).json({ ok: false, error: e?.message || 'Failed to save chatbot' });
   }
+}
+
+function safeTemp(v: unknown, dflt: number) {
+  const n = typeof v === 'string' ? parseFloat(v) : typeof v === 'number' ? v : NaN;
+  return Number.isFinite(n) ? (n as number) : dflt;
 }
