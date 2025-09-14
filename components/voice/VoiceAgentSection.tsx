@@ -9,6 +9,8 @@ import {
   ChevronUp,
   Gauge,
   Timer,
+  Phone,
+  Rocket,
 } from 'lucide-react';
 
 /* Safe dynamic rail */
@@ -35,18 +37,17 @@ function LocalTokens() {
     <style>{`
       .va { --panel: rgba(13,15,17,0.92); --card: rgba(18,20,23,0.88);
             --border: rgba(106,247,209,0.18); --text: #E9FBF5; --muted: #9bb7ae; --fg:#E9FBF5; }
-      .va { color: var(--fg); font-size:13px; } /* smaller body text */
+      .va { color: var(--fg); font-size:13px; }
       .va-panel{ background:var(--panel); border:1px solid var(--border); border-radius:24px;
                  box-shadow: inset 0 0 20px rgba(0,0,0,.28), 0 0 14px rgba(106,247,209,.05), 0 0 18px rgba(0,255,194,.05); }
       .va-card{ background:var(--card); border:1px solid var(--border); border-radius:14px;
                 box-shadow: 0 14px 28px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.06), 0 0 0 1px rgba(0,255,194,.05); }
 
-      /* Compact controls */
       .input,.select,.textarea{
         width:100%; background:var(--card); border:1px solid var(--border); color:var(--fg);
         border-radius:12px; padding:0 .7rem; outline:none; font-size:13px;
       }
-      .input,.select{ height:34px; }            /* shorter height */
+      .input,.select{ height:34px; }
       .textarea{ min-height:130px; padding:.6rem .7rem; line-height:1.45; font-size:13px; }
 
       .btn{
@@ -78,7 +79,6 @@ function LocalTokens() {
       .row{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
       @media (max-width:980px){ .row{ grid-template-columns:1fr; } }
 
-      /* Make icons compact (≈14px) and aligned like API Keys */
       .ico{ width:14px; height:14px; display:inline-block; }
     `}</style>
   );
@@ -130,7 +130,7 @@ export default function VoiceAgentSection() {
     <div className="va w-full" style={{ background:'var(--bg)', color:'var(--text)' }}>
       <LocalTokens />
 
-      {/* 1px breathing room on the right edge */}
+      {/* layout */}
       <div className="grid w-full pr-[1px]" style={{ gridTemplateColumns:'312px 1fr' }}>
         {/* LEFT rail */}
         <div className="border-r" style={{ borderColor:'var(--border)' }}>
@@ -139,7 +139,16 @@ export default function VoiceAgentSection() {
 
         {/* RIGHT content */}
         <div className="px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w-[1160px]">
-          {/* (Removed: header + action buttons + tabs) */}
+
+          {/* header: only Publish + Talk to Assistant */}
+          <div className="mb-3 flex flex-wrap items-center justify-end gap-2">
+            <button className="btn">
+              <Rocket className="ico" /> Publish
+            </button>
+            <button className="btn-primary">
+              <Phone className="ico" /> Talk to Assistant
+            </button>
+          </div>
 
           {/* KPIs */}
           <div className="grid gap-3 md:grid-cols-2 mb-5">
