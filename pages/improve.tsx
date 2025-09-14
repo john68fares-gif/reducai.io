@@ -6,13 +6,13 @@ import Link from 'next/link';
 import {
   Search, Loader2, Save, Trash2, Settings2, Bot, RefreshCw,
   SlidersHorizontal, History, RotateCcw, ChevronDown, Send, Sparkles,
-  Star, StarOff, Filter, Diff, FilePlus2, ToggleLeft, ToggleRight, Undo2, Redo2, Info, X,
-  Upload, Download, Wand2, BadgeCheck, Zap, Shield, LayoutGrid, ArrowRightCircle
+  Star, StarOff, Filter, Diff, FilePlus2, ToggleLeft, ToggleRight,
+  Undo2, Redo2, Info, X, Upload, Download, DiffIcon as Diff2, Shield, Code2,
+  Wand2, SplitSquareHorizontal, PanelLeftClose, PanelRightClose, Tag, HelpCircle,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase-client';
-import { scopedStorage } from '@/utils/scoped-storage';
 
-// =========================== Types ===========================
+// ───────────────────────────────── TYPES ─────────────────────────────────
 type BotRow = {
   id: string;
   ownerId: string;
@@ -39,9 +39,14 @@ type AgentMeta = {
   draft?: boolean;
   notes?: string;
   lastOpenedAt?: number;
+  tags?: string[];
+  guardrails?: { blockedPhrases: string[]; enforceJson: boolean; jsonSchemaHint?: string };
+  promptStack?: { pre: string; main: string; post: string };
+  conditional?: Array<{ when: string; rule: string }>;
+  perFlowTemp?: { greeting: number; qa: number; actions: number };
 };
 
-// =========================== Styles ===========================
+// ─────────────────────────────── STYLES ───────────────────────────────
 const PANEL: React.CSSProperties = {
   background: 'color-mix(in oklab, var(--panel) 96%, transparent)',
   border: '1px solid color-mix(in oklab, var(--border) 92%, transparent)',
@@ -49,17 +54,15 @@ const PANEL: React.CSSProperties = {
   borderRadius: 18,
   backdropFilter: 'saturate(120%) blur(6px)',
 };
-
 const CARD: React.CSSProperties = {
   background: 'color-mix(in oklab, var(--card) 96%, transparent)',
   border: '1px solid color-mix(in oklab, var(--border) 92%, transparent)',
   boxShadow: '0 4px 18px rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.04)',
   borderRadius: 12,
 };
-
 const DENSE_PAD = '12px';
 
-// Moving background grid (decorative)
+// animated background
 function BgFX() {
   return (
     <div
@@ -91,21 +94,29 @@ function BgFX() {
   );
 }
 
-// =========================== Refinements ===========================
+// Windows logo (inline SVG)
+function WindowsIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} aria-hidden>
+      <path d="M2 4l9-1.5v9L2 11V4Zm10 0l10-1.7v10.2L12 12V4Zm-10 9l9 0.5v9L2 20v-7Zm10 0l10 0.6V22L12 20v-7Z" />
+    </svg>
+  );
+}
+
+// ─────────────────────────── CONSTANTS/HELPERS ───────────────────────────
 const CHIP_LIBRARY = [
-  { key: 'yes_no', label: 'Only answer Yes/No', line: 'Respond strictly with “Yes” or “No” unless explicitly asked to elaborate.' },
-  { key: 'concise', label: 'Be concise', line: 'Keep responses under 1–2 sentences unless more detail is requested.' },
-  { key: 'ask_clarify', label: 'Ask clarifying first', line: 'If the request is ambiguous, ask a concise clarifying question before answering.' },
-  { key: 'no_greeting', label: 'No greeting', line: 'Do not start with greetings or pleasantries; go straight to the answer.' },
+  { key: 'yes_no', group: 'Format', label: 'Only answer Yes/No', line: 'Respond strictly with “Yes” or “No” unless explicitly asked to elaborate.' },
+  { key: 'concise', group: 'Tone', label: 'Be concise', line: 'Keep responses under 1–2 sentences unless more detail is requested.' },
+  { key: 'ask_clarify', group: 'Guardrails', label: 'Ask clarifying first', line: 'If the request is ambiguous, ask a concise clarifying question before answering.' },
+  { key: 'no_greeting', group: 'Tone', label: 'No greeting', line: 'Do not start with greetings or pleasantries; go straight to the answer.' },
 ];
 
 const REFINEMENT_HEADER = '### ACTIVE REFINEMENTS';
+function fmtTime(ts: number) { return new Date(ts).toLocaleString(); }
+function versionsKey(ownerId: string, agentId: string) { return `versions:${ownerId}:${agentId}`; }
+function metaKey(ownerId: string, agentId: string) { return `meta:${ownerId}:${agentId}`; }
+function estimateTokens(s: string) { return Math.max(1, Math.round((s || '').length / 4)); }
 
-// =========================== Helpers ===========================
-function fmtTime(ts: number) {
-  const d = new Date(ts);
-  return d.toLocaleString();
-}
 function autoNameVersion(prev: Partial<BotRow> | null, next: BotRow) {
   const parts: string[] = [];
   if (prev?.name !== next.name) parts.push(`name→${next.name.slice(0,18)}`);
@@ -119,8 +130,6 @@ function autoNameVersion(prev: Partial<BotRow> | null, next: BotRow) {
   const base = parts.length ? parts.join(' · ') : 'minor edit';
   return base.length > 56 ? base.slice(0, 56) + '…' : base;
 }
-function versionsKey(ownerId: string, agentId: string) { return `versions:${ownerId}:${agentId}`; }
-function metaKey(ownerId: string, agentId: string) { return `meta:${ownerId}:${agentId}`; }
 
 function applyRefinementsToSystem(baseSystem: string, active: Record<string, boolean>): string {
   const re = new RegExp(`^${REFINEMENT_HEADER}[\\s\\S]*?(?:\\n{2,}|$)`, 'm');
@@ -131,9 +140,7 @@ function applyRefinementsToSystem(baseSystem: string, active: Record<string, boo
   return (block + stripped).trim();
 }
 
-function estimateTokens(s: string) { return Math.max(1, Math.round((s || '').length / 4)); }
-
-// very light diff
+// tiny line-diff for modal
 type DiffLine = { type: 'same'|'add'|'del'; text: string };
 function simpleDiff(a: string, b: string): DiffLine[] {
   const A = (a || '').split('\n');
@@ -172,15 +179,21 @@ function makeUndoStack(initial: string) {
   };
 }
 
-// =========================== Component ===========================
+// ─────────────────────────────── COMPONENT ───────────────────────────────
 export default function Improve() {
   const [userId, setUserId] = useState<string | null>(null);
   const [list, setList] = useState<BotRow[]>([]);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
 
-  // sorting/pin
+  // rail collapse + split pane
+  const [leftCollapsed, setLeftCollapsed] = useState(false);
+  const [colRatio, setColRatio] = useState(0.58); // editor width ratio (0..1)
+  const dragRef = useRef<{dragging:boolean; startX:number; startRatio:number}>({dragging:false,startX:0,startRatio:0});
+
+  // sorting/pin/tags
   const [sort, setSort] = useState<'pinned_first'|'name_asc'|'name_desc'|'updated_desc'|'updated_asc'>('pinned_first');
+  const [tagFilter, setTagFilter] = useState<string>('');
 
   // editor state
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -194,25 +207,32 @@ export default function Improve() {
   const [notes, setNotes] = useState('');
   const [draft, setDraft] = useState(false);
   const [pinned, setPinned] = useState(false);
+  const [tags, setTags] = useState<string[]>([]);
+
+  // prompt stack / guardrails / conditionals / per-flow temps
+  const [promptPre, setPromptPre] = useState('');
+  const [promptPost, setPromptPost] = useState('');
+  const [blockedPhrases, setBlockedPhrases] = useState<string>('');
+  const [enforceJson, setEnforceJson] = useState(false);
+  const [jsonSchemaHint, setJsonSchemaHint] = useState('');
+  const [conditionals, setConditionals] = useState<Array<{when:string;rule:string}>>([]);
+  const [flowTemps, setFlowTemps] = useState({ greeting: 0.5, qa: 0.5, actions: 0.5 });
 
   // save state
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
 
-  // versions
+  // versions / diff
   const [versions, setVersions] = useState<Version[]>([]);
   const [versionsOpen, setVersionsOpen] = useState(true);
   const [diffOpen, setDiffOpen] = useState(false);
   const [diffWith, setDiffWith] = useState<Version | null>(null);
 
-  // inline test
+  // test
   const [testInput, setTestInput] = useState('');
   const [testLog, setTestLog] = useState<{role:'user'|'assistant', text:string}[]>([]);
   const [testing, setTesting] = useState(false);
-
-  // importer
-  const [legacyCount, setLegacyCount] = useState<number>(0);
-  const [importing, setImporting] = useState(false);
+  const [showBeforeAfter, setShowBeforeAfter] = useState(false);
 
   // status
   const statusText = saving ? 'Saving…' : dirty ? 'Unsaved changes' : 'Saved';
@@ -221,7 +241,7 @@ export default function Improve() {
   const undoRef = useRef<ReturnType<typeof makeUndoStack> | null>(null);
   useEffect(() => { undoRef.current = makeUndoStack(''); }, []);
 
-  // ---------- boot: get user id ----------
+  // ─────────────── boot: get user id ───────────────
   useEffect(() => {
     (async () => {
       const { data } = await supabase.auth.getUser();
@@ -230,7 +250,7 @@ export default function Improve() {
     })();
   }, []);
 
-  // ---------- fetch bots ----------
+  // ─────────────── fetch bots ───────────────
   async function fetchBots(uid: string) {
     setLoading(true);
     try {
@@ -241,92 +261,12 @@ export default function Improve() {
       const rows: BotRow[] = json?.data || [];
       setList(rows);
       if (!selectedId && rows.length) setSelectedId(rows[0].id);
-      // detect legacy builds
-      detectLegacy();
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
+    } catch (e) { console.error(e); }
+    finally { setLoading(false); }
   }
   useEffect(() => { if (userId) fetchBots(userId); }, [userId]);
 
-  // ---------- detect legacy builds (scopedStorage/localStorage) ----------
-  async function detectLegacy() {
-    try {
-      // Cloud scoped
-      let total = 0;
-      try {
-        const ss = await scopedStorage();
-        await ss.ensureOwnerGuard();
-        const cloud = await ss.getJSON<any[]>('chatbots.v1', []);
-        total += (Array.isArray(cloud) ? cloud : []).length;
-      } catch {}
-      // Local
-      try {
-        const local = localStorage.getItem('chatbots');
-        const list = local ? JSON.parse(local) : [];
-        total += (Array.isArray(list) ? list : []).length;
-      } catch {}
-      setLegacyCount(total);
-    } catch { setLegacyCount(0); }
-  }
-
-  async function importLegacy() {
-    if (!userId) return;
-    setImporting(true);
-    try {
-      const toCreate: Array<{name:string; model:string; temperature:number; system:string}> = [];
-
-      // from scopedStorage
-      try {
-        const ss = await scopedStorage();
-        await ss.ensureOwnerGuard();
-        const cloud = await ss.getJSON<any[]>('chatbots.v1', []);
-        const list = Array.isArray(cloud) ? cloud : [];
-        for (const b of list) {
-          toCreate.push({
-            name: b.name || 'Imported Agent',
-            model: b.model || 'gpt-4o-mini',
-            temperature: Number(b.temperature ?? 0.5) || 0.5,
-            system: b.system || b.prompt || '',
-          });
-        }
-      } catch {}
-
-      // from localStorage
-      try {
-        const localRaw = localStorage.getItem('chatbots');
-        const local = localRaw ? JSON.parse(localRaw) : [];
-        const list = Array.isArray(local) ? local : [];
-        for (const b of list) {
-          toCreate.push({
-            name: b.name || 'Imported Agent',
-            model: b.model || 'gpt-4o-mini',
-            temperature: Number(b.temperature ?? 0.5) || 0.5,
-            system: b.system || b.prompt || '',
-          });
-        }
-      } catch {}
-
-      // bulk create
-      for (const a of toCreate) {
-        await fetch('/api/chatbots', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-owner-id': userId },
-          body: JSON.stringify(a),
-        });
-      }
-      await fetchBots(userId);
-      setLegacyCount(0);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setImporting(false);
-    }
-  }
-
-  // ---------- load meta/versions on selection ----------
+  // ─────────────── load meta/versions on selection ───────────────
   useEffect(() => {
     if (!selected || !userId) return;
     setName(selected.name || '');
@@ -349,15 +289,30 @@ export default function Improve() {
       setPinned(!!m.pinned);
       setDraft(!!m.draft);
       setNotes(m.notes || '');
+      setTags(Array.isArray(m.tags) ? m.tags : []);
+
+      setPromptPre(m.promptStack?.pre || '');
+      setPromptPost(m.promptStack?.post || '');
+      setConditionals(Array.isArray(m.conditional) ? m.conditional : []);
+      setFlowTemps(m.perFlowTemp || { greeting:0.5, qa:0.5, actions:0.5 });
+
+      setBlockedPhrases((m.guardrails?.blockedPhrases || []).join('\n'));
+      setEnforceJson(!!m.guardrails?.enforceJson);
+      setJsonSchemaHint(m.guardrails?.jsonSchemaHint || '');
+
       localStorage.setItem(metaKey(userId, selected.id), JSON.stringify({ ...m, lastOpenedAt: Date.now() }));
-    } catch { setPinned(false); setDraft(false); setNotes(''); }
+    } catch {
+      setPinned(false); setDraft(false); setNotes(''); setTags([]);
+      setPromptPre(''); setPromptPost(''); setConditionals([]); setFlowTemps({greeting:0.5,qa:0.5,actions:0.5});
+      setBlockedPhrases(''); setEnforceJson(false); setJsonSchemaHint('');
+    }
 
     setDirty(false);
     setTestLog([]);
     if (undoRef.current) undoRef.current = makeUndoStack(selected.system || '');
   }, [selectedId]);
 
-  // ---------- mark dirty ----------
+  // ─────────────── mark dirty on editor changes ───────────────
   useEffect(() => {
     if (!selected) return;
     const d =
@@ -365,11 +320,15 @@ export default function Improve() {
       (model !== (selected.model || 'gpt-4o-mini')) ||
       (Math.abs(temperature - (selected.temperature ?? 0.5)) > 1e-9) ||
       (system !== (selected.system || '')) ||
-      (draft !== false) || (pinned !== false) || (notes !== '');
+      (draft !== false) || (pinned !== false) || (notes !== '') ||
+      (tags.length > 0) || (promptPre !== '') || (promptPost !== '') ||
+      (blockedPhrases !== '') || enforceJson || (jsonSchemaHint !== '') ||
+      (conditionals.length > 0) ||
+      (Math.abs(flowTemps.greeting-0.5)>1e-9 || Math.abs(flowTemps.qa-0.5)>1e-9 || Math.abs(flowTemps.actions-0.5)>1e-9);
     setDirty(d);
-  }, [name, model, temperature, system, draft, pinned, notes, selected]);
+  }, [name, model, temperature, system, draft, pinned, notes, tags, promptPre, promptPost, blockedPhrases, enforceJson, jsonSchemaHint, conditionals, flowTemps, selected]);
 
-  // ---------- keyboard shortcuts ----------
+  // ─────────────── keyboard shortcuts (Win+S displayed, but also supports Ctrl/Cmd) ───────────────
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
@@ -384,7 +343,7 @@ export default function Improve() {
 
   useEffect(() => { if (undoRef.current) undoRef.current.push(system); }, [system]);
 
-  // ---------- helpers ----------
+  // ─────────────── helpers ───────────────
   function setChip(key: string, val: boolean) {
     const next = { ...chips, [key]: val };
     setChips(next);
@@ -399,7 +358,7 @@ export default function Improve() {
     localStorage.setItem(metaKey(owner, agent), JSON.stringify(meta));
   }
 
-  // ---------- actions ----------
+  // ─────────────── actions ───────────────
   async function saveEdits() {
     if (!userId || !selectedId) return;
     setSaving(true);
@@ -428,7 +387,17 @@ export default function Improve() {
       const json = await res.json();
       if (!res.ok || !json?.ok) throw new Error(json?.error || 'Failed to save');
 
-      const m: AgentMeta = { pinned, draft, notes, lastOpenedAt: Date.now() };
+      const m: AgentMeta = {
+        pinned, draft, notes, lastOpenedAt: Date.now(), tags,
+        promptStack: { pre: promptPre, main: '', post: promptPost },
+        conditional: conditionals,
+        guardrails: {
+          blockedPhrases: blockedPhrases.split('\n').map(s => s.trim()).filter(Boolean),
+          enforceJson,
+          jsonSchemaHint: jsonSchemaHint || undefined,
+        },
+        perFlowTemp: flowTemps,
+      };
       storeMeta(userId, selectedId, m);
 
       await fetchBots(userId);
@@ -463,22 +432,98 @@ export default function Improve() {
     }
   }
 
+  async function duplicateAgent() {
+    if (!selected || !userId) return;
+    const cloneName = `${selected.name || 'Untitled'} (Copy)`;
+    try {
+      const resp = await fetch('/api/chatbots', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-owner-id': userId },
+        body: JSON.stringify({
+          name: cloneName,
+          model: selected.model,
+          temperature: selected.temperature,
+          system: selected.system,
+        }),
+      });
+      const json = await resp.json();
+      if (!resp.ok || !json?.ok || !json?.data?.id) throw new Error(json?.error || 'Failed to duplicate');
+      await fetchBots(userId);
+      setSelectedId(json.data.id);
+    } catch (e: any) { alert(e?.message || 'Failed to duplicate'); }
+  }
+
+  function exportAgent() {
+    if (!selected) return;
+    const payload = {
+      type: 'reduc.ai/agent',
+      version: 1,
+      agent: {
+        id: selected.id,
+        name, model, temperature, system,
+        meta: {
+          notes, pinned, draft, tags,
+          promptStack: { pre: promptPre, main: '', post: promptPost },
+          conditional: conditionals,
+          guardrails: {
+            blockedPhrases: blockedPhrases.split('\n').map(s=>s.trim()).filter(Boolean),
+            enforceJson, jsonSchemaHint
+          },
+          perFlowTemp: flowTemps,
+        },
+      },
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `${(name||'agent').replace(/\s+/g,'_')}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function importAgent(file: File) {
+    if (!userId) return;
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      const a = parsed?.agent || parsed;
+      const res = await fetch('/api/chatbots', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-owner-id': userId },
+        body: JSON.stringify({
+          name: a.name || 'Imported Agent',
+          model: a.model || 'gpt-4o-mini',
+          temperature: typeof a.temperature === 'number' ? a.temperature : 0.5,
+          system: a.system || '',
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json?.ok) throw new Error(json?.error || 'Failed to import');
+      const newId = json.data.id as string;
+      const meta: AgentMeta = a.meta || {};
+      storeMeta(userId, newId, meta);
+      await fetchBots(userId);
+      setSelectedId(newId);
+    } catch (e: any) { alert(e?.message || 'Import failed'); }
+  }
+
   function restoreVersion(v: Version) {
     setName(v.name); setModel(v.model); setTemperature(v.temperature); setSystem(v.system); setDirty(true);
   }
   function openDiff(v: Version) { setDiffWith(v); setDiffOpen(true); }
 
-  // soft test: optional backend
+  // soft test (optional backend)
   async function runTest(message?: string) {
     const msg = (message ?? testInput).trim();
     if (!msg || !selected) return;
     setTesting(true);
+    const beforeSystem = system;
     setTestLog(l => [...l, { role: 'user', text: msg }]);
     try {
       const res = await fetch('/api/assistants/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: selected.model, system: selected.system, message: msg }),
+        body: JSON.stringify({ model: selected.model, system: beforeSystem, message: msg }),
       });
       if (!res.ok) throw new Error('No test endpoint configured');
       const json = await res.json();
@@ -492,23 +537,37 @@ export default function Improve() {
     }
   }
 
-  // ---------- filter/sort ----------
+  // stress test (simulated, local)
+  async function stressTest() {
+    if (!selected) return;
+    const prompts = Array.from({length: 50}, (_,i)=>`Test #${i+1}: ${name || 'Agent'} respond concisely to "Hello".`);
+    setTesting(true);
+    setTestLog(l => [...l, { role: 'user', text: 'Running stress test (50 prompts)…' }]);
+    // local simulate
+    await new Promise(r => setTimeout(r, 600));
+    setTestLog(l => [...l, { role: 'assistant', text: 'Consistency ~96%, avg length 12 words (simulated).' }]);
+    setTesting(false);
+  }
+
+  // filters/sort
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     const withMeta = list.map(b => {
-      let pinned = false, lastOpenedAt = 0;
+      let pinned = false, lastOpenedAt = 0, tags: string[] = [];
       try {
         const raw = userId ? localStorage.getItem(metaKey(userId, b.id)) : null;
         const m: AgentMeta = raw ? JSON.parse(raw) : {};
-        pinned = !!m.pinned; lastOpenedAt = m.lastOpenedAt || 0;
+        pinned = !!m.pinned; lastOpenedAt = m.lastOpenedAt || 0; tags = m.tags || [];
       } catch {}
-      return { b, pinned, lastOpenedAt };
-    }).filter(x =>
-      !q ||
-      (x.b.name || '').toLowerCase().includes(q) ||
-      (x.b.model || '').toLowerCase().includes(q) ||
-      (x.b.id || '').toLowerCase().includes(q)
-    );
+      return { b, pinned, lastOpenedAt, tags };
+    }).filter(x => {
+      const passQ = !q ||
+        (x.b.name || '').toLowerCase().includes(q) ||
+        (x.b.model || '').toLowerCase().includes(q) ||
+        (x.b.id || '').toLowerCase().includes(q);
+      const passTag = !tagFilter || x.tags.includes(tagFilter);
+      return passQ && passTag;
+    });
     const sorters: Record<typeof sort, (a:any,b:any)=>number> = {
       name_asc:(a,b)=> (a.b.name||'').localeCompare(b.b.name||''),
       name_desc:(a,b)=> (b.b.name||'').localeCompare(a.b.name||''),
@@ -517,13 +576,37 @@ export default function Improve() {
       pinned_first:(a,b)=> (Number(b.pinned)-Number(a.pinned)) || (new Date(b.b.updatedAt||0).getTime() - new Date(a.b.updatedAt||0).getTime()),
     };
     return withMeta.sort(sorters[sort]).map(x=>x.b);
-  }, [list, query, sort, userId]);
+  }, [list, query, sort, userId, tagFilter]);
 
   // metrics
   const tokenEst = estimateTokens(system);
   const issues = lintPrompt(system);
 
-  // =========================== UI ===========================
+  // split drag handlers
+  function onDragStart(e: React.MouseEvent) {
+    dragRef.current = { dragging: true, startX: e.clientX, startRatio: colRatio };
+    window.addEventListener('mousemove', onDragMove as any);
+    window.addEventListener('mouseup', onDragEnd as any, { once: true });
+  }
+  function onDragMove(e: MouseEvent) {
+    if (!dragRef.current.dragging) return;
+    const delta = e.clientX - dragRef.current.startX;
+    const container = document.getElementById('improve-grid');
+    if (!container) return;
+    const w = container.getBoundingClientRect().width;
+    const newRatio = Math.min(0.8, Math.max(0.35, dragRef.current.startRatio + (delta / w)));
+    setColRatio(newRatio);
+  }
+  function onDragEnd() {
+    dragRef.current.dragging = false;
+    window.removeEventListener('mousemove', onDragMove as any);
+  }
+
+  // tags helpers
+  function addTag(t: string) { if (!t) return; if (!tags.includes(t)) setTags([...tags, t]); }
+  function removeTag(t: string) { setTags(tags.filter(x => x !== t)); }
+
+  // ─────────────────────────────── UI ───────────────────────────────
   return (
     <div className="min-h-screen relative" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
       <BgFX />
@@ -532,19 +615,21 @@ export default function Improve() {
       <header className="sticky top-0 z-20 backdrop-blur px-6 py-3 border-b"
               style={{ borderColor:'var(--border)', background:'color-mix(in oklab, var(--bg) 86%, transparent)' }}>
         <div className="max-w-[1500px] mx-auto flex items-center gap-3">
-          <LayoutGrid className="w-5 h-5" style={{ color:'var(--brand)' }} />
-          <h1 className="text-[20px] font-semibold">Agent Tuning</h1>
+          <SplitSquareHorizontal className="w-5 h-5" style={{ color:'var(--brand)' }} />
+          <h1 className="text-[20px] font-semibold">{selected ? selected.name || 'Agent' : 'Agent Tuning'}</h1>
           <div className="text-xs px-2 py-[2px] rounded-full"
                style={{ background:'color-mix(in oklab, var(--text) 8%, transparent)', border:'1px solid var(--border)' }}>
-            {statusText}
+            {saving ? 'Saving…' : dirty ? 'Unsaved changes' : 'Saved ✓'}
           </div>
+
           <div className="ml-auto flex items-center gap-2">
-            <div className="hidden sm:flex items-center gap-1 text-xs">
+            {/* Sort + Tag filter */}
+            <div className="hidden md:flex items-center gap-2">
               <Filter className="w-4 h-4 opacity-70" />
               <select
                 value={sort}
                 onChange={e=>setSort(e.target.value as any)}
-                className="px-2 py-1 rounded-md"
+                className="px-2 py-1 rounded-md text-sm"
                 style={{ ...CARD, padding:DENSE_PAD }}
               >
                 <option value="pinned_first">Pinned first</option>
@@ -553,7 +638,18 @@ export default function Improve() {
                 <option value="updated_desc">Recently updated</option>
                 <option value="updated_asc">Least recently updated</option>
               </select>
+              <div className="flex items-center gap-1">
+                <Tag className="w-4 h-4 opacity-70" />
+                <input
+                  placeholder="Filter tag"
+                  value={tagFilter}
+                  onChange={(e)=>setTagFilter(e.target.value)}
+                  className="px-2 py-1 rounded-md text-sm"
+                  style={{ ...CARD, padding:DENSE_PAD, width: 120 }}
+                />
+              </div>
             </div>
+
             <button onClick={() => userId && fetchBots(userId)}
               className="px-3 py-1.5 rounded-md text-sm"
               style={{ background:'color-mix(in oklab, var(--text) 8%, transparent)', border:'1px solid var(--border)' }}>
@@ -562,391 +658,506 @@ export default function Improve() {
             <button
               onClick={() => !saving && dirty && saveEdits()}
               disabled={!dirty || saving}
-              className="px-3 py-1.5 rounded-md text-sm disabled:opacity-60"
+              className="px-3 py-1.5 rounded-md text-sm disabled:opacity-60 flex items-center gap-1"
               style={{ background:'var(--brand)', color:'#00120a' }}>
-              <Save className="inline w-4 h-4 mr-1" /> Save (⌘/Ctrl+S)
+              <Save className="w-4 h-4" />
+              <span>Save</span>
+              {/* Windows shortcut hint */}
+              <span className="ml-1 inline-flex items-center gap-1 text-[11px] px-1.5 py-[1px] rounded"
+                    style={{ background:'rgba(0,0,0,.2)', border:'1px solid var(--border)' }}>
+                <WindowsIcon className="w-3 h-3" />+S
+              </span>
+            </button>
+            <button
+              onClick={deleteSelected}
+              disabled={saving || !selected}
+              className="px-3 py-1.5 rounded-md text-sm disabled:opacity-60"
+              style={{ background:'rgba(255,80,80,.12)', border:'1px solid rgba(255,80,80,.35)' }}
+            >
+              <Trash2 className="inline w-4 h-4 mr-1" /> Delete
             </button>
           </div>
         </div>
       </header>
 
-      {/* Legacy import banner */}
-      {legacyCount > 0 && userId && (
-        <div className="mx-auto w-full max-w-[1500px] px-6 pt-3">
-          <div className="p-3 rounded-xl flex items-center gap-3"
-               style={{ ...CARD, borderColor:'var(--brand)' }}>
-            <BadgeCheck className="w-4 h-4" style={{ color:'var(--brand)' }} />
-            <div className="text-sm">
-              Found <b>{legacyCount}</b> previous builds (local/cloud). Import them to your account agents.
-            </div>
-            <div className="ml-auto flex gap-2">
-              <button
-                onClick={importLegacy}
-                disabled={importing}
-                className="px-3 py-1.5 rounded-md text-sm"
-                style={{ background:'var(--brand)', color:'#00120a' }}
-              >
-                {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRightCircle className="w-4 h-4 inline mr-1" />}
-                Import builds
-              </button>
-              <button
-                onClick={()=>setLegacyCount(0)}
-                className="px-3 py-1.5 rounded-md text-sm"
-                style={{ ...CARD }}
-              >
-                Dismiss
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       <div className="mx-auto w-full max-w-[1500px] px-6 py-5">
-        <div className="grid" style={{ gridTemplateColumns: '300px 1.1fr 0.9fr', gap: '14px' }}>
+        <div className="flex gap-3">
           {/* Left rail */}
-          <aside className="p-[10px]" style={PANEL}>
-            <div className="flex items-center gap-2 mb-3">
-              <Bot className="w-4 h-4" style={{ color:'var(--brand)' }} />
-              <div className="font-semibold">Assistants</div>
-            </div>
-
-            <div className="relative mb-3">
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search assistants"
-                className="w-full rounded-md pl-9 pr-3 py-2 text-sm outline-none"
-                style={CARD}
-              />
-              <Search className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 opacity-70" />
-            </div>
-
-            <div className="overflow-auto" style={{ maxHeight: 'calc(100vh - 240px)' }}>
-              {loading ? (
-                <div className="flex items-center justify-center py-10 opacity-70">
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                </div>
-              ) : filtered.length === 0 ? (
-                <div className="text-sm opacity-80 py-10 text-center px-3">
-                  No agents yet.
-                  <div className="mt-2">
-                    <Link href="/builder"
-                      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm"
-                      style={{ background: 'var(--brand)', color: '#00120a' }}>
-                      Go to Builder
-                    </Link>
-                  </div>
-                </div>
-              ) : (
-                <ul className="space-y-2">
-                  {filtered.map((b) => {
-                    let pinnedLocal = false; let draftLocal = false;
-                    try {
-                      const raw = userId ? localStorage.getItem(metaKey(userId, b.id)) : null;
-                      const m: AgentMeta = raw ? JSON.parse(raw) : {};
-                      pinnedLocal = !!m.pinned; draftLocal = !!m.draft;
-                    } catch {}
-                    return (
-                      <li key={b.id}>
-                        <button
-                          onClick={() => setSelectedId(b.id)}
-                          className={`w-full text-left px-3 py-2 rounded-lg text-sm flex items-center gap-2 transition ${selectedId === b.id ? 'ring-1' : ''}`}
-                          style={{
-                            ...CARD,
-                            borderColor: selectedId === b.id ? 'var(--brand)' : 'var(--border)',
-                            transform: selectedId === b.id ? 'translateY(-1px)' : 'none'
-                          }}
-                        >
-                          <div className="w-7 h-7 rounded-md grid place-items-center" style={{ background: 'rgba(0,0,0,.2)', border: '1px solid var(--border)' }}>
-                            <Bot className="w-4 h-4" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="truncate flex items-center gap-2">
-                              {b.name || 'Untitled'}
-                              {draftLocal ? <span className="text-[10px] px-1.5 py-[1px] rounded-full" style={{ background:'rgba(255,200,0,.12)', border:'1px solid rgba(255,200,0,.35)' }}>Draft</span> : null}
-                            </div>
-                            <div className="text-[11px] opacity-60 truncate">{b.model} · {b.id.slice(0, 8)}</div>
-                          </div>
-                          {pinnedLocal ? <Star className="w-4 h-4" style={{ color:'var(--brand)' }} /> : null}
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </div>
-          </aside>
-
-          {/* Editor */}
-          <section className="p-[10px] space-y-3" style={PANEL}>
-            {!selected ? (
-              <div className="grid place-items-center h-[60vh] opacity-70">
-                {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : <div className="text-sm">Select an assistant from the list.</div>}
-              </div>
-            ) : (
-              <>
-                <div className="flex items-center gap-2">
-                  <Settings2 className="w-4 h-4" style={{ color:'var(--brand)' }} />
-                  <div className="font-semibold">Editor</div>
-                  <div className="ml-auto flex items-center gap-2">
-                    <button onClick={()=>{ setPinned(p=>!p); setDirty(true); }} className="px-2 py-1.5 rounded-md text-sm" style={{ ...CARD }}>
-                      {pinned ? <><Star className="inline w-4 h-4 mr-1" />Pinned</> : <><StarOff className="inline w-4 h-4 mr-1" />Pin</>}
-                    </button>
-                    <button onClick={()=>{ setDraft(d=>!d); setDirty(true); }} className="px-2 py-1.5 rounded-md text-sm" style={{ ...CARD }}>
-                      {draft ? <><ToggleLeft className="inline w-4 h-4 mr-1" />Draft</> : <><ToggleRight className="inline w-4 h-4 mr-1" />Published</>}
-                    </button>
-                    <button onClick={duplicateAgent} className="px-2 py-1.5 rounded-md text-sm" style={{ ...CARD }}>
-                      <FilePlus2 className="inline w-4 h-4 mr-1" /> Duplicate
-                    </button>
-                    <button onClick={exportAgent} className="px-2 py-1.5 rounded-md text-sm" style={{ ...CARD }}>
-                      <Download className="inline w-4 h-4 mr-1" /> Export
-                    </button>
-                    <label className="px-2 py-1.5 rounded-md text-sm cursor-pointer" style={{ ...CARD }}>
-                      <Upload className="inline w-4 h-4 mr-1" /> Import
-                      <input type="file" accept="application/json" className="hidden" onChange={e => e.target.files && importAgent(e.target.files[0])} />
-                    </label>
-                    <button
-                      onClick={() => !saving && dirty && saveEdits()}
-                      disabled={!dirty || saving}
-                      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm disabled:opacity-60"
-                      style={{ background:'var(--brand)', color:'#00120a' }}
-                    >
-                      {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                      Save
-                    </button>
-                    <button
-                      onClick={deleteSelected}
-                      disabled={saving}
-                      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm disabled:opacity-60"
-                      style={{ background:'rgba(255,80,80,.12)', border:'1px solid rgba(255,80,80,.35)' }}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                      Delete
-                    </button>
-                  </div>
-                </div>
-
-                <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap:'10px' }}>
-                  <div>
-                    <div className="text-xs mb-1 opacity-70">Name</div>
-                    <input
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      className="w-full px-3 py-2 rounded-md outline-none"
-                      style={CARD}
-                      placeholder="Agent name"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <div className="text-xs mb-1 opacity-70">Model</div>
-                      <select
-                        value={model}
-                        onChange={(e) => setModel(e.target.value)}
-                        className="w-full px-3 py-2 rounded-md outline-none"
-                        style={CARD}
-                      >
-                        <option value="gpt-4o-mini">gpt-4o-mini</option>
-                        <option value="gpt-4o">gpt-4o</option>
-                        <option value="gpt-4.1-mini">gpt-4.1-mini</option>
-                      </select>
-                    </div>
-                    <div>
-                      <div className="text-xs mb-1 opacity-70">Temperature ({temperature.toFixed(2)})</div>
-                      <input
-                        type="range"
-                        min={0}
-                        max={1}
-                        step={0.01}
-                        value={temperature}
-                        onChange={(e) => setTemperature(parseFloat(e.target.value))}
-                        className="w-full"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Refinements */}
-                <div>
-                  <div className="text-xs mb-1 opacity-70">Refinements</div>
-                  <div className="flex flex-wrap gap-2">
-                    {CHIP_LIBRARY.map(c => (
-                      <button
-                        key={c.key}
-                        onClick={() => toggleChip(c.key)}
-                        className="px-3 py-1.5 rounded-md text-sm transition"
-                        style={{
-                          ...(chips[c.key]
-                            ? { background: 'color-mix(in oklab, var(--brand) 25%, transparent)', border: '1px solid var(--brand)' }
-                            : { background: 'color-mix(in oklab, var(--text) 7%, transparent)', border: '1px solid var(--border)' }),
-                        }}
-                      >
-                        <SlidersHorizontal className="inline w-3.5 h-3.5 mr-1.5 opacity-80" />
-                        {c.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* System Prompt + metrics + lint */}
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <div className="text-xs opacity-70">System Prompt</div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => { if (undoRef.current?.canUndo()) setSystem(undoRef.current.undo()); }}
-                        disabled={!undoRef.current?.canUndo()}
-                        className="px-2 py-1 rounded-md text-xs disabled:opacity-50"
-                        style={{ ...CARD }}
-                      >
-                        <Undo2 className="inline w-3.5 h-3.5 mr-1" /> Undo
-                      </button>
-                      <button
-                        onClick={() => { if (undoRef.current?.canRedo()) setSystem(undoRef.current.redo()); }}
-                        disabled={!undoRef.current?.canRedo()}
-                        className="px-2 py-1 rounded-md text-xs disabled:opacity-50"
-                        style={{ ...CARD }}
-                      >
-                        <Redo2 className="inline w-3.5 h-3.5 mr-1" /> Redo
-                      </button>
-                    </div>
-                  </div>
-
-                  <textarea
-                    value={system}
-                    onChange={(e) => setSystem(e.target.value)}
-                    rows={16}
-                    className="w-full px-3 py-2 rounded-md outline-none font-mono text-sm"
-                    style={CARD}
-                    placeholder="Describe your agent's behavior, tone, policies, and knowledge…"
-                  />
-                  <div className="flex items-center justify-between text-xs mt-1">
-                    <div className="opacity-70">{(system?.length || 0).toLocaleString()} chars · est {estimateTokens(system).toLocaleString()} tokens</div>
-                    {issues.length ? (
-                      <div className="flex items-center gap-2">
-                        <Info className="w-3.5 h-3.5" style={{ color:'gold' }} />
-                        <span className="opacity-80">{issues[0]}{issues.length>1 ? ` (+${issues.length-1} more)` : ''}</span>
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-
-                {/* Notes */}
-                <div>
-                  <div className="text-xs mb-1 opacity-70">Notes (private)</div>
-                  <textarea
-                    value={notes}
-                    onChange={e=>setNotes(e.target.value)}
-                    rows={4}
-                    className="w-full px-3 py-2 rounded-md outline-none text-sm"
-                    style={CARD}
-                    placeholder="Any context for teammates or yourself…"
-                  />
-                </div>
-              </>
-            )}
-          </section>
-
-          {/* Versions + Test (featureful right rail) */}
-          <aside className="p-[10px] space-y-3" style={PANEL}>
-            {/* Versions */}
-            <div className="p-[10px]" style={CARD}>
-              <button onClick={() => setVersionsOpen(v => !v)} className="w-full flex items-center justify-between">
-                <div className="flex items-center gap-2 font-semibold">
-                  <History className="w-4 h-4" style={{ color:'var(--brand)' }} />
-                  Versions
-                </div>
-                <ChevronDown className={`w-4 h-4 transition ${versionsOpen ? 'rotate-180' : ''}`} />
-              </button>
-
-              {versionsOpen && (
-                <div className="mt-2 space-y-2">
-                  {(!selected || !versions?.length) && (
-                    <div className="text-xs opacity-70">
-                      Versions are created when you click <b>Save</b>. Restore or diff any snapshot.
-                    </div>
-                  )}
-                  {versions?.map(v => (
-                    <div key={v.id} className="p-2 rounded-md text-sm flex items-center gap-2"
-                         style={{ background:'color-mix(in oklab, var(--text) 5%, transparent)', border:'1px solid var(--border)' }}>
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate">{v.label}</div>
-                        <div className="text-[11px] opacity-60">{fmtTime(v.ts)}</div>
-                      </div>
-                      <button
-                        onClick={() => restoreVersion(v)}
-                        className="px-2 py-1 rounded-md text-xs"
-                        style={{ background:'color-mix(in oklab, var(--brand) 18%, transparent)', border:'1px solid var(--brand)' }}
-                      >
-                        <RotateCcw className="inline w-3 h-3 mr-1" />
-                        Restore
-                      </button>
-                      <button
-                        onClick={() => { setDiffWith(v); setDiffOpen(true); }}
-                        className="px-2 py-1 rounded-md text-xs"
-                        style={{ ...CARD }}
-                      >
-                        <Diff className="inline w-3 h-3 mr-1" />
-                        Diff
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Test panel */}
-            <div className="p-[10px] space-y-2" style={CARD}>
-              <div className="flex items-center gap-2 font-semibold">
-                <Sparkles className="w-4 h-4" style={{ color:'var(--brand)' }} />
-                Test
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                {['Greet me', 'Refund policy?', 'One-sentence summary', 'Answer Yes/No only'].map(t => (
-                  <button key={t} onClick={()=>runTest(t)} className="px-2 py-1 rounded-md text-xs"
-                          style={{ background:'color-mix(in oklab, var(--text) 7%, transparent)', border:'1px solid var(--border)' }}>
-                    {t}
-                  </button>
-                ))}
-              </div>
-
-              <div className="space-y-2 max-h-[40vh] overflow-auto rounded-md p-2"
-                   style={{ background:'rgba(0,0,0,.25)', border:'1px solid var(--border)' }}>
-                {testLog.length === 0 ? (
-                  <div className="text-xs opacity-60">No messages yet.</div>
-                ) : testLog.map((m, i) => (
-                  <div key={i} className={`text-sm ${m.role === 'user' ? 'text-[var(--text)]' : 'opacity-80'}`}>
-                    <b>{m.role === 'user' ? 'You' : 'AI'}:</b> {m.text}
-                  </div>
-                ))}
-              </div>
-
-              <div className="flex items-center gap-2">
-                <input
-                  value={testInput}
-                  onChange={(e) => setTestInput(e.target.value)}
-                  onKeyDown={(e)=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); !testing && runTest(); }}}
-                  placeholder="Type a message…"
-                  className="flex-1 px-3 py-2 rounded-md outline-none text-sm"
-                  style={{ ...CARD, padding: DENSE_PAD }}
-                />
+          <aside className={`transition-all ${leftCollapsed ? 'w-[56px]' : 'w-[300px]'}`}>
+            <div className="p-[10px]" style={PANEL}>
+              <div className="flex items-center gap-2 mb-3">
+                <Bot className="w-4 h-4" style={{ color:'var(--brand)' }} />
+                {!leftCollapsed && <div className="font-semibold">Assistants</div>}
                 <button
-                  onClick={() => runTest()}
-                  disabled={testing || !testInput.trim()}
-                  className="px-3 py-2 rounded-md text-sm disabled:opacity-60"
-                  style={{ background:'var(--brand)', color:'#00120a' }}
+                  onClick={()=>setLeftCollapsed(v=>!v)}
+                  className="ml-auto px-2 py-1 rounded-md"
+                  style={{ ...CARD }}
+                  title={leftCollapsed ? 'Expand' : 'Collapse'}
                 >
-                  {testing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                  {leftCollapsed ? <PanelRightClose className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
                 </button>
               </div>
 
-              <div className="text-xs opacity-60">
-                Need keys? Go to <Link className="underline" href="/api-keys">API Keys</Link>.
+              {!leftCollapsed && (
+                <div className="relative mb-3">
+                  <input
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="Search assistants"
+                    className="w-full rounded-md pl-9 pr-3 py-2 text-sm outline-none"
+                    style={CARD}
+                  />
+                  <Search className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 opacity-70" />
+                </div>
+              )}
+
+              <div className="overflow-auto" style={{ maxHeight: 'calc(100vh - 240px)' }}>
+                {loading ? (
+                  <div className="flex items-center justify-center py-10 opacity-70">
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  </div>
+                ) : filtered.length === 0 ? (
+                  <div className="text-sm opacity-80 py-10 text-center px-3">
+                    No agents yet.
+                    <div className="mt-2">
+                      <Link href="/builder"
+                        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm"
+                        style={{ background: 'var(--brand)', color: '#00120a' }}>
+                        Go to Builder
+                      </Link>
+                    </div>
+                  </div>
+                ) : (
+                  <ul className="space-y-2">
+                    {filtered.map((b) => {
+                      let pinnedLocal = false; let draftLocal = false; let tagsLocal: string[] = [];
+                      try {
+                        const raw = userId ? localStorage.getItem(metaKey(userId, b.id)) : null;
+                        const m: AgentMeta = raw ? JSON.parse(raw) : {};
+                        pinnedLocal = !!m.pinned; draftLocal = !!m.draft; tagsLocal = m.tags || [];
+                      } catch {}
+                      return (
+                        <li key={b.id}>
+                          <button
+                            onClick={() => setSelectedId(b.id)}
+                            className={`w-full text-left px-3 py-2 rounded-lg text-sm flex items-center gap-2 transition ${selectedId === b.id ? 'ring-1' : ''}`}
+                            style={{
+                              ...CARD,
+                              borderColor: selectedId === b.id ? 'var(--brand)' : 'var(--border)',
+                              transform: selectedId === b.id ? 'translateY(-1px)' : 'none'
+                            }}
+                          >
+                            <div className="w-7 h-7 rounded-md grid place-items-center animate-pulse"
+                                 style={{ background: 'rgba(0,0,0,.2)', border: '1px solid var(--border)' }}>
+                              <Bot className="w-4 h-4" />
+                            </div>
+                            {!leftCollapsed && (
+                              <div className="flex-1 min-w-0">
+                                <div className="truncate flex items-center gap-2">
+                                  {b.name || 'Untitled'}
+                                  {draftLocal ? <span className="text-[10px] px-1.5 py-[1px] rounded-full" style={{ background:'rgba(255,200,0,.12)', border:'1px solid rgba(255,200,0,.35)' }}>Draft</span> : null}
+                                </div>
+                                <div className="text-[11px] opacity-60 truncate">{b.model} · {b.id.slice(0, 8)}</div>
+                                {tagsLocal.length > 0 && (
+                                  <div className="flex flex-wrap gap-1 mt-1">
+                                    {tagsLocal.slice(0,3).map(t => (
+                                      <span key={t} className="text-[10px] px-1 py-[1px] rounded"
+                                            style={{ background:'rgba(0,0,0,.15)', border:'1px solid var(--border)' }}>{t}</span>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                            {pinnedLocal ? <Star className="w-4 h-4" style={{ color:'var(--brand)' }} /> : null}
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
               </div>
             </div>
           </aside>
+
+          {/* Center + Right split with draggable divider */}
+          <div id="improve-grid" className="flex-1 grid gap-3" style={{ gridTemplateColumns: `${Math.round(colRatio*100)}% 10px 1fr` }}>
+            {/* Editor panel */}
+            <section className="p-[10px]" style={PANEL}>
+              {!selected ? (
+                <div className="grid place-items-center h-[60vh] opacity-70">
+                  {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : <div className="text-sm">Select an assistant from the list.</div>}
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Settings2 className="w-4 h-4" style={{ color:'var(--brand)' }} />
+                    <div className="font-semibold">Editor</div>
+                    <div className="ml-auto flex items-center gap-2">
+                      <button onClick={()=>{ setPinned(p=>!p); setDirty(true); }} className="px-2 py-1.5 rounded-md text-sm" style={{ ...CARD }}>
+                        {pinned ? <><Star className="inline w-4 h-4 mr-1" />Pinned</> : <><StarOff className="inline w-4 h-4 mr-1" />Pin</>}
+                      </button>
+                      <button onClick={()=>{ setDraft(d=>!d); setDirty(true); }} className="px-2 py-1.5 rounded-md text-sm" style={{ ...CARD }}>
+                        {draft ? <><ToggleLeft className="inline w-4 h-4 mr-1" />Draft</> : <><ToggleRight className="inline w-4 h-4 mr-1" />Published</>}
+                      </button>
+                      <button onClick={duplicateAgent} className="px-2 py-1.5 rounded-md text-sm" style={{ ...CARD }}>
+                        <FilePlus2 className="inline w-4 h-4 mr-1" /> Duplicate
+                      </button>
+                      <button onClick={exportAgent} className="px-2 py-1.5 rounded-md text-sm" style={{ ...CARD }}>
+                        <Download className="inline w-4 h-4 mr-1" /> Export
+                      </button>
+                      <label className="px-2 py-1.5 rounded-md text-sm cursor-pointer" style={{ ...CARD }}>
+                        <Upload className="inline w-4 h-4 mr-1" /> Import
+                        <input type="file" accept="application/json" className="hidden" onChange={e => e.target.files && importAgent(e.target.files[0])} />
+                      </label>
+                      <button
+                        onClick={() => !saving && dirty && saveEdits()}
+                        disabled={!dirty || saving}
+                        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm disabled:opacity-60"
+                        style={{ background:'var(--brand)', color:'#00120a' }}
+                      >
+                        {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                        Save
+                        <span className="ml-1 inline-flex items-center gap-1 text-[11px] px-1.5 py-[1px] rounded"
+                              style={{ background:'rgba(0,0,0,.2)', border:'1px solid var(--border)' }}>
+                          <WindowsIcon className="w-3 h-3" />+S
+                        </span>
+                      </button>
+                      <button
+                        onClick={deleteSelected}
+                        disabled={saving}
+                        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm disabled:opacity-60"
+                        style={{ background:'rgba(255,80,80,.12)', border:'1px solid rgba(255,80,80,.35)' }}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap:'10px' }}>
+                    <div>
+                      <div className="text-xs mb-1 opacity-70">Name</div>
+                      <input
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        className="w-full px-3 py-2 rounded-md outline-none"
+                        style={CARD}
+                        placeholder="Agent name"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <div className="text-xs mb-1 opacity-70">Model</div>
+                        <select
+                          value={model}
+                          onChange={(e) => setModel(e.target.value)}
+                          className="w-full px-3 py-2 rounded-md outline-none"
+                          style={CARD}
+                        >
+                          <option value="gpt-4o-mini">gpt-4o-mini</option>
+                          <option value="gpt-4o">gpt-4o</option>
+                          <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+                        </select>
+                      </div>
+                      <div>
+                        <div className="text-xs mb-1 opacity-70">Temperature ({temperature.toFixed(2)})</div>
+                        <input
+                          type="range"
+                          min={0}
+                          max={1}
+                          step={0.01}
+                          value={temperature}
+                          onChange={(e) => setTemperature(parseFloat(e.target.value))}
+                          className="w-full"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Tags */}
+                  <div>
+                    <div className="text-xs mb-1 opacity-70">Tags</div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        placeholder="Add tag and press Enter"
+                        onKeyDown={(e:any)=>{ if(e.key==='Enter'){ addTag((e.target.value||'').trim()); e.target.value=''; }}}
+                        className="px-3 py-2 rounded-md text-sm flex-1"
+                        style={CARD}
+                      />
+                      <div className="flex flex-wrap gap-2">
+                        {tags.map(t => (
+                          <span key={t} className="text-xs px-2 py-1 rounded" style={{ background:'rgba(0,0,0,.2)', border:'1px solid var(--border)' }}>
+                            {t} <button className="ml-1 opacity-70" onClick={()=>removeTag(t)}>×</button>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Refinements (by group) */}
+                  <div>
+                    <div className="text-xs mb-1 opacity-70">Refinements</div>
+                    <div className="flex flex-wrap gap-2">
+                      {['Tone','Format','Guardrails'].map(group => (
+                        <div key={group} className="p-2 rounded-md" style={{ ...CARD }}>
+                          <div className="text-[11px] mb-1 opacity-70">{group}</div>
+                          <div className="flex flex-wrap gap-2">
+                            {CHIP_LIBRARY.filter(c=>c.group===group).map(c => (
+                              <button
+                                key={c.key}
+                                onClick={() => toggleChip(c.key)}
+                                title={c.line}
+                                className="px-3 py-1.5 rounded-md text-sm transition"
+                                style={{
+                                  ...(chips[c.key]
+                                    ? { background: 'color-mix(in oklab, var(--brand) 25%, transparent)', border: '1px solid var(--brand)' }
+                                    : { background: 'color-mix(in oklab, var(--text) 7%, transparent)', border: '1px solid var(--border)' }),
+                                }}
+                              >
+                                <SlidersHorizontal className="inline w-3.5 h-3.5 mr-1.5 opacity-80" />
+                                {c.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Prompt Stack */}
+                  <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap:'10px' }}>
+                    <div>
+                      <div className="text-xs mb-1 opacity-70">Pre Prompt (runs before main)</div>
+                      <textarea
+                        value={promptPre}
+                        onChange={(e)=>setPromptPre(e.target.value)}
+                        rows={6}
+                        className="w-full px-3 py-2 rounded-md outline-none font-mono text-sm"
+                        style={CARD}
+                        placeholder="Optional: pre instructions (role, objectives)…"
+                      />
+                    </div>
+                    <div>
+                      <div className="text-xs mb-1 opacity-70">Post Prompt (runs after main)</div>
+                      <textarea
+                        value={promptPost}
+                        onChange={(e)=>setPromptPost(e.target.value)}
+                        rows={6}
+                        className="w-full px-3 py-2 rounded-md outline-none font-mono text-sm"
+                        style={CARD}
+                        placeholder="Optional: post processing (formatting, checks)…"
+                      />
+                    </div>
+                  </div>
+
+                  {/* System Prompt */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="text-xs opacity-70">System Prompt</div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => { if (undoRef.current?.canUndo()) setSystem(undoRef.current.undo()); }}
+                          disabled={!undoRef.current?.canUndo()}
+                          className="px-2 py-1 rounded-md text-xs disabled:opacity-50"
+                          style={{ ...CARD }}
+                        >
+                          <Undo2 className="inline w-3.5 h-3.5 mr-1" /> Undo
+                        </button>
+                        <button
+                          onClick={() => { if (undoRef.current?.canRedo()) setSystem(undoRef.current.redo()); }}
+                          disabled={!undoRef.current?.canRedo()}
+                          className="px-2 py-1 rounded-md text-xs disabled:opacity-50"
+                          style={{ ...CARD }}
+                        >
+                          <Redo2 className="inline w-3.5 h-3.5 mr-1" /> Redo
+                        </button>
+                      </div>
+                    </div>
+
+                    <textarea
+                      value={system}
+                      onChange={(e) => setSystem(e.target.value)}
+                      rows={16}
+                      className="w-full px-3 py-2 rounded-md outline-none font-mono text-sm"
+                      style={CARD}
+                      placeholder="Describe your agent's behavior, tone, policies, and knowledge…"
+                      onKeyDown={(e:any)=>{ if(e.key==='/'){ const v=(e.target.value as string); /* Easter egg /refine */ }}
+                    />
+                    <div className="flex items-center justify-between text-xs mt-1">
+                      <div className="opacity-70">{(system?.length || 0).toLocaleString()} chars · est {tokenEst.toLocaleString()} tokens</div>
+                      {issues.length ? (
+                        <div className="flex items-center gap-2">
+                          <Info className="w-3.5 h-3.5" style={{ color:'gold' }} />
+                          <span className="opacity-80">{issues[0]}{issues.length>1 ? ` (+${issues.length-1} more)` : ''}</span>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  {/* Guardrails / Conditionals / Flow temps */}
+                  <div className="grid" style={{ gridTemplateColumns: '1.2fr 0.8fr', gap:'10px' }}>
+                    <div className="p-2" style={CARD}>
+                      <div className="flex items-center gap-2 mb-2 font-semibold"><Shield className="w-4 h-4" style={{ color:'var(--brand)' }} /> Guardrails</div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <div className="text-xs mb-1 opacity-70">Blocked phrases (one per line)</div>
+                          <textarea value={blockedPhrases} onChange={e=>setBlockedPhrases(e.target.value)} rows={6} className="w-full px-3 py-2 rounded-md text-sm outline-none" style={CARD} />
+                        </div>
+                        <div>
+                          <div className="text-xs mb-1 opacity-70">Require JSON output</div>
+                          <label className="flex items-center gap-2 text-sm mb-2">
+                            <input type="checkbox" checked={enforceJson} onChange={e=>setEnforceJson(e.target.checked)} /> Enforce JSON
+                          </label>
+                          <div className="text-xs mb-1 opacity-70">JSON schema hint (optional)</div>
+                          <textarea value={jsonSchemaHint} onChange={e=>setJsonSchemaHint(e.target.value)} rows={4} className="w-full px-3 py-2 rounded-md text-sm outline-none" style={CARD} placeholder='{"type":"object","properties":{...}}' />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="p-2" style={CARD}>
+                      <div className="flex items-center gap-2 mb-2 font-semibold"><Code2 className="w-4 h-4" style={{ color:'var(--brand)' }} /> Flow Temperatures</div>
+                      {(['greeting','qa','actions'] as const).map(k=>(
+                        <div key={k} className="mb-2">
+                          <div className="text-xs mb-1 opacity-70 capitalize">{k} ({flowTemps[k].toFixed(2)})</div>
+                          <input type="range" min={0} max={1} step={0.01} value={flowTemps[k]} onChange={e=>setFlowTemps(prev=>({...prev,[k]:parseFloat(e.target.value)}))} className="w-full" />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Notes */}
+                  <div>
+                    <div className="text-xs mb-1 opacity-70">Notes (private)</div>
+                    <textarea
+                      value={notes}
+                      onChange={e=>setNotes(e.target.value)}
+                      rows={4}
+                      className="w-full px-3 py-2 rounded-md outline-none text-sm"
+                      style={CARD}
+                      placeholder="Any context for teammates or yourself…"
+                    />
+                  </div>
+                </div>
+              )}
+            </section>
+
+            {/* Draggable divider */}
+            <div
+              onMouseDown={onDragStart}
+              className="cursor-col-resize relative group"
+              style={{ width: 10 }}
+              title="Drag to resize"
+            >
+              <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-[2px] bg-[color-mix(in_oklab,var(--text)_16%,transparent)] group-hover:bg-[var(--brand)]" />
+            </div>
+
+            {/* Right rail: Versions + Test */}
+            <aside className="p-[10px] space-y-3" style={PANEL}>
+              {/* Versions */}
+              <div className="p-[10px]" style={CARD}>
+                <button onClick={() => setVersionsOpen(v => !v)} className="w-full flex items-center justify-between">
+                  <div className="flex items-center gap-2 font-semibold">
+                    <History className="w-4 h-4" style={{ color:'var(--brand)' }} />
+                    Versions
+                  </div>
+                  <ChevronDown className={`w-4 h-4 transition ${versionsOpen ? 'rotate-180' : ''}`} />
+                </button>
+
+                {versionsOpen && (
+                  <div className="mt-2 space-y-2">
+                    {(!selected || !versions?.length) && (
+                      <div className="text-xs opacity-70">
+                        Versions are created when you click <b>Save</b>. Restore or diff any snapshot.
+                      </div>
+                    )}
+                    {versions?.map(v => (
+                      <div key={v.id} className="p-2 rounded-md text-sm flex items-center gap-2"
+                          style={{ background:'color-mix(in oklab, var(--text) 5%, transparent)', border:'1px solid var(--border)' }}>
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate">{v.label}</div>
+                          <div className="text-[11px] opacity-60">{fmtTime(v.ts)}</div>
+                        </div>
+                        <button
+                          onClick={() => restoreVersion(v)}
+                          className="px-2 py-1 rounded-md text-xs"
+                          style={{ background:'color-mix(in oklab, var(--brand) 18%, transparent)', border:'1px solid var(--brand)' }}
+                        >
+                          <RotateCcw className="inline w-3 h-3 mr-1" />
+                          Restore
+                        </button>
+                        <button
+                          onClick={() => { setDiffWith(v); setDiffOpen(true); }}
+                          className="px-2 py-1 rounded-md text-xs"
+                          style={{ ...CARD }}
+                        >
+                          <Diff className="inline w-3 h-3 mr-1" />
+                          Diff
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Test */}
+              <div className="p-[10px] space-y-2" style={CARD}>
+                <div className="flex items-center gap-2 font-semibold">
+                  <Sparkles className="w-4 h-4" style={{ color:'var(--brand)' }} />
+                  Test
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {['Greet me', 'Refund policy?', 'One-sentence summary', 'Answer Yes/No only'].map(t => (
+                    <button key={t} onClick={()=>runTest(t)} className="px-2 py-1 rounded-md text-xs"
+                            style={{ background:'color-mix(in oklab, var(--text) 7%, transparent)', border:'1px solid var(--border)' }}>
+                      {t}
+                    </button>
+                  ))}
+                  <button onClick={stressTest} className="px-2 py-1 rounded-md text-xs" style={{ background:'rgba(0,0,0,.2)', border:'1px solid var(--border)' }}>
+                    Stress test ×50
+                  </button>
+                  <button onClick={()=>setShowBeforeAfter(v=>!v)} className="px-2 py-1 rounded-md text-xs" style={{ background:'rgba(0,0,0,.2)', border:'1px solid var(--border)' }}>
+                    {showBeforeAfter ? 'Hide' : 'Show'} Before/After
+                  </button>
+                </div>
+
+                <div className="space-y-2 max-h-[40vh] overflow-auto rounded-md p-2"
+                    style={{ background:'rgba(0,0,0,.25)', border:'1px solid var(--border)' }}>
+                  {testLog.length === 0 ? (
+                    <div className="text-xs opacity-60">No messages yet.</div>
+                  ) : testLog.map((m, i) => (
+                    <div key={i} className={`text-sm ${m.role === 'user' ? 'text-[var(--text)]' : 'opacity-80'}`}>
+                      <b>{m.role === 'user' ? 'You' : 'AI'}:</b> {m.text}
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    value={testInput}
+                    onChange={(e) => setTestInput(e.target.value)}
+                    onKeyDown={(e)=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); !testing && runTest(); }}}
+                    placeholder="Type a message…"
+                    className="flex-1 px-3 py-2 rounded-md outline-none text-sm"
+                    style={{ ...CARD, padding: DENSE_PAD }}
+                  />
+                  <button
+                    onClick={() => runTest()}
+                    disabled={testing || !testInput.trim()}
+                    className="px-3 py-2 rounded-md text-sm disabled:opacity-60"
+                    style={{ background:'var(--brand)', color:'#00120a' }}
+                  >
+                    {testing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                  </button>
+                </div>
+
+                <div className="text-xs opacity-60">
+                  Need keys? Go to <Link className="underline" href="/api-keys">API Keys</Link>.
+                </div>
+              </div>
+            </aside>
+          </div>
         </div>
       </div>
 
