@@ -8,15 +8,14 @@ import {
 } from 'lucide-react';
 
 const SCOPE = 'va-scope';
+const RAIL_OPEN_W = 320;   // Vapi-like width
+const RAIL_BORDER = '1px solid var(--va-border)';
 
-/* === Keep the exact app-sidebar width sync logic === */
 function useAppSidebarWidth(scopeRef: React.RefObject<HTMLDivElement>, fallbackCollapsed: boolean) {
   useEffect(() => {
     const scope = scopeRef.current;
     if (!scope) return;
-
     const setVar = (w: number) => scope.style.setProperty('--app-sidebar-w', `${Math.round(w)}px`);
-
     const findSidebar = () =>
       (document.querySelector('[data-app-sidebar]') as HTMLElement) ||
       (document.querySelector('#app-sidebar') as HTMLElement) ||
@@ -26,7 +25,6 @@ function useAppSidebarWidth(scopeRef: React.RefObject<HTMLDivElement>, fallbackC
 
     let target = findSidebar();
     if (!target) { setVar(fallbackCollapsed ? 72 : 248); return; }
-
     setVar(target.getBoundingClientRect().width);
 
     const ro = new ResizeObserver(() => setVar(target!.getBoundingClientRect().width));
@@ -44,6 +42,21 @@ function useAppSidebarWidth(scopeRef: React.RefObject<HTMLDivElement>, fallbackC
       target.removeEventListener('transitionend', onTransitionEnd);
     };
   }, [scopeRef, fallbackCollapsed]);
+}
+
+/** Sync the CSS var --va-rail-w to the real <aside> width */
+function useRailWidthSync(asideRef: React.RefObject<HTMLElement>) {
+  useEffect(() => {
+    const el = asideRef.current;
+    if (!el) return;
+    const root = document.documentElement;
+    const apply = () => root.style.setProperty('--va-rail-w', `${Math.round(el.getBoundingClientRect().width)}px`);
+    apply();
+    const ro = new ResizeObserver(apply);
+    ro.observe(el);
+    window.addEventListener('resize', apply);
+    return () => { ro.disconnect(); window.removeEventListener('resize', apply); };
+  }, [asideRef]);
 }
 
 /* === Types (lite) === */
@@ -90,10 +103,13 @@ export default function AssistantRail({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [tempName, setTempName] = useState('');
 
-  // ping layout on any collapse/expand so main can recompute widths
+  // ping layout so main recomputes when we collapse/expand
   useEffect(() => {
     window.dispatchEvent(new CustomEvent('voice:layout:ping'));
   }, [railCollapsed]);
+
+  const asideRef = useRef<HTMLElement | null>(null);
+  useRailWidthSync(asideRef); // <— keeps --va-rail-w accurate
 
   const visible = useMemo(
     () => assistants.filter(a => a.name.toLowerCase().includes(query.trim().toLowerCase())),
@@ -106,6 +122,7 @@ export default function AssistantRail({
   return (
     <div ref={scopeRef} className={SCOPE}>
       <aside
+        ref={asideRef as any}
         data-va-rail
         data-va-collapsed={railCollapsed ? 'true' : 'false'}
         className="hidden lg:flex flex-col"
@@ -113,16 +130,18 @@ export default function AssistantRail({
           position:'fixed',
           left:'calc(var(--app-sidebar-w, 248px) - 1px)',
           top:'var(--app-header-h, 64px)',
-          width: railCollapsed ? 0 : 'var(--va-rail-w, 360px)',
+          width: railCollapsed ? 0 : `${RAIL_OPEN_W}px`,
           height:'calc(100vh - var(--app-header-h, 64px))',
-          borderRight: railCollapsed ? 'none' : '1px solid var(--va-border)',
+          borderRight: railCollapsed ? 'none' : RAIL_BORDER,
           background:'var(--va-sidebar)',
           boxShadow: railCollapsed ? 'none' : 'var(--va-shadow-side)',
           zIndex: 10,
           overflow:'hidden'
         }}
       >
-        <div className="px-3 py-3 flex items-center justify-between" style={{ borderBottom:'1px solid var(--va-border)' }}>
+        {/* sticky top like Vapi */}
+        <div className="px-3 py-3 flex items-center justify-between sticky top-0 z-10"
+             style={{ borderBottom: RAIL_BORDER, background:'var(--va-sidebar)' }}>
           <div className="flex items-center gap-2 text-sm font-semibold">
             <PanelLeft className="w-4 h-4 icon" />
             {!railCollapsed && <span>Assistants</span>}
@@ -147,7 +166,7 @@ export default function AssistantRail({
         <div className="p-3 min-h-0 flex-1 overflow-y-auto" style={{ scrollbarWidth:'thin' }}>
           {!railCollapsed && (
             <>
-              <div
+              <label
                 className="flex items-center gap-2 rounded-lg px-2.5 py-2 mb-2"
                 style={{ background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-input-shadow)' }}
               >
@@ -159,7 +178,7 @@ export default function AssistantRail({
                   className="w-full bg-transparent outline-none text-sm"
                   style={{ color:'var(--text)' }}
                 />
-              </div>
+              </label>
 
               <div className="text-xs font-semibold flex items-center gap-2 mt-3 mb-1" style={{ color:'var(--text-muted)' }}>
                 <Folder className="w-3.5 h-3.5 icon" /> Folders
@@ -174,6 +193,7 @@ export default function AssistantRail({
             {visible.map(a => {
               const isActive = a.id === activeId;
               const isEdit = editingId === a.id;
+
               if (railCollapsed) {
                 return (
                   <button
@@ -191,6 +211,7 @@ export default function AssistantRail({
                   </button>
                 );
               }
+
               return (
                 <div
                   key={a.id}
