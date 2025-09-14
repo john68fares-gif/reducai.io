@@ -1,11 +1,13 @@
 // components/voice/VoiceAgentSection.tsx
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Copy, Sparkles, ChevronDown, ChevronRight, FileText, Mic2, BookOpen, SlidersHorizontal,
-  UploadCloud, RefreshCw, X, Phone as PhoneIcon, Rocket, PhoneOff, MessageSquare, ListTree, AudioLines, Volume2, Save, Trash2
+  Search, Plus, Folder, FolderOpen, Check, Trash2, Copy, Edit3, Sparkles,
+  ChevronDown, ChevronRight, FileText, Mic2, BookOpen, SlidersHorizontal,
+  Bot, UploadCloud, RefreshCw, X, Phone as PhoneIcon, Rocket,
+  MessageSquare, ListTree, AudioLines, Volume2, Save
 } from 'lucide-react';
 
 import AssistantRail, { type AssistantLite } from '@/components/voice/AssistantRail';
@@ -70,11 +72,13 @@ const ak = (id: string) => `voice:assistant:${id}`;
 const LS_CALLS = 'voice:calls.v1';
 const LS_ROUTES = 'voice:phoneRoutes.v1';
 
+// ---------- small localStorage helpers ----------
 const readLS = <T,>(k: string): T | null => {
   try { const r = localStorage.getItem(k); return r ? (JSON.parse(r) as T) : null; } catch { return null; }
 };
 const writeLS = <T,>(k: string, v: T) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 
+// ---------- default prompt ----------
 const BASE_PROMPT = `[Identity]
 You are an intelligent and responsive assistant designed to help users with a wide range of inquiries and tasks.
 
@@ -117,10 +121,8 @@ function mergeInput(freeText: string, current: string) {
   const out = { prompt: current || BASE_PROMPT, firstMessage: undefined as string | undefined };
   const raw = (freeText || '').trim();
   if (!raw) return out;
-
   const m = raw.match(/^(?:first\s*message|greeting)\s*[:\-]\s*(.+)$/i);
   if (m) { out.firstMessage = m[1].trim(); return out; }
-
   const blocks = [...raw.matchAll(/\[(Identity|Style|System Behaviors|Task & Goals|Data to Collect|Safety|Handover|Refinements)\]\s*([\s\S]*?)(?=\n\[|$)/gi)];
   if (blocks.length) {
     let next = out.prompt;
@@ -128,7 +130,6 @@ function mergeInput(freeText: string, current: string) {
     out.prompt = next;
     return out;
   }
-
   const hasRef = sectionRegex('Refinements').test(out.prompt);
   const bullet = `- ${raw.replace(/\s+/g, ' ').trim()}`;
   out.prompt = hasRef
@@ -164,6 +165,58 @@ function Section({ title, icon, children }: { title: string; icon: React.ReactNo
           </motion.div>
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+/* -------------------- API KEY DROPDOWN -------------------- */
+function ApiKeySelect({ value, onChange }: { value: string; onChange: (id: string) => void }) {
+  const [keys, setKeys] = useState<{ id: string; name: string; key: string }[]>([]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const ss = await scopedStorage();
+        await ss.ensureOwnerGuard();
+        const v1 = await ss.getJSON<any[]>('apiKeys.v1', []);
+        const legacy = await ss.getJSON<any[]>('apiKeys', []);
+        const merged = Array.isArray(v1) && v1.length ? v1 : Array.isArray(legacy) ? legacy : [];
+        const cleaned = merged
+          .filter(Boolean)
+          .map((k: any) => ({ id: String(k?.id || ''), name: String(k?.name || ''), key: String(k?.key || '') }))
+          .filter((k) => k.id && k.name);
+        setKeys(cleaned);
+      } catch {}
+    })();
+  }, []);
+  return (
+    <div>
+      <div className="mb-1.5 text-[13px] font-medium" style={{ color: 'var(--text)' }}>OpenAI API Key</div>
+      <div className="relative">
+        <select
+          value={value}
+          onChange={async (e) => {
+            const id = e.target.value;
+            onChange(id);
+            try {
+              const ss = await scopedStorage();
+              await ss.ensureOwnerGuard();
+              await ss.setJSON('apiKeys.selectedId', id);
+            } catch {}
+          }}
+          className="va-select"
+        >
+          <option value="">— Select a key —</option>
+          {keys.map(k => (
+            <option key={k.id} value={k.id}>
+              {k.name} ••••{(k.key || '').slice(-4).toUpperCase()}
+            </option>
+          ))}
+        </select>
+        <div className="va-select-caret" />
+      </div>
+      <div className="mt-1 text-xs" style={{ color: 'var(--text-muted)' }}>
+        Keys are stored per-account via scoped storage. Manage them in the API Keys page.
+      </div>
     </div>
   );
 }
@@ -224,7 +277,7 @@ function TelephonyEditor({ numbers, linkedId, onLink, onAdd, onRemove }: {
   );
 }
 
-/* -------------------- Scoped CSS (incl. inputs/selects polish) -------------------- */
+/* -------------------- Scoped CSS (theme + fixes) -------------------- */
 function StyleBlock() {
   return (
     <style jsx global>{`
@@ -238,9 +291,9 @@ function StyleBlock() {
   --va-sidebar:linear-gradient(180deg,#0d1113 0%,#0b0e10 100%);
   --va-chip:rgba(255,255,255,.03);
   --va-border:rgba(255,255,255,.10);
-  --va-input-bg:#101314;
+  --va-input-bg:rgba(255,255,255,.03);
   --va-input-border:rgba(255,255,255,.14);
-  --va-input-shadow:inset 0 1px 0 rgba(255,255,255,.04), 0 12px 30px rgba(0,0,0,.38);
+  --va-input-shadow:inset 0 1px 0 rgba(255,255,255,.06);
   --va-menu-bg:#101314;
   --va-menu-border:rgba(255,255,255,.16);
   --va-shadow:0 24px 70px rgba(0,0,0,.55), 0 10px 28px rgba(0,0,0,.4);
@@ -268,25 +321,16 @@ function StyleBlock() {
   --va-shadow-sm:0 12px 26px rgba(0,0,0,.10);
   --va-shadow-side:8px 0 26px rgba(0,0,0,.08);
 }
-.${SCOPE} .va-main{ max-width: none !important; }
-.${SCOPE} .icon{ color: var(--accent); }
-
-.${SCOPE} select,
-.${SCOPE} input,
-.${SCOPE} textarea{
-  -webkit-appearance: none;
-  appearance: none;
-  border-radius: 14px;
-  background: var(--va-input-bg);
-  border: 1px solid var(--va-input-border);
-  box-shadow: var(--va-input-shadow);
-  color: var(--text);
+.${SCOPE} .va-main{
+  /* 4px gutters left/right; expands when app sidebar collapses (variable updated by app) */
+  max-width:none!important;
+  padding-left:4px; padding-right:4px;
 }
-.${SCOPE} select{ padding-right: 2.2rem; background-image: none; }
-
+.${SCOPE} .icon{ color: var(--accent); }
 .${SCOPE} .btn{
   display:inline-flex; align-items:center; gap:.5rem;
-  border-radius:14px; padding:.65rem 1rem; font-size:14px; line-height:1;
+  height:40px; /* uniform height */
+  border-radius:14px; padding:0 .9rem; font-size:14px; line-height:1;
   border:1px solid var(--va-border);
 }
 .${SCOPE} .btn--green{ background:${ACCENT}; color:#fff; box-shadow:${BTN_SHADOW}; transition:transform .04s ease, background .18s ease; }
@@ -298,6 +342,26 @@ function StyleBlock() {
   box-shadow:0 10px 24px rgba(220,38,38,.15);
   border-color:rgba(220,38,38,.35);
 }
+
+/* custom select look (fixes native grey bevel rectangles) */
+.${SCOPE} .va-select{
+  appearance:none; -webkit-appearance:none; -moz-appearance:none;
+  width:100%; border-radius:14px;
+  padding:0.75rem 2.25rem 0.75rem 0.85rem;
+  font-size:15px; outline:none;
+  background:var(--va-input-bg);
+  border:1px solid var(--va-input-border);
+  box-shadow:var(--va-input-shadow);
+  color:var(--text);
+}
+.${SCOPE} .va-select-caret{
+  pointer-events:none;
+  position:absolute; right:12px; top:50%; transform:translateY(-50%);
+  width:0; height:0; border-left:6px solid transparent; border-right:6px solid transparent; border-top:7px solid var(--text-muted);
+}
+
+/* grid gutters very tight to match request */
+.${SCOPE} .cards-grid{ gap:10px; } /* tight, but not zero to avoid sticking */
 
 /* no left transition to avoid jitter alongside app sidebar */
 .${SCOPE} aside{ transition: none !important; }
@@ -322,9 +386,44 @@ export default function VoiceAgentSection() {
   const [active, setActive] = useState<Assistant | null>(null);
   const [rev, setRev] = useState(0);
 
-  // 🔑 OpenAI key state
-  const [apiKeyId, setApiKeyId] = useState<string>('');
-  const [openaiKey, setOpenaiKey] = useState<string>('');
+  // OpenAI API key selection
+  const [apiKeyId, setApiKeyId] = useState('');
+  useEffect(() => {
+    (async () => {
+      try {
+        const ss = await scopedStorage();
+        await ss.ensureOwnerGuard();
+        const sel = await ss.getJSON<string>('apiKeys.selectedId', '');
+        if (sel) setApiKeyId(sel);
+      } catch {}
+    })();
+  }, []);
+
+  // Voices
+  const openaiVoices = [
+    { value: 'alloy', label: 'Alloy (OpenAI)' },
+    { value: 'ember', label: 'Ember (OpenAI)' },
+  ];
+  const [elevenVoices, setElevenVoices] = useState<{ value: string; label: string }[]>([
+    { value: 'rachel', label: 'Rachel (ElevenLabs)' },
+    { value: 'adam', label: 'Adam (ElevenLabs)' },
+    { value: 'bella', label: 'Bella (ElevenLabs)' },
+  ]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const ss = await scopedStorage();
+        await ss.ensureOwnerGuard();
+        const saved = await ss.getJSON<any[]>('voices.11labs.v1', []);
+        if (Array.isArray(saved) && saved.length) {
+          setElevenVoices(saved.map(v => ({
+            value: String(v.id || v.voice_id || v.value),
+            label: String(v.label || v.name || v.title || v.id),
+          })));
+        }
+      } catch {}
+    })();
+  }, []);
 
   useEffect(() => {
     if (!isClient) return;
@@ -354,27 +453,6 @@ export default function VoiceAgentSection() {
     if (!readLS<CallLog[]>(LS_CALLS)) writeLS(LS_CALLS, []);
     if (!readLS<Record<string, string>>(LS_ROUTES)) writeLS(LS_ROUTES, {});
   }, [isClient]);
-
-  // 🔑 Resolve OpenAI key (selected id -> secret)
-  useEffect(() => {
-    if (!isClient) return;
-    (async () => {
-      try {
-        const ss = await scopedStorage();
-        await ss.ensureOwnerGuard();
-        const sel = await ss.getJSON<string>('apiKeys.selectedId', '');
-        const keys = await ss.getJSON<any[]>('apiKeys.v1', []);
-        const chosen = sel || '';
-        setApiKeyId(chosen);
-        const match = Array.isArray(keys)
-          ? keys.find(k => k?.id === chosen && (k?.provider === 'openai' || !k?.provider))
-          : null;
-        setOpenaiKey(match?.key ? String(match.key) : '');
-      } catch {
-        setApiKeyId(''); setOpenaiKey('');
-      }
-    })();
-  }, [isClient, activeId]);
 
   useEffect(() => {
     if (!isClient || !activeId) { setActive(null); return; }
@@ -455,15 +533,6 @@ export default function VoiceAgentSection() {
   const declineGenerate = () => { setTypingPreview(null); setPendingFirstMsg(undefined); };
 
   // Voice select/fns
-  const openaiVoices = [
-    { value: 'alloy', label: 'Alloy (OpenAI)' },
-    { value: 'ember', label: 'Ember (OpenAI)' },
-  ];
-  const elevenVoices = [
-    { value: 'rachel', label: 'Rachel (ElevenLabs)' },
-    { value: 'adam', label: 'Adam (ElevenLabs)' },
-    { value: 'bella', label: 'Bella (ElevenLabs)' },
-  ];
   const [pendingVoiceId, setPendingVoiceId] = useState<string | null>(null);
   const [pendingVoiceLabel, setPendingVoiceLabel] = useState<string | null>(null);
   useEffect(() => {
@@ -526,6 +595,7 @@ export default function VoiceAgentSection() {
   const [currentCallId, setCurrentCallId] = useState<string | null>(null);
   const [callsForAssistant, setCallsForAssistant] = useState<CallLog[]>([]);
 
+  // create a call id when first turn arrives
   const ensureCall = () => {
     if (currentCallId || !active) return;
     const id = `call_${crypto.randomUUID?.() || Math.random().toString(36).slice(2)}`;
@@ -564,15 +634,13 @@ export default function VoiceAgentSection() {
     setCallsForAssistant(list.filter(c => c.assistantId === active.id));
   }, [isClient, active?.id, currentCallId, transcript.length, rev]);
 
-  if (!isClient) return (<div ref={scopeRef} className={SCOPE} style={{ background: 'var(--bg)', color: 'var(--text)' }}><StyleBlock /><div className="px-6 py-10 opacity-70 text-sm">Loading…</div></div>);
-  if (!active) return (<div ref={scopeRef} className={SCOPE} style={{ background: 'var(--bg)', color: 'var(--text)' }}><StyleBlock /><div className="px-6 py-10 opacity-70">Create your first assistant.</div></div>);
+  if (!isClient) return (<div ref={scopeRef} className={SCOPE} style={{ background: 'var(--bg)', color: 'var(--text)' }}><StyleBlock /><div className="px-2 py-10 opacity-70 text-sm">Loading…</div></div>);
+  if (!active) return (<div ref={scopeRef} className={SCOPE} style={{ background: 'var(--bg)', color: 'var(--text)' }}><StyleBlock /><div className="px-2 py-10 opacity-70">Create your first assistant.</div></div>);
 
   const railData: AssistantLite[] = assistants.map(a => ({ id: a.id, name: a.name, folder: a.folder, updatedAt: a.updatedAt }));
-
   const greet = active.config.model.firstMessageMode === 'assistant_first'
     ? (active.config.model.firstMessage || 'Hello. How may I help you today?')
     : 'Listening…';
-
   const linkedE164 = active.config.telephony?.numbers.find(n => n.id === active.config.telephony?.linkedNumberId)?.e164 || '';
 
   return (
@@ -592,13 +660,12 @@ export default function VoiceAgentSection() {
         className="va-main"
         style={{
           marginLeft: `calc(var(--app-sidebar-w, 248px) + var(--va-rail-w, 360px))`,
-          paddingRight: 'clamp(20px, 4vw, 40px)',
           paddingTop: 'calc(var(--app-header-h, 64px) + 12px)',
           paddingBottom: '88px'
         }}
       >
-        {/* Top actions */}
-        <div className="px-2 pb-3 flex items-center justify-between sticky" style={{ top: 'calc(var(--app-header-h, 64px) + 8px)', zIndex: 2 }}>
+        {/* Top actions (uniform height) */}
+        <div className="px-1 pb-3 flex items-center justify-between sticky" style={{ top: 'calc(var(--app-header-h, 64px) + 8px)', zIndex: 2 }}>
           <div className="flex items-center gap-2">
             {!currentCallId ? (
               <WebCallButton
@@ -607,51 +674,49 @@ export default function VoiceAgentSection() {
                 systemPrompt={active.config.model.systemPrompt || BASE_PROMPT}
                 model={active.config.model.model}
                 apiKeyId={apiKeyId}
-                apiKey={openaiKey}         // pass resolved secret
                 fromE164={linkedE164}
                 onTurn={onTurn}
               />
             ) : (
               <button onClick={() => { endWebCallSession('Ended by user'); window.speechSynthesis?.cancel(); }} className="btn btn--danger">
-                <PhoneOff className="w-4 h-4" /> End Call
+                End Call
               </button>
             )}
+
             <button onClick={() => window.dispatchEvent(new CustomEvent('voiceagent:open-chat', { detail: { id: active.id } }))}
                     className="btn btn--ghost"><MessageSquare className="w-4 h-4 icon" /> Chat</button>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs px-2 py-1 rounded-lg" style={{border:'1px solid var(--va-border)'}}>
-              Key: {openaiKey ? `••••${openaiKey.slice(-4)}` : '—'}
-            </span>
             <button onClick={() => navigator.clipboard.writeText(active.config.model.systemPrompt || '').catch(() => {})} className="btn btn--ghost">
               <Copy className="w-4 h-4 icon" /> Copy Prompt
             </button>
-            <button onClick={() => onDelete(active.id)} className="btn btn--danger"><Trash2 className="w-4 h-4" /> Delete</button>
+          </div>
+          <div className="flex items-center gap-2">
             <button onClick={publish} className="btn btn--green"><Rocket className="w-4 h-4 text-white" /><span className="text-white">{active.published ? 'Republish' : 'Publish'}</span></button>
           </div>
         </div>
 
         {/* Body */}
-        <div className="mx-auto grid grid-cols-12 gap-10" style={{ maxWidth: 'min(2400px, 98vw)' }}>
+        <div className="mx-auto grid grid-cols-12 cards-grid" style={{ maxWidth: 'min(2400px, 100vw)' }}>
           {/* Model */}
           <Section title="Model" icon={<FileText className="w-4 h-4 icon" />}>
-            <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(4, minmax(360px, 1fr))' }}>
+            <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(4, minmax(320px, 1fr))' }}>
+              {/* 🔑 API Key dropdown */}
+              <ApiKeySelect value={apiKeyId} onChange={setApiKeyId} />
+
               <Field label="Provider">
                 <select
                   value={active.config.model.provider}
                   onChange={e => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, provider: e.target.value as Provider } } }))}
-                  className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
-                  style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)', boxShadow: 'var(--va-input-shadow)', color: 'var(--text)' }}
+                  className="va-select"
                 >
                   <option value="openai">OpenAI</option>
                 </select>
               </Field>
+
               <Field label="Model">
                 <select
                   value={active.config.model.model}
                   onChange={e => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, model: e.target.value as ModelId } } }))}
-                  className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
-                  style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)', boxShadow: 'var(--va-input-shadow)', color: 'var(--text)' }}
+                  className="va-select"
                 >
                   <option value="gpt-4o">GPT-4o</option>
                   <option value="gpt-4o-mini">GPT-4o mini</option>
@@ -659,17 +724,18 @@ export default function VoiceAgentSection() {
                   <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
                 </select>
               </Field>
+
               <Field label="First Message Mode">
                 <select
                   value={active.config.model.firstMessageMode}
                   onChange={e => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, firstMessageMode: e.target.value as any } } }))}
-                  className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
-                  style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)', boxShadow: 'var(--va-input-shadow)', color: 'var(--text)' }}
+                  className="va-select"
                 >
                   <option value="assistant_first">Assistant speaks first</option>
                   <option value="user_first">User speaks first</option>
                 </select>
               </Field>
+
               <Field label="First Message">
                 <input
                   value={active.config.model.firstMessage}
@@ -728,13 +794,12 @@ export default function VoiceAgentSection() {
 
           {/* Voice */}
           <Section title="Voice" icon={<Mic2 className="w-4 h-4 icon" />}>
-            <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(2, minmax(360px, 1fr))' }}>
+            <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(2, minmax(320px, 1fr))' }}>
               <Field label="Provider">
                 <select
                   value={active.config.voice.provider}
                   onChange={(e) => handleVoiceProviderChange(e.target.value)}
-                  className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
-                  style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)', boxShadow: 'var(--va-input-shadow)', color: 'var(--text)' }}
+                  className="va-select"
                 >
                   <option value="openai">OpenAI</option>
                   <option value="elevenlabs">ElevenLabs</option>
@@ -744,8 +809,7 @@ export default function VoiceAgentSection() {
                 <select
                   value={pendingVoiceId || active.config.voice.voiceId}
                   onChange={(e) => handleVoiceIdChange(e.target.value)}
-                  className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
-                  style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)', boxShadow: 'var(--va-input-shadow)', color: 'var(--text)' }}
+                  className="va-select"
                 >
                   {(active.config.voice.provider === 'elevenlabs' ? elevenVoices : openaiVoices).map(v => (
                     <option key={v.value} value={v.value}>{v.label}</option>
@@ -773,13 +837,12 @@ export default function VoiceAgentSection() {
 
           {/* Transcriber */}
           <Section title="Transcriber" icon={<BookOpen className="w-4 h-4 icon" />}>
-            <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(3, minmax(360px, 1fr))' }}>
+            <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(3, minmax(320px, 1fr))' }}>
               <Field label="Provider">
                 <select
                   value={active.config.transcriber.provider}
                   onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, provider: e.target.value as any } } }))}
-                  className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
-                  style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)', boxShadow: 'var(--va-input-shadow)', color: 'var(--text)' }}
+                  className="va-select"
                 >
                   <option value="deepgram">Deepgram</option>
                 </select>
@@ -788,8 +851,7 @@ export default function VoiceAgentSection() {
                 <select
                   value={active.config.transcriber.model}
                   onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, model: e.target.value as any } } }))}
-                  className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
-                  style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)', boxShadow: 'var(--va-input-shadow)', color: 'var(--text)' }}
+                  className="va-select"
                 >
                   <option value="nova-2">Nova 2</option>
                   <option value="nova-3">Nova 3</option>
@@ -799,8 +861,7 @@ export default function VoiceAgentSection() {
                 <select
                   value={active.config.transcriber.language}
                   onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, language: e.target.value as any } } }))}
-                  className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
-                  style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)', boxShadow: 'var(--va-input-shadow)', color: 'var(--text)' }}
+                  className="va-select"
                 >
                   <option value="en">English</option>
                   <option value="multi">Multi</option>
@@ -822,8 +883,7 @@ export default function VoiceAgentSection() {
                 <select
                   value={String(active.config.transcriber.denoise)}
                   onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, denoise: e.target.value === 'true' } } }))}
-                  className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
-                  style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)', boxShadow: 'var(--va-input-shadow)', color: 'var(--text)' }}
+                  className="va-select"
                 >
                   <option value="false">Off</option>
                   <option value="true">On</option>
@@ -833,8 +893,7 @@ export default function VoiceAgentSection() {
                 <select
                   value={String(active.config.transcriber.numerals)}
                   onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, numerals: e.target.value === 'true' } } }))}
-                  className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
-                  style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)', boxShadow: 'var(--va-input-shadow)', color: 'var(--text)' }}
+                  className="va-select"
                 >
                   <option value="false">No</option>
                   <option value="true">Yes</option>
@@ -845,13 +904,12 @@ export default function VoiceAgentSection() {
 
           {/* Tools */}
           <Section title="Tools" icon={<SlidersHorizontal className="w-4 h-4 icon" />}>
-            <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(2, minmax(360px, 1fr))' }}>
+            <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(2, minmax(320px, 1fr))' }}>
               <Field label="Enable End Call Function">
                 <select
                   value={String(active.config.tools.enableEndCall)}
                   onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, tools: { ...a.config.tools, enableEndCall: e.target.value === 'true' } } }))}
-                  className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
-                  style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)', boxShadow: 'var(--va-input-shadow)', color: 'var(--text)' }}
+                  className="va-select"
                 >
                   <option value="true">Enabled</option>
                   <option value="false">Disabled</option>
@@ -861,8 +919,7 @@ export default function VoiceAgentSection() {
                 <select
                   value={String(active.config.tools.dialKeypad)}
                   onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, tools: { ...a.config.tools, dialKeypad: e.target.value === 'true' } } }))}
-                  className="w-full rounded-2xl px-3 py-3 text-[15px] outline-none"
-                  style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)', boxShadow: 'var(--va-input-shadow)', color: 'var(--text)' }}
+                  className="va-select"
                 >
                   <option value="true">Enabled</option>
                   <option value="false">Disabled</option>
