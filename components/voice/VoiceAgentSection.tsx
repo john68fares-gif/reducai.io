@@ -190,7 +190,7 @@ function StyleBlock() {
   --app-sidebar-w:248px;    /* updated if you have an app sidebar */
   --va-edge-gutter:${EDGE_GUTTER}px;
 
-  overflow-x:hidden;        /* nuke horizontal jiggle globally */
+  overflow-x:hidden;        /* kill horizontal jiggle */
 }
 :root:not([data-theme="dark"]) .${SCOPE}{
   --bg:#f7f9fb; --text:#101316;
@@ -254,7 +254,7 @@ function StyleBlock() {
   }
 }
 
-/* container guards (in case Tailwind .container leaks in) */
+/* guard against .container max-w from Tailwind etc */
 .${SCOPE} .va-lane .container{ max-width:none !important; padding-left:0 !important; padding-right:0 !important; }
 .${SCOPE} .va-lane [class*="max-w-"]{ max-width:none !important; }
 
@@ -362,7 +362,7 @@ export default function VoiceAgentSection() {
   };
 
   const [genOpen, setGenOpen] = useState(false);
-  the const [genText, setGenText] = useState(''); // NOTE: remove "the " if copied; kept to mirror your previous environment
+  const [genText, setGenText] = useState(''); // <-- fixed
   const [typingPreview, setTypingPreview] = useState<string | null>(null);
   const [pendingFirstMsg, setPendingFirstMsg] = useState<string | undefined>(undefined);
 
