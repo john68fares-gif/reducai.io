@@ -6,9 +6,11 @@ import Link from 'next/link';
 import {
   Search, Loader2, Save, Trash2, Settings2, Bot, RefreshCw,
   SlidersHorizontal, History, RotateCcw, ChevronDown, Send, Sparkles,
-  Copy, Download, Upload, Star, StarOff, Filter, ArrowUpAZ, ArrowDownAZ, Clock3, Diff, FilePlus2, ToggleLeft, ToggleRight, Undo2, Redo2, Info, X
+  Star, StarOff, Filter, Diff, FilePlus2, ToggleLeft, ToggleRight, Undo2, Redo2, Info, X,
+  Upload, Download, Wand2, BadgeCheck, Zap, Shield, LayoutGrid, ArrowRightCircle
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase-client';
+import { scopedStorage } from '@/utils/scoped-storage';
 
 // =========================== Types ===========================
 type BotRow = {
@@ -23,9 +25,9 @@ type BotRow = {
 };
 
 type Version = {
-  id: string;            // generated
-  ts: number;            // epoch ms
-  label: string;         // auto-named
+  id: string;
+  ts: number;
+  label: string;
   name: string;
   model: string;
   temperature: number;
@@ -41,20 +43,53 @@ type AgentMeta = {
 
 // =========================== Styles ===========================
 const PANEL: React.CSSProperties = {
-  background: 'var(--panel)',
-  border: '1px solid var(--border)',
-  boxShadow: 'var(--shadow-soft)',
+  background: 'color-mix(in oklab, var(--panel) 96%, transparent)',
+  border: '1px solid color-mix(in oklab, var(--border) 92%, transparent)',
+  boxShadow: '0 6px 30px rgba(0,0,0,.25), inset 0 1px 0 rgba(255,255,255,.04)',
   borderRadius: 18,
+  backdropFilter: 'saturate(120%) blur(6px)',
 };
 
 const CARD: React.CSSProperties = {
-  background: 'var(--card)',
-  border: '1px solid var(--border)',
-  boxShadow: 'var(--shadow-card)',
+  background: 'color-mix(in oklab, var(--card) 96%, transparent)',
+  border: '1px solid color-mix(in oklab, var(--border) 92%, transparent)',
+  boxShadow: '0 4px 18px rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.04)',
   borderRadius: 12,
 };
 
 const DENSE_PAD = '12px';
+
+// Moving background grid (decorative)
+function BgFX() {
+  return (
+    <div
+      aria-hidden
+      className="pointer-events-none fixed inset-0 -z-10"
+      style={{
+        background:
+          'radial-gradient(1200px 600px at 10% -10%, color-mix(in oklab, var(--brand) 10%, transparent), transparent 60%), radial-gradient(1000px 800px at 110% 120%, color-mix(in oklab, var(--brand) 8%, transparent), transparent 60%)',
+        maskImage:
+          'radial-gradient(1000px 800px at 0% 0%, #000 40%, transparent), radial-gradient(1000px 800px at 100% 100%, #000 40%, transparent)',
+      }}
+    >
+      <div
+        className="absolute inset-0 opacity-[.06] animate-[pan_28s_linear_infinite]"
+        style={{
+          background:
+            'linear-gradient(transparent 31px, color-mix(in oklab, var(--text) 7%, transparent) 32px), linear-gradient(90deg, transparent 31px, color-mix(in oklab, var(--text) 7%, transparent) 32px)',
+          backgroundSize: '32px 32px',
+        }}
+      />
+      <style jsx>{`
+        @keyframes pan {
+          0% { transform: translateX(0); }
+          50% { transform: translateX(16px); }
+          100% { transform: translateX(0); }
+        }
+      `}</style>
+    </div>
+  );
+}
 
 // =========================== Refinements ===========================
 const CHIP_LIBRARY = [
@@ -88,7 +123,6 @@ function versionsKey(ownerId: string, agentId: string) { return `versions:${owne
 function metaKey(ownerId: string, agentId: string) { return `meta:${ownerId}:${agentId}`; }
 
 function applyRefinementsToSystem(baseSystem: string, active: Record<string, boolean>): string {
-  // strip old block
   const re = new RegExp(`^${REFINEMENT_HEADER}[\\s\\S]*?(?:\\n{2,}|$)`, 'm');
   let stripped = baseSystem || '';
   if (re.test(stripped)) stripped = stripped.replace(re, '').trim();
@@ -99,7 +133,7 @@ function applyRefinementsToSystem(baseSystem: string, active: Record<string, boo
 
 function estimateTokens(s: string) { return Math.max(1, Math.round((s || '').length / 4)); }
 
-// simple line diff (no lib)
+// very light diff
 type DiffLine = { type: 'same'|'add'|'del'; text: string };
 function simpleDiff(a: string, b: string): DiffLine[] {
   const A = (a || '').split('\n');
@@ -117,18 +151,14 @@ function simpleDiff(a: string, b: string): DiffLine[] {
   return out;
 }
 
-// prompt lint (very light)
 function lintPrompt(system: string): string[] {
   const issues: string[] = [];
   if ((system || '').length > 28000) issues.push('Prompt is very long; consider trimming for latency/cost.');
-  if (/be polite/i.test(system) && !/examples?/i.test(system)) {
-    issues.push('“Be polite” is vague; consider concrete style examples.');
-  }
-  if (!/###/i.test(system)) issues.push('Consider using clear section headers (### …) to structure rules.');
+  if (/be polite/i.test(system) && !/examples?/i.test(system)) issues.push('“Be polite” is vague; consider concrete examples.');
+  if (!/###/i.test(system)) issues.push('Consider section headers (### …) to structure rules.');
   return issues;
 }
 
-// Undo/redo stack
 function makeUndoStack(initial: string) {
   const stack = [initial];
   let idx = 0;
@@ -139,8 +169,6 @@ function makeUndoStack(initial: string) {
     redo(){ if (idx<stack.length-1) idx++; return stack[idx]; },
     canUndo(){ return idx>0; },
     canRedo(){ return idx<stack.length-1; },
-    index(){ return idx; },
-    len(){ return stack.length; }
   };
 }
 
@@ -152,7 +180,7 @@ export default function Improve() {
   const [loading, setLoading] = useState(true);
 
   // sorting/pin
-  const [sort, setSort] = useState<'name_asc'|'name_desc'|'updated_desc'|'updated_asc'|'pinned_first'>('pinned_first');
+  const [sort, setSort] = useState<'pinned_first'|'name_asc'|'name_desc'|'updated_desc'|'updated_asc'>('pinned_first');
 
   // editor state
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -169,7 +197,7 @@ export default function Improve() {
 
   // save state
   const [saving, setSaving] = useState(false);
-  const [dirty, setDirty] = useState(false); // unsaved changes
+  const [dirty, setDirty] = useState(false);
 
   // versions
   const [versions, setVersions] = useState<Version[]>([]);
@@ -182,7 +210,11 @@ export default function Improve() {
   const [testLog, setTestLog] = useState<{role:'user'|'assistant', text:string}[]>([]);
   const [testing, setTesting] = useState(false);
 
-  // sticky save status text
+  // importer
+  const [legacyCount, setLegacyCount] = useState<number>(0);
+  const [importing, setImporting] = useState(false);
+
+  // status
   const statusText = saving ? 'Saving…' : dirty ? 'Unsaved changes' : 'Saved';
 
   // undo/redo
@@ -209,6 +241,8 @@ export default function Improve() {
       const rows: BotRow[] = json?.data || [];
       setList(rows);
       if (!selectedId && rows.length) setSelectedId(rows[0].id);
+      // detect legacy builds
+      detectLegacy();
     } catch (e) {
       console.error(e);
     } finally {
@@ -216,6 +250,81 @@ export default function Improve() {
     }
   }
   useEffect(() => { if (userId) fetchBots(userId); }, [userId]);
+
+  // ---------- detect legacy builds (scopedStorage/localStorage) ----------
+  async function detectLegacy() {
+    try {
+      // Cloud scoped
+      let total = 0;
+      try {
+        const ss = await scopedStorage();
+        await ss.ensureOwnerGuard();
+        const cloud = await ss.getJSON<any[]>('chatbots.v1', []);
+        total += (Array.isArray(cloud) ? cloud : []).length;
+      } catch {}
+      // Local
+      try {
+        const local = localStorage.getItem('chatbots');
+        const list = local ? JSON.parse(local) : [];
+        total += (Array.isArray(list) ? list : []).length;
+      } catch {}
+      setLegacyCount(total);
+    } catch { setLegacyCount(0); }
+  }
+
+  async function importLegacy() {
+    if (!userId) return;
+    setImporting(true);
+    try {
+      const toCreate: Array<{name:string; model:string; temperature:number; system:string}> = [];
+
+      // from scopedStorage
+      try {
+        const ss = await scopedStorage();
+        await ss.ensureOwnerGuard();
+        const cloud = await ss.getJSON<any[]>('chatbots.v1', []);
+        const list = Array.isArray(cloud) ? cloud : [];
+        for (const b of list) {
+          toCreate.push({
+            name: b.name || 'Imported Agent',
+            model: b.model || 'gpt-4o-mini',
+            temperature: Number(b.temperature ?? 0.5) || 0.5,
+            system: b.system || b.prompt || '',
+          });
+        }
+      } catch {}
+
+      // from localStorage
+      try {
+        const localRaw = localStorage.getItem('chatbots');
+        const local = localRaw ? JSON.parse(localRaw) : [];
+        const list = Array.isArray(local) ? local : [];
+        for (const b of list) {
+          toCreate.push({
+            name: b.name || 'Imported Agent',
+            model: b.model || 'gpt-4o-mini',
+            temperature: Number(b.temperature ?? 0.5) || 0.5,
+            system: b.system || b.prompt || '',
+          });
+        }
+      } catch {}
+
+      // bulk create
+      for (const a of toCreate) {
+        await fetch('/api/chatbots', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-owner-id': userId },
+          body: JSON.stringify(a),
+        });
+      }
+      await fetchBots(userId);
+      setLegacyCount(0);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setImporting(false);
+    }
+  }
 
   // ---------- load meta/versions on selection ----------
   useEffect(() => {
@@ -225,18 +334,15 @@ export default function Improve() {
     setTemperature(Number.isFinite(selected.temperature) ? selected.temperature : 0.5);
     setSystem(selected.system || '');
 
-    // chips from system
     const next: Record<string, boolean> = {};
     CHIP_LIBRARY.forEach(c => { next[c.key] = (selected.system || '').includes(c.line); });
     setChips(next);
 
-    // versions
     try {
       const raw = localStorage.getItem(versionsKey(userId, selected.id));
       setVersions(raw ? JSON.parse(raw) as Version[] : []);
     } catch { setVersions([]); }
 
-    // meta
     try {
       const raw = localStorage.getItem(metaKey(userId, selected.id));
       const m = raw ? (JSON.parse(raw) as AgentMeta) : {};
@@ -244,18 +350,14 @@ export default function Improve() {
       setDraft(!!m.draft);
       setNotes(m.notes || '');
       localStorage.setItem(metaKey(userId, selected.id), JSON.stringify({ ...m, lastOpenedAt: Date.now() }));
-    } catch {
-      setPinned(false); setDraft(false); setNotes('');
-    }
+    } catch { setPinned(false); setDraft(false); setNotes(''); }
 
     setDirty(false);
     setTestLog([]);
-    if (undoRef.current) {
-      undoRef.current = makeUndoStack(selected.system || '');
-    }
+    if (undoRef.current) undoRef.current = makeUndoStack(selected.system || '');
   }, [selectedId]);
 
-  // ---------- mark dirty on editor changes ----------
+  // ---------- mark dirty ----------
   useEffect(() => {
     if (!selected) return;
     const d =
@@ -272,33 +374,15 @@ export default function Improve() {
     const onKey = (e: KeyboardEvent) => {
       const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
       const mod = isMac ? e.metaKey : e.ctrlKey;
-      if (mod && e.key.toLowerCase() === 's') {
-        e.preventDefault();
-        if (!saving && dirty) void saveEdits();
-      }
-      if (mod && !e.shiftKey && e.key.toLowerCase() === 'z') {
-        e.preventDefault();
-        if (undoRef.current && undoRef.current.canUndo()) {
-          const v = undoRef.current.undo();
-          setSystem(v);
-        }
-      }
-      if (mod && e.shiftKey && e.key.toLowerCase() === 'z') {
-        e.preventDefault();
-        if (undoRef.current && undoRef.current.canRedo()) {
-          const v = undoRef.current.redo();
-          setSystem(v);
-        }
-      }
+      if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); if (!saving && dirty) void saveEdits(); }
+      if (mod && !e.shiftKey && e.key.toLowerCase() === 'z') { e.preventDefault(); if (undoRef.current?.canUndo()) setSystem(undoRef.current.undo()); }
+      if (mod && e.shiftKey && e.key.toLowerCase() === 'z') { e.preventDefault(); if (undoRef.current?.canRedo()) setSystem(undoRef.current.redo()); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [saving, dirty]);
 
-  // track editor text for undo stack
-  useEffect(() => {
-    if (undoRef.current) undoRef.current.push(system);
-  }, [system]);
+  useEffect(() => { if (undoRef.current) undoRef.current.push(system); }, [system]);
 
   // ---------- helpers ----------
   function setChip(key: string, val: boolean) {
@@ -315,12 +399,11 @@ export default function Improve() {
     localStorage.setItem(metaKey(owner, agent), JSON.stringify(meta));
   }
 
-  // ---------- Actions ----------
+  // ---------- actions ----------
   async function saveEdits() {
     if (!userId || !selectedId) return;
     setSaving(true);
     try {
-      // SNAPSHOT (before write)
       const prev = list.find(b => b.id === selectedId) || null;
       const candidate: BotRow = {
         id: selectedId, ownerId: userId, name, model, temperature, system,
@@ -333,11 +416,10 @@ export default function Improve() {
         name: candidate.name, model: candidate.model,
         temperature: candidate.temperature, system: candidate.system,
       };
-      const nextVersions = [v, ...versions].slice(0, 50); // keep last 50
+      const nextVersions = [v, ...versions].slice(0, 50);
       setVersions(nextVersions);
       storeVersions(userId, selectedId, nextVersions);
 
-      // Persist core fields (unchanged API)
       const res = await fetch(`/api/chatbots/${selectedId}?ownerId=${encodeURIComponent(userId)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', 'x-owner-id': userId },
@@ -346,7 +428,6 @@ export default function Improve() {
       const json = await res.json();
       if (!res.ok || !json?.ok) throw new Error(json?.error || 'Failed to save');
 
-      // meta stays client-side
       const m: AgentMeta = { pinned, draft, notes, lastOpenedAt: Date.now() };
       storeMeta(userId, selectedId, m);
 
@@ -383,96 +464,11 @@ export default function Improve() {
   }
 
   function restoreVersion(v: Version) {
-    setName(v.name);
-    setModel(v.model);
-    setTemperature(v.temperature);
-    setSystem(v.system);
-    setDirty(true);
+    setName(v.name); setModel(v.model); setTemperature(v.temperature); setSystem(v.system); setDirty(true);
   }
-
   function openDiff(v: Version) { setDiffWith(v); setDiffOpen(true); }
 
-  // Clone/Duplicate (client-side: new temp object + Save to persist)
-  async function duplicateAgent() {
-    if (!selected || !userId) return;
-    const cloneName = `${selected.name || 'Untitled'} (Copy)`;
-    try {
-      const resp = await fetch('/api/chatbots', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-owner-id': userId },
-        body: JSON.stringify({
-          name: cloneName,
-          model: selected.model,
-          temperature: selected.temperature,
-          system: selected.system,
-        }),
-      });
-      const json = await resp.json();
-      if (!resp.ok || !json?.ok || !json?.data?.id) throw new Error(json?.error || 'Failed to duplicate');
-      await fetchBots(userId);
-      setSelectedId(json.data.id);
-    } catch (e: any) { alert(e?.message || 'Failed to duplicate'); }
-  }
-
-  // Export/Import
-  function exportAgent() {
-    if (!selected) return;
-    const payload = {
-      type: 'reduc.ai/agent',
-      version: 1,
-      agent: {
-        id: selected.id,
-        name, model, temperature, system,
-        meta: { pinned, draft, notes },
-      },
-    };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `${(name||'agent').replace(/\s+/g,'_')}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  async function importAgent(file: File) {
-    if (!userId) return;
-    try {
-      const text = await file.text();
-      const parsed = JSON.parse(text);
-      const a = parsed?.agent || parsed;
-      const res = await fetch('/api/chatbots', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-owner-id': userId },
-        body: JSON.stringify({
-          name: a.name || 'Imported Agent',
-          model: a.model || 'gpt-4o-mini',
-          temperature: typeof a.temperature === 'number' ? a.temperature : 0.5,
-          system: a.system || '',
-        }),
-      });
-      const json = await res.json();
-      if (!res.ok || !json?.ok) throw new Error(json?.error || 'Failed to import');
-      // store meta client side
-      const newId = json.data.id as string;
-      const meta: AgentMeta = a.meta || {};
-      storeMeta(userId, newId, meta);
-      await fetchBots(userId);
-      setSelectedId(newId);
-    } catch (e: any) {
-      alert(e?.message || 'Import failed');
-    }
-  }
-
-  function togglePinned() {
-    if (!userId || !selected) return;
-    const next = !pinned; setPinned(next); setDirty(true);
-  }
-  function toggleDraft() {
-    if (!userId || !selected) return;
-    const next = !draft; setDraft(next); setDirty(true);
-  }
-
-  // soft test: route optional
+  // soft test: optional backend
   async function runTest(message?: string) {
     const msg = (message ?? testInput).trim();
     if (!msg || !selected) return;
@@ -482,28 +478,21 @@ export default function Improve() {
       const res = await fetch('/api/assistants/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: selected.model,
-          system: selected.system,
-          message: msg,
-        }),
+        body: JSON.stringify({ model: selected.model, system: selected.system, message: msg }),
       });
       if (!res.ok) throw new Error('No test endpoint configured');
       const json = await res.json();
       const answer = json?.message || '…';
       setTestLog(l => [...l, { role: 'assistant', text: String(answer) }]);
     } catch {
-      setTestLog(l => [...l, {
-        role: 'assistant',
-        text: 'No live test endpoint configured. Go to API Keys to connect or use your chat sandbox.',
-      }]);
+      setTestLog(l => [...l, { role: 'assistant', text: 'No live test endpoint configured. Connect keys or use your chat sandbox.' }]);
     } finally {
       setTesting(false);
       setTestInput('');
     }
   }
 
-  // ---------- filters/sort ----------
+  // ---------- filter/sort ----------
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     const withMeta = list.map(b => {
@@ -536,16 +525,20 @@ export default function Improve() {
 
   // =========================== UI ===========================
   return (
-    <div className="min-h-screen" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
+    <div className="min-h-screen relative" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
+      <BgFX />
+
       {/* Sticky head */}
-      <header className="sticky top-0 z-20 backdrop-blur px-6 py-3 border-b" style={{ borderColor:'var(--border)', background:'color-mix(in oklab, var(--bg) 86%, transparent)' }}>
+      <header className="sticky top-0 z-20 backdrop-blur px-6 py-3 border-b"
+              style={{ borderColor:'var(--border)', background:'color-mix(in oklab, var(--bg) 86%, transparent)' }}>
         <div className="max-w-[1500px] mx-auto flex items-center gap-3">
-          <h1 className="text-[20px] font-semibold">Tuning</h1>
-          <div className="text-xs px-2 py-[2px] rounded-full" style={{ background:'color-mix(in oklab, var(--text) 8%, transparent)', border:'1px solid var(--border)' }}>
+          <LayoutGrid className="w-5 h-5" style={{ color:'var(--brand)' }} />
+          <h1 className="text-[20px] font-semibold">Agent Tuning</h1>
+          <div className="text-xs px-2 py-[2px] rounded-full"
+               style={{ background:'color-mix(in oklab, var(--text) 8%, transparent)', border:'1px solid var(--border)' }}>
             {statusText}
           </div>
           <div className="ml-auto flex items-center gap-2">
-            {/* Sort */}
             <div className="hidden sm:flex items-center gap-1 text-xs">
               <Filter className="w-4 h-4 opacity-70" />
               <select
@@ -561,7 +554,6 @@ export default function Improve() {
                 <option value="updated_asc">Least recently updated</option>
               </select>
             </div>
-
             <button onClick={() => userId && fetchBots(userId)}
               className="px-3 py-1.5 rounded-md text-sm"
               style={{ background:'color-mix(in oklab, var(--text) 8%, transparent)', border:'1px solid var(--border)' }}>
@@ -577,6 +569,37 @@ export default function Improve() {
           </div>
         </div>
       </header>
+
+      {/* Legacy import banner */}
+      {legacyCount > 0 && userId && (
+        <div className="mx-auto w-full max-w-[1500px] px-6 pt-3">
+          <div className="p-3 rounded-xl flex items-center gap-3"
+               style={{ ...CARD, borderColor:'var(--brand)' }}>
+            <BadgeCheck className="w-4 h-4" style={{ color:'var(--brand)' }} />
+            <div className="text-sm">
+              Found <b>{legacyCount}</b> previous builds (local/cloud). Import them to your account agents.
+            </div>
+            <div className="ml-auto flex gap-2">
+              <button
+                onClick={importLegacy}
+                disabled={importing}
+                className="px-3 py-1.5 rounded-md text-sm"
+                style={{ background:'var(--brand)', color:'#00120a' }}
+              >
+                {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRightCircle className="w-4 h-4 inline mr-1" />}
+                Import builds
+              </button>
+              <button
+                onClick={()=>setLegacyCount(0)}
+                className="px-3 py-1.5 rounded-md text-sm"
+                style={{ ...CARD }}
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="mx-auto w-full max-w-[1500px] px-6 py-5">
         <div className="grid" style={{ gridTemplateColumns: '300px 1.1fr 0.9fr', gap: '14px' }}>
@@ -617,10 +640,11 @@ export default function Improve() {
               ) : (
                 <ul className="space-y-2">
                   {filtered.map((b) => {
-                    let pinnedLocal = false;
+                    let pinnedLocal = false; let draftLocal = false;
                     try {
                       const raw = userId ? localStorage.getItem(metaKey(userId, b.id)) : null;
-                      pinnedLocal = raw ? !!(JSON.parse(raw) as AgentMeta).pinned : false;
+                      const m: AgentMeta = raw ? JSON.parse(raw) : {};
+                      pinnedLocal = !!m.pinned; draftLocal = !!m.draft;
                     } catch {}
                     return (
                       <li key={b.id}>
@@ -630,13 +654,17 @@ export default function Improve() {
                           style={{
                             ...CARD,
                             borderColor: selectedId === b.id ? 'var(--brand)' : 'var(--border)',
+                            transform: selectedId === b.id ? 'translateY(-1px)' : 'none'
                           }}
                         >
                           <div className="w-7 h-7 rounded-md grid place-items-center" style={{ background: 'rgba(0,0,0,.2)', border: '1px solid var(--border)' }}>
                             <Bot className="w-4 h-4" />
                           </div>
                           <div className="flex-1 min-w-0">
-                            <div className="truncate">{b.name || 'Untitled'}</div>
+                            <div className="truncate flex items-center gap-2">
+                              {b.name || 'Untitled'}
+                              {draftLocal ? <span className="text-[10px] px-1.5 py-[1px] rounded-full" style={{ background:'rgba(255,200,0,.12)', border:'1px solid rgba(255,200,0,.35)' }}>Draft</span> : null}
+                            </div>
                             <div className="text-[11px] opacity-60 truncate">{b.model} · {b.id.slice(0, 8)}</div>
                           </div>
                           {pinnedLocal ? <Star className="w-4 h-4" style={{ color:'var(--brand)' }} /> : null}
@@ -661,10 +689,10 @@ export default function Improve() {
                   <Settings2 className="w-4 h-4" style={{ color:'var(--brand)' }} />
                   <div className="font-semibold">Editor</div>
                   <div className="ml-auto flex items-center gap-2">
-                    <button onClick={togglePinned} className="px-2 py-1.5 rounded-md text-sm" style={{ ...CARD }}>
+                    <button onClick={()=>{ setPinned(p=>!p); setDirty(true); }} className="px-2 py-1.5 rounded-md text-sm" style={{ ...CARD }}>
                       {pinned ? <><Star className="inline w-4 h-4 mr-1" />Pinned</> : <><StarOff className="inline w-4 h-4 mr-1" />Pin</>}
                     </button>
-                    <button onClick={toggleDraft} className="px-2 py-1.5 rounded-md text-sm" style={{ ...CARD }}>
+                    <button onClick={()=>{ setDraft(d=>!d); setDirty(true); }} className="px-2 py-1.5 rounded-md text-sm" style={{ ...CARD }}>
                       {draft ? <><ToggleLeft className="inline w-4 h-4 mr-1" />Draft</> : <><ToggleRight className="inline w-4 h-4 mr-1" />Published</>}
                     </button>
                     <button onClick={duplicateAgent} className="px-2 py-1.5 rounded-md text-sm" style={{ ...CARD }}>
@@ -794,7 +822,7 @@ export default function Improve() {
                     placeholder="Describe your agent's behavior, tone, policies, and knowledge…"
                   />
                   <div className="flex items-center justify-between text-xs mt-1">
-                    <div className="opacity-70">{(system?.length || 0).toLocaleString()} chars · est {tokenEst.toLocaleString()} tokens</div>
+                    <div className="opacity-70">{(system?.length || 0).toLocaleString()} chars · est {estimateTokens(system).toLocaleString()} tokens</div>
                     {issues.length ? (
                       <div className="flex items-center gap-2">
                         <Info className="w-3.5 h-3.5" style={{ color:'gold' }} />
@@ -820,14 +848,11 @@ export default function Improve() {
             )}
           </section>
 
-          {/* Versions + Test */}
+          {/* Versions + Test (featureful right rail) */}
           <aside className="p-[10px] space-y-3" style={PANEL}>
             {/* Versions */}
             <div className="p-[10px]" style={CARD}>
-              <button
-                onClick={() => setVersionsOpen(v => !v)}
-                className="w-full flex items-center justify-between"
-              >
+              <button onClick={() => setVersionsOpen(v => !v)} className="w-full flex items-center justify-between">
                 <div className="flex items-center gap-2 font-semibold">
                   <History className="w-4 h-4" style={{ color:'var(--brand)' }} />
                   Versions
@@ -839,7 +864,7 @@ export default function Improve() {
                 <div className="mt-2 space-y-2">
                   {(!selected || !versions?.length) && (
                     <div className="text-xs opacity-70">
-                      Versions are created when you click <b>Save</b>. You can restore or diff any snapshot.
+                      Versions are created when you click <b>Save</b>. Restore or diff any snapshot.
                     </div>
                   )}
                   {versions?.map(v => (
@@ -858,7 +883,7 @@ export default function Improve() {
                         Restore
                       </button>
                       <button
-                        onClick={() => openDiff(v)}
+                        onClick={() => { setDiffWith(v); setDiffOpen(true); }}
                         className="px-2 py-1 rounded-md text-xs"
                         style={{ ...CARD }}
                       >
