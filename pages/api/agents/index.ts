@@ -6,10 +6,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
-    if (!OPENAI_API_KEY) return res.status(200).json([]); // no key => empty list, UI still works
+    if (!OPENAI_API_KEY) return res.status(200).json([]);
 
     const r = await fetch('https://api.openai.com/v1/assistants?limit=100', {
-      headers: { Authorization: `Bearer ${OPENAI_API_KEY}` },
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        'Content-Type': 'application/json',
+        'OpenAI-Beta': 'assistants=v2',   // <-- required for many accounts
+      },
       cache: 'no-store',
     });
 
@@ -22,7 +26,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const items: any[] = Array.isArray(data?.data) ? data.data : [];
 
     const list = items.map((a) => ({
-      id: a?.id, // asst_…
+      id: a?.id,
       name: a?.name || 'Untitled Agent',
       createdAt: a?.created_at ? a.created_at * 1000 : Date.now(),
       model: a?.model || 'gpt-4o-mini',
