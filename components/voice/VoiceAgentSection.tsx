@@ -12,11 +12,21 @@ import {
 import AssistantRail, { type AssistantLite } from '@/components/voice/AssistantRail';
 import WebCallButton from '@/components/voice/WebCallButton';
 
+/* ──────────────────────────────────────────────────────────────────────────── */
+/* THEME / SIZING                                                              */
+/* ──────────────────────────────────────────────────────────────────────────── */
 const SCOPE = 'va-scope';
 const ACCENT = '#10b981';
 const ACCENT_HOVER = '#0ea371';
 const BTN_SHADOW = '0 10px 24px rgba(16,185,129,.22)';
 
+/* Page sizing knobs */
+const MAX_CONTENT_W = 1000;  // <- keeps cards/textarea from being crazy wide on laptops
+const EDGE_GUTTER = 4;       // <- your requested 4px edge space
+
+/* ──────────────────────────────────────────────────────────────────────────── */
+/* TYPES                                                                       */
+/* ──────────────────────────────────────────────────────────────────────────── */
 type Provider = 'openai';
 type ModelId = 'gpt-4o' | 'gpt-4o-mini' | 'gpt-4.1' | 'gpt-3.5-turbo';
 type VoiceProvider = 'openai' | 'elevenlabs';
@@ -65,6 +75,9 @@ type Assistant = {
   };
 };
 
+/* ──────────────────────────────────────────────────────────────────────────── */
+/* LOCAL STORAGE KEYS                                                          */
+/* ──────────────────────────────────────────────────────────────────────────── */
 const LS_LIST = 'voice:assistants.v1';
 const ak = (id: string) => `voice:assistant:${id}`;
 const LS_CALLS = 'voice:calls.v1';
@@ -73,6 +86,9 @@ const LS_ROUTES = 'voice:phoneRoutes.v1';
 const readLS = <T,>(k: string): T | null => { try { const r = localStorage.getItem(k); return r ? (JSON.parse(r) as T) : null; } catch { return null; } };
 const writeLS = <T,>(k: string, v: T) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 
+/* ──────────────────────────────────────────────────────────────────────────── */
+/* BASE PROMPT                                                                 */
+/* ──────────────────────────────────────────────────────────────────────────── */
 const BASE_PROMPT = `[Identity]
 You are an intelligent and responsive assistant designed to help users with a wide range of inquiries and tasks.
 
@@ -101,7 +117,9 @@ You are an intelligent and responsive assistant designed to help users with a wi
 [Handover]
 - When done, summarize details and hand off if needed.`.trim();
 
-/* -------------------- Prompt helpers -------------------- */
+/* ──────────────────────────────────────────────────────────────────────────── */
+/* PROMPT HELPERS                                                              */
+/* ──────────────────────────────────────────────────────────────────────────── */
 function sectionRegex(name: string) { return new RegExp(String.raw`\[${name}\]\s*([\s\S]*?)(?=\n\[|$)`, 'i'); }
 function setSection(prompt: string, name: string, body: string) {
   const re = sectionRegex(name);
@@ -112,18 +130,10 @@ function setSection(prompt: string, name: string, body: string) {
 function mergeInput(freeText: string, current: string) {
   const out = { prompt: current || BASE_PROMPT, firstMessage: undefined as string | undefined };
   const raw = (freeText || '').trim(); if (!raw) return out;
-
   const m = raw.match(/^(?:first\s*message|greeting)\s*[:\-]\s*(.+)$/i);
   if (m) { out.firstMessage = m[1].trim(); return out; }
-
   const blocks = [...raw.matchAll(/\[(Identity|Style|System Behaviors|Task & Goals|Data to Collect|Safety|Handover|Refinements)\]\s*([\s\S]*?)(?=\n\[|$)/gi)];
-  if (blocks.length) {
-    let next = out.prompt;
-    for (const b of blocks) next = setSection(next, b[1], b[2]);
-    out.prompt = next;
-    return out;
-  }
-
+  if (blocks.length) { let next = out.prompt; for (const b of blocks) next = setSection(next, b[1], b[2]); out.prompt = next; return out; }
   const hasRef = sectionRegex('Refinements').test(out.prompt);
   const bullet = `- ${raw.replace(/\s+/g, ' ').trim()}`;
   out.prompt = hasRef
@@ -132,7 +142,9 @@ function mergeInput(freeText: string, current: string) {
   return out;
 }
 
-/* -------------------- Atoms -------------------- */
+/* ──────────────────────────────────────────────────────────────────────────── */
+/* SMALL UI ATOMS                                                              */
+/* ──────────────────────────────────────────────────────────────────────────── */
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div style={{ minWidth: 0 }}>
@@ -144,7 +156,8 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function Section({ title, icon, children }: { title: string; icon: React.ReactNode; children: React.ReactNode }) {
   const [open, setOpen] = useState(true);
   return (
-    <div className="col-span-12 rounded-xl relative va-card">
+    <div className="col-span-12 rounded-xl relative"
+         style={{ background: 'var(--va-card)', border: '1px solid var(--va-border)', boxShadow: 'var(--va-shadow)' }}>
       <div aria-hidden className="pointer-events-none absolute -top-[22%] -left-[22%] w-[70%] h-[70%] rounded-full"
            style={{ background: 'radial-gradient(circle, color-mix(in oklab, var(--accent) 14%, transparent) 0%, transparent 70%)', filter: 'blur(40px)' }} />
       <button type="button" onClick={() => setOpen(v => !v)} className="w-full flex items-center justify-between px-5 py-4">
@@ -162,9 +175,11 @@ function Section({ title, icon, children }: { title: string; icon: React.ReactNo
   );
 }
 
+/* ──────────────────────────────────────────────────────────────────────────── */
+/* TELEPHONY EDITOR                                                            */
+/* ──────────────────────────────────────────────────────────────────────────── */
 function TelephonyEditor({ numbers, linkedId, onLink, onAdd, onRemove }: {
-  numbers: PhoneNum[]; linkedId?: string;
-  onLink: (id?: string) => void; onAdd: (e164: string, label?: string) => void; onRemove: (id: string) => void;
+  numbers: PhoneNum[]; linkedId?: string; onLink: (id?: string) => void; onAdd: (e164: string, label?: string) => void; onRemove: (id: string) => void;
 }) {
   const [e164, setE164] = useState(''); const [label, setLabel] = useState('');
   return (
@@ -172,11 +187,13 @@ function TelephonyEditor({ numbers, linkedId, onLink, onAdd, onRemove }: {
       <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(3, minmax(240px, 1fr))' }}>
         <div style={{ minWidth: 0 }}>
           <div className="mb-1.5 text-[13px] font-medium" style={{ color: 'var(--text)' }}>Phone Number (E.164)</div>
-          <input value={e164} onChange={(e) => setE164(e.target.value)} placeholder="+1xxxxxxxxxx" className="va-input"/>
+          <input value={e164} onChange={(e) => setE164(e.target.value)} placeholder="+1xxxxxxxxxx" className="va-input"
+                 style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)', boxShadow: 'var(--va-input-shadow)', color: 'var(--text)' }}/>
         </div>
         <div style={{ minWidth: 0 }}>
           <div className="mb-1.5 text-[13px] font-medium" style={{ color: 'var(--text)' }}>Label</div>
-          <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Support line" className="va-input"/>
+          <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Support line" className="va-input"
+                 style={{ background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)', boxShadow: 'var(--va-input-shadow)', color: 'var(--text)' }}/>
         </div>
         <div className="flex items-end">
           <button onClick={() => { onAdd(e164, label); setE164(''); setLabel(''); }} className="btn btn--green w-full justify-center">
@@ -209,7 +226,9 @@ function TelephonyEditor({ numbers, linkedId, onLink, onAdd, onRemove }: {
   );
 }
 
-/* -------------------- Scoped CSS -------------------- */
+/* ──────────────────────────────────────────────────────────────────────────── */
+/* SCOPED CSS (v0-like)                                                        */
+/* ──────────────────────────────────────────────────────────────────────────── */
 function StyleBlock() {
   return (
     <style jsx global>{`
@@ -232,75 +251,59 @@ function StyleBlock() {
   --va-shadow-lg:0 42px 110px rgba(0,0,0,.66), 0 20px 48px rgba(0,0,0,.5);
   --va-shadow-sm:0 12px 26px rgba(0,0,0,.35);
   --va-shadow-side:8px 0 28px rgba(0,0,0,.42);
-  --va-rail-w:360px; /* JS will keep updating */
-  --va-edge-gutter:4px; /* requested 4px spacing */
+  --va-rail-w:360px;            /* updated at runtime */
+  --app-sidebar-w:248px;        /* updated at runtime */
+  --va-edge-gutter:${EDGE_GUTTER}px;
 }
-
-/* light */
 :root:not([data-theme="dark"]) .${SCOPE}{
   --bg:#f7f9fb; --text:#101316; --text-muted:color-mix(in oklab, var(--text) 55%, transparent);
   --va-card:#ffffff; --va-topbar:#ffffff; --va-sidebar:linear-gradient(180deg,#ffffff 0%,#f7f9fb 100%);
   --va-chip:#ffffff; --va-border:rgba(0,0,0,.10); --va-input-bg:#ffffff; --va-input-border:rgba(0,0,0,.12);
   --va-input-shadow:inset 0 1px 0 rgba(255,255,255,.85); --va-menu-bg:#ffffff; --va-menu-border:rgba(0,0,0,.10);
-  --va-shadow:0 28px 70px rgba(0,0,0,.12), 0 12px 28px rgba(0,0,0,.08); --va-shadow-lg:0 42px 110px rgba(0,0,0,.16), 0 22px 54px rgba(0,0,0,.10);
-  --va-shadow-sm:0 12px 26px rgba(0,0,0,.10); --va-shadow-side:8px 0 26px rgba(0,0,0,.08);
+  --va-shadow:0 28px 70px rgba(0,0,0,.12), 0 12px 28px rgba(0,0,0,.08);
+  --va-shadow-lg:0 42px 110px rgba(0,0,0,.16), 0 22px 54px rgba(0,0,0,.10);
+  --va-shadow-sm:0 12px 26px rgba(0,0,0,.10);
 }
-
 .${SCOPE} .icon{ color: var(--accent); }
 
-/* cards */
-.${SCOPE} .va-card{
-  background: var(--va-card);
-  border: 1px solid var(--va-border);
-  box-shadow: var(--va-shadow);
-  border-radius: 16px;
-  box-sizing: border-box;
-  overflow: hidden;
-}
-
-/* unified top buttons */
-.${SCOPE} .topbar-btn{ height:42px; padding:0 .9rem; border-radius:14px; display:inline-flex; align-items:center; gap:.5rem;
-  border:1px solid var(--va-border); background:var(--va-card); box-shadow:var(--va-shadow-sm); }
-.${SCOPE} .btn{ display:inline-flex; align-items:center; gap:.5rem; border-radius:14px; padding:0 .95rem; height:42px; font-size:14px;
-  border:1px solid var(--va-border); box-sizing:border-box; }
+/* unified control sizing */
+.${SCOPE} .topbar-btn,
+.${SCOPE} .btn{ height:42px; padding:0 .95rem; border-radius:14px; display:inline-flex; align-items:center; gap:.5rem; border:1px solid var(--va-border); }
 .${SCOPE} .btn--green{ background:${ACCENT}; color:#fff; box-shadow:${BTN_SHADOW}; transition:transform .04s ease, background .18s ease; }
 .${SCOPE} .btn--green:hover{ background:${ACCENT_HOVER}; }
 .${SCOPE} .btn--green:active{ transform:translateY(1px); }
-.${SCOPE} .btn--danger{ background:rgba(220,38,38,.12); color:#fca5a5; border-color:rgba(220,38,38,.35); box-shadow:0 10px 24px rgba(220,38,38,.15); }
+.${SCOPE} .btn--danger{ background:rgba(220,38,38,.12); color:#fca5a5; box-shadow:0 10px 24px rgba(220,38,38,.15); border-color:rgba(220,38,38,.35); }
 .${SCOPE} .btn--ghost{ background:var(--va-card); color:var(--text); box-shadow:var(--va-shadow-sm); }
 
-/* inputs/selects — never overflow */
-.${SCOPE} .va-input, .${SCOPE} select, .${SCOPE} textarea, .${SCOPE} input{
-  width:100%; min-width:0; max-width:100%; box-sizing:border-box;
-  height:42px; border-radius:14px; padding:0 .9rem; font-size:15px; outline:none;
+/* Inputs/selects consistent & never overflow */
+.${SCOPE} .va-input, .${SCOPE} select{
+  width:100%; min-width:0; height:42px; border-radius:14px; padding:0 .9rem; font-size:15px; outline:none;
   background:var(--va-input-bg); border:1px solid var(--va-input-border); box-shadow:var(--va-input-shadow); color:var(--text);
 }
-.${SCOPE} textarea{ height:auto; }
 
-/* main area “magnet” behavior */
-.${SCOPE} .va-main{ max-width:none !important; }
+/* Main grid never clamps too wide; centered lane feel */
+.${SCOPE} .va-main { max-width: none !important; }
 
-/* collapsed rail should not overlay content: handled inside AssistantRail (width:0) */
-
-/* responsive tweak */
-@media (max-width: 1180px){ .${SCOPE}{ --va-rail-w: 320px; } }
+/* small tweak for laptop */
+@media (max-width: 1280px){ .${SCOPE}{ --va-rail-w: 320px; } }
 `}</style>
   );
 }
 
-/* ========================================================================== */
-/*                                   PAGE                                     */
-/* ========================================================================== */
+/* ──────────────────────────────────────────────────────────────────────────── */
+/* PAGE                                                                        */
+/* ──────────────────────────────────────────────────────────────────────────── */
 export default function VoiceAgentSection() {
   const scopeRef = useRef<HTMLDivElement | null>(null);
   const [isClient, setIsClient] = useState(false);
   useEffect(() => { setIsClient(true); }, []);
 
-  /* ----- live width calc (magnet with rail) ----- */
+  /* Measure app sidebar + the FIXED rail <aside> width so the lane expands/collapses correctly */
   useLayoutEffect(() => {
     if (!isClient) return;
 
     const root = document.documentElement;
+
     const getW = (el?: HTMLElement | null) =>
       el && el.offsetParent !== null ? Math.round(el.getBoundingClientRect().width) : 0;
 
@@ -308,33 +311,44 @@ export default function VoiceAgentSection() {
       const appSidebar =
         document.querySelector<HTMLElement>('[data-app-sidebar]') ||
         document.getElementById('app-sidebar') ||
-        document.querySelector<HTMLElement>('.app-sidebar');
+        document.querySelector<HTMLElement>('.app-sidebar') ||
+        document.querySelector<HTMLElement>('aside.sidebar');
 
-      const rail = document.querySelector<HTMLElement>('[data-va-rail]'); // <-- the real rail (from AssistantRail)
-      root.style.setProperty('--app-sidebar-w', `${getW(appSidebar) || 0}px`);
-      root.style.setProperty('--va-rail-w', `${getW(rail) || 0}px`);
-      root.style.setProperty('--va-edge-gutter', '4px');
+      /* IMPORTANT: find the fixed rail <aside> inside AssistantRail */
+      const railAside =
+        document.querySelector<HTMLElement>(`.${SCOPE} aside[data-collapsed]`);
+
+      const appW = getW(appSidebar);
+      const railW = getW(railAside);
+
+      root.style.setProperty('--app-sidebar-w', `${appW}px`);
+      root.style.setProperty('--va-rail-w', `${railW}px`);
+      root.style.setProperty('--va-edge-gutter', `${EDGE_GUTTER}px`);
     };
 
     apply();
+
     const ro = new ResizeObserver(apply);
     const appSidebar =
       document.querySelector<HTMLElement>('[data-app-sidebar]') ||
       document.getElementById('app-sidebar') ||
-      document.querySelector<HTMLElement>('.app-sidebar');
-    const rail = document.querySelector<HTMLElement>('[data-va-rail]');
+      document.querySelector<HTMLElement>('.app-sidebar') ||
+      document.querySelector<HTMLElement>('aside.sidebar');
+    const railAside =
+      document.querySelector<HTMLElement>(`.${SCOPE} aside[data-collapsed]`);
 
     if (appSidebar) ro.observe(appSidebar);
-    if (rail) ro.observe(rail);
+    if (railAside)  ro.observe(railAside);
+    window.addEventListener('resize', apply);
 
-    let ticks = 40; const id = window.setInterval(() => { apply(); if (--ticks <= 0) window.clearInterval(id); }, 100);
-    const onPing = () => apply();
-    window.addEventListener('voice:layout:ping', onPing);
+    /* keep applying briefly after layout changes */
+    let ticks = 40;
+    const id = window.setInterval(() => { apply(); if (--ticks <= 0) window.clearInterval(id); }, 80);
 
-    return () => { ro.disconnect(); window.clearInterval(id); window.removeEventListener('voice:layout:ping', onPing); };
+    return () => { ro.disconnect(); window.removeEventListener('resize', apply); window.clearInterval(id); };
   }, [isClient]);
 
-  /* ----- state/bootstrap ----- */
+  /* ─────────────────────────── Assistants (LS) ─────────────────────────── */
   const [assistants, setAssistants] = useState<Assistant[]>([]);
   const [activeId, setActiveId] = useState(''); const [active, setActive] = useState<Assistant | null>(null);
   const [rev, setRev] = useState(0);
@@ -371,21 +385,15 @@ export default function VoiceAgentSection() {
 
   const updateActive = (mut: (a: Assistant) => Assistant) => {
     if (!active) return;
-    const next = mut(active);
-    writeLS(ak(next.id), next);
+    const next = mut(active); writeLS(ak(next.id), next);
     const list = (readLS<Assistant[]>(LS_LIST) || []).map(x =>
       x.id === next.id ? { ...x, name: next.name, folder: next.folder, updatedAt: Date.now(), published: next.published } : x
     );
-    writeLS(LS_LIST, list);
-    setAssistants(list);
-    setActive(next);
-    setRev(r => r + 1);
+    writeLS(LS_LIST, list); setAssistants(list); setActive(next); setRev(r => r + 1);
   };
 
-  /* rail actions */
-  const [creating, setCreating] = useState(false);
+  /* Create/Rename/Delete (for rail) */
   const onCreate = async () => {
-    setCreating(true); await new Promise(r => setTimeout(r, 240));
     const id = `agent_${Math.random().toString(36).slice(2, 8)}`;
     const a: Assistant = {
       id, name: 'New Assistant', updatedAt: Date.now(), published: false,
@@ -397,9 +405,8 @@ export default function VoiceAgentSection() {
         telephony: { numbers: [], linkedNumberId: undefined }
       }
     };
-    writeLS(ak(id), a);
-    const list = [...assistants, a]; writeLS(LS_LIST, list);
-    setAssistants(list); setActiveId(id); setCreating(false);
+    writeLS(ak(id), a); const list = [...assistants, a]; writeLS(LS_LIST, list);
+    setAssistants(list); setActiveId(id);
   };
   const onRename = (id: string, name: string) => {
     const cur = readLS<Assistant>(ak(id)); if (cur) writeLS(ak(id), { ...cur, name, updatedAt: Date.now() });
@@ -408,14 +415,12 @@ export default function VoiceAgentSection() {
   };
   const onDelete = (id: string) => {
     const list = assistants.filter(a => a.id !== id);
-    writeLS(LS_LIST, list); setAssistants(list);
-    localStorage.removeItem(ak(id));
-    if (activeId === id && list.length) setActiveId(list[0].id);
-    if (!list.length) setActiveId('');
+    writeLS(LS_LIST, list); setAssistants(list); localStorage.removeItem(ak(id));
+    if (activeId === id && list.length) setActiveId(list[0].id); if (!list.length) setActiveId('');
     setRev(r => r + 1);
   };
 
-  /* Generate overlay (prompt merge) */
+  /* Generate overlay */
   const [genOpen, setGenOpen] = useState(false);
   const [genText, setGenText] = useState('');
   const [typingPreview, setTypingPreview] = useState<string | null>(null);
@@ -425,16 +430,20 @@ export default function VoiceAgentSection() {
     if (!active) return;
     const current = active.config.model.systemPrompt || '';
     const { prompt, firstMessage } = mergeInput(genText, current || BASE_PROMPT);
-    setTypingPreview(prompt);
-    setPendingFirstMsg(firstMessage);
-    setGenOpen(false);
-    setGenText('');
+    setTypingPreview(prompt); setPendingFirstMsg(firstMessage); setGenOpen(false); setGenText('');
   };
   const acceptGenerate = () => {
     if (!active) return;
     updateActive(a => ({
       ...a,
-      config: { ...a.config, model: { ...a.config.model, systemPrompt: typingPreview || a.config.model.systemPrompt, firstMessage: typeof pendingFirstMsg === 'string' ? pendingFirstMsg : a.config.model.firstMessage } }
+      config: {
+        ...a.config,
+        model: {
+          ...a.config.model,
+          systemPrompt: typingPreview || a.config.model.systemPrompt,
+          firstMessage: typeof pendingFirstMsg === 'string' ? pendingFirstMsg : a.config.model.firstMessage
+        }
+      }
     }));
     setTypingPreview(null); setPendingFirstMsg(undefined);
   };
@@ -452,10 +461,8 @@ export default function VoiceAgentSection() {
     updateActive(a => ({ ...a, config: { ...a.config, voice: { provider: v as VoiceProvider, voiceId: list[0].value, voiceLabel: list[0].label } } }));
   };
   const handleVoiceIdChange = (v: string) => {
-    if (!active) return;
-    const list = active.config.voice.provider === 'elevenlabs' ? elevenVoices : openaiVoices;
-    const found = list.find(x => x.value === v);
-    setPendingVoiceId(v); setPendingVoiceLabel(found?.label || v);
+    if (!active) return; const list = active.config.voice.provider === 'elevenlabs' ? elevenVoices : openaiVoices;
+    const found = list.find(x => x.value === v); setPendingVoiceId(v); setPendingVoiceLabel(found?.label || v);
   };
   const saveVoice = async () => {
     if (!active || !pendingVoiceId) return;
@@ -473,8 +480,7 @@ export default function VoiceAgentSection() {
   };
   const removePhone = (id: string) => {
     updateActive(a => {
-      const nums = a.config.telephony?.numbers ?? [];
-      const linked = a.config.telephony?.linkedNumberId;
+      const nums = a.config.telephony?.numbers ?? []; const linked = a.config.telephony?.linkedNumberId;
       const nextLinked = linked === id ? undefined : linked;
       return { ...a, config: { ...a.config, telephony: { numbers: nums.filter(n => n.id !== id), linkedNumberId: nextLinked } } };
     });
@@ -487,8 +493,7 @@ export default function VoiceAgentSection() {
     const num = numbers.find(n => n.id === linkedId);
     if (!num) { alert('Pick a Phone Number (Linked) before publishing.'); return; }
     const routes = readLS<Record<string, string>>(LS_ROUTES) || {};
-    routes[num.id] = active.id; writeLS(LS_ROUTES, routes);
-    updateActive(a => ({ ...a, published: true }));
+    routes[num.id] = active.id; writeLS(LS_ROUTES, routes); updateActive(a => ({ ...a, published: true }));
     alert(`Published! ${num.e164} is now linked to ${active.name}.`);
   };
 
@@ -507,8 +512,7 @@ export default function VoiceAgentSection() {
   };
 
   const onTurn = (role: 'user' | 'assistant', text: string) => {
-    if (!active) return;
-    ensureCall();
+    if (!active) return; ensureCall();
     const turn = { role, text, ts: Date.now() };
     setTranscript(t => {
       const next = [...t, turn];
@@ -534,31 +538,44 @@ export default function VoiceAgentSection() {
   }, [isClient, active?.id, currentCallId, transcript.length, rev]);
 
   if (!isClient) return (<div ref={scopeRef} className={SCOPE} style={{ background: 'var(--bg)', color: 'var(--text)' }}><StyleBlock /><div className="px-6 py-10 opacity-70 text-sm">Loading…</div></div>);
-  if (!active)     return (<div ref={scopeRef} className={SCOPE} style={{ background: 'var(--bg)', color: 'var(--text)' }}><StyleBlock /><div className="px-6 py-10 opacity-70">Create your first assistant.</div></div>);
+  if (!active) return (<div ref={scopeRef} className={SCOPE} style={{ background: 'var(--bg)', color: 'var(--text)' }}><StyleBlock /><div className="px-6 py-10 opacity-70">Create your first assistant.</div></div>);
 
   const railData: AssistantLite[] = assistants.map(a => ({ id: a.id, name: a.name, folder: a.folder, updatedAt: a.updatedAt }));
   const greet = active.config.model.firstMessageMode === 'assistant_first'
-    ? (active.config.model.firstMessage || 'Hello. How may I help you today?') : 'Listening…';
+    ? (active.config.model.firstMessage || 'Hello. How may I help you today?')
+    : 'Listening…';
   const linkedE164 = active.config.telephony?.numbers.find(n => n.id === active.config.telephony?.linkedNumberId)?.e164 || '';
 
+  /* ─────────────────────────── RENDER ─────────────────────────── */
   return (
     <div ref={scopeRef} className={SCOPE} style={{ background: 'var(--bg)', color: 'var(--text)' }}>
-      {/* render the rail directly (it already sets data-va-rail on its <aside>) */}
-      <AssistantRail assistants={railData} activeId={activeId} onSelect={setActiveId} onCreate={onCreate} onRename={onRename} onDelete={onDelete} />
+      {/* Assistant Rail (fixed). We rely on its fixed <aside> for measurement. */}
+      <AssistantRail
+        assistants={railData}
+        activeId={activeId}
+        onSelect={setActiveId}
+        onCreate={onCreate}
+        onRename={onRename}
+        onDelete={onDelete}
+      />
 
-      {/* MAIN — expands with rail; 4px gutters; no overflow */}
+      {/* CONTENT LANE — always visible; expands/shrinks with sidebars */}
       <div
         className="va-main"
         style={{
+          /* Left offset = app sidebar + rail + 4px gutter */
           marginLeft: 'calc(var(--app-sidebar-w, 0px) + var(--va-rail-w, 0px) + var(--va-edge-gutter, 4px))',
-          width: 'calc(100vw - var(--app-sidebar-w, 0px) - var(--va-rail-w, 0px) - (var(--va-edge-gutter, 4px) * 2))',
+          /* Available viewport width after subtracting left offset + right gutter */
+          width: `calc(100vw - var(--app-sidebar-w, 0px) - var(--va-rail-w, 0px) - (var(--va-edge-gutter, 4px) * 2))`,
+          /* Clamp max width for laptop so UI never looks stretched */
+          maxWidth: `${MAX_CONTENT_W}px`,
           paddingRight: 'var(--va-edge-gutter, 4px)',
           paddingLeft: 'var(--va-edge-gutter, 4px)',
           paddingTop: 'calc(var(--app-header-h, 64px) + 12px)',
           paddingBottom: '88px'
         }}
       >
-        {/* top actions */}
+        {/* Top actions (uniform height) */}
         <div className="px-2 pb-3 flex items-center justify-between sticky" style={{ top: 'calc(var(--app-header-h, 64px) + 8px)', zIndex: 2 }}>
           <div className="flex items-center gap-8">
             {!currentCallId ? (
@@ -576,11 +593,15 @@ export default function VoiceAgentSection() {
                 <PhoneOff className="w-4 h-4" /> End Call
               </button>
             )}
-            <button className="topbar-btn"><MessageSquare className="w-4 h-4 icon" /> Chat</button>
-            <button className="topbar-btn" onClick={() => navigator.clipboard.writeText(active.config.model.systemPrompt || '').catch(() => {})}>
+
+            <button onClick={() => window.dispatchEvent(new CustomEvent('voiceagent:open-chat', { detail: { id: active.id } }))}
+                    className="topbar-btn"><MessageSquare className="w-4 h-4 icon" /> Chat</button>
+            <button onClick={() => navigator.clipboard.writeText(active.config.model.systemPrompt || '').catch(() => {})}
+                    className="topbar-btn">
               <Copy className="w-4 h-4 icon" /> Copy Prompt
             </button>
           </div>
+
           <div className="flex items-center gap-8">
             <button onClick={publish} className="btn btn--green">
               <Rocket className="w-4 h-4 text-white" /><span className="text-white">{active.published ? 'Republish' : 'Publish'}</span>
@@ -588,20 +609,24 @@ export default function VoiceAgentSection() {
           </div>
         </div>
 
-        {/* body */}
+        {/* Body */}
         <div className="grid gap-6 md:gap-8" style={{ gridTemplateColumns: '1fr', width: '100%', minWidth: 0 }}>
           {/* Model */}
           <Section title="Model" icon={<FileText className="w-4 h-4 icon" />}>
-            <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(4, minmax(280px, 1fr))' }}>
+            <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(4, minmax(220px, 1fr))' }}>
               <Field label="Provider">
-                <select value={active.config.model.provider}
-                        onChange={e => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, provider: e.target.value as Provider } } }))}>
+                <select
+                  value={active.config.model.provider}
+                  onChange={e => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, provider: e.target.value as Provider } } }))}
+                >
                   <option value="openai">OpenAI</option>
                 </select>
               </Field>
               <Field label="Model">
-                <select value={active.config.model.model}
-                        onChange={e => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, model: e.target.value as ModelId } } }))}>
+                <select
+                  value={active.config.model.model}
+                  onChange={e => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, model: e.target.value as ModelId } } }))}
+                >
                   <option value="gpt-4o">GPT-4o</option>
                   <option value="gpt-4o-mini">GPT-4o mini</option>
                   <option value="gpt-4.1">GPT-4.1</option>
@@ -609,26 +634,33 @@ export default function VoiceAgentSection() {
                 </select>
               </Field>
               <Field label="First Message Mode">
-                <select value={active.config.model.firstMessageMode}
-                        onChange={e => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, firstMessageMode: e.target.value as any } } }))}>
+                <select
+                  value={active.config.model.firstMessageMode}
+                  onChange={e => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, firstMessageMode: e.target.value as any } } }))}
+                >
                   <option value="assistant_first">Assistant speaks first</option>
                   <option value="user_first">User speaks first</option>
                 </select>
               </Field>
               <Field label="First Message">
-                <input className="va-input" value={active.config.model.firstMessage}
-                       onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, firstMessage: e.target.value } } }))}/>
+                <input
+                  className="va-input"
+                  style={{ minWidth: 0 }}
+                  value={active.config.model.firstMessage}
+                  onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, firstMessage: e.target.value } } }))}
+                />
               </Field>
             </div>
 
+            {/* System Prompt */}
             <div className="mt-6" style={{ minWidth: 0 }}>
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="w-4 h-4 icon" /> System Prompt</div>
                 <div className="flex items-center gap-2">
-                  <button className="topbar-btn" onClick={() => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, systemPrompt: BASE_PROMPT } } }))}>
+                  <button onClick={() => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, systemPrompt: BASE_PROMPT } } }))} className="topbar-btn">
                     <RefreshCw className="w-4 h-4 icon" /> Reset
                   </button>
-                  <button className="btn btn--green" onClick={() => setGenOpen(true)}>
+                  <button onClick={() => setGenOpen(true)} className="btn btn--green">
                     <Sparkles className="w-4 h-4 text-white" /> <span className="text-white">Generate / Edit</span>
                   </button>
                 </div>
@@ -636,21 +668,27 @@ export default function VoiceAgentSection() {
 
               {!typingPreview ? (
                 <textarea
-                  rows={26}
+                  rows={24}
                   value={active.config.model.systemPrompt || ''}
                   onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, systemPrompt: e.target.value } } }))}
+                  className="w-full rounded-2xl px-3 py-3 text-[14px] leading-6 outline-none"
                   style={{
-                    background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-shadow), inset 0 1px 0 rgba(255,255,255,.03)',
-                    color:'var(--text)', borderRadius:16, padding:'12px', width:'100%', minHeight:560, resize:'vertical',
-                    fontFamily:'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace'
+                    background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)',
+                    boxShadow: 'var(--va-shadow), inset 0 1px 0 rgba(255,255,255,.03)', color: 'var(--text)',
+                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+                    minHeight: 520
                   }}
                 />
               ) : (
                 <div>
-                  <div style={{
-                    background:'var(--va-input-bg)', border:'1px solid var(--va-input-border)', boxShadow:'var(--va-shadow), inset 0 1px 0 rgba(255,255,255,.03)',
-                    color:'var(--text)', borderRadius:16, padding:'12px', whiteSpace:'pre-wrap', minHeight:560, maxHeight:680, overflowY:'auto'
-                  }}>{typingPreview}</div>
+                  <div className="w-full rounded-2xl px-3 py-3 text-[14px] leading-6"
+                       style={{
+                         background: 'var(--va-input-bg)', border: '1px solid var(--va-input-border)',
+                         boxShadow: 'var(--va-shadow), inset 0 1px 0 rgba(255,255,255,.03)', color: 'var(--text)',
+                         whiteSpace: 'pre-wrap', minHeight: 520, maxHeight: 680, overflowY: 'auto'
+                       }}>
+                    {typingPreview}
+                  </div>
                   <div className="flex items-center gap-2 justify-end mt-3">
                     <button onClick={declineGenerate} className="topbar-btn"><X className="w-4 h-4 icon" /> Decline</button>
                     <button onClick={acceptGenerate} className="btn btn--green"><Check className="w-4 h-4 text-white" /><span className="text-white">Accept</span></button>
@@ -662,7 +700,7 @@ export default function VoiceAgentSection() {
 
           {/* Voice */}
           <Section title="Voice" icon={<Mic2 className="w-4 h-4 icon" />}>
-            <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(2, minmax(280px, 1fr))' }}>
+            <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(2, minmax(220px, 1fr))' }}>
               <Field label="Provider">
                 <select value={active.config.voice.provider} onChange={(e) => handleVoiceProviderChange(e.target.value)}>
                   <option value="openai">OpenAI</option>
@@ -672,13 +710,17 @@ export default function VoiceAgentSection() {
               <Field label="Voice">
                 <select value={pendingVoiceId || active.config.voice.voiceId} onChange={(e) => handleVoiceIdChange(e.target.value)}>
                   {(active.config.voice.provider === 'elevenlabs' ? [
-                    { value: 'rachel', label: 'Rachel (ElevenLabs)' }, { value: 'adam', label: 'Adam (ElevenLabs)' }, { value: 'bella', label: 'Bella (ElevenLabs)' },
+                    { value: 'rachel', label: 'Rachel (ElevenLabs)' },
+                    { value: 'adam', label: 'Adam (ElevenLabs)' },
+                    { value: 'bella', label: 'Bella (ElevenLabs)' },
                   ] : [
-                    { value: 'alloy', label: 'Alloy (OpenAI)' }, { value: 'ember', label: 'Ember (OpenAI)' },
-                  ]).map(v => <option key={v.value} value={v.value}>{v.label}</option>)}
+                    { value: 'alloy', label: 'Alloy (OpenAI)' },
+                    { value: 'ember', label: 'Ember (OpenAI)' },
+                  ]).map(v => (<option key={v.value} value={v.value}>{v.label}</option>))}
                 </select>
               </Field>
             </div>
+
             <div className="mt-3 flex items-center gap-2">
               <button onClick={() => { try { const u = new SpeechSynthesisUtterance('This is a quick preview of the selected voice.'); window.speechSynthesis.cancel(); window.speechSynthesis.speak(u); } catch {} }} className="topbar-btn">
                 <Volume2 className="w-4 h-4 icon" /> Test Voice
@@ -692,23 +734,20 @@ export default function VoiceAgentSection() {
 
           {/* Transcriber */}
           <Section title="Transcriber" icon={<BookOpen className="w-4 h-4 icon" />}>
-            <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(3, minmax(280px, 1fr))' }}>
+            <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(3, minmax(220px, 1fr))' }}>
               <Field label="Provider">
-                <select value={active.config.transcriber.provider}
-                        onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, provider: e.target.value as any } } }))}>
+                <select value={active.config.transcriber.provider} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, provider: e.target.value as any } } }))}>
                   <option value="deepgram">Deepgram</option>
                 </select>
               </Field>
               <Field label="Model">
-                <select value={active.config.transcriber.model}
-                        onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, model: e.target.value as any } } }))}>
+                <select value={active.config.transcriber.model} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, model: e.target.value as any } } }))}>
                   <option value="nova-2">Nova 2</option>
                   <option value="nova-3">Nova 3</option>
                 </select>
               </Field>
               <Field label="Language">
-                <select value={active.config.transcriber.language}
-                        onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, language: e.target.value as any } } }))}>
+                <select value={active.config.transcriber.language} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, language: e.target.value as any } } }))}>
                   <option value="en">English</option>
                   <option value="multi">Multi</option>
                 </select>
@@ -717,21 +756,21 @@ export default function VoiceAgentSection() {
               <Field label="Confidence Threshold">
                 <div className="flex items-center gap-3">
                   <input type="range" min={0} max={1} step={0.01}
-                         value={active.config.transcriber.confidenceThreshold}
-                         onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, confidenceThreshold: Number(e.target.value) } } }))} className="w-full" />
+                    value={active.config.transcriber.confidenceThreshold}
+                    onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, confidenceThreshold: Number(e.target.value) } } }))} className="w-full"/>
                   <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{active.config.transcriber.confidenceThreshold.toFixed(2)}</span>
                 </div>
               </Field>
               <Field label="Denoise">
-                <select value={String(active.config.transcriber.denoise)}
-                        onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, denoise: e.target.value === 'true' } } }))}>
-                  <option value="false">Off</option><option value="true">On</option>
+                <select value={String(active.config.transcriber.denoise)} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, denoise: e.target.value === 'true' } } }))}>
+                  <option value="false">Off</option>
+                  <option value="true">On</option>
                 </select>
               </Field>
               <Field label="Use Numerals">
-                <select value={String(active.config.transcriber.numerals)}
-                        onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, numerals: e.target.value === 'true' } } }))}>
-                  <option value="false">No</option><option value="true">Yes</option>
+                <select value={String(active.config.transcriber.numerals)} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, numerals: e.target.value === 'true' } } }))}>
+                  <option value="false">No</option>
+                  <option value="true">Yes</option>
                 </select>
               </Field>
             </div>
@@ -739,17 +778,17 @@ export default function VoiceAgentSection() {
 
           {/* Tools */}
           <Section title="Tools" icon={<SlidersHorizontal className="w-4 h-4 icon" />}>
-            <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(2, minmax(280px, 1fr))' }}>
+            <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(2, minmax(220px, 1fr))' }}>
               <Field label="Enable End Call Function">
-                <select value={String(active.config.tools.enableEndCall)}
-                        onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, tools: { ...a.config.tools, enableEndCall: e.target.value === 'true' } } }))}>
-                  <option value="true">Enabled</option><option value="false">Disabled</option>
+                <select value={String(active.config.tools.enableEndCall)} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, tools: { ...a.config.tools, enableEndCall: e.target.value === 'true' } } }))}>
+                  <option value="true">Enabled</option>
+                  <option value="false">Disabled</option>
                 </select>
               </Field>
               <Field label="Dial Keypad">
-                <select value={String(active.config.tools.dialKeypad)}
-                        onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, tools: { ...a.config.tools, dialKeypad: e.target.value === 'true' } } }))}>
-                  <option value="true">Enabled</option><option value="false">Disabled</option>
+                <select value={String(active.config.tools.dialKeypad)} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, tools: { ...a.config.tools, dialKeypad: e.target.value === 'true' } } }))}>
+                  <option value="true">Enabled</option>
+                  <option value="false">Disabled</option>
                 </select>
               </Field>
             </div>
@@ -823,16 +862,19 @@ export default function VoiceAgentSection() {
           <motion.div className="fixed inset-0 z-[999] flex items-center justify-center p-4"
                       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
                       style={{ background: 'rgba(0,0,0,.45)' }}>
-            <motion.div initial={{ y: 10, opacity: 0, scale: .98 }} animate={{ y: 0, opacity: 1, scale: 1 }} exit={{ y: 8, opacity: 0, scale: .985 }}
-                        className="w-full max-w-2xl rounded-2xl va-card">
+            <motion.div
+              initial={{ y: 10, opacity: 0, scale: .98 }} animate={{ y: 0, opacity: 1, scale: 1 }} exit={{ y: 8, opacity: 0, scale: .985 }}
+              className="w-full max-w-2xl rounded-2xl"
+              style={{ background: 'var(--va-card)', border: '1px solid var(--va-border)', boxShadow: 'var(--va-shadow-lg)' }}
+            >
               <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid var(--va-border)' }}>
                 <div className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="w-4 h-4 icon" /> Generate / Edit Prompt</div>
                 <button onClick={() => setGenOpen(false)} className="p-2 rounded-lg hover:opacity-80"><X className="w-4 h-4 icon" /></button>
               </div>
               <div className="p-4">
                 <input value={genText} onChange={(e) => setGenText(e.target.value)}
-                       placeholder={`Examples:\n• assistant\n• collect full name, phone, date\n• [Identity] AI Sales Agent for roofers\n• first message: Hey—quick question to get you booked…`}
-                       className="va-input"/>
+                  placeholder={`Examples:\n• assistant\n• collect full name, phone, date\n• [Identity] AI Sales Agent for roofers\n• first message: Hey—quick question to get you booked…`}
+                  className="va-input"/>
                 <div className="mt-3 flex items-center justify-between gap-2">
                   <button onClick={() => setGenOpen(false)} className="topbar-btn">Cancel</button>
                   <button onClick={handleGenerate} className="btn btn--green"><span className="text-white">Generate</span></button>
