@@ -186,7 +186,7 @@ function CreateModal({ open, onClose, onCreate }:{
   );
 }
 
-/* ---------- Card ---------- */
+/* ---------- Card with top shadow/glow ---------- */
 function AssistantCard({
   a, active, onClick, onRename, onDelete,
 }:{
@@ -206,9 +206,9 @@ function AssistantCard({
       className="relative p-3 rounded-[14px] cursor-pointer transition-transform"
       whileHover={{ y: -2 }}
       style={{
-        background: 'var(--panel)',
+        background: 'var(--rail-card-bg, var(--acct-bg, var(--card)))',
         color: 'var(--text)',
-        /* base soft lift */
+        border: '1px solid var(--rail-card-border, var(--border))',
         boxShadow: active
           ? '0 16px 36px rgba(0,0,0,.38), 0 0 0 1px rgba(0,255,194,.10)'
           : '0 6px 18px rgba(0,0,0,.22), 0 0 0 1px rgba(255,255,255,.03)',
@@ -223,14 +223,20 @@ function AssistantCard({
           background: active
             ? 'linear-gradient(180deg, rgba(0,0,0,.55), rgba(0,0,0,0))'
             : 'linear-gradient(180deg, rgba(0,0,0,.38), rgba(0,0,0,0))',
-          boxShadow: active ? '0 0 24px rgba(0,255,194,.20)' : undefined,
+          boxShadow: active ? '0 0 24px rgba(0,255,194,.18)' : undefined,
         }}
       />
 
       <div className="flex items-center gap-3">
-        <div className="w-8 h-8 rounded-xl grid place-items-center"
-             style={{ background:'var(--brand-weak)', boxShadow: active ? '0 0 0 1px rgba(0,255,194,.18)' : undefined }}>
-          <Bot className="w-4 h-4" style={{ color:'var(--brand)' }} />
+        <div
+          className="w-8 h-8 rounded-xl grid place-items-center"
+          style={{
+            background:'var(--sb-icon-bg, rgba(255,255,255,.06))',
+            border:'1px solid var(--sb-icon-border, rgba(255,255,255,.12))',
+            boxShadow: active ? 'inset 0 0 10px rgba(0,0,0,.16), 0 0 0 1px rgba(0,255,194,.18)' : 'inset 0 0 10px rgba(0,0,0,.16)',
+          }}
+        >
+          <Bot className="w-4 h-4" style={{ color:'var(--brand, #12a989)' }} />
         </div>
 
         <div className="min-w-0 flex-1">
@@ -258,13 +264,11 @@ function AssistantCard({
         </div>
       </div>
 
-      {/* active rim (subtle) */}
+      {/* active rim */}
       {active && (
         <div
           className="pointer-events-none absolute inset-0 rounded-[14px]"
-          style={{
-            boxShadow: 'inset 0 0 0 1px rgba(0,255,194,.22), 0 0 30px rgba(0,255,194,.10)',
-          }}
+          style={{ boxShadow: 'inset 0 0 0 1px rgba(0,255,194,.22), 0 0 30px rgba(0,255,194,.10)' }}
         />
       )}
     </motion.div>
@@ -311,20 +315,34 @@ export default function AssistantRail() {
   const delName = assistants.find(a=>a.id===delId)?.name;
 
   return (
-    <div className="px-3 py-4">
+    <div
+      className="px-3 py-4 rounded-[16px]"
+      style={{
+        /* Match sidebar grey tones; fall back to panel/card */
+        background: 'var(--rail-bg, var(--sb-tag-bg, var(--panel)))',
+        border: '1px solid var(--rail-border, var(--sidebar-border, var(--border)))',
+        boxShadow: 'inset 0 0 10px rgba(0,0,0,.12)',
+      }}
+    >
       {/* Label */}
-      <div className="text-[11px] font-semibold tracking-[.12em] mb-2" style={{ color:'var(--text-muted)' }}>
+      <div className="text-[11px] font-semibold tracking-[.12em] mb-2" style={{ color:'var(--sidebar-muted, var(--text-muted))' }}>
         ASSISTANTS
       </div>
 
-      {/* Header (tighter spacing like Vapi) */}
+      {/* Header (Vapi-like tight) */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <div className="w-9 h-9 rounded-xl grid place-items-center shadow"
-               style={{ background:'var(--brand-weak)' }}>
-            <Bot className="w-4 h-4" style={{ color:'var(--brand)' }} />
+          <div
+            className="w-9 h-9 rounded-xl grid place-items-center shadow"
+            style={{
+              background:'var(--sb-icon-bg, rgba(255,255,255,.06))',
+              border:'1px solid var(--sb-icon-border, rgba(255,255,255,.12))',
+              boxShadow:'inset 0 0 10px rgba(0,0,0,.16)',
+            }}
+          >
+            <Bot className="w-4 h-4" style={{ color:'var(--brand, #12a989)' }} />
           </div>
-          <span className="font-semibold text-sm" style={{ color:'var(--text)' }}>Assistants</span>
+          <span className="font-semibold text-sm" style={{ color:'var(--sidebar-text, var(--text))' }}>Assistants</span>
         </div>
 
         <button
@@ -354,7 +372,7 @@ export default function AssistantRail() {
 
       {/* Search */}
       <div className="flex items-center gap-2 mb-3">
-        <Search className="w-4 h-4" style={{ color:'var(--text-muted)' }} />
+        <Search className="w-4 h-4" style={{ color:'var(--sidebar-muted, var(--text-muted))' }} />
         <input
           value={q}
           onChange={e=>setQ(e.target.value)}
@@ -369,7 +387,7 @@ export default function AssistantRail() {
         )}
       </div>
 
-      {/* Assistants list (tight vertical rhythm) */}
+      {/* Assistants list */}
       <div className="space-y-2.5">
         <AnimatePresence initial={false}>
           {filtered.map(a=>(
@@ -385,7 +403,7 @@ export default function AssistantRail() {
         </AnimatePresence>
 
         {filtered.length === 0 && (
-          <div className="text-xs" style={{ color:'var(--text-muted)' }}>No assistants found.</div>
+          <div className="text-xs" style={{ color:'var(--sidebar-muted, var(--text-muted))' }}>No assistants found.</div>
         )}
       </div>
 
