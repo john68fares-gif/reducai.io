@@ -1,39 +1,42 @@
-// pages/api/agents/index.ts
-import type { NextApiRequest, NextApiResponse } from 'next'
-import { upsertAgent, getAgentByPhoneNumberId, Agent } from '@/lib/store'
+import type { NextApiRequest, NextApiResponse } from 'next';
 
-// NOTE: Add real auth here. Right now this trusts the caller (your dashboard).
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY!;
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method === 'POST') {
-    const { id, ownerId, phoneNumberId, prompt, model = 'gpt-4o-mini', openaiApiKey, enabled = true } = req.body || {}
+  if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
-    if (!id || !ownerId || !phoneNumberId || !prompt || !openaiApiKey) {
-      res.status(400).json({ ok: false, error: 'Missing required fields.' })
-      return
+  try {
+    if (!OPENAI_API_KEY) return res.status(200).json([]); // no key => empty list, UI still works
+
+    const r = await fetch('https://api.openai.com/v1/assistants?limit=100', {
+      headers: { Authorization: `Bearer ${OPENAI_API_KEY}` },
+      cache: 'no-store',
+    });
+
+    if (!r.ok) {
+      const text = await r.text().catch(() => '');
+      return res.status(r.status).json({ error: text || `Upstream ${r.status}` });
     }
 
-    const saved = await upsertAgent({ id, ownerId, phoneNumberId, prompt, model, openaiApiKey, enabled })
-    res.status(200).json({ ok: true, data: { ...saved, openaiApiKey: '***' } })
-    return
+    const data = await r.json();
+    const items: any[] = Array.isArray(data?.data) ? data.data : [];
+
+    const list = items.map((a) => ({
+      id: a?.id, // asst_…
+      name: a?.name || 'Untitled Agent',
+      createdAt: a?.created_at ? a.created_at * 1000 : Date.now(),
+      model: a?.model || 'gpt-4o-mini',
+      temperature: parseMetaNumber(a?.metadata?.temperature, 0.5),
+    }));
+
+    list.sort((a, b) => b.createdAt - a.createdAt);
+    return res.status(200).json(list);
+  } catch (e: any) {
+    return res.status(500).json({ error: e?.message || 'failed to list assistants' });
   }
+}
 
-  if (req.method === 'GET') {
-    const phoneNumberId = (req.query.phoneNumberId as string) || ''
-    if (!phoneNumberId) {
-      res.status(400).json({ ok: false, error: 'phoneNumberId required' })
-      return
-    }
-    const agent = await getAgentByPhoneNumberId(phoneNumberId)
-    if (!agent) {
-      res.status(404).json({ ok: false, error: 'Not found' })
-      return
-    }
-    const masked: Agent & { openaiApiKey: string } = { ...agent, openaiApiKey: '***' }
-    res.status(200).json({ ok: true, data: masked })
-    return
-  }
-
-  res.setHeader('Allow', ['GET', 'POST'])
-  res.status(405).end('Method Not Allowed')
+function parseMetaNumber(v: any, dflt: number) {
+  const n = typeof v === 'string' ? parseFloat(v) : (typeof v === 'number' ? v : NaN);
+  return Number.isFinite(n) ? n : dflt;
 }
