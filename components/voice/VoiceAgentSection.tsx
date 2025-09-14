@@ -7,22 +7,24 @@ import {
   Search, Plus, Folder, FolderOpen, Check, Trash2, Copy, Edit3, Sparkles,
   ChevronDown, ChevronRight, FileText, Mic2, BookOpen, SlidersHorizontal,
   Bot, UploadCloud, RefreshCw, X, Phone as PhoneIcon, Rocket, PhoneOff,
-  MessageSquare, ListTree, AudioLines, Volume2, Save
+  MessageSquare, ListTree, AudioLines, Volume2, Save, Gauge
 } from 'lucide-react';
 
 import AssistantRail, { type AssistantLite } from '@/components/voice/AssistantRail';
 import WebCallButton from '@/components/voice/WebCallButton';
 
 /* ──────────────────────────────────────────────────────────────────────────── */
-/* THEME / SIZING (Vapi-like)                                                  */
+/* THEME / SIZING – tuned to match the Vapi screenshots                        */
 /* ──────────────────────────────────────────────────────────────────────────── */
 const SCOPE = 'va-scope';
 const ACCENT = '#10b981';
 const ACCENT_HOVER = '#0ea371';
 const BTN_SHADOW = '0 10px 24px rgba(16,185,129,.22)';
 
-const MAX_CONTENT_W = 1180;   // main lane clamp on laptop (13.6")
-const EDGE_GUTTER = 24;       // comfy gutters like Vapi
+/** Vapi-ish content lane. Their main column on a 13.6" sits ~1100–1180px. */
+const MAX_CONTENT_W = 1180;
+/** Vapi uses comfy gutters (≈24px). Switching from 4 → 24 to match. */
+const EDGE_GUTTER = 24;
 
 /* ──────────────────────────────────────────────────────────────────────────── */
 /* TYPES                                                                       */
@@ -143,7 +145,7 @@ function mergeInput(freeText: string, current: string) {
 }
 
 /* ──────────────────────────────────────────────────────────────────────────── */
-/* SMALL UI ATOMS – tuned to Vapi proportions                                  */
+/* SMALL UI ATOMS – Vapi proportions                                           */
 /* ──────────────────────────────────────────────────────────────────────────── */
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -153,46 +155,20 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     </div>
   );
 }
-
 function Section({ title, icon, children }: { title: string; icon: React.ReactNode; children: React.ReactNode }) {
   const [open, setOpen] = useState(true);
   return (
-    <div
-      className="col-span-12 group rounded-2xl relative transition-shadow"
-      style={{
-        background: 'linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,.01))',
-        border: '1px solid var(--va-border)',
-        boxShadow: '0 24px 70px rgba(0,0,0,.55), 0 10px 28px rgba(0,0,0,.40)',
-      }}
-    >
-      <div
-        aria-hidden
-        className="pointer-events-none absolute -top-[20%] -left-[18%] w-[64%] h-[64%] rounded-full"
-        style={{
-          background: 'radial-gradient(circle, color-mix(in oklab, var(--accent) 16%, transparent) 0%, transparent 70%)',
-          filter: 'blur(42px)',
-          opacity: .75
-        }}
-      />
-      <button
-        type="button"
-        onClick={() => setOpen(v => !v)}
-        className="w-full flex items-center justify-between px-5 py-4"
-        style={{ borderBottom: open ? '1px solid var(--va-border)' : 'none' }}
-      >
-        <span className="flex items-center gap-2 text-sm font-semibold tracking-wide">
-          <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: 'var(--accent)' }} />
-          {icon}{title}
-        </span>
+    <div className="col-span-12 rounded-xl relative"
+         style={{ background: 'var(--va-card)', border: '1px solid var(--va-border)', boxShadow: 'var(--va-shadow)' }}>
+      <div aria-hidden className="pointer-events-none absolute -top-[22%] -left-[22%] w-[70%] h-[70%] rounded-full"
+           style={{ background: 'radial-gradient(circle, color-mix(in oklab, var(--accent) 14%, transparent) 0%, transparent 70%)', filter: 'blur(40px)' }} />
+      <button type="button" onClick={() => setOpen(v => !v)} className="w-full flex items-center justify-between px-5 py-4">
+        <span className="flex items-center gap-2 text-sm font-semibold">{icon}{title}</span>
         {open ? <ChevronDown className="w-4 h-4 icon" /> : <ChevronRight className="w-4 h-4 icon" />}
       </button>
       <AnimatePresence initial={false}>
         {open && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }} transition={{ duration: .18 }}
-            className="px-5 pb-5"
-          >
+          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: .18 }} className="px-5 pb-5">
             {children}
           </motion.div>
         )}
@@ -201,6 +177,7 @@ function Section({ title, icon, children }: { title: string; icon: React.ReactNo
   );
 }
 
+/** Stat card row (Cost / Latency) just like the screenshots */
 function StatCard({ title, value, bar }: { title: string; value: string; bar?: 'cost'|'latency' }) {
   return (
     <div className="rounded-xl p-4"
@@ -219,7 +196,7 @@ function StatCard({ title, value, bar }: { title: string; value: string; bar?: '
 }
 
 /* ──────────────────────────────────────────────────────────────────────────── */
-/* SCOPED CSS                                                                  */
+/* SCOPED CSS (v0/Vapi-like)                                                   */
 /* ──────────────────────────────────────────────────────────────────────────── */
 function StyleBlock() {
   return (
@@ -262,57 +239,23 @@ function StyleBlock() {
 
 /* Buttons */
 .${SCOPE} .topbar-btn,
-.${SCOPE} .btn{
-  height:42px; padding:0 .95rem; border-radius:12px; display:inline-flex; align-items:center; gap:.5rem;
-  border:1px solid var(--va-border); background:var(--va-card); color:var(--text);
-}
+.${SCOPE} .btn{ height:42px; padding:0 .95rem; border-radius:12px; display:inline-flex; align-items:center; gap:.5rem; border:1px solid var(--va-border); }
 .${SCOPE} .btn--green{ background:${ACCENT}; color:#fff; box-shadow:${BTN_SHADOW}; transition:transform .04s ease, background .18s ease; }
 .${SCOPE} .btn--green:hover{ background:${ACCENT_HOVER}; }
 .${SCOPE} .btn--green:active{ transform:translateY(1px); }
 .${SCOPE} .btn--danger{ background:rgba(220,38,38,.12); color:#fca5a5; box-shadow:0 10px 24px rgba(220,38,38,.15); border-color:rgba(220,38,38,.35); }
+.${SCOPE} .btn--ghost{ background:var(--va-card); color:var(--text); box-shadow:var(--va-shadow-sm); }
 
-/* Inputs */
-.${SCOPE} .va-input{
+/* Inputs/selects */
+.${SCOPE} .va-input, .${SCOPE} select{
   width:100%; min-width:0; height:42px; border-radius:12px; padding:0 .9rem; font-size:15px; outline:none;
   background:var(--va-input-bg); border:1px solid var(--va-input-border); box-shadow:var(--va-input-shadow); color:var(--text);
 }
-.${SCOPE} .va-input:focus{
-  border-color: color-mix(in oklab, var(--accent) 50%, var(--va-input-border));
-  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 18%, transparent), var(--va-input-shadow);
-}
 
-/* Pretty select */
-.${SCOPE} .va-select{
-  width:100%; min-width:0; height:42px; font-size:15px; border-radius:12px; outline:none;
-  padding:0 2.2rem 0 .9rem;
-  background:
-    linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02)),
-    var(--va-input-bg);
-  border:1px solid var(--va-input-border);
-  color:var(--text);
-  -webkit-appearance:none; -moz-appearance:none; appearance:none;
-  box-shadow:var(--va-input-shadow);
-  transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
-  background-image:
-    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%23A8B3BE' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
-  background-repeat:no-repeat;
-  background-position: right .7rem center;
-}
-.${SCOPE} .va-select:hover{
-  background:
-    linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.03)),
-    var(--va-input-bg);
-}
-.${SCOPE} .va-select:focus{
-  border-color: color-mix(in oklab, var(--accent) 50%, var(--va-input-border));
-  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 18%, transparent), var(--va-input-shadow);
-}
-.${SCOPE} .va-select:disabled{ opacity:.6; cursor:not-allowed; }
+/* Lane width */
+.${SCOPE} .va-main { max-width: none !important; }
 
-/* Lane */
-.${SCOPE} .va-main { max-width:none !important; }
-
-/* Laptop rail width */
+/* Laptop tweak like Vapi’s rail */
 @media (max-width: 1280px){ .${SCOPE}{ --va-rail-w: 320px; } }
 `}</style>
   );
@@ -326,7 +269,7 @@ export default function VoiceAgentSection() {
   const [isClient, setIsClient] = useState(false);
   useEffect(() => { setIsClient(true); }, []);
 
-  /* Measure app sidebar + fixed rail so the lane responds like Vapi */
+  /* Measure app sidebar + fixed rail so the lane responds exactly like Vapi */
   useLayoutEffect(() => {
     if (!isClient) return;
 
@@ -341,6 +284,7 @@ export default function VoiceAgentSection() {
         document.querySelector<HTMLElement>('.app-sidebar') ||
         document.querySelector<HTMLElement>('aside.sidebar');
 
+      /** IMPORTANT: fixed rail inside AssistantRail must be <aside data-collapsed="true|false">  */
       const railAside =
         document.querySelector<HTMLElement>(`.${SCOPE} aside[data-collapsed]`);
 
@@ -364,13 +308,14 @@ export default function VoiceAgentSection() {
     if (railAside)  ro.observe(railAside);
     window.addEventListener('resize', apply);
 
+    /* keep applying shortly after UI changes */
     let ticks = 40;
     const id = window.setInterval(() => { apply(); if (--ticks <= 0) window.clearInterval(id); }, 80);
 
     return () => { ro.disconnect(); window.removeEventListener('resize', apply); window.clearInterval(id); };
   }, [isClient]);
 
-  /* Assistants (LS) */
+  /* ─────────────────────────── Assistants (LS) ─────────────────────────── */
   const [assistants, setAssistants] = useState<Assistant[]>([]);
   const [activeId, setActiveId] = useState(''); const [active, setActive] = useState<Assistant | null>(null);
   const [rev, setRev] = useState(0);
@@ -414,7 +359,7 @@ export default function VoiceAgentSection() {
     writeLS(LS_LIST, list); setAssistants(list); setActive(next); setRev(r => r + 1);
   };
 
-  /* CRUD */
+  /* Create/Rename/Delete (for rail) */
   const onCreate = async () => {
     const id = `agent_${Math.random().toString(36).slice(2, 8)}`;
     const a: Assistant = {
@@ -571,6 +516,7 @@ export default function VoiceAgentSection() {
   /* ─────────────────────────── RENDER ─────────────────────────── */
   return (
     <div ref={scopeRef} className={SCOPE} style={{ background: 'var(--bg)', color: 'var(--text)' }}>
+      {/* Assistant Rail (fixed). We rely on its fixed <aside> for measurement. */}
       <AssistantRail
         assistants={railData}
         activeId={activeId}
@@ -580,6 +526,7 @@ export default function VoiceAgentSection() {
         onDelete={onDelete}
       />
 
+      {/* CONTENT LANE — expands/shrinks with sidebars like Vapi */}
       <div
         className="va-main"
         style={{
@@ -626,7 +573,7 @@ export default function VoiceAgentSection() {
           </div>
         </div>
 
-        {/* Stats row */}
+        {/* Stats row – Cost & Latency like in Vapi */}
         <div className="grid gap-6 md:gap-6 mb-6" style={{ gridTemplateColumns:'repeat(2, minmax(260px,1fr))' }}>
           <StatCard title="Cost" value="~$0.1/min" bar="cost" />
           <StatCard title="Latency" value="~1050 ms" bar="latency" />
@@ -639,7 +586,6 @@ export default function VoiceAgentSection() {
             <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(4, minmax(220px, 1fr))' }}>
               <Field label="Provider">
                 <select
-                  className="va-select"
                   value={active.config.model.provider}
                   onChange={e => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, provider: e.target.value as Provider } } }))}
                 >
@@ -648,7 +594,6 @@ export default function VoiceAgentSection() {
               </Field>
               <Field label="Model">
                 <select
-                  className="va-select"
                   value={active.config.model.model}
                   onChange={e => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, model: e.target.value as ModelId } } }))}
                 >
@@ -660,7 +605,6 @@ export default function VoiceAgentSection() {
               </Field>
               <Field label="First Message Mode">
                 <select
-                  className="va-select"
                   value={active.config.model.firstMessageMode}
                   onChange={e => updateActive(a => ({ ...a, config: { ...a.config, model: { ...a.config.model, firstMessageMode: e.target.value as any } } }))}
                 >
@@ -728,13 +672,13 @@ export default function VoiceAgentSection() {
           <Section title="Voice" icon={<Mic2 className="w-4 h-4 icon" />}>
             <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(2, minmax(220px, 1fr))' }}>
               <Field label="Provider">
-                <select className="va-select" value={active.config.voice.provider} onChange={(e) => handleVoiceProviderChange(e.target.value)}>
+                <select value={active.config.voice.provider} onChange={(e) => handleVoiceProviderChange(e.target.value)}>
                   <option value="openai">OpenAI</option>
                   <option value="elevenlabs">ElevenLabs</option>
                 </select>
               </Field>
               <Field label="Voice">
-                <select className="va-select" value={pendingVoiceId || active.config.voice.voiceId} onChange={(e) => handleVoiceIdChange(e.target.value)}>
+                <select value={pendingVoiceId || active.config.voice.voiceId} onChange={(e) => handleVoiceIdChange(e.target.value)}>
                   {(active.config.voice.provider === 'elevenlabs' ? [
                     { value: 'rachel', label: 'Rachel (ElevenLabs)' },
                     { value: 'adam', label: 'Adam (ElevenLabs)' },
@@ -762,18 +706,18 @@ export default function VoiceAgentSection() {
           <Section title="Transcriber" icon={<BookOpen className="w-4 h-4 icon" />}>
             <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(3, minmax(220px, 1fr))' }}>
               <Field label="Provider">
-                <select className="va-select" value={active.config.transcriber.provider} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, provider: e.target.value as any } } }))}>
+                <select value={active.config.transcriber.provider} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, provider: e.target.value as any } } }))}>
                   <option value="deepgram">Deepgram</option>
                 </select>
               </Field>
               <Field label="Model">
-                <select className="va-select" value={active.config.transcriber.model} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, model: e.target.value as any } } }))}>
+                <select value={active.config.transcriber.model} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, model: e.target.value as any } } }))}>
                   <option value="nova-2">Nova 2</option>
                   <option value="nova-3">Nova 3</option>
                 </select>
               </Field>
               <Field label="Language">
-                <select className="va-select" value={active.config.transcriber.language} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, language: e.target.value as any } } }))}>
+                <select value={active.config.transcriber.language} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, language: e.target.value as any } } }))}>
                   <option value="en">English</option>
                   <option value="multi">Multi</option>
                 </select>
@@ -788,13 +732,13 @@ export default function VoiceAgentSection() {
                 </div>
               </Field>
               <Field label="Denoise">
-                <select className="va-select" value={String(active.config.transcriber.denoise)} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, denoise: e.target.value === 'true' } } }))}>
+                <select value={String(active.config.transcriber.denoise)} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, denoise: e.target.value === 'true' } } }))}>
                   <option value="false">Off</option>
                   <option value="true">On</option>
                 </select>
               </Field>
               <Field label="Use Numerals">
-                <select className="va-select" value={String(active.config.transcriber.numerals)} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, numerals: e.target.value === 'true' } } }))}>
+                <select value={String(active.config.transcriber.numerals)} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, transcriber: { ...a.config.transcriber, numerals: e.target.value === 'true' } } }))}>
                   <option value="false">No</option>
                   <option value="true">Yes</option>
                 </select>
@@ -806,13 +750,13 @@ export default function VoiceAgentSection() {
           <Section title="Tools" icon={<SlidersHorizontal className="w-4 h-4 icon" />}>
             <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(2, minmax(220px, 1fr))' }}>
               <Field label="Enable End Call Function">
-                <select className="va-select" value={String(active.config.tools.enableEndCall)} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, tools: { ...a.config.tools, enableEndCall: e.target.value === 'true' } } }))}>
+                <select value={String(active.config.tools.enableEndCall)} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, tools: { ...a.config.tools, enableEndCall: e.target.value === 'true' } } }))}>
                   <option value="true">Enabled</option>
                   <option value="false">Disabled</option>
                 </select>
               </Field>
               <Field label="Dial Keypad">
-                <select className="va-select" value={String(active.config.tools.dialKeypad)} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, tools: { ...a.config.tools, dialKeypad: e.target.value === 'true' } } }))}>
+                <select value={String(active.config.tools.dialKeypad)} onChange={(e) => updateActive(a => ({ ...a, config: { ...a.config, tools: { ...a.config.tools, dialKeypad: e.target.value === 'true' } } }))}>
                   <option value="true">Enabled</option>
                   <option value="false">Disabled</option>
                 </select>
@@ -917,7 +861,7 @@ export default function VoiceAgentSection() {
 }
 
 /* ──────────────────────────────────────────────────────────────────────────── */
-/* Telephony Editor                                                            */
+/* Telephony Editor (unchanged from your version, just moved to bottom)        */
 /* ──────────────────────────────────────────────────────────────────────────── */
 function TelephonyEditor({ numbers, linkedId, onLink, onAdd, onRemove }: {
   numbers: PhoneNum[]; linkedId?: string; onLink: (id?: string) => void; onAdd: (e164: string, label?: string) => void; onRemove: (id: string) => void;
