@@ -6,14 +6,14 @@ import Link from 'next/link';
 import {
   Search, Loader2, Save, Trash2, Settings2, Bot, RefreshCw,
   History, RotateCcw, ChevronDown, Send, Sparkles,
-  Star, StarOff, Filter, Diff, FilePlus2, ToggleLeft, ToggleRight,
-  Undo2, Redo2, Info, X, Upload, Download, Shield, Code2,
-  SplitSquareHorizontal, PanelLeftClose, PanelRightClose, Tag, Copy, Check,
-  SlidersHorizontal, PanelsTopLeft, Gauge, HelpCircle
+  Star, StarOff, FilePlus2, ToggleLeft, ToggleRight,
+  Undo2, Redo2, Info, X, Upload, Download, Shield, Diff,
+  SplitSquareHorizontal, Tag, Copy, Check, SlidersHorizontal,
+  PanelsTopLeft, Gauge, HelpCircle
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase-client';
 
-/** Endpoints used (unchanged):
+/** API endpoints used (unchanged):
  * GET    /api/chatbots?ownerId=...   (header x-owner-id)
  * PATCH  /api/chatbots/[id]          (header x-owner-id)
  * DELETE /api/chatbots/[id]          (header x-owner-id)
@@ -32,7 +32,10 @@ type BotRow = {
   createdAt?: string;
   updatedAt?: string;
 };
-type Version = { id: string; ts: number; label: string; name: string; model: string; temperature: number; system: string; };
+type Version = {
+  id: string; ts: number; label: string;
+  name: string; model: string; temperature: number; system: string;
+};
 type AgentMeta = {
   pinned?: boolean;
   draft?: boolean;
@@ -41,7 +44,6 @@ type AgentMeta = {
   tags?: string[];
   guardrails?: { blockedPhrases: string[]; enforceJson: boolean; jsonSchemaHint?: string };
   promptStack?: { pre: string; main: string; post: string };
-  conditional?: Array<{ when: string; rule: string }>;
   perFlowTemp?: { greeting: number; qa: number; actions: number };
   audit?: Array<{ at: number; action: string }>;
 };
@@ -138,6 +140,21 @@ function autoNameVersion(prev: Partial<BotRow> | null, next: BotRow) {
   return base.length > 56 ? base.slice(0, 56) + '…' : base;
 }
 
+/* ─────────────────────────── Simple Overlay ─────────────────────────── */
+function Overlay({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  return (
+    <div className="fixed inset-0 z-40">
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <div className="absolute inset-0 grid place-items-center p-4">{children}</div>
+    </div>
+  );
+}
+
 /* ─────────────────────────── Component ─────────────────────────── */
 export default function Improve() {
   const [userId, setUserId] = useState<string | null>(null);
@@ -189,7 +206,6 @@ export default function Improve() {
   const [dirty, setDirty] = useState(false);
   const [autosave, setAutosave] = useState(true);
   const [copied, setCopied] = useState(false);
-  const statusText = saving ? 'Saving…' : dirty ? 'Unsaved changes' : 'Saved ✓';
 
   /* Undo/redo for prompt */
   const undoRef = useRef<ReturnType<typeof makeUndoStack> | null>(null);
@@ -197,7 +213,12 @@ export default function Improve() {
   useEffect(() => { if (undoRef.current) undoRef.current.push(system); }, [system]);
 
   /* User ID */
-  useEffect(() => { (async () => { const { data } = await supabase.auth.getUser(); setUserId(data?.user?.id || null); })(); }, []);
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.auth.getUser();
+      setUserId(data?.user?.id || null);
+    })();
+  }, []);
 
   /* Fetch list */
   async function fetchBots(uid: string) {
@@ -211,7 +232,7 @@ export default function Improve() {
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   }
-  useEffect(() => { if (userId) fetchBots(userId); }, [userId]);
+  useEffect(() => { if (userId) fetchBots(userId); }, [userId]); // eslint-disable-line
 
   /* Load selected meta/versions */
   useEffect(() => {
@@ -250,7 +271,7 @@ export default function Improve() {
     if (undoRef.current) undoRef.current = makeUndoStack(selected.system || '');
   }, [selectedId, userId, selected]);
 
-  /* Dirty + autosave */
+  /* Dirty + autosave (no flicker: silent saves DO NOT refetch list) */
   useEffect(() => {
     if (!selected) return;
     const d =
@@ -264,7 +285,7 @@ export default function Improve() {
       (Math.abs(flowTemps.greeting-0.5)>1e-9 || Math.abs(flowTemps.qa-0.5)>1e-9 || Math.abs(flowTemps.actions-0.5)>1e-9);
     setDirty(d);
     if (autosave && d && !saving) {
-      const t = setTimeout(() => { void saveEdits(true); }, 900);
+      const t = setTimeout(() => { void saveEdits(true); }, 1200);
       return () => clearTimeout(t);
     }
   }, [name, model, temperature, system, notes, draft, pinned, tags, promptPre, promptPost, blockedPhrases, enforceJson, jsonSchemaHint, flowTemps, selected, autosave, saving]);
@@ -301,7 +322,8 @@ export default function Improve() {
       });
       const json = await res.json();
       if (!res.ok || !json?.ok) throw new Error(json?.error || 'Failed to save');
-      // meta
+
+      // meta (client)
       const meta: AgentMeta = {
         pinned, draft, notes, lastOpenedAt: Date.now(), tags,
         promptStack: { pre: promptPre, main: '', post: promptPost },
@@ -309,12 +331,19 @@ export default function Improve() {
         perFlowTemp: flowTemps,
       };
       localStorage.setItem(metaKey(userId, selectedId), JSON.stringify(meta));
-      await fetchBots(userId);
-      setSelectedId(selectedId);
+
+      if (silent) {
+        // Update local list only → avoid flicker from refetch
+        setList(cur => cur.map(b => b.id === selectedId ? { ...b, name, model, temperature, system, updatedAt: candidate.updatedAt } : b));
+      } else {
+        await fetchBots(userId);
+        setSelectedId(selectedId);
+      }
       setDirty(false);
     } catch (e: any) { alert(e?.message || 'Failed to save'); }
     finally { if (!silent) setSaving(false); }
   }
+
   async function deleteSelected() {
     if (!userId || !selectedId) return;
     if (!confirm('Delete this agent?')) return;
@@ -332,6 +361,7 @@ export default function Improve() {
     } catch (e: any) { alert(e?.message || 'Failed to delete'); }
     finally { setSaving(false); }
   }
+
   async function duplicateAgent() {
     if (!selected || !userId) return;
     try {
@@ -344,6 +374,7 @@ export default function Improve() {
       await fetchBots(userId); setSelectedId(json.data.id);
     } catch (e:any) { alert(e?.message || 'Failed to duplicate'); }
   }
+
   function exportAgent() {
     if (!selected) return;
     const payload = {
@@ -361,6 +392,7 @@ export default function Improve() {
     const url = URL.createObjectURL(blob); const a = document.createElement('a');
     a.href = url; a.download = `${(name||'agent').replace(/\s+/g,'_')}.json`; a.click(); URL.revokeObjectURL(url);
   }
+
   async function importAgent(file: File) {
     if (!userId) return;
     try {
@@ -383,7 +415,10 @@ export default function Improve() {
     setTesting(true);
     setTestLog(l => [...l, { role: 'user', text: msg }]);
     try {
-      const res = await fetch('/api/assistants/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: selected.model, system, message: msg }) });
+      const res = await fetch('/api/assistants/chat', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: selected.model, system, message: msg })
+      });
       if (!res.ok) throw new Error('No test endpoint configured');
       const json = await res.json();
       const answer = stripMarkdownNoise(String(json?.message || '…'));
@@ -414,7 +449,7 @@ export default function Improve() {
     const sorter = (a:any,b:any) =>
       sort==='name_asc' ? (a.b.name||'').localeCompare(b.b.name||'') :
       sort==='updated_desc' ? (new Date(b.b.updatedAt||0).getTime() - new Date(a.b.updatedAt||0).getTime()) :
-      (Number(b.pinned)-Number(a.pinned)) || (new Date(b.b.updatedAt||0).getTime() - new Date(a.b.updatedAt||0).getTime());
+      (Number(b.pinned)-Number(a.pinned)) || (new Date(b.b.updatedAt||0).getTime() - new Date(a.b.b.updatedAt||0).getTime());
     return enriched.sort(sorter).map(x=>x.b);
   }, [list, query, sort, tagFilter, userId]);
 
@@ -556,8 +591,11 @@ export default function Improve() {
                   {filtered.map((b) => {
                     let pinnedLocal=false, draftLocal=false, tagsLocal: string[]=[];
                     try {
-                      if (userId) { const raw = localStorage.getItem(metaKey(userId, b.id)); const m: AgentMeta = raw ? JSON.parse(raw) : {};
-                        pinnedLocal=!!m.pinned; draftLocal=!!m.draft; tagsLocal=m.tags||[]; }
+                      if (userId) {
+                        const raw = localStorage.getItem(metaKey(userId, b.id));
+                        const m: AgentMeta = raw ? JSON.parse(raw) : {};
+                        pinnedLocal=!!m.pinned; draftLocal=!!m.draft; tagsLocal=m.tags||[];
+                      }
                     } catch {}
                     const active = selectedId === b.id;
                     return (
@@ -728,10 +766,10 @@ export default function Improve() {
                   </div>
 
                   <div className="col-span-2">
-                    <div className="text-xs opacity-70 mb-1">Notes (private)</div>
+                    <div className="text-xs opacity-70 mb-1">Notes for you & colleagues</div>
                     <textarea value={notes} onChange={(e)=>setNotes(e.target.value)} rows={4}
                               className="w-full px-3 py-2 rounded-md outline-none text-sm" style={CARD}
-                              placeholder="Any context for teammates or yourself…" />
+                              placeholder="Share context for your future self and teammates…" />
                   </div>
                 </div>
               )}
@@ -844,7 +882,7 @@ export default function Improve() {
                 <input
                   value={testInput}
                   onChange={(e)=>setTestInput(e.target.value)}
-                  onKeyDown={(e)=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); !testing && runTest(); }}}
+                  onKeyDown={(e)=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); if (!testing) runTest(); }}}
                   placeholder="Type a message…"
                   className="flex-1 px-3 py-2 rounded-md text-sm"
                   style={CARD}
@@ -852,7 +890,7 @@ export default function Improve() {
                 <button onClick={()=>runTest()} disabled={testing || !testInput.trim()}
                         className="px-3 py-2 rounded-md text-sm disabled:opacity-60"
                         style={{ background:'var(--brand)', color:'#00120a' }}>
-                  {testing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                  {testing ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Send className="inline w-4 h-4 mr-1" /> Send</>}
                 </button>
               </div>
             </div>
@@ -860,88 +898,87 @@ export default function Improve() {
         </Overlay>
       )}
 
-      {/* Slide-over: Advanced (Guardrails + JSON) */}
-      {showAdvanced && (
+      {/* Slide-over: Advanced (Guardrails) */}
+      {showAdvanced && selected && (
         <Overlay onClose={()=>setShowAdvanced(false)}>
           <div className="w-[min(900px,95vw)] max-h-[85vh] overflow-hidden rounded-2xl" style={PANEL}>
             <div className="p-4 border-b flex items-center gap-2" style={{ borderColor:'var(--border)' }}>
               <Shield className="w-5 h-5" style={{ color:'var(--brand)' }} />
-              <div className="font-semibold">Advanced Controls</div>
+              <div className="font-semibold">Advanced Guardrails</div>
               <button onClick={()=>setShowAdvanced(false)} className="ml-auto px-2 py-1 rounded-md" style={{ ...CARD }}><X className="w-4 h-4" /></button>
             </div>
             <div className="p-3 grid gap-3" style={{ gridTemplateColumns:'1fr 1fr' }}>
-              <div>
+              <div className="col-span-2">
                 <div className="text-xs opacity-70 mb-1">Blocked phrases (one per line)</div>
-                <textarea value={blockedPhrases} onChange={(e)=>setBlockedPhrases(e.target.value)} rows={10}
-                          className="w-full px-3 py-2 rounded-md text-sm outline-none" style={CARD} />
+                <textarea value={blockedPhrases} onChange={(e)=>setBlockedPhrases(e.target.value)} rows={6}
+                          className="w-full px-3 py-2 rounded-md outline-none font-mono text-sm" style={CARD}
+                          placeholder="forbidden term A\nforbidden term B" />
               </div>
               <div>
-                <div className="text-xs opacity-70 mb-1">JSON Output (optional)</div>
-                <label className="flex items-center gap-2 text-sm mb-2">
-                  <input type="checkbox" checked={enforceJson} onChange={e=>setEnforceJson(e.target.checked)} /> Enforce JSON output
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={enforceJson} onChange={(e)=>setEnforceJson(e.target.checked)} />
+                  Enforce JSON outputs when applicable
                 </label>
-                <details className="rounded-md" style={CARD}>
-                  <summary className="cursor-pointer select-none px-3 py-2 text-sm">Schema hint (advanced)</summary>
-                  <div className="p-3 space-y-2">
-                    <div className="text-xs opacity-70">If you know the shape, paste a small JSON Schema here.</div>
-                    <textarea value={jsonSchemaHint} onChange={(e)=>setJsonSchemaHint(e.target.value)} rows={6}
-                              className="w-full px-3 py-2 rounded-md text-sm outline-none" style={CARD}
-                              placeholder='{"type":"object","properties":{"answer":{"type":"string"}}}' />
-                    <div className="flex flex-wrap gap-2 text-xs">
-                      <button onClick={()=>setJsonSchemaHint('{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}')}
-                              className="px-2 py-1 rounded-md" style={CARD}>Answer string</button>
-                      <button onClick={()=>setJsonSchemaHint('{"type":"object","properties":{"items":{"type":"array","items":{"type":"string"}}},"required":["items"]}')}
-                              className="px-2 py-1 rounded-md" style={CARD}>String array</button>
-                      <button onClick={()=>setJsonSchemaHint('{"type":"object","properties":{"ok":{"type":"boolean"},"data":{"type":"object"}},"required":["ok"]}')}
-                              className="px-2 py-1 rounded-md" style={CARD}>Boolean + object</button>
-                    </div>
-                  </div>
-                </details>
+                <div className="text-xs opacity-70 mt-1">Will bias responses to valid JSON if a schema is provided.</div>
+              </div>
+              <div>
+                <div className="text-xs opacity-70 mb-1">JSON schema hint (optional)</div>
+                <textarea value={jsonSchemaHint} onChange={(e)=>setJsonSchemaHint(e.target.value)} rows={4}
+                          className="w-full px-3 py-2 rounded-md outline-none font-mono text-sm" style={CARD}
+                          placeholder='{"type":"object","properties":{"answer":{"type":"string"}}}' />
+              </div>
+              <div className="col-span-2 flex justify-end gap-2">
+                <button onClick={()=>setShowAdvanced(false)} className="px-3 py-2 rounded-md text-sm" style={{ ...CARD }}>
+                  Close
+                </button>
+                <button onClick={()=>{ setDirty(true); setShowAdvanced(false); }} className="px-3 py-2 rounded-md text-sm"
+                        style={{ background:'var(--brand)', color:'#00120a' }}>
+                  Apply
+                </button>
               </div>
             </div>
           </div>
         </Overlay>
       )}
 
-      {/* Slide-over: Flow Temperatures */}
-      {showFlowTuner && (
+      {/* Slide-over: Flow Tuner */}
+      {showFlowTuner && selected && (
         <Overlay onClose={()=>setShowFlowTuner(false)}>
-          <div className="w-[min(700px,95vw)] max-h-[70vh] overflow-hidden rounded-2xl" style={PANEL}>
+          <div className="w-[min(760px,95vw)] max-h-[80vh] overflow-hidden rounded-2xl" style={PANEL}>
             <div className="p-4 border-b flex items-center gap-2" style={{ borderColor:'var(--border)' }}>
               <Gauge className="w-5 h-5" style={{ color:'var(--brand)' }} />
-              <div className="font-semibold">Tune Flow Temperatures</div>
+              <div className="font-semibold">Per-Flow Temperature</div>
               <button onClick={()=>setShowFlowTuner(false)} className="ml-auto px-2 py-1 rounded-md" style={{ ...CARD }}><X className="w-4 h-4" /></button>
             </div>
-            <div className="p-4 space-y-3">
-              {(['greeting','qa','actions'] as const).map(k=>(
-                <div key={k}>
-                  <div className="text-xs mb-1 opacity-70 capitalize">{k} ({flowTemps[k].toFixed(2)})</div>
-                  <input type="range" min={0} max={1} step={0.01} value={flowTemps[k]} onChange={(e)=>setFlowTemps(prev=>({...prev,[k]:parseFloat(e.target.value)}))} className="w-full" />
+            <div className="p-4 space-y-4">
+              {(['greeting','qa','actions'] as const).map(key => (
+                <div key={key}>
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="text-sm capitalize">{key}</div>
+                    <div className="text-xs opacity-70">{flowTemps[key].toFixed(2)}</div>
+                  </div>
+                  <input type="range" min={0} max={1} step={0.01}
+                         value={flowTemps[key]}
+                         onChange={(e)=>setFlowTemps(s=>({ ...s, [key]: Number(e.target.value) }))}
+                         className="w-full" />
                 </div>
               ))}
-              <div className="text-[11px] opacity-60">Saved in client meta; core agent settings remain unchanged.</div>
+              <div className="flex justify-end gap-2">
+                <button onClick={()=>setShowFlowTuner(false)} className="px-3 py-2 rounded-md text-sm" style={{ ...CARD }}>
+                  Close
+                </button>
+                <button onClick={()=>{ setDirty(true); setShowFlowTuner(false); }} className="px-3 py-2 rounded-md text-sm"
+                        style={{ background:'var(--brand)', color:'#00120a' }}>
+                  Apply
+                </button>
+              </div>
+              <div className="text-xs opacity-70">
+                Tip: Flow temps bias sub-behaviors. Your global Temperature mode still applies as a base.
+              </div>
             </div>
           </div>
         </Overlay>
       )}
-    </div>
-  );
-}
-
-/* ─────────────────────────── Overlay Component ─────────────────────────── */
-function Overlay({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
-  useEffect(() => {
-    const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', onEsc);
-    return () => window.removeEventListener('keydown', onEsc);
-  }, [onClose]);
-
-  return (
-    <div className="fixed inset-0 z-40 grid place-items-center px-4" style={{ background:'rgba(0,0,0,.65)' }} onMouseDown={onClose}>
-      <div className="animate-[fadeIn_.18s_ease] relative" onMouseDown={(e)=>e.stopPropagation()}>
-        {children}
-      </div>
-      <style jsx>{`@keyframes fadeIn { from{opacity:0; transform:translateY(4px)} to{opacity:1; transform:none} }`}</style>
     </div>
   );
 }
