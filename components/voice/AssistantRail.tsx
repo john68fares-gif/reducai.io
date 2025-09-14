@@ -17,6 +17,7 @@ const STORAGE_KEY = 'agents';
 const BTN_GREEN = '#10b981';
 const BTN_GREEN_HOVER = '#0ea473';
 
+/* ---------------------------- Local theme tokens --------------------------- */
 function LocalTokens() {
   return (
     <style>{`
@@ -27,11 +28,8 @@ function LocalTokens() {
         border-radius: 18px;
         box-shadow: var(--shadow-soft);
       }
-
-      /* Thin, quiet borders everywhere */
       .thin { border:1px solid var(--border) }
 
-      /* Inputs & buttons to match compact voice page + API Keys */
       .input {
         height:34px; width:100%; border-radius:12px; padding:0 .7rem;
         background: var(--card); border:1px solid var(--border); color:var(--text);
@@ -41,6 +39,7 @@ function LocalTokens() {
         border-color: color-mix(in oklab, var(--brand) 40%, var(--border));
         box-shadow: 0 0 0 3px color-mix(in oklab, var(--brand) 14%, transparent);
       }
+
       .btn {
         height:34px; padding:0 .8rem; border-radius:12px; display:inline-flex; align-items:center; gap:.5rem;
         background: var(--card); color: var(--text); border:1px solid var(--border); font-size:13px; font-weight:600;
@@ -53,7 +52,6 @@ function LocalTokens() {
       }
       .btn-primary:hover { background:${BTN_GREEN_HOVER}; }
 
-      /* Row item: no extra box, just a thin border + hover inner-ish shadow like Account page */
       .item {
         display:flex; align-items:center; gap:10px;
         padding:10px 12px; border-radius:12px;
@@ -70,14 +68,13 @@ function LocalTokens() {
         border-color: color-mix(in oklab, var(--brand) 28%, var(--border));
       }
 
-      /* Small helper text */
       .muted { color: var(--text-muted); }
       .ico { width:14px; height:14px; }
     `}</style>
   );
 }
 
-/* Storage helpers */
+/* ------------------------------- Storage utils ------------------------------ */
 async function loadAssistants(): Promise<AssistantLite[]> {
   try { if (scopedStorageFn) { const ss = await scopedStorageFn(); const arr = await ss.getJSON<AssistantLite[]>(STORAGE_KEY, []); if (Array.isArray(arr)) return normalize(arr); } } catch {}
   try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) return normalize(JSON.parse(raw)); } catch {}
@@ -91,42 +88,61 @@ function normalize(arr: AssistantLite[]): AssistantLite[] {
   return (arr||[]).map((x,i)=>({ id:String(x.id ?? `a_${i}`), name:String(x.name ?? `Assistant ${i+1}`), purpose:x.purpose ?? '', createdAt:x.createdAt ?? Date.now() }));
 }
 
-/* Modals (warning + rename) */
+/* ------------------------------- Shared modals ------------------------------ */
+function FrameHeader({
+  icon, title, subtitle, onClose,
+}: { icon: React.ReactNode; title: string; subtitle?: string; onClose: () => void }) {
+  return (
+    <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom:'1px solid var(--border)' }}>
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background:'var(--brand-weak)' }}>
+          {icon}
+        </div>
+        <div className="min-w-0">
+          <div className="text-lg font-semibold">{title}</div>
+          {subtitle && <div className="text-sm muted">{subtitle}</div>}
+        </div>
+      </div>
+      <button onClick={onClose} className="p-2 rounded hover:opacity-75"><X className="ico" /></button>
+    </div>
+  );
+}
+
+function ModalShell({ children }:{ children: React.ReactNode }) {
+  return (
+    <div className="fixed inset-0 z-[9998] flex items-center justify-center px-4" style={{ background:'rgba(0,0,0,.60)' }}>
+      <div className="panel w-full max-w-md overflow-hidden">{children}</div>
+    </div>
+  );
+}
+
 function ConfirmDeleteModal({ open, name, onClose, onConfirm }:{
   open:boolean; name?:string; onClose:()=>void; onConfirm:()=>void;
 }) {
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-[9998] flex items-center justify-center px-4" style={{ background:'rgba(0,0,0,.60)' }}>
-      <div className="panel w-full max-w-md overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-4 thin" style={{ borderBottom:'1px solid var(--border)' }}>
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background:'var(--brand-weak)' }}>
-              <AlertTriangle className="ico" style={{ color:'var(--brand)' }} />
-            </div>
-            <div className="min-w-0">
-              <div className="text-lg font-semibold">Delete Assistant</div>
-              <div className="text-sm muted">This action cannot be undone.</div>
-            </div>
-          </div>
-          <button onClick={onClose} className="p-2 rounded hover:opacity-75"><X className="ico" /></button>
-        </div>
-        <div className="px-5 py-4">
-          <div className="text-sm">Are you sure you want to delete <span className="font-semibold">“{name||'assistant'}”</span>?</div>
-        </div>
-        <div className="px-5 pb-5 flex gap-2">
-          <button className="btn flex-1" onClick={onClose}>Cancel</button>
-          <button
-            className="btn btn-primary flex-1"
-            onClick={onConfirm}
-            onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER)}
-            onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN)}
-          >
-            Delete
-          </button>
-        </div>
+    <ModalShell>
+      <FrameHeader
+        icon={<AlertTriangle className="ico" style={{ color:'var(--brand)' }} />}
+        title="Delete Assistant"
+        subtitle="This action cannot be undone."
+        onClose={onClose}
+      />
+      <div className="px-5 py-4 text-sm">
+        Are you sure you want to delete <span className="font-semibold">“{name||'assistant'}”</span>?
       </div>
-    </div>
+      <div className="px-5 pb-5 flex gap-2">
+        <button className="btn flex-1" onClick={onClose}>Cancel</button>
+        <button
+          className="btn btn-primary flex-1"
+          onClick={onConfirm}
+          onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER)}
+          onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN)}
+        >
+          Delete
+        </button>
+      </div>
+    </ModalShell>
   );
 }
 
@@ -138,46 +154,83 @@ function RenameModal({ open, initial, onClose, onSave }:{
   const can = val.trim().length>0;
   if(!open) return null;
   return (
-    <div className="fixed inset-0 z-[9998] flex items-center justify-center px-4" style={{ background:'rgba(0,0,0,.60)' }}>
-      <div className="panel w-full max-w-md overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-4 thin" style={{ borderBottom:'1px solid var(--border)' }}>
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background:'var(--brand-weak)' }}>
-              <Edit3 className="ico" style={{ color:'var(--brand)' }} />
-            </div>
-            <div className="text-lg font-semibold">Rename Assistant</div>
-          </div>
-          <button onClick={onClose} className="p-2 rounded hover:opacity-75"><X className="ico" /></button>
-        </div>
-        <div className="px-5 py-4">
-          <label className="block text-xs mb-1 muted">Name</label>
-          <input className="input" value={val} onChange={e=>setVal(e.target.value)} placeholder="e.g., Support Bot" autoFocus />
-        </div>
-        <div className="px-5 pb-5 flex gap-2">
-          <button className="btn flex-1" onClick={onClose}>Cancel</button>
-          <button
-            disabled={!can}
-            className="btn btn-primary flex-1"
-            style={{ opacity: can?1:.6, cursor: can?'pointer':'not-allowed' }}
-            onClick={()=> can && onSave(val.trim())}
-            onMouseEnter={(e)=>{ if(can) (e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER; }}
-            onMouseLeave={(e)=>{ if(can) (e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN; }}
-          >
-            Save
-          </button>
-        </div>
+    <ModalShell>
+      <FrameHeader
+        icon={<Edit3 className="ico" style={{ color:'var(--brand)' }} />}
+        title="Rename Assistant"
+        onClose={onClose}
+      />
+      <div className="px-5 py-4">
+        <label className="block text-xs mb-1 muted">Name</label>
+        <input className="input" value={val} onChange={e=>setVal(e.target.value)} placeholder="e.g., Support Bot" autoFocus />
       </div>
-    </div>
+      <div className="px-5 pb-5 flex gap-2">
+        <button className="btn flex-1" onClick={onClose}>Cancel</button>
+        <button
+          disabled={!can}
+          className="btn btn-primary flex-1"
+          style={{ opacity: can?1:.6, cursor: can?'pointer':'not-allowed' }}
+          onClick={()=> can && onSave(val.trim())}
+          onMouseEnter={(e)=>{ if(can) (e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER; }}
+          onMouseLeave={(e)=>{ if(can) (e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN; }}
+        >
+          Save
+        </button>
+      </div>
+    </ModalShell>
   );
 }
 
-/* Component */
+/* NEW: Create modal (same style as Rename) */
+function CreateModal({ open, onClose, onCreate }:{
+  open:boolean; onClose:()=>void; onCreate:(name:string)=>void;
+}) {
+  const [val, setVal] = useState('');
+  useEffect(()=>{ if(open){ setVal(''); } },[open]);
+  const can = val.trim().length > 0;
+  if(!open) return null;
+  return (
+    <ModalShell>
+      <FrameHeader
+        icon={<Plus className="ico" style={{ color:'var(--brand)' }} />}
+        title="Create Assistant"
+        onClose={onClose}
+      />
+      <div className="px-5 py-4">
+        <label className="block text-xs mb-1 muted">Name</label>
+        <input
+          className="input"
+          value={val}
+          onChange={(e)=>setVal(e.target.value)}
+          placeholder="e.g., Sales Bot"
+          autoFocus
+        />
+      </div>
+      <div className="px-5 pb-5 flex gap-2">
+        <button className="btn flex-1" onClick={onClose}>Cancel</button>
+        <button
+          disabled={!can}
+          className="btn btn-primary flex-1"
+          style={{ opacity: can?1:.6, cursor: can?'pointer':'not-allowed' }}
+          onClick={()=> can && onCreate(val.trim())}
+          onMouseEnter={(e)=>{ if(can) (e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER; }}
+          onMouseLeave={(e)=>{ if(can) (e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN; }}
+        >
+          Create
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
+/* --------------------------------- Component -------------------------------- */
 export default function AssistantRail() {
   const [assistants, setAssistants] = useState<AssistantLite[]>([]);
   const [activeId, setActiveId] = useState('');
   const [q, setQ] = useState('');
   const [delId, setDelId] = useState<string|null>(null);
   const [renId, setRenId] = useState<string|null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement|null>(null);
 
   useEffect(()=>{ let alive=true; (async()=>{ const list=await loadAssistants(); if(!alive) return; setAssistants(list); if(list[0]) setActiveId(list[0].id);})(); return()=>{alive=false}; },[]);
@@ -187,12 +240,13 @@ export default function AssistantRail() {
     return !s?assistants:assistants.filter(a=>a.name.toLowerCase().includes(s) || (a.purpose||'').toLowerCase().includes(s));
   },[assistants,q]);
 
-  function onCreate() {
-    const name = prompt('New assistant name?')?.trim();
-    if(!name) return;
+  async function createAssistant(name: string) {
     const a:AssistantLite={ id:`a_${Date.now().toString(36)}${Math.random().toString(36).slice(2,6)}`, name, createdAt:Date.now(), purpose:'' };
     const next=[a, ...assistants];
-    setAssistants(next); setActiveId(a.id); saveAssistants(next);
+    setAssistants(next);
+    setActiveId(a.id);
+    await saveAssistants(next);
+    setCreateOpen(false);
   }
 
   async function confirmDelete() {
@@ -216,11 +270,11 @@ export default function AssistantRail() {
     <div className="rail px-3 py-4">
       <LocalTokens />
 
-      {/* tiny label above panel (like API Keys) */}
+      {/* tiny section label like API Keys */}
       <div className="mb-2 text-[11px] font-semibold tracking-[.12em] muted">ASSISTANTS</div>
 
       <div className="panel p-3">
-        {/* Header: API Keys-style brand chip + green Create */}
+        {/* Header (API Keys chip + green Create) */}
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background:'var(--brand-weak)' }}>
@@ -230,7 +284,7 @@ export default function AssistantRail() {
           </div>
           <button
             className="btn btn-primary"
-            onClick={onCreate}
+            onClick={()=> setCreateOpen(true)}
             onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER)}
             onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN)}
           >
@@ -238,7 +292,7 @@ export default function AssistantRail() {
           </button>
         </div>
 
-        {/* Search: single input (no extra inner box) */}
+        {/* Search — single input (no extra inner card) */}
         <div className="mb-3">
           <div className="flex items-center gap-2">
             <Search className="ico muted" />
@@ -258,7 +312,7 @@ export default function AssistantRail() {
           </div>
         </div>
 
-        {/* List: just rows with thin borders; no extra wrappers */}
+        {/* List */}
         <div className="space-y-2">
           {filtered.length===0 ? (
             <div className="muted text-[12px] px-1 py-2">No assistants found</div>
@@ -267,7 +321,7 @@ export default function AssistantRail() {
               const active=a.id===activeId;
               return (
                 <div key={a.id} className={`item ${active?'active':''}`} onClick={()=>setActiveId(a.id)} role="button">
-                  {/* icon chip like API Keys page */}
+                  {/* icon chip (thin border) */}
                   <div className="w-8 h-8 rounded-xl flex items-center justify-center thin" style={{ background:'var(--card)' }}>
                     <Bot className="ico" />
                   </div>
@@ -295,6 +349,7 @@ export default function AssistantRail() {
       </div>
 
       {/* Modals */}
+      <CreateModal open={createOpen} onClose={()=>setCreateOpen(false)} onCreate={createAssistant} />
       <ConfirmDeleteModal open={!!delId} name={delName} onClose={()=>setDelId(null)} onConfirm={confirmDelete} />
       <RenameModal open={!!renId} initial={renName} onClose={()=>setRenId(null)} onSave={saveRename} />
     </div>
