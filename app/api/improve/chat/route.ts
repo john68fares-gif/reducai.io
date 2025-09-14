@@ -1,72 +1,59 @@
 // app/api/improve/chat/route.ts
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from 'next/server';
 
 /**
  * Improve → Chat proxy (App Router)
- * URL: /api/improve/chat
- * Method: POST
+ * - No Supabase required here.
+ * - If OPENAI_API_KEY is missing, returns a mock reply so the UI still works.
+ * - Maps o3/o3-mini to a chat-capable model so upstream won't error.
  *
- * Body (JSON):
- * {
- *   "agentId": "optional",
- *   "model": "gpt-4o-mini" | "gpt-4o" | "gpt-4.1" | "gpt-4.1-mini" | "o3" | "o3-mini",
- *   "temperature": 0.0..1.0,
- *   "system": "string",
- *   "messages": [{ role: "user"|"assistant", content: "..." }],
- *   "guardLevel": "provider-only" | "lenient"
- * }
- *
- * Notes:
- * - If OPENAI_API_KEY is missing, returns a mock echo so the UI still works.
- * - Maps reasoning models (o3/o3-mini) to a chat-capable model to avoid upstream errors.
+ * ENV:
+ *   - OPENAI_API_KEY   (optional; if absent, returns mock output)
  */
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
     const {
-      agentId, // not used here, accepted for parity
+      agentId,                  // accepted for parity with client; unused here
       model,
       temperature,
       system,
       messages,
-      guardLevel,
+      guardLevel,               // 'provider-only' | 'lenient'
     } = (body || {}) as {
       agentId?: string;
       model?: string;
       temperature?: number;
       system?: string;
-      messages?: Array<{ role: "user" | "assistant"; content: string }>;
-      guardLevel?: "provider-only" | "lenient";
+      messages?: Array<{ role: 'user' | 'assistant'; content: string }>;
+      guardLevel?: 'provider-only' | 'lenient';
     };
 
-    const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
-
-    const safeModel = mapModel(model ?? "gpt-4o-mini");
+    const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+    const safeModel = mapModel(model ?? 'gpt-4o-mini');
     const safeTemp =
-      typeof temperature === "number" && temperature >= 0 && temperature <= 1
-        ? temperature
-        : 0.5;
+      typeof temperature === 'number' && temperature >= 0 && temperature <= 1 ? temperature : 0.5;
 
-    // Optional tiny guard hint to align with your UI's "refinements" switch
+    // Build final system prompt (include a tiny guard hint if provided)
     const guardHint =
-      guardLevel === "provider-only"
-        ? "Follow the user’s instructions within legal and safety boundaries. Do not add extra disclaimers beyond provider requirements."
-        : "Be helpful, precise, and safe. Respect any refinements.";
-    const finalSystem = [String(system || "").trim(), guardHint]
+      guardLevel === 'provider-only'
+        ? 'Follow the user’s instructions within legal and safety boundaries. Do not add extra disclaimers beyond provider requirements.'
+        : 'Be helpful, precise, and safe. Respect any refinements.';
+    const finalSystem = [typeof system === 'string' ? system.trim() : '', guardHint]
       .filter(Boolean)
-      .join("\n\n");
+      .join('\n\n');
 
-    const chatMessages = normalize(messages);
+    // Normalize chat messages from UI (ignore system; we add it above)
+    const chatMessages = normalizeMessages(messages);
 
-    // No key? Return a mock so the Improve UI keeps working.
+    // If no key → return mock reply so UI works
     if (!OPENAI_API_KEY) {
       const lastUser =
-        [...chatMessages].reverse().find((m) => m.role === "user")?.content ??
-        "Hello!";
+        [...chatMessages].reverse().find((m) => m.role === 'user')?.content ?? 'Hello!';
       return NextResponse.json({
         content: `(mock) You said: ${lastUser}`,
         modelUsed: safeModel,
-        finish_reason: "stop",
+        finish_reason: 'stop',
       });
     }
 
@@ -75,66 +62,57 @@ export async function POST(req: Request) {
       model: safeModel,
       temperature: safeTemp,
       messages: [
-        ...(finalSystem
-          ? [{ role: "system" as const, content: finalSystem }]
-          : []),
+        ...(finalSystem ? [{ role: 'system' as const, content: finalSystem }] : []),
         ...chatMessages,
       ],
     };
 
-    const r = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
+    const r = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
       headers: {
-        "Content-Type": "application/json",
+        'Content-Type': 'application/json',
         Authorization: `Bearer ${OPENAI_API_KEY}`,
+        // NOTE: we’re hitting chat/completions here; assistants header is NOT required
+        // (leaving this comment so future edits don’t move this call back to the Assistants API)
       },
       body: JSON.stringify(payload),
+      cache: 'no-store',
     });
 
     if (!r.ok) {
-      // Try to surface upstream error text for easier debugging
-      const text = await r.text().catch(() => "");
-      return NextResponse.json(
-        { error: text || `Upstream ${r.status}` },
-        { status: r.status }
-      );
+      const text = await r.text().catch(() => '');
+      return NextResponse.json({ error: text || `Upstream ${r.status}` }, { status: r.status });
     }
 
-    const data = await r.json().catch(() => ({}));
-    const content: string =
-      data?.choices?.[0]?.message?.content ??
-      data?.choices?.[0]?.text ??
-      "";
-    const finish_reason: string = data?.choices?.[0]?.finish_reason ?? "stop";
-    const modelUsed: string = data?.model || safeModel;
+    const data = await r.json();
+    const content = data?.choices?.[0]?.message?.content ?? '';
+    const finish_reason = data?.choices?.[0]?.finish_reason ?? 'stop';
+    const modelUsed = data?.model || safeModel;
 
     return NextResponse.json({ content, modelUsed, finish_reason });
   } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message || "chat failed" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: e?.message || 'chat failed' }, { status: 500 });
   }
 }
 
 /* ---------------- helpers ---------------- */
 
-function normalize(
+function normalizeMessages(
   arr: any
-): Array<{ role: "user" | "assistant"; content: string }> {
+): Array<{ role: 'user' | 'assistant'; content: string }> {
   if (!Array.isArray(arr)) return [];
   return arr
     .filter(
       (m) =>
         m &&
-        (m.role === "user" || m.role === "assistant") &&
-        typeof m.content === "string"
+        (m.role === 'user' || m.role === 'assistant') &&
+        typeof m.content === 'string'
     )
     .map((m) => ({ role: m.role, content: m.content }));
 }
 
 function mapModel(m: string): string {
-  // Reasoning models aren't supported on /chat/completions; pick a safe chat model.
-  if (m === "o3" || m === "o3-mini") return "gpt-4o-mini";
+  // Reasoning models (o3) aren’t available on /chat/completions → pick a safe chat model.
+  if (m === 'o3' || m === 'o3-mini') return 'gpt-4o-mini';
   return m;
 }
