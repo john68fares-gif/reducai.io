@@ -2,111 +2,125 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Search, Plus, Bot, Folder, FolderOpen, Trash2, Edit3, X, AlertTriangle } from 'lucide-react';
+import { Search, Plus, Bot, Trash2, Edit3, X, AlertTriangle } from 'lucide-react';
 
-/* ========== Scoped storage (safe optional) ========== */
-type Scoped = { getJSON<T>(k: string, f: T): Promise<T>; setJSON(k: string, v: unknown): Promise<void>; };
+/* Optional scoped storage (won't crash if missing) */
+type Scoped = { getJSON<T>(k:string,f:T):Promise<T>; setJSON(k:string,v:unknown):Promise<void> };
 let scopedStorageFn: undefined | (() => Promise<Scoped>);
 try { scopedStorageFn = require('@/utils/scoped-storage').scopedStorage; } catch {}
 
-/* ========== Types ========== */
-export type AssistantLite = { id: string; name: string; purpose?: string; createdAt?: number; };
-const KEYS = { list: 'agents', local: 'agents' };
+/* Data types */
+export type AssistantLite = { id: string; name: string; purpose?: string; createdAt?: number };
+const STORAGE_KEY = 'agents';
 
-/* ========== Theme + styles ========== */
+/* API Keys page green */
+const BTN_GREEN = '#10b981';
+const BTN_GREEN_HOVER = '#0ea473';
+
 function LocalTokens() {
   return (
     <style>{`
-      .rail { width: 312px; color: var(--text); }
-      .panel {
-        background: var(--panel); border: 1px solid var(--border);
-        border-radius: 18px; box-shadow: var(--shadow-soft);
-      }
-      .card {
-        background: var(--card); border: 1px solid var(--border);
-        border-radius: 12px; box-shadow: var(--shadow-card);
+      .rail { width:312px; color:var(--text); }
+      .rail .panel {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        box-shadow: var(--shadow-soft);
       }
 
+      /* Thin, quiet borders everywhere */
+      .thin { border:1px solid var(--border) }
+
+      /* Inputs & buttons to match compact voice page + API Keys */
       .input {
-        height: 34px; border-radius: 12px; padding: 0 .7rem;
-        background: var(--card); border: 1px solid var(--border); color: var(--text);
-        font-size: 13px; outline: none; transition: box-shadow .16s ease, border-color .16s ease;
+        height:34px; width:100%; border-radius:12px; padding:0 .7rem;
+        background: var(--card); border:1px solid var(--border); color:var(--text);
+        font-size:13px; outline:none; transition: box-shadow .16s ease, border-color .16s ease;
       }
       .input:focus {
         border-color: color-mix(in oklab, var(--brand) 40%, var(--border));
-        box-shadow: 0 0 0 2px color-mix(in oklab, var(--brand) 18%, transparent);
+        box-shadow: 0 0 0 3px color-mix(in oklab, var(--brand) 14%, transparent);
       }
-
       .btn {
-        height: 32px; padding: 0 .7rem; border-radius: 10px;
-        display: inline-flex; align-items: center; gap: .4rem;
-        background: var(--card); color: var(--text); border: 1px solid var(--border);
-        font-size: 13px; font-weight: 500; transition: transform .06s ease;
+        height:34px; padding:0 .8rem; border-radius:12px; display:inline-flex; align-items:center; gap:.5rem;
+        background: var(--card); color: var(--text); border:1px solid var(--border); font-size:13px; font-weight:600;
+        transition: transform .06s ease;
       }
-      .btn:hover { transform: translateY(-1px); }
-      .btn-create {
-        background: var(--panel); border: 1px solid var(--border);
-        color: #fff; font-weight: 600;
+      .btn:hover{ transform: translateY(-1px); }
+      .btn-primary {
+        background:${BTN_GREEN}; color:#fff; border:1px solid ${BTN_GREEN};
+        box-shadow: 0 10px 24px rgba(16,185,129,.22);
       }
+      .btn-primary:hover { background:${BTN_GREEN_HOVER}; }
 
+      /* Row item: no extra box, just a thin border + hover inner-ish shadow like Account page */
       .item {
-        display: flex; align-items: center; gap: 10px;
-        padding: 9px 11px; border-radius: 10px;
-        background: var(--card); border: 1px solid var(--border);
-        transition: box-shadow .18s ease, transform .12s ease;
+        display:flex; align-items:center; gap:10px;
+        padding:10px 12px; border-radius:12px;
+        background: var(--card); border:1px solid var(--border);
+        transition: box-shadow .18s ease, transform .12s ease, border-color .18s ease;
       }
       .item:hover {
         transform: translateY(-1px);
-        box-shadow: 0 10px 20px rgba(0,0,0,.16);
+        box-shadow: var(--shadow-card, 0 10px 22px rgba(0,0,0,.14)), inset 0 1px 0 rgba(255,255,255,.06);
+        border-color: color-mix(in oklab, var(--brand) 22%, var(--border));
       }
       .item.active {
-        border-color: color-mix(in oklab, var(--brand) 40%, var(--border));
-        box-shadow: 0 0 0 2px color-mix(in oklab, var(--brand) 25%, transparent);
+        box-shadow: var(--shadow-card), inset 0 1px 0 rgba(255,255,255,.08);
+        border-color: color-mix(in oklab, var(--brand) 28%, var(--border));
       }
 
+      /* Small helper text */
       .muted { color: var(--text-muted); }
-      .icon { width: 14px; height: 14px; }
+      .ico { width:14px; height:14px; }
     `}</style>
   );
 }
 
-/* ========== Storage ========== */
+/* Storage helpers */
 async function loadAssistants(): Promise<AssistantLite[]> {
-  try {
-    if (scopedStorageFn) {
-      const ss = await scopedStorageFn();
-      return await ss.getJSON(KEYS.list, []);
-    }
-  } catch {}
-  try {
-    const raw = localStorage.getItem(KEYS.local);
-    return raw ? JSON.parse(raw) : [];
-  } catch {}
+  try { if (scopedStorageFn) { const ss = await scopedStorageFn(); const arr = await ss.getJSON<AssistantLite[]>(STORAGE_KEY, []); if (Array.isArray(arr)) return normalize(arr); } } catch {}
+  try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) return normalize(JSON.parse(raw)); } catch {}
   return [];
 }
 async function saveAssistants(list: AssistantLite[]) {
-  try { if (scopedStorageFn) { const ss = await scopedStorageFn(); await ss.setJSON(KEYS.list, list); } } catch {}
-  try { localStorage.setItem(KEYS.local, JSON.stringify(list)); } catch {}
+  try { if (scopedStorageFn) { const ss = await scopedStorageFn(); await ss.setJSON(STORAGE_KEY, list); } } catch {}
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); } catch {}
+}
+function normalize(arr: AssistantLite[]): AssistantLite[] {
+  return (arr||[]).map((x,i)=>({ id:String(x.id ?? `a_${i}`), name:String(x.name ?? `Assistant ${i+1}`), purpose:x.purpose ?? '', createdAt:x.createdAt ?? Date.now() }));
 }
 
-/* ========== ConfirmDelete modal ========== */
-function ConfirmDelete({ name, onCancel, onConfirm }: { name: string; onCancel: () => void; onConfirm: () => void }) {
+/* Modals (warning + rename) */
+function ConfirmDeleteModal({ open, name, onClose, onConfirm }:{
+  open:boolean; name?:string; onClose:()=>void; onConfirm:()=>void;
+}) {
+  if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 grid place-items-center px-4">
-      <div className="panel w-full max-w-sm p-6">
-        <div className="flex gap-3">
-          <AlertTriangle className="w-5 h-5" style={{ color: 'salmon' }} />
-          <div className="min-w-0">
-            <div className="font-semibold">Delete assistant?</div>
-            <div className="text-sm muted">You’re about to remove <span style={{ color: 'var(--text)' }}>{name}</span>.</div>
+    <div className="fixed inset-0 z-[9998] flex items-center justify-center px-4" style={{ background:'rgba(0,0,0,.60)' }}>
+      <div className="panel w-full max-w-md overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-4 thin" style={{ borderBottom:'1px solid var(--border)' }}>
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background:'var(--brand-weak)' }}>
+              <AlertTriangle className="ico" style={{ color:'var(--brand)' }} />
+            </div>
+            <div className="min-w-0">
+              <div className="text-lg font-semibold">Delete Assistant</div>
+              <div className="text-sm muted">This action cannot be undone.</div>
+            </div>
           </div>
+          <button onClick={onClose} className="p-2 rounded hover:opacity-75"><X className="ico" /></button>
         </div>
-        <div className="mt-5 flex justify-end gap-2">
-          <button className="btn" onClick={onCancel}>Cancel</button>
+        <div className="px-5 py-4">
+          <div className="text-sm">Are you sure you want to delete <span className="font-semibold">“{name||'assistant'}”</span>?</div>
+        </div>
+        <div className="px-5 pb-5 flex gap-2">
+          <button className="btn flex-1" onClick={onClose}>Cancel</button>
           <button
-            className="btn"
-            style={{ background: 'rgba(255,120,120,.12)', borderColor: 'rgba(255,120,120,.35)', color: 'rgba(255,160,160,.95)' }}
+            className="btn btn-primary flex-1"
             onClick={onConfirm}
+            onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER)}
+            onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN)}
           >
             Delete
           </button>
@@ -116,88 +130,173 @@ function ConfirmDelete({ name, onCancel, onConfirm }: { name: string; onCancel: 
   );
 }
 
-/* ========== Main ========== */
+function RenameModal({ open, initial, onClose, onSave }:{
+  open:boolean; initial:string; onClose:()=>void; onSave:(v:string)=>void;
+}) {
+  const [val,setVal] = useState(initial);
+  useEffect(()=>{ if(open) setVal(initial); },[open,initial]);
+  const can = val.trim().length>0;
+  if(!open) return null;
+  return (
+    <div className="fixed inset-0 z-[9998] flex items-center justify-center px-4" style={{ background:'rgba(0,0,0,.60)' }}>
+      <div className="panel w-full max-w-md overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-4 thin" style={{ borderBottom:'1px solid var(--border)' }}>
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background:'var(--brand-weak)' }}>
+              <Edit3 className="ico" style={{ color:'var(--brand)' }} />
+            </div>
+            <div className="text-lg font-semibold">Rename Assistant</div>
+          </div>
+          <button onClick={onClose} className="p-2 rounded hover:opacity-75"><X className="ico" /></button>
+        </div>
+        <div className="px-5 py-4">
+          <label className="block text-xs mb-1 muted">Name</label>
+          <input className="input" value={val} onChange={e=>setVal(e.target.value)} placeholder="e.g., Support Bot" autoFocus />
+        </div>
+        <div className="px-5 pb-5 flex gap-2">
+          <button className="btn flex-1" onClick={onClose}>Cancel</button>
+          <button
+            disabled={!can}
+            className="btn btn-primary flex-1"
+            style={{ opacity: can?1:.6, cursor: can?'pointer':'not-allowed' }}
+            onClick={()=> can && onSave(val.trim())}
+            onMouseEnter={(e)=>{ if(can) (e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER; }}
+            onMouseLeave={(e)=>{ if(can) (e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN; }}
+          >
+            Save
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* Component */
 export default function AssistantRail() {
   const [assistants, setAssistants] = useState<AssistantLite[]>([]);
   const [activeId, setActiveId] = useState('');
   const [q, setQ] = useState('');
-  const [confirming, setConfirming] = useState<AssistantLite | null>(null);
+  const [delId, setDelId] = useState<string|null>(null);
+  const [renId, setRenId] = useState<string|null>(null);
+  const searchRef = useRef<HTMLInputElement|null>(null);
 
-  useEffect(() => { loadAssistants().then(setAssistants); }, []);
-  const filtered = useMemo(() => assistants.filter(a => a.name.toLowerCase().includes(q.toLowerCase())), [assistants, q]);
+  useEffect(()=>{ let alive=true; (async()=>{ const list=await loadAssistants(); if(!alive) return; setAssistants(list); if(list[0]) setActiveId(list[0].id);})(); return()=>{alive=false}; },[]);
 
-  const doDelete = async (id: string) => {
-    const next = assistants.filter(a => a.id !== id);
+  const filtered = useMemo(()=>{
+    const s=q.trim().toLowerCase();
+    return !s?assistants:assistants.filter(a=>a.name.toLowerCase().includes(s) || (a.purpose||'').toLowerCase().includes(s));
+  },[assistants,q]);
+
+  function onCreate() {
+    const name = prompt('New assistant name?')?.trim();
+    if(!name) return;
+    const a:AssistantLite={ id:`a_${Date.now().toString(36)}${Math.random().toString(36).slice(2,6)}`, name, createdAt:Date.now(), purpose:'' };
+    const next=[a, ...assistants];
+    setAssistants(next); setActiveId(a.id); saveAssistants(next);
+  }
+
+  async function confirmDelete() {
+    if(!delId) return;
+    const next = assistants.filter(a=>a.id!==delId);
     setAssistants(next);
-    if (activeId === id) setActiveId(next[0]?.id || '');
+    if(activeId===delId) setActiveId(next[0]?.id || '');
     await saveAssistants(next);
-  };
+    setDelId(null);
+  }
+  function saveRename(nextName:string){
+    if(!renId) return;
+    const next = assistants.map(a=>a.id===renId?{...a, name:nextName}:a);
+    setAssistants(next); saveAssistants(next); setRenId(null);
+  }
+
+  const delName = assistants.find(a=>a.id===delId)?.name;
+  const renName = assistants.find(a=>a.id===renId)?.name || '';
 
   return (
     <div className="rail px-3 py-4">
       <LocalTokens />
+
+      {/* tiny label above panel (like API Keys) */}
       <div className="mb-2 text-[11px] font-semibold tracking-[.12em] muted">ASSISTANTS</div>
 
       <div className="panel p-3">
+        {/* Header: API Keys-style brand chip + green Create */}
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg grid place-items-center card">
-              <Bot className="icon" />
+            <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background:'var(--brand-weak)' }}>
+              <Bot className="ico" style={{ color:'var(--brand)' }} />
             </div>
             <div className="text-[13px] font-semibold">Assistants</div>
           </div>
-          <button className="btn btn-create" onClick={() => {
-            const name = prompt('Assistant name?'); if (!name) return;
-            const a = { id: crypto.randomUUID(), name };
-            const list = [a, ...assistants];
-            setAssistants(list); setActiveId(a.id); saveAssistants(list);
-          }}>
-            <Plus className="icon" /> Create
+          <button
+            className="btn btn-primary"
+            onClick={onCreate}
+            onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER)}
+            onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN)}
+          >
+            <Plus className="ico" /> Create
           </button>
         </div>
 
-        <div className="card mb-3 px-2 py-1.5 flex items-center gap-2">
-          <Search className="icon muted" />
-          <input className="input flex-1 border-0 bg-transparent" value={q} onChange={e => setQ(e.target.value)} placeholder="Search…" />
-          {q && <button className="btn" onClick={() => setQ('')}><X className="icon" /></button>}
+        {/* Search: single input (no extra inner box) */}
+        <div className="mb-3">
+          <div className="flex items-center gap-2">
+            <Search className="ico muted" />
+            <input
+              ref={searchRef}
+              value={q}
+              onChange={(e)=>setQ(e.target.value)}
+              className="input"
+              placeholder="Search assistants"
+              style={{ flex:1 }}
+            />
+            {q && (
+              <button className="btn" onClick={()=>setQ('')} aria-label="Clear">
+                <X className="ico" />
+              </button>
+            )}
+          </div>
         </div>
 
+        {/* List: just rows with thin borders; no extra wrappers */}
         <div className="space-y-2">
-          {filtered.map(a => (
-            <div key={a.id} className={`item ${a.id === activeId ? 'active' : ''}`} onClick={() => setActiveId(a.id)}>
-              <div className="w-7 h-7 rounded-lg grid place-items-center card">
-                {a.id === activeId ? <FolderOpen className="icon" /> : <Folder className="icon" />}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-[13px] font-semibold truncate">{a.name}</div>
-                <div className="muted text-[11.5px] truncate">{a.purpose || '—'}</div>
-              </div>
-              <div className="flex gap-1">
-                <button
-                  className="btn"
-                  onClick={(e) => { e.stopPropagation(); const name = prompt('Rename', a.name); if (!name) return;
-                    const list = assistants.map(x => x.id === a.id ? { ...x, name } : x);
-                    setAssistants(list); saveAssistants(list);
-                  }}
-                >
-                  <Edit3 className="icon" />
-                </button>
-                <button className="btn" onClick={(e) => { e.stopPropagation(); setConfirming(a); }}>
-                  <Trash2 className="icon" />
-                </button>
-              </div>
-            </div>
-          ))}
+          {filtered.length===0 ? (
+            <div className="muted text-[12px] px-1 py-2">No assistants found</div>
+          ) : (
+            filtered.map(a=>{
+              const active=a.id===activeId;
+              return (
+                <div key={a.id} className={`item ${active?'active':''}`} onClick={()=>setActiveId(a.id)} role="button">
+                  {/* icon chip like API Keys page */}
+                  <div className="w-8 h-8 rounded-xl flex items-center justify-center thin" style={{ background:'var(--card)' }}>
+                    <Bot className="ico" />
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <div className="font-semibold text-[13px] truncate">{a.name}</div>
+                    <div className="muted text-[11.5px] truncate">{a.purpose || '—'}</div>
+                  </div>
+
+                  <div className="flex items-center gap-1">
+                    <button className="btn" style={{ height:28, padding:'0 8px' }} onClick={(e)=>{ e.stopPropagation(); setRenId(a.id); }} aria-label="Rename">
+                      <Edit3 className="ico" />
+                    </button>
+                    <button className="btn" style={{ height:28, padding:'0 8px' }} onClick={(e)=>{ e.stopPropagation(); setDelId(a.id); }} aria-label="Delete">
+                      <Trash2 className="ico" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })
+          )}
         </div>
+
+        <div className="muted text-[11.5px] mt-3 px-1">Tip: saved to workspace (with local fallback).</div>
       </div>
 
-      {confirming && (
-        <ConfirmDelete
-          name={confirming.name}
-          onCancel={() => setConfirming(null)}
-          onConfirm={() => { doDelete(confirming.id); setConfirming(null); }}
-        />
-      )}
+      {/* Modals */}
+      <ConfirmDeleteModal open={!!delId} name={delName} onClose={()=>setDelId(null)} onConfirm={confirmDelete} />
+      <RenameModal open={!!renId} initial={renName} onClose={()=>setRenId(null)} onSave={saveRename} />
     </div>
   );
 }
