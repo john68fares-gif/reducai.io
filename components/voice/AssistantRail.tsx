@@ -186,7 +186,7 @@ function CreateModal({ open, onClose, onCreate }:{
   );
 }
 
-/* ---------- Card with top shadow/glow ---------- */
+/* ---------- Card ---------- */
 function AssistantCard({
   a, active, onClick, onRename, onDelete,
 }:{
@@ -206,15 +206,15 @@ function AssistantCard({
       className="relative p-3 rounded-[14px] cursor-pointer transition-transform"
       whileHover={{ y: -2 }}
       style={{
-        background: 'var(--rail-card-bg, var(--acct-bg, var(--card)))',
+        background: 'var(--card)',
         color: 'var(--text)',
-        border: '1px solid var(--rail-card-border, var(--border))',
+        border: '1px solid var(--border)',
         boxShadow: active
           ? '0 16px 36px rgba(0,0,0,.38), 0 0 0 1px rgba(0,255,194,.10)'
           : '0 6px 18px rgba(0,0,0,.22), 0 0 0 1px rgba(255,255,255,.03)',
       }}
     >
-      {/* top shadow/glow strip */}
+      {/* top strip */}
       <div
         className="pointer-events-none absolute left-0 right-0 rounded-t-[14px]"
         style={{
@@ -233,7 +233,7 @@ function AssistantCard({
           style={{
             background:'var(--sb-icon-bg, rgba(255,255,255,.06))',
             border:'1px solid var(--sb-icon-border, rgba(255,255,255,.12))',
-            boxShadow: active ? 'inset 0 0 10px rgba(0,0,0,.16), 0 0 0 1px rgba(0,255,194,.18)' : 'inset 0 0 10px rgba(0,0,0,.16)',
+            boxShadow: active ? '0 0 0 1px rgba(0,255,194,.18)' : undefined,
           }}
         >
           <Bot className="w-4 h-4" style={{ color:'var(--brand, #12a989)' }} />
@@ -263,14 +263,6 @@ function AssistantCard({
           </button>
         </div>
       </div>
-
-      {/* active rim */}
-      {active && (
-        <div
-          className="pointer-events-none absolute inset-0 rounded-[14px]"
-          style={{ boxShadow: 'inset 0 0 0 1px rgba(0,255,194,.22), 0 0 30px rgba(0,255,194,.10)' }}
-        />
-      )}
     </motion.div>
   );
 }
@@ -316,12 +308,11 @@ export default function AssistantRail() {
 
   return (
     <div
-      className="px-3 py-4 rounded-[16px]"
+      className="px-3 py-4 h-full"
       style={{
-        /* Match sidebar grey tones; fall back to panel/card */
-        background: 'var(--rail-bg, var(--sb-tag-bg, var(--panel)))',
-        border: '1px solid var(--rail-border, var(--sidebar-border, var(--border)))',
-        boxShadow: 'inset 0 0 10px rgba(0,0,0,.12)',
+        background: 'var(--sidebar-bg)',   // match Sidebar solid background
+        borderRight: '1px solid var(--sidebar-border)',
+        color: 'var(--sidebar-text)',
       }}
     >
       {/* Label */}
@@ -329,7 +320,7 @@ export default function AssistantRail() {
         ASSISTANTS
       </div>
 
-      {/* Header (Vapi-like tight) */}
+      {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <div
@@ -337,7 +328,6 @@ export default function AssistantRail() {
             style={{
               background:'var(--sb-icon-bg, rgba(255,255,255,.06))',
               border:'1px solid var(--sb-icon-border, rgba(255,255,255,.12))',
-              boxShadow:'inset 0 0 10px rgba(0,0,0,.16)',
             }}
           >
             <Bot className="w-4 h-4" style={{ color:'var(--brand, #12a989)' }} />
@@ -387,30 +377,5 @@ export default function AssistantRail() {
         )}
       </div>
 
-      {/* Assistants list */}
-      <div className="space-y-2.5">
-        <AnimatePresence initial={false}>
-          {filtered.map(a=>(
-            <AssistantCard
-              key={a.id}
-              a={a}
-              active={a.id === activeId}
-              onClick={()=> setActiveId(a.id)}
-              onRename={()=> setRenId(a.id)}
-              onDelete={()=> setDelId(a.id)}
-            />
-          ))}
-        </AnimatePresence>
-
-        {filtered.length === 0 && (
-          <div className="text-xs" style={{ color:'var(--sidebar-muted, var(--text-muted))' }}>No assistants found.</div>
-        )}
-      </div>
-
-      {/* Modals */}
-      <CreateModal open={createOpen} onClose={()=>setCreateOpen(false)} onCreate={addAssistant} />
-      <RenameModal open={!!renId} initial={renName} onClose={()=>setRenId(null)} onSave={saveRename} />
-      <ConfirmDelete open={!!delId} name={delName} onClose={()=>setDelId(null)} onConfirm={confirmDelete} />
-    </div>
-  );
-}
+      {/* Assistants */}
+      <div class
