@@ -1,346 +1,285 @@
-// components/voice/AssistantRail.tsx
+// components/voice/VoiceAgentSection.tsx
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Search, Plus, Bot, Folder, FolderOpen, Trash2, Edit3, X } from 'lucide-react';
+import React, { useState } from 'react';
+import dynamic from 'next/dynamic';
+import {
+  Bot, Code2, Play, MessagesSquare, Phone, Wand2,
+  ChevronDown, ChevronUp, Gauge, Timer
+} from 'lucide-react';
 
-/* -----------------------------------------------------------------------------
-   Optional scoped storage (won't crash if missing)
------------------------------------------------------------------------------ */
-type Scoped = {
-  getJSON<T>(key: string, fallback: T): Promise<T>;
-  setJSON(key: string, value: unknown): Promise<void>;
-};
-let scopedStorageFn: undefined | (() => Promise<Scoped>);
-try {
-  scopedStorageFn = require('@/utils/scoped-storage').scopedStorage;
-} catch { /* no-op */ }
+/* Safe dynamic rail */
+const AssistantRail = dynamic(
+  () =>
+    import('@/components/voice/AssistantRail')
+      .then(m => m.default ?? m)
+      .catch(() => () => <div className="px-3 py-3 text-xs opacity-70">Rail unavailable</div>),
+  { ssr: false, loading: () => <div className="px-3 py-3 text-xs opacity-70">Loading…</div> }
+);
 
-/* -----------------------------------------------------------------------------
-   Types
------------------------------------------------------------------------------ */
-export type AssistantLite = {
-  id: string;
-  name: string;
-  purpose?: string;
-  createdAt?: number;
-};
+class RailBoundary extends React.Component<{children:React.ReactNode},{hasError:boolean}> {
+  constructor(p:any){ super(p); this.state={hasError:false}; }
+  static getDerivedStateFromError(){ return {hasError:true}; }
+  render(){ return this.state.hasError ? <div className="px-3 py-3 text-xs opacity-70">Rail crashed</div> : this.props.children; }
+}
 
-const KEYS = {
-  list: 'agents',                   // primary scoped key
-  localFallback: 'agents',          // localStorage fallback
-};
+/* ===== Compact tokens ===== */
+const GREEN = '#10b981';
+const GREEN_HOVER = '#0ea473';
 
-const GREEN = 'var(--brand, #10b981)'; // respect theme
-const GREEN_HOVER = 'color-mix(in oklab, var(--brand, #10b981) 86%, black)';
-
-/* -----------------------------------------------------------------------------
-   Theme tokens (light & dark by CSS vars) + compact controls
------------------------------------------------------------------------------ */
 function LocalTokens() {
   return (
     <style>{`
-      .rail { width: 312px; color: var(--text); }
-      .rail .panel {
-        background: var(--panel); border: 1px solid var(--border); border-radius: 18px;
-        box-shadow: var(--shadow-soft, 0 12px 30px rgba(0,0,0,.18));
-      }
-      .rail .card {
-        background: var(--card); border: 1px solid var(--border); border-radius: 12px;
-        box-shadow: var(--shadow-card, 0 6px 16px rgba(0,0,0,.12));
-      }
+      .va { --panel: rgba(13,15,17,0.92); --card: rgba(18,20,23,0.88);
+            --border: rgba(106,247,209,0.18); --text: #E9FBF5; --muted: #9bb7ae; --fg:#E9FBF5; }
+      .va { color: var(--fg); font-size:13px; } /* smaller body text */
+      .va-panel{ background:var(--panel); border:1px solid var(--border); border-radius:24px;
+                 box-shadow: inset 0 0 20px rgba(0,0,0,.28), 0 0 14px rgba(106,247,209,.05), 0 0 18px rgba(0,255,194,.05); }
+      .va-card{ background:var(--card); border:1px solid var(--border); border-radius:14px;
+                box-shadow: 0 14px 28px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.06), 0 0 0 1px rgba(0,255,194,.05); }
 
-      .rail .input {
-        height: 34px; width: 100%; border-radius: 12px; padding: 0 .7rem;
-        background: var(--card); border: 1px solid var(--border); color: var(--text);
-        font-size: 13px; outline: none; transition: box-shadow .16s ease, border-color .16s ease;
+      /* Compact controls */
+      .input,.select,.textarea{
+        width:100%; background:var(--card); border:1px solid var(--border); color:var(--fg);
+        border-radius:12px; padding:0 .7rem; outline:none; font-size:13px;
       }
-      .rail .input:focus {
-        border-color: color-mix(in oklab, var(--brand, #10b981) 40%, var(--border));
-        box-shadow: 0 0 0 3px color-mix(in oklab, var(--brand, #10b981) 18%, transparent);
-      }
+      .input,.select{ height:34px; }            /* shorter height */
+      .textarea{ min-height:130px; padding:.6rem .7rem; line-height:1.45; font-size:13px; }
 
-      .rail .btn {
-        height: 34px; padding: 0 .75rem; border-radius: 12px;
-        display: inline-flex; align-items: center; gap: .45rem;
-        background: var(--card); color: var(--text); border: 1px solid var(--border);
-        font-size: 13px; font-weight: 600; transition: transform .06s ease, box-shadow .16s ease, border-color .16s ease;
+      .btn{
+        height:34px; padding:0 .75rem; border-radius:12px; display:inline-flex; align-items:center; gap:.45rem;
+        background:var(--card); color:var(--fg); border:1px solid var(--border); font-weight:600; font-size:13px;
+        transition:transform .06s ease;
       }
-      .rail .btn:hover { transform: translateY(-1px); }
-      .rail .btn-primary {
-        background: ${GREEN}; color: #0b1210; border: 1px solid ${GREEN};
-        box-shadow: 0 8px 20px color-mix(in oklab, var(--brand, #10b981) 40%, transparent);
+      .btn:hover{ transform:translateY(-1px); }
+      .btn-primary{
+        height:34px; padding:0 .85rem; border-radius:14px; display:inline-flex; align-items:center; gap:.5rem;
+        background:${GREEN}; border:1px solid ${GREEN}; color:#0b1210; font-weight:700; font-size:13px;
+        box-shadow:0 8px 20px rgba(16,185,129,.20);
       }
-      .rail .btn-primary:hover { background: ${GREEN_HOVER}; }
+      .btn-primary:hover{ background:${GREEN_HOVER}; box-shadow:0 10px 24px rgba(16,185,129,.28); }
 
-      .rail .item {
-        display: flex; align-items: center; gap: 10px;
-        padding: 10px 12px; border-radius: 12px;
-        background: var(--card); border: 1px solid var(--border);
-        transition: box-shadow .18s ease, transform .12s ease, outline-color .18s ease, border-color .18s ease;
-        outline: 0 solid transparent;
-      }
-      /* Hover shadow request */
-      .rail .item:hover {
-        transform: translateY(-1px);
-        box-shadow:
-          0 10px 24px rgba(0,0,0,.16),
-          inset 0 1px 0 rgba(255,255,255,.06);
-        border-color: color-mix(in oklab, var(--brand, #10b981) 24%, var(--border));
-      }
-      .rail .item.active {
-        outline: 2px solid color-mix(in oklab, var(--brand, #10b981) 32%, transparent);
-        border-color: color-mix(in oklab, var(--brand, #10b981) 36%, var(--border));
-        box-shadow:
-          0 12px 30px color-mix(in oklab, var(--brand, #10b981) 22%, transparent),
-          inset 0 1px 0 rgba(255,255,255,.08);
-      }
+      .kpi{ padding:12px; }
+      .kpi-title{ font-size:11.5px; color:var(--muted); margin-bottom:4px; }
+      .kpi-value{ font-size:17px; font-weight:800; }
 
-      .rail .muted { color: var(--text-muted); }
-      .rail .icon { width: 14px; height: 14px; }
+      .label-xs{ font-size:11.5px; color:var(--muted); }
+      .pill{
+        height:30px; padding:0 .7rem; border-radius:9px;
+        border:1px solid var(--border); background:var(--card); font-weight:650; font-size:12.5px;
+        display:inline-flex; align-items:center; gap:.4rem;
+      }
+      .acc-head{ display:flex; align-items:center; justify-content:space-between; padding:14px 16px; cursor:pointer; }
+      .acc-title{ display:flex; align-items:center; gap:8px; font-weight:700; font-size:13px; }
+      .sep{ border-top:1px solid var(--border); }
+      .row{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+      @media (max-width:980px){ .row{ grid-template-columns:1fr; } }
 
-      /* Light / dark niceties if host app lacks vars */
-      :root:not([data-theme="dark"]) .rail {
-        --panel: #fff; --card: #fafafa; --border: rgba(0,0,0,.08);
-        --text: #0f1412; --text-muted: rgba(15,20,18,.62);
-      }
-      [data-theme="dark"] .rail {
-        --panel: rgba(16,22,21,.96); --card: rgba(22,28,27,.9); --border: rgba(255,255,255,.12);
-        --text: #E9FBF5; --text-muted: #9bb7ae;
-      }
+      /* Make icons compact (≈14px) and aligned like API Keys */
+      .ico{ width:14px; height:14px; display:inline-block; }
     `}</style>
   );
 }
 
-/* -----------------------------------------------------------------------------
-   Storage helpers
------------------------------------------------------------------------------ */
-async function loadAssistants(): Promise<AssistantLite[]> {
-  // 1) scoped storage
-  try {
-    if (scopedStorageFn) {
-      const ss = await scopedStorageFn();
-      const arr = await ss.getJSON<AssistantLite[]>(KEYS.list, []);
-      if (Array.isArray(arr)) return normalize(arr);
-    }
-  } catch {}
-  // 2) local fallback
-  try {
-    if (typeof window !== 'undefined') {
-      const raw = localStorage.getItem(KEYS.localFallback);
-      if (raw) return normalize(JSON.parse(raw));
-    }
-  } catch {}
-  return [];
-}
-async function saveAssistants(list: AssistantLite[]) {
-  try {
-    if (scopedStorageFn) {
-      const ss = await scopedStorageFn();
-      await ss.setJSON(KEYS.list, list);
-    }
-  } catch {}
-  try {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(KEYS.localFallback, JSON.stringify(list));
-    }
-  } catch {}
-}
-function normalize(arr: AssistantLite[]): AssistantLite[] {
-  return (arr || []).map((x, i) => ({
-    id: String(x.id ?? x['agentId'] ?? x['slug'] ?? `idx_${i}`),
-    name: String(x.name ?? x['title'] ?? `Assistant ${i + 1}`),
-    purpose: x.purpose ?? x['desc'] ?? '',
-    createdAt: x.createdAt ?? Date.now(),
-  }));
-}
+/* Compact toggle */
+const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}) => (
+  <button
+    onClick={()=>onChange(!checked)}
+    className="btn"
+    style={{
+      height:28, width:50, padding:'0 6px', borderRadius:999,
+      justifyContent:'flex-start',
+      background: checked ? 'rgba(16,185,129,.18)' : 'var(--card)',
+      borderColor: checked ? GREEN : 'var(--border)'
+    }}
+    aria-pressed={checked}
+  >
+    <span
+      style={{
+        width:18, height:18, borderRadius:999, background: checked ? GREEN : 'rgba(255,255,255,.12)',
+        transform:`translateX(${checked?22:0}px)`, transition:'transform .18s ease',
+        boxShadow: checked ? '0 0 8px rgba(16,185,129,.45)' : undefined
+      }}
+    />
+  </button>
+);
 
-/* -----------------------------------------------------------------------------
-   Component
------------------------------------------------------------------------------ */
-export default function AssistantRail() {
-  const [assistants, setAssistants] = useState<AssistantLite[]>([]);
-  const [activeId, setActiveId] = useState<string>('');
-  const [q, setQ] = useState('');
-  const [focused, setFocused] = useState(false);
-  const searchRef = useRef<HTMLInputElement | null>(null);
+export default function VoiceAgentSection() {
+  const [openModel, setOpenModel] = useState(true);
+  const [openTranscriber, setOpenTranscriber] = useState(true);
 
-  // boot
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      const list = await loadAssistants();
-      if (!alive) return;
-      setAssistants(list);
-      if (list[0]) setActiveId(list[0].id);
-    })();
-    return () => { alive = false; };
-  }, []);
-
-  // keyboard: ESC clears
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (document.activeElement === searchRef.current && e.key === 'Escape') {
-        setQ('');
-        searchRef.current?.blur();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
-
-  // debounced filter
-  const [debouncedQ, setDebouncedQ] = useState('');
-  useEffect(() => {
-    const t = setTimeout(() => setDebouncedQ(q.trim().toLowerCase()), 140);
-    return () => clearTimeout(t);
-  }, [q]);
-
-  const filtered = useMemo(() => {
-    if (!debouncedQ) return assistants;
-    return assistants.filter(a =>
-      a.name.toLowerCase().includes(debouncedQ) ||
-      (a.purpose || '').toLowerCase().includes(debouncedQ)
-    );
-  }, [assistants, debouncedQ]);
-
-  async function onDelete(id: string) {
-    const victim = assistants.find(a => a.id === id);
-    const ok = window.confirm(`Delete “${victim?.name ?? 'assistant'}”? This can’t be undone.`);
-    if (!ok) return;
-    const next = assistants.filter(a => a.id !== id);
-    setAssistants(next);
-    if (activeId === id) setActiveId(next[0]?.id || '');
-    await saveAssistants(next);
-  }
-
-  function onCreate() {
-    const name = prompt('New assistant name?');
-    if (!name) return;
-    const next: AssistantLite = {
-      id: `a_${Date.now().toString(36)}${Math.random().toString(36).slice(2,6)}`,
-      name: name.trim(),
-      createdAt: Date.now(),
-      purpose: '',
-    };
-    const list = [next, ...assistants];
-    setAssistants(list);
-    setActiveId(next.id);
-    saveAssistants(list);
-  }
+  // state (unchanged)
+  const [provider, setProvider] = useState('OpenAI');
+  const [model, setModel] = useState('GPT 4o Cluster');
+  const [firstMode, setFirstMode] = useState('Assistant speaks first');
+  const [firstMsg, setFirstMsg] = useState('Hello.');
+  const [systemPrompt, setSystemPrompt] = useState(
+    'This is a blank template with minimal defaults, you can change the model, temperature, and messages.'
+  );
+  const [asrProvider, setAsrProvider] = useState('Deepgram');
+  const [asrLang, setAsrLang] = useState('En');
+  const [asrModel, setAsrModel] = useState('Nova 2');
+  const [denoise, setDenoise] = useState(false);
+  const [numerals, setNumerals] = useState(false);
+  const [confidence, setConfidence] = useState(0.4);
 
   return (
-    <div className="rail px-3 py-4">
+    <div className="va w-full" style={{ background:'var(--bg)', color:'var(--text)' }}>
       <LocalTokens />
 
-      <div className="mb-2 text-[11px] font-semibold tracking-[.12em] muted">ASSISTANTS</div>
-
-      <div className="panel p-3">
-        {/* header */}
-        <div className="flex items-center justify-between gap-2 mb-3">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl grid place-items-center card">
-              <Bot className="icon" />
-            </div>
-            <div className="font-semibold text-[13px]">Assistants</div>
-          </div>
-          <button className="btn btn-primary" onClick={onCreate}>
-            <Plus className="icon" /> Create
-          </button>
+      {/* 1px breathing room on the right edge */}
+      <div className="grid w-full pr-[1px]" style={{ gridTemplateColumns:'312px 1fr' }}>
+        {/* LEFT rail */}
+        <div className="border-r" style={{ borderColor:'var(--border)' }}>
+          <RailBoundary><AssistantRail /></RailBoundary>
         </div>
 
-        {/* search */}
-        <div className="card mb-3 px-2 py-1.5">
-          <div className="flex items-center gap-2">
-            <Search className="icon muted" />
-            <input
-              ref={searchRef}
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              onFocus={() => setFocused(true)}
-              onBlur={() => setFocused(false)}
-              className="input"
-              placeholder="Search assistants"
-              style={{
-                border: 'none',
-                background: 'transparent',
-                paddingLeft: 0,
-                height: 30,
-                boxShadow: focused ? '0 0 0 3px color-mix(in oklab, var(--brand, #10b981) 12%, transparent)' : 'none',
-              }}
-            />
-            {q && (
-              <button
-                aria-label="Clear search"
-                className="btn"
-                onClick={() => setQ('')}
-                style={{ height: 28, padding: '0 6px' }}
-              >
-                <X className="icon" />
-              </button>
+        {/* RIGHT content */}
+        <div className="px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w-[1160px]">
+          {/* header */}
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="pill"><Bot className="ico"/> Voice Studio</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button className="btn"><Code2 className="ico"/> Code</button>
+              <button className="btn"><Play className="ico"/> Test</button>
+              <button className="btn"><MessagesSquare className="ico"/> Chat</button>
+              <button className="btn-primary"><Phone className="ico"/> Talk to Assistant</button>
+              <span className="pill">Published</span>
+            </div>
+          </div>
+
+          {/* tabs */}
+          <div className="mb-4 flex flex-wrap items-center gap-6">
+            <div className="flex flex-wrap items-center gap-6">
+              <span className="pill">Model</span>
+              <span className="pill">Voice</span>
+              <span className="pill">Transcriber</span>
+              <span className="pill">Tools</span>
+              <span className="pill">Analysis</span>
+              <span className="pill">Advanced</span>
+              <span className="pill">Widget</span>
+            </div>
+            <div className="flex items-center gap-2"><span className="label-xs">Web</span></div>
+          </div>
+
+          {/* KPIs */}
+          <div className="grid gap-3 md:grid-cols-2 mb-5">
+            <div className="va-card kpi"><div className="kpi-title">Cost</div><div className="kpi-value">~$0.1/min</div></div>
+            <div className="va-card kpi"><div className="kpi-title">Latency</div><div className="kpi-value">~1050 ms</div></div>
+          </div>
+
+          <div className="va-panel overflow-hidden">
+            {/* Model */}
+            <div className="acc-head" onClick={()=>setOpenModel(v=>!v)}>
+              <div className="acc-title"><span className="pill" style={{height:26}}><Gauge className="ico"/></span>Model</div>
+              {openModel ? <ChevronUp className="ico" style={{ color:'var(--muted)' }}/> : <ChevronDown className="ico" style={{ color:'var(--muted)' }}/>}
+            </div>
+            {openModel && (
+              <div className="px-4 pb-4">
+                <div className="row">
+                  <div>
+                    <label className="label-xs">Provider</label>
+                    <select className="select" value={provider} onChange={e=>setProvider(e.target.value)}>
+                      <option>OpenAI</option><option>Anthropic</option><option>Google</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="label-xs">Model</label>
+                    <select className="select" value={model} onChange={e=>setModel(e.target.value)}>
+                      <option>GPT 4o Cluster</option><option>GPT-4o</option><option>GPT-4.1</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="row mt-2.5">
+                  <div>
+                    <label className="label-xs">First Message Mode</label>
+                    <select className="select" value={firstMode} onChange={e=>setFirstMode(e.target.value)}>
+                      <option>Assistant speaks first</option><option>User speaks first</option><option>Silent until tool required</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="label-xs">First Message</label>
+                    <input className="input" value={firstMsg} onChange={e=>setFirstMsg(e.target.value)} />
+                  </div>
+                </div>
+
+                <div className="mt-2.5">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="label-xs">System Prompt</label>
+                    <div className="flex items-center gap-2"><button className="btn"><Wand2 className="ico"/> Generate</button></div>
+                  </div>
+                  <textarea className="textarea" value={systemPrompt} onChange={e=>setSystemPrompt(e.target.value)} />
+                </div>
+              </div>
+            )}
+
+            <div className="sep" />
+
+            {/* Transcriber */}
+            <div className="acc-head" onClick={()=>setOpenTranscriber(v=>!v)}>
+              <div className="acc-title"><span className="pill" style={{height:26}}><Timer className="ico"/></span>Transcriber</div>
+              {openTranscriber ? <ChevronUp className="ico" style={{ color:'var(--muted)' }}/> : <ChevronDown className="ico" style={{ color:'var(--muted)' }}/>}
+            </div>
+            {openTranscriber && (
+              <div className="px-4 pb-5">
+                <div className="row">
+                  <div>
+                    <label className="label-xs">Provider</label>
+                    <select className="select" value={asrProvider} onChange={e=>setAsrProvider(e.target.value)}>
+                      <option>Deepgram</option><option>Whisper</option><option>AssemblyAI</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="label-xs">Language</label>
+                    <select className="select" value={asrLang} onChange={e=>setAsrLang(e.target.value)}>
+                      <option>En</option><option>Multi</option><option>Es</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="row mt-2.5">
+                  <div>
+                    <label className="label-xs">Model</label>
+                    <select className="select" value={asrModel} onChange={e=>setAsrModel(e.target.value)}>
+                      <option>Nova 2</option><option>Nova</option><option>Whisper Large-V3</option>
+                    </select>
+                  </div>
+                  <div className="flex items-end gap-2">
+                    <div className="flex-1">
+                      <label className="label-xs">Confidence Threshold</label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="range" min={0} max={1} step={0.01}
+                          value={confidence}
+                          onChange={(e)=>setConfidence(parseFloat(e.target.value))}
+                          style={{ width:'100%' }}
+                        />
+                        <div className="va-card px-2.5 py-1.5 rounded-md text-xs" style={{minWidth:46, textAlign:'center'}}>
+                          {confidence.toFixed(1)}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-3">
+                  <div className="flex items-center justify-between">
+                    <div><div className="font-semibold text-[13px]">Background Denoising Enabled</div><div className="label-xs">Filter background noise while the user is talking.</div></div>
+                    <Toggle checked={denoise} onChange={setDenoise} />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div><div className="font-semibold text-[13px]">Use Numerals</div><div className="label-xs">Convert numbers from words to digits in transcription.</div></div>
+                    <Toggle checked={numerals} onChange={setNumerals} />
+                  </div>
+                </div>
+              </div>
             )}
           </div>
         </div>
 
-        {/* list */}
-        <div className="space-y-2">
-          {filtered.length === 0 ? (
-            <div className="muted text-[12px] px-1 py-2">No assistants found</div>
-          ) : (
-            filtered.map(a => {
-              const active = a.id === activeId;
-              return (
-                <div
-                  key={a.id}
-                  className={`item ${active ? 'active' : ''}`}
-                  onClick={() => setActiveId(a.id)}
-                  role="button"
-                >
-                  <div className="w-8 h-8 rounded-xl grid place-items-center card">
-                    {active ? <FolderOpen className="icon" /> : <Folder className="icon" />}
-                  </div>
-
-                  <div className="min-w-0 text-left flex-1">
-                    <div className="font-semibold text-[13px] truncate">{a.name}</div>
-                    <div className="muted text-[11.5px] truncate">{a.purpose || '—'}</div>
-                  </div>
-
-                  <div className="flex items-center gap-1 opacity-90">
-                    <button
-                      className="btn"
-                      aria-label="Rename"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        const name = prompt('Rename assistant', a.name) || '';
-                        const trimmed = name.trim();
-                        if (!trimmed || trimmed === a.name) return;
-                        const next = assistants.map(x => x.id === a.id ? { ...x, name: trimmed } : x);
-                        setAssistants(next);
-                        saveAssistants(next);
-                      }}
-                      style={{ height: 28, padding: '0 8px' }}
-                    >
-                      <Edit3 className="icon" />
-                    </button>
-                    <button
-                      className="btn"
-                      aria-label="Delete"
-                      onClick={(e) => { e.stopPropagation(); onDelete(a.id); }}
-                      style={{ height: 28, padding: '0 8px' }}
-                    >
-                      <Trash2 className="icon" />
-                    </button>
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </div>
-
-        {/* foot hint */}
-        <div className="muted text-[11.5px] mt-3 px-1">
-          Tip: data is saved to your workspace (with a safe local fallback).
-        </div>
       </div>
     </div>
   );
