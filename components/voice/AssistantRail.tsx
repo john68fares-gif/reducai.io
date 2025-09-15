@@ -1,229 +1,350 @@
-// components/voice/VoiceAgentSection.tsx
+// components/voice/AssistantRail.tsx
 'use client';
 
-import React, { useState } from 'react';
-import dynamic from 'next/dynamic';
-import {
-  Bot, Code2, Play, MessagesSquare, Phone, Wand2,
-  ChevronDown, ChevronUp, Gauge, Timer
-} from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Search, Plus, Bot, Trash2, Edit3, X, AlertTriangle } from 'lucide-react';
+import { AnimatePresence, motion } from 'framer-motion';
 
-/* Safe dynamic rail */
-const AssistantRail = dynamic(
-  () =>
-    import('@/components/voice/AssistantRail')
-      .then(m => m.default ?? m)
-      .catch(() => () => <div className="px-3 py-3 text-xs opacity-70">Rail unavailable</div>),
-  { ssr: false, loading: () => <div className="px-3 py-3 text-xs opacity-70">Loading…</div> }
-);
+/* Optional scoped storage (safe if missing) */
+type Scoped = { getJSON<T>(k:string,f:T):Promise<T>; setJSON(k:string,v:unknown):Promise<void> };
+let scopedStorageFn: undefined | (() => Promise<Scoped>);
+try { scopedStorageFn = require('@/utils/scoped-storage').scopedStorage; } catch {}
 
-class RailBoundary extends React.Component<{children:React.ReactNode},{hasError:boolean}> {
-  constructor(p:any){ super(p); this.state={hasError:false}; }
-  static getDerivedStateFromError(){ return {hasError:true}; }
-  render(){ return this.state.hasError ? <div className="px-3 py-3 text-xs opacity-70">Rail crashed</div> : this.props.children; }
+export type AssistantLite = { id: string; name: string; purpose?: string; createdAt?: number };
+
+const STORAGE_KEY = 'agents';
+const BTN_GREEN = '#10b981';
+const BTN_GREEN_HOVER = '#0ea473';
+
+async function loadAssistants(): Promise<AssistantLite[]> {
+  try { if (scopedStorageFn) { const ss = await scopedStorageFn(); const a=await ss.getJSON<AssistantLite[]>(STORAGE_KEY, []); return Array.isArray(a)?a:[]; } } catch {}
+  try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) return JSON.parse(raw); } catch {}
+  return [];
+}
+async function saveAssistants(list: AssistantLite[]) {
+  try { if (scopedStorageFn) { const ss = await scopedStorageFn(); await ss.setJSON(STORAGE_KEY, list); } } catch {}
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); } catch {}
 }
 
-/* ===== Compact tokens ===== */
-const GREEN = '#10b981';
-const GREEN_HOVER = '#0ea473';
-
-function LocalTokens() {
+/* ----------------------------- Modals (theme-aware) ----------------------------- */
+function ModalShell({ children }:{ children:React.ReactNode }) {
   return (
-    <style>{`
-      .va { --panel: rgba(13,15,17,0.92); --card: rgba(18,20,23,0.88);
-            --border: rgba(106,247,209,0.18); --text: #E9FBF5; --muted: #9bb7ae; --fg:#E9FBF5; }
-      .va { color: var(--fg); font-size:13px; }
-      .va-panel{ background:var(--panel); border:1px solid var(--border); border-radius:24px;
-                 box-shadow: inset 0 0 20px rgba(0,0,0,.28), 0 0 14px rgba(106,247,209,.05), 0 0 18px rgba(0,255,194,.05); }
-      .va-card{ background:var(--card); border:1px solid var(--border); border-radius:14px;
-                box-shadow: 0 14px 28px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.06), 0 0 0 1px rgba(0,255,194,.05); }
-      .input,.select,.textarea{
-        width:100%; background:var(--card); border:1px solid var(--border); color:var(--fg);
-        border-radius:12px; padding:0 .7rem; outline:none; font-size:13px;
-      }
-      .input,.select{ height:34px; }
-      .textarea{ min-height:130px; padding:.6rem .7rem; line-height:1.45; font-size:13px; }
-      .btn{
-        height:34px; padding:0 .75rem; border-radius:12px; display:inline-flex; align-items:center; gap:.45rem;
-        background:var(--card); color:var(--fg); border:1px solid var(--border); font-weight:600; font-size:13px;
-        transition:transform .06s ease;
-      }
-      .btn:hover{ transform:translateY(-1px); }
-      .btn-primary{
-        height:34px; padding:0 .85rem; border-radius:14px; display:inline-flex; align-items:center; gap:.5rem;
-        background:${GREEN}; border:1px solid ${GREEN}; color:#fff; font-weight:700; font-size:13px; /* ← white text */
-        box-shadow:0 8px 20px rgba(16,185,129,.20);
-      }
-      .btn-primary:hover{ background:${GREEN_HOVER}; box-shadow:0 10px 24px rgba(16,185,129,.28); }
-      .kpi{ padding:12px; }
-      .kpi-title{ font-size:11.5px; color:var(--muted); margin-bottom:4px; }
-      .kpi-value{ font-size:17px; font-weight:800; }
-      .label-xs{ font-size:11.5px; color:var(--muted); }
-      .pill{
-        height:30px; padding:0 .7rem; border-radius:9px;
-        border:1px solid var(--border); background:var(--card); font-weight:650; font-size:12.5px;
-        display:inline-flex; align-items:center; gap:.4rem;
-      }
-      .acc-head{ display:flex; align-items:center; justify-content:space-between; padding:14px 16px; cursor:pointer; }
-      .acc-title{ display:flex; align-items:center; gap:8px; font-weight:700; font-size:13px; }
-      .sep{ border-top:1px solid var(--border); }
-      .row{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
-      @media (max-width:980px){ .row{ grid-template-columns:1fr; } }
-      .ico{ width:14px; height:14px; display:inline-block; }
-    `}</style>
+    <div className="fixed inset-0 z-[9998] flex items-center justify-center px-4" style={{ background:'rgba(0,0,0,.60)' }}>
+      <div className="w-full max-w-[720px] rounded-[24px] overflow-hidden"
+           style={{ background:'var(--panel)', border:'1px solid var(--border)', boxShadow:'var(--shadow-soft)' }}>
+        {children}
+      </div>
+    </div>
   );
 }
-
-/* Compact toggle */
-const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}) => (
-  <button
-    onClick={()=>onChange(!checked)}
-    className="btn"
-    style={{
-      height:28, width:50, padding:'0 6px', borderRadius:999,
-      justifyContent:'flex-start',
-      background: checked ? 'rgba(16,185,129,.18)' : 'var(--card)',
-      borderColor: checked ? GREEN : 'var(--border)'
-    }}
-    aria-pressed={checked}
-  >
-    <span
-      style={{
-        width:18, height:18, borderRadius:999, background: checked ? GREEN : 'rgba(255,255,255,.12)',
-        transform:`translateX(${checked?22:0}px)`, transition:'transform .18s ease',
-        boxShadow: checked ? '0 0 8px rgba(16,185,129,.45)' : undefined
-      }}
-    />
-  </button>
-);
-
-export default function VoiceAgentSection() {
-  const [openModel, setOpenModel] = useState(true);
-  const [openTranscriber, setOpenTranscriber] = useState(true);
-
-  // state (unchanged)
-  const [provider, setProvider] = useState('OpenAI');
-  const [model, setModel] = useState('GPT 4o Cluster');
-  const [firstMode, setFirstMode] = useState('Assistant speaks first');
-  const [firstMsg, setFirstMsg] = useState('Hello.');
-  const [systemPrompt, setSystemPrompt] = useState(
-    'This is a blank template with minimal defaults, you can change the model, temperature, and messages.'
-  );
-  const [asrProvider, setAsrProvider] = useState('Deepgram');
-  const [asrLang, setAsrLang] = useState('En');
-  const [asrModel, setAsrModel] = useState('Nova 2');
-  const [denoise, setDenoise] = useState(false);
-  const [numerals, setNumerals] = useState(false);
-  const [confidence, setConfidence] = useState(0.4);
-
+function ModalHeader({ icon, title, subtitle, onClose }:{
+  icon:React.ReactNode; title:string; subtitle?:string; onClose:()=>void;
+}) {
   return (
-    <div className="va w-full" style={{ background:'var(--bg)', color:'var(--text)' }}>
-      <LocalTokens />
-
-      {/* narrower left rail */}
-      <div className="grid w-full pr-[1px]" style={{ gridTemplateColumns:'248px 1fr' }}>
-        {/* LEFT rail */}
-        <div className="border-r" style={{ borderColor:'var(--sidebar-border)' }}>
-          <RailBoundary><AssistantRail /></RailBoundary>
+    <div className="flex items-center justify-between px-6 py-5" style={{ borderBottom:'1px solid var(--border)' }}>
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-xl grid place-items-center" style={{ background:'var(--brand-weak)' }}>
+          {icon}
         </div>
-
-        {/* RIGHT content (unchanged below) */}
-        <div className="px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w-[1160px]">
-          {/* header */}
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <span className="pill"><Bot className="ico"/> Voice Studio</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <button className="btn"><Code2 className="ico"/> Code</button>
-              <button className="btn"><Play className="ico"/> Test</button>
-              <button className="btn"><MessagesSquare className="ico"/> Chat</button>
-              <button className="btn-primary"><Phone className="ico"/> Talk to Assistant</button>
-              <span className="pill">Published</span>
-            </div>
-          </div>
-
-          {/* tabs */}
-          <div className="mb-4 flex flex-wrap items-center gap-6">
-            <div className="flex flex-wrap items-center gap-6">
-              <span className="pill">Model</span>
-              <span className="pill">Voice</span>
-              <span className="pill">Transcriber</span>
-              <span className="pill">Tools</span>
-              <span className="pill">Analysis</span>
-              <span className="pill">Advanced</span>
-              <span className="pill">Widget</span>
-            </div>
-            <div className="flex items-center gap-2"><span className="label-xs">Web</span></div>
-          </div>
-
-          {/* KPIs */}
-          <div className="grid gap-3 md:grid-cols-2 mb-5">
-            <div className="va-card kpi"><div className="kpi-title">Cost</div><div className="kpi-value">~$0.1/min</div></div>
-            <div className="va-card kpi"><div className="kpi-title">Latency</div><div className="kpi-value">~1050 ms</div></div>
-          </div>
-
-          <div className="va-panel overflow-hidden">
-            {/* Model */}
-            <div className="acc-head" onClick={()=>setOpenModel(v=>!v)}>
-              <div className="acc-title"><span className="pill" style={{height:26}}><Gauge className="ico"/></span>Model</div>
-              {openModel ? <ChevronUp className="ico" style={{ color:'var(--muted)' }}/> : <ChevronDown className="ico" style={{ color:'var(--muted)' }}/>}
-            </div>
-            {openModel && (
-              <div className="px-4 pb-4">
-                <div className="row">
-                  <div>
-                    <label className="label-xs">Provider</label>
-                    <select className="select" value={provider} onChange={e=>setProvider(e.target.value)}>
-                      <option>OpenAI</option><option>Anthropic</option><option>Google</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="label-xs">Model</label>
-                    <select className="select" value={model} onChange={e=>setModel(e.target.value)}>
-                      <option>GPT 4o Cluster</option><option>GPT-4o</option><option>GPT-4.1</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="row mt-2.5">
-                  <div>
-                    <label className="label-xs">First Message Mode</label>
-                    <select className="select" value={firstMode} onChange={e=>setFirstMode(e.target.value)}>
-                      <option>Assistant speaks first</option><option>User speaks first</option><option>Silent until tool required</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="label-xs">First Message</label>
-                    <input className="input" value={firstMsg} onChange={e=>setFirstMsg(e.target.value)} />
-                  </div>
-                </div>
-
-                <div className="mt-2.5">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="label-xs">System Prompt</label>
-                    <div className="flex items-center gap-2"><button className="btn"><Wand2 className="ico"/> Generate</button></div>
-                  </div>
-                  <textarea className="textarea" value={systemPrompt} onChange={e=>setSystemPrompt(e.target.value)} />
-                </div>
-              </div>
-            )}
-
-            <div className="sep" />
-
-            {/* Transcriber */}
-            <div className="acc-head" onClick={()=>setOpenTranscriber(v=>!v)}>
-              <div className="acc-title"><span className="pill" style={{height:26}}><Timer className="ico"/></span>Transcriber</div>
-              {openTranscriber ? <ChevronUp className="ico" style={{ color:'var(--muted)' }}/> : <ChevronDown className="ico" style={{ color:'var(--muted)' }}/>}
-            </div>
-            {openTranscriber && (
-              <div className="px-4 pb-5">
-                {/* (unchanged form controls) */}
-              </div>
-            )}
-          </div>
+        <div className="min-w-0">
+          <div className="text-lg font-semibold" style={{ color:'var(--text)' }}>{title}</div>
+          {subtitle && <div className="text-xs" style={{ color:'var(--text-muted)' }}>{subtitle}</div>}
         </div>
       </div>
+      <button onClick={onClose} className="p-2 rounded hover:opacity-70" aria-label="Close">
+        <X className="w-4 h-4" style={{ color:'var(--text)' }} />
+      </button>
+    </div>
+  );
+}
+function CreateModal({ open, onClose, onCreate }:{
+  open:boolean; onClose:()=>void; onCreate:(name:string)=>void;
+}) {
+  const [name,setName] = useState('');
+  useEffect(()=>{ if(open) setName(''); },[open]);
+  if(!open) return null;
+  const can = name.trim().length>1;
+  return (
+    <ModalShell>
+      <ModalHeader icon={<Plus className="w-5 h-5" style={{ color:'var(--brand)' }}/>} title="Create Assistant" onClose={onClose}/>
+      <div className="px-6 py-5">
+        <label className="block text-xs mb-1" style={{ color:'var(--text-muted)' }}>Name</label>
+        <input value={name} onChange={(e)=>setName(e.target.value)}
+               className="w-full h-[44px] rounded-[14px] px-3 text-sm outline-none border"
+               style={{ background:'var(--card)', borderColor:'var(--border)', color:'var(--text)' }}
+               placeholder="e.g., Sales Bot" autoFocus/>
+      </div>
+      <div className="px-6 pb-6 flex gap-3">
+        <button onClick={onClose}
+                className="w-full h-[44px] rounded-[14px] font-semibold border"
+                style={{ background:'var(--card)', borderColor:'var(--border)', color:'var(--text)' }}>
+          Cancel
+        </button>
+        <button disabled={!can}
+                onClick={()=> can && onCreate(name.trim())}
+                className="w-full h-[44px] rounded-[14px] font-semibold disabled:opacity-60"
+                style={{ background:BTN_GREEN, color:'#fff' }}
+                onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=BTN_GREEN_HOVER)}
+                onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=BTN_GREEN)}>
+          Create
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+function RenameModal({ open, initial, onClose, onSave }:{
+  open:boolean; initial:string; onClose:()=>void; onSave:(v:string)=>void;
+}) {
+  const [val,setVal]=useState(initial);
+  useEffect(()=>{ if(open) setVal(initial); },[open,initial]);
+  if(!open) return null;
+  const can = val.trim().length>1;
+  return (
+    <ModalShell>
+      <ModalHeader icon={<Edit3 className="w-5 h-5" style={{ color:'var(--brand)' }}/>} title="Rename Assistant" onClose={onClose}/>
+      <div className="px-6 py-5">
+        <label className="block text-xs mb-1" style={{ color:'var(--text-muted)' }}>Name</label>
+        <input value={val} onChange={(e)=>setVal(e.target.value)}
+               className="w-full h-[44px] rounded-[14px] px-3 text-sm outline-none border"
+               style={{ background:'var(--card)', borderColor:'var(--border)', color:'var(--text)' }} />
+      </div>
+      <div className="px-6 pb-6 flex gap-3">
+        <button onClick={onClose}
+                className="w-full h-[44px] rounded-[14px] font-semibold border"
+                style={{ background:'var(--card)', borderColor:'var(--border)', color:'var(--text)' }}>
+          Cancel
+        </button>
+        <button disabled={!can}
+                onClick={()=> can && onSave(val.trim())}
+                className="w-full h-[44px] rounded-[14px] font-semibold disabled:opacity-60"
+                style={{ background:BTN_GREEN, color:'#fff' }}
+                onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=BTN_GREEN_HOVER)}
+                onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=BTN_GREEN)}>
+          Save
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+function ConfirmDelete({ open, name, onClose, onConfirm }:{
+  open:boolean; name?:string; onClose:()=>void; onConfirm:()=>void;
+}) {
+  if(!open) return null;
+  return (
+    <ModalShell>
+      <ModalHeader icon={<AlertTriangle className="w-5 h-5" style={{ color:'var(--brand)' }}/>}
+                   title="Delete Assistant" subtitle="This action cannot be undone." onClose={onClose}/>
+      <div className="px-6 py-5 text-sm" style={{ color:'var(--text)' }}>
+        Delete <b>“{name||'assistant'}”</b>?
+      </div>
+      <div className="px-6 pb-6 flex gap-3">
+        <button onClick={onClose}
+                className="w-full h-[44px] rounded-[14px] font-semibold border"
+                style={{ background:'var(--card)', borderColor:'var(--border)', color:'var(--text)' }}>
+          Cancel
+        </button>
+        <button onClick={onConfirm}
+                className="w-full h-[44px] rounded-[14px] font-semibold"
+                style={{ background:BTN_GREEN, color:'#fff' }}
+                onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=BTN_GREEN_HOVER)}
+                onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=BTN_GREEN)}>
+          Delete
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
+/* -------------------------------- Row -------------------------------- */
+function Row({
+  a, active, onClick, onRename, onDelete,
+}:{
+  a:AssistantLite; active:boolean; onClick:()=>void; onRename:()=>void; onDelete:()=>void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="rail-row w-full text-left rounded-[12px] px-3 py-3 flex items-center gap-2 group transition"
+      style={{
+        background: active ? 'var(--rail-selected-bg)' : 'transparent',
+        border: '1px solid transparent',               // no green border
+        color: 'var(--sidebar-text)',
+        boxShadow: active ? 'var(--rail-row-shadow)' : 'none',
+      }}
+    >
+      <div className="w-10 h-10 rounded-md grid place-items-center"
+           style={{ background:'var(--rail-avatar-bg)', border:'1px solid var(--sidebar-border)' }}>
+        <Bot className="w-4 h-4" style={{ color:'var(--brand)' }} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-medium truncate">{a.name}</div>
+        <div className="text-[11px] truncate" style={{ color:'var(--sidebar-muted)' }}>
+          {a.purpose || 'Elliot'}
+        </div>
+      </div>
+      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button
+          onClick={(e)=>{ e.stopPropagation(); onRename(); }}
+          className="px-2 h-[28px] rounded-[8px] border"
+          style={{ background:'var(--rail-chip-bg)', borderColor:'var(--rail-chip-border)' }}
+          aria-label="Rename"
+        >
+          <Edit3 className="w-4 h-4" />
+        </button>
+        <button
+          onClick={(e)=>{ e.stopPropagation(); onDelete(); }}
+          className="px-2 h-[28px] rounded-[8px] border"
+          style={{ background:'var(--rail-chip-bg)', borderColor:'var(--rail-chip-border)' }}
+          aria-label="Delete"
+        >
+          <Trash2 className="w-4 h-4" />
+        </button>
+      </div>
+    </button>
+  );
+}
+
+/* -------------------------------- Main -------------------------------- */
+export default function AssistantRail() {
+  const [assistants,setAssistants] = useState<AssistantLite[]>([]);
+  const [activeId,setActiveId] = useState('');
+  const [q,setQ] = useState('');
+  const [createOpen,setCreateOpen] = useState(false);
+  const [renId,setRenId] = useState<string|null>(null);
+  const [delId,setDelId] = useState<string|null>(null);
+
+  useEffect(()=>{ (async()=>{ const list = await loadAssistants(); setAssistants(list); if(list[0]) setActiveId(list[0].id); })(); },[]);
+  const filtered = useMemo(()=> {
+    const s=q.trim().toLowerCase();
+    return !s?assistants:assistants.filter(a=>a.name.toLowerCase().includes(s) || (a.purpose||'').toLowerCase().includes(s));
+  },[assistants,q]);
+
+  function addAssistant(name:string){
+    const a:AssistantLite = { id:`a_${Date.now().toString(36)}${Math.random().toString(36).slice(2,6)}`, name, createdAt: Date.now(), purpose:'Elliot' };
+    const next=[a, ...assistants];
+    setAssistants(next); setActiveId(a.id); saveAssistants(next); setCreateOpen(false);
+  }
+  function saveRename(name:string){
+    const next=assistants.map(x=> x.id===renId ? {...x, name} : x);
+    setAssistants(next); saveAssistants(next); setRenId(null);
+  }
+  function confirmDelete(){
+    const next = assistants.filter(x=> x.id!==delId);
+    setAssistants(next); saveAssistants(next);
+    if(activeId===delId) setActiveId(next[0]?.id || '');
+    setDelId(null);
+  }
+
+  const renName = assistants.find(a=>a.id===renId)?.name || '';
+  const delName = assistants.find(a=>a.id===delId)?.name;
+
+  return (
+    <div className="assistant-rail px-3 py-3 h-full"
+         style={{ background:'var(--sidebar-bg)', borderRight:'1px solid var(--sidebar-border)', color:'var(--sidebar-text)' }}>
+
+      {/* Create CTA (white text) */}
+      <button
+        type="button"
+        className="w-full inline-flex items-center justify-center gap-2 rounded-[10px] font-semibold mb-3"
+        style={{ height: 40, background: BTN_GREEN, color: '#fff' }}
+        onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=BTN_GREEN_HOVER)}
+        onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=BTN_GREEN)}
+        onClick={()=> setCreateOpen(true)}
+      >
+        <Plus className="w-4 h-4" /> Create Assistant
+      </button>
+
+      {/* Search (white thin border in dark) */}
+      <div className="relative mb-3">
+        <input
+          value={q} onChange={(e)=>setQ(e.target.value)} placeholder="Search Assistants"
+          className="w-full h-[36px] rounded-[10px] pl-8 pr-3 text-sm outline-none border"
+          style={{
+            background:'var(--rail-input-bg)',
+            borderColor:'var(--rail-input-border)',
+            color:'var(--rail-input-text)',
+            boxShadow:'var(--rail-input-shadow, none)'
+          }}
+        />
+        <Search className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2"
+                style={{ color:'var(--rail-input-muted)' }}/>
+      </div>
+
+      {/* Label */}
+      <div className="text-[11px] font-semibold tracking-[.12em] mb-2" style={{ color:'var(--sidebar-muted)' }}>
+        ASSISTANTS
+      </div>
+
+      {/* List */}
+      <div className="overflow-auto" style={{ maxHeight:'calc(100% - 124px)' }}>
+        <div className="space-y-1.5">
+          <AnimatePresence initial={false}>
+            {filtered.map(a=>(
+              <motion.div key={a.id} initial={{ opacity:0, y:6 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:-6 }}>
+                <Row
+                  a={a}
+                  active={a.id===activeId}
+                  onClick={()=>setActiveId(a.id)}
+                  onRename={()=>setRenId(a.id)}
+                  onDelete={()=>setDelId(a.id)}
+                />
+              </motion.div>
+            ))}
+          </AnimatePresence>
+
+          {filtered.length===0 && (
+            <div className="text-xs py-8 text-center" style={{ color:'var(--sidebar-muted)' }}>
+              No assistants found.
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Modals */}
+      <CreateModal open={createOpen} onClose={()=>setCreateOpen(false)} onCreate={addAssistant} />
+      <RenameModal open={!!renId} initial={renName} onClose={()=>setRenId(null)} onSave={saveRename} />
+      <ConfirmDelete open={!!delId} name={delName} onClose={()=>setDelId(null)} onConfirm={confirmDelete} />
+
+      {/* Theme tokens + hover effects */}
+      <style jsx>{`
+        /* Light */
+        :global(:root:not([data-theme="dark"])) .assistant-rail{
+          --rail-input-bg: #fff;
+          --rail-input-border: rgba(0,0,0,.12);   /* subtle on white */
+          --rail-input-text: #0f172a;
+          --rail-input-muted: #64748b;
+          --rail-input-shadow: 0 1px 2px rgba(0,0,0,.04);
+
+          --rail-selected-bg: rgba(0,0,0,.04);    /* neutral, no green */
+          --rail-row-shadow: 0 6px 16px rgba(0,0,0,.08), inset 0 1px 0 rgba(255,255,255,.5);
+          --rail-avatar-bg: rgba(0,0,0,.06);
+
+          --rail-chip-bg: #fff;
+          --rail-chip-border: rgba(0,0,0,.12);
+        }
+        /* Dark */
+        :global([data-theme="dark"]) .assistant-rail{
+          --rail-input-bg: var(--card);
+          --rail-input-border: rgba(255,255,255,.65); /* white & thin */
+          --rail-input-text: var(--text);
+          --rail-input-muted: var(--text-muted);
+
+          --rail-selected-bg: rgba(255,255,255,.06);  /* neutral, no green */
+          --rail-row-shadow: 0 10px 26px rgba(0,0,0,.38), inset 0 1px 0 rgba(255,255,255,.04);
+          --rail-avatar-bg: rgba(255,255,255,.06);
+
+          --rail-chip-bg: var(--card);
+          --rail-chip-border: var(--border);
+        }
+
+        .assistant-rail input::placeholder{ color: var(--rail-input-muted); opacity: .9; }
+
+        /* Nice hover ring & slight tint, matching active state */
+        .assistant-rail .rail-row:hover{
+          box-shadow: var(--rail-row-shadow);
+          background: var(--rail-selected-bg);
+        }
+      `}</style>
     </div>
   );
 }
