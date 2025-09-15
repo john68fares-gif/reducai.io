@@ -1,10 +1,11 @@
+// components/voice/AssistantRail.tsx
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { Search, Plus, Bot, Trash2, Edit3, X, AlertTriangle } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 
-/* Optional scoped storage (safe if missing) */
+/* Optional scoped storage (no crash if not present) */
 type Scoped = { getJSON<T>(k:string,f:T):Promise<T>; setJSON(k:string,v:unknown):Promise<void> };
 let scopedStorageFn: undefined | (() => Promise<Scoped>);
 try { scopedStorageFn = require('@/utils/scoped-storage').scopedStorage; } catch {}
@@ -12,14 +13,16 @@ try { scopedStorageFn = require('@/utils/scoped-storage').scopedStorage; } catch
 export type AssistantLite = { id: string; name: string; purpose?: string; createdAt?: number };
 
 const STORAGE_KEY = 'agents';
+const ACTIVE_KEY  = 'va:activeId'; // <- sync active id to VoiceAgentSection
 const BTN_GREEN = '#10b981';
 const BTN_GREEN_HOVER = '#0ea473';
 
+/* ids */
 function uid() {
-  // strong unique id -> avoids any accidental reuse
   return `a_${Date.now().toString(36)}_${crypto.getRandomValues(new Uint32Array(1))[0].toString(36)}`;
 }
 
+/* storage */
 async function loadAssistants(): Promise<AssistantLite[]> {
   try { if (scopedStorageFn) { const ss = await scopedStorageFn(); const a=await ss.getJSON<AssistantLite[]>(STORAGE_KEY, []); return Array.isArray(a)?a:[]; } } catch {}
   try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) return JSON.parse(raw); } catch {}
@@ -29,12 +32,16 @@ async function saveAssistants(list: AssistantLite[]) {
   try { if (scopedStorageFn) { const ss = await scopedStorageFn(); await ss.setJSON(STORAGE_KEY, list); } } catch {}
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); } catch {}
 }
+function writeActive(id:string){
+  try { localStorage.setItem(ACTIVE_KEY, id); } catch {}
+  try { window.dispatchEvent(new CustomEvent('assistant:active', { detail: id })); } catch {}
+}
 
-/* ---------- Theme-aware modals ---------- */
+/* ---------- Theme-aware Modals ---------- */
 function ModalShell({ children }:{ children:React.ReactNode }) {
   return (
     <div className="fixed inset-0 z-[9998] flex items-center justify-center px-4" style={{ background:'rgba(0,0,0,.60)' }}>
-      <div className="w-full max-w-[720px] rounded-[20px] overflow-hidden"
+      <div className="w-full max-w-[700px] rounded-[20px] overflow-hidden"
            style={{ background:'var(--panel)', border:'1px solid var(--border)', boxShadow:'var(--shadow-soft)' }}>
         {children}
       </div>
@@ -55,9 +62,7 @@ function ModalHeader({ icon, title, subtitle, onClose }:{
           {subtitle && <div className="text-xs" style={{ color:'var(--text-muted)' }}>{subtitle}</div>}
         </div>
       </div>
-      <button onClick={onClose} className="p-2 rounded hover:opacity-70" aria-label="Close">
-        <X className="w-4 h-4" style={{ color:'var(--text)' }} />
-      </button>
+      <button onClick={onClose} className="p-2 rounded hover:opacity-70"><X className="w-4 h-4" style={{ color:'var(--text)' }}/></button>
     </div>
   );
 }
@@ -73,10 +78,12 @@ function CreateModal({ open, onClose, onCreate }:{
       <ModalHeader icon={<Plus className="w-5 h-5" style={{ color:'var(--brand)' }}/>} title="Create Assistant" onClose={onClose}/>
       <div className="px-6 py-5">
         <label className="block text-xs mb-1" style={{ color:'var(--text-muted)' }}>Name</label>
-        <input value={name} onChange={(e)=>setName(e.target.value)}
-               className="w-full h-[44px] rounded-[14px] px-3 text-sm outline-none border"
-               style={{ background:'var(--card)', borderColor:'var(--border)', color:'var(--text)' }}
-               placeholder="e.g., Sales Bot" autoFocus/>
+        <input
+          value={name} onChange={(e)=>setName(e.target.value)}
+          className="w-full h-[44px] rounded-[14px] px-3 text-sm outline-none border"
+          style={{ background:'var(--card)', borderColor:'var(--border)', color:'var(--text)' }}
+          placeholder="e.g., Sales Bot" autoFocus
+        />
       </div>
       <div className="px-6 pb-6 flex gap-3">
         <button onClick={onClose}
@@ -84,12 +91,14 @@ function CreateModal({ open, onClose, onCreate }:{
                 style={{ background:'var(--card)', borderColor:'var(--border)', color:'var(--text)' }}>
           Cancel
         </button>
-        <button disabled={!can}
-                onClick={()=> can && onCreate(name.trim())}
-                className="w-full h-[44px] rounded-[14px] font-semibold disabled:opacity-60"
-                style={{ background:BTN_GREEN, color:'#fff', fontSize:12.5 }}  /* small white text */
-                onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=BTN_GREEN_HOVER)}
-                onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=BTN_GREEN)}>
+        <button
+          disabled={!can}
+          onClick={()=> can && onCreate(name.trim())}
+          className="w-full h-[44px] rounded-[14px] font-semibold disabled:opacity-60"
+          style={{ background:BTN_GREEN, color:'#fff', fontSize:12.5 }}
+          onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=BTN_GREEN_HOVER)}
+          onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=BTN_GREEN)}
+        >
           Create
         </button>
       </div>
@@ -118,12 +127,14 @@ function RenameModal({ open, initial, onClose, onSave }:{
                 style={{ background:'var(--card)', borderColor:'var(--border)', color:'var(--text)' }}>
           Cancel
         </button>
-        <button disabled={!can}
-                onClick={()=> can && onSave(val.trim())}
-                className="w-full h-[44px] rounded-[14px] font-semibold disabled:opacity-60"
-                style={{ background:BTN_GREEN, color:'#fff', fontSize:12.5 }}  /* small white text */
-                onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=BTN_GREEN_HOVER)}
-                onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=BTN_GREEN)}>
+        <button
+          disabled={!can}
+          onClick={()=> can && onSave(val.trim())}
+          className="w-full h-[44px] rounded-[14px] font-semibold disabled:opacity-60"
+          style={{ background:BTN_GREEN, color:'#fff', fontSize:12.5 }}
+          onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=BTN_GREEN_HOVER)}
+          onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=BTN_GREEN)}
+        >
           Save
         </button>
       </div>
@@ -136,8 +147,10 @@ function ConfirmDelete({ open, name, onClose, onConfirm }:{
   if(!open) return null;
   return (
     <ModalShell>
-      <ModalHeader icon={<AlertTriangle className="w-5 h-5" style={{ color:'var(--brand)' }}/>}
-                   title="Delete Assistant" subtitle="This action cannot be undone." onClose={onClose}/>
+      <ModalHeader
+        icon={<AlertTriangle className="w-5 h-5" style={{ color:'var(--brand)' }}/>}
+        title="Delete Assistant" subtitle="This action cannot be undone." onClose={onClose}
+      />
       <div className="px-6 py-5 text-sm" style={{ color:'var(--text)' }}>
         Delete <b>“{name||'assistant'}”</b>?
       </div>
@@ -149,7 +162,7 @@ function ConfirmDelete({ open, name, onClose, onConfirm }:{
         </button>
         <button onClick={onConfirm}
                 className="w-full h-[44px] rounded-[14px] font-semibold"
-                style={{ background:BTN_GREEN, color:'#fff', fontSize:12.5 }}  /* small white text */
+                style={{ background:BTN_GREEN, color:'#fff', fontSize:12.5 }}
                 onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=BTN_GREEN_HOVER)}
                 onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=BTN_GREEN)}>
           Delete
@@ -159,7 +172,7 @@ function ConfirmDelete({ open, name, onClose, onConfirm }:{
   );
 }
 
-/* ---------- Row (taller, green GLOW overlay; no border) ---------- */
+/* ---------- Assistant row (green GLOW; no green border) ---------- */
 function Row({
   a, active, onClick, onRename, onDelete,
 }:{
@@ -170,13 +183,12 @@ function Row({
       onClick={onClick}
       className="rail-row w-full text-left rounded-[12px] px-3 flex items-center gap-2 group transition"
       style={{
-        minHeight: 58,                               // taller
+        minHeight: 60,
         background: active ? 'var(--rail-selected-bg)' : 'transparent',
-        border: '1px solid transparent',             // NO green border
+        border: '1px solid transparent',
         color: 'var(--sidebar-text)',
-        // green glow overlay + soft lift:
         boxShadow: active
-          ? '0 10px 26px rgba(0,0,0,.36), 0 0 0 1px rgba(16,185,129,.20), 0 0 18px rgba(16,185,129,.25)'
+          ? '0 10px 26px rgba(0,0,0,.36), 0 0 0 1px rgba(16,185,129,.18), 0 0 18px rgba(16,185,129,.22)'
           : 'none',
       }}
     >
@@ -211,8 +223,7 @@ function Row({
 
       <style jsx>{`
         .rail-row:hover{
-          /* keep shadow, add the green overlay on hover too */
-          box-shadow: 0 10px 26px rgba(0,0,0,.32), 0 0 0 1px rgba(16,185,129,.16), 0 0 16px rgba(16,185,129,.20);
+          box-shadow: 0 10px 26px rgba(0,0,0,.32), 0 0 0 1px rgba(16,185,129,.14), 0 0 16px rgba(16,185,129,.18);
           background: var(--rail-selected-bg);
         }
       `}</style>
@@ -229,25 +240,44 @@ export default function AssistantRail() {
   const [renId,setRenId] = useState<string|null>(null);
   const [delId,setDelId] = useState<string|null>(null);
 
-  useEffect(()=>{ (async()=>{ const list = await loadAssistants(); setAssistants(list); if(list[0]) setActiveId(list[0].id); })(); },[]);
+  useEffect(()=>{ (async()=>{
+    const list = await loadAssistants();
+    setAssistants(list);
+    const savedActive = (()=>{
+      try { return localStorage.getItem(ACTIVE_KEY) || ''; } catch { return ''; }
+    })();
+    const firstId = savedActive && list.find(a=>a.id===savedActive) ? savedActive : (list[0]?.id || '');
+    setActiveId(firstId); if (firstId) writeActive(firstId);
+  })(); },[]);
+
   const filtered = useMemo(()=> {
     const s=q.trim().toLowerCase();
     return !s?assistants:assistants.filter(a=>a.name.toLowerCase().includes(s) || (a.purpose||'').toLowerCase().includes(s));
   },[assistants,q]);
 
+  function select(id:string){
+    setActiveId(id);
+    writeActive(id); // <- notify page + persist
+  }
   function addAssistant(name:string){
     const a:AssistantLite = { id: uid(), name, createdAt: Date.now(), purpose:'' };
     const next=[a, ...assistants];
-    setAssistants(next); setActiveId(a.id); void saveAssistants(next); setCreateOpen(false);
+    setAssistants(next); saveAssistants(next);
+    select(a.id);
+    setCreateOpen(false);
   }
   function saveRename(name:string){
     const next=assistants.map(x=> x.id===renId ? {...x, name} : x);
-    setAssistants(next); void saveAssistants(next); setRenId(null);
+    setAssistants(next); saveAssistants(next); setRenId(null);
   }
   function confirmDelete(){
     const next = assistants.filter(x=> x.id!==delId);
-    setAssistants(next); void saveAssistants(next);
-    if(activeId===delId) setActiveId(next[0]?.id || '');
+    const deletedActive = activeId===delId;
+    setAssistants(next); saveAssistants(next);
+    if (deletedActive) {
+      const nid = next[0]?.id || '';
+      setActiveId(nid); if (nid) writeActive(nid);
+    }
     setDelId(null);
   }
 
@@ -258,13 +288,12 @@ export default function AssistantRail() {
     <div
       className="assistant-rail px-3 py-3 h-full"
       style={{
-        background:'var(--sidebar-bg)',
-        // side divider should be WHITE-ish (not green)
-        borderRight:'1px solid rgba(255,255,255,.22)',
+        background:'var(--sidebar-bg)',                // match Sidebar
+        borderRight:'1px solid rgba(255,255,255,.14)', // thinner white-ish sideline
         color:'var(--sidebar-text)'
       }}
     >
-      {/* Green CTA — smaller text */}
+      {/* CTA (smaller white text) */}
       <button
         type="button"
         className="w-full inline-flex items-center justify-center gap-2 rounded-[10px] font-semibold mb-3"
@@ -276,15 +305,15 @@ export default function AssistantRail() {
         <Plus className="w-4 h-4" /> Create Assistant
       </button>
 
-      {/* Search — thinner white border in dark mode */}
+      {/* Search — thinner, white in dark */}
       <div className="relative mb-3">
         <input
-          value={q} onChange={(e)=>setQ(e.target.value)} placeholder="Search Assistants"
-          className="w-full h-[34px] rounded-[10px] pl-8 pr-3 text-sm outline-none border"
+          value={q} onChange={(e)=>setQ(e.target.value)} placeholder="Search assistants"
+          className="w-full h-[32px] rounded-[10px] pl-8 pr-3 text-sm outline-none border"
           style={{
             background:'var(--rail-input-bg)',
-            borderColor:'var(--rail-input-border)',   // white-ish in dark
-            borderWidth: '1px',                       // thinner
+            borderColor:'var(--rail-input-border)',
+            borderWidth:'1px',
             color:'var(--rail-input-text)'
           }}
         />
@@ -296,14 +325,15 @@ export default function AssistantRail() {
         ASSISTANTS
       </div>
 
-      <div className="overflow-auto" style={{ maxHeight:'calc(100% - 120px)' }}>
+      <div className="overflow-auto" style={{ maxHeight:'calc(100% - 118px)' }}>
         <div className="space-y-1.5">
           <AnimatePresence initial={false}>
             {filtered.map(a=>(
               <motion.div key={a.id} initial={{ opacity:0, y:6 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:-6 }}>
                 <Row
-                  a={a} active={a.id===activeId}
-                  onClick={()=>setActiveId(a.id)}
+                  a={a}
+                  active={a.id===activeId}
+                  onClick={()=>select(a.id)}
                   onRename={()=>setRenId(a.id)}
                   onDelete={()=>setDelId(a.id)}
                 />
@@ -346,7 +376,7 @@ export default function AssistantRail() {
           --rail-input-text: var(--text);
           --rail-input-muted: var(--text-muted);
 
-          --rail-selected-bg: rgba(255,255,255,.06);   /* neutral bg */
+          --rail-selected-bg: rgba(255,255,255,.06);
           --rail-avatar-bg: rgba(255,255,255,.06);
 
           --rail-chip-bg: var(--card);
