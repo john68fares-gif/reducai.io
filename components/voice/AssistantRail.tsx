@@ -1,61 +1,41 @@
 // components/voice/AssistantRail.tsx
-'use client'; // 👉 Next.js: render this component on the client
+'use client';
 
-// 👉 React core + hooks
 import React, { useEffect, useMemo, useState } from 'react';
-// 👉 Code-split the rail safely so page never crashes if it errors
 import { Search, Plus, Bot, Trash2, Edit3, X, AlertTriangle } from 'lucide-react';
-// 👉 Lightweight entrance/exit animations for list rows
 import { AnimatePresence, motion } from 'framer-motion';
 
-/* ────────────────────────────────────────────────────────────────────────────
-   Optional scoped storage helper (no-throw if the module doesn't exist)
-   - We try to require '@/utils/scoped-storage' at runtime
-   - If missing, everything still works with plain localStorage
-──────────────────────────────────────────────────────────────────────────── */
+/* Scoped storage (optional, won’t crash if not present) */
 type Scoped = { getJSON<T>(k:string,f:T):Promise<T>; setJSON(k:string,v:unknown):Promise<void> };
 let scopedStorageFn: undefined | (() => Promise<Scoped>);
 try { scopedStorageFn = require('@/utils/scoped-storage').scopedStorage; } catch {}
 
-/* ───────────────────────── Types & constants ──────────────────────────────── */
-// 👉 Minimal assistant shape for the rail
+/* App constants */
 export type AssistantLite = { id: string; name: string; purpose?: string; createdAt?: number };
-
-// 👉 Keys: list cache + “active assistant” id (shared with VoiceAgentSection)
 const STORAGE_KEY = 'agents';
 const ACTIVE_KEY  = 'va:activeId';
-
-// 👉 Brand greens for CTA hover effect
 const BTN_GREEN = '#10b981';
 const BTN_GREEN_HOVER = '#0ea473';
 
-/* ───────────────────────── ID + storage helpers ──────────────────────────── */
-// 👉 Create reasonably-unique ids (timestamp base + random)
+/* IDs + storage helpers */
 function uid() {
   return `a_${Date.now().toString(36)}_${crypto.getRandomValues(new Uint32Array(1))[0].toString(36)}`;
 }
-
-// 👉 Load assistants from scoped storage if available, else localStorage
 async function loadAssistants(): Promise<AssistantLite[]> {
   try { if (scopedStorageFn) { const ss = await scopedStorageFn(); const a=await ss.getJSON<AssistantLite[]>(STORAGE_KEY, []); return Array.isArray(a)?a:[]; } } catch {}
   try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) return JSON.parse(raw); } catch {}
   return [];
 }
-
-// 👉 Save assistants to both storages (best effort)
 async function saveAssistants(list: AssistantLite[]) {
   try { if (scopedStorageFn) { const ss = await scopedStorageFn(); await ss.setJSON(STORAGE_KEY, list); } } catch {}
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); } catch {}
 }
-
-// 👉 Persist active id and broadcast a DOM event for other components (VoiceAgentSection) to react to
 function writeActive(id:string){
   try { localStorage.setItem(ACTIVE_KEY, id); } catch {}
   try { window.dispatchEvent(new CustomEvent('assistant:active', { detail: id })); } catch {}
 }
 
-/* ───────────────────────────── Modal shells ──────────────────────────────── */
-// 👉 Shared container for all modals; dim background + themed panel
+/* Modal primitives */
 function ModalShell({ children }:{ children:React.ReactNode }) {
   return (
     <div className="fixed inset-0 z-[9998] flex items-center justify-center px-4" style={{ background:'rgba(0,0,0,.60)' }}>
@@ -66,8 +46,6 @@ function ModalShell({ children }:{ children:React.ReactNode }) {
     </div>
   );
 }
-
-// 👉 Reusable modal header (icon + title + close)
 function ModalHeader({ icon, title, subtitle, onClose }:{
   icon:React.ReactNode; title:string; subtitle?:string; onClose:()=>void;
 }) {
@@ -86,8 +64,6 @@ function ModalHeader({ icon, title, subtitle, onClose }:{
     </div>
   );
 }
-
-// 👉 “Create assistant” modal: simple text field + CTA
 function CreateModal({ open, onClose, onCreate }:{
   open:boolean; onClose:()=>void; onCreate:(name:string)=>void;
 }) {
@@ -99,7 +75,6 @@ function CreateModal({ open, onClose, onCreate }:{
     <ModalShell>
       <ModalHeader icon={<Plus className="w-5 h-5" style={{ color:'var(--brand)' }}/>} title="Create Assistant" onClose={onClose}/>
       <div className="px-6 py-5">
-        {/* 👉 Labeled input, theme-aware */}
         <label className="block text-xs mb-1" style={{ color:'var(--text-muted)' }}>Name</label>
         <input
           value={name} onChange={(e)=>setName(e.target.value)}
@@ -109,13 +84,11 @@ function CreateModal({ open, onClose, onCreate }:{
         />
       </div>
       <div className="px-6 pb-6 flex gap-3">
-        {/* 👉 Neutral cancel button */}
         <button onClick={onClose}
                 className="w-full h-[44px] rounded-[14px] font-semibold border"
                 style={{ background:'var(--card)', borderColor:'var(--border)', color:'var(--text)' }}>
           Cancel
         </button>
-        {/* 👉 Primary green CTA with hover color swap */}
         <button
           disabled={!can}
           onClick={()=> can && onCreate(name.trim())}
@@ -130,8 +103,6 @@ function CreateModal({ open, onClose, onCreate }:{
     </ModalShell>
   );
 }
-
-// 👉 “Rename assistant” modal: same shell, writes new name
 function RenameModal({ open, initial, onClose, onSave }:{
   open:boolean; initial:string; onClose:()=>void; onSave:(v:string)=>void;
 }) {
@@ -168,8 +139,6 @@ function RenameModal({ open, initial, onClose, onSave }:{
     </ModalShell>
   );
 }
-
-// 👉 “Confirm delete” modal: warning + irreversible copy
 function ConfirmDelete({ open, name, onClose, onConfirm }:{
   open:boolean; name?:string; onClose:()=>void; onConfirm:()=>void;
 }) {
@@ -201,10 +170,7 @@ function ConfirmDelete({ open, name, onClose, onConfirm }:{
   );
 }
 
-/* ───────────────────────── Assistant list row ───────────────────────────────
-   - Green GLOW on active/hover (no green border)
-   - Click selects, small chip buttons on hover for rename/delete
-──────────────────────────────────────────────────────────────────────────── */
+/* One rail row: green glow on ACTIVE and on HOVER */
 function Row({
   a, active, onClick, onRename, onDelete,
 }:{
@@ -215,22 +181,20 @@ function Row({
       onClick={onClick}
       className="rail-row w-full text-left rounded-[12px] px-3 flex items-center gap-2 group transition"
       style={{
-        minHeight: 60,                                    // 👉 taller, touch-friendly
-        background: active ? 'var(--rail-selected-bg)' : 'transparent', // 👉 subtle fill when active
-        border: '1px solid transparent',                  // 👉 no visible border (we use shadow)
+        minHeight: 60,
+        background: active ? 'var(--rail-selected-bg)' : 'transparent',
+        border: '1px solid transparent',                // let shadow be the visual outline
         color: 'var(--sidebar-text)',
         boxShadow: active
-          ? '0 10px 26px rgba(0,0,0,.36), 0 0 0 1px rgba(16,185,129,.18), 0 0 18px rgba(16,185,129,.22)' // 👉 green halo
+          ? '0 10px 26px rgba(0,0,0,.36), 0 0 0 1px rgba(16,185,129,.22), 0 0 18px rgba(16,185,129,.28)'
           : 'none',
       }}
     >
-      {/* 👉 Avatar square with thin border to align with theme */}
       <div className="w-10 h-10 rounded-md grid place-items-center"
            style={{ background:'var(--rail-avatar-bg)', border:'1px solid var(--sidebar-border)' }}>
         <Bot className="w-4 h-4" style={{ color:'var(--brand)' }} />
       </div>
 
-      {/* 👉 Title + subtitle (purpose) clamps, respects narrow rails */}
       <div className="min-w-0 flex-1">
         <div className="text-sm font-medium truncate">{a.name}</div>
         <div className="text-[11px] truncate" style={{ color:'var(--sidebar-muted)' }}>
@@ -238,7 +202,6 @@ function Row({
         </div>
       </div>
 
-      {/* 👉 Inline actions appear on hover only */}
       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
         <button
           onClick={(e)=>{ e.stopPropagation(); onRename(); }}
@@ -258,10 +221,10 @@ function Row({
         </button>
       </div>
 
-      {/* 👉 Hover halo (slightly softer than active) */}
+      {/* Hover glow (softer than active) */}
       <style jsx>{`
         .rail-row:hover{
-          box-shadow: 0 10px 26px rgba(0,0,0,.32), 0 0 0 1px rgba(16,185,129,.14), 0 0 16px rgba(16,185,129,.18);
+          box-shadow: 0 10px 26px rgba(0,0,0,.32), 0 0 0 1px rgba(16,185,129,.16), 0 0 16px rgba(16,185,129,.22);
           background: var(--rail-selected-bg);
         }
       `}</style>
@@ -269,44 +232,34 @@ function Row({
   );
 }
 
-/* ─────────────────────────────── Main rail ───────────────────────────────── */
+/* Main rail */
 export default function AssistantRail() {
-  // 👉 All assistants in rail (local cache)
   const [assistants,setAssistants] = useState<AssistantLite[]>([]);
-  // 👉 Currently selected assistant id
   const [activeId,setActiveId] = useState('');
-  // 👉 Search query
   const [q,setQ] = useState('');
-  // 👉 Modal states
   const [createOpen,setCreateOpen] = useState(false);
   const [renId,setRenId] = useState<string|null>(null);
   const [delId,setDelId] = useState<string|null>(null);
 
-  // 👉 First load: read list + restore previously active id (if exists)
   useEffect(()=>{ (async()=>{
     const list = await loadAssistants();
     setAssistants(list);
     const savedActive = (()=>{
       try { return localStorage.getItem(ACTIVE_KEY) || ''; } catch { return ''; }
     })();
-    // 👉 If saved id is present in the list use it, else pick first assistant
     const firstId = savedActive && list.find(a=>a.id===savedActive) ? savedActive : (list[0]?.id || '');
-    setActiveId(firstId); if (firstId) writeActive(firstId); // 👉 notify page selection
+    setActiveId(firstId); if (firstId) writeActive(firstId);
   })(); },[]);
 
-  // 👉 Memo filter list by search query (name or purpose)
   const filtered = useMemo(()=> {
     const s=q.trim().toLowerCase();
     return !s?assistants:assistants.filter(a=>a.name.toLowerCase().includes(s) || (a.purpose||'').toLowerCase().includes(s));
   },[assistants,q]);
 
-  // 👉 Selecting a row: set active id + broadcast
   function select(id:string){
     setActiveId(id);
-    writeActive(id); // <- notify VoiceAgentSection + persist
+    writeActive(id);
   }
-
-  // 👉 Create & select the new assistant
   function addAssistant(name:string){
     const a:AssistantLite = { id: uid(), name, createdAt: Date.now(), purpose:'' };
     const next=[a, ...assistants];
@@ -314,14 +267,10 @@ export default function AssistantRail() {
     select(a.id);
     setCreateOpen(false);
   }
-
-  // 👉 Rename in-place (by id)
   function saveRename(name:string){
     const next=assistants.map(x=> x.id===renId ? {...x, name} : x);
     setAssistants(next); saveAssistants(next); setRenId(null);
   }
-
-  // 👉 Delete, and if we deleted the active one, fall back to first
   function confirmDelete(){
     const next = assistants.filter(x=> x.id!==delId);
     const deletedActive = activeId===delId;
@@ -333,24 +282,23 @@ export default function AssistantRail() {
     setDelId(null);
   }
 
-  // 👉 Names for modal headers
   const renName = assistants.find(a=>a.id===renId)?.name || '';
   const delName = assistants.find(a=>a.id===delId)?.name;
 
   return (
     <div
-      className="assistant-rail px-3 py-3 h-full"
+      className="assistant-rail px-3 py-3 h-full font-movatif"  // ← use your Movatif utility if available
       style={{
-        background:'var(--sidebar-bg)',                // 👉 match global sidebar BG
-        borderRight:'1px solid rgba(255,255,255,.14)', // 👉 thinner white-ish sideline
+        background:'var(--sidebar-bg)',
+        borderRight:'1px solid rgba(255,255,255,.14)', // thin white side line
         color:'var(--sidebar-text)'
       }}
     >
-      {/* 👉 Primary CTA (green) smaller text per your spec */}
+      {/* Green CTA (smaller text, white letters) */}
       <button
         type="button"
         className="w-full inline-flex items-center justify-center gap-2 rounded-[18px] font-semibold mb-3"
-        style={{ height: 38, background: BTN_GREEN, color: '#fff', fontSize: 13.5 }}
+        style={{ height: 38, background: BTN_GREEN, color: '#fff', fontSize: 13 }}
         onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=BTN_GREEN_HOVER)}
         onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=BTN_GREEN)}
         onClick={()=> setCreateOpen(true)}
@@ -358,28 +306,27 @@ export default function AssistantRail() {
         <Plus className="w-4 h-4" /> Create Assistant
       </button>
 
-      {/* 👉 Search: thin white border (dark), neutral (light) */}
+      {/* SEARCH — hairline border (0.5px). Remove Tailwind `border` so this wins. */}
       <div className="relative mb-3">
         <input
-          value={q} onChange={(e)=>setQ(e.target.value)} placeholder="Search assistants"
-          className="w-full h-[30px] rounded-[15px] pl-8 pr-8 text-sm outline-none border"
+          value={q}
+          onChange={(e)=>setQ(e.target.value)}
+          placeholder="Search assistants"
+          className="w-full h-[32px] rounded-[12px] pl-8 pr-3 text-sm outline-none"
           style={{
             background:'var(--rail-input-bg)',
-            borderColor:'var(--rail-input-border)',
-            borderWidth:'0.01px',
+            border: '0.5px solid var(--rail-input-border)',   // ← thinner, theme-aware
             color:'var(--rail-input-text)'
           }}
         />
-        <Search className="w-1 h-1 absolute left-2.5 top-1/2 -translate-y-1/2"
+        <Search className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2"
                 style={{ color:'var(--rail-input-muted)' }}/>
       </div>
 
-      {/* 👉 Section label */}
       <div className="text-[11px] font-semibold tracking-[.12em] mb-2" style={{ color:'var(--sidebar-muted)' }}>
         ASSISTANTS
       </div>
 
-      {/* 👉 Scrollable list; space-y for row separation */}
       <div className="overflow-auto" style={{ maxHeight:'calc(100% - 118px)' }}>
         <div className="space-y-1.5">
           <AnimatePresence initial={false}>
@@ -387,7 +334,7 @@ export default function AssistantRail() {
               <motion.div key={a.id} initial={{ opacity:0, y:6 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:-6 }}>
                 <Row
                   a={a}
-                  active={a.id===activeId}
+                  active={a.id===activeId}               // ← green glow on the one we’re editing
                   onClick={()=>select(a.id)}
                   onRename={()=>setRenId(a.id)}
                   onDelete={()=>setDelId(a.id)}
@@ -396,7 +343,6 @@ export default function AssistantRail() {
             ))}
           </AnimatePresence>
 
-          {/* 👉 Empty state when filter yields none */}
           {filtered.length===0 && (
             <div className="text-xs py-8 text-center" style={{ color:'var(--sidebar-muted)' }}>
               No assistants found.
@@ -405,14 +351,14 @@ export default function AssistantRail() {
         </div>
       </div>
 
-      {/* 👉 Modal mounts */}
+      {/* Modals */}
       <CreateModal open={createOpen} onClose={()=>setCreateOpen(false)} onCreate={addAssistant} />
       <RenameModal open={!!renId} initial={renName} onClose={()=>setRenId(null)} onSave={saveRename} />
       <ConfirmDelete open={!!delId} name={delName} onClose={()=>setDelId(null)} onConfirm={confirmDelete} />
 
-      {/* 👉 Theme tokens (light/dark) for inputs, chips, selection bg */}
+      {/* Theme tokens + font fallback */}
       <style jsx>{`
-        /* Light theme tokens for rail */
+        /* Light theme tokens */
         :global(:root:not([data-theme="dark"])) .assistant-rail{
           --rail-input-bg: #fff;
           --rail-input-border: rgba(0,0,0,.14);
@@ -425,10 +371,10 @@ export default function AssistantRail() {
           --rail-chip-bg: #fff;
           --rail-chip-border: rgba(0,0,0,.12);
         }
-        /* Dark theme tokens for rail */
+        /* Dark theme tokens */
         :global([data-theme="dark"]) .assistant-rail{
           --rail-input-bg: var(--card);
-          --rail-input-border: rgba(255,255,255,.78);  /* thin white line */
+          --rail-input-border: rgba(255,255,255,.78);  /* white hairline */
           --rail-input-text: var(--text);
           --rail-input-muted: var(--text-muted);
 
@@ -439,7 +385,12 @@ export default function AssistantRail() {
           --rail-chip-border: var(--border);
         }
 
-        /* 👉 Placeholder color respects theme token */
+        /* Movatif fallback if the Tailwind utility isn't present */
+        :global(.assistant-rail){
+          font-family: "Movatif", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Apple Color Emoji", "Segoe UI Emoji";
+        }
+
+        /* Placeholder color */
         .assistant-rail input::placeholder{ color: var(--rail-input-muted); opacity: .9; }
       `}</style>
     </div>
