@@ -15,7 +15,7 @@ try {
 
 export type AssistantLite = { id: string; name: string; purpose?: string; createdAt?: number };
 
-/* ------------------------------- Look & feel (exactly like api-keys) ------- */
+/* Look & feel (aligned with api-keys + improve spacing) */
 const BTN_GREEN = '#10b981';
 const BTN_GREEN_HOVER = '#0ea473';
 
@@ -32,7 +32,7 @@ const CARD: React.CSSProperties = {
   borderRadius: 20,
 };
 
-/* ------------------------------- Storage ----------------------------------- */
+/* Storage */
 const STORAGE_KEY = 'agents';
 async function loadAssistants(): Promise<AssistantLite[]> {
   try {
@@ -50,7 +50,7 @@ async function saveAssistants(list: AssistantLite[]) {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); } catch {}
 }
 
-/* --------------------------------- Modals (copied styling from api-keys) ---- */
+/* ---------- Modals (theme + buttons exactly like api-keys) ---------- */
 function ModalShell({ children }: { children: React.ReactNode }) {
   return (
     <div
@@ -171,7 +171,7 @@ function RenameModal({
           className="w-full h-[46px] rounded-[18px] font-semibold flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
           style={{ background: BTN_GREEN, color: '#fff' }}
           onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER)}
-          onMouseLeave={(e) => ((e.currentTarget as HTMLButtonButtonElement).style.background = BTN_GREEN)}
+          onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN)}
         >
           Save
         </button>
@@ -217,7 +217,7 @@ function ConfirmDelete({
   );
 }
 
-/* -------------------------- Sidebar-style item (unchanged layout) ----------- */
+/* ---------- List item (sidebar-style) ---------- */
 function AssistantItem({
   a, active, onClick, onRename, onDelete,
 }: {
@@ -227,8 +227,8 @@ function AssistantItem({
   onRename: () => void;
   onDelete: () => void;
 }) {
-  const bg = active ? 'rgba(16,185,129,.14)' : 'var(--sb-icon-bg, rgba(255,255,255,.06))';
-  const border = active ? 'rgba(16,185,129,.45)' : 'var(--sb-icon-border, rgba(255,255,255,.12))';
+  const bg = active ? 'rgba(16,185,129,.14)' : 'var(--sb-icon-bg, rgba(0,0,0,.06))';
+  const border = active ? 'rgba(16,185,129,.45)' : 'var(--sb-icon-border, rgba(0,0,0,.12))';
   const halo = active
     ? `0 0 0 1px rgba(0,255,194,.10), 0 8px 18px rgba(0,0,0,.22), 0 0 18px rgba(16,185,129,.25)`
     : 'inset 0 0 10px rgba(0,0,0,.16)';
@@ -255,7 +255,7 @@ function AssistantItem({
         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
           <button
             className="px-2 h-[28px] rounded-[8px] border"
-            style={{ background: 'var(--card)', borderColor: 'var(--border)' }}
+            style={{ background: 'var(--rail-chip-bg)', borderColor: 'var(--rail-chip-border)' }}
             onClick={(e) => { e.stopPropagation(); onRename(); }}
             aria-label="Rename"
           >
@@ -263,7 +263,7 @@ function AssistantItem({
           </button>
           <button
             className="px-2 h-[28px] rounded-[8px] border"
-            style={{ background: 'var(--card)', borderColor: 'var(--border)' }}
+            style={{ background: 'var(--rail-chip-bg)', borderColor: 'var(--rail-chip-border)' }}
             onClick={(e) => { e.stopPropagation(); onDelete(); }}
             aria-label="Delete"
           >
@@ -285,13 +285,13 @@ function AssistantItem({
   );
 }
 
-/* ----------------------------------- Main ----------------------------------- */
+/* ---------- Main ---------- */
 export default function AssistantRail() {
   const [assistants, setAssistants] = useState<AssistantLite[]>([]);
   const [activeId, setActiveId] = useState('');
   const [q, setQ] = useState('');
 
-  // Modal state
+  // Modals
   const [createOpen, setCreateOpen] = useState(false);
   const [renId, setRenId] = useState<string | null>(null);
   const [delId, setDelId] = useState<string | null>(null);
@@ -336,74 +336,147 @@ export default function AssistantRail() {
 
   return (
     <div
-      className="px-3 py-4 h-full"
+      className="assistant-rail h-full"
       style={{ background: 'var(--sidebar-bg)', borderRight: '1px solid var(--sidebar-border)', color: 'var(--sidebar-text)' }}
     >
-      <div className="text-[11px] font-semibold tracking-[.12em] mb-2" style={{ color: 'var(--sidebar-muted, var(--text-muted))' }}>
-        ASSISTANTS
+      {/* Sticky section label (like improve spacing) */}
+      <div className="sticky top-0 z-10 px-3 pt-3 pb-2 backdrop-blur"
+           style={{ background: 'color-mix(in oklab, var(--sidebar-bg) 92%, transparent)', boxShadow: '0 1px 0 var(--sidebar-border)' }}>
+        <div className="text-[11px] font-semibold tracking-[.12em]" style={{ color: 'var(--sidebar-muted, var(--text-muted))' }}>
+          ASSISTANTS
+        </div>
       </div>
 
-      {/* EXACT green CTA like api-keys */}
-      <button
-        type="button"
-        className="mb-3 inline-flex items-center gap-2 select-none w-full justify-center rounded-[18px] font-semibold"
-        style={{ height: 46, background: BTN_GREEN, color: '#fff' }}
-        onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER)}
-        onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN)}
-        onClick={() => setCreateOpen(true)}
-      >
-        <Plus className="w-4 h-4" /> Create Assistant
-      </button>
-
-      {/* Search */}
-      <div className="flex items-center gap-2 mb-4">
-        <Search className="w-4 h-4" style={{ color: 'var(--sidebar-muted, var(--text-muted))' }} />
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Search assistants"
-          className="flex-1 h-[34px] rounded-[10px] px-3 text-sm outline-none border"
-          style={{ background: 'var(--card)', borderColor: 'var(--border)', color: 'var(--text)' }}
-        />
-        {q && (
+      {/* Band: Actions (green CTA) */}
+      <div className="px-3">
+        <div className="rounded-[16px] p-3 mb-3" style={{ background: 'var(--rail-band-bg)', border: '1px solid var(--rail-band-border)', boxShadow: 'var(--rail-band-shadow)' }}>
           <button
-            onClick={() => setQ('')}
-            className="px-2 h-[34px] rounded-[10px] border"
-            style={{ background: 'var(--card)', borderColor: 'var(--border)' }}
-            aria-label="Clear"
+            type="button"
+            className="w-full inline-flex items-center justify-center gap-2 rounded-[18px] font-semibold"
+            style={{ height: 46, background: BTN_GREEN, color: '#fff' }}
+            onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER)}
+            onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN)}
+            onClick={() => setCreateOpen(true)}
           >
-            <X className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
+            <Plus className="w-4 h-4" /> Create Assistant
           </button>
-        )}
+        </div>
       </div>
 
-      {/* List */}
-      <div className="space-y-[6px]">
-        <AnimatePresence initial={false}>
-          {filtered.map((a) => (
-            <motion.div key={a.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <AssistantItem
-                a={a}
-                active={a.id === activeId}
-                onClick={() => setActiveId(a.id)}
-                onRename={() => setRenId(a.id)}
-                onDelete={() => setDelId(a.id)}
-              />
-            </motion.div>
-          ))}
-        </AnimatePresence>
-
-        {filtered.length === 0 && (
-          <div className="text-xs" style={{ color: 'var(--sidebar-muted, var(--text-muted))' }}>
-            No assistants found.
+      {/* Band: Search (white in light mode, themed in dark) */}
+      <div className="px-3">
+        <div className="rounded-[16px] p-3 mb-3" style={{ background: 'var(--rail-band-bg)', border: '1px solid var(--rail-band-border)', boxShadow: 'var(--rail-band-shadow)' }}>
+          <div className="flex items-center gap-2">
+            <Search className="w-4 h-4" style={{ color: 'var(--rail-input-muted)' }} />
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search assistants"
+              className="flex-1 h-[36px] rounded-[10px] px-3 text-sm outline-none border"
+              style={{
+                background: 'var(--rail-input-bg)',
+                borderColor: 'var(--rail-input-border)',
+                color: 'var(--rail-input-text)',
+                boxShadow: 'var(--rail-input-shadow, none)',
+              }}
+            />
+            {q && (
+              <button
+                onClick={() => setQ('')}
+                className="px-2 h-[36px] rounded-[10px] border"
+                style={{ background: 'var(--rail-input-bg)', borderColor: 'var(--rail-input-border)' }}
+                aria-label="Clear search"
+              >
+                <X className="w-4 h-4" style={{ color: 'var(--rail-input-muted)' }} />
+              </button>
+            )}
           </div>
-        )}
+        </div>
       </div>
 
-      {/* Modals — identical button/overlay look to api-keys */}
+      {/* List section with comfy spacing like improve */}
+      <div className="px-3 pb-4">
+        <div className="rounded-[16px] p-3"
+             style={{ background: 'var(--rail-list-bg)', border: '1px solid var(--rail-list-border)', boxShadow: 'var(--rail-list-shadow)', maxHeight: 'calc(100vh - 210px)', overflow: 'auto' }}>
+          <div className="text-[11px] font-semibold mb-2" style={{ color: 'var(--sidebar-muted, var(--text-muted))' }}>
+            ALL
+          </div>
+
+          <div className="space-y-[6px]">
+            <AnimatePresence initial={false}>
+              {filtered.map((a) => (
+                <motion.div key={a.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                  <AssistantItem
+                    a={a}
+                    active={a.id === activeId}
+                    onClick={() => setActiveId(a.id)}
+                    onRename={() => setRenId(a.id)}
+                    onDelete={() => setDelId(a.id)}
+                  />
+                </motion.div>
+              ))}
+            </AnimatePresence>
+
+            {filtered.length === 0 && (
+              <div className="text-xs py-8 text-center" style={{ color: 'var(--sidebar-muted, var(--text-muted))' }}>
+                No assistants found.
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Modals */}
       <CreateModal open={createOpen} onClose={() => setCreateOpen(false)} onCreate={addAssistant} />
       <RenameModal open={!!renId} initial={renName} onClose={() => setRenId(null)} onSave={saveRename} />
       <ConfirmDelete open={!!delId} name={delName} onClose={() => setDelId(null)} onConfirm={confirmDelete} />
+
+      {/* Theme tokens to match light/dark & spacing like improve.tsx */}
+      <style jsx>{`
+        :global(:root:not([data-theme="dark"])) .assistant-rail {
+          /* Inputs: crisp light */
+          --rail-input-bg: #ffffff;
+          --rail-input-border: rgba(0, 0, 0, 0.12);
+          --rail-input-text: #0f172a;
+          --rail-input-muted: #64748b;
+          --rail-input-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+
+          /* Bands and list surfaces (light) */
+          --rail-band-bg: #ffffff;
+          --rail-band-border: rgba(0, 0, 0, 0.08);
+          --rail-band-shadow: 0 2px 12px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+
+          --rail-list-bg: #ffffff;
+          --rail-list-border: rgba(0, 0, 0, 0.08);
+          --rail-list-shadow: 0 3px 14px rgba(0, 0, 0, 0.08);
+
+          --rail-chip-bg: #ffffff;
+          --rail-chip-border: rgba(0, 0, 0, 0.12);
+        }
+
+        :global([data-theme="dark"]) .assistant-rail {
+          /* Inputs: match your card/border tokens */
+          --rail-input-bg: var(--card);
+          --rail-input-border: var(--border);
+          --rail-input-text: var(--text);
+          --rail-input-muted: var(--text-muted);
+          --rail-input-shadow: none;
+
+          /* Bands and list surfaces (dark) — echo improve.tsx softness */
+          --rail-band-bg: color-mix(in oklab, var(--panel) 96%, transparent);
+          --rail-band-border: color-mix(in oklab, var(--border) 92%, transparent);
+          --rail-band-shadow: 0 6px 30px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+
+          --rail-list-bg: color-mix(in oklab, var(--card) 96%, transparent);
+          --rail-list-border: color-mix(in oklab, var(--border) 92%, transparent);
+          --rail-list-shadow: 0 3px 16px rgba(0, 0, 0, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+
+          --rail-chip-bg: var(--card);
+          --rail-chip-border: var(--border);
+        }
+
+        .assistant-rail input::placeholder { color: var(--rail-input-muted); opacity: 0.9; }
+      `}</style>
     </div>
   );
 }
