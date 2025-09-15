@@ -1,17 +1,9 @@
 // components/voice/VoiceAgentSection.tsx
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
-import {
-  Wand2,
-  ChevronDown,
-  ChevronUp,
-  Gauge,
-  Timer,
-  Phone,
-  Rocket,
-} from 'lucide-react';
+import { Wand2, ChevronDown, ChevronUp, Gauge, Timer, Phone, Rocket } from 'lucide-react';
 
 /* Safe dynamic rail */
 const AssistantRail = dynamic(
@@ -31,6 +23,45 @@ class RailBoundary extends React.Component<{children:React.ReactNode},{hasError:
 /* ===== Compact tokens ===== */
 const GREEN = '#10b981';
 const GREEN_HOVER = '#0ea473';
+const ACTIVE_KEY  = 'va:activeId';
+
+type AgentData = {
+  provider: string;
+  model: string;
+  firstMode: string;
+  firstMsg: string;
+  systemPrompt: string;
+  asrProvider: string;
+  asrLang: string;
+  asrModel: string;
+  denoise: boolean;
+  numerals: boolean;
+  confidence: number;
+};
+
+const DEFAULT_AGENT: AgentData = {
+  provider: 'OpenAI',
+  model: 'GPT 4o Cluster',
+  firstMode: 'Assistant speaks first',
+  firstMsg: 'Hello.',
+  systemPrompt: 'This is a blank template with minimal defaults, you can change the model, temperature, and messages.',
+  asrProvider: 'Deepgram',
+  asrLang: 'En',
+  asrModel: 'Nova 2',
+  denoise: false,
+  numerals: false,
+  confidence: 0.4,
+};
+
+function keyFor(id: string){ return `va:agent:${id}`; }
+function loadAgentData(id: string): AgentData {
+  try { const raw = localStorage.getItem(keyFor(id)); if (raw) return { ...DEFAULT_AGENT, ...(JSON.parse(raw)||{}) }; }
+  catch {}
+  return { ...DEFAULT_AGENT };
+}
+function saveAgentData(id: string, data: AgentData){
+  try { localStorage.setItem(keyFor(id), JSON.stringify(data)); } catch {}
+}
 
 function LocalTokens() {
   return (
@@ -108,32 +139,49 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
 );
 
 export default function VoiceAgentSection() {
-  const [openModel, setOpenModel] = useState(true);
-  const [openTranscriber, setOpenTranscriber] = useState(true);
+  /* Active assistant id from rail */
+  const [activeId, setActiveId] = useState<string>(() => {
+    try { return localStorage.getItem(ACTIVE_KEY) || ''; } catch { return ''; }
+  });
 
-  // state (unchanged)
-  const [provider, setProvider] = useState('OpenAI');
-  const [model, setModel] = useState('GPT 4o Cluster');
-  const [firstMode, setFirstMode] = useState('Assistant speaks first');
-  const [firstMsg, setFirstMsg] = useState('Hello.');
-  const [systemPrompt, setSystemPrompt] = useState(
-    'This is a blank template with minimal defaults, you can change the model, temperature, and messages.'
-  );
-  const [asrProvider, setAsrProvider] = useState('Deepgram');
-  const [asrLang, setAsrLang] = useState('En');
-  const [asrModel, setAsrModel] = useState('Nova 2');
-  const [denoise, setDenoise] = useState(false);
-  const [numerals, setNumerals] = useState(false);
-  const [confidence, setConfidence] = useState(0.4);
+  /* Per-assistant data */
+  const [data, setData] = useState<AgentData>(() => activeId ? loadAgentData(activeId) : DEFAULT_AGENT);
+
+  /* Listen for rail selection changes */
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const id = (e as CustomEvent<string>).detail;
+      setActiveId(id);
+    };
+    window.addEventListener('assistant:active', handler as EventListener);
+    return () => window.removeEventListener('assistant:active', handler as EventListener);
+  }, []);
+
+  /* When active changes, load that assistant's config */
+  useEffect(() => {
+    if (!activeId) return;
+    setData(loadAgentData(activeId));
+    try { localStorage.setItem(ACTIVE_KEY, activeId); } catch {}
+  }, [activeId]);
+
+  /* Any edit saves to that assistant only */
+  useEffect(() => {
+    if (!activeId) return;
+    saveAgentData(activeId, data);
+  }, [activeId, data]);
+
+  /* Shorthand setters */
+  const set = <K extends keyof AgentData>(k: K) => (v: AgentData[K]) =>
+    setData(prev => ({ ...prev, [k]: v }));
 
   return (
     <div className="va w-full" style={{ background:'var(--bg)', color:'var(--text)' }}>
       <LocalTokens />
 
-      {/* layout */}
-      <div className="grid w-full pr-[1px]" style={{ gridTemplateColumns:'312px 1fr' }}>
+      {/* layout: NARROWER rail + thinner white divider */}
+      <div className="grid w-full pr-[1px]" style={{ gridTemplateColumns:'196px 1fr' }}>
         {/* LEFT rail */}
-        <div className="border-r" style={{ borderColor:'var(--border)' }}>
+        <div className="border-r" style={{ borderColor:'rgba(255,255,255,.14)' }}>
           <RailBoundary><AssistantRail /></RailBoundary>
         </div>
 
@@ -164,129 +212,139 @@ export default function VoiceAgentSection() {
 
           <div className="va-panel overflow-hidden">
             {/* Model */}
-            <div className="acc-head" onClick={()=>setOpenModel(v=>!v)}>
-              <div className="acc-title">
-                <span className="pill" style={{height:26}}><Gauge className="ico"/></span>
-                Model
-              </div>
-              {openModel ? <ChevronUp className="ico" style={{ color:'var(--muted)' }}/> : <ChevronDown className="ico" style={{ color:'var(--muted)' }}/>}
-            </div>
-            {openModel && (
-              <div className="px-4 pb-4">
-                <div className="row">
-                  <div>
-                    <label className="label-xs">Provider</label>
-                    <select className="select" value={provider} onChange={e=>setProvider(e.target.value)}>
-                      <option>OpenAI</option><option>Anthropic</option><option>Google</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="label-xs">Model</label>
-                    <select className="select" value={model} onChange={e=>setModel(e.target.value)}>
-                      <option>GPT 4o Cluster</option><option>GPT-4o</option><option>GPT-4.1</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="row mt-2.5">
-                  <div>
-                    <label className="label-xs">First Message Mode</label>
-                    <select className="select" value={firstMode} onChange={e=>setFirstMode(e.target.value)}>
-                      <option>Assistant speaks first</option><option>User speaks first</option><option>Silent until tool required</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="label-xs">First Message</label>
-                    <input className="input" value={firstMsg} onChange={e=>setFirstMsg(e.target.value)} />
-                  </div>
-                </div>
-
-                <div className="mt-2.5">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="label-xs">System Prompt</label>
-                    <div className="flex items-center gap-2">
-                      <button className="btn"><Wand2 className="ico"/> Generate</button>
+            <Accordion
+              title="Model"
+              icon={<Gauge className="ico" />}
+              content={
+                <div className="px-4 pb-4">
+                  <div className="row">
+                    <div>
+                      <label className="label-xs">Provider</label>
+                      <select className="select" value={data.provider} onChange={e=>set('provider')(e.target.value)}>
+                        <option>OpenAI</option><option>Anthropic</option><option>Google</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="label-xs">Model</label>
+                      <select className="select" value={data.model} onChange={e=>set('model')(e.target.value)}>
+                        <option>GPT 4o Cluster</option><option>GPT-4o</option><option>GPT-4.1</option>
+                      </select>
                     </div>
                   </div>
-                  <textarea className="textarea" value={systemPrompt} onChange={e=>setSystemPrompt(e.target.value)} />
+
+                  <div className="row mt-2.5">
+                    <div>
+                      <label className="label-xs">First Message Mode</label>
+                      <select className="select" value={data.firstMode} onChange={e=>set('firstMode')(e.target.value)}>
+                        <option>Assistant speaks first</option><option>User speaks first</option><option>Silent until tool required</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="label-xs">First Message</label>
+                      <input className="input" value={data.firstMsg} onChange={e=>set('firstMsg')(e.target.value)} />
+                    </div>
+                  </div>
+
+                  <div className="mt-2.5">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="label-xs">System Prompt</label>
+                      <div className="flex items-center gap-2">
+                        <button className="btn"><Wand2 className="ico"/> Generate</button>
+                      </div>
+                    </div>
+                    <textarea className="textarea" value={data.systemPrompt} onChange={e=>set('systemPrompt')(e.target.value)} />
+                  </div>
                 </div>
-              </div>
-            )}
+              }
+            />
 
             <div className="sep" />
 
             {/* Transcriber */}
-            <div className="acc-head" onClick={()=>setOpenTranscriber(v=>!v)}>
-              <div className="acc-title">
-                <span className="pill" style={{height:26}}><Timer className="ico"/></span>
-                Transcriber
-              </div>
-              {openTranscriber ? <ChevronUp className="ico" style={{ color:'var(--muted)' }}/> : <ChevronDown className="ico" style={{ color:'var(--muted)' }}/>}
-            </div>
-            {openTranscriber && (
-              <div className="px-4 pb-5">
-                <div className="row">
-                  <div>
-                    <label className="label-xs">Provider</label>
-                    <select className="select" value={asrProvider} onChange={e=>setAsrProvider(e.target.value)}>
-                      <option>Deepgram</option><option>Whisper</option><option>AssemblyAI</option>
-                    </select>
+            <Accordion
+              title="Transcriber"
+              icon={<Timer className="ico" />}
+              content={
+                <div className="px-4 pb-5">
+                  <div className="row">
+                    <div>
+                      <label className="label-xs">Provider</label>
+                      <select className="select" value={data.asrProvider} onChange={e=>set('asrProvider')(e.target.value)}>
+                        <option>Deepgram</option><option>Whisper</option><option>AssemblyAI</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="label-xs">Language</label>
+                      <select className="select" value={data.asrLang} onChange={e=>set('asrLang')(e.target.value)}>
+                        <option>En</option><option>Multi</option><option>Es</option>
+                      </select>
+                    </div>
                   </div>
-                  <div>
-                    <label className="label-xs">Language</label>
-                    <select className="select" value={asrLang} onChange={e=>setAsrLang(e.target.value)}>
-                      <option>En</option><option>Multi</option><option>Es</option>
-                    </select>
-                  </div>
-                </div>
 
-                <div className="row mt-2.5">
-                  <div>
-                    <label className="label-xs">Model</label>
-                    <select className="select" value={asrModel} onChange={e=>setAsrModel(e.target.value)}>
-                      <option>Nova 2</option><option>Nova</option><option>Whisper Large-V3</option>
-                    </select>
-                  </div>
-                  <div className="flex items-end gap-2">
-                    <div className="flex-1">
-                      <label className="label-xs">Confidence Threshold</label>
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="range" min={0} max={1} step={0.01}
-                          value={confidence}
-                          onChange={(e)=>setConfidence(parseFloat(e.target.value))}
-                          style={{ width:'100%' }}
-                        />
-                        <div className="va-card px-2.5 py-1.5 rounded-md text-xs" style={{minWidth:46, textAlign:'center'}}>
-                          {confidence.toFixed(1)}
+                  <div className="row mt-2.5">
+                    <div>
+                      <label className="label-xs">Model</label>
+                      <select className="select" value={data.asrModel} onChange={e=>set('asrModel')(e.target.value)}>
+                        <option>Nova 2</option><option>Nova</option><option>Whisper Large-V3</option>
+                      </select>
+                    </div>
+                    <div className="flex items-end gap-2">
+                      <div className="flex-1">
+                        <label className="label-xs">Confidence Threshold</label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="range" min={0} max={1} step={0.01}
+                            value={data.confidence}
+                            onChange={(e)=>set('confidence')(parseFloat(e.target.value))}
+                            style={{ width:'100%' }}
+                          />
+                          <div className="va-card px-2.5 py-1.5 rounded-md text-xs" style={{minWidth:46, textAlign:'center'}}>
+                            {data.confidence.toFixed(1)}
+                          </div>
                         </div>
                       </div>
                     </div>
                   </div>
-                </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="font-semibold text-[13px]">Background Denoising Enabled</div>
-                      <div className="label-xs">Filter background noise while the user is talking.</div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="font-semibold text-[13px]">Background Denoising Enabled</div>
+                        <div className="label-xs">Filter background noise while the user is talking.</div>
+                      </div>
+                      <Toggle checked={data.denoise} onChange={v=>set('denoise')(v)} />
                     </div>
-                    <Toggle checked={denoise} onChange={setDenoise} />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="font-semibold text-[13px]">Use Numerals</div>
-                      <div className="label-xs">Convert numbers from words to digits in transcription.</div>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="font-semibold text-[13px]">Use Numerals</div>
+                        <div className="label-xs">Convert numbers from words to digits in transcription.</div>
+                      </div>
+                      <Toggle checked={data.numerals} onChange={v=>set('numerals')(v)} />
                     </div>
-                    <Toggle checked={numerals} onChange={setNumerals} />
                   </div>
                 </div>
-              </div>
-            )}
+              }
+            />
           </div>
         </div>
-
       </div>
     </div>
+  );
+}
+
+/* Small accordion helper (keeps file tidy) */
+function Accordion({ title, icon, content }:{ title:string; icon:React.ReactNode; content:React.ReactNode }) {
+  const [open,setOpen]=useState(true);
+  return (
+    <>
+      <div className="acc-head" onClick={()=>setOpen(v=>!v)}>
+        <div className="acc-title">
+          <span className="pill" style={{height:26}}>{icon}</span>
+          {title}
+        </div>
+        {open ? <ChevronUp className="ico" style={{ color:'var(--muted)' }}/> : <ChevronDown className="ico" style={{ color:'var(--muted)' }}/>}
+      </div>
+      {open && content}
+    </>
   );
 }
