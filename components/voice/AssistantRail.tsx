@@ -349,8 +349,8 @@ export default function AssistantRail() {
       {/* 👉 Primary CTA (green) smaller text per your spec */}
       <button
         type="button"
-        className="w-full inline-flex items-center justify-center gap-2 rounded-[10px] font-semibold mb-3"
-        style={{ height: 38, background: BTN_GREEN, color: '#fff', fontSize: 12.5 }}
+        className="w-full inline-flex items-center justify-center gap-2 rounded-[12px] font-semibold mb-3"
+        style={{ height: 38, background: BTN_GREEN, color: '#fff', fontSize: 15.5 }}
         onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=BTN_GREEN_HOVER)}
         onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=BTN_GREEN)}
         onClick={()=> setCreateOpen(true)}
