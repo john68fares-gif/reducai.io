@@ -349,8 +349,8 @@ export default function AssistantRail() {
       {/* 👉 Primary CTA (green) smaller text per your spec */}
       <button
         type="button"
-        className="w-full inline-flex items-center justify-center gap-2 rounded-[12px] font-semibold mb-3"
-        style={{ height: 38, background: BTN_GREEN, color: '#fff', fontSize: 15.5 }}
+        className="w-full inline-flex items-center justify-center gap-3 rounded-[18px] font-semibold mb-3"
+        style={{ height: 38, background: BTN_GREEN, color: '#fff', fontSize: 13.5 }}
         onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=BTN_GREEN_HOVER)}
         onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=BTN_GREEN)}
         onClick={()=> setCreateOpen(true)}
@@ -362,11 +362,11 @@ export default function AssistantRail() {
       <div className="relative mb-3">
         <input
           value={q} onChange={(e)=>setQ(e.target.value)} placeholder="Search assistants"
-          className="w-full h-[30px] rounded-[12px] pl-8 pr-8 text-sm outline-none border"
+          className="w-full h-[30px] rounded-[18px] pl-8 pr-8 text-sm outline-none border"
           style={{
             background:'var(--rail-input-bg)',
             borderColor:'var(--rail-input-border)',
-            borderWidth:'1px',
+            borderWidth:'0.2px',
             color:'var(--rail-input-text)'
           }}
         />
