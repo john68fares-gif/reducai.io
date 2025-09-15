@@ -1,58 +1,42 @@
-// components/voice/AssistantRail.tsx
-'use client'; // RENDER ON CLIENT ONLY (Next.js)
+'use client';
 
-// IMPORTS: core React + icons + light row animations
 import React, { useEffect, useMemo, useState } from 'react';
 import { Search, Plus, Bot, Trash2, Edit3, X, AlertTriangle } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 
-/* STORAGE SCOPE (OPTIONAL)
-   - If '@/utils/scoped-storage' exists, use it (multi-tenant persistence).
-   - Falls back to localStorage if not found.
-*/
+/* Optional scoped storage (safe if module missing) */
 type Scoped = { getJSON<T>(k:string,f:T):Promise<T>; setJSON(k:string,v:unknown):Promise<void> };
 let scopedStorageFn: undefined | (() => Promise<Scoped>);
 try { scopedStorageFn = require('@/utils/scoped-storage').scopedStorage; } catch {}
 
-/* TYPES: “lite” assistant structure shown in the rail */
 export type AssistantLite = { id: string; name: string; purpose?: string; createdAt?: number };
 
-/* KEYS: where we store the list + the currently active assistant id */
 const STORAGE_KEY = 'agents';
-const ACTIVE_KEY  = 'va:activeId'; // shares selection with VoiceAgentSection via DOM event
-
-/* BRAND GREENS: primary CTA + hover */
+const ACTIVE_KEY  = 'va:activeId';
 const BTN_GREEN = '#10b981';
 const BTN_GREEN_HOVER = '#0ea473';
 
-/* UID HELPER: make a reasonably unique id for new assistants */
+/* ids */
 function uid() {
   return `a_${Date.now().toString(36)}_${crypto.getRandomValues(new Uint32Array(1))[0].toString(36)}`;
 }
 
-/* LOAD ASSISTANTS: first try scoped storage, otherwise localStorage */
+/* storage */
 async function loadAssistants(): Promise<AssistantLite[]> {
   try { if (scopedStorageFn) { const ss = await scopedStorageFn(); const a=await ss.getJSON<AssistantLite[]>(STORAGE_KEY, []); return Array.isArray(a)?a:[]; } } catch {}
   try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) return JSON.parse(raw); } catch {}
   return [];
 }
-
-/* SAVE ASSISTANTS: write to scoped storage (if any) and localStorage */
 async function saveAssistants(list: AssistantLite[]) {
   try { if (scopedStorageFn) { const ss = await scopedStorageFn(); await ss.setJSON(STORAGE_KEY, list); } } catch {}
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); } catch {}
 }
-
-/* SET ACTIVE ASSISTANT:
-   - persist to localStorage
-   - broadcast CustomEvent so VoiceAgentSection updates
-*/
 function writeActive(id:string){
   try { localStorage.setItem(ACTIVE_KEY, id); } catch {}
   try { window.dispatchEvent(new CustomEvent('assistant:active', { detail: id })); } catch {}
 }
 
-/* MODAL SHELL: shared container with dim backdrop + themed panel */
+/* ---------- Modal shells ---------- */
 function ModalShell({ children }:{ children:React.ReactNode }) {
   return (
     <div className="fixed inset-0 z-[9998] flex items-center justify-center px-4" style={{ background:'rgba(0,0,0,.60)' }}>
@@ -63,8 +47,6 @@ function ModalShell({ children }:{ children:React.ReactNode }) {
     </div>
   );
 }
-
-/* MODAL HEADER: icon + title + optional subtitle + X close */
 function ModalHeader({ icon, title, subtitle, onClose }:{
   icon:React.ReactNode; title:string; subtitle?:string; onClose:()=>void;
 }) {
@@ -83,8 +65,6 @@ function ModalHeader({ icon, title, subtitle, onClose }:{
     </div>
   );
 }
-
-/* CREATE MODAL: text input + green "Create" button */
 function CreateModal({ open, onClose, onCreate }:{
   open:boolean; onClose:()=>void; onCreate:(name:string)=>void;
 }) {
@@ -96,7 +76,6 @@ function CreateModal({ open, onClose, onCreate }:{
     <ModalShell>
       <ModalHeader icon={<Plus className="w-5 h-5" style={{ color:'var(--brand)' }}/>} title="Create Assistant" onClose={onClose}/>
       <div className="px-6 py-5">
-        {/* LABEL + TEXT FIELD (theme aware) */}
         <label className="block text-xs mb-1" style={{ color:'var(--text-muted)' }}>Name</label>
         <input
           value={name} onChange={(e)=>setName(e.target.value)}
@@ -105,7 +84,6 @@ function CreateModal({ open, onClose, onCreate }:{
           placeholder="e.g., Sales Bot" autoFocus
         />
       </div>
-      {/* FOOTER BUTTONS: cancel (neutral) + create (brand) */}
       <div className="px-6 pb-6 flex gap-3">
         <button onClick={onClose}
                 className="w-full h-[44px] rounded-[14px] font-semibold border"
@@ -126,8 +104,6 @@ function CreateModal({ open, onClose, onCreate }:{
     </ModalShell>
   );
 }
-
-/* RENAME MODAL: same shell, prefilled input + Save */
 function RenameModal({ open, initial, onClose, onSave }:{
   open:boolean; initial:string; onClose:()=>void; onSave:(v:string)=>void;
 }) {
@@ -156,7 +132,7 @@ function RenameModal({ open, initial, onClose, onSave }:{
           className="w-full h-[44px] rounded-[14px] font-semibold disabled:opacity-60"
           style={{ background:BTN_GREEN, color:'#fff', fontSize:12.5 }}
           onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=BTN_GREEN_HOVER)}
-          onMouseLeave={(e)=>((e.currentTarget as HTMLButtonButtonElement).style.background=BTN_GREEN)}
+          onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=BTN_GREEN)}
         >
           Save
         </button>
@@ -164,8 +140,6 @@ function RenameModal({ open, initial, onClose, onSave }:{
     </ModalShell>
   );
 }
-
-/* DELETE CONFIRM MODAL: irreversible action warning */
 function ConfirmDelete({ open, name, onClose, onConfirm }:{
   open:boolean; name?:string; onClose:()=>void; onConfirm:()=>void;
 }) {
@@ -197,10 +171,7 @@ function ConfirmDelete({ open, name, onClose, onConfirm }:{
   );
 }
 
-/* ROW COMPONENT (LIST ITEM)
-   - Active row: green halo (shadow), subtle fill.
-   - Hover row: softer halo so you can see which one the cursor is on.
-*/
+/* ---------- Assistant row (GREEN bg + glow) ---------- */
 function Row({
   a, active, onClick, onRename, onDelete,
 }:{
@@ -211,31 +182,25 @@ function Row({
       onClick={onClick}
       className="rail-row w-full text-left rounded-[12px] px-3 flex items-center gap-2 group transition"
       style={{
-        minHeight: 60, // ROW HEIGHT (tweak here)
+        minHeight: 60,
         background: active ? 'var(--rail-selected-bg)' : 'transparent',
-        border: '1px solid transparent', // no visible border; we use shadows
+        border: '1px solid transparent',
         color: 'var(--sidebar-text)',
-        // ACTIVE GREEN HALO (edit intensity here)
         boxShadow: active
-          ? '0 10px 26px rgba(0,0,0,.36), 0 0 0 1px rgba(16,185,129,.22), 0 0 18px rgba(16,185,129,.28)'
+          ? '0 10px 26px rgba(0,0,0,.36), 0 0 0 1px rgba(16,185,129,.20), 0 0 18px rgba(16,185,129,.28)'
           : 'none',
       }}
     >
-      {/* AVATAR SQUARE: thin border, uses theme colors */}
       <div className="w-10 h-10 rounded-md grid place-items-center"
            style={{ background:'var(--rail-avatar-bg)', border:'1px solid var(--sidebar-border)' }}>
         <Bot className="w-4 h-4" style={{ color:'var(--brand)' }} />
       </div>
-
-      {/* TITLE + SUBTITLE (truncate to fit narrow rails) */}
       <div className="min-w-0 flex-1">
         <div className="text-sm font-medium truncate">{a.name}</div>
         <div className="text-[11px] truncate" style={{ color:'var(--sidebar-muted)' }}>
           {a.purpose || '—'}
         </div>
       </div>
-
-      {/* INLINE ACTIONS: show on hover only */}
       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
         <button
           onClick={(e)=>{ e.stopPropagation(); onRename(); }}
@@ -255,23 +220,21 @@ function Row({
         </button>
       </div>
 
-      {/* HOVER HALO: softer than active (edit the glow here) */}
+      {/* Hover halo */}
       <style jsx>{`
-        .rail-row:hover{
-          box-shadow: 0 10px 26px rgba(0,0,0,.32), 0 0 0 1px rgba(16,185,129,.16), 0 0 16px rgba(16,185,129,.22);
+        .rail-row:hover,
+        .rail-row:focus-visible{
+          box-shadow: 0 10px 26px rgba(0,0,0,.32), 0 0 0 1px rgba(16,185,129,.18), 0 0 16px rgba(16,185,129,.24);
           background: var(--rail-selected-bg);
+          outline: none;
         }
       `}</style>
     </button>
   );
 }
 
-/* MAIN RAIL COMPONENT
-   - Left sidebar container (bg, divider, font)
-   - Create button + Search bar + List + Modals
-*/
+/* -------------------------------- Main -------------------------------- */
 export default function AssistantRail() {
-  // RAIL STATE: assistants list, selection, search, modal states
   const [assistants,setAssistants] = useState<AssistantLite[]>([]);
   const [activeId,setActiveId] = useState('');
   const [q,setQ] = useState('');
@@ -279,7 +242,6 @@ export default function AssistantRail() {
   const [renId,setRenId] = useState<string|null>(null);
   const [delId,setDelId] = useState<string|null>(null);
 
-  // FIRST LOAD: read assistants + restore active id (then broadcast)
   useEffect(()=>{ (async()=>{
     const list = await loadAssistants();
     setAssistants(list);
@@ -290,19 +252,15 @@ export default function AssistantRail() {
     setActiveId(firstId); if (firstId) writeActive(firstId);
   })(); },[]);
 
-  // FILTERED LIST: name or purpose contains query
   const filtered = useMemo(()=> {
     const s=q.trim().toLowerCase();
     return !s?assistants:assistants.filter(a=>a.name.toLowerCase().includes(s) || (a.purpose||'').toLowerCase().includes(s));
   },[assistants,q]);
 
-  // SELECT A ROW: set active + notify page (VoiceAgentSection)
   function select(id:string){
     setActiveId(id);
     writeActive(id);
   }
-
-  // CREATE NEW: prepend + persist + select it
   function addAssistant(name:string){
     const a:AssistantLite = { id: uid(), name, createdAt: Date.now(), purpose:'' };
     const next=[a, ...assistants];
@@ -310,14 +268,10 @@ export default function AssistantRail() {
     select(a.id);
     setCreateOpen(false);
   }
-
-  // RENAME: map by id and persist
   function saveRename(name:string){
     const next=assistants.map(x=> x.id===renId ? {...x, name} : x);
     setAssistants(next); saveAssistants(next); setRenId(null);
   }
-
-  // DELETE: remove by id; if active was deleted, select first
   function confirmDelete(){
     const next = assistants.filter(x=> x.id!==delId);
     const deletedActive = activeId===delId;
@@ -329,25 +283,24 @@ export default function AssistantRail() {
     setDelId(null);
   }
 
-  // NAMES FOR MODALS
   const renName = assistants.find(a=>a.id===renId)?.name || '';
   const delName = assistants.find(a=>a.id===delId)?.name;
 
   return (
-    // RAIL SHELL: bg, vertical divider, font family (Movatif first)
     <div
       className="assistant-rail px-3 py-3 h-full"
       style={{
         background:'var(--sidebar-bg)',
-        borderRight:'1px solid rgba(255,255,255,.14)', // VERTICAL DIVIDER (thin white-ish)
-        color:'var(--sidebar-text)'
+        borderRight:'1px solid rgba(255,255,255,.14)',
+        color:'var(--sidebar-text)',
+        fontFamily: 'var(--font-movatif, ui-sans-serif, system-ui)',   // ← Movatif by CSS var
       }}
     >
-      {/* CTA BUTTON: green + smaller white text */}
+      {/* CTA */}
       <button
         type="button"
-        className="w-full inline-flex items-center justify-center gap-2 rounded-[18px] font-semibold mb-3"
-        style={{ height: 38, background: BTN_GREEN, color: '#fff', fontSize: 12.5 }}
+        className="w-full inline-flex items-center justify-center gap-2 rounded-[14px] font-semibold mb-3"
+        style={{ height: 38, background: BTN_GREEN, color: '#fff', fontSize: 13 }}
         onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=BTN_GREEN_HOVER)}
         onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=BTN_GREEN)}
         onClick={()=> setCreateOpen(true)}
@@ -355,28 +308,26 @@ export default function AssistantRail() {
         <Plus className="w-4 h-4" /> Create Assistant
       </button>
 
-      {/* SEARCH: THIN BORDER (edit thickness here) */}
+      {/* Search — thin border; white in dark */}
       <div className="relative mb-3">
         <input
           value={q} onChange={(e)=>setQ(e.target.value)} placeholder="Search assistants"
-          className="w-full h-[32px] rounded-[12px] pl-8 pr-3 text-sm outline-none"
+          className="w-full h-[32px] rounded-[10px] pl-9 pr-3 text-sm outline-none border"
           style={{
             background:'var(--rail-input-bg)',
-            border: '0.5px solid var(--rail-input-border)', // SEARCH BORDER THICKNESS
-            color:'var(--rail-input-text)',
+            borderColor:'var(--rail-input-border)',
+            borderWidth:'1px',                 // ← hairline; tweak to .5px if you want finer
+            color:'var(--rail-input-text)'
           }}
         />
-        {/* SEARCH ICON (color via token) */}
         <Search className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2"
                 style={{ color:'var(--rail-input-muted)' }}/>
       </div>
 
-      {/* SECTION LABEL */}
       <div className="text-[11px] font-semibold tracking-[.12em] mb-2" style={{ color:'var(--sidebar-muted)' }}>
         ASSISTANTS
       </div>
 
-      {/* LIST SCROLLER: holds the animated rows */}
       <div className="overflow-auto" style={{ maxHeight:'calc(100% - 118px)' }}>
         <div className="space-y-1.5">
           <AnimatePresence initial={false}>
@@ -393,7 +344,6 @@ export default function AssistantRail() {
             ))}
           </AnimatePresence>
 
-          {/* EMPTY STATE: if search yields nothing */}
           {filtered.length===0 && (
             <div className="text-xs py-8 text-center" style={{ color:'var(--sidebar-muted)' }}>
               No assistants found.
@@ -402,48 +352,40 @@ export default function AssistantRail() {
         </div>
       </div>
 
-      {/* MODALS: create / rename / confirm delete */}
+      {/* Modals */}
       <CreateModal open={createOpen} onClose={()=>setCreateOpen(false)} onCreate={addAssistant} />
       <RenameModal open={!!renId} initial={renName} onClose={()=>setRenId(null)} onSave={saveRename} />
       <ConfirmDelete open={!!delId} name={delName} onClose={()=>setDelId(null)} onConfirm={confirmDelete} />
 
-      {/* THEME TOKENS + FONT FAMILY (MOVATIF) */}
+      {/* Theme tokens */}
       <style jsx>{`
-        /* FONT FAMILY FOR THIS RAIL (Movatif first) */
-        :global(.assistant-rail){
-          font-family: "Movatif", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
-                       Roboto, "Helvetica Neue", Arial, "Apple Color Emoji", "Segoe UI Emoji";
-        }
-
-        /* LIGHT THEME TOKENS */
+        /* Light */
         :global(:root:not([data-theme="dark"])) .assistant-rail{
           --rail-input-bg: #fff;
-          --rail-input-border: rgba(0,0,0,.14);    /* SEARCH BORDER COLOR (light) */
+          --rail-input-border: rgba(0,0,0,.14);
           --rail-input-text: #0f172a;
           --rail-input-muted: #64748b;
 
-          --rail-selected-bg: rgba(0,0,0,.04);
+          --rail-selected-bg: rgba(15,185,129,.10);  /* green tint in light too */
           --rail-avatar-bg: rgba(0,0,0,.06);
 
           --rail-chip-bg: #fff;
           --rail-chip-border: rgba(0,0,0,.12);
         }
-
-        /* DARK THEME TOKENS */
+        /* Dark */
         :global([data-theme="dark"]) .assistant-rail{
           --rail-input-bg: var(--card);
-          --rail-input-border: rgba(255,255,255,.78);  /* SEARCH BORDER COLOR (dark, white-ish) */
+          --rail-input-border: rgba(255,255,255,.78); /* thin white */
           --rail-input-text: var(--text);
           --rail-input-muted: var(--text-muted);
 
-          --rail-selected-bg: rgba(255,255,255,.06);
+          --rail-selected-bg: rgba(16,185,129,.10);   /* **GREEN**, not gray */
           --rail-avatar-bg: rgba(255,255,255,.06);
 
           --rail-chip-bg: var(--card);
           --rail-chip-border: var(--border);
         }
 
-        /* PLACEHOLDER COLOR */
         .assistant-rail input::placeholder{ color: var(--rail-input-muted); opacity: .9; }
       `}</style>
     </div>
