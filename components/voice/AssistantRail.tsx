@@ -349,7 +349,7 @@ export default function AssistantRail() {
       {/* 👉 Primary CTA (green) smaller text per your spec */}
       <button
         type="button"
-        className="w-full inline-flex items-center justify-center gap-3 rounded-[18px] font-semibold mb-3"
+        className="w-full inline-flex items-center justify-center gap-2 rounded-[18px] font-semibold mb-3"
         style={{ height: 38, background: BTN_GREEN, color: '#fff', fontSize: 13.5 }}
         onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=BTN_GREEN_HOVER)}
         onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=BTN_GREEN)}
@@ -366,11 +366,11 @@ export default function AssistantRail() {
           style={{
             background:'var(--rail-input-bg)',
             borderColor:'var(--rail-input-border)',
-            borderWidth:'0.2px',
+            borderWidth:'0.01px',
             color:'var(--rail-input-text)'
           }}
         />
-        <Search className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2"
+        <Search className="w-3 h-3 absolute left-2.5 top-1/2 -translate-y-1/2"
                 style={{ color:'var(--rail-input-muted)' }}/>
       </div>
 
