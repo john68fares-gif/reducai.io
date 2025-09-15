@@ -362,7 +362,7 @@ export default function AssistantRail() {
       <div className="relative mb-3">
         <input
           value={q} onChange={(e)=>setQ(e.target.value)} placeholder="Search assistants"
-          className="w-full h-[30px] rounded-[18px] pl-8 pr-8 text-sm outline-none border"
+          className="w-full h-[30px] rounded-[15px] pl-8 pr-8 text-sm outline-none border"
           style={{
             background:'var(--rail-input-bg)',
             borderColor:'var(--rail-input-border)',
@@ -370,7 +370,7 @@ export default function AssistantRail() {
             color:'var(--rail-input-text)'
           }}
         />
-        <Search className="w-3 h-3 absolute left-2.5 top-1/2 -translate-y-1/2"
+        <Search className="w-1 h-1 absolute left-2.5 top-1/2 -translate-y-1/2"
                 style={{ color:'var(--rail-input-muted)' }}/>
       </div>
 
