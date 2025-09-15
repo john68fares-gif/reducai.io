@@ -179,7 +179,7 @@ export default function VoiceAgentSection() {
       <LocalTokens />
 
       {/* layout: NARROWER rail + thinner white divider */}
-      <div className="grid w-full pr-[1px]" style={{ gridTemplateColumns:'196px 1fr' }}>
+      <div className="grid w-full pr-[1px]" style={{ gridTemplateColumns:'232px 1fr' }}>
         {/* LEFT rail */}
         <div className="border-r" style={{ borderColor:'rgba(255,255,255,.14)' }}>
           <RailBoundary><AssistantRail /></RailBoundary>
