@@ -181,9 +181,9 @@ function ConfirmDelete({ open, name, onClose, onConfirm }:{
 
 /* ---------- Row (assistant item) ---------- */
 function Row({
-  a, active, loading, onClick, onRename, onDelete,
+  a, active, onClick, onRename, onDelete,
 }:{
-  a:AssistantLite; active:boolean; loading:boolean; onClick:()=>void; onRename:()=>void; onDelete:()=>void;
+  a:AssistantLite; active:boolean; onClick:()=>void; onRename:()=>void; onDelete:()=>void;
 }) {
   return (
     <button
@@ -197,7 +197,6 @@ function Row({
         boxShadow: active
           ? `0 12px 28px rgba(0,0,0,.36), 0 0 0 1px ${GREEN_OL18}, 0 0 18px ${GREEN_OL18}`
           : 'none',
-        fontFamily: `"Movatif", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial`,
         position: 'relative',
         overflow: 'hidden',
       }}
@@ -211,12 +210,6 @@ function Row({
         }}
       >
         <Bot className="w-4 h-4" style={{ color:'var(--brand)' }} />
-        {/* If the row itself is loading, tint the tile too */}
-        {loading && (
-          <div className="absolute inset-0 rounded-md grid place-items-center" style={{ background: GREEN_OL30 }}>
-            <Loader2 className="h-4 w-4 animate-spin text-black/80" />
-          </div>
-        )}
       </div>
 
       <div className="min-w-0 flex-1">
@@ -245,6 +238,7 @@ function Row({
         </button>
       </div>
 
+      {/* Hover effect (soft) */}
       <style jsx>{`
         .rail-row:hover{
           background: linear-gradient(0deg, ${GREEN_OL14}, ${GREEN_OL14});
@@ -259,7 +253,7 @@ function Row({
 export default function AssistantRail() {
   const [assistants,setAssistants] = useState<AssistantLite[]>([]);
   const [activeId,setActiveId] = useState('');
-  const [loadingId,setLoadingId] = useState<string | null>(null); // full-screen overlay trigger
+  const [overlay,setOverlay] = useState(false); // full-screen loader
   const [q,setQ] = useState('');
   const [createOpen,setCreateOpen] = useState(false);
   const [renId,setRenId] = useState<string|null>(null);
@@ -281,12 +275,12 @@ export default function AssistantRail() {
     return !s?assistants:assistants.filter(a=>a.name.toLowerCase().includes(s) || (a.purpose||'').toLowerCase().includes(s));
   },[assistants,q]);
 
-  /* selection with full-screen loading overlay */
+  /* selection with AccountPage-style full-screen overlay */
   function select(id:string){
-    setLoadingId(id);
+    setOverlay(true);
     setActiveId(id);
     writeActive(id);
-    window.setTimeout(()=> setLoadingId(null), 520); // keep visible briefly
+    window.setTimeout(()=> setOverlay(false), 520); // same feel as account.tsx booting delay
   }
 
   /* CRUD */
@@ -316,115 +310,136 @@ export default function AssistantRail() {
   const delName = assistants.find(a=>a.id===delId)?.name;
 
   return (
-    <div
-      className="assistant-rail px-3 py-3 h-full font-[Movatif]"
-      style={{
-        background:'var(--sidebar-bg)',
-        borderRight:'1px solid rgba(255,255,255,.14)',
-        color:'var(--sidebar-text)',
-      }}
-    >
-      {/* Create Assistant */}
-      <button
-        type="button"
-        className="w-full inline-flex items-center justify-center gap-2 rounded-[12px] font-semibold mb-3"
-        style={{ height: 38, background: GREEN, color: '#fff', fontSize: 12.5 }}
-        onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=GREEN_HOVER)}
-        onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=GREEN)}
-        onClick={()=> setCreateOpen(true)}
+    <>
+      <div
+        className="assistant-rail px-3 py-3 h-full"
+        style={{
+          background:'var(--sidebar-bg)',
+          borderRight:'1px solid rgba(255,255,255,.14)',
+          color:'var(--sidebar-text)',
+        }}
       >
-        <Plus className="w-4 h-4" /> Create Assistant
-      </button>
+        {/* Create Assistant */}
+        <button
+          type="button"
+          className="w-full inline-flex items-center justify-center gap-2 rounded-[12px] font-semibold mb-3"
+          style={{ height: 38, background: GREEN, color: '#fff', fontSize: 12.5 }}
+          onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=GREEN_HOVER)}
+          onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=GREEN)}
+          onClick={()=> setCreateOpen(true)}
+        >
+          <Plus className="w-4 h-4" /> Create Assistant
+        </button>
 
-      {/* Search — **hairline** 0.25px border (+shadow fallback) */}
-      <div className="relative mb-3">
-        <input
-          value={q}
-          onChange={(e)=>setQ(e.target.value)}
-          placeholder="Search assistants"
-          className="w-full h-[32px] rounded-[10px] pl-8 pr-3 text-sm outline-none"
-          style={{
-            background:'var(--rail-input-bg)',
-            border: '0.25px solid var(--rail-input-border)',
-            boxShadow: '0 0 0 0.25px var(--rail-input-border)',
-            color:'var(--rail-input-text)',
-          }}
-        />
-        <Search
-          className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2"
-          style={{ color:'var(--rail-input-muted)' }}
-        />
-      </div>
-
-      <div className="text-[11px] font-semibold tracking-[.12em] mb-2" style={{ color:'var(--sidebar-muted)' }}>
-        ASSISTANTS
-      </div>
-
-      {/* List */}
-      <div className="overflow-auto" style={{ maxHeight:'calc(100% - 118px)' }}>
-        <div className="space-y-1.5">
-          <AnimatePresence initial={false}>
-            {filtered.map(a=>(
-              <motion.div key={a.id} initial={{ opacity:0, y:6 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:-6 }}>
-                <Row
-                  a={a}
-                  active={a.id===activeId}
-                  loading={loadingId===a.id}
-                  onClick={()=>select(a.id)}
-                  onRename={()=>setRenId(a.id)}
-                  onDelete={()=>setDelId(a.id)}
-                />
-              </motion.div>
-            ))}
-          </AnimatePresence>
-
-          {filtered.length===0 && (
-            <div className="text-xs py-8 text-center" style={{ color:'var(--sidebar-muted)' }}>
-              No assistants found.
-            </div>
-          )}
+        {/* Search — ultra-thin hairline */}
+        <div className="relative mb-3">
+          <input
+            value={q}
+            onChange={(e)=>setQ(e.target.value)}
+            placeholder="Search assistants"
+            className="w-full h-[32px] rounded-[10px] pl-8 pr-3 text-sm outline-none"
+            style={{
+              background:'var(--rail-input-bg)',
+              border: '0.25px solid var(--rail-input-border)',
+              boxShadow: '0 0 0 0.25px var(--rail-input-border)',
+              color:'var(--rail-input-text)',
+            }}
+          />
+          <Search
+            className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2"
+            style={{ color:'var(--rail-input-muted)' }}
+          />
         </div>
+
+        <div className="text-[11px] font-semibold tracking-[.12em] mb-2" style={{ color:'var(--sidebar-muted)' }}>
+          ASSISTANTS
+        </div>
+
+        {/* List */}
+        <div className="overflow-auto" style={{ maxHeight:'calc(100% - 118px)' }}>
+          <div className="space-y-1.5">
+            <AnimatePresence initial={false}>
+              {filtered.map(a=>(
+                <motion.div key={a.id} initial={{ opacity:0, y:6 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:-6 }}>
+                  <Row
+                    a={a}
+                    active={a.id===activeId}
+                    onClick={()=>select(a.id)}
+                    onRename={()=>setRenId(a.id)}
+                    onDelete={()=>setDelId(a.id)}
+                  />
+                </motion.div>
+              ))}
+            </AnimatePresence>
+
+            {filtered.length===0 && (
+              <div className="text-xs py-8 text-center" style={{ color:'var(--sidebar-muted)' }}>
+                No assistants found.
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Modals */}
+        <CreateModal open={createOpen} onClose={()=>setCreateOpen(false)} onCreate={addAssistant} />
+        <RenameModal open={!!renId} initial={renName} onClose={()=>setRenId(null)} onSave={saveRename} />
+        <ConfirmDelete open={!!delId} name={delName} onClose={()=>setDelId(null)} onConfirm={confirmDelete} />
+
+        {/* Rail theme tokens */}
+        <style jsx>{`
+          /* Light */
+          :global(:root:not([data-theme="dark"])) .assistant-rail{
+            --rail-input-bg: #fff;
+            --rail-input-border: rgba(0,0,0,.18);
+            --rail-input-text: #0f172a;
+            --rail-input-muted: #64748b;
+
+            --rail-avatar-bg: linear-gradient(135deg,#f8fafc 0%,#eef2f7 100%);
+            --rail-chip-bg: #fff;
+            --rail-chip-border: rgba(0,0,0,.12);
+          }
+          /* Dark */
+          :global([data-theme="dark"]) .assistant-rail{
+            --rail-input-bg: var(--card);
+            --rail-input-border: rgba(255,255,255,.78);
+            --rail-input-text: var(--text);
+            --rail-input-muted: var(--text-muted);
+
+            --rail-avatar-bg: linear-gradient(135deg,#0f1214 0%,#11181a 100%);
+            --rail-chip-bg: var(--card);
+            --rail-chip-border: var(--border);
+          }
+          .assistant-rail input::placeholder{ color: var(--rail-input-muted); opacity: .9; }
+        `}</style>
       </div>
 
-      {/* Modals */}
-      <CreateModal open={createOpen} onClose={()=>setCreateOpen(false)} onCreate={addAssistant} />
-      <RenameModal open={!!renId} initial={renName} onClose={()=>setRenId(null)} onSave={saveRename} />
-      <ConfirmDelete open={!!delId} name={delName} onClose={()=>setDelId(null)} onConfirm={confirmDelete} />
-
-      {/* Full-screen loading overlay (brand green ~30% opacity) */}
-      {loadingId && (
-        <div className="fixed inset-0 z-[9999] grid place-items-center"
-             style={{ background: GREEN_OL30, backdropFilter: 'blur(1px)' }}>
-          <Loader2 className="h-6 w-6 animate-spin text-black/80" />
-        </div>
-      )}
-
-      {/* Rail theme tokens */}
-      <style jsx>{`
-        /* Light */
-        :global(:root:not([data-theme="dark"])) .assistant-rail{
-          --rail-input-bg: #fff;
-          --rail-input-border: rgba(0,0,0,.18);
-          --rail-input-text: #0f172a;
-          --rail-input-muted: #64748b;
-
-          --rail-avatar-bg: linear-gradient(135deg,#f8fafc 0%,#eef2f7 100%);
-          --rail-chip-bg: #fff;
-          --rail-chip-border: rgba(0,0,0,.12);
-        }
-        /* Dark */
-        :global([data-theme="dark"]) .assistant-rail{
-          --rail-input-bg: var(--card);
-          --rail-input-border: rgba(255,255,255,.78);
-          --rail-input-text: var(--text);
-          --rail-input-muted: var(--text-muted);
-
-          --rail-avatar-bg: linear-gradient(135deg,#0f1214 0%,#11181a 100%);
-          --rail-chip-bg: var(--card);
-          --rail-chip-border: var(--border);
-        }
-        .assistant-rail input::placeholder{ color: var(--rail-input-muted); opacity: .9; }
-      `}</style>
-    </div>
+      {/* Full-screen loader — same pattern as pages/account.tsx */}
+      <AnimatePresence>
+        {overlay && (
+          <motion.div
+            key="assistant-switch"
+            className="fixed inset-0 z-[9999] flex items-center justify-center"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            style={{
+              background:
+                'radial-gradient(1000px 500px at 50% -10%, var(--brand-weak), transparent 60%), var(--bg)',
+              backdropFilter: 'blur(2px)',
+            }}
+          >
+            <motion.div
+              initial={{ scale: 0.96, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="px-6 py-5 rounded-2xl border"
+              style={{ border: '1px solid var(--border)', background: 'var(--panel)', boxShadow: 'var(--shadow-soft)', color:'var(--text)' }}
+            >
+              <div className="flex items-center gap-3">
+                <Loader2 className="w-5 h-5 animate-spin" />
+                <div className="text-sm">Loading assistant…</div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>
   );
 }
