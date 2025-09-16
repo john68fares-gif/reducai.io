@@ -25,11 +25,11 @@ class RailBoundary extends React.Component<{children:React.ReactNode},{hasError:
 }
 
 /* ───────────────── Tokens / constants ───────────────── */
-const ACTIVE_KEY = 'va:activeId';
-const CTA = '#59d9b3';
-const CTA_HOVER = '#54cfa9';
+const ACTIVE_KEY   = 'va:activeId';
+const CTA          = '#59d9b3';
+const CTA_HOVER    = '#54cfa9';
 
-/* Rhythm & theme (ChatGPT-like spacing + solid controls, subtle borders/shadows) */
+/** Page rhythm + tokens (ChatGPT-like greys + hairline borders removed) */
 const Rhythm = () => (
   <style jsx global>{`
     .va-rhythm{
@@ -39,62 +39,59 @@ const Rhythm = () => (
       --s-4: 16px;
       --s-6: 24px;
       --s-8: 32px;
-      --radius-card: 16px;  /* LESS rounded outer boxes */
-      --radius-band: 14px;
+
+      /* radii */
+      --radius-card: 16px;  /* outer boxes = less rounded */
+      --radius-band: 14px;  /* inner controls retain comfort radius */
       --control-h: 44px;
 
       /* type */
-      --fz-title: 18px;
+      --fz-title: 20px;
       --fz-sub: 15px;
       --fz-body: 14px;
       --fz-label: 12.5px;
       --lh-body: 1.45;
 
-      /* LIGHT */
-      --surface: #f3f4f6; /* grey page bg similar to ChatGPT app light */
-      --vs-card: #ffffff;
-      --vs-border: rgba(0,0,0,.06); /* almost 0px look */
-      --vs-shadow: 0 28px 70px rgba(0,0,0,.12), 0 10px 26px rgba(0,0,0,.08), 0 0 0 0.5px rgba(0,0,0,.02);
-      --vs-ring: rgba(0,255,194,.10);
+      /* brand */
+      --cta: ${CTA};
+      --cta-shadow: 0 16px 40px rgba(89,217,179,.25);
 
-      --vs-input-bg: #ffffff;
-      --vs-input-border: rgba(0,0,0,.10);
-      --vs-input-shadow: inset 0 1px 0 rgba(255,255,255,.85), 0 10px 22px rgba(0,0,0,.06);
+      /* surface — ChatGPT-like grey */
+      --page-bg: #f3f5f7;
+      --card-bg: #ffffff;
+      --near-zero-border: rgba(0,0,0,0); /* “almost 0px” → transparent but keeps layout */
+      --control-bg: #ffffff;
 
+      /* shadow (outside only, green-tinted) */
+      --card-shadow: 0 24px 60px rgba(89,217,179,.18), 0 8px 22px rgba(0,0,0,.06);
+      --menu-shadow: 0 28px 70px rgba(89,217,179,.20), 0 10px 26px rgba(0,0,0,.08);
+
+      /* menu */
       --menu-bg: #ffffff;
-      --menu-border: rgba(0,0,0,.10);
+
+      /* text */
+      --t: #0b0c10;
+      --tm: rgba(11,12,16,.65);
     }
     [data-theme="dark"] .va-rhythm{
-      --surface: #0f1214; /* match sidebar/chat vibe */
-      --vs-card:
+      --page-bg:
         radial-gradient(120% 180% at 50% -40%, rgba(0,255,194,.06) 0%, rgba(12,16,18,1) 42%),
         linear-gradient(180deg, #0e1213 0%, #0c1012 100%);
-      --vs-border: rgba(255,255,255,.06); /* hairline */
-      --vs-shadow: 0 36px 90px rgba(0,0,0,.60), 0 14px 34px rgba(0,0,0,.45), 0 0 0 0.5px rgba(0,255,194,.08);
-      --vs-ring: rgba(0,255,194,.12);
-
-      --vs-input-bg: #101314;
-      --vs-input-border: rgba(255,255,255,.14);
-      --vs-input-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 12px 30px rgba(0,0,0,.38);
-
+      --card-bg: #101314;
+      --control-bg: #101314;
       --menu-bg: #101314;
-      --menu-border: rgba(255,255,255,.16);
+      --near-zero-border: rgba(255,255,255,0); /* keep transparent */
+      --card-shadow: 0 36px 90px rgba(89,217,179,.22), 0 14px 34px rgba(0,0,0,.45);
+      --menu-shadow: 0 36px 90px rgba(89,217,179,.24), 0 14px 34px rgba(0,0,0,.45);
+      --t: #ffffff;
+      --tm: rgba(255,255,255,.72);
     }
 
-    /* solid controls (no transparency) */
-    .va-select-trigger,
-    .va-input,
-    .va-textarea{
-      background: var(--vs-input-bg) !important;
-      border: 1px solid var(--vs-input-border) !important;
-      box-shadow: var(--vs-input-shadow) !important;
-      color: var(--text) !important;
+    /* subtle focus ring (green glow, but no visible border line) */
+    .va-focus:focus{
+      outline: none !important;
+      box-shadow: 0 0 0 3px color-mix(in oklab, var(--cta) 28%, transparent);
     }
-
-    /* fix placeholder tint */
-    .va-select-trigger::placeholder,
-    .va-input::placeholder,
-    .va-textarea::placeholder { color: var(--text-muted); opacity: .9; }
   `}</style>
 );
 
@@ -139,56 +136,55 @@ const saveAgentData = (id: string, data: AgentData) => {
 };
 
 /* ───────────────── Small building blocks ───────────────── */
-/** FieldShell: supports boxed content; for selects we set boxed={false} (single box only). */
-const FieldShell = ({ label, children, error, boxed = true }:{
-  label: React.ReactNode; children: React.ReactNode; error?: string; boxed?: boolean;
-}) => {
-  const borderBase = error ? 'rgba(255,120,120,0.55)' : 'var(--vs-input-border)';
-  return (
-    <div>
-      <label className="block mb-[var(--s-2)] font-medium" style={{ fontSize:'var(--fz-label)', color:'var(--text)' }}>{label}</label>
+/** Label above a control (no wrapper box here → avoids double boxes) */
+const FieldLabel = ({ children }:{ children: React.ReactNode }) => (
+  <label className="block mb-[var(--s-2)] font-medium"
+         style={{ fontSize:'var(--fz-label)', color:'var(--t)' }}>
+    {children}
+  </label>
+);
 
-      {boxed ? (
-        <div
-          className="px-3 py-[10px] rounded-[var(--radius-band)]"
-          style={{ background:'var(--vs-input-bg)', border:`0.5px solid ${borderBase}`, boxShadow:'var(--vs-input-shadow)' }}
-        >
-          {children}
-        </div>
-      ) : (
-        children
-      )}
+/** Single control box (used for inputs) — no extra inner wrapper */
+const ControlBox = ({ children }:{ children: React.ReactNode }) => (
+  <div
+    className="rounded-[var(--radius-band)]"
+    style={{
+      background:'var(--control-bg)',
+      border:'0.5px solid var(--near-zero-border)',   // almost 0px (invisible) — keeps geometry tight
+      boxShadow:'var(--card-shadow)',                  // outside greenish shadow
+      padding: '10px 12px',
+    }}
+  >
+    {children}
+  </div>
+);
 
-      {error && <div className="mt-[6px] text-xs" style={{ color:'rgba(255,138,138,0.95)' }}>{error}</div>}
-    </div>
-  );
-};
-
+/** Toggle with green glow — matches new shadows */
 const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}) => (
   <button
     onClick={()=>onChange(!checked)}
-    className="inline-flex items-center"
+    className="inline-flex items-center va-focus"
     style={{
       height: 28, width: 50, padding: '0 6px', borderRadius: 999,
       justifyContent: 'flex-start',
-      background: checked ? 'color-mix(in oklab, var(--brand) 18%, var(--vs-input-bg))' : 'var(--vs-input-bg)',
-      border: '0.5px solid var(--vs-input-border)',
-      boxShadow: 'var(--vs-input-shadow)'
+      background: checked ? 'color-mix(in oklab, var(--cta) 16%, var(--control-bg))' : 'var(--control-bg)',
+      border: '0.5px solid var(--near-zero-border)',
+      boxShadow: 'var(--card-shadow)'
     }}
     aria-pressed={checked}
   >
     <span
       style={{
         width:18, height:18, borderRadius:999,
-        background: checked ? 'var(--brand)' : 'rgba(255,255,255,.12)',
+        background: checked ? 'var(--cta)' : 'rgba(255,255,255,.12)',
         transform:`translateX(${checked?22:0}px)`, transition:'transform .18s var(--ease)',
-        boxShadow: checked ? '0 0 10px color-mix(in oklab, var(--brand) 55%, transparent)' : undefined
+        boxShadow: '0 6px 16px rgba(89,217,179,.45)'
       }}
     />
   </button>
 );
 
-/* ChatGPT-style floating dropdown (independent menu w/ search, solid surface) */
+/* ChatGPT-style floating dropdown (independent menu, solid bg, green glow) */
 function StyledSelect({
   value, onChange, options, placeholder
 }:{
@@ -228,87 +224,86 @@ function StyledSelect({
 
   return (
     <>
-      {/* Trigger = single bordered box (no double wrappers) */}
+      {/* Single, solid trigger (no extra wrapper to avoid double box) */}
       <button
         ref={btnRef}
         type="button"
         onClick={() => { setOpen(v=>!v); setTimeout(()=>searchRef.current?.focus(),0); }}
-        className="va-select-trigger w-full flex items-center justify-between gap-3 px-3 rounded-[14px] transition"
+        className="w-full flex items-center justify-between gap-3 px-3 rounded-[var(--radius-band)] va-focus transition"
         style={{
           height:'var(--control-h)',
+          background:'var(--control-bg)',
+          border:'0.5px solid var(--near-zero-border)',
+          boxShadow:'var(--card-shadow)',
+          color:'var(--t)',
           fontSize:'var(--fz-body)'
         }}
       >
         <span className="truncate">{current ? current.label : (placeholder || '— Choose —')}</span>
-        <ChevronDown className="w-4 h-4 opacity-80" style={{ color:'var(--text-muted)' }} />
+        <ChevronDown className="w-4 h-4" style={{ color:'var(--tm)' }} />
       </button>
 
-      {/* Floating independent menu */}
+      {/* Independent floating menu */}
       <AnimatePresence>
-        {open && rect && typeof document !== 'undefined' && (
-          createPortal(
-            <motion.div
-              key="menu"
-              ref={portalRef}
-              initial={{ opacity: 0, y: -6, filter: 'blur(8px)' }}
-              animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-              exit={{ opacity: 0, y: -6, filter: 'blur(6px)' }}
-              transition={{ duration: 0.18, ease: 'easeOut' }}
-              className="fixed z-[9999] p-3"
-              style={{
-                top: rect.openUp ? rect.top - 8 : rect.top + 8,
-                left: rect.left,
-                width: rect.width,
-                transform: rect.openUp ? 'translateY(-100%)' : 'none',
-                background: 'var(--menu-bg)',
-                border: '0.5px solid var(--menu-border)',
-                borderRadius: 16,
-                boxShadow: '0 28px 70px rgba(0,0,0,.12), 0 10px 26px rgba(0,0,0,.08), 0 0 0 0.5px rgba(0,0,0,.02)',
-              }}
-            >
-              {/* soft glow */}
-              <div
-                aria-hidden
-                className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
-                style={{ background:'radial-gradient(circle, var(--vs-ring) 0%, transparent 70%)', filter:'blur(26px)' }}
-              />
-              {/* search input inside the menu */}
-              <div
-                className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[12px]"
-                style={{ background:'var(--vs-input-bg)', border:'0.5px solid var(--vs-input-border)', boxShadow:'var(--vs-input-shadow)' }}
+        {open && rect && typeof document !== 'undefined'
+          ? createPortal(
+              <motion.div
+                key="menu"
+                ref={portalRef}
+                initial={{ opacity: 0, y: rect.openUp ? -4 : 4, filter: 'blur(6px)' }}
+                animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+                exit={{ opacity: 0, y: rect.openUp ? -4 : 4, filter: 'blur(6px)' }}
+                transition={{ duration: 0.16, ease: 'easeOut' }}
+                className="fixed z-[9999] p-3"
+                style={{
+                  top: rect.openUp ? rect.top - 8 : rect.top + 8,
+                  left: rect.left,
+                  width: rect.width,
+                  transform: rect.openUp ? 'translateY(-100%)' : 'none',
+                  background: 'var(--menu-bg)',
+                  border: '0.5px solid var(--near-zero-border)',
+                  borderRadius: '16px',
+                  boxShadow: 'var(--menu-shadow)',
+                }}
               >
-                <Search className="w-4 h-4" style={{ color:'var(--text-muted)' }} />
-                <input
-                  ref={searchRef}
-                  value={query}
-                  onChange={(e)=>setQuery(e.target.value)}
-                  placeholder="Type to filter…"
-                  className="w-full bg-transparent outline-none text-sm"
-                  style={{ color:'var(--text)' }}
-                />
-              </div>
+                {/* search inside menu */}
+                <div
+                  className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[12px]"
+                  style={{ background:'var(--control-bg)', border:'0.5px solid var(--near-zero-border)', boxShadow:'var(--card-shadow)', color:'var(--t)' }}
+                >
+                  <Search className="w-4 h-4" style={{ color:'var(--tm)' }} />
+                  <input
+                    ref={searchRef}
+                    value={query}
+                    onChange={(e)=>setQuery(e.target.value)}
+                    placeholder="Type to filter…"
+                    className="w-full bg-transparent outline-none text-sm"
+                    style={{ color:'var(--t)' }}
+                  />
+                </div>
 
-              <div className="max-h-72 overflow-y-auto pr-1" style={{ scrollbarWidth:'thin' }}>
-                {filtered.map(o => (
-                  <button
-                    key={o.value}
-                    onClick={()=>{ onChange(o.value); setOpen(false); }}
-                    className="w-full text-left text-sm px-3 py-2 rounded-[10px] transition"
-                    style={{ color:'var(--text)', background:'transparent', border:'0.5px solid transparent' }}
-                    onMouseEnter={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='rgba(0,255,194,0.10)'; (e.currentTarget as HTMLButtonElement).style.border='0.5px solid rgba(0,255,194,0.35)'; }}
-                    onMouseLeave={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='transparent'; (e.currentTarget as HTMLButtonElement).style.border='0.5px solid transparent'; }}
-                  >
-                    {o.label}
-                  </button>
-                ))}
-                {filtered.length===0 && (
-                  <div className="px-3 py-6 text-sm" style={{ color:'var(--text-muted)' }}>No matches.</div>
-                )}
-              </div>
-            </motion.div>,
-            document.body
-          )
-        )}
+                {/* options */}
+                <div className="max-h-72 overflow-y-auto pr-1" style={{ scrollbarWidth:'thin' }}>
+                  {filtered.map(o => (
+                    <button
+                      key={o.value}
+                      onClick={()=>{ onChange(o.value); setOpen(false); }}
+                      className="w-full text-left text-sm px-3 py-2 rounded-[10px] transition"
+                      style={{ color:'var(--t)', background:'transparent', border:'0.5px solid transparent' }}
+                      onMouseEnter={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='rgba(89,217,179,0.12)'; }}
+                      onMouseLeave={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='transparent'; }}
+                    >
+                      {o.label}
+                    </button>
+                  ))}
+                  {filtered.length===0 && (
+                    <div className="px-3 py-6 text-sm" style={{ color:'var(--tm)' }}>No matches.</div>
+                  )}
+                </div>
+              </motion.div>,
+              document.body
+            )
+          : null}
       </AnimatePresence>
     </>
   );
@@ -347,7 +342,7 @@ export default function VoiceAgentSection() {
   const asrModels = useMemo(()=>['Nova 2','Nova','Whisper Large-V3'].map(x=>({value:x,label:x})),[]);
 
   return (
-    <section className="va-rhythm" style={{ background:'var(--surface)', color:'var(--text)' }}>
+    <section className="va-rhythm" style={{ background:'var(--page-bg)', color:'var(--t)' }}>
       <Rhythm />
 
       <div className="grid w-full pr-[1px]" style={{ gridTemplateColumns: '260px 1fr' }}>
@@ -361,20 +356,20 @@ export default function VoiceAgentSection() {
              style={{ fontSize:'var(--fz-body)', lineHeight:'var(--lh-body)' }}>
 
           {/* Actions row */}
-          <div className="mb-[var(--s-6)] flex flex-wrap items-center justify-end gap-[var(--s-3)]">
+          <div className="mb-[var(--s-4)] flex flex-wrap items-center justify-end gap-[var(--s-3)]">
             <button
-              className="inline-flex items-center gap-2 rounded-[16px] px-4 text-sm transition hover:-translate-y-[1px]"
+              className="inline-flex items-center gap-2 rounded-[16px] px-4 text-sm transition hover:-translate-y-[1px] va-focus"
               style={{
                 height:'var(--control-h)',
-                background:'var(--vs-input-bg)', border:'0.5px solid var(--vs-input-border)',
-                boxShadow:'var(--vs-input-shadow)', color:'var(--text)'
+                background:'var(--control-bg)', border:'0.5px solid var(--near-zero-border)',
+                boxShadow:'var(--card-shadow)', color:'var(--t)'
               }}
             >
               <Rocket className="w-4 h-4" /> Publish
             </button>
             <button
-              className="inline-flex items-center gap-2 rounded-[16px] font-semibold select-none"
-              style={{ height:'var(--control-h)', padding:'0 18px', background:CTA, color:'#fff', boxShadow:'0 10px 24px rgba(16,185,129,.25)' }}
+              className="inline-flex items-center gap-2 rounded-[16px] font-semibold select-none va-focus"
+              style={{ height:'var(--control-h)', padding:'0 18px', background:'var(--cta)', color:'#fff', boxShadow:'var(--cta-shadow)' }}
               onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA_HOVER)}
               onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA)}
             >
@@ -385,78 +380,93 @@ export default function VoiceAgentSection() {
           {/* KPIs */}
           <div className="grid gap-[var(--s-4)] md:grid-cols-2 mb-[var(--s-6)]">
             <div className="relative p-[var(--s-4)] rounded-[14px]"
-                 style={{ background:'var(--vs-card)', border:'0.5px solid var(--vs-border)', boxShadow:'var(--vs-shadow)' }}>
-              <div className="text-xs mb-[6px]" style={{ color:'var(--text-muted)' }}>Cost</div>
-              <div className="font-semibold" style={{ fontSize:'var(--fz-sub)', color:'var(--text)' }}>~$0.1/min</div>
+                 style={{ background:'var(--card-bg)', border:'0.5px solid var(--near-zero-border)', boxShadow:'var(--card-shadow)' }}>
+              <div className="text-xs mb-[6px]" style={{ color:'var(--tm)' }}>Cost</div>
+              <div className="font-semibold" style={{ fontSize:'var(--fz-sub)', color:'var(--t)' }}>~$0.1/min</div>
             </div>
             <div className="relative p-[var(--s-4)] rounded-[14px]"
-                 style={{ background:'var(--vs-card)', border:'0.5px solid var(--vs-border)', boxShadow:'var(--vs-shadow)' }}>
-              <div className="text-xs mb-[6px]" style={{ color:'var(--text-muted)' }}>Latency</div>
-              <div className="font-semibold" style={{ fontSize:'var(--fz-sub)', color:'var(--text)' }}>~1050 ms</div>
+                 style={{ background:'var(--card-bg)', border:'0.5px solid var(--near-zero-border)', boxShadow:'var(--card-shadow)' }}>
+              <div className="text-xs mb-[6px]" style={{ color:'var(--tm)' }}>Latency</div>
+              <div className="font-semibold" style={{ fontSize:'var(--fz-sub)', color:'var(--t)' }}>~1050 ms</div>
             </div>
           </div>
 
           {/* MODEL */}
-          <Section title="Model" icon={<Gauge className="w-4 h-4" style={{ color: CTA }} />}>
+          <Section title="Model" icon={<Gauge className="w-4 h-4" style={{ color:'var(--cta)' }} />}>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[var(--s-4)]">
-              <FieldShell label="Provider" boxed={false}>
+              <div>
+                <FieldLabel>Provider</FieldLabel>
                 <StyledSelect value={data.provider} onChange={set('provider')} options={providers} />
-              </FieldShell>
-              <FieldShell label="Model" boxed={false}>
+              </div>
+              <div>
+                <FieldLabel>Model</FieldLabel>
                 <StyledSelect value={data.model} onChange={set('model')} options={models} />
-              </FieldShell>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[var(--s-4)] mt-[var(--s-4)]">
-              <FieldShell label="First Message Mode" boxed={false}>
+              <div>
+                <FieldLabel>First Message Mode</FieldLabel>
                 <StyledSelect value={data.firstMode} onChange={set('firstMode')} options={firstModes} />
-              </FieldShell>
-              <FieldShell label="First Message" boxed={true}>
-                {/* same height as selects */}
-                <input
-                  className="va-input w-full bg-transparent outline-none"
-                  style={{ height:'calc(var(--control-h) - 10px)', fontSize:'var(--fz-body)' }}
-                  value={data.firstMsg} onChange={(e)=>set('firstMsg')(e.target.value)}
-                />
-              </FieldShell>
+              </div>
+              <div>
+                <FieldLabel>First Message</FieldLabel>
+                {/* single control, same height as selects */}
+                <div
+                  className="rounded-[var(--radius-band)] va-focus"
+                  style={{ background:'var(--control-bg)', border:'0.5px solid var(--near-zero-border)', boxShadow:'var(--card-shadow)' }}
+                >
+                  <input
+                    className="w-full bg-transparent outline-none"
+                    style={{ color:'var(--t)', height:'var(--control-h)', padding:'0 12px', fontSize:'var(--fz-body)' }}
+                    value={data.firstMsg} onChange={(e)=>set('firstMsg')(e.target.value)}
+                  />
+                </div>
+              </div>
             </div>
 
             <div className="mt-[var(--s-4)]">
               <div className="flex items-center justify-between mb-[var(--s-2)]">
                 <div className="font-medium" style={{ fontSize:'var(--fz-label)' }}>System Prompt</div>
                 <button
-                  className="inline-flex items-center gap-2 rounded-[14px] text-sm transition hover:-translate-y-[1px]"
+                  className="inline-flex items-center gap-2 rounded-[14px] text-sm transition hover:-translate-y-[1px] va-focus"
                   style={{ height:'var(--control-h)', padding:'0 14px',
-                           background:'var(--vs-input-bg)', border:'0.5px solid var(--vs-input-border)', boxShadow:'var(--vs-input-shadow)', color:'var(--text)' }}
+                           background:'var(--control-bg)', border:'0.5px solid var(--near-zero-border)', boxShadow:'var(--card-shadow)', color:'var(--t)' }}
                 >
                   <Wand2 className="w-4 h-4" /> Generate
                 </button>
               </div>
-              <textarea
-                className="va-textarea w-full bg-transparent outline-none rounded-[var(--radius-band)] px-3 py-[10px]"
-                style={{ minHeight:130, lineHeight:'var(--lh-body)', fontSize:'var(--fz-body)' }}
-                value={data.systemPrompt} onChange={(e)=>set('systemPrompt')(e.target.value)}
-              />
+              <ControlBox>
+                <textarea
+                  className="w-full bg-transparent outline-none"
+                  style={{ color:'var(--t)', minHeight:130, lineHeight:'var(--lh-body)', fontSize:'var(--fz-body)' }}
+                  value={data.systemPrompt} onChange={(e)=>set('systemPrompt')(e.target.value)}
+                />
+              </ControlBox>
             </div>
           </Section>
 
           {/* TRANSCRIBER */}
-          <Section title="Transcriber" icon={<Timer className="w-4 h-4" style={{ color: CTA }} />}>
+          <Section title="Transcriber" icon={<Timer className="w-4 h-4" style={{ color:'var(--cta)' }} />}>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[var(--s-4)]">
-              <FieldShell label="Provider" boxed={false}>
+              <div>
+                <FieldLabel>Provider</FieldLabel>
                 <StyledSelect value={data.asrProvider} onChange={set('asrProvider')} options={asrProv} />
-              </FieldShell>
-              <FieldShell label="Language" boxed={false}>
+              </div>
+              <div>
+                <FieldLabel>Language</FieldLabel>
                 <StyledSelect value={data.asrLang} onChange={set('asrLang')} options={asrLangs} />
-              </FieldShell>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[var(--s-4)] mt-[var(--s-4)]">
-              <FieldShell label="Model" boxed={false}>
+              <div>
+                <FieldLabel>Model</FieldLabel>
                 <StyledSelect value={data.asrModel} onChange={set('asrModel')} options={asrModels} />
-              </FieldShell>
+              </div>
 
-              <FieldShell label="Confidence Threshold" boxed={true}>
+              <div>
+                <FieldLabel>Confidence Threshold</FieldLabel>
                 <div className="flex items-center gap-[var(--s-3)]">
                   <input
                     type="range" min={0} max={1} step={0.01}
@@ -465,27 +475,27 @@ export default function VoiceAgentSection() {
                     style={{ width:'100%' }}
                   />
                   <div
-                    className="px-2.5 py-1.5 rounded-md text-xs va-input"
-                    style={{ minWidth:46, textAlign:'center' }}
+                    className="px-2.5 py-1.5 rounded-md text-xs"
+                    style={{ background:'var(--control-bg)', border:'0.5px solid var(--near-zero-border)', boxShadow:'var(--card-shadow)', minWidth:46, textAlign:'center', color:'var(--t)' }}
                   >
                     {data.confidence.toFixed(1)}
                   </div>
                 </div>
-              </FieldShell>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[var(--s-6)] mt-[var(--s-4)]">
               <div className="flex items-center justify-between">
                 <div>
-                  <div className="font-semibold" style={{ fontSize:'var(--fz-body)', color:'var(--text)' }}>Background Denoising Enabled</div>
-                  <div className="text-xs" style={{ color:'var(--text-muted)' }}>Filter background noise while the user is talking.</div>
+                  <div className="font-semibold" style={{ fontSize:'var(--fz-body)', color:'var(--t)' }}>Background Denoising Enabled</div>
+                  <div className="text-xs" style={{ color:'var(--tm)' }}>Filter background noise while the user is talking.</div>
                 </div>
                 <Toggle checked={data.denoise} onChange={v=>set('denoise')(v)} />
               </div>
               <div className="flex items-center justify-between">
                 <div>
-                  <div className="font-semibold" style={{ fontSize:'var(--fz-body)', color:'var(--text)' }}>Use Numerals</div>
-                  <div className="text-xs" style={{ color:'var(--text-muted)' }}>Convert numbers from words to digits in transcription.</div>
+                  <div className="font-semibold" style={{ fontSize:'var(--fz-body)', color:'var(--t)' }}>Use Numerals</div>
+                  <div className="text-xs" style={{ color:'var(--tm)' }}>Convert numbers from words to digits in transcription.</div>
                 </div>
                 <Toggle checked={data.numerals} onChange={v=>set('numerals')(v)} />
               </div>
@@ -497,60 +507,55 @@ export default function VoiceAgentSection() {
   );
 }
 
-/* ───────────────── Cards with external titles + animated expand ───────────────── */
-function Section({ title, icon, children }:{ title:string; icon:React.ReactNode; children:React.ReactNode }) {
+/* ───────────────── Section (title outside card + motion) ───────────────── */
+function Section({ title, icon, children }:{
+  title:string; icon:React.ReactNode; children:React.ReactNode;
+}) {
   const [open,setOpen]=useState(true);
   return (
     <div className="mb-[var(--s-6)]">
-      {/* Title OUTSIDE the box (Vapi-style) */}
-      <div className="flex items-center gap-[var(--s-3)] mb-[var(--s-2)]">
-        {/* bare icon, no chip */}
-        <span>{icon}</span>
-        <span className="font-semibold" style={{ fontSize:'var(--fz-title)', lineHeight:1.2 }}>{title}</span>
-      </div>
-
-      {/* The card itself (less rounded, hairline border, glow + motion) */}
-      <motion.div
-        initial={{ scale: 0.995, opacity: 0, filter: 'blur(8px)' }}
-        animate={{ scale: 1, opacity: 1, filter: 'blur(0px)' }}
-        transition={{ duration: 0.18, ease: 'easeOut' }}
-        className="relative rounded-[var(--radius-card)] overflow-hidden"
-        style={{ background:'var(--vs-card)', border:'0.5px solid var(--vs-border)', boxShadow:'var(--vs-shadow)' }}
+      {/* Title row outside the card, icon in green, no chip */}
+      <button
+        onClick={()=>setOpen(v=>!v)}
+        className="w-full flex items-center justify-between mb-[var(--s-3)]"
+        style={{ color:'var(--t)' }}
       >
-        {/* soft brand glow */}
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
-          style={{ background:'radial-gradient(circle, var(--vs-ring) 0%, transparent 70%)', filter:'blur(40px)' }}
-        />
-        {/* header inside card to toggle open/close (no icon box) */}
-        <button
-          onClick={()=>setOpen(v=>!v)}
-          className="w-full flex items-center justify-between px-3 sm:px-4 py-3 cursor-pointer"
-          style={{ color:'var(--text)' }}
-        >
-          <span className="font-medium" style={{ fontSize:'var(--fz-sub)' }}>{open ? 'Hide' : 'Show'} {title}</span>
-          {open ? <ChevronUp className="w-4 h-4" style={{ color:'var(--text-muted)' }}/> :
-                  <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)' }}/>}
-        </button>
+        <span className="inline-flex items-center gap-[var(--s-3)]">
+          <span className="inline-flex items-center justify-center w-7 h-7">
+            {icon}
+          </span>
+          <span className="font-semibold" style={{ fontSize:'var(--fz-title)', lineHeight:1.2 }}>{title}</span>
+        </span>
+        {open ? <ChevronUp className="w-4 h-4" style={{ color:'var(--tm)' }}/> :
+                <ChevronDown className="w-4 h-4" style={{ color:'var(--tm)' }}/>}
+      </button>
 
-        <AnimatePresence initial={false}>
-          {open && (
-            <motion.div
-              key="body"
-              initial={{ height: 0, opacity: 0, filter: 'blur(6px)' }}
-              animate={{ height: 'auto', opacity: 1, filter: 'blur(0px)' }}
-              exit={{ height: 0, opacity: 0, filter: 'blur(6px)' }}
-              transition={{ duration: 0.22, ease: 'easeInOut' }}
-              style={{ overflow: 'hidden' }}
-            >
-              <div className="px-3 sm:px-4 pb-4">
-                {children}
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </motion.div>
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            key="body"
+            initial={{ opacity: 0, y: -6, filter: 'blur(6px)' }}
+            animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+            exit={{ opacity: 0, y: -6, filter: 'blur(6px)' }}
+            transition={{ duration: 0.18, ease: 'easeOut' }}
+            className="rounded-[var(--radius-card)]"
+            style={{
+              background:'var(--card-bg)',
+              border:'0.5px solid var(--near-zero-border)',
+              boxShadow:'var(--card-shadow)',
+              padding: 'var(--s-6)',
+            }}
+          >
+            {/* subtle green glow spot */}
+            <div
+              aria-hidden
+              className="pointer-events-none absolute -mt-10 -ml-10 w-[60%] h-[60%] rounded-full"
+              style={{ background:'radial-gradient(circle, color-mix(in oklab, var(--cta) 24%, transparent) 0%, transparent 70%)', filter:'blur(40px)' }}
+            />
+            {children}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
