@@ -27,18 +27,16 @@ class RailBoundary extends React.Component<{children:React.ReactNode},{hasError:
 const ACTIVE_KEY = 'va:activeId';
 const CTA = '#59d9b3';
 const CTA_HOVER = '#54cfa9';
-const CTA_DISABLED = '#2e6f63';
 
-/* Spacing + type rhythm (ChatGPT-like) */
 const Rhythm = () => (
   <style jsx global>{`
     .va-rhythm{
-      /* spacing scale (4px base) */
-      --s-2: 8px;   /* compact */
-      --s-3: 12px;  /* tight */
-      --s-4: 16px;  /* default gap */
-      --s-6: 24px;  /* row / card pad */
-      --s-8: 32px;  /* section gap */
+      /* spacing (4px base) */
+      --s-2: 8px;
+      --s-3: 12px;
+      --s-4: 16px;
+      --s-6: 24px;
+      --s-8: 32px;
       --radius-card: 28px;
       --radius-band: 20px;
       --control-h: 44px;
@@ -50,7 +48,7 @@ const Rhythm = () => (
       --fz-label: 12.5px;
       --lh-body: 1.45;
 
-      /* surfaces (re-use step tokens) */
+      /* LIGHT (kept for completeness) */
       --vs-card: #ffffff;
       --vs-border: rgba(0,0,0,.10);
       --vs-shadow: 0 28px 70px rgba(0,0,0,.12), 0 10px 26px rgba(0,0,0,.08), 0 0 0 1px rgba(0,0,0,.02);
@@ -122,19 +120,26 @@ const saveAgentData = (id: string, data: AgentData) => {
 };
 
 /* ───────────────── Small building blocks ───────────────── */
-const FieldShell = ({ label, children, error }:{
-  label: React.ReactNode; children: React.ReactNode; error?: string;
+/** FieldShell: now supports `boxed` (default true). Use boxed={false} for selects to avoid double borders. */
+const FieldShell = ({ label, children, error, boxed = true }:{
+  label: React.ReactNode; children: React.ReactNode; error?: string; boxed?: boolean;
 }) => {
   const borderBase = error ? 'rgba(255,120,120,0.55)' : 'var(--vs-input-border)';
   return (
     <div>
       <label className="block mb-[var(--s-2)] font-medium" style={{ fontSize:'var(--fz-label)', color:'var(--text)' }}>{label}</label>
-      <div
-        className="px-3 py-[10px] rounded-[var(--radius-band)]"
-        style={{ background:'var(--vs-input-bg)', border:`1px solid ${borderBase}`, boxShadow:'var(--vs-input-shadow)' }}
-      >
-        {children}
-      </div>
+
+      {boxed ? (
+        <div
+          className="px-3 py-[10px] rounded-[var(--radius-band)]"
+          style={{ background:'var(--vs-input-bg)', border:`1px solid ${borderBase}`, boxShadow:'var(--vs-input-shadow)' }}
+        >
+          {children}
+        </div>
+      ) : (
+        children
+      )}
+
       {error && <div className="mt-[6px] text-xs" style={{ color:'rgba(255,138,138,0.95)' }}>{error}</div>}
     </div>
   );
@@ -164,13 +169,13 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
-/* Styled portal dropdown (same UI as your Steps) */
+/* ChatGPT-style floating dropdown (independent menu w/ search) */
 function StyledSelect({
-  value, onChange, options, placeholder, leftIcon
+  value, onChange, options, placeholder
 }:{
   value: string; onChange: (v: string) => void;
   options: { value: string; label: string }[];
-  placeholder?: string; leftIcon?: React.ReactNode;
+  placeholder?: string;
 }) {
   const btnRef = useRef<HTMLButtonElement|null>(null);
   const portalRef = useRef<HTMLDivElement|null>(null);
@@ -204,6 +209,7 @@ function StyledSelect({
 
   return (
     <>
+      {/* Trigger = single bordered box (no outer wrapper) */}
       <button
         ref={btnRef}
         type="button"
@@ -215,13 +221,11 @@ function StyledSelect({
           boxShadow:'var(--vs-input-shadow)', color:'var(--text)', fontSize:'var(--fz-body)'
         }}
       >
-        <span className="flex items-center gap-2 truncate">
-          {leftIcon}
-          <span className="truncate">{current ? current.label : (placeholder || '— Choose —')}</span>
-        </span>
+        <span className="truncate">{current ? current.label : (placeholder || '— Choose —')}</span>
         <ChevronDown className="w-4 h-4 opacity-80" style={{ color:'var(--text-muted)' }} />
       </button>
 
+      {/* Floating independent menu */}
       {open && rect && typeof document !== 'undefined'
         ? createPortal(
             <div
@@ -238,6 +242,7 @@ function StyledSelect({
                 boxShadow: '0 28px 70px rgba(0,0,0,.12), 0 10px 26px rgba(0,0,0,.08), 0 0 0 1px rgba(0,0,0,.02)',
               }}
             >
+              {/* search input inside the menu */}
               <div
                 className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[12px]"
                 style={{ background:'var(--vs-input-bg)', border:'1px solid var(--vs-input-border)', boxShadow:'var(--vs-input-shadow)' }}
@@ -258,12 +263,12 @@ function StyledSelect({
                   <button
                     key={o.value}
                     onClick={()=>{ onChange(o.value); setOpen(false); }}
-                    className="w-full flex items-center gap-3 px-3 py-2 rounded-[10px] text-left transition"
-                    style={{ background:'transparent', border:'1px solid transparent', color:'var(--text)' }}
+                    className="w-full text-left text-sm px-3 py-2 rounded-[10px] transition"
+                    style={{ color:'var(--text)', background:'transparent', border:'1px solid transparent' }}
                     onMouseEnter={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='rgba(0,255,194,0.10)'; (e.currentTarget as HTMLButtonElement).style.border='1px solid rgba(0,255,194,0.35)'; }}
-                    onMouseLeave={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='transparent'; (e.currentTarget as HTMLButtonElement).style.border='1px solid transparent'; }}
+                    onMouseLeave={(e)=>{ (e.currentTarget as HTMLButtonButtonElement).style.background='transparent'; (e.currentTarget as HTMLButtonElement).style.border='1px solid transparent'; }}
                   >
-                    <span className="flex-1 truncate">{o.label}</span>
+                    {o.label}
                   </button>
                 ))}
                 {filtered.length===0 && (
@@ -315,7 +320,7 @@ export default function VoiceAgentSection() {
       <Rhythm />
 
       <div className="grid w-full pr-[1px]" style={{ gridTemplateColumns: '260px 1fr' }}>
-        {/* Rail with thin divider, consistent with app */}
+        {/* Rail with thin divider */}
         <div className="border-r" style={{ borderColor:'rgba(255,255,255,.14)' }}>
           <RailBoundary><AssistantRail /></RailBoundary>
         </div>
@@ -323,6 +328,7 @@ export default function VoiceAgentSection() {
         {/* Content column */}
         <div className="px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w-[1160px]"
              style={{ fontSize:'var(--fz-body)', lineHeight:'var(--lh-body)' }}>
+
           {/* Actions row */}
           <div className="mb-[var(--s-4)] flex flex-wrap items-center justify-end gap-[var(--s-3)]">
             <button
@@ -337,7 +343,7 @@ export default function VoiceAgentSection() {
             </button>
             <button
               className="inline-flex items-center gap-2 rounded-[18px] font-semibold select-none"
-              style={{ height:'var(--control-h)', padding:'0 18px', background:CTA, color:'#fff', boxShadow:'0 10px 24px rgba(16,185,129,.25)' }}
+              style={{ height:'var(--control-h)', padding:'0 18px', background:CTA, color:'#000', boxShadow:'0 10px 24px rgba(16,185,129,.25)' }}
               onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA_HOVER)}
               onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA)}
             >
@@ -371,18 +377,18 @@ export default function VoiceAgentSection() {
               />
 
               {/* Section: Model */}
-              <Accordion title="Model" icon={<Gauge className="w-4 h-4" />}>
+              <Section title="Model" icon={<Gauge className="w-4 h-4" />}>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-[var(--s-4)]">
-                  <FieldShell label="Provider">
+                  <FieldShell label="Provider" boxed={false}>
                     <StyledSelect value={data.provider} onChange={set('provider')} options={providers} />
                   </FieldShell>
-                  <FieldShell label="Model">
+                  <FieldShell label="Model" boxed={false}>
                     <StyledSelect value={data.model} onChange={set('model')} options={models} />
                   </FieldShell>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-[var(--s-4)] mt-[var(--s-4)]">
-                  <FieldShell label="First Message Mode">
+                  <FieldShell label="First Message Mode" boxed={false}>
                     <StyledSelect value={data.firstMode} onChange={set('firstMode')} options={firstModes} />
                   </FieldShell>
                   <FieldShell label="First Message">
@@ -416,21 +422,21 @@ export default function VoiceAgentSection() {
                     />
                   </div>
                 </div>
-              </Accordion>
+              </Section>
 
               {/* Section: Transcriber */}
-              <Accordion title="Transcriber" icon={<Timer className="w-4 h-4" />}>
+              <Section title="Transcriber" icon={<Timer className="w-4 h-4" />}>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-[var(--s-4)]">
-                  <FieldShell label="Provider">
+                  <FieldShell label="Provider" boxed={false}>
                     <StyledSelect value={data.asrProvider} onChange={set('asrProvider')} options={asrProv} />
                   </FieldShell>
-                  <FieldShell label="Language">
+                  <FieldShell label="Language" boxed={false}>
                     <StyledSelect value={data.asrLang} onChange={set('asrLang')} options={asrLangs} />
                   </FieldShell>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-[var(--s-4)] mt-[var(--s-4)]">
-                  <FieldShell label="Model">
+                  <FieldShell label="Model" boxed={false}>
                     <StyledSelect value={data.asrModel} onChange={set('asrModel')} options={asrModels} />
                   </FieldShell>
 
@@ -468,7 +474,7 @@ export default function VoiceAgentSection() {
                     <Toggle checked={data.numerals} onChange={v=>set('numerals')(v)} />
                   </div>
                 </div>
-              </Accordion>
+              </Section>
             </div>
           </div>
         </div>
@@ -477,32 +483,29 @@ export default function VoiceAgentSection() {
   );
 }
 
-/* ───────────────── Accordion (header sized to rhythm) ───────────────── */
-function Accordion({ title, icon, children }:{ title:string; icon:React.ReactNode; children:React.ReactNode }) {
+/* ───────────────── Cards with collapsible headers (ChatGPT-style) ───────────────── */
+function Section({ title, icon, children }:{ title:string; icon:React.ReactNode; children:React.ReactNode }) {
   const [open,setOpen]=useState(true);
   return (
-    <div>
-      <div
-        className="flex items-center justify-between cursor-pointer"
+    <div className="rounded-[18px] overflow-hidden"
+         style={{ background:'var(--vs-card)', border:'1px solid var(--vs-border)', boxShadow:'var(--vs-shadow)' }}>
+      <button
         onClick={()=>setOpen(v=>!v)}
-        style={{ padding:'6px 8px' }}
+        className="w-full flex items-center justify-between px-3 sm:px-4 py-3 cursor-pointer"
+        style={{ color:'var(--text)' }}
       >
-        <div className="inline-flex items-center gap-[var(--s-3)]">
-          <span
-            className="inline-flex items-center gap-2 px-3 rounded-[10px]"
-            style={{
-              height: 28, background:'var(--vs-input-bg)',
-              border:'1px solid var(--vs-input-border)', boxShadow:'var(--vs-input-shadow)'
-            }}
-          >
+        <span className="inline-flex items-center gap-[var(--s-3)]">
+          <span className="inline-flex items-center gap-2 px-3 rounded-[10px]"
+                style={{ height: 28, background:'var(--vs-input-bg)', border:'1px solid var(--vs-input-border)', boxShadow:'var(--vs-input-shadow)' }}>
             {icon}
           </span>
           <span className="font-semibold" style={{ fontSize:'var(--fz-title)', lineHeight:1.2 }}>{title}</span>
-        </div>
+        </span>
         {open ? <ChevronUp className="w-4 h-4" style={{ color:'var(--text-muted)' }}/> :
                 <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)' }}/>}
-      </div>
-      {open && <div className="mt-[var(--s-4)]">{children}</div>}
+      </button>
+
+      {open && <div className="px-3 sm:px-4 pb-4">{children}</div>}
     </div>
   );
 }
