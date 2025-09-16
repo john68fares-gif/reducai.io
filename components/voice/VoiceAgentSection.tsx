@@ -5,7 +5,7 @@ import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 're
 import dynamic from 'next/dynamic';
 import { createPortal } from 'react-dom';
 import {
-  Wand2, ChevronDown, ChevronUp, Gauge, Timer, Phone, Rocket, Search, Check, Lock, Mic, Volume2
+  Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Phone, Rocket, Search, Check, Lock, X
 } from 'lucide-react';
 
 /* ───────────────── Dynamic rail ───────────────── */
@@ -32,7 +32,7 @@ const Tokens = () => (
   <style jsx global>{`
     .va-scope{
       --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-6: 24px; --s-8: 32px;
-      --radius-outer: 8px;                /* less rounded outer boxes */
+      --radius-outer: 10px;
       --radius-inner: 12px;
       --control-h: 44px;
       --collapsed-h: 72px;
@@ -41,36 +41,36 @@ const Tokens = () => (
 
       --panel: #101314;
       --panel-alt: #0e1212;
-      --border-weak: rgba(255,255,255,.05);
+      --border-weak: rgba(255,255,255,.06);
       --ring: rgba(89,217,179,.10);
 
       --input-bg: #0e1112;
       --input-border: rgba(255,255,255,.12);
-      --input-shadow: 0 6px 16px rgba(0,0,0,.18), 0 0 0 1px rgba(89,217,179,.04);
+      --input-shadow: 0 10px 28px rgba(0,0,0,.22), 0 0 0 1px rgba(89,217,179,.06);
 
       --menu-bg: #0f1314;
       --menu-border: rgba(255,255,255,.12);
-      --menu-shadow: 0 18px 30px rgba(0,0,0,.30), 0 0 0 1px rgba(89,217,179,.06);
+      --menu-shadow: 0 26px 60px rgba(0,0,0,.46), 0 0 0 1px rgba(89,217,179,.10);
 
       --text: #eaf8f3; --text-muted: rgba(234,248,243,.66);
       --bg: #0b0e0f;
 
-      /* very subtle green shadow */
-      --shadow-green: 0 10px 18px rgba(89,217,179,.10);
+      /* bigger, softer green glow */
+      --shadow-green: 0 28px 80px rgba(89,217,179,.18), 0 8px 24px rgba(0,0,0,.35);
     }
     :root:not([data-theme="dark"]) .va-scope{
-      --panel: #ffffff; --panel-alt: #ffffff; --border-weak: rgba(0,0,0,.06);
+      --panel: #ffffff; --panel-alt: #ffffff; --border-weak: rgba(0,0,0,.08);
       --ring: rgba(89,217,179,.08);
       --input-bg: #ffffff; --input-border: rgba(0,0,0,.10);
-      --input-shadow: 0 8px 16px rgba(0,0,0,.10), 0 0 0 1px rgba(0,0,0,.03);
+      --input-shadow: 0 12px 28px rgba(0,0,0,.14), 0 0 0 1px rgba(0,0,0,.03);
       --menu-bg: #ffffff; --menu-border: rgba(0,0,0,.10);
-      --menu-shadow: 0 18px 30px rgba(0,0,0,.12), 0 0 0 1px rgba(0,0,0,.02);
+      --menu-shadow: 0 26px 60px rgba(0,0,0,.18), 0 0 0 1px rgba(0,0,0,.04);
       --text: #0e1213; --text-muted: rgba(14,18,19,.62);
       --bg: #f6f7f8;
-      --shadow-green: 0 10px 18px rgba(89,217,179,.08);
+      --shadow-green: 0 28px 80px rgba(89,217,179,.10), 0 8px 24px rgba(0,0,0,.18);
     }
 
-    .va-main{ overflow: visible; position: relative; contain: none; } /* rail never crops */
+    .va-main{ overflow: visible; position: relative; contain: none; }
     .va-portal{ background: var(--menu-bg); border: 1px solid var(--menu-border); box-shadow: var(--menu-shadow); border-radius: 10px; }
     .va-collapsing{ overflow: hidden; will-change: height; }
   `}</style>
@@ -103,7 +103,25 @@ const DEFAULT_AGENT: AgentData = {
   firstMode: 'Assistant speaks first',
   firstMsg: 'Hello.',
   systemPrompt:
-    'This is a blank template with minimal defaults, you can change the model, temperature, and messages.',
+`[Identity]
+You are a blank template AI assistant with minimal default settings, designed to be easily customizable for various use cases.
+
+[Style]
+- Maintain a neutral and adaptable tone suitable for a wide range of contexts.
+- Use clear and concise language to ensure effective communication.
+
+[Response Guidelines]
+- Avoid using any specific jargon or domain-specific language.
+- Keep responses straightforward and focused on the task at hand.
+
+[Task & Goals]
+1. Serve as a versatile agent that can be tailored to fit different roles based on user instructions.
+2. Allow users to modify model parameters, such as temperature, messages, and other settings as needed.
+3. Ensure all adjustments are reflected in real-time to adapt to the current context.
+
+[Error Handling / Fallback]
+- Prompt users for clarification if inputs are vague or unclear.
+- Gracefully handle any errors by providing a polite default response or seeking further instruction.`,
   ttsProvider: 'openai',
   voiceName: 'Alloy (American)',
   asrProvider: 'deepgram',
@@ -229,37 +247,13 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
         width:18, height:18, borderRadius:999,
         background: checked ? CTA : 'rgba(255,255,255,.12)',
         transform:`translateX(${checked?22:0}px)`, transition:'transform .18s var(--ease)',
-        boxShadow: checked ? '0 0 6px rgba(89,217,179,.35)' : undefined
+        boxShadow: checked ? '0 0 8px rgba(89,217,179,.45)' : undefined
       }}
     />
   </button>
 );
 
-const FieldShell = ({ label, children, error, boxed = true }:{
-  label: React.ReactNode; children: React.ReactNode; error?: string; boxed?: boolean;
-}) => {
-  const borderBase = error ? 'rgba(255,120,120,0.55)' : 'var(--input-border)';
-  return (
-    <div>
-      <label className="block mb-[var(--s-2)] font-medium" style={{ fontSize:'var(--fz-label)', color:'var(--text)' }}>
-        {label}
-      </label>
-
-      {boxed ? (
-        <div
-          className="px-3 py-[10px] rounded-[var(--radius-inner)]"
-          style={{ background:'var(--input-bg)', border:`1px solid ${borderBase}`, boxShadow:'var(--input-shadow)' }}
-        >
-          {children}
-        </div>
-      ) : children}
-
-      {error && <div className="mt-[6px] text-xs" style={{ color:'rgba(255,138,138,0.95)' }}>{error}</div>}
-    </div>
-  );
-};
-
-/* Solid portal dropdown */
+/* Solid portal dropdown (fixed, high z-index, stable click-outside) */
 function StyledSelect({
   value, onChange, options, placeholder
 }:{
@@ -290,11 +284,14 @@ function StyledSelect({
   useEffect(() => {
     if (!open) return;
     const off = (e: MouseEvent) => {
-      if (btnRef.current?.contains(e.target as Node) || portalRef.current?.contains(e.target as Node)) return;
+      const t = e.target as Node;
+      if (btnRef.current?.contains(t) || portalRef.current?.contains(t)) return;
       setOpen(false);
     };
+    const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
     window.addEventListener('mousedown', off);
-    return () => window.removeEventListener('mousedown', off);
+    window.addEventListener('keydown', onEsc);
+    return () => { window.removeEventListener('mousedown', off); window.removeEventListener('keydown', onEsc); };
   }, [open]);
 
   return (
@@ -318,13 +315,13 @@ function StyledSelect({
         ? createPortal(
             <div
               ref={portalRef}
-              className="va-portal fixed z-[9999] p-3"
+              className="va-portal fixed z-[99999] p-3"
               style={{
                 top: rect.openUp ? rect.top - 8 : rect.top + 8,
                 left: rect.left,
                 width: rect.width,
                 transform: rect.openUp ? 'translateY(-100%)' : 'none',
-                backdropFilter: 'blur(1px)'
+                pointerEvents:'auto'
               }}
             >
               <div
@@ -350,8 +347,8 @@ function StyledSelect({
                     onClick={()=>{ if (o.disabled) return; onChange(o.value); setOpen(false); }}
                     className="w-full text-left text-sm px-3 py-2 rounded-[8px] transition flex items-center gap-2 disabled:opacity-60"
                     style={{ color:'var(--text)', background:'transparent', border:'1px solid transparent', cursor:o.disabled?'not-allowed':'pointer' }}
-                    onMouseEnter={(e)=>{ if (o.disabled) return; (e.currentTarget as HTMLButtonElement).style.background='rgba(89,217,179,0.06)'; (e.currentTarget as HTMLButtonElement).style.border='1px solid rgba(89,217,179,0.22)'; }}
-                    onMouseLeave={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='transparent'; (e.currentTarget as HTMLButtonElement).style.border='1px solid transparent'; }}
+                    onMouseEnter={(e)=>{ if (o.disabled) return; const el=e.currentTarget as HTMLButtonElement; el.style.background='rgba(89,217,179,0.06)'; el.style.border='1px solid rgba(89,217,179,0.22)'; }}
+                    onMouseLeave={(e)=>{ const el=e.currentTarget as HTMLButtonElement; el.style.background='transparent'; el.style.border='1px solid transparent'; }}
                   >
                     {o.disabled ? <Lock className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" style={{ opacity: o.value===value ? 1 : 0 }} />}
                     <span className="flex-1 truncate">{o.label}</span>
@@ -370,7 +367,70 @@ function StyledSelect({
   );
 }
 
-/* ───────────────── Section (header is SAME box; collapsed shows header only) ───────────────── */
+/* ───────────────── Small overlay for Generate → writes main prompt ───────────────── */
+function PromptOverlay({
+  initial, onClose, onUse,
+}:{
+  initial: string; onClose: ()=>void; onUse: (v:string)=>void;
+}) {
+  const [val, setVal] = useState(initial);
+  const boxRef = useRef<HTMLDivElement|null>(null);
+
+  useEffect(() => {
+    const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (!boxRef.current?.contains(t)) onClose();
+    };
+    window.addEventListener('keydown', onEsc);
+    window.addEventListener('mousedown', onDown);
+    return () => { window.removeEventListener('keydown', onEsc); window.removeEventListener('mousedown', onDown); };
+  }, [onClose]);
+
+  return createPortal(
+    <div className="fixed inset-0 z-[99998] grid place-items-center px-4" style={{ background:'rgba(0,0,0,.55)' }}>
+      <div ref={boxRef} className="w-full max-w-[680px] rounded-[12px] p-4 md:p-5"
+           style={{ background:'var(--menu-bg)', border:'1px solid var(--menu-border)', boxShadow:'var(--menu-shadow)' }}>
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-base font-semibold" style={{ color:'var(--text)' }}>Generate Base Prompt</div>
+          <button onClick={onClose} className="p-1 rounded hover:opacity-80" aria-label="Close">
+            <X className="w-5 h-5" style={{ color:'var(--text-muted)' }} />
+          </button>
+        </div>
+        <div className="text-xs mb-3" style={{ color:'var(--text-muted)' }}>
+          Edit the template below or paste your own. Clicking “Use as Prompt” will replace the System Prompt.
+        </div>
+        <textarea
+          value={val}
+          onChange={(e)=>setVal(e.target.value)}
+          className="w-full bg-transparent outline-none rounded-[10px] px-3 py-2"
+          style={{ minHeight: 260, background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)', lineHeight:'var(--lh-body)', fontSize:'var(--fz-body)' }}
+        />
+        <div className="mt-3 flex items-center justify-end gap-2">
+          <button
+            onClick={onClose}
+            className="h-9 px-3 rounded-[8px]"
+            style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)' }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={()=>onUse(val)}
+            className="h-9 px-3 rounded-[8px] font-semibold"
+            style={{ background:CTA, color:'#0a0f0d', boxShadow:'0 10px 24px rgba(89,217,179,.28)' }}
+            onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA_HOVER)}
+            onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA)}
+          >
+            Use as Prompt
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+/* ───────────────── Section (lighter header) ───────────────── */
 function Section({
   title, icon, desc, children, defaultOpen = true
 }:{
@@ -386,22 +446,22 @@ function Section({
 
   return (
     <div className="mb-[var(--s-6)]">
-      {/* One container: header + body share bg/border/radius */}
       <div
-        className="rounded-[var(--radius-outer)]"
+        className="rounded-[var(--radius-outer)] overflow-hidden"
         style={{
           background:'linear-gradient(180deg, var(--panel-alt), var(--panel))',
           border:'1px solid var(--border-weak)',
           boxShadow:'var(--shadow-green)'
         }}
       >
-        {/* Header bar (always visible; touching the box) */}
+        {/* Lighter header bar for separation */}
         <button
           onClick={()=>setOpen(v=>!v)}
-          className="w-full text-left px-4 sm:px-5"
+          className="w-full text-left px-4 sm:px-5 relative"
           style={{
             color:'var(--text)', minHeight:'var(--collapsed-h)',
-            display:'grid', gridTemplateColumns:'1fr auto', alignItems:'center', gap:'12px'
+            display:'grid', gridTemplateColumns:'1fr auto', alignItems:'center', gap:'12px',
+            background:'linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,0))'
           }}
         >
           <span className="min-w-0 flex items-center gap-3">
@@ -420,10 +480,8 @@ function Section({
           </span>
         </button>
 
-        {/* tiny divider inside the same box */}
         <div style={{ height:1, background:'var(--border-weak)', opacity:.6 }} />
 
-        {/* Body collapses; header remains */}
         <div
           ref={wrapRef}
           className="va-collapsing"
@@ -450,6 +508,7 @@ export default function VoiceAgentSection() {
   const [publishing, setPublishing] = useState(false);
   const [calling, setCalling] = useState(false);
   const [toast, setToast] = useState<string>('');
+  const [showPromptOverlay, setShowPromptOverlay] = useState(false);
 
   useEffect(() => {
     const handler = (e: Event) => setActiveId((e as CustomEvent<string>).detail);
@@ -532,7 +591,7 @@ export default function VoiceAgentSection() {
               onClick={doCallTest}
               disabled={calling}
               className="inline-flex items-center gap-2 rounded-[8px] font-semibold select-none disabled:opacity-60"
-              style={{ height:'var(--control-h)', padding:'0 18px', background:CTA, color:'#fff', boxShadow:'0 6px 12px rgba(89,217,179,.18)' }}
+              style={{ height:'var(--control-h)', padding:'0 18px', background:CTA, color:'#0a0f0d', boxShadow:'0 14px 30px rgba(89,217,179,.28)' }}
               onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA_HOVER)}
               onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA)}
             >
@@ -547,21 +606,21 @@ export default function VoiceAgentSection() {
             </div>
           ) : null}
 
-          {/* KPIs (very light shadow) */}
+          {/* KPIs */}
           <div className="grid gap-[var(--s-4)] md:grid-cols-2 mb-[var(--s-6)]">
-            <div className="relative p-[var(--s-4)] rounded-[8px]"
+            <div className="relative p-[var(--s-4)] rounded-[10px]"
                  style={{ background:'var(--panel)', border:'1px solid var(--border-weak)', boxShadow:'var(--shadow-green)' }}>
               <div className="text-xs mb-[6px]" style={{ color:'var(--text-muted)' }}>Cost</div>
               <div className="font-semibold" style={{ fontSize:'var(--fz-sub)', color:'var(--text)' }}>~$0.1/min</div>
             </div>
-            <div className="relative p-[var(--s-4)] rounded-[8px]"
+            <div className="relative p-[var(--s-4)] rounded-[10px]"
                  style={{ background:'var(--panel)', border:'1px solid var(--border-weak)', boxShadow:'var(--shadow-green)' }}>
               <div className="text-xs mb-[6px]" style={{ color:'var(--text-muted)' }}>Latency</div>
               <div className="font-semibold" style={{ fontSize:'var(--fz-sub)', color:'var(--text)' }}>~1050 ms</div>
             </div>
           </div>
 
-          {/* Sections: header is SAME box; collapsed shows only header (≥72px) */}
+          {/* Sections */}
           <Section
             title="Model"
             icon={<Gauge className="w-4 h-4" style={{ color: CTA }} />}
@@ -569,31 +628,31 @@ export default function VoiceAgentSection() {
             defaultOpen={true}
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[var(--s-4)]">
-              <FieldShell label="Provider" boxed={false}>
-                <StyledSelect
-                  value={data.provider}
-                  onChange={(v)=>set('provider')(v as AgentData['provider'])}
-                  options={providerOpts}
-                />
-              </FieldShell>
+              <div>
+                <label className="block mb-[var(--s-2)] font-medium" style={{ fontSize:'var(--fz-label)', color:'var(--text)' }}>Provider</label>
+                <StyledSelect value={data.provider} onChange={(v)=>set('provider')(v as AgentData['provider'])} options={providerOpts}/>
+              </div>
 
-              <FieldShell label="Model" boxed={false}>
-                <StyledSelect value={data.model} onChange={set('model')} options={modelOpts} />
-              </FieldShell>
+              <div>
+                <label className="block mb-[var(--s-2)] font-medium" style={{ fontSize:'var(--fz-label)', color:'var(--text)' }}>Model</label>
+                <StyledSelect value={data.model} onChange={set('model')} options={modelOpts}/>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[var(--s-4)] mt-[var(--s-4)]">
-              <FieldShell label="First Message Mode" boxed={false}>
-                <StyledSelect value={data.firstMode} onChange={set('firstMode')} options={firstMessageModes} />
-              </FieldShell>
-              <FieldShell label="First Message" boxed={false}>
+              <div>
+                <label className="block mb-[var(--s-2)] font-medium" style={{ fontSize:'var(--fz-label)', color:'var(--text)' }}>First Message Mode</label>
+                <StyledSelect value={data.firstMode} onChange={set('firstMode')} options={firstMessageModes}/>
+              </div>
+              <div>
+                <label className="block mb-[var(--s-2)] font-medium" style={{ fontSize:'var(--fz-label)', color:'var(--text)' }}>First Message</label>
                 <input
                   className="w-full bg-transparent outline-none rounded-[var(--radius-inner)] px-3"
                   style={{ height:'var(--control-h)', background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)', fontSize:'var(--fz-body)' }}
                   value={data.firstMsg}
                   onChange={(e)=>set('firstMsg')(e.target.value)}
                 />
-              </FieldShell>
+              </div>
             </div>
 
             <div className="mt-[var(--s-4)]">
@@ -602,7 +661,7 @@ export default function VoiceAgentSection() {
                 <button
                   className="inline-flex items-center gap-2 rounded-[8px] text-sm transition hover:-translate-y-[1px]"
                   style={{ height:36, padding:'0 12px', background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)' }}
-                  onClick={()=>set('systemPrompt')(`${data.systemPrompt}\n\n# Improved by generator`) }
+                  onClick={()=>setShowPromptOverlay(true)}
                 >
                   <Wand2 className="w-4 h-4" /> Generate
                 </button>
@@ -623,24 +682,15 @@ export default function VoiceAgentSection() {
             defaultOpen={true}
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[var(--s-4)]">
-              <FieldShell label="Voice Provider" boxed={false}>
-                <StyledSelect
-                  value={data.ttsProvider}
-                  onChange={(v)=>set('ttsProvider')(v as AgentData['ttsProvider'])}
-                  options={ttsProviders}
-                />
-              </FieldShell>
-
-              <FieldShell label="Voice" boxed={false}>
-                <StyledSelect
-                  value={data.voiceName}
-                  onChange={set('voiceName')}
-                  options={openAiVoices}
-                  placeholder="— Choose —"
-                />
-              </FieldShell>
+              <div>
+                <label className="block mb-[var(--s-2)] font-medium" style={{ fontSize:'var(--fz-label)', color:'var(--text)' }}>Voice Provider</label>
+                <StyledSelect value={data.ttsProvider} onChange={(v)=>set('ttsProvider')(v as AgentData['ttsProvider'])} options={ttsProviders}/>
+              </div>
+              <div>
+                <label className="block mb-[var(--s-2)] font-medium" style={{ fontSize:'var(--fz-label)', color:'var(--text)' }}>Voice</label>
+                <StyledSelect value={data.voiceName} onChange={set('voiceName')} options={openAiVoices} placeholder="— Choose —"/>
+              </div>
             </div>
-
             <div className="mt-[var(--s-2)] text-xs" style={{ color:'var(--text-muted)' }}>
               Keep utterances short/specific for the most natural cadence. (ElevenLabs mapping can be added later.)
             </div>
@@ -653,15 +703,12 @@ export default function VoiceAgentSection() {
             defaultOpen={true}
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[var(--s-4)]">
-              <FieldShell label="Provider" boxed={false}>
-                <StyledSelect
-                  value={data.asrProvider}
-                  onChange={(v)=>set('asrProvider')(v as AgentData['asrProvider'])}
-                  options={asrProviders}
-                />
-              </FieldShell>
-
-              <FieldShell label="Language" boxed={false}>
+              <div>
+                <label className="block mb-[var(--s-2)] font-medium" style={{ fontSize:'var(--fz-label)', color:'var(--text)' }}>Provider</label>
+                <StyledSelect value={data.asrProvider} onChange={(v)=>set('asrProvider')(v as AgentData['asrProvider'])} options={asrProviders}/>
+              </div>
+              <div>
+                <label className="block mb-[var(--s-2)] font-medium" style={{ fontSize:'var(--fz-label)', color:'var(--text)' }}>Language</label>
                 <StyledSelect
                   value={data.asrLang}
                   onChange={(v)=>{
@@ -671,25 +718,18 @@ export default function VoiceAgentSection() {
                   }}
                   options={asrLanguages}
                 />
-              </FieldShell>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[var(--s-4)] mt-[var(--s-4)]">
-              <FieldShell label="Dialect" boxed={false}>
-                <StyledSelect
-                  value={data.asrDialect}
-                  onChange={(v)=>set('asrDialect')(v as AgentData['asrDialect'])}
-                  options={dialectOpts}
-                />
-              </FieldShell>
-
-              <FieldShell label="Model" boxed={false}>
-                <StyledSelect
-                  value={data.asrModel}
-                  onChange={set('asrModel')}
-                  options={asrModelOpts}
-                />
-              </FieldShell>
+              <div>
+                <label className="block mb-[var(--s-2)] font-medium" style={{ fontSize:'var(--fz-label)', color:'var(--text)' }}>Dialect</label>
+                <StyledSelect value={data.asrDialect} onChange={(v)=>set('asrDialect')(v as AgentData['asrDialect'])} options={dialectOpts}/>
+              </div>
+              <div>
+                <label className="block mb-[var(--s-2)] font-medium" style={{ fontSize:'var(--fz-label)', color:'var(--text)' }}>Model</label>
+                <StyledSelect value={data.asrModel} onChange={set('asrModel')} options={asrModelOpts}/>
+              </div>
             </div>
 
             <div className="grid grid-cols-[1fr_auto] gap-[var(--s-3)] items-center mt-[var(--s-4)]">
@@ -714,6 +754,14 @@ export default function VoiceAgentSection() {
           </Section>
         </div>
       </div>
+
+      {showPromptOverlay && (
+        <PromptOverlay
+          initial={DEFAULT_AGENT.systemPrompt}
+          onClose={()=>setShowPromptOverlay(false)}
+          onUse={(v)=>{ set('systemPrompt')(v); setShowPromptOverlay(false); }}
+        />
+      )}
     </section>
   );
 }
