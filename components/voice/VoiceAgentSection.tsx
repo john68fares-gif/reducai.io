@@ -32,72 +32,47 @@ const Tokens = () => (
   <style jsx global>{`
     .va-scope{
       --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-6: 24px; --s-8: 32px;
-      --radius-outer: 14px;               /* less rounded outer boxes */
-      --radius-inner: 12px;               /* inner controls */
-      --control-h: 44px;                  /* inputs + selects height */
-      --collapsed-h: 72px;                /* collapsed band height */
+      --radius-outer: 8px;                /* less rounded outer boxes */
+      --radius-inner: 12px;
+      --control-h: 44px;
+      --collapsed-h: 72px;
       --fz-title: 18px; --fz-sub: 15px; --fz-body: 14px; --fz-label: 12.5px;
       --lh-body: 1.45; --ease: cubic-bezier(.22,.61,.36,1);
 
-      /* Dark theme like ChatGPT desktop, solid controls */
       --panel: #101314;
-      --panel-alt: #0c1011;
-      --border-weak: rgba(255,255,255,.06);     /* nearly 0px look */
-      --ring: rgba(89,217,179,.12);
+      --panel-alt: #0e1212;
+      --border-weak: rgba(255,255,255,.05);
+      --ring: rgba(89,217,179,.10);
 
       --input-bg: #0e1112;
       --input-border: rgba(255,255,255,.12);
-      --input-shadow: 0 16px 40px rgba(0,0,0,.45), 0 0 0 1px rgba(89,217,179,.06);
+      --input-shadow: 0 6px 16px rgba(0,0,0,.18), 0 0 0 1px rgba(89,217,179,.04);
 
-      --menu-bg: #0f1314;                         /* solid menu surface */
+      --menu-bg: #0f1314;
       --menu-border: rgba(255,255,255,.12);
-      --menu-shadow: 0 28px 70px rgba(0,0,0,.55), 0 10px 26px rgba(0,0,0,.40), 0 0 0 1px rgba(89,217,179,.10);
+      --menu-shadow: 0 18px 30px rgba(0,0,0,.30), 0 0 0 1px rgba(89,217,179,.06);
 
       --text: #eaf8f3; --text-muted: rgba(234,248,243,.66);
-
-      /* Green outer shadow to match CTA button */
-      --shadow-green: 0 26px 70px rgba(89,217,179,.28), 0 10px 30px rgba(89,217,179,.20), 0 0 0 1px rgba(89,217,179,.12);
-
-      /* Layout helpers */
       --bg: #0b0e0f;
+
+      /* very subtle green shadow */
+      --shadow-green: 0 10px 18px rgba(89,217,179,.10);
     }
     :root:not([data-theme="dark"]) .va-scope{
       --panel: #ffffff; --panel-alt: #ffffff; --border-weak: rgba(0,0,0,.06);
-      --ring: rgba(89,217,179,.10);
+      --ring: rgba(89,217,179,.08);
       --input-bg: #ffffff; --input-border: rgba(0,0,0,.10);
-      --input-shadow: 0 16px 40px rgba(0,0,0,.10), 0 0 0 1px rgba(0,0,0,.03);
+      --input-shadow: 0 8px 16px rgba(0,0,0,.10), 0 0 0 1px rgba(0,0,0,.03);
       --menu-bg: #ffffff; --menu-border: rgba(0,0,0,.10);
-      --menu-shadow: 0 28px 70px rgba(0,0,0,.12), 0 10px 26px rgba(0,0,0,.08), 0 0 0 1px rgba(0,0,0,.02);
+      --menu-shadow: 0 18px 30px rgba(0,0,0,.12), 0 0 0 1px rgba(0,0,0,.02);
       --text: #0e1213; --text-muted: rgba(14,18,19,.62);
       --bg: #f6f7f8;
+      --shadow-green: 0 10px 18px rgba(89,217,179,.08);
     }
 
-    /* main column must NOT paint-contain, otherwise shadows/rail clip */
-    .va-main{
-      overflow: visible;
-      position: relative;
-      contain: none;
-    }
-
-    .va-portal{
-      background: var(--menu-bg);
-      border: 1px solid var(--menu-border);
-      box-shadow: var(--menu-shadow);
-      border-radius: 14px;
-    }
-
-    /* collapse helper */
+    .va-main{ overflow: visible; position: relative; contain: none; } /* rail never crops */
+    .va-portal{ background: var(--menu-bg); border: 1px solid var(--menu-border); box-shadow: var(--menu-shadow); border-radius: 10px; }
     .va-collapsing{ overflow: hidden; will-change: height; }
-
-    /* long header band styling */
-    .va-band{
-      background:
-        radial-gradient(80% 180% at 10% -50%, rgba(89,217,179,.10) 0%, transparent 65%),
-        linear-gradient(180deg, var(--panel-alt), var(--panel));
-      border: 1px solid var(--border-weak);
-      border-radius: 12px;
-      box-shadow: var(--shadow-green);
-    }
   `}</style>
 );
 
@@ -109,17 +84,14 @@ type AgentData = {
   firstMsg: string;
   systemPrompt: string;
 
-  /* Voice */
   ttsProvider: 'openai' | 'elevenlabs';
-  voiceName: string;          // OpenAI voice name or later ElevenLabs mapping
+  voiceName: string;
 
-  /* Transcriber */
   asrProvider: 'deepgram' | 'whisper' | 'assemblyai';
   asrLang: 'en' | 'nl' | 'es' | 'de';
   asrDialect: 'en-US' | 'en-UK' | 'en-AU' | 'standard';
   asrModel: string;
 
-  /* Flags */
   denoise: boolean;
   numerals: boolean;
   confidence: number;
@@ -134,12 +106,10 @@ const DEFAULT_AGENT: AgentData = {
     'This is a blank template with minimal defaults, you can change the model, temperature, and messages.',
   ttsProvider: 'openai',
   voiceName: 'Alloy (American)',
-
   asrProvider: 'deepgram',
   asrLang: 'en',
   asrDialect: 'en-US',
   asrModel: 'Nova 2',
-
   denoise: false,
   numerals: false,
   confidence: 0.4,
@@ -155,7 +125,7 @@ const saveAgentData = (id: string, data: AgentData) => {
   try { localStorage.setItem(keyFor(id), JSON.stringify(data)); } catch {}
 };
 
-/* ───────────────── Mock backend endpoints (wire later) ───────────────── */
+/* ───────────────── Mock backend ───────────────── */
 async function apiSave(agentId: string, payload: AgentData){
   const r = await fetch(`/api/voice/agent/${agentId}/save`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
@@ -198,7 +168,6 @@ const firstMessageModes: Opt[] = [
   { value: 'Silent until tool required', label: 'Silent until tool required' },
 ];
 
-/* Voices (OpenAI only for now; ElevenLabs to be mapped later) */
 const ttsProviders: Opt[] = [
   { value: 'openai',    label: 'OpenAI' },
   { value: 'elevenlabs', label: 'ElevenLabs — coming soon', disabled: true, note: 'soon' },
@@ -260,7 +229,7 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
         width:18, height:18, borderRadius:999,
         background: checked ? CTA : 'rgba(255,255,255,.12)',
         transform:`translateX(${checked?22:0}px)`, transition:'transform .18s var(--ease)',
-        boxShadow: checked ? '0 0 10px rgba(89,217,179,.55)' : undefined
+        boxShadow: checked ? '0 0 6px rgba(89,217,179,.35)' : undefined
       }}
     />
   </button>
@@ -290,7 +259,7 @@ const FieldShell = ({ label, children, error, boxed = true }:{
   );
 };
 
-/* Solid portal dropdown w/ disabled options (“coming soon”) */
+/* Solid portal dropdown */
 function StyledSelect({
   value, onChange, options, placeholder
 }:{
@@ -355,11 +324,11 @@ function StyledSelect({
                 left: rect.left,
                 width: rect.width,
                 transform: rect.openUp ? 'translateY(-100%)' : 'none',
-                backdropFilter: 'blur(2px)'
+                backdropFilter: 'blur(1px)'
               }}
             >
               <div
-                className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[10px]"
+                className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[8px]"
                 style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)' }}
               >
                 <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
@@ -379,9 +348,9 @@ function StyledSelect({
                     key={o.value}
                     disabled={o.disabled}
                     onClick={()=>{ if (o.disabled) return; onChange(o.value); setOpen(false); }}
-                    className="w-full text-left text-sm px-3 py-2 rounded-[10px] transition flex items-center gap-2 disabled:opacity-60"
+                    className="w-full text-left text-sm px-3 py-2 rounded-[8px] transition flex items-center gap-2 disabled:opacity-60"
                     style={{ color:'var(--text)', background:'transparent', border:'1px solid transparent', cursor:o.disabled?'not-allowed':'pointer' }}
-                    onMouseEnter={(e)=>{ if (o.disabled) return; (e.currentTarget as HTMLButtonElement).style.background='rgba(89,217,179,0.10)'; (e.currentTarget as HTMLButtonElement).style.border='1px solid rgba(89,217,179,0.35)'; }}
+                    onMouseEnter={(e)=>{ if (o.disabled) return; (e.currentTarget as HTMLButtonElement).style.background='rgba(89,217,179,0.06)'; (e.currentTarget as HTMLButtonElement).style.border='1px solid rgba(89,217,179,0.22)'; }}
                     onMouseLeave={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='transparent'; (e.currentTarget as HTMLButtonElement).style.border='1px solid transparent'; }}
                   >
                     {o.disabled ? <Lock className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" style={{ opacity: o.value===value ? 1 : 0 }} />}
@@ -401,7 +370,7 @@ function StyledSelect({
   );
 }
 
-/* ───────────────── Section (long header band, stable collapse) ───────────────── */
+/* ───────────────── Section (header is SAME box; collapsed shows header only) ───────────────── */
 function Section({
   title, icon, desc, children, defaultOpen = true
 }:{
@@ -417,48 +386,51 @@ function Section({
 
   return (
     <div className="mb-[var(--s-6)]">
-      {/* Long band header (always visible) */}
-      <button
-        onClick={()=>setOpen(v=>!v)}
-        className="w-full text-left va-band px-4 sm:px-5"
+      {/* One container: header + body share bg/border/radius */}
+      <div
+        className="rounded-[var(--radius-outer)]"
         style={{
-          color:'var(--text)',
-          minHeight:'var(--collapsed-h)',
-          display:'grid', gridTemplateColumns:'1fr auto', alignItems:'center', gap:'12px'
+          background:'linear-gradient(180deg, var(--panel-alt), var(--panel))',
+          border:'1px solid var(--border-weak)',
+          boxShadow:'var(--shadow-green)'
         }}
       >
-        <span className="min-w-0 flex items-center gap-3">
-          <span className="inline-grid place-items-center w-7 h-7 rounded-full"
-                style={{ background:'rgba(89,217,179,.12)', boxShadow:'0 0 0 1px rgba(89,217,179,.14) inset' }}>
-            {icon}
+        {/* Header bar (always visible; touching the box) */}
+        <button
+          onClick={()=>setOpen(v=>!v)}
+          className="w-full text-left px-4 sm:px-5"
+          style={{
+            color:'var(--text)', minHeight:'var(--collapsed-h)',
+            display:'grid', gridTemplateColumns:'1fr auto', alignItems:'center', gap:'12px'
+          }}
+        >
+          <span className="min-w-0 flex items-center gap-3">
+            <span className="inline-grid place-items-center w-7 h-7 rounded-full"
+                  style={{ background:'rgba(89,217,179,.10)' }}>
+              {icon}
+            </span>
+            <span className="min-w-0">
+              <span className="block font-semibold truncate" style={{ fontSize:'var(--fz-title)' }}>{title}</span>
+              {desc ? <span className="block text-xs truncate" style={{ color:'var(--text-muted)' }}>{desc}</span> : null}
+            </span>
           </span>
-          <span className="min-w-0">
-            <span className="block font-semibold truncate" style={{ fontSize:'var(--fz-title)' }}>{title}</span>
-            {desc ? <span className="block text-xs truncate" style={{ color:'var(--text-muted)' }}>{desc}</span> : null}
+          <span className="justify-self-end">
+            {open ? <ChevronUp className="w-4 h-4" style={{ color:'var(--text-muted)' }}/> :
+                    <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)' }}/>}
           </span>
-        </span>
-        <span className="justify-self-end">
-          {open ? <ChevronUp className="w-4 h-4" style={{ color:'var(--text-muted)' }}/> :
-                  <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)' }}/>}
-        </span>
-      </button>
+        </button>
 
-      {/* Card body with green shadow */}
-      <div className="rounded-[var(--radius-outer)] mt-[var(--s-3)]"
-           style={{ background:'var(--panel)', border:'1px solid var(--border-weak)', boxShadow:'var(--shadow-green)' }}>
+        {/* tiny divider inside the same box */}
+        <div style={{ height:1, background:'var(--border-weak)', opacity:.6 }} />
+
+        {/* Body collapses; header remains */}
         <div
           ref={wrapRef}
           className="va-collapsing"
-          style={{ height: open ? h : 0, transition: 'height 240ms var(--ease)' }}
+          style={{ height: open ? h : 0, transition: 'height 200ms var(--ease)' }}
           onTransitionEnd={() => { if (open) measure(); }}
         >
-          <div ref={innerRef} className="relative p-[var(--s-6)]">
-            {/* subtle green glow */}
-            <div
-              aria-hidden
-              className="pointer-events-none absolute -top-[28%] -left-[28%] w-[55%] h-[55%] rounded-full"
-              style={{ background:'radial-gradient(circle, var(--ring) 0%, transparent 70%)', filter:'blur(36px)' }}
-            />
+          <div ref={innerRef} className="p-[var(--s-6)]">
             {children}
           </div>
         </div>
@@ -505,21 +477,21 @@ export default function VoiceAgentSection() {
     setSaving(true); setToast('');
     try { await apiSave(activeId, data); setToast('Saved'); }
     catch { setToast('Save failed'); }
-    finally { setSaving(false); setTimeout(()=>setToast(''), 2000); }
+    finally { setSaving(false); setTimeout(()=>setToast(''), 1400); }
   }
   async function doPublish(){
     if (!activeId) { setToast('Select or create an agent'); return; }
     setPublishing(true); setToast('');
     try { await apiPublish(activeId); setToast('Published'); }
     catch { setToast('Publish failed'); }
-    finally { setPublishing(false); setTimeout(()=>setToast(''), 2000); }
+    finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
   }
   async function doCallTest(){
     if (!activeId) { setToast('Select or create an agent'); return; }
     setCalling(true); setToast('');
     try { await apiCallTest(activeId); setToast('Calling…'); }
     catch { setToast('Test call failed'); }
-    finally { setCalling(false); setTimeout(()=>setToast(''), 2500); }
+    finally { setCalling(false); setTimeout(()=>setToast(''), 1800); }
   }
 
   return (
@@ -541,7 +513,7 @@ export default function VoiceAgentSection() {
             <button
               onClick={doSave}
               disabled={saving}
-              className="inline-flex items-center gap-2 rounded-[10px] px-4 text-sm transition hover:-translate-y-[1px] disabled:opacity-60"
+              className="inline-flex items-center gap-2 rounded-[8px] px-4 text-sm transition hover:-translate-y-[1px] disabled:opacity-60"
               style={{ height:'var(--control-h)', background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)' }}
             >
               {saving ? 'Saving…' : 'Save'}
@@ -550,7 +522,7 @@ export default function VoiceAgentSection() {
             <button
               onClick={doPublish}
               disabled={publishing}
-              className="inline-flex items-center gap-2 rounded-[10px] px-4 text-sm transition hover:-translate-y-[1px] disabled:opacity-60"
+              className="inline-flex items-center gap-2 rounded-[8px] px-4 text-sm transition hover:-translate-y-[1px] disabled:opacity-60"
               style={{ height:'var(--control-h)', background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)' }}
             >
               <Rocket className="w-4 h-4" /> {publishing ? 'Publishing…' : 'Publish'}
@@ -559,8 +531,8 @@ export default function VoiceAgentSection() {
             <button
               onClick={doCallTest}
               disabled={calling}
-              className="inline-flex items-center gap-2 rounded-[10px] font-semibold select-none disabled:opacity-60"
-              style={{ height:'var(--control-h)', padding:'0 18px', background:CTA, color:'#fff', boxShadow:'0 10px 24px rgba(89,217,179,.28)' }}
+              className="inline-flex items-center gap-2 rounded-[8px] font-semibold select-none disabled:opacity-60"
+              style={{ height:'var(--control-h)', padding:'0 18px', background:CTA, color:'#fff', boxShadow:'0 6px 12px rgba(89,217,179,.18)' }}
               onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA_HOVER)}
               onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA)}
             >
@@ -569,27 +541,27 @@ export default function VoiceAgentSection() {
           </div>
 
           {toast ? (
-            <div className="mb-[var(--s-4)] inline-flex items-center gap-2 px-3 py-1.5 rounded-[10px]"
-                 style={{ background:'rgba(89,217,179,.12)', color:'var(--text)', boxShadow:'0 0 0 1px rgba(89,217,179,.20) inset' }}>
+            <div className="mb-[var(--s-4)] inline-flex items-center gap-2 px-3 py-1.5 rounded-[8px]"
+                 style={{ background:'rgba(89,217,179,.10)', color:'var(--text)', boxShadow:'0 0 0 1px rgba(89,217,179,.16) inset' }}>
               <Check className="w-4 h-4" /> {toast}
             </div>
           ) : null}
 
-          {/* KPIs */}
+          {/* KPIs (very light shadow) */}
           <div className="grid gap-[var(--s-4)] md:grid-cols-2 mb-[var(--s-6)]">
-            <div className="relative p-[var(--s-4)] rounded-[12px]"
+            <div className="relative p-[var(--s-4)] rounded-[8px]"
                  style={{ background:'var(--panel)', border:'1px solid var(--border-weak)', boxShadow:'var(--shadow-green)' }}>
               <div className="text-xs mb-[6px]" style={{ color:'var(--text-muted)' }}>Cost</div>
               <div className="font-semibold" style={{ fontSize:'var(--fz-sub)', color:'var(--text)' }}>~$0.1/min</div>
             </div>
-            <div className="relative p-[var(--s-4)] rounded-[12px]"
+            <div className="relative p-[var(--s-4)] rounded-[8px]"
                  style={{ background:'var(--panel)', border:'1px solid var(--border-weak)', boxShadow:'var(--shadow-green)' }}>
               <div className="text-xs mb-[6px]" style={{ color:'var(--text-muted)' }}>Latency</div>
               <div className="font-semibold" style={{ fontSize:'var(--fz-sub)', color:'var(--text)' }}>~1050 ms</div>
             </div>
           </div>
 
-          {/* Model */}
+          {/* Sections: header is SAME box; collapsed shows only header (≥72px) */}
           <Section
             title="Model"
             icon={<Gauge className="w-4 h-4" style={{ color: CTA }} />}
@@ -628,7 +600,7 @@ export default function VoiceAgentSection() {
               <div className="flex items-center justify-between mb-[var(--s-2)]">
                 <div className="font-medium" style={{ fontSize:'var(--fz-label)' }}>System Prompt</div>
                 <button
-                  className="inline-flex items-center gap-2 rounded-[10px] text-sm transition hover:-translate-y-[1px]"
+                  className="inline-flex items-center gap-2 rounded-[8px] text-sm transition hover:-translate-y-[1px]"
                   style={{ height:36, padding:'0 12px', background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)' }}
                   onClick={()=>set('systemPrompt')(`${data.systemPrompt}\n\n# Improved by generator`) }
                 >
@@ -644,7 +616,6 @@ export default function VoiceAgentSection() {
             </div>
           </Section>
 
-          {/* Voice */}
           <Section
             title="Voice"
             icon={<Volume2 className="w-4 h-4" style={{ color: CTA }} />}
@@ -671,11 +642,10 @@ export default function VoiceAgentSection() {
             </div>
 
             <div className="mt-[var(--s-2)] text-xs" style={{ color:'var(--text-muted)' }}>
-              Naturalness hint: voices render server-side; keep utterances short/specific for the most “human” cadence.
+              Keep utterances short/specific for the most natural cadence. (ElevenLabs mapping can be added later.)
             </div>
           </Section>
 
-          {/* Transcriber */}
           <Section
             title="Transcriber"
             icon={<Mic className="w-4 h-4" style={{ color: CTA }} />}
@@ -720,23 +690,6 @@ export default function VoiceAgentSection() {
                   options={asrModelOpts}
                 />
               </FieldShell>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-[var(--s-6)] mt-[var(--s-4)]">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="font-semibold" style={{ fontSize:'var(--fz-body)', color:'var(--text)' }}>Background Denoising Enabled</div>
-                  <div className="text-xs" style={{ color:'var(--text-muted)' }}>Filter background noise while the user is talking.</div>
-                </div>
-                <Toggle checked={data.denoise} onChange={v=>set('denoise')(v)} />
-              </div>
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="font-semibold" style={{ fontSize:'var(--fz-body)', color:'var(--text)' }}>Use Numerals</div>
-                  <div className="text-xs" style={{ color:'var(--text-muted)' }}>Convert numbers from words to digits in transcription.</div>
-                </div>
-                <Toggle checked={data.numerals} onChange={v=>set('numerals')(v)} />
-              </div>
             </div>
 
             <div className="grid grid-cols-[1fr_auto] gap-[var(--s-3)] items-center mt-[var(--s-4)]">
