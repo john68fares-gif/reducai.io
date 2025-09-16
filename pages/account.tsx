@@ -1,242 +1,424 @@
-// pages/account.tsx
+// components/voice/AssistantRail.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import Head from 'next/head';
-import Link from 'next/link';
-import { supabase } from '@/lib/supabase-client';
-import { motion, AnimatePresence } from 'framer-motion';
-import {
-  User as UserIcon, Mail, Calendar, Sun, Moon, Save, LogOut, KeyRound,
-  CheckCircle2, AlertCircle, Crown, Zap, ShieldCheck, Loader2, LockKeyhole,
-  ShieldAlert, ChevronRight, Palette, Shield, CreditCard, Box
-} from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Search, Plus, Bot, Trash2, Edit3, X, AlertTriangle, Loader2 } from 'lucide-react';
+import { AnimatePresence, motion } from 'framer-motion';
 
-/**
- * UI helpers that read from your global theme tokens.
- * No hardcoded dark-only colors anymore.
- */
-const UI = {
-  brand: 'var(--brand)',
-  brandWeak: 'var(--brand-weak)',
+/* Optional scoped storage helper (falls back to localStorage if missing) */
+type Scoped = { getJSON<T>(k:string,f:T):Promise<T>; setJSON(k:string,v:unknown):Promise<void> };
+let scopedStorageFn: undefined | (() => Promise<Scoped>);
+try { scopedStorageFn = require('@/utils/scoped-storage').scopedStorage; } catch {}
 
-  // Surfaces
-  bg: 'var(--bg)',
-  text: 'var(--text)',
-  textMuted: 'var(--text-muted)',
+/* Types */
+export type AssistantLite = { id: string; name: string; purpose?: string; createdAt?: number };
 
-  // Card/panel (match Phone Numbers / API Keys)
-  cardBg: 'var(--panel)',
-  cardBorder: '1px solid var(--border)',
-  cardShadow: 'var(--shadow-soft)',
+/* Keys */
+const STORAGE_KEY = 'agents';
+const ACTIVE_KEY  = 'va:activeId';
 
-  // Smaller “band” blocks inside cards
-  subBg: 'var(--card)',
-  subBorder: '1px solid var(--border)',
-  subShadow: 'var(--shadow-card)',
+/* Brand tokens */
+const GREEN       = '#10b981';
+const GREEN_HOVER = '#0ea473';
+const GREEN_OL30  = 'rgba(16,185,129,.30)';
+const GREEN_OL18  = 'rgba(16,185,129,.18)';
+const GREEN_OL14  = 'rgba(16,185,129,.14)';
 
-  // Soft right-side separator halo when needed
-  rightEdgeShadow: '14px 0 28px rgba(0,0,0,.08)',
-};
-
-type ThemeMode = 'dark' | 'light';
-type PlanTier = 'Free' | 'Pro';
-
-function fmtDate(iso?: string) {
-  if (!iso) return '—';
-  try { return new Date(iso).toLocaleString(); } catch { return iso; }
+/* Utils */
+function uid() {
+  return `a_${Date.now().toString(36)}_${crypto.getRandomValues(new Uint32Array(1))[0].toString(36)}`;
+}
+async function loadAssistants(): Promise<AssistantLite[]> {
+  try { if (scopedStorageFn) { const ss = await scopedStorageFn(); return await ss.getJSON<AssistantLite[]>(STORAGE_KEY, []); } } catch {}
+  try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) return JSON.parse(raw); } catch {}
+  return [];
+}
+async function saveAssistants(list: AssistantLite[]) {
+  try { if (scopedStorageFn) { const ss = await scopedStorageFn(); await ss.setJSON(STORAGE_KEY, list); } } catch {}
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); } catch {}
+}
+function writeActive(id:string){
+  try { localStorage.setItem(ACTIVE_KEY, id); } catch {}
+  try { window.dispatchEvent(new CustomEvent('assistant:active', { detail: id })); } catch {}
 }
 
-export default function AccountPage() {
-  const [booting, setBooting] = useState(true);
+/* ---------- Modal shells ---------- */
+function ModalShell({ children }:{ children:React.ReactNode }) {
+  return (
+    <div className="fixed inset-0 z-[9998] flex items-center justify-center px-4" style={{ background:'rgba(0,0,0,.60)' }}>
+      <div className="w-full max-w-[700px] rounded-[20px] overflow-hidden"
+           style={{ background:'var(--panel)', border:'1px solid var(--border)', boxShadow:'var(--shadow-soft)' }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+function ModalHeader({ icon, title, subtitle, onClose }:{
+  icon:React.ReactNode; title:string; subtitle?:string; onClose:()=>void;
+}) {
+  return (
+    <div className="flex items-center justify-between px-6 py-5" style={{ borderBottom:'1px solid var(--border)' }}>
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-xl grid place-items-center" style={{ background:'var(--brand-weak)' }}>
+          {icon}
+        </div>
+        <div className="min-w-0">
+          <div className="text-lg font-semibold" style={{ color:'var(--text)' }}>{title}</div>
+          {subtitle && <div className="text-xs" style={{ color:'var(--text-muted)' }}>{subtitle}</div>}
+        </div>
+      </div>
+      <button onClick={onClose} className="p-2 rounded hover:opacity-70"><X className="w-4 h-4" style={{ color:'var(--text)' }}/></button>
+    </div>
+  );
+}
 
-  // User
-  const [loading, setLoading] = useState(true);
-  const [userId, setUserId] = useState<string | null>(null);
-  const [userEmail, setUserEmail] = useState<string | null>(null);
-  const [userName, setUserName] = useState<string | null>(null);
-  const [userCreated, setUserCreated] = useState<string | null>(null);
-  const [userUpdated, setUserUpdated] = useState<string | null>(null);
+/* Create / Rename / Delete modals */
+function CreateModal({ open, onClose, onCreate }:{
+  open:boolean; onClose:()=>void; onCreate:(name:string)=>void;
+}) {
+  const [name,setName] = useState('');
+  useEffect(()=>{ if(open) setName(''); },[open]);
+  if(!open) return null;
+  const can = name.trim().length>1;
+  return (
+    <ModalShell>
+      <ModalHeader icon={<Plus className="w-5 h-5" style={{ color:'var(--brand)' }}/>} title="Create Assistant" onClose={onClose}/>
+      <div className="px-6 py-5">
+        <label className="block text-xs mb-1" style={{ color:'var(--text-muted)' }}>Name</label>
+        <input
+          value={name} onChange={(e)=>setName(e.target.value)}
+          className="w-full h-[44px] rounded-[14px] px-3 text-sm outline-none border"
+          style={{ background:'var(--card)', borderColor:'var(--border)', color:'var(--text)' }}
+          placeholder="e.g., Sales Bot" autoFocus
+        />
+      </div>
+      <div className="px-6 pb-6 flex gap-3">
+        <button onClick={onClose}
+                className="w-full h-[44px] rounded-[14px] font-semibold border"
+                style={{ background:'var(--card)', borderColor:'var(--border)', color:'var(--text)' }}>
+          Cancel
+        </button>
+        <button
+          disabled={!can}
+          onClick={()=> can && onCreate(name.trim())}
+          className="w-full h-[44px] rounded-[14px] font-semibold disabled:opacity-60"
+          style={{ background:GREEN, color:'#fff', fontSize:12.5 }}
+          onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=GREEN_HOVER)}
+          onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=GREEN)}
+        >
+          Create
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+function RenameModal({ open, initial, onClose, onSave }:{
+  open:boolean; initial:string; onClose:()=>void; onSave:(v:string)=>void;
+}) {
+  const [val,setVal]=useState(initial);
+  useEffect(()=>{ if(open) setVal(initial); },[open,initial]);
+  if(!open) return null;
+  const can = val.trim().length>1;
+  return (
+    <ModalShell>
+      <ModalHeader icon={<Edit3 className="w-5 h-5" style={{ color:'var(--brand)' }}/>} title="Rename Assistant" onClose={onClose}/>
+      <div className="px-6 py-5">
+        <label className="block text-xs mb-1" style={{ color:'var(--text-muted)' }}>Name</label>
+        <input value={val} onChange={(e)=>setVal(e.target.value)}
+               className="w-full h-[44px] rounded-[14px] px-3 text-sm outline-none border"
+               style={{ background:'var(--card)', borderColor:'var(--border)', color:'var(--text)' }} />
+      </div>
+      <div className="px-6 pb-6 flex gap-3">
+        <button onClick={onClose}
+                className="w-full h-[44px] rounded-[14px] font-semibold border"
+                style={{ background:'var(--card)', borderColor:'var(--border)', color:'var(--text)' }}>
+          Cancel
+        </button>
+        <button
+          disabled={!can}
+          onClick={()=> can && onSave(val.trim())}
+          className="w-full h-[44px] rounded-[14px] font-semibold disabled:opacity-60"
+          style={{ background:GREEN, color:'#fff', fontSize:12.5 }}
+          onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=GREEN_HOVER)}
+          onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=GREEN)}
+        >
+          Save
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+function ConfirmDelete({ open, name, onClose, onConfirm }:{
+  open:boolean; name?:string; onClose:()=>void; onConfirm:()=>void;
+}) {
+  if(!open) return null;
+  return (
+    <ModalShell>
+      <ModalHeader
+        icon={<AlertTriangle className="w-5 h-5" style={{ color:'var(--brand)' }}/>}
+        title="Delete Assistant" subtitle="This action cannot be undone." onClose={onClose}
+      />
+      <div className="px-6 py-5 text-sm" style={{ color:'var(--text)' }}>
+        Delete <b>“{name||'assistant'}”</b>?
+      </div>
+      <div className="px-6 pb-6 flex gap-3">
+        <button onClick={onClose}
+                className="w-full h-[44px] rounded-[14px] font-semibold border"
+                style={{ background:'var(--card)', borderColor:'var(--border)', color:'var(--text)' }}>
+          Cancel
+        </button>
+        <button onClick={onConfirm}
+                className="w-full h-[44px] rounded-[14px] font-semibold"
+                style={{ background:GREEN, color:'#fff', fontSize:12.5 }}
+                onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=GREEN_HOVER)}
+                onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=GREEN)}>
+          Delete
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
 
-  // Providers
-  const [providers, setProviders] = useState<string[]>([]);
-  const [passwordEnabled, setPasswordEnabled] = useState<boolean>(false);
-  const hasEmailPassword = providers.includes('email') || passwordEnabled;
-  const hasGoogle = providers.includes('google');
+/* ---------- Row (assistant item) ---------- */
+function Row({
+  a, active, onClick, onRename, onDelete,
+}:{
+  a:AssistantLite; active:boolean; onClick:()=>void; onRename:()=>void; onDelete:()=>void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="rail-row w-full text-left rounded-[12px] px-3 flex items-center gap-2 group transition"
+      style={{
+        minHeight: 60,
+        background: active ? `linear-gradient(0deg, ${GREEN_OL30}, ${GREEN_OL30})` : 'transparent',
+        border: '1px solid transparent',
+        color: 'var(--sidebar-text)',
+        boxShadow: active
+          ? `0 12px 28px rgba(0,0,0,.36), 0 0 0 1px ${GREEN_OL18}, 0 0 18px ${GREEN_OL18}`
+          : 'none',
+        position: 'relative',
+        overflow: 'hidden',
+      }}
+    >
+      {/* Tile avatar — NO photo, subtle inner brand glow */}
+      <div
+        className="relative w-10 h-10 rounded-md grid place-items-center shrink-0"
+        style={{
+          background:'var(--rail-avatar-bg)',
+          border:'1px solid var(--sidebar-border)',
+        }}
+      >
+        <Bot className="w-4 h-4" style={{ color:'var(--brand)' }} />
+      </div>
 
-  // Plan + usage (placeholder)
-  const [plan, setPlan] = useState<PlanTier>('Free');
-  const [usage, setUsage] = useState({ requests: 0, limit: 10000 });
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-medium truncate">{a.name}</div>
+        <div className="text-[11px] truncate" style={{ color:'var(--sidebar-muted)' }}>
+          {a.purpose || '—'}
+        </div>
+      </div>
 
-  // Theme
-  const [theme, setTheme] = useState<ThemeMode>('dark');
-  const [savingTheme, setSavingTheme] = useState(false);
-  const [saveMsg, setSaveMsg] = useState<'idle' | 'ok' | 'err'>('idle');
+      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button
+          onClick={(e)=>{ e.stopPropagation(); onRename(); }}
+          className="px-2 h-[30px] rounded-[8px] border"
+          style={{ background:'var(--rail-chip-bg)', borderColor:'var(--rail-chip-border)' }}
+          aria-label="Rename"
+        >
+          <Edit3 className="w-4 h-4" />
+        </button>
+        <button
+          onClick={(e)=>{ e.stopPropagation(); onDelete(); }}
+          className="px-2 h-[30px] rounded-[8px] border"
+          style={{ background:'var(--rail-chip-bg)', borderColor:'var(--rail-chip-border)' }}
+          aria-label="Delete"
+        >
+          <Trash2 className="w-4 h-4" />
+        </button>
+      </div>
 
-  // Password flows
-  const [resetLoading, setResetLoading] = useState(false);
-  const [resetMsg, setResetMsg] = useState<'idle' | 'sent' | 'err'>('idle');
-  const [createPwLoading, setCreatePwLoading] = useState(false);
-  const [createPwMsg, setCreatePwMsg] = useState<'idle' | 'ok' | 'err'>('idle');
-  const [pw1, setPw1] = useState('');
-  const [pw2, setPw2] = useState('');
+      {/* Hover effect (soft) */}
+      <style jsx>{`
+        .rail-row:hover{
+          background: linear-gradient(0deg, ${GREEN_OL14}, ${GREEN_OL14});
+          box-shadow: 0 10px 24px rgba(0,0,0,.32), 0 0 0 1px ${GREEN_OL14}, 0 0 14px ${GREEN_OL14};
+        }
+      `}</style>
+    </button>
+  );
+}
 
-  const pwStrength = useMemo(() => {
-    let s = 0;
-    if (pw1.length >= 8) s++;
-    if (/[A-Z]/.test(pw1)) s++;
-    if (/[0-9]/.test(pw1)) s++;
-    if (/[^A-Za-z0-9]/.test(pw1)) s++;
-    return s;
-  }, [pw1]);
+/* ---------- Main rail ---------- */
+export default function AssistantRail() {
+  const [assistants,setAssistants] = useState<AssistantLite[]>([]);
+  const [activeId,setActiveId] = useState('');
+  const [overlay,setOverlay] = useState(false); // full-screen loader
+  const [q,setQ] = useState('');
+  const [createOpen,setCreateOpen] = useState(false);
+  const [renId,setRenId] = useState<string|null>(null);
+  const [delId,setDelId] = useState<string|null>(null);
 
-  // Fetch user (unchanged logic)
-  useEffect(() => {
-    let unsub: any;
-    (async () => {
-      const { data: { user } } = await supabase.auth.getUser();
+  /* initial load + restore selection */
+  useEffect(()=>{ (async()=>{
+    const list = await loadAssistants();
+    setAssistants(list);
+    const savedActive = (()=>{ try { return localStorage.getItem(ACTIVE_KEY) || ''; } catch { return ''; } })();
+    const firstId = savedActive && list.find(a=>a.id===savedActive) ? savedActive : (list[0]?.id || '');
+    setActiveId(firstId);
+    if (firstId) writeActive(firstId);
+  })(); },[]);
 
-      setUserId(user?.id ?? null);
-      setUserEmail(user?.email ?? null);
-      setUserName((user?.user_metadata as any)?.full_name ?? user?.user_metadata?.name ?? null);
-      setUserCreated(user?.created_at ?? null);
-      setUserUpdated(user?.updated_at ?? null);
+  /* filter */
+  const filtered = useMemo(()=> {
+    const s=q.trim().toLowerCase();
+    return !s?assistants:assistants.filter(a=>a.name.toLowerCase().includes(s) || (a.purpose||'').toLowerCase().includes(s));
+  },[assistants,q]);
 
-      const ids = (user as any)?.identities || [];
-      const provs = Array.from(new Set(ids.map((i: any) => i?.provider).filter(Boolean)));
-      setProviders(provs);
+  /* selection with AccountPage-style full-screen overlay */
+  function select(id:string){
+    setOverlay(true);
+    setActiveId(id);
+    writeActive(id);
+    window.setTimeout(()=> setOverlay(false), 520); // same feel as account.tsx booting delay
+  }
 
-      const pwdMeta = (user?.user_metadata as any)?.password_enabled;
-      setPasswordEnabled(Boolean(pwdMeta));
-
-      const p = (user?.user_metadata as any)?.plan_tier as PlanTier | undefined;
-      if (p && (p === 'Free' || p === 'Pro')) setPlan(p);
-
-      const u = (user?.user_metadata as any)?.requests_used;
-      setUsage({ requests: typeof u === 'number' ? u : 0, limit: 10000 });
-
-      setLoading(false);
-      setTimeout(() => setBooting(false), 420);
-
-      unsub = supabase.auth.onAuthStateChange((_e, session) => {
-        const u2 = session?.user;
-        setUserId(u2?.id ?? null);
-        setUserEmail(u2?.email ?? null);
-        setUserName((u2?.user_metadata as any)?.full_name ?? u2?.user_metadata?.name ?? null);
-        setUserCreated(u2?.created_at ?? null);
-        setUserUpdated(u2?.updated_at ?? null);
-
-        const ids2 = (u2 as any)?.identities || [];
-        const provs2 = Array.from(new Set(ids2.map((i: any) => i?.provider).filter(Boolean)));
-        setProviders(provs2);
-
-        const pwdMeta2 = (u2?.user_metadata as any)?.password_enabled;
-        setPasswordEnabled(Boolean(pwdMeta2));
-
-        const pt = (u2?.user_metadata as any)?.plan_tier as PlanTier | undefined;
-        if (pt && (pt === 'Free' || pt === 'Pro')) setPlan(pt);
-      });
-    })();
-    return () => unsub?.data?.subscription?.unsubscribe?.();
-  }, []);
-
-  // Theme init + guard (unchanged)
-  useEffect(() => {
-    try {
-      const ls = (localStorage.getItem('ui:theme') as ThemeMode) || 'dark';
-      setTheme(ls === 'light' ? 'light' : 'dark');
-      document.documentElement.dataset.theme = ls === 'light' ? 'light' : 'dark';
-    } catch {}
-    try {
-      const owner = localStorage.getItem('workspace:owner');
-      if (userId && owner && owner !== userId) localStorage.clear();
-      if (userId) localStorage.setItem('workspace:owner', userId);
-    } catch {}
-  }, [userId]);
-
-  const displayName = useMemo(() => {
-    if (userName && userName.trim()) return userName.trim();
-    if (userEmail && userEmail.includes('@')) return userEmail.split('@')[0];
-    return 'Account';
-  }, [userName, userEmail]);
-
-  const saveTheme = async () => {
-    setSavingTheme(true);
-    setSaveMsg('idle');
-    try {
-      document.documentElement.dataset.theme = theme;
-      localStorage.setItem('ui:theme', theme);
-      const { error } = await supabase.auth.updateUser({ data: { ui_theme: theme } });
-      if (error) throw error;
-      setSaveMsg('ok');
-    } catch {
-      setSaveMsg('err');
-    } finally {
-      setSavingTheme(false);
-      setTimeout(() => setSaveMsg('idle'), 1800);
+  /* CRUD */
+  function addAssistant(name:string){
+    const a:AssistantLite = { id: uid(), name, createdAt: Date.now(), purpose:'' };
+    const next=[a, ...assistants];
+    setAssistants(next); saveAssistants(next);
+    select(a.id);
+    setCreateOpen(false);
+  }
+  function saveRename(name:string){
+    const next=assistants.map(x=> x.id===renId ? {...x, name} : x);
+    setAssistants(next); saveAssistants(next); setRenId(null);
+  }
+  function confirmDelete(){
+    const next = assistants.filter(x=> x.id!==delId);
+    const deletedActive = activeId===delId;
+    setAssistants(next); saveAssistants(next);
+    if (deletedActive) {
+      const nid = next[0]?.id || '';
+      setActiveId(nid); if (nid) writeActive(nid);
     }
-  };
+    setDelId(null);
+  }
 
-  const sendReset = async () => {
-    if (!userEmail) return;
-    setResetLoading(true);
-    setResetMsg('idle');
-    try {
-      const { error } = await supabase.auth.resetPasswordForEmail(userEmail, {
-        redirectTo: `${window.location.origin}/auth/callback`,
-      });
-      if (error) throw error;
-      setResetMsg('sent');
-    } catch {
-      setResetMsg('err');
-    } finally {
-      setResetLoading(false);
-      setTimeout(() => setResetMsg('idle'), 3200);
-    }
-  };
-
-  const refreshProviders = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    const ids = (user as any)?.identities || [];
-    const provs = Array.from(new Set(ids.map((i: any) => i?.provider).filter(Boolean)));
-    setProviders(provs);
-    const pwdMeta = (user?.user_metadata as any)?.password_enabled;
-    setPasswordEnabled(Boolean(pwdMeta));
-  };
-
-  const createPassword = async () => {
-    if (!pw1 || pw1 !== pw2) {
-      setCreatePwMsg('err'); setTimeout(() => setCreatePwMsg('idle'), 2000);
-      return;
-    }
-    setCreatePwLoading(true); setCreatePwMsg('idle');
-    try {
-      const { error } = await supabase.auth.updateUser({ password: pw1 });
-      if (error) throw error;
-      await supabase.auth.updateUser({ data: { password_enabled: true } });
-      setPasswordEnabled(true);
-      await refreshProviders();
-      setCreatePwMsg('ok'); setPw1(''); setPw2('');
-    } catch {
-      setCreatePwMsg('err');
-    } finally {
-      setCreatePwLoading(false);
-      setTimeout(() => setCreatePwMsg('idle'), 2800);
-    }
-  };
-
-  const signOut = async () => { try { await supabase.auth.signOut(); } catch {} };
+  const renName = assistants.find(a=>a.id===renId)?.name || '';
+  const delName = assistants.find(a=>a.id===delId)?.name;
 
   return (
     <>
-      <Head><title>Account • Reduc AI</title></Head>
+      <div
+        className="assistant-rail px-3 py-3 h-full"
+        style={{
+          background:'var(--sidebar-bg)',
+          borderRight:'1px solid rgba(255,255,255,.14)',
+          color:'var(--sidebar-text)',
+        }}
+      >
+        {/* Create Assistant */}
+        <button
+          type="button"
+          className="w-full inline-flex items-center justify-center gap-2 rounded-[12px] font-semibold mb-3"
+          style={{ height: 38, background: GREEN, color: '#fff', fontSize: 12.5 }}
+          onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=GREEN_HOVER)}
+          onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=GREEN)}
+          onClick={()=> setCreateOpen(true)}
+        >
+          <Plus className="w-4 h-4" /> Create Assistant
+        </button>
 
-      {/* Loader (theme-aware) */}
+        {/* Search — ultra-thin hairline */}
+        <div className="relative mb-3">
+          <input
+            value={q}
+            onChange={(e)=>setQ(e.target.value)}
+            placeholder="Search assistants"
+            className="w-full h-[32px] rounded-[10px] pl-8 pr-3 text-sm outline-none"
+            style={{
+              background:'var(--rail-input-bg)',
+              border: '0.25px solid var(--rail-input-border)',
+              boxShadow: '0 0 0 0.25px var(--rail-input-border)',
+              color:'var(--rail-input-text)',
+            }}
+          />
+          <Search
+            className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2"
+            style={{ color:'var(--rail-input-muted)' }}
+          />
+        </div>
+
+        <div className="text-[11px] font-semibold tracking-[.12em] mb-2" style={{ color:'var(--sidebar-muted)' }}>
+          ASSISTANTS
+        </div>
+
+        {/* List */}
+        <div className="overflow-auto" style={{ maxHeight:'calc(100% - 118px)' }}>
+          <div className="space-y-1.5">
+            <AnimatePresence initial={false}>
+              {filtered.map(a=>(
+                <motion.div key={a.id} initial={{ opacity:0, y:6 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:-6 }}>
+                  <Row
+                    a={a}
+                    active={a.id===activeId}
+                    onClick={()=>select(a.id)}
+                    onRename={()=>setRenId(a.id)}
+                    onDelete={()=>setDelId(a.id)}
+                  />
+                </motion.div>
+              ))}
+            </AnimatePresence>
+
+            {filtered.length===0 && (
+              <div className="text-xs py-8 text-center" style={{ color:'var(--sidebar-muted)' }}>
+                No assistants found.
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Modals */}
+        <CreateModal open={createOpen} onClose={()=>setCreateOpen(false)} onCreate={addAssistant} />
+        <RenameModal open={!!renId} initial={renName} onClose={()=>setRenId(null)} onSave={saveRename} />
+        <ConfirmDelete open={!!delId} name={delName} onClose={()=>setDelId(null)} onConfirm={confirmDelete} />
+
+        {/* Rail theme tokens */}
+        <style jsx>{`
+          /* Light */
+          :global(:root:not([data-theme="dark"])) .assistant-rail{
+            --rail-input-bg: #fff;
+            --rail-input-border: rgba(0,0,0,.18);
+            --rail-input-text: #0f172a;
+            --rail-input-muted: #64748b;
+
+            --rail-avatar-bg: linear-gradient(135deg,#f8fafc 0%,#eef2f7 100%);
+            --rail-chip-bg: #fff;
+            --rail-chip-border: rgba(0,0,0,.12);
+          }
+          /* Dark */
+          :global([data-theme="dark"]) .assistant-rail{
+            --rail-input-bg: var(--card);
+            --rail-input-border: rgba(255,255,255,.78);
+            --rail-input-text: var(--text);
+            --rail-input-muted: var(--text-muted);
+
+            --rail-avatar-bg: linear-gradient(135deg,#0f1214 0%,#11181a 100%);
+            --rail-chip-bg: var(--card);
+            --rail-chip-border: var(--border);
+          }
+          .assistant-rail input::placeholder{ color: var(--rail-input-muted); opacity: .9; }
+        `}</style>
+      </div>
+
+      {/* Full-screen loader — same pattern as pages/account.tsx */}
       <AnimatePresence>
-        {(booting || loading) && (
+        {overlay && (
           <motion.div
-            key="boot"
-            className="fixed inset-0 z-50 flex items-center justify-center"
+            key="assistant-switch"
+            className="fixed inset-0 z-[9999] flex items-center justify-center"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             style={{
               background:
@@ -248,427 +430,16 @@ export default function AccountPage() {
               initial={{ scale: 0.96, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               className="px-6 py-5 rounded-2xl border"
-              style={{ border: '1px solid var(--border)', background: UI.cardBg, boxShadow: UI.cardShadow }}
+              style={{ border: '1px solid var(--border)', background: 'var(--panel)', boxShadow: 'var(--shadow-soft)', color:'var(--text)' }}
             >
-              <div className="flex items-center gap-3" style={{ color: 'var(--text)' }}>
+              <div className="flex items-center gap-3">
                 <Loader2 className="w-5 h-5 animate-spin" />
-                <div className="text-sm">Loading your settings…</div>
+                <div className="text-sm">Loading assistant…</div>
               </div>
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
-
-      {/* Page */}
-      <div className="min-h-screen" style={{ background: UI.bg, color: UI.text }}>
-        <main className="w-full max-w-[1100px] mx-auto px-6 pt-10 pb-24 grid grid-cols-1 md:grid-cols-[260px,1fr] gap-8">
-
-          {/* Left nav */}
-          <aside className="md:sticky md:top-10 h-fit">
-            <div className="text-xl font-semibold mb-4">Settings</div>
-            <nav className="space-y-2">
-              <SettingsLink icon={<UserIcon className="w-4 h-4" />} label="Profile" href="#profile" />
-              <SettingsLink icon={<CreditCard className="w-4 h-4" />} label="Plan & Billing" href="#billing" />
-            </nav>
-          </aside>
-
-          {/* Right content */}
-          <section className="space-y-10">
-
-            {/* Profile */}
-            <div id="profile" className="scroll-mt-16">
-              <Header icon={<UserIcon className="w-5 h-5" />} title="Profile" subtitle="Manage your account info, theme, and security" />
-
-              {/* Profile Card */}
-              <Card>
-                <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
-                  <div className="flex items-center gap-4 mb-6">
-                    <div className="w-12 h-12 rounded-full grid place-items-center"
-                         style={{ background: 'color-mix(in oklab, var(--brand) 25%, transparent)' }}>
-                      <UserIcon className="w-6 h-6" style={{ color: 'var(--text)' }} />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-lg font-semibold truncate">
-                        {loading ? <span className="inline-block h-5 w-40 rounded skeleton" /> : displayName}
-                      </div>
-                      <div className="text-sm truncate" style={{ color: UI.textMuted }}>
-                        {loading ? <span className="inline-block h-4 w-56 rounded skeleton" /> : (userEmail || '—')}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="grid sm:grid-cols-3 gap-3 text-sm" style={{ color: 'var(--text)' }}>
-                    <InfoRow icon={<Mail className="w-4 h-4" />}     label="Email"   value={userEmail || '—'} />
-                    <InfoRow icon={<Calendar className="w-4 h-4" />} label="Created" value={fmtDate(userCreated || undefined)} />
-                    <InfoRow icon={<Calendar className="w-4 h-4" />} label="Updated" value={fmtDate(userUpdated || undefined)} />
-                  </div>
-
-                  <div className="mt-6 flex flex-wrap gap-3">
-                    <button
-                      onClick={signOut}
-                      className="inline-flex items-center gap-2 px-4 py-2 rounded-[10px] border transition hover:translate-y-[-1px]"
-                      style={{ borderColor: 'var(--border)', background: 'var(--card)', color: 'var(--text)' }}
-                    >
-                      <LogOut className="w-4 h-4" />
-                      Sign out
-                    </button>
-
-                    <div className="inline-flex items-center gap-2 text-xs" style={{ color: UI.textMuted }}>
-                      <ShieldCheck className="w-4 h-4" />
-                      Your workspace is private. After sign-in, everything starts from zero in your own space.
-                    </div>
-                  </div>
-                </motion.div>
-              </Card>
-
-              {/* Appearance */}
-              <SubHeader icon={<Palette className="w-4 h-4" />} title="Appearance" subtitle="Customize how the app looks" />
-              <Card>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <ThemeTile label="Dark"  active={theme === 'dark'}  icon={<Moon className="w-4 h-4" />} onClick={() => setTheme('dark')} />
-                  <ThemeTile label="Light" active={theme === 'light'} icon={<Sun  className="w-4 h-4" />} onClick={() => setTheme('light')} />
-                </div>
-
-                <div className="mt-6 flex items-center gap-3">
-                  <button
-                    onClick={saveTheme}
-                    disabled={savingTheme}
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-[10px] border transition hover:translate-y-[-1px] disabled:opacity-60"
-                    style={{ borderColor: 'var(--border)', background: 'var(--card)', color: 'var(--text)' }}
-                  >
-                    {savingTheme ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                    Save theme
-                  </button>
-
-                  <AnimatePresence mode="popLayout">
-                    {saveMsg === 'ok' && (
-                      <motion.span initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} className="inline-flex items-center gap-1" style={{ color: 'color-mix(in oklab, var(--brand) 75%, var(--text))' }}>
-                        <CheckCircle2 className="w-4 h-4" /> Saved
-                      </motion.span>
-                    )}
-                    {saveMsg === 'err' && (
-                      <motion.span initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} className="inline-flex items-center gap-1" style={{ color: 'crimson' }}>
-                        <AlertCircle className="w-4 h-4" /> Failed
-                      </motion.span>
-                    )}
-                  </AnimatePresence>
-                </div>
-              </Card>
-
-              {/* Account & Security */}
-              <SubHeader icon={<Shield className="w-4 h-4" />} title="Account & Security" subtitle="Sign-in methods and password" />
-              <Card>
-                <div className="grid gap-4">
-                  {/* Sign-in methods */}
-                  <Band>
-                    <div className="text-sm font-semibold mb-2">Sign-in methods</div>
-                    <div className="flex flex-wrap items-center gap-2 text-xs" style={{ color: 'var(--text)' }}>
-                      {hasEmailPassword ? (
-                        <Badge>EMAIL &amp; PASSWORD</Badge>
-                      ) : (
-                        <BadgeMuted>
-                          EMAIL &amp; PASSWORD <span className="ml-1 px-1 rounded" style={{ background: 'color-mix(in oklab, var(--brand) 60%, transparent)', color: 'var(--text)' }}>NOT SET</span>
-                        </BadgeMuted>
-                      )}
-                      {hasGoogle && <Badge>GOOGLE</Badge>}
-                    </div>
-                  </Band>
-
-                  {/* Create password */}
-                  {!hasEmailPassword && (
-                    <Band accent>
-                      <div className="flex items-center gap-2 mb-2">
-                        <LockKeyhole className="w-4 h-4" />
-                        <div className="text-sm font-semibold">Create a password</div>
-                      </div>
-                      <p className="text-xs mb-3" style={{ color: UI.textMuted }}>
-                        Add a password so you can also sign in with email + password.
-                      </p>
-
-                      <div className="grid gap-3">
-                        <input
-                          type="password"
-                          className="w-full rounded-[10px] px-3 py-2 border outline-none"
-                          style={{ background: 'var(--card)', borderColor: 'var(--border)', color: 'var(--text)' }}
-                          placeholder="New password"
-                          value={pw1}
-                          onChange={(e) => setPw1(e.target.value)}
-                        />
-                        <input
-                          type="password"
-                          className="w-full rounded-[10px] px-3 py-2 border outline-none"
-                          style={{ background: 'var(--card)', borderColor: 'var(--border)', color: 'var(--text)' }}
-                          placeholder="Confirm password"
-                          value={pw2}
-                          onChange={(e) => setPw2(e.target.value)}
-                        />
-                        <div className="h-1 w-full rounded overflow-hidden" style={{ background: 'var(--border)' }}>
-                          <div className="h-full" style={{ width: `${(pwStrength / 4) * 100}%`, background: 'linear-gradient(90deg, var(--brand), color-mix(in oklab, var(--brand) 50%, white))', transition: 'width 220ms var(--ease)' }} />
-                        </div>
-
-                        <div className="flex items-center gap-3">
-                          <button
-                            onClick={createPassword}
-                            disabled={createPwLoading}
-                            className="inline-flex items-center gap-2 px-4 py-2 rounded-[10px] border transition hover:translate-y-[-1px] disabled:opacity-60"
-                            style={{ borderColor: 'var(--border)', background: 'var(--card)', color: 'var(--text)' }}
-                          >
-                            {createPwLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
-                            Create password
-                          </button>
-
-                          <AnimatePresence>
-                            {createPwMsg === 'ok' && (
-                              <motion.span initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} className="inline-flex items-center gap-1" style={{ color: 'color-mix(in oklab, var(--brand) 75%, var(--text))' }}>
-                                <CheckCircle2 className="w-4 h-4" /> Saved
-                              </motion.span>
-                            )}
-                            {createPwMsg === 'err' && (
-                              <motion.span initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} className="inline-flex items-center gap-1" style={{ color: 'crimson' }}>
-                                <ShieldAlert className="w-4 h-4" /> Check passwords
-                              </motion.span>
-                            )}
-                          </AnimatePresence>
-                        </div>
-                      </div>
-                    </Band>
-                  )}
-
-                  {/* Change password */}
-                  {hasEmailPassword && (
-                    <Band>
-                      <div className="flex items-center gap-2 mb-1">
-                        <LockKeyhole className="w-4 h-4" />
-                        <div className="text-sm font-semibold">Change password</div>
-                      </div>
-                      <p className="text-xs mb-3" style={{ color: UI.textMuted }}>
-                        We’ll send a secure link to your email to update your password.
-                      </p>
-                      <div className="flex items-center gap-3">
-                        <button
-                          onClick={sendReset}
-                          disabled={!userEmail || resetLoading}
-                          className="inline-flex items-center gap-2 px-4 py-2 rounded-[10px] border transition hover:translate-y-[-1px] disabled:opacity-60"
-                          style={{ borderColor: 'var(--border)', background: 'var(--card)', color: 'var(--text)' }}
-                        >
-                          {resetLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
-                          Send reset link
-                        </button>
-
-                        <AnimatePresence>
-                          {resetMsg === 'sent' && (
-                            <motion.span initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} className="inline-flex items-center gap-1" style={{ color: 'color-mix(in oklab, var(--brand) 75%, var(--text))' }}>
-                              <CheckCircle2 className="w-4 h-4" /> Sent
-                            </motion.span>
-                          )}
-                          {resetMsg === 'err' && (
-                            <motion.span initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} className="inline-flex items-center gap-1" style={{ color: 'crimson' }}>
-                              <AlertCircle className="w-4 h-4" /> Failed
-                            </motion.span>
-                          )}
-                        </AnimatePresence>
-                      </div>
-                    </Band>
-                  )}
-                </div>
-              </Card>
-            </div>
-
-            {/* Plan & Billing */}
-            <div id="billing" className="scroll-mt-16">
-              <Header icon={<Box className="w-5 h-5" />} title="Current Plan" subtitle="Your current subscription plan" />
-              <Card>
-                <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className="w-10 h-10 rounded-xl grid place-items-center"
-                         style={{ background: 'color-mix(in oklab, var(--brand) 18%, transparent)' }}>
-                      <Crown className="w-5 h-5" style={{ color: 'var(--brand)' }} />
-                    </div>
-                    <div>
-                      <div className="text-lg font-semibold" style={{ color: 'var(--text)' }}>Plan & Billing</div>
-                      <div className="text-sm" style={{ color: UI.textMuted }}>
-                        Current plan: <span className="font-semibold" style={{ color: 'var(--text)' }}>{plan}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="text-xs mb-4" style={{ color: UI.textMuted }}>
-                    Usage: {usage.requests.toLocaleString()} / {usage.limit.toLocaleString()} requests
-                  </div>
-
-                  <div className="text-xs mb-6 flex items-center gap-2" style={{ color: UI.textMuted }}>
-                    <ShieldCheck className="w-4 h-4" /> Free is demo-only. Upgrade to Pro for full features.
-                  </div>
-
-                  <div className="flex flex-wrap gap-3">
-                    <Link
-                      href="/account/pricing"
-                      className="inline-flex items-center gap-2 px-5 py-2 rounded-[10px] border hover:translate-y-[-1px]"
-                      style={{ borderColor: 'var(--border)', background: 'var(--card)', color: 'var(--text)' }}
-                    >
-                      View pricing <ChevronRight className="w-4 h-4" />
-                    </Link>
-
-                    {plan !== 'Pro' && (
-                      <a
-                        href="https://buy.stripe.com/3cI7sLgWz0zb0uT5hrgUM00"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-2 px-5 py-2 rounded-[10px] border font-semibold hover:translate-y-[-1px]"
-                        style={{ borderColor: 'var(--border)', background: 'color-mix(in oklab, var(--brand) 8%, var(--card))', color: 'var(--text)' }}
-                      >
-                        <Zap className="w-4 h-4" /> Upgrade to Pro (€19.99/mo)
-                      </a>
-                    )}
-                  </div>
-                </motion.div>
-              </Card>
-            </div>
-
-          </section>
-        </main>
-      </div>
-
-      {/* subtle right-edge separation like the sidebar uses in dark mode */}
-      <style jsx>{`
-        main { box-shadow: ${UI.rightEdgeShadow}; }
-        .skeleton {
-          background: linear-gradient(90deg, var(--card) 25%, var(--panel) 37%, var(--card) 63%);
-          background-size: 200% 100%;
-          animation: shimmer 1.2s linear infinite;
-          display: inline-block;
-        }
-        @keyframes shimmer { from { background-position: -200% 0; } to { background-position: 200% 0; } }
-      `}</style>
     </>
-  );
-}
-
-/* ---------- small building blocks (theme-aware) ---------- */
-
-function Header({ icon, title, subtitle }:{ icon: React.ReactNode; title: string; subtitle?: string }) {
-  return (
-    <div className="mb-3">
-      <div className="flex items-center gap-2 text-[17px] font-semibold" style={{ color: 'var(--text)' }}>
-        <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg border"
-              style={{ borderColor:'var(--border)', background:'var(--card)' }}>
-          {icon}
-        </span>
-        <span>{title}</span>
-      </div>
-      {subtitle && <div className="text-sm ml-10 -mt-1" style={{ color: 'var(--text-muted)' }}>{subtitle}</div>}
-    </div>
-  );
-}
-
-function SubHeader({ icon, title, subtitle }:{ icon: React.ReactNode; title: string; subtitle?: string }) {
-  return (
-    <div className="mt-8 mb-3">
-      <div className="flex items-center gap-2 text-sm font-semibold" style={{ color: 'var(--text)' }}>
-        <span className="inline-flex items-center justify-center w-6 h-6 rounded-md border"
-              style={{ borderColor:'var(--border)', background:'var(--card)' }}>
-          {icon}
-        </span>
-        <span>{title}</span>
-      </div>
-      {subtitle && <div className="text-xs ml-8 mt-1" style={{ color: 'var(--text-muted)' }}>{subtitle}</div>}
-    </div>
-  );
-}
-
-function Card({ children }: { children: React.ReactNode }) {
-  return (
-    <motion.section
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.28 }}
-      className="rounded-[18px] p-6"
-      style={{ background: UI.cardBg, border: UI.cardBorder, boxShadow: UI.cardShadow }}
-    >
-      {children}
-    </motion.section>
-  );
-}
-
-function Band({ children, accent = false }:{ children: React.ReactNode; accent?: boolean }) {
-  return (
-    <div
-      className="rounded-[12px] p-4"
-      style={{
-        background: accent ? 'color-mix(in oklab, var(--brand) 6%, var(--card))' : UI.subBg,
-        border: accent ? `1px solid color-mix(in oklab, var(--brand) 35%, var(--border))` : UI.subBorder,
-        boxShadow: UI.subShadow,
-        color: 'var(--text)',
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-function InfoRow({ icon, label, value }: { icon: React.ReactNode; label: string; value: React.ReactNode }) {
-  return (
-    <div className="flex items-center gap-2 text-sm">
-      {icon}
-      <span className="w-28 shrink-0" style={{ color: 'var(--text-muted)' }}>{label}</span>
-      <span className="truncate" style={{ color: 'var(--text)' }}>{value}</span>
-    </div>
-  );
-}
-
-function ThemeTile({ label, active, onClick, icon }: { label: string; active: boolean; onClick: () => void; icon: React.ReactNode; }) {
-  return (
-    <motion.button
-      whileHover={{ y: -1 }}
-      whileTap={{ scale: 0.98 }}
-      onClick={onClick}
-      className="rounded-[14px] p-4 text-left transition-all"
-      style={{
-        background: active ? 'color-mix(in oklab, var(--brand) 8%, var(--card))' : 'var(--card)',
-        border: `1px solid ${active ? 'color-mix(in oklab, var(--brand) 30%, var(--border))' : 'var(--border)'}`,
-        boxShadow: active ? 'inset 0 0 14px color-mix(in oklab, var(--brand) 14%, transparent), var(--shadow-card)' : 'var(--shadow-card)',
-        color: 'var(--text)',
-      }}
-    >
-      <div className="flex items-center gap-2">
-        <div className="w-8 h-8 rounded-[10px] grid place-items-center" style={{ background: 'var(--panel)', border: '1px solid var(--border)' }}>
-          {icon}
-        </div>
-        <div className="font-semibold">{label}</div>
-      </div>
-      <div className="text-xs mt-2" style={{ color: 'var(--text-muted)' }}>
-        {label === 'Light' ? 'Bright backgrounds and dark text.' : 'Dim backgrounds and light text.'}
-      </div>
-    </motion.button>
-  );
-}
-
-function SettingsLink({ icon, label, href }: { icon: React.ReactNode; label: string; href: string; }) {
-  return (
-    <a
-      href={href}
-      className="w-full flex items-center justify-between rounded-[12px] px-3 py-2 border hover:translate-y-[-1px] transition"
-      style={{ borderColor: 'var(--border)', background: 'var(--card)', color: 'var(--text)' }}
-    >
-      <span className="flex items-center gap-2 text-sm">{icon}{label}</span>
-      <ChevronRight className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
-    </a>
-  );
-}
-
-function Badge({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="px-2.5 py-1 rounded-md border text-[11px] uppercase tracking-wide"
-      style={{ borderColor: 'color-mix(in oklab, var(--brand) 35%, var(--border))', background: 'color-mix(in oklab, var(--brand) 8%, var(--card))', color: 'var(--text)' }}>
-      {children}
-    </span>
-  );
-}
-function BadgeMuted({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="px-2.5 py-1 rounded-md border text-[11px] uppercase tracking-wide"
-      style={{ borderColor: 'var(--border)', background: 'var(--card)', color: 'var(--text-muted)' }}>
-      {children}
-    </span>
   );
 }
