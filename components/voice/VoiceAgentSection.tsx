@@ -5,8 +5,9 @@ import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 're
 import dynamic from 'next/dynamic';
 import { createPortal } from 'react-dom';
 import {
-  Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Phone, Rocket, Search, Check, Lock, X
+  Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Phone, Rocket, Search, Check, Lock, X, KeyRound
 } from 'lucide-react';
+import { scopedStorage } from '@/utils/scoped-storage';
 
 /* ───────────────── Dynamic rail ───────────────── */
 const AssistantRail = dynamic(
@@ -28,55 +29,65 @@ const ACTIVE_KEY = 'va:activeId';
 const CTA        = '#59d9b3';
 const CTA_HOVER  = '#54cfa9';
 
+const LS_KEYS = 'apiKeys.v1';
+const LS_SELECTED = 'apiKeys.selectedId';
+
 const Tokens = () => (
   <style jsx global>{`
     .va-scope{
-      --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-6: 24px; --s-8: 32px;
-      --radius-outer: 10px;
+      --s-1: 6px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 20px; --s-6: 24px;
+      --radius-outer: 12px;
       --radius-inner: 12px;
       --control-h: 44px;
-      --collapsed-h: 72px;
+      --header-h: 82px;                 /* taller header */
+      --collapsed-h: var(--header-h);
       --fz-title: 18px; --fz-sub: 15px; --fz-body: 14px; --fz-label: 12.5px;
       --lh-body: 1.45; --ease: cubic-bezier(.22,.61,.36,1);
 
-      --panel: #101314;
-      --panel-alt: #0e1212;
-      --border-weak: rgba(255,255,255,.06);
-      --ring: rgba(89,217,179,.10);
+      --panel: #0f1314;
+      --panel-alt: #0d1112;
+      --border-weak: rgba(255,255,255,.08);
 
-      --input-bg: #0e1112;
-      --input-border: rgba(255,255,255,.12);
-      --input-shadow: 0 10px 28px rgba(0,0,0,.22), 0 0 0 1px rgba(89,217,179,.06);
+      --input-bg: #101314;
+      --input-border: rgba(255,255,255,.16);
+      --input-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 12px 30px rgba(0,0,0,.38);
 
-      --menu-bg: #0f1314;
-      --menu-border: rgba(255,255,255,.12);
-      --menu-shadow: 0 26px 60px rgba(0,0,0,.46), 0 0 0 1px rgba(89,217,179,.10);
+      --menu-bg: #101314;
+      --menu-border: rgba(255,255,255,.16);
+      --menu-shadow: 0 42px 110px rgba(0,0,0,.62), 0 0 0 1px rgba(0,0,0,.35), 0 0 0 1px rgba(0,255,194,.10);
 
-      --text: #eaf8f3; --text-muted: rgba(234,248,243,.66);
+      --text: #eaf8f3; --text-muted: rgba(234,248,243,.62);
       --bg: #0b0e0f;
 
-      /* bigger, softer green glow */
-      --shadow-green: 0 28px 80px rgba(89,217,179,.18), 0 8px 24px rgba(0,0,0,.35);
+      /* better ambient placement: wide, soft base + inner lift */
+      --shadow-green: 0 36px 120px rgba(89,217,179,.22), 0 10px 26px rgba(0,0,0,.45);
     }
+    .va-title-chip{
+      color: rgba(234,248,243,.58);
+      border: 1px dashed rgba(234,248,243,.14);
+      background: linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,0));
+    }
+
     :root:not([data-theme="dark"]) .va-scope{
-      --panel: #ffffff; --panel-alt: #ffffff; --border-weak: rgba(0,0,0,.08);
-      --ring: rgba(89,217,179,.08);
-      --input-bg: #ffffff; --input-border: rgba(0,0,0,.10);
-      --input-shadow: 0 12px 28px rgba(0,0,0,.14), 0 0 0 1px rgba(0,0,0,.03);
-      --menu-bg: #ffffff; --menu-border: rgba(0,0,0,.10);
-      --menu-shadow: 0 26px 60px rgba(0,0,0,.18), 0 0 0 1px rgba(0,0,0,.04);
-      --text: #0e1213; --text-muted: rgba(14,18,19,.62);
+      --panel: #fff; --panel-alt: #fff; --border-weak: rgba(0,0,0,.08);
+      --input-bg: #fff; --input-border: rgba(0,0,0,.12);
+      --input-shadow: inset 0 1px 0 rgba(255,255,255,.8), 0 10px 26px rgba(0,0,0,.12);
+      --menu-bg: #fff; --menu-border: rgba(0,0,0,.10);
+      --menu-shadow: 0 42px 110px rgba(0,0,0,.20), 0 0 0 1px rgba(0,0,0,.05);
+      --text: #0f1213; --text-muted: rgba(15,18,19,.62);
       --bg: #f6f7f8;
-      --shadow-green: 0 28px 80px rgba(89,217,179,.10), 0 8px 24px rgba(0,0,0,.18);
+      --shadow-green: 0 36px 120px rgba(89,217,179,.12), 0 10px 24px rgba(0,0,0,.12);
     }
 
     .va-main{ overflow: visible; position: relative; contain: none; }
-    .va-portal{ background: var(--menu-bg); border: 1px solid var(--menu-border); box-shadow: var(--menu-shadow); border-radius: 10px; }
+    .va-portal{ background: var(--menu-bg); border: 1px solid var(--menu-border); box-shadow: var(--menu-shadow); border-radius: 12px; }
     .va-collapsing{ overflow: hidden; will-change: height; }
   `}</style>
 );
 
 /* ───────────────── Types / storage ───────────────── */
+type ApiKey = { id: string; name: string; key: string };
+
 type AgentData = {
   provider: 'openai' | 'anthropic' | 'google';
   model: string;
@@ -86,6 +97,8 @@ type AgentData = {
 
   ttsProvider: 'openai' | 'elevenlabs';
   voiceName: string;
+
+  apiKeyId?: string; // NEW — selected OpenAI key id
 
   asrProvider: 'deepgram' | 'whisper' | 'assemblyai';
   asrLang: 'en' | 'nl' | 'es' | 'de';
@@ -124,6 +137,7 @@ You are a blank template AI assistant with minimal default settings, designed to
 - Gracefully handle any errors by providing a polite default response or seeking further instruction.`,
   ttsProvider: 'openai',
   voiceName: 'Alloy (American)',
+  apiKeyId: '',
   asrProvider: 'deepgram',
   asrLang: 'en',
   asrDialect: 'en-US',
@@ -253,13 +267,12 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
-/* Solid portal dropdown (fixed, high z-index, stable click-outside) */
+/* Styled select — visual parity with StepV2 (solid surface + heavy portal) */
 function StyledSelect({
-  value, onChange, options, placeholder
+  value, onChange, options, placeholder, leftIcon
 }:{
   value: string; onChange: (v: string) => void;
-  options: Opt[];
-  placeholder?: string;
+  options: Opt[]; placeholder?: string; leftIcon?: React.ReactNode;
 }) {
   const btnRef = useRef<HTMLButtonElement|null>(null);
   const portalRef = useRef<HTMLDivElement|null>(null);
@@ -284,8 +297,7 @@ function StyledSelect({
   useEffect(() => {
     if (!open) return;
     const off = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (btnRef.current?.contains(t) || portalRef.current?.contains(t)) return;
+      if (btnRef.current?.contains(e.target as Node) || portalRef.current?.contains(e.target as Node)) return;
       setOpen(false);
     };
     const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
@@ -300,15 +312,19 @@ function StyledSelect({
         ref={btnRef}
         type="button"
         onClick={() => { setOpen(v=>!v); setTimeout(()=>searchRef.current?.focus(),0); }}
-        className="w-full flex items-center justify-between gap-3 px-3 rounded-[var(--radius-inner)] transition"
+        className="w-full flex items-center justify-between gap-3 px-3 py-3 rounded-[14px] text-sm outline-none transition"
         style={{
-          height:'var(--control-h)',
-          background:'var(--input-bg)', border:'1px solid var(--input-border)',
-          boxShadow:'var(--input-shadow)', color:'var(--text)', fontSize:'var(--fz-body)'
+          background:'var(--input-bg)',
+          border:'1px solid var(--input-border)',
+          boxShadow:'var(--input-shadow)',
+          color:'var(--text)'
         }}
       >
-        <span className="truncate">{current ? current.label : (placeholder || '— Choose —')}</span>
-        <ChevronDown className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
+        <span className="flex items-center gap-2 truncate">
+          {leftIcon}
+          <span className="truncate">{current ? current.label : (placeholder || '— Choose —')}</span>
+        </span>
+        <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)' }} />
       </button>
 
       {open && rect && typeof document !== 'undefined'
@@ -320,12 +336,11 @@ function StyledSelect({
                 top: rect.openUp ? rect.top - 8 : rect.top + 8,
                 left: rect.left,
                 width: rect.width,
-                transform: rect.openUp ? 'translateY(-100%)' : 'none',
-                pointerEvents:'auto'
+                transform: rect.openUp ? 'translateY(-100%)' : 'none'
               }}
             >
               <div
-                className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[8px]"
+                className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[12px]"
                 style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)' }}
               >
                 <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
@@ -345,9 +360,9 @@ function StyledSelect({
                     key={o.value}
                     disabled={o.disabled}
                     onClick={()=>{ if (o.disabled) return; onChange(o.value); setOpen(false); }}
-                    className="w-full text-left text-sm px-3 py-2 rounded-[8px] transition flex items-center gap-2 disabled:opacity-60"
+                    className="w-full text-left text-sm px-3 py-2 rounded-[10px] transition flex items-center gap-2 disabled:opacity-60"
                     style={{ color:'var(--text)', background:'transparent', border:'1px solid transparent', cursor:o.disabled?'not-allowed':'pointer' }}
-                    onMouseEnter={(e)=>{ if (o.disabled) return; const el=e.currentTarget as HTMLButtonElement; el.style.background='rgba(89,217,179,0.06)'; el.style.border='1px solid rgba(89,217,179,0.22)'; }}
+                    onMouseEnter={(e)=>{ if (o.disabled) return; const el=e.currentTarget as HTMLButtonElement; el.style.background='rgba(0,255,194,0.10)'; el.style.border='1px solid rgba(0,255,194,0.35)'; }}
                     onMouseLeave={(e)=>{ const el=e.currentTarget as HTMLButtonElement; el.style.background='transparent'; el.style.border='1px solid transparent'; }}
                   >
                     {o.disabled ? <Lock className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" style={{ opacity: o.value===value ? 1 : 0 }} />}
@@ -367,7 +382,7 @@ function StyledSelect({
   );
 }
 
-/* ───────────────── Small overlay for Generate → writes main prompt ───────────────── */
+/* ───────────────── Small overlay for Generate ───────────────── */
 function PromptOverlay({
   initial, onClose, onUse,
 }:{
@@ -398,7 +413,7 @@ function PromptOverlay({
           </button>
         </div>
         <div className="text-xs mb-3" style={{ color:'var(--text-muted)' }}>
-          Edit the template below or paste your own. Clicking “Use as Prompt” will replace the System Prompt.
+          Edit the template below or paste your own. “Use as Prompt” replaces the System Prompt.
         </div>
         <textarea
           value={val}
@@ -417,7 +432,7 @@ function PromptOverlay({
           <button
             onClick={()=>onUse(val)}
             className="h-9 px-3 rounded-[8px] font-semibold"
-            style={{ background:CTA, color:'#0a0f0d', boxShadow:'0 10px 24px rgba(89,217,179,.28)' }}
+            style={{ background:CTA, color:'#0a0f0d', boxShadow:'0 14px 32px rgba(89,217,179,.30)' }}
             onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA_HOVER)}
             onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA)}
           >
@@ -430,7 +445,7 @@ function PromptOverlay({
   );
 }
 
-/* ───────────────── Section (lighter header) ───────────────── */
+/* ───────────────── Section (lighter + taller header, smaller gaps) ───────────────── */
 function Section({
   title, icon, desc, children, defaultOpen = true
 }:{
@@ -445,7 +460,7 @@ function Section({
   useLayoutEffect(() => { measure(); }, [children, open]);
 
   return (
-    <div className="mb-[var(--s-6)]">
+    <div className="mb-[18px]"> {/* smaller gap between boxes */}
       <div
         className="rounded-[var(--radius-outer)] overflow-hidden"
         style={{
@@ -454,14 +469,14 @@ function Section({
           boxShadow:'var(--shadow-green)'
         }}
       >
-        {/* Lighter header bar for separation */}
+        {/* lighter, taller header */}
         <button
           onClick={()=>setOpen(v=>!v)}
           className="w-full text-left px-4 sm:px-5 relative"
           style={{
-            color:'var(--text)', minHeight:'var(--collapsed-h)',
+            color:'var(--text)', minHeight:'var(--header-h)',
             display:'grid', gridTemplateColumns:'1fr auto', alignItems:'center', gap:'12px',
-            background:'linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,0))'
+            background:'linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,0))'
           }}
         >
           <span className="min-w-0 flex items-center gap-3">
@@ -480,18 +495,22 @@ function Section({
           </span>
         </button>
 
-        <div style={{ height:1, background:'var(--border-weak)', opacity:.6 }} />
-
+        {/* body */}
         <div
           ref={wrapRef}
           className="va-collapsing"
           style={{ height: open ? h : 0, transition: 'height 200ms var(--ease)' }}
           onTransitionEnd={() => { if (open) measure(); }}
         >
-          <div ref={innerRef} className="p-[var(--s-6)]">
+          <div ref={innerRef} className="p-[var(--s-5)]">
             {children}
           </div>
         </div>
+      </div>
+
+      {/* grey title chip between boxes */}
+      <div className="mx-1 mt-[10px] mb-[2px] inline-flex items-center gap-2 px-2.5 py-1 rounded-[10px] va-title-chip text-[11.5px]">
+        {title}
       </div>
     </div>
   );
@@ -510,6 +529,9 @@ export default function VoiceAgentSection() {
   const [toast, setToast] = useState<string>('');
   const [showPromptOverlay, setShowPromptOverlay] = useState(false);
 
+  // API Keys (scoped, same behavior as StepV2)
+  const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
+
   useEffect(() => {
     const handler = (e: Event) => setActiveId((e as CustomEvent<string>).detail);
     window.addEventListener('assistant:active', handler as EventListener);
@@ -523,6 +545,38 @@ export default function VoiceAgentSection() {
   }, [activeId]);
 
   useEffect(() => { if (activeId) saveAgentData(activeId, data); }, [activeId, data]);
+
+  // bootstrap api keys (copy of your StepV2 logic)
+  useEffect(() => {
+    (async () => {
+      try {
+        const ss = await scopedStorage();
+        await ss.ensureOwnerGuard();
+
+        const v1 = await ss.getJSON<ApiKey[]>(LS_KEYS, []);
+        const legacy = await ss.getJSON<ApiKey[]>('apiKeys', []);
+        const merged = Array.isArray(v1) && v1.length ? v1 : Array.isArray(legacy) ? legacy : [];
+        const cleaned = merged
+          .filter(Boolean)
+          .map((k: any) => ({ id: String(k?.id || ''), name: String(k?.name || ''), key: String(k?.key || '') }))
+          .filter((k) => k.id && k.name);
+
+        setApiKeys(cleaned);
+
+        const globalSelected = await ss.getJSON<string>(LS_SELECTED, '');
+        const chosen =
+          (data.apiKeyId && cleaned.some((k) => k.id === data.apiKeyId)) ? data.apiKeyId! :
+          (globalSelected && cleaned.some((k) => k.id === globalSelected)) ? globalSelected :
+          (cleaned[0]?.id || '');
+
+        if (chosen && chosen !== data.apiKeyId) {
+          setData(prev => ({ ...prev, apiKeyId: chosen }));
+          await ss.setJSON(LS_SELECTED, chosen);
+        }
+      } catch {}
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const set = <K extends keyof AgentData>(k: K) => (v: AgentData[K]) =>
     setData(prev => ({ ...prev, [k]: v }));
@@ -572,7 +626,7 @@ export default function VoiceAgentSection() {
             <button
               onClick={doSave}
               disabled={saving}
-              className="inline-flex items-center gap-2 rounded-[8px] px-4 text-sm transition hover:-translate-y-[1px] disabled:opacity-60"
+              className="inline-flex items-center gap-2 rounded-[10px] px-4 text-sm transition hover:-translate-y-[1px] disabled:opacity-60"
               style={{ height:'var(--control-h)', background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)' }}
             >
               {saving ? 'Saving…' : 'Save'}
@@ -581,7 +635,7 @@ export default function VoiceAgentSection() {
             <button
               onClick={doPublish}
               disabled={publishing}
-              className="inline-flex items-center gap-2 rounded-[8px] px-4 text-sm transition hover:-translate-y-[1px] disabled:opacity-60"
+              className="inline-flex items-center gap-2 rounded-[10px] px-4 text-sm transition hover:-translate-y-[1px] disabled:opacity-60"
               style={{ height:'var(--control-h)', background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)' }}
             >
               <Rocket className="w-4 h-4" /> {publishing ? 'Publishing…' : 'Publish'}
@@ -590,8 +644,8 @@ export default function VoiceAgentSection() {
             <button
               onClick={doCallTest}
               disabled={calling}
-              className="inline-flex items-center gap-2 rounded-[8px] font-semibold select-none disabled:opacity-60"
-              style={{ height:'var(--control-h)', padding:'0 18px', background:CTA, color:'#0a0f0d', boxShadow:'0 14px 30px rgba(89,217,179,.28)' }}
+              className="inline-flex items-center gap-2 rounded-[10px] font-semibold select-none disabled:opacity-60"
+              style={{ height:'var(--control-h)', padding:'0 18px', background:CTA, color:'#0a0f0d', boxShadow:'0 16px 36px rgba(89,217,179,.30)' }}
               onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA_HOVER)}
               onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA)}
             >
@@ -600,20 +654,20 @@ export default function VoiceAgentSection() {
           </div>
 
           {toast ? (
-            <div className="mb-[var(--s-4)] inline-flex items-center gap-2 px-3 py-1.5 rounded-[8px]"
+            <div className="mb-[var(--s-4)] inline-flex items-center gap-2 px-3 py-1.5 rounded-[10px]"
                  style={{ background:'rgba(89,217,179,.10)', color:'var(--text)', boxShadow:'0 0 0 1px rgba(89,217,179,.16) inset' }}>
               <Check className="w-4 h-4" /> {toast}
             </div>
           ) : null}
 
           {/* KPIs */}
-          <div className="grid gap-[var(--s-4)] md:grid-cols-2 mb-[var(--s-6)]">
-            <div className="relative p-[var(--s-4)] rounded-[10px]"
+          <div className="grid gap-[14px] md:grid-cols-2 mb-[18px]">
+            <div className="relative p-[var(--s-4)] rounded-[12px]"
                  style={{ background:'var(--panel)', border:'1px solid var(--border-weak)', boxShadow:'var(--shadow-green)' }}>
               <div className="text-xs mb-[6px]" style={{ color:'var(--text-muted)' }}>Cost</div>
               <div className="font-semibold" style={{ fontSize:'var(--fz-sub)', color:'var(--text)' }}>~$0.1/min</div>
             </div>
-            <div className="relative p-[var(--s-4)] rounded-[10px]"
+            <div className="relative p-[var(--s-4)] rounded-[12px]"
                  style={{ background:'var(--panel)', border:'1px solid var(--border-weak)', boxShadow:'var(--shadow-green)' }}>
               <div className="text-xs mb-[6px]" style={{ color:'var(--text-muted)' }}>Latency</div>
               <div className="font-semibold" style={{ fontSize:'var(--fz-sub)', color:'var(--text)' }}>~1050 ms</div>
@@ -627,27 +681,27 @@ export default function VoiceAgentSection() {
             desc="Configure the assistant’s reasoning model and first message."
             defaultOpen={true}
           >
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-[var(--s-4)]">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-[14px]">
               <div>
-                <label className="block mb-[var(--s-2)] font-medium" style={{ fontSize:'var(--fz-label)', color:'var(--text)' }}>Provider</label>
+                <div className="mb-[var(--s-2)] text-[12.5px]" style={{ color:'var(--text)' }}>Provider</div>
                 <StyledSelect value={data.provider} onChange={(v)=>set('provider')(v as AgentData['provider'])} options={providerOpts}/>
               </div>
 
               <div>
-                <label className="block mb-[var(--s-2)] font-medium" style={{ fontSize:'var(--fz-label)', color:'var(--text)' }}>Model</label>
+                <div className="mb-[var(--s-2)] text-[12.5px]" style={{ color:'var(--text)' }}>Model</div>
                 <StyledSelect value={data.model} onChange={set('model')} options={modelOpts}/>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-[var(--s-4)] mt-[var(--s-4)]">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-[14px] mt-[var(--s-4)]">
               <div>
-                <label className="block mb-[var(--s-2)] font-medium" style={{ fontSize:'var(--fz-label)', color:'var(--text)' }}>First Message Mode</label>
+                <div className="mb-[var(--s-2)] text-[12.5px]" style={{ color:'var(--text)' }}>First Message Mode</div>
                 <StyledSelect value={data.firstMode} onChange={set('firstMode')} options={firstMessageModes}/>
               </div>
               <div>
-                <label className="block mb-[var(--s-2)] font-medium" style={{ fontSize:'var(--fz-label)', color:'var(--text)' }}>First Message</label>
+                <div className="mb-[var(--s-2)] text-[12.5px]" style={{ color:'var(--text)' }}>First Message</div>
                 <input
-                  className="w-full bg-transparent outline-none rounded-[var(--radius-inner)] px-3"
+                  className="w-full bg-transparent outline-none rounded-[12px] px-3"
                   style={{ height:'var(--control-h)', background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)', fontSize:'var(--fz-body)' }}
                   value={data.firstMsg}
                   onChange={(e)=>set('firstMsg')(e.target.value)}
@@ -659,7 +713,7 @@ export default function VoiceAgentSection() {
               <div className="flex items-center justify-between mb-[var(--s-2)]">
                 <div className="font-medium" style={{ fontSize:'var(--fz-label)' }}>System Prompt</div>
                 <button
-                  className="inline-flex items-center gap-2 rounded-[8px] text-sm transition hover:-translate-y-[1px]"
+                  className="inline-flex items-center gap-2 rounded-[10px] text-sm transition hover:-translate-y-[1px]"
                   style={{ height:36, padding:'0 12px', background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)' }}
                   onClick={()=>setShowPromptOverlay(true)}
                 >
@@ -667,7 +721,7 @@ export default function VoiceAgentSection() {
                 </button>
               </div>
               <textarea
-                className="w-full bg-transparent outline-none rounded-[var(--radius-inner)] px-3 py-[10px]"
+                className="w-full bg-transparent outline-none rounded-[12px] px-3 py-[10px]"
                 style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)', minHeight:130, lineHeight:'var(--lh-body)', fontSize:'var(--fz-body)' }}
                 value={data.systemPrompt}
                 onChange={(e)=>set('systemPrompt')(e.target.value)}
@@ -678,21 +732,56 @@ export default function VoiceAgentSection() {
           <Section
             title="Voice"
             icon={<Volume2 className="w-4 h-4" style={{ color: CTA }} />}
-            desc="Choose the TTS provider and voice."
+            desc="Choose the TTS provider, voice, and OpenAI key."
             defaultOpen={true}
           >
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-[var(--s-4)]">
+            {/* API Key selector (scoped storage import) */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-[14px]">
               <div>
-                <label className="block mb-[var(--s-2)] font-medium" style={{ fontSize:'var(--fz-label)', color:'var(--text)' }}>Voice Provider</label>
-                <StyledSelect value={data.ttsProvider} onChange={(v)=>set('ttsProvider')(v as AgentData['ttsProvider'])} options={ttsProviders}/>
+                <div className="mb-[var(--s-2)] text-[12.5px] flex items-center gap-2" style={{ color:'var(--text)' }}>
+                  <KeyRound className="w-4 h-4 opacity-80" /> OpenAI API Key
+                </div>
+                <StyledSelect
+                  value={data.apiKeyId || ''}
+                  onChange={async (val)=>{
+                    set('apiKeyId')(val);
+                    try { const ss = await scopedStorage(); await ss.ensureOwnerGuard(); await ss.setJSON(LS_SELECTED, val); } catch {}
+                  }}
+                  options={[
+                    { value: '', label: 'Select an API key…' },
+                    ...apiKeys.map(k=>({ value: k.id, label: `${k.name} ••••${(k.key||'').slice(-4).toUpperCase()}` }))
+                  ]}
+                  leftIcon={<KeyRound className="w-4 h-4" style={{ color: CTA }} />}
+                />
+                <div className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
+                  Keys are stored per-account via scoped storage. Manage them in the API Keys page.
+                </div>
               </div>
+
               <div>
-                <label className="block mb-[var(--s-2)] font-medium" style={{ fontSize:'var(--fz-label)', color:'var(--text)' }}>Voice</label>
-                <StyledSelect value={data.voiceName} onChange={set('voiceName')} options={openAiVoices} placeholder="— Choose —"/>
+                <div className="mb-[var(--s-2)] text-[12.5px]" style={{ color:'var(--text)' }}>Voice Provider</div>
+                <StyledSelect
+                  value={data.ttsProvider}
+                  onChange={(v)=>set('ttsProvider')(v as AgentData['ttsProvider'])}
+                  options={ttsProviders}
+                />
               </div>
             </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-[14px] mt-[var(--s-4)]">
+              <div>
+                <div className="mb-[var(--s-2)] text-[12.5px]" style={{ color:'var(--text)' }}>Voice</div>
+                <StyledSelect
+                  value={data.voiceName}
+                  onChange={set('voiceName')}
+                  options={openAiVoices}
+                  placeholder="— Choose —"
+                />
+              </div>
+            </div>
+
             <div className="mt-[var(--s-2)] text-xs" style={{ color:'var(--text-muted)' }}>
-              Keep utterances short/specific for the most natural cadence. (ElevenLabs mapping can be added later.)
+              Keep utterances short/specific for natural cadence. (ElevenLabs mapping can be added later.)
             </div>
           </Section>
 
@@ -702,13 +791,14 @@ export default function VoiceAgentSection() {
             desc="Speech-to-text configuration for calls."
             defaultOpen={true}
           >
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-[var(--s-4)]">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-[14px]">
               <div>
-                <label className="block mb-[var(--s-2)] font-medium" style={{ fontSize:'var(--fz-label)', color:'var(--text)' }}>Provider</label>
+                <div className="mb-[var(--s-2)] text-[12.5px]" style={{ color:'var(--text)' }}>Provider</div>
                 <StyledSelect value={data.asrProvider} onChange={(v)=>set('asrProvider')(v as AgentData['asrProvider'])} options={asrProviders}/>
               </div>
+
               <div>
-                <label className="block mb-[var(--s-2)] font-medium" style={{ fontSize:'var(--fz-label)', color:'var(--text)' }}>Language</label>
+                <div className="mb-[var(--s-2)] text-[12.5px]" style={{ color:'var(--text)' }}>Language</div>
                 <StyledSelect
                   value={data.asrLang}
                   onChange={(v)=>{
@@ -721,13 +811,14 @@ export default function VoiceAgentSection() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-[var(--s-4)] mt-[var(--s-4)]">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-[14px] mt-[var(--s-4)]">
               <div>
-                <label className="block mb-[var(--s-2)] font-medium" style={{ fontSize:'var(--fz-label)', color:'var(--text)' }}>Dialect</label>
+                <div className="mb-[var(--s-2)] text-[12.5px]" style={{ color:'var(--text)' }}>Dialect</div>
                 <StyledSelect value={data.asrDialect} onChange={(v)=>set('asrDialect')(v as AgentData['asrDialect'])} options={dialectOpts}/>
               </div>
+
               <div>
-                <label className="block mb-[var(--s-2)] font-medium" style={{ fontSize:'var(--fz-label)', color:'var(--text)' }}>Model</label>
+                <div className="mb-[var(--s-2)] text-[12.5px]" style={{ color:'var(--text)' }}>Model</div>
                 <StyledSelect value={data.asrModel} onChange={set('asrModel')} options={asrModelOpts}/>
               </div>
             </div>
