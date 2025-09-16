@@ -27,20 +27,23 @@ class RailBoundary extends React.Component<{children:React.ReactNode},{hasError:
 const ACTIVE_KEY = 'va:activeId';
 const CTA = '#59d9b3';
 const CTA_HOVER = '#54cfa9';
+const DARK_GREEN = '#0b6b53'; // for Transcriber icon in dark green
 
+/* ChatGPT-like spacing + theme tokens */
 const Rhythm = () => (
   <style jsx global>{`
     .va-rhythm{
       /* spacing (4px base) */
+      --s-1: 4px;
       --s-2: 8px;
       --s-3: 12px;
       --s-4: 16px;
+      --s-5: 20px;
       --s-6: 24px;
       --s-8: 32px;
-
-      /* radii */
-      --radius-card: 14px;  /* less rounded outer cards */
-      --radius-band: 20px;  /* keep inner controls plush */
+      --s-10: 40px;
+      --radius-card: 18px;       /* OUTER section cards = less rounded */
+      --radius-band: 20px;       /* inner bands (inputs/textarea) keep roundness */
       --control-h: 44px;
 
       /* type */
@@ -56,7 +59,7 @@ const Rhythm = () => (
       --vs-shadow: 0 28px 70px rgba(0,0,0,.12), 0 10px 26px rgba(0,0,0,.08), 0 0 0 1px rgba(0,0,0,.02);
       --vs-ring: rgba(0,255,194,.10);
 
-      --vs-input-bg: #ffffff;
+      --vs-input-bg: #ffffff;                         /* solid, NOT transparent */
       --vs-input-border: rgba(0,0,0,.12);
       --vs-input-shadow: inset 0 1px 0 rgba(255,255,255,.8), 0 10px 22px rgba(0,0,0,.06);
 
@@ -71,7 +74,7 @@ const Rhythm = () => (
       --vs-shadow: 0 36px 90px rgba(0,0,0,.60), 0 14px 34px rgba(0,0,0,.45), 0 0 0 1px rgba(0,255,194,.10);
       --vs-ring: rgba(0,255,194,.12);
 
-      --vs-input-bg: #101314;
+      --vs-input-bg: #101314;                         /* solid, NOT transparent */
       --vs-input-border: rgba(255,255,255,.14);
       --vs-input-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 12px 30px rgba(0,0,0,.38);
 
@@ -122,14 +125,15 @@ const saveAgentData = (id: string, data: AgentData) => {
 };
 
 /* ───────────────── Small building blocks ───────────────── */
-/** FieldShell: use boxed={false} for selects to avoid nested borders (no double box). */
+/** FieldShell: supports `boxed` (default true). Use boxed={false} to avoid double borders. */
 const FieldShell = ({ label, children, error, boxed = true }:{
   label: React.ReactNode; children: React.ReactNode; error?: string; boxed?: boolean;
 }) => {
   const borderBase = error ? 'rgba(255,120,120,0.55)' : 'var(--vs-input-border)';
   return (
     <div>
-      <label className="block mb-[var(--s-2)] font-medium" style={{ fontSize:'var(--fz-label)', color:'var(--text)' }}>{label}</label>
+      <label className="block mb-[var(--s-2)] font-medium"
+        style={{ fontSize:'var(--fz-label)', color:'var(--text)' }}>{label}</label>
 
       {boxed ? (
         <div
@@ -171,7 +175,7 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
-/* ChatGPT-style floating dropdown (independent menu w/ search) */
+/* ChatGPT-style floating dropdown (independent menu with search) */
 function StyledSelect({
   value, onChange, options, placeholder
 }:{
@@ -211,7 +215,7 @@ function StyledSelect({
 
   return (
     <>
-      {/* Trigger = single bordered box (no outer wrapper around it) */}
+      {/* Trigger = single bordered box (no outer wrapper) */}
       <button
         ref={btnRef}
         type="button"
@@ -227,7 +231,7 @@ function StyledSelect({
         <ChevronDown className="w-4 h-4 opacity-80" style={{ color:'var(--text-muted)' }} />
       </button>
 
-      {/* Floating independent menu (solid surface, not transparent) */}
+      {/* Floating independent menu */}
       {open && rect && typeof document !== 'undefined'
         ? createPortal(
             <div
@@ -322,7 +326,7 @@ export default function VoiceAgentSection() {
       <Rhythm />
 
       <div className="grid w-full pr-[1px]" style={{ gridTemplateColumns: '260px 1fr' }}>
-        {/* Rail with thin divider */}
+        {/* Rail */}
         <div className="border-r" style={{ borderColor:'rgba(255,255,255,.14)' }}>
           <RailBoundary><AssistantRail /></RailBoundary>
         </div>
@@ -345,11 +349,7 @@ export default function VoiceAgentSection() {
             </button>
             <button
               className="inline-flex items-center gap-2 rounded-[18px] font-semibold select-none"
-              style={{
-                height:'var(--control-h)', padding:'0 18px',
-                background:CTA, color:'#fff', /* ← white text */
-                boxShadow:'0 10px 24px rgba(16,185,129,.25)'
-              }}
+              style={{ height:'var(--control-h)', padding:'0 18px', background:CTA, color:'#fff', boxShadow:'0 10px 24px rgba(16,185,129,.25)' }}
               onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA_HOVER)}
               onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA)}
             >
@@ -357,7 +357,7 @@ export default function VoiceAgentSection() {
             </button>
           </div>
 
-          {/* KPIs (kept, independent small cards) */}
+          {/* KPIs */}
           <div className="grid gap-[var(--s-4)] md:grid-cols-2 mb-[var(--s-6)]">
             <div className="relative p-[var(--s-4)] rounded-[var(--radius-card)]"
                  style={{ background:'var(--vs-card)', border:'1px solid var(--vs-border)', boxShadow:'var(--vs-shadow)' }}>
@@ -371,11 +371,8 @@ export default function VoiceAgentSection() {
             </div>
           </div>
 
-          {/* Independent section cards (no big outer box) */}
-          <Section
-            title="Model"
-            icon={<Gauge className="w-4 h-4" />}
-          >
+          {/* === Section: Model === */}
+          <Section title="Model" icon={<Gauge className="w-4 h-4" />}>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[var(--s-4)]">
               <FieldShell label="Provider" boxed={false}>
                 <StyledSelect value={data.provider} onChange={set('provider')} options={providers} />
@@ -422,7 +419,86 @@ export default function VoiceAgentSection() {
             </div>
           </Section>
 
-          <Section
-            title="Transcriber"
-            icon={<Timer className="w-4 h-4" style={{ color:'#1faa7a' }} />}  /* dark green icon */
-         
+          {/* === Section: Transcriber === */}
+          <Section title="Transcriber" icon={<Timer className="w-4 h-4" style={{ color:DARK_GREEN }} />}>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-[var(--s-4)]">
+              <FieldShell label="Provider" boxed={false}>
+                <StyledSelect value={data.asrProvider} onChange={set('asrProvider')} options={asrProv} />
+              </FieldShell>
+              <FieldShell label="Language" boxed={false}>
+                <StyledSelect value={data.asrLang} onChange={set('asrLang')} options={asrLangs} />
+              </FieldShell>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-[var(--s-4)] mt-[var(--s-4)]">
+              <FieldShell label="Model" boxed={false}>
+                <StyledSelect value={data.asrModel} onChange={set('asrModel')} options={asrModels} />
+              </FieldShell>
+
+              <FieldShell label="Confidence Threshold">
+                <div className="flex items-center gap-[var(--s-3)]">
+                  <input
+                    type="range" min={0} max={1} step={0.01}
+                    value={data.confidence}
+                    onChange={(e)=>set('confidence')(parseFloat(e.target.value))}
+                    style={{ width:'100%' }}
+                  />
+                  <div
+                    className="px-2.5 py-1.5 rounded-md text-xs"
+                    style={{ background:'var(--vs-input-bg)', border:'1px solid var(--vs-input-border)', boxShadow:'var(--vs-input-shadow)', minWidth:46, textAlign:'center', color:'var(--text)' }}
+                  >
+                    {data.confidence.toFixed(1)}
+                  </div>
+                </div>
+              </FieldShell>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-[var(--s-6)] mt-[var(--s-4)]">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="font-semibold" style={{ fontSize:'var(--fz-body)', color:'var(--text)' }}>Background Denoising Enabled</div>
+                  <div className="text-xs" style={{ color:'var(--text-muted)' }}>Filter background noise while the user is talking.</div>
+                </div>
+                <Toggle checked={data.denoise} onChange={v=>set('denoise')(v)} />
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="font-semibold" style={{ fontSize:'var(--fz-body)', color:'var(--text)' }}>Use Numerals</div>
+                  <div className="text-xs" style={{ color:'var(--text-muted)' }}>Convert numbers from words to digits in transcription.</div>
+                </div>
+                <Toggle checked={data.numerals} onChange={v=>set('numerals')(v)} />
+              </div>
+            </div>
+          </Section>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ───────────────── Cards with collapsible headers (no giant outer box) ───────────────── */
+function Section({ title, icon, children }:{ title:string; icon:React.ReactNode; children:React.ReactNode }) {
+  const [open,setOpen]=useState(true);
+  return (
+    <div className="rounded-[var(--radius-card)] overflow-hidden mb-[var(--s-6)]"
+         style={{ background:'var(--vs-card)', border:'1px solid var(--vs-border)', boxShadow:'var(--vs-shadow)' }}>
+      <button
+        onClick={()=>setOpen(v=>!v)}
+        className="w-full flex items-center justify-between px-3 sm:px-4 py-3 cursor-pointer"
+        style={{ color:'var(--text)' }}
+      >
+        <span className="inline-flex items-center gap-[var(--s-3)]">
+          <span className="inline-flex items-center gap-2 px-3 rounded-[10px]"
+                style={{ height: 28, background:'var(--vs-input-bg)', border:'1px solid var(--vs-input-border)', boxShadow:'var(--vs-input-shadow)' }}>
+            {icon}
+          </span>
+          <span className="font-semibold" style={{ fontSize:'var(--fz-title)', lineHeight:1.2 }}>{title}</span>
+        </span>
+        {open ? <ChevronUp className="w-4 h-4" style={{ color:'var(--text-muted)' }}/> :
+                <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)' }}/>}
+      </button>
+
+      {open && <div className="px-3 sm:px-4 pb-4">{children}</div>}
+    </div>
+  );
+}
