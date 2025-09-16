@@ -37,8 +37,10 @@ const Rhythm = () => (
       --s-4: 16px;
       --s-6: 24px;
       --s-8: 32px;
-      --radius-card: 28px;
-      --radius-band: 20px;
+
+      /* radii */
+      --radius-card: 14px;  /* less rounded outer cards */
+      --radius-band: 20px;  /* keep inner controls plush */
       --control-h: 44px;
 
       /* type */
@@ -48,7 +50,7 @@ const Rhythm = () => (
       --fz-label: 12.5px;
       --lh-body: 1.45;
 
-      /* LIGHT (kept for completeness) */
+      /* LIGHT */
       --vs-card: #ffffff;
       --vs-border: rgba(0,0,0,.10);
       --vs-shadow: 0 28px 70px rgba(0,0,0,.12), 0 10px 26px rgba(0,0,0,.08), 0 0 0 1px rgba(0,0,0,.02);
@@ -120,7 +122,7 @@ const saveAgentData = (id: string, data: AgentData) => {
 };
 
 /* ───────────────── Small building blocks ───────────────── */
-/** FieldShell: now supports `boxed` (default true). Use boxed={false} for selects to avoid double borders. */
+/** FieldShell: use boxed={false} for selects to avoid nested borders (no double box). */
 const FieldShell = ({ label, children, error, boxed = true }:{
   label: React.ReactNode; children: React.ReactNode; error?: string; boxed?: boolean;
 }) => {
@@ -209,7 +211,7 @@ function StyledSelect({
 
   return (
     <>
-      {/* Trigger = single bordered box (no outer wrapper) */}
+      {/* Trigger = single bordered box (no outer wrapper around it) */}
       <button
         ref={btnRef}
         type="button"
@@ -225,7 +227,7 @@ function StyledSelect({
         <ChevronDown className="w-4 h-4 opacity-80" style={{ color:'var(--text-muted)' }} />
       </button>
 
-      {/* Floating independent menu */}
+      {/* Floating independent menu (solid surface, not transparent) */}
       {open && rect && typeof document !== 'undefined'
         ? createPortal(
             <div
@@ -266,7 +268,7 @@ function StyledSelect({
                     className="w-full text-left text-sm px-3 py-2 rounded-[10px] transition"
                     style={{ color:'var(--text)', background:'transparent', border:'1px solid transparent' }}
                     onMouseEnter={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='rgba(0,255,194,0.10)'; (e.currentTarget as HTMLButtonElement).style.border='1px solid rgba(0,255,194,0.35)'; }}
-                    onMouseLeave={(e)=>{ (e.currentTarget as HTMLButtonButtonElement).style.background='transparent'; (e.currentTarget as HTMLButtonElement).style.border='1px solid transparent'; }}
+                    onMouseLeave={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='transparent'; (e.currentTarget as HTMLButtonElement).style.border='1px solid transparent'; }}
                   >
                     {o.label}
                   </button>
@@ -343,7 +345,11 @@ export default function VoiceAgentSection() {
             </button>
             <button
               className="inline-flex items-center gap-2 rounded-[18px] font-semibold select-none"
-              style={{ height:'var(--control-h)', padding:'0 18px', background:CTA, color:'#000', boxShadow:'0 10px 24px rgba(16,185,129,.25)' }}
+              style={{
+                height:'var(--control-h)', padding:'0 18px',
+                background:CTA, color:'#fff', /* ← white text */
+                boxShadow:'0 10px 24px rgba(16,185,129,.25)'
+              }}
               onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA_HOVER)}
               onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA)}
             >
@@ -351,161 +357,72 @@ export default function VoiceAgentSection() {
             </button>
           </div>
 
-          {/* KPIs */}
+          {/* KPIs (kept, independent small cards) */}
           <div className="grid gap-[var(--s-4)] md:grid-cols-2 mb-[var(--s-6)]">
-            <div className="relative p-[var(--s-4)] rounded-[20px]"
+            <div className="relative p-[var(--s-4)] rounded-[var(--radius-card)]"
                  style={{ background:'var(--vs-card)', border:'1px solid var(--vs-border)', boxShadow:'var(--vs-shadow)' }}>
               <div className="text-xs mb-[6px]" style={{ color:'var(--text-muted)' }}>Cost</div>
               <div className="font-semibold" style={{ fontSize:'var(--fz-sub)', color:'var(--text)' }}>~$0.1/min</div>
             </div>
-            <div className="relative p-[var(--s-4)] rounded-[20px]"
+            <div className="relative p-[var(--s-4)] rounded-[var(--radius-card)]"
                  style={{ background:'var(--vs-card)', border:'1px solid var(--vs-border)', boxShadow:'var(--vs-shadow)' }}>
               <div className="text-xs mb-[6px]" style={{ color:'var(--text-muted)' }}>Latency</div>
               <div className="font-semibold" style={{ fontSize:'var(--fz-sub)', color:'var(--text)' }}>~1050 ms</div>
             </div>
           </div>
 
-          {/* Main card */}
-          <div className="relative rounded-[var(--radius-card)]"
-               style={{ background:'var(--vs-card)', border:'1px solid var(--vs-border)', boxShadow:'var(--vs-shadow)' }}>
-            <div className="p-[var(--s-6)] sm:p-[var(--s-8)] space-y-[var(--s-6)]">
-              {/* Glow */}
-              <div
-                aria-hidden
-                className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
-                style={{ background:'radial-gradient(circle, var(--vs-ring) 0%, transparent 70%)', filter:'blur(38px)' }}
-              />
-
-              {/* Section: Model */}
-              <Section title="Model" icon={<Gauge className="w-4 h-4" />}>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-[var(--s-4)]">
-                  <FieldShell label="Provider" boxed={false}>
-                    <StyledSelect value={data.provider} onChange={set('provider')} options={providers} />
-                  </FieldShell>
-                  <FieldShell label="Model" boxed={false}>
-                    <StyledSelect value={data.model} onChange={set('model')} options={models} />
-                  </FieldShell>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-[var(--s-4)] mt-[var(--s-4)]">
-                  <FieldShell label="First Message Mode" boxed={false}>
-                    <StyledSelect value={data.firstMode} onChange={set('firstMode')} options={firstModes} />
-                  </FieldShell>
-                  <FieldShell label="First Message">
-                    <input
-                      className="w-full bg-transparent outline-none"
-                      style={{ color:'var(--text)', height:'calc(var(--control-h) - 10px)', fontSize:'var(--fz-body)' }}
-                      value={data.firstMsg} onChange={(e)=>set('firstMsg')(e.target.value)}
-                    />
-                  </FieldShell>
-                </div>
-
-                <div className="mt-[var(--s-4)]">
-                  <div className="flex items-center justify-between mb-[var(--s-2)]">
-                    <div className="font-medium" style={{ fontSize:'var(--fz-label)' }}>System Prompt</div>
-                    <button
-                      className="inline-flex items-center gap-2 rounded-[18px] text-sm transition hover:-translate-y-[1px]"
-                      style={{ height:'var(--control-h)', padding:'0 14px',
-                               background:'var(--vs-input-bg)', border:'1px solid var(--vs-input-border)', boxShadow:'var(--vs-input-shadow)', color:'var(--text)' }}
-                    >
-                      <Wand2 className="w-4 h-4" /> Generate
-                    </button>
-                  </div>
-                  <div
-                    className="rounded-[var(--radius-band)] px-3 py-[10px]"
-                    style={{ background:'var(--vs-input-bg)', border:'1px solid var(--vs-input-border)', boxShadow:'var(--vs-input-shadow)' }}
-                  >
-                    <textarea
-                      className="w-full bg-transparent outline-none"
-                      style={{ color:'var(--text)', minHeight:130, lineHeight:'var(--lh-body)', fontSize:'var(--fz-body)' }}
-                      value={data.systemPrompt} onChange={(e)=>set('systemPrompt')(e.target.value)}
-                    />
-                  </div>
-                </div>
-              </Section>
-
-              {/* Section: Transcriber */}
-              <Section title="Transcriber" icon={<Timer className="w-4 h-4" />}>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-[var(--s-4)]">
-                  <FieldShell label="Provider" boxed={false}>
-                    <StyledSelect value={data.asrProvider} onChange={set('asrProvider')} options={asrProv} />
-                  </FieldShell>
-                  <FieldShell label="Language" boxed={false}>
-                    <StyledSelect value={data.asrLang} onChange={set('asrLang')} options={asrLangs} />
-                  </FieldShell>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-[var(--s-4)] mt-[var(--s-4)]">
-                  <FieldShell label="Model" boxed={false}>
-                    <StyledSelect value={data.asrModel} onChange={set('asrModel')} options={asrModels} />
-                  </FieldShell>
-
-                  <FieldShell label="Confidence Threshold">
-                    <div className="flex items-center gap-[var(--s-3)]">
-                      <input
-                        type="range" min={0} max={1} step={0.01}
-                        value={data.confidence}
-                        onChange={(e)=>set('confidence')(parseFloat(e.target.value))}
-                        style={{ width:'100%' }}
-                      />
-                      <div
-                        className="px-2.5 py-1.5 rounded-md text-xs"
-                        style={{ background:'var(--vs-input-bg)', border:'1px solid var(--vs-input-border)', boxShadow:'var(--vs-input-shadow)', minWidth:46, textAlign:'center', color:'var(--text)' }}
-                      >
-                        {data.confidence.toFixed(1)}
-                      </div>
-                    </div>
-                  </FieldShell>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-[var(--s-6)] mt-[var(--s-4)]">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="font-semibold" style={{ fontSize:'var(--fz-body)', color:'var(--text)' }}>Background Denoising Enabled</div>
-                      <div className="text-xs" style={{ color:'var(--text-muted)' }}>Filter background noise while the user is talking.</div>
-                    </div>
-                    <Toggle checked={data.denoise} onChange={v=>set('denoise')(v)} />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="font-semibold" style={{ fontSize:'var(--fz-body)', color:'var(--text)' }}>Use Numerals</div>
-                      <div className="text-xs" style={{ color:'var(--text-muted)' }}>Convert numbers from words to digits in transcription.</div>
-                    </div>
-                    <Toggle checked={data.numerals} onChange={v=>set('numerals')(v)} />
-                  </div>
-                </div>
-              </Section>
+          {/* Independent section cards (no big outer box) */}
+          <Section
+            title="Model"
+            icon={<Gauge className="w-4 h-4" />}
+          >
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-[var(--s-4)]">
+              <FieldShell label="Provider" boxed={false}>
+                <StyledSelect value={data.provider} onChange={set('provider')} options={providers} />
+              </FieldShell>
+              <FieldShell label="Model" boxed={false}>
+                <StyledSelect value={data.model} onChange={set('model')} options={models} />
+              </FieldShell>
             </div>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
 
-/* ───────────────── Cards with collapsible headers (ChatGPT-style) ───────────────── */
-function Section({ title, icon, children }:{ title:string; icon:React.ReactNode; children:React.ReactNode }) {
-  const [open,setOpen]=useState(true);
-  return (
-    <div className="rounded-[18px] overflow-hidden"
-         style={{ background:'var(--vs-card)', border:'1px solid var(--vs-border)', boxShadow:'var(--vs-shadow)' }}>
-      <button
-        onClick={()=>setOpen(v=>!v)}
-        className="w-full flex items-center justify-between px-3 sm:px-4 py-3 cursor-pointer"
-        style={{ color:'var(--text)' }}
-      >
-        <span className="inline-flex items-center gap-[var(--s-3)]">
-          <span className="inline-flex items-center gap-2 px-3 rounded-[10px]"
-                style={{ height: 28, background:'var(--vs-input-bg)', border:'1px solid var(--vs-input-border)', boxShadow:'var(--vs-input-shadow)' }}>
-            {icon}
-          </span>
-          <span className="font-semibold" style={{ fontSize:'var(--fz-title)', lineHeight:1.2 }}>{title}</span>
-        </span>
-        {open ? <ChevronUp className="w-4 h-4" style={{ color:'var(--text-muted)' }}/> :
-                <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)' }}/>}
-      </button>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-[var(--s-4)] mt-[var(--s-4)]">
+              <FieldShell label="First Message Mode" boxed={false}>
+                <StyledSelect value={data.firstMode} onChange={set('firstMode')} options={firstModes} />
+              </FieldShell>
+              <FieldShell label="First Message">
+                <input
+                  className="w-full bg-transparent outline-none"
+                  style={{ color:'var(--text)', height:'calc(var(--control-h) - 10px)', fontSize:'var(--fz-body)' }}
+                  value={data.firstMsg} onChange={(e)=>set('firstMsg')(e.target.value)}
+                />
+              </FieldShell>
+            </div>
 
-      {open && <div className="px-3 sm:px-4 pb-4">{children}</div>}
-    </div>
-  );
-}
+            <div className="mt-[var(--s-4)]">
+              <div className="flex items-center justify-between mb-[var(--s-2)]">
+                <div className="font-medium" style={{ fontSize:'var(--fz-label)' }}>System Prompt</div>
+                <button
+                  className="inline-flex items-center gap-2 rounded-[18px] text-sm transition hover:-translate-y-[1px]"
+                  style={{ height:'var(--control-h)', padding:'0 14px',
+                           background:'var(--vs-input-bg)', border:'1px solid var(--vs-input-border)', boxShadow:'var(--vs-input-shadow)', color:'var(--text)' }}
+                >
+                  <Wand2 className="w-4 h-4" /> Generate
+                </button>
+              </div>
+              <div
+                className="rounded-[var(--radius-band)] px-3 py-[10px]"
+                style={{ background:'var(--vs-input-bg)', border:'1px solid var(--vs-input-border)', boxShadow:'var(--vs-input-shadow)' }}
+              >
+                <textarea
+                  className="w-full bg-transparent outline-none"
+                  style={{ color:'var(--text)', minHeight:130, lineHeight:'var(--lh-body)', fontSize:'var(--fz-body)' }}
+                  value={data.systemPrompt} onChange={(e)=>set('systemPrompt')(e.target.value)}
+                />
+              </div>
+            </div>
+          </Section>
+
+          <Section
+            title="Transcriber"
+            icon={<Timer className="w-4 h-4" style={{ color:'#1faa7a' }} />}  /* dark green icon */
+         
