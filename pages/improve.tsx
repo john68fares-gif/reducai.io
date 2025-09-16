@@ -212,6 +212,43 @@ export default function Improve() {
   const [sort, setSort] = useState<'pinned_first'|'name_asc'|'updated_desc'>('pinned_first');
   const [tagFilter, setTagFilter] = useState('');
 
+  const filtered = useMemo(() => {
+  let rows = list;
+  if (query.trim()) {
+    const q = query.toLowerCase();
+    rows = rows.filter(b =>
+      (b.name || '').toLowerCase().includes(q) ||
+      (b.model || '').toLowerCase().includes(q) ||
+      (b.id || '').toLowerCase().includes(q)
+    );
+  }
+  if (tagFilter.trim()) {
+    rows = rows.filter(b => {
+      try {
+        const raw = localStorage.getItem(metaKey(userId || '', b.id));
+        const m: AgentMeta = raw ? JSON.parse(raw) : {};
+        return (m.tags || []).some((t: string) =>
+          t.toLowerCase().includes(tagFilter.toLowerCase())
+        );
+      } catch { return false; }
+    });
+  }
+  if (sort === 'name_asc') {
+    rows = [...rows].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  } else if (sort === 'updated_desc') {
+    rows = [...rows].sort(
+      (a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime()
+    );
+  } else if (sort === 'pinned_first') {
+    rows = [...rows].sort((a, b) => {
+      const aMeta = JSON.parse(localStorage.getItem(metaKey(userId || '', a.id)) || '{}');
+      const bMeta = JSON.parse(localStorage.getItem(metaKey(userId || '', b.id)) || '{}');
+      return (bMeta.pinned ? 1 : 0) - (aMeta.pinned ? 1 : 0);
+    });
+  }
+  return rows;
+}, [list, query, sort, tagFilter, userId]);
+
   /* Editor state */
   const [name, setName] = useState('');
   const [model, setModel] = useState('gpt-4o-mini');
