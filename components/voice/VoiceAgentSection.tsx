@@ -8,7 +8,7 @@ import {
   Wand2, ChevronDown, ChevronUp, Gauge, Timer, Phone, Rocket, Search,
 } from 'lucide-react';
 
-/* ───────────────────────────────────────── Dynamic rail ───────────────────────────────────────── */
+/* ───────────────── Dynamic rail ───────────────── */
 const AssistantRail = dynamic(
   () =>
     import('@/components/voice/AssistantRail')
@@ -23,41 +23,31 @@ class RailBoundary extends React.Component<{children:React.ReactNode},{hasError:
   render(){ return this.state.hasError ? <div className="px-3 py-3 text-xs opacity-70">Rail crashed</div> : this.props.children; }
 }
 
-/* ───────────────────────────────────────── Tokens ───────────────────────────────────────── */
+/* ───────────────── Tokens ───────────────── */
 const ACTIVE_KEY = 'va:activeId';
-
-/* Same greens used across your steps */
 const CTA        = '#59d9b3';
 const CTA_HOVER  = '#54cfa9';
 
-/* Global rhythm + theme (mirrors StepV2Telephony/StepV1Basics) */
+/* Global rhythm + theme. NOTE: now includes .va-portal tokens so portal menus are SOLID. */
 const Tokens = () => (
   <style jsx global>{`
     .va-scope{
-      /* spacing / radii / type */
       --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-6: 24px; --s-8: 32px;
-      --radius-outer: 16px;       /* outer cards (less rounded) */
-      --radius-inner: 12px;       /* inputs/selects */
-      --control-h: 44px;
-
+      --radius-outer: 16px; --radius-inner: 12px; --control-h: 44px;
       --fz-title: 18px; --fz-sub: 15px; --fz-body: 14px; --fz-label: 12.5px;
       --lh-body: 1.45; --ease: cubic-bezier(.22,.61,.36,1);
 
-      /* Surfaces (ChatGPT/your sidebar vibe) */
-      --vs-card: #101314;            /* solid */
-      --vs-border: rgba(255,255,255,.06);  /* almost 0px look */
+      --vs-card: #101314;                    /* solid */
+      --vs-border: rgba(255,255,255,.06);    /* almost invisible */
       --vs-shadow: 0 36px 90px rgba(0,0,0,.60), 0 14px 34px rgba(0,0,0,.45), 0 0 0 1px rgba(89,217,179,.10);
       --vs-ring: rgba(89,217,179,.10);
 
-      --vs-input-bg: #101314;        /* solid */
+      --vs-input-bg: #101314;                /* solid */
       --vs-input-border: rgba(255,255,255,.08);
       --vs-input-shadow: 0 16px 40px rgba(0,0,0,.45), 0 0 0 1px rgba(89,217,179,.06); /* outside */
+
       --text: #eaf8f3; --text-muted: rgba(234,248,243,.66);
 
-      /* Menus (portal) */
-      --vs-menu-bg: #101314; --vs-menu-border: rgba(255,255,255,.10);
-
-      /* Section card shadow (outside, green tint) */
       --card-shadow-outer: 0 28px 70px rgba(0,0,0,.55), 0 0 0 1px rgba(89,217,179,.08);
     }
 
@@ -66,23 +56,31 @@ const Tokens = () => (
       --vs-border: rgba(0,0,0,.06);
       --vs-shadow: 0 28px 70px rgba(0,0,0,.12), 0 10px 26px rgba(0,0,0,.08), 0 0 0 1px rgba(0,0,0,.02);
       --vs-ring: rgba(89,217,179,.10);
-
       --vs-input-bg: #ffffff;
       --vs-input-border: rgba(0,0,0,.10);
       --vs-input-shadow: 0 16px 40px rgba(0,0,0,.10), 0 0 0 1px rgba(0,0,0,.03);
-
-      --vs-menu-bg: #ffffff; --vs-menu-border: rgba(0,0,0,.10);
       --text: #0e1213; --text-muted: rgba(14,18,19,.62);
       --card-shadow-outer: 0 28px 70px rgba(0,0,0,.14), 0 0 0 1px rgba(89,217,179,.08);
     }
 
-    /* pop / blur for opening menus/cards */
+    /* PORTAL MENU TOKENS (this is the missing piece that made menus look transparent) */
+    .va-portal{
+      --menu-bg: #101314;
+      --menu-border: rgba(255,255,255,.12);
+      --menu-shadow: 0 28px 70px rgba(0,0,0,.55), 0 10px 26px rgba(0,0,0,.40), 0 0 0 1px rgba(89,217,179,.10);
+    }
+    :root:not([data-theme="dark"]) .va-portal{
+      --menu-bg: #ffffff;
+      --menu-border: rgba(0,0,0,.10);
+      --menu-shadow: 0 28px 70px rgba(0,0,0,.12), 0 10px 26px rgba(0,0,0,.08), 0 0 0 1px rgba(0,0,0,.02);
+    }
+
     @keyframes va-pop { from { opacity:0; transform: translateY(6px) scale(.985); filter: blur(2px); } to { opacity:1; transform:none; filter:none; } }
     .va-pop { animation: va-pop 180ms var(--ease) both; }
   `}</style>
 );
 
-/* ───────────────────────────────────────── Types / storage ───────────────────────────────────────── */
+/* ───────────────── Types / storage ───────────────── */
 type AgentData = {
   provider: string;
   model: string;
@@ -121,7 +119,7 @@ const saveAgentData = (id: string, data: AgentData) => {
   try { localStorage.setItem(keyFor(id), JSON.stringify(data)); } catch {}
 };
 
-/* ───────────────────────────────────────── Building blocks ───────────────────────────────────────── */
+/* ───────────────── Building blocks ───────────────── */
 const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}) => (
   <button
     onClick={()=>onChange(!checked)}
@@ -144,7 +142,6 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
-/* Field label + optional wrapper; use boxed={false} around selects to avoid the “two boxes” look */
 const FieldShell = ({ label, children, error, boxed = true }:{
   label: React.ReactNode; children: React.ReactNode; error?: string; boxed?: boolean;
 }) => {
@@ -169,7 +166,7 @@ const FieldShell = ({ label, children, error, boxed = true }:{
   );
 };
 
-/* Solid, portal dropdown like StepV2Telephony (NOT transparent) */
+/* Solid portal dropdown — now uses .va-portal tokens so it’s never transparent */
 function StyledSelect({
   value, onChange, options, placeholder
 }:{
@@ -209,7 +206,6 @@ function StyledSelect({
 
   return (
     <>
-      {/* solid trigger */}
       <button
         ref={btnRef}
         type="button"
@@ -225,29 +221,26 @@ function StyledSelect({
         <ChevronDown className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
       </button>
 
-      {/* independent floating menu (solid) */}
       {open && rect && typeof document !== 'undefined'
         ? createPortal(
             <div
               ref={portalRef}
-              className="fixed z-[9999] p-3 va-pop"
+              className="va-portal fixed z-[9999] p-3 va-pop"
               style={{
                 top: rect.openUp ? rect.top - 8 : rect.top + 8,
                 left: rect.left,
                 width: rect.width,
                 transform: rect.openUp ? 'translateY(-100%)' : 'none',
-                background: 'var(--vs-menu-bg)',
-                border: '1px solid var(--vs-menu-border)',
+                background: 'var(--menu-bg)',
+                border: '1px solid var(--menu-border)',
                 borderRadius: 16,
-                boxShadow: 'var(--card-shadow-outer)',
+                boxShadow: 'var(--menu-shadow)',
+                backdropFilter: 'blur(2px)'
               }}
             >
-              {/* search inside menu */}
               <div
                 className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[10px]"
-                style={{
-                  background:'var(--vs-input-bg)', border:'1px solid var(--vs-input-border)', boxShadow:'var(--vs-input-shadow)', color:'var(--text)'
-                }}
+                style={{ background:'var(--vs-input-bg)', border:'1px solid var(--vs-input-border)', boxShadow:'var(--vs-input-shadow)', color:'var(--text)' }}
               >
                 <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
                 <input
@@ -260,7 +253,6 @@ function StyledSelect({
                 />
               </div>
 
-              {/* list */}
               <div className="max-h-72 overflow-y-auto pr-1" style={{ scrollbarWidth:'thin' }}>
                 {filtered.map(o => (
                   <button
@@ -286,7 +278,7 @@ function StyledSelect({
   );
 }
 
-/* ───────────────────────────────────────── Page ───────────────────────────────────────── */
+/* ───────────────── Page ───────────────── */
 export default function VoiceAgentSection() {
   const [activeId, setActiveId] = useState<string>(() => {
     try { return localStorage.getItem(ACTIVE_KEY) || ''; } catch { return ''; }
@@ -322,15 +314,12 @@ export default function VoiceAgentSection() {
       <Tokens />
 
       <div className="grid w-full pr-[1px]" style={{ gridTemplateColumns: '260px 1fr' }}>
-        {/* rail */}
         <div className="border-r" style={{ borderColor:'rgba(255,255,255,.14)' }}>
           <RailBoundary><AssistantRail /></RailBoundary>
         </div>
 
-        {/* content */}
         <div className="px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w-[1160px]"
              style={{ fontSize:'var(--fz-body)', lineHeight:'var(--lh-body)' }}>
-
           {/* Actions */}
           <div className="mb-[var(--s-4)] flex flex-wrap items-center justify-end gap-[var(--s-3)]">
             <button
@@ -460,32 +449,29 @@ export default function VoiceAgentSection() {
   );
 }
 
-/* ───────────────────────────────────────── Section (collapses, not unmounted) ───────────────────────────────────────── */
+/* ───────────────── Section card with collapse (not unmounted) ───────────────── */
 function Section({ title, icon, children }:{ title:string; icon:React.ReactNode; children:React.ReactNode }) {
   const [open,setOpen]=useState(true);
   const wrapRef = useRef<HTMLDivElement|null>(null);
   const [h, setH] = useState<'auto'|number>('auto');
 
-  // measure height whenever it might change
   useLayoutEffect(() => {
     if (!wrapRef.current) return;
     const el = wrapRef.current;
     if (open) {
       const ph = el.scrollHeight;
       setH(ph);
-      // set to auto after transition ends so content can grow naturally
       const t = setTimeout(()=>setH('auto'), 220);
       return () => clearTimeout(t);
     } else {
       const ph = el.scrollHeight;
-      setH(ph); // set from current px
-      requestAnimationFrame(()=>setH(0)); // then collapse
+      setH(ph);
+      requestAnimationFrame(()=>setH(0));
     }
   }, [open, children]);
 
   return (
     <div className="mb-[var(--s-6)]">
-      {/* Title row (icon green, outside the card) */}
       <button
         onClick={()=>setOpen(v=>!v)}
         className="w-full flex items-center justify-between mb-[var(--s-3)]"
@@ -502,27 +488,15 @@ function Section({ title, icon, children }:{ title:string; icon:React.ReactNode;
                 <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)' }}/>}
       </button>
 
-      {/* Card (solid, less rounded, outside shadow) with height animation (collapsed, not removed) */}
       <div
         className="rounded-[var(--radius-outer)] va-pop"
-        style={{
-          background:'var(--vs-card)',
-          border:'1px solid var(--vs-border)',
-          boxShadow:'var(--card-shadow-outer)',
-          overflow:'hidden'
-        }}
+        style={{ background:'var(--vs-card)', border:'1px solid var(--vs-border)', boxShadow:'var(--card-shadow-outer)', overflow:'hidden' }}
       >
         <div
           ref={wrapRef}
-          style={{
-            height: h==='auto' ? 'auto' : `${h}px`,
-            transition: 'height 220ms var(--ease), filter 220ms var(--ease), opacity 220ms var(--ease)',
-            filter: open ? 'none' : 'blur(1px)',
-            opacity: open ? 1 : 0.96
-          }}
+          style={{ height: h==='auto' ? 'auto' : `${h}px`, transition: 'height 220ms var(--ease), filter 220ms var(--ease), opacity 220ms var(--ease)', filter: open ? 'none' : 'blur(1px)', opacity: open ? 1 : 0.96 }}
         >
           <div className="p-[var(--s-6)]">
-            {/* subtle background glow spot like your steps */}
             <div
               aria-hidden
               className="pointer-events-none absolute -mt-8 -ml-8 w-[60%] h-[60%] rounded-full"
