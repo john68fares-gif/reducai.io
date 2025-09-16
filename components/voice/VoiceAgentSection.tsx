@@ -4,6 +4,7 @@
 import React, { useEffect, useMemo, useState, useLayoutEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { createPortal } from 'react-dom';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   Wand2, ChevronDown, ChevronUp, Gauge, Timer, Phone, Rocket, Search,
 } from 'lucide-react';
@@ -27,60 +28,73 @@ class RailBoundary extends React.Component<{children:React.ReactNode},{hasError:
 const ACTIVE_KEY = 'va:activeId';
 const CTA = '#59d9b3';
 const CTA_HOVER = '#54cfa9';
-const DARK_GREEN = '#0b6b53'; // for Transcriber icon in dark green
 
-/* ChatGPT-like spacing + theme tokens */
+/* Rhythm & theme (ChatGPT-like spacing + solid controls, subtle borders/shadows) */
 const Rhythm = () => (
   <style jsx global>{`
     .va-rhythm{
       /* spacing (4px base) */
-      --s-1: 4px;
       --s-2: 8px;
       --s-3: 12px;
       --s-4: 16px;
-      --s-5: 20px;
       --s-6: 24px;
       --s-8: 32px;
-      --s-10: 40px;
-      --radius-card: 18px;       /* OUTER section cards = less rounded */
-      --radius-band: 20px;       /* inner bands (inputs/textarea) keep roundness */
+      --radius-card: 16px;  /* LESS rounded outer boxes */
+      --radius-band: 14px;
       --control-h: 44px;
 
       /* type */
-      --fz-title: 20px;
+      --fz-title: 18px;
       --fz-sub: 15px;
       --fz-body: 14px;
       --fz-label: 12.5px;
       --lh-body: 1.45;
 
       /* LIGHT */
+      --surface: #f3f4f6; /* grey page bg similar to ChatGPT app light */
       --vs-card: #ffffff;
-      --vs-border: rgba(0,0,0,.10);
-      --vs-shadow: 0 28px 70px rgba(0,0,0,.12), 0 10px 26px rgba(0,0,0,.08), 0 0 0 1px rgba(0,0,0,.02);
+      --vs-border: rgba(0,0,0,.06); /* almost 0px look */
+      --vs-shadow: 0 28px 70px rgba(0,0,0,.12), 0 10px 26px rgba(0,0,0,.08), 0 0 0 0.5px rgba(0,0,0,.02);
       --vs-ring: rgba(0,255,194,.10);
 
-      --vs-input-bg: #ffffff;                         /* solid, NOT transparent */
-      --vs-input-border: rgba(0,0,0,.12);
-      --vs-input-shadow: inset 0 1px 0 rgba(255,255,255,.8), 0 10px 22px rgba(0,0,0,.06);
+      --vs-input-bg: #ffffff;
+      --vs-input-border: rgba(0,0,0,.10);
+      --vs-input-shadow: inset 0 1px 0 rgba(255,255,255,.85), 0 10px 22px rgba(0,0,0,.06);
 
       --menu-bg: #ffffff;
       --menu-border: rgba(0,0,0,.10);
     }
     [data-theme="dark"] .va-rhythm{
+      --surface: #0f1214; /* match sidebar/chat vibe */
       --vs-card:
         radial-gradient(120% 180% at 50% -40%, rgba(0,255,194,.06) 0%, rgba(12,16,18,1) 42%),
         linear-gradient(180deg, #0e1213 0%, #0c1012 100%);
-      --vs-border: rgba(255,255,255,.08);
-      --vs-shadow: 0 36px 90px rgba(0,0,0,.60), 0 14px 34px rgba(0,0,0,.45), 0 0 0 1px rgba(0,255,194,.10);
+      --vs-border: rgba(255,255,255,.06); /* hairline */
+      --vs-shadow: 0 36px 90px rgba(0,0,0,.60), 0 14px 34px rgba(0,0,0,.45), 0 0 0 0.5px rgba(0,255,194,.08);
       --vs-ring: rgba(0,255,194,.12);
 
-      --vs-input-bg: #101314;                         /* solid, NOT transparent */
+      --vs-input-bg: #101314;
       --vs-input-border: rgba(255,255,255,.14);
       --vs-input-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 12px 30px rgba(0,0,0,.38);
 
       --menu-bg: #101314;
       --menu-border: rgba(255,255,255,.16);
     }
+
+    /* solid controls (no transparency) */
+    .va-select-trigger,
+    .va-input,
+    .va-textarea{
+      background: var(--vs-input-bg) !important;
+      border: 1px solid var(--vs-input-border) !important;
+      box-shadow: var(--vs-input-shadow) !important;
+      color: var(--text) !important;
+    }
+
+    /* fix placeholder tint */
+    .va-select-trigger::placeholder,
+    .va-input::placeholder,
+    .va-textarea::placeholder { color: var(--text-muted); opacity: .9; }
   `}</style>
 );
 
@@ -125,20 +139,19 @@ const saveAgentData = (id: string, data: AgentData) => {
 };
 
 /* ───────────────── Small building blocks ───────────────── */
-/** FieldShell: supports `boxed` (default true). Use boxed={false} to avoid double borders. */
+/** FieldShell: supports boxed content; for selects we set boxed={false} (single box only). */
 const FieldShell = ({ label, children, error, boxed = true }:{
   label: React.ReactNode; children: React.ReactNode; error?: string; boxed?: boolean;
 }) => {
   const borderBase = error ? 'rgba(255,120,120,0.55)' : 'var(--vs-input-border)';
   return (
     <div>
-      <label className="block mb-[var(--s-2)] font-medium"
-        style={{ fontSize:'var(--fz-label)', color:'var(--text)' }}>{label}</label>
+      <label className="block mb-[var(--s-2)] font-medium" style={{ fontSize:'var(--fz-label)', color:'var(--text)' }}>{label}</label>
 
       {boxed ? (
         <div
           className="px-3 py-[10px] rounded-[var(--radius-band)]"
-          style={{ background:'var(--vs-input-bg)', border:`1px solid ${borderBase}`, boxShadow:'var(--vs-input-shadow)' }}
+          style={{ background:'var(--vs-input-bg)', border:`0.5px solid ${borderBase}`, boxShadow:'var(--vs-input-shadow)' }}
         >
           {children}
         </div>
@@ -159,7 +172,7 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
       height: 28, width: 50, padding: '0 6px', borderRadius: 999,
       justifyContent: 'flex-start',
       background: checked ? 'color-mix(in oklab, var(--brand) 18%, var(--vs-input-bg))' : 'var(--vs-input-bg)',
-      border: '1px solid var(--vs-input-border)',
+      border: '0.5px solid var(--vs-input-border)',
       boxShadow: 'var(--vs-input-shadow)'
     }}
     aria-pressed={checked}
@@ -175,7 +188,7 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
-/* ChatGPT-style floating dropdown (independent menu with search) */
+/* ChatGPT-style floating dropdown (independent menu w/ search, solid surface) */
 function StyledSelect({
   value, onChange, options, placeholder
 }:{
@@ -215,16 +228,15 @@ function StyledSelect({
 
   return (
     <>
-      {/* Trigger = single bordered box (no outer wrapper) */}
+      {/* Trigger = single bordered box (no double wrappers) */}
       <button
         ref={btnRef}
         type="button"
         onClick={() => { setOpen(v=>!v); setTimeout(()=>searchRef.current?.focus(),0); }}
-        className="w-full flex items-center justify-between gap-3 px-3 rounded-[14px] transition"
+        className="va-select-trigger w-full flex items-center justify-between gap-3 px-3 rounded-[14px] transition"
         style={{
           height:'var(--control-h)',
-          background:'var(--vs-input-bg)', border:'1px solid var(--vs-input-border)',
-          boxShadow:'var(--vs-input-shadow)', color:'var(--text)', fontSize:'var(--fz-body)'
+          fontSize:'var(--fz-body)'
         }}
       >
         <span className="truncate">{current ? current.label : (placeholder || '— Choose —')}</span>
@@ -232,10 +244,16 @@ function StyledSelect({
       </button>
 
       {/* Floating independent menu */}
-      {open && rect && typeof document !== 'undefined'
-        ? createPortal(
-            <div
+      <AnimatePresence>
+        {open && rect && typeof document !== 'undefined' && (
+          createPortal(
+            <motion.div
+              key="menu"
               ref={portalRef}
+              initial={{ opacity: 0, y: -6, filter: 'blur(8px)' }}
+              animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+              exit={{ opacity: 0, y: -6, filter: 'blur(6px)' }}
+              transition={{ duration: 0.18, ease: 'easeOut' }}
               className="fixed z-[9999] p-3"
               style={{
                 top: rect.openUp ? rect.top - 8 : rect.top + 8,
@@ -243,15 +261,21 @@ function StyledSelect({
                 width: rect.width,
                 transform: rect.openUp ? 'translateY(-100%)' : 'none',
                 background: 'var(--menu-bg)',
-                border: '1px solid var(--menu-border)',
-                borderRadius: 20,
-                boxShadow: '0 28px 70px rgba(0,0,0,.12), 0 10px 26px rgba(0,0,0,.08), 0 0 0 1px rgba(0,0,0,.02)',
+                border: '0.5px solid var(--menu-border)',
+                borderRadius: 16,
+                boxShadow: '0 28px 70px rgba(0,0,0,.12), 0 10px 26px rgba(0,0,0,.08), 0 0 0 0.5px rgba(0,0,0,.02)',
               }}
             >
+              {/* soft glow */}
+              <div
+                aria-hidden
+                className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
+                style={{ background:'radial-gradient(circle, var(--vs-ring) 0%, transparent 70%)', filter:'blur(26px)' }}
+              />
               {/* search input inside the menu */}
               <div
                 className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[12px]"
-                style={{ background:'var(--vs-input-bg)', border:'1px solid var(--vs-input-border)', boxShadow:'var(--vs-input-shadow)' }}
+                style={{ background:'var(--vs-input-bg)', border:'0.5px solid var(--vs-input-border)', boxShadow:'var(--vs-input-shadow)' }}
               >
                 <Search className="w-4 h-4" style={{ color:'var(--text-muted)' }} />
                 <input
@@ -270,9 +294,9 @@ function StyledSelect({
                     key={o.value}
                     onClick={()=>{ onChange(o.value); setOpen(false); }}
                     className="w-full text-left text-sm px-3 py-2 rounded-[10px] transition"
-                    style={{ color:'var(--text)', background:'transparent', border:'1px solid transparent' }}
-                    onMouseEnter={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='rgba(0,255,194,0.10)'; (e.currentTarget as HTMLButtonElement).style.border='1px solid rgba(0,255,194,0.35)'; }}
-                    onMouseLeave={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='transparent'; (e.currentTarget as HTMLButtonElement).style.border='1px solid transparent'; }}
+                    style={{ color:'var(--text)', background:'transparent', border:'0.5px solid transparent' }}
+                    onMouseEnter={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='rgba(0,255,194,0.10)'; (e.currentTarget as HTMLButtonElement).style.border='0.5px solid rgba(0,255,194,0.35)'; }}
+                    onMouseLeave={(e)=>{ (e.currentTarget as HTMLButtonElement).style.background='transparent'; (e.currentTarget as HTMLButtonElement).style.border='0.5px solid transparent'; }}
                   >
                     {o.label}
                   </button>
@@ -281,10 +305,11 @@ function StyledSelect({
                   <div className="px-3 py-6 text-sm" style={{ color:'var(--text-muted)' }}>No matches.</div>
                 )}
               </div>
-            </div>,
+            </motion.div>,
             document.body
           )
-        : null}
+        )}
+      </AnimatePresence>
     </>
   );
 }
@@ -322,33 +347,33 @@ export default function VoiceAgentSection() {
   const asrModels = useMemo(()=>['Nova 2','Nova','Whisper Large-V3'].map(x=>({value:x,label:x})),[]);
 
   return (
-    <section className="va-rhythm" style={{ background:'var(--bg)', color:'var(--text)' }}>
+    <section className="va-rhythm" style={{ background:'var(--surface)', color:'var(--text)' }}>
       <Rhythm />
 
       <div className="grid w-full pr-[1px]" style={{ gridTemplateColumns: '260px 1fr' }}>
-        {/* Rail */}
+        {/* Rail with thin divider */}
         <div className="border-r" style={{ borderColor:'rgba(255,255,255,.14)' }}>
           <RailBoundary><AssistantRail /></RailBoundary>
         </div>
 
         {/* Content column */}
-        <div className="px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w-[1160px]"
+        <div className="px-3 md:px-5 lg:px-6 py-6 mx-auto w-full max-w-[1160px]"
              style={{ fontSize:'var(--fz-body)', lineHeight:'var(--lh-body)' }}>
 
           {/* Actions row */}
-          <div className="mb-[var(--s-4)] flex flex-wrap items-center justify-end gap-[var(--s-3)]">
+          <div className="mb-[var(--s-6)] flex flex-wrap items-center justify-end gap-[var(--s-3)]">
             <button
-              className="inline-flex items-center gap-2 rounded-[18px] px-4 text-sm transition hover:-translate-y-[1px]"
+              className="inline-flex items-center gap-2 rounded-[16px] px-4 text-sm transition hover:-translate-y-[1px]"
               style={{
                 height:'var(--control-h)',
-                background:'var(--vs-input-bg)', border:'1px solid var(--vs-input-border)',
+                background:'var(--vs-input-bg)', border:'0.5px solid var(--vs-input-border)',
                 boxShadow:'var(--vs-input-shadow)', color:'var(--text)'
               }}
             >
               <Rocket className="w-4 h-4" /> Publish
             </button>
             <button
-              className="inline-flex items-center gap-2 rounded-[18px] font-semibold select-none"
+              className="inline-flex items-center gap-2 rounded-[16px] font-semibold select-none"
               style={{ height:'var(--control-h)', padding:'0 18px', background:CTA, color:'#fff', boxShadow:'0 10px 24px rgba(16,185,129,.25)' }}
               onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA_HOVER)}
               onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA)}
@@ -359,20 +384,20 @@ export default function VoiceAgentSection() {
 
           {/* KPIs */}
           <div className="grid gap-[var(--s-4)] md:grid-cols-2 mb-[var(--s-6)]">
-            <div className="relative p-[var(--s-4)] rounded-[var(--radius-card)]"
-                 style={{ background:'var(--vs-card)', border:'1px solid var(--vs-border)', boxShadow:'var(--vs-shadow)' }}>
+            <div className="relative p-[var(--s-4)] rounded-[14px]"
+                 style={{ background:'var(--vs-card)', border:'0.5px solid var(--vs-border)', boxShadow:'var(--vs-shadow)' }}>
               <div className="text-xs mb-[6px]" style={{ color:'var(--text-muted)' }}>Cost</div>
               <div className="font-semibold" style={{ fontSize:'var(--fz-sub)', color:'var(--text)' }}>~$0.1/min</div>
             </div>
-            <div className="relative p-[var(--s-4)] rounded-[var(--radius-card)]"
-                 style={{ background:'var(--vs-card)', border:'1px solid var(--vs-border)', boxShadow:'var(--vs-shadow)' }}>
+            <div className="relative p-[var(--s-4)] rounded-[14px]"
+                 style={{ background:'var(--vs-card)', border:'0.5px solid var(--vs-border)', boxShadow:'var(--vs-shadow)' }}>
               <div className="text-xs mb-[6px]" style={{ color:'var(--text-muted)' }}>Latency</div>
               <div className="font-semibold" style={{ fontSize:'var(--fz-sub)', color:'var(--text)' }}>~1050 ms</div>
             </div>
           </div>
 
-          {/* === Section: Model === */}
-          <Section title="Model" icon={<Gauge className="w-4 h-4" />}>
+          {/* MODEL */}
+          <Section title="Model" icon={<Gauge className="w-4 h-4" style={{ color: CTA }} />}>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[var(--s-4)]">
               <FieldShell label="Provider" boxed={false}>
                 <StyledSelect value={data.provider} onChange={set('provider')} options={providers} />
@@ -386,10 +411,11 @@ export default function VoiceAgentSection() {
               <FieldShell label="First Message Mode" boxed={false}>
                 <StyledSelect value={data.firstMode} onChange={set('firstMode')} options={firstModes} />
               </FieldShell>
-              <FieldShell label="First Message">
+              <FieldShell label="First Message" boxed={true}>
+                {/* same height as selects */}
                 <input
-                  className="w-full bg-transparent outline-none"
-                  style={{ color:'var(--text)', height:'calc(var(--control-h) - 10px)', fontSize:'var(--fz-body)' }}
+                  className="va-input w-full bg-transparent outline-none"
+                  style={{ height:'calc(var(--control-h) - 10px)', fontSize:'var(--fz-body)' }}
                   value={data.firstMsg} onChange={(e)=>set('firstMsg')(e.target.value)}
                 />
               </FieldShell>
@@ -399,28 +425,23 @@ export default function VoiceAgentSection() {
               <div className="flex items-center justify-between mb-[var(--s-2)]">
                 <div className="font-medium" style={{ fontSize:'var(--fz-label)' }}>System Prompt</div>
                 <button
-                  className="inline-flex items-center gap-2 rounded-[18px] text-sm transition hover:-translate-y-[1px]"
+                  className="inline-flex items-center gap-2 rounded-[14px] text-sm transition hover:-translate-y-[1px]"
                   style={{ height:'var(--control-h)', padding:'0 14px',
-                           background:'var(--vs-input-bg)', border:'1px solid var(--vs-input-border)', boxShadow:'var(--vs-input-shadow)', color:'var(--text)' }}
+                           background:'var(--vs-input-bg)', border:'0.5px solid var(--vs-input-border)', boxShadow:'var(--vs-input-shadow)', color:'var(--text)' }}
                 >
                   <Wand2 className="w-4 h-4" /> Generate
                 </button>
               </div>
-              <div
-                className="rounded-[var(--radius-band)] px-3 py-[10px]"
-                style={{ background:'var(--vs-input-bg)', border:'1px solid var(--vs-input-border)', boxShadow:'var(--vs-input-shadow)' }}
-              >
-                <textarea
-                  className="w-full bg-transparent outline-none"
-                  style={{ color:'var(--text)', minHeight:130, lineHeight:'var(--lh-body)', fontSize:'var(--fz-body)' }}
-                  value={data.systemPrompt} onChange={(e)=>set('systemPrompt')(e.target.value)}
-                />
-              </div>
+              <textarea
+                className="va-textarea w-full bg-transparent outline-none rounded-[var(--radius-band)] px-3 py-[10px]"
+                style={{ minHeight:130, lineHeight:'var(--lh-body)', fontSize:'var(--fz-body)' }}
+                value={data.systemPrompt} onChange={(e)=>set('systemPrompt')(e.target.value)}
+              />
             </div>
           </Section>
 
-          {/* === Section: Transcriber === */}
-          <Section title="Transcriber" icon={<Timer className="w-4 h-4" style={{ color:DARK_GREEN }} />}>
+          {/* TRANSCRIBER */}
+          <Section title="Transcriber" icon={<Timer className="w-4 h-4" style={{ color: CTA }} />}>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[var(--s-4)]">
               <FieldShell label="Provider" boxed={false}>
                 <StyledSelect value={data.asrProvider} onChange={set('asrProvider')} options={asrProv} />
@@ -435,7 +456,7 @@ export default function VoiceAgentSection() {
                 <StyledSelect value={data.asrModel} onChange={set('asrModel')} options={asrModels} />
               </FieldShell>
 
-              <FieldShell label="Confidence Threshold">
+              <FieldShell label="Confidence Threshold" boxed={true}>
                 <div className="flex items-center gap-[var(--s-3)]">
                   <input
                     type="range" min={0} max={1} step={0.01}
@@ -444,8 +465,8 @@ export default function VoiceAgentSection() {
                     style={{ width:'100%' }}
                   />
                   <div
-                    className="px-2.5 py-1.5 rounded-md text-xs"
-                    style={{ background:'var(--vs-input-bg)', border:'1px solid var(--vs-input-border)', boxShadow:'var(--vs-input-shadow)', minWidth:46, textAlign:'center', color:'var(--text)' }}
+                    className="px-2.5 py-1.5 rounded-md text-xs va-input"
+                    style={{ minWidth:46, textAlign:'center' }}
                   >
                     {data.confidence.toFixed(1)}
                   </div>
@@ -476,29 +497,60 @@ export default function VoiceAgentSection() {
   );
 }
 
-/* ───────────────── Cards with collapsible headers (no giant outer box) ───────────────── */
+/* ───────────────── Cards with external titles + animated expand ───────────────── */
 function Section({ title, icon, children }:{ title:string; icon:React.ReactNode; children:React.ReactNode }) {
   const [open,setOpen]=useState(true);
   return (
-    <div className="rounded-[var(--radius-card)] overflow-hidden mb-[var(--s-6)]"
-         style={{ background:'var(--vs-card)', border:'1px solid var(--vs-border)', boxShadow:'var(--vs-shadow)' }}>
-      <button
-        onClick={()=>setOpen(v=>!v)}
-        className="w-full flex items-center justify-between px-3 sm:px-4 py-3 cursor-pointer"
-        style={{ color:'var(--text)' }}
-      >
-        <span className="inline-flex items-center gap-[var(--s-3)]">
-          <span className="inline-flex items-center gap-2 px-3 rounded-[10px]"
-                style={{ height: 28, background:'var(--vs-input-bg)', border:'1px solid var(--vs-input-border)', boxShadow:'var(--vs-input-shadow)' }}>
-            {icon}
-          </span>
-          <span className="font-semibold" style={{ fontSize:'var(--fz-title)', lineHeight:1.2 }}>{title}</span>
-        </span>
-        {open ? <ChevronUp className="w-4 h-4" style={{ color:'var(--text-muted)' }}/> :
-                <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)' }}/>}
-      </button>
+    <div className="mb-[var(--s-6)]">
+      {/* Title OUTSIDE the box (Vapi-style) */}
+      <div className="flex items-center gap-[var(--s-3)] mb-[var(--s-2)]">
+        {/* bare icon, no chip */}
+        <span>{icon}</span>
+        <span className="font-semibold" style={{ fontSize:'var(--fz-title)', lineHeight:1.2 }}>{title}</span>
+      </div>
 
-      {open && <div className="px-3 sm:px-4 pb-4">{children}</div>}
+      {/* The card itself (less rounded, hairline border, glow + motion) */}
+      <motion.div
+        initial={{ scale: 0.995, opacity: 0, filter: 'blur(8px)' }}
+        animate={{ scale: 1, opacity: 1, filter: 'blur(0px)' }}
+        transition={{ duration: 0.18, ease: 'easeOut' }}
+        className="relative rounded-[var(--radius-card)] overflow-hidden"
+        style={{ background:'var(--vs-card)', border:'0.5px solid var(--vs-border)', boxShadow:'var(--vs-shadow)' }}
+      >
+        {/* soft brand glow */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
+          style={{ background:'radial-gradient(circle, var(--vs-ring) 0%, transparent 70%)', filter:'blur(40px)' }}
+        />
+        {/* header inside card to toggle open/close (no icon box) */}
+        <button
+          onClick={()=>setOpen(v=>!v)}
+          className="w-full flex items-center justify-between px-3 sm:px-4 py-3 cursor-pointer"
+          style={{ color:'var(--text)' }}
+        >
+          <span className="font-medium" style={{ fontSize:'var(--fz-sub)' }}>{open ? 'Hide' : 'Show'} {title}</span>
+          {open ? <ChevronUp className="w-4 h-4" style={{ color:'var(--text-muted)' }}/> :
+                  <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)' }}/>}
+        </button>
+
+        <AnimatePresence initial={false}>
+          {open && (
+            <motion.div
+              key="body"
+              initial={{ height: 0, opacity: 0, filter: 'blur(6px)' }}
+              animate={{ height: 'auto', opacity: 1, filter: 'blur(0px)' }}
+              exit={{ height: 0, opacity: 0, filter: 'blur(6px)' }}
+              transition={{ duration: 0.22, ease: 'easeInOut' }}
+              style={{ overflow: 'hidden' }}
+            >
+              <div className="px-3 sm:px-4 pb-4">
+                {children}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </motion.div>
     </div>
   );
 }
