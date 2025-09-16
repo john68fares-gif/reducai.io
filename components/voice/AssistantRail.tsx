@@ -1,29 +1,38 @@
-'use client';
+// components/voice/AssistantRail.tsx
+'use client';                           // ABOUT: make this component render on the client (required for localStorage, events)
 
-import React, { useEffect, useMemo, useState } from 'react';
-import { Search, Plus, Bot, Trash2, Edit3, X, AlertTriangle } from 'lucide-react';
-import { AnimatePresence, motion } from 'framer-motion';
+import React, { useEffect, useMemo, useState } from 'react'; // ABOUT: core React + hooks
+import { Search, Plus, Bot, Trash2, Edit3, X, AlertTriangle } from 'lucide-react'; // ABOUT: icons
+import { AnimatePresence, motion } from 'framer-motion';     // ABOUT: row enter/exit animation
 
-/* Optional scoped storage (safe if module missing) */
+/* ABOUT: Optional scoped storage helper. If your app has scoped-storage, use it.
+         If not, everything silently falls back to window.localStorage. */
 type Scoped = { getJSON<T>(k:string,f:T):Promise<T>; setJSON(k:string,v:unknown):Promise<void> };
 let scopedStorageFn: undefined | (() => Promise<Scoped>);
 try { scopedStorageFn = require('@/utils/scoped-storage').scopedStorage; } catch {}
 
+/* ABOUT: Minimal assistant record */
 export type AssistantLite = { id: string; name: string; purpose?: string; createdAt?: number };
 
+/* ABOUT: Keys used in storage (list + selected id) */
 const STORAGE_KEY = 'agents';
 const ACTIVE_KEY  = 'va:activeId';
-const BTN_GREEN = '#10b981';
-const BTN_GREEN_HOVER = '#0ea473';
 
-/* ids */
+/* ABOUT: Brand greens (button + glow overlay) */
+const GREEN       = '#10b981';
+const GREEN_HOVER = '#0ea473';
+const GREEN_OL30  = 'rgba(16,185,129,.30)'; // ← 30% overlay
+const GREEN_OL18  = 'rgba(16,185,129,.18)';
+const GREEN_OL14  = 'rgba(16,185,129,.14)';
+
+/* ABOUT: ID generator for new assistants */
 function uid() {
   return `a_${Date.now().toString(36)}_${crypto.getRandomValues(new Uint32Array(1))[0].toString(36)}`;
 }
 
-/* storage */
+/* ABOUT: Load and save assistants (scoped first, then localStorage) */
 async function loadAssistants(): Promise<AssistantLite[]> {
-  try { if (scopedStorageFn) { const ss = await scopedStorageFn(); const a=await ss.getJSON<AssistantLite[]>(STORAGE_KEY, []); return Array.isArray(a)?a:[]; } } catch {}
+  try { if (scopedStorageFn) { const ss = await scopedStorageFn(); return await ss.getJSON<AssistantLite[]>(STORAGE_KEY, []); } } catch {}
   try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) return JSON.parse(raw); } catch {}
   return [];
 }
@@ -31,12 +40,16 @@ async function saveAssistants(list: AssistantLite[]) {
   try { if (scopedStorageFn) { const ss = await scopedStorageFn(); await ss.setJSON(STORAGE_KEY, list); } } catch {}
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); } catch {}
 }
+
+/* ABOUT: Persist current selection + broadcast a DOM event that VoiceAgentSection listens for */
 function writeActive(id:string){
   try { localStorage.setItem(ACTIVE_KEY, id); } catch {}
   try { window.dispatchEvent(new CustomEvent('assistant:active', { detail: id })); } catch {}
 }
 
-/* ---------- Modal shells ---------- */
+/* ────────────────────────────── Modal shells (shared) ───────────────────────
+   ABOUT: Skeleton + header used by Create/Rename/Delete modals (theme-aware)
+──────────────────────────────────────────────────────────────────────────── */
 function ModalShell({ children }:{ children:React.ReactNode }) {
   return (
     <div className="fixed inset-0 z-[9998] flex items-center justify-center px-4" style={{ background:'rgba(0,0,0,.60)' }}>
@@ -65,6 +78,8 @@ function ModalHeader({ icon, title, subtitle, onClose }:{
     </div>
   );
 }
+
+/* ABOUT: “Create Assistant” modal */
 function CreateModal({ open, onClose, onCreate }:{
   open:boolean; onClose:()=>void; onCreate:(name:string)=>void;
 }) {
@@ -94,9 +109,9 @@ function CreateModal({ open, onClose, onCreate }:{
           disabled={!can}
           onClick={()=> can && onCreate(name.trim())}
           className="w-full h-[44px] rounded-[14px] font-semibold disabled:opacity-60"
-          style={{ background:BTN_GREEN, color:'#fff', fontSize:12.5 }}
-          onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=BTN_GREEN_HOVER)}
-          onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=BTN_GREEN)}
+          style={{ background:GREEN, color:'#fff', fontSize:12.5 }}
+          onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=GREEN_HOVER)}
+          onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=GREEN)}
         >
           Create
         </button>
@@ -104,6 +119,8 @@ function CreateModal({ open, onClose, onCreate }:{
     </ModalShell>
   );
 }
+
+/* ABOUT: “Rename” modal */
 function RenameModal({ open, initial, onClose, onSave }:{
   open:boolean; initial:string; onClose:()=>void; onSave:(v:string)=>void;
 }) {
@@ -130,9 +147,9 @@ function RenameModal({ open, initial, onClose, onSave }:{
           disabled={!can}
           onClick={()=> can && onSave(val.trim())}
           className="w-full h-[44px] rounded-[14px] font-semibold disabled:opacity-60"
-          style={{ background:BTN_GREEN, color:'#fff', fontSize:12.5 }}
-          onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=BTN_GREEN_HOVER)}
-          onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=BTN_GREEN)}
+          style={{ background:GREEN, color:'#fff', fontSize:12.5 }}
+          onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=GREEN_HOVER)}
+          onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=GREEN)}
         >
           Save
         </button>
@@ -140,6 +157,8 @@ function RenameModal({ open, initial, onClose, onSave }:{
     </ModalShell>
   );
 }
+
+/* ABOUT: “Confirm Delete” modal */
 function ConfirmDelete({ open, name, onClose, onConfirm }:{
   open:boolean; name?:string; onClose:()=>void; onConfirm:()=>void;
 }) {
@@ -161,9 +180,9 @@ function ConfirmDelete({ open, name, onClose, onConfirm }:{
         </button>
         <button onClick={onConfirm}
                 className="w-full h-[44px] rounded-[14px] font-semibold"
-                style={{ background:BTN_GREEN, color:'#fff', fontSize:12.5 }}
-                onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=BTN_GREEN_HOVER)}
-                onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=BTN_GREEN)}>
+                style={{ background:GREEN, color:'#fff', fontSize:12.5 }}
+                onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=GREEN_HOVER)}
+                onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=GREEN)}>
           Delete
         </button>
       </div>
@@ -171,7 +190,12 @@ function ConfirmDelete({ open, name, onClose, onConfirm }:{
   );
 }
 
-/* ---------- Assistant row (GREEN bg + glow) ---------- */
+/* ───────────────────────── Row (assistant item) ─────────────────────────────
+   ABOUT:
+   - Active row: soft green background overlay (30%) + green halo — NO border
+   - Hover row: same green overlay (a bit softer) + halo
+   - Avatar: thin border to match theme
+──────────────────────────────────────────────────────────────────────────── */
 function Row({
   a, active, onClick, onRename, onDelete,
 }:{
@@ -183,24 +207,32 @@ function Row({
       className="rail-row w-full text-left rounded-[12px] px-3 flex items-center gap-2 group transition"
       style={{
         minHeight: 60,
-        background: active ? 'var(--rail-selected-bg)' : 'transparent',
-        border: '1px solid transparent',
+        // green overlay under content (active) — exactly ~30% opacity as requested
+        background: active
+          ? `linear-gradient(0deg, ${GREEN_OL30}, ${GREEN_OL30})`
+          : 'transparent',
+        border: '1px solid transparent', // no visible border, we’re using shadow halos
         color: 'var(--sidebar-text)',
         boxShadow: active
-          ? '0 10px 26px rgba(0,0,0,.36), 0 0 0 1px rgba(16,185,129,.20), 0 0 18px rgba(16,185,129,.28)'
+          ? `0 12px 28px rgba(0,0,0,.36), 0 0 0 1px ${GREEN_OL18}, 0 0 18px ${GREEN_OL18}`
           : 'none',
+        fontFamily: 'var(--font-movatif, inherit)',
       }}
     >
-      <div className="w-10 h-10 rounded-md grid place-items-center"
-           style={{ background:'var(--rail-avatar-bg)', border:'1px solid var(--sidebar-border)' }}>
+      <div
+        className="w-10 h-10 rounded-md grid place-items-center"
+        style={{ background:'var(--rail-avatar-bg)', border:'1px solid var(--sidebar-border)' }}
+      >
         <Bot className="w-4 h-4" style={{ color:'var(--brand)' }} />
       </div>
+
       <div className="min-w-0 flex-1">
         <div className="text-sm font-medium truncate">{a.name}</div>
         <div className="text-[11px] truncate" style={{ color:'var(--sidebar-muted)' }}>
           {a.purpose || '—'}
         </div>
       </div>
+
       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
         <button
           onClick={(e)=>{ e.stopPropagation(); onRename(); }}
@@ -220,20 +252,24 @@ function Row({
         </button>
       </div>
 
-      {/* Hover halo */}
+      {/* ABOUT: green hover effect (overlay + halo), softer than active */}
       <style jsx>{`
-        .rail-row:hover,
-        .rail-row:focus-visible{
-          box-shadow: 0 10px 26px rgba(0,0,0,.32), 0 0 0 1px rgba(16,185,129,.18), 0 0 16px rgba(16,185,129,.24);
-          background: var(--rail-selected-bg);
-          outline: none;
+        .rail-row:hover{
+          background: linear-gradient(0deg, ${GREEN_OL14}, ${GREEN_OL14});
+          box-shadow: 0 10px 24px rgba(0,0,0,.32), 0 0 0 1px ${GREEN_OL14}, 0 0 14px ${GREEN_OL14};
         }
       `}</style>
     </button>
   );
 }
 
-/* -------------------------------- Main -------------------------------- */
+/* ─────────────────────────────── Main rail ─────────────────────────────────
+   ABOUT:
+   - Movatif font (via CSS var) applied to the whole panel
+   - Search bar: **hairline** border (0.5px) and white-ish in dark mode
+   - “Create Assistant” small white text on green, hover to deeper green
+   - Emits assistant:active events so VoiceAgentSection stays independent
+──────────────────────────────────────────────────────────────────────────── */
 export default function AssistantRail() {
   const [assistants,setAssistants] = useState<AssistantLite[]>([]);
   const [activeId,setActiveId] = useState('');
@@ -242,25 +278,26 @@ export default function AssistantRail() {
   const [renId,setRenId] = useState<string|null>(null);
   const [delId,setDelId] = useState<string|null>(null);
 
+  // ABOUT: initial load + restore selection
   useEffect(()=>{ (async()=>{
     const list = await loadAssistants();
     setAssistants(list);
-    const savedActive = (()=>{
-      try { return localStorage.getItem(ACTIVE_KEY) || ''; } catch { return ''; }
-    })();
+    const savedActive = (()=>{ try { return localStorage.getItem(ACTIVE_KEY) || ''; } catch { return ''; } })();
     const firstId = savedActive && list.find(a=>a.id===savedActive) ? savedActive : (list[0]?.id || '');
-    setActiveId(firstId); if (firstId) writeActive(firstId);
+    setActiveId(firstId);
+    if (firstId) writeActive(firstId);
   })(); },[]);
 
+  // ABOUT: filter by query (name or purpose)
   const filtered = useMemo(()=> {
     const s=q.trim().toLowerCase();
     return !s?assistants:assistants.filter(a=>a.name.toLowerCase().includes(s) || (a.purpose||'').toLowerCase().includes(s));
   },[assistants,q]);
 
-  function select(id:string){
-    setActiveId(id);
-    writeActive(id);
-  }
+  // ABOUT: select row + broadcast
+  function select(id:string){ setActiveId(id); writeActive(id); }
+
+  // ABOUT: create → save → select new
   function addAssistant(name:string){
     const a:AssistantLite = { id: uid(), name, createdAt: Date.now(), purpose:'' };
     const next=[a, ...assistants];
@@ -268,10 +305,14 @@ export default function AssistantRail() {
     select(a.id);
     setCreateOpen(false);
   }
+
+  // ABOUT: rename in-place
   function saveRename(name:string){
     const next=assistants.map(x=> x.id===renId ? {...x, name} : x);
     setAssistants(next); saveAssistants(next); setRenId(null);
   }
+
+  // ABOUT: delete + fix selection
   function confirmDelete(){
     const next = assistants.filter(x=> x.id!==delId);
     const deletedActive = activeId===delId;
@@ -291,43 +332,51 @@ export default function AssistantRail() {
       className="assistant-rail px-3 py-3 h-full"
       style={{
         background:'var(--sidebar-bg)',
-        borderRight:'1px solid rgba(255,255,255,.14)',
+        borderRight:'1px solid rgba(255,255,255,.14)',   // ABOUT: rail divider (thin, white-ish)
         color:'var(--sidebar-text)',
-        fontFamily: 'var(--font-movatif, ui-sans-serif, system-ui)',   // ← Movatif by CSS var
+        fontFamily: 'var(--font-movatif, inherit)',      // ABOUT: Movatif font if provided globally
       }}
     >
-      {/* CTA */}
+      {/* ABOUT: primary CTA (small white text, green bg, hover darker green) */}
       <button
         type="button"
-        className="w-full inline-flex items-center justify-center gap-2 rounded-[14px] font-semibold mb-3"
-        style={{ height: 38, background: BTN_GREEN, color: '#fff', fontSize: 13 }}
-        onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=BTN_GREEN_HOVER)}
-        onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=BTN_GREEN)}
+        className="w-full inline-flex items-center justify-center gap-2 rounded-[12px] font-semibold mb-3"
+        style={{ height: 38, background: GREEN, color: '#fff', fontSize: 12.5 }}
+        onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=GREEN_HOVER)}
+        onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=GREEN)}
         onClick={()=> setCreateOpen(true)}
       >
         <Plus className="w-4 h-4" /> Create Assistant
       </button>
 
-      {/* Search — thin border; white in dark */}
+      {/* ABOUT: search input — ultra-thin border (0.5px).
+                Dark: white-ish border; Light: neutral. */}
       <div className="relative mb-3">
         <input
-          value={q} onChange={(e)=>setQ(e.target.value)} placeholder="Search assistants"
-          className="w-full h-[32px] rounded-[10px] pl-9 pr-3 text-sm outline-none border"
+          value={q}
+          onChange={(e)=>setQ(e.target.value)}
+          placeholder="Search assistants"
+          className="w-full h-[32px] rounded-[10px] pl-8 pr-3 text-sm outline-none"
           style={{
             background:'var(--rail-input-bg)',
-            borderColor:'var(--rail-input-border)',
-            borderWidth:'1px',                 // ← hairline; tweak to .5px if you want finer
-            color:'var(--rail-input-text)'
+            // Hairline border: some browsers ignore <1px; we safeguard with box-shadow
+            border: '0.5px solid var(--rail-input-border)',
+            boxShadow: '0 0 0 0.5px var(--rail-input-border)',
+            color:'var(--rail-input-text)',
           }}
         />
-        <Search className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2"
-                style={{ color:'var(--rail-input-muted)' }}/>
+        <Search
+          className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2"
+          style={{ color:'var(--rail-input-muted)' }}
+        />
       </div>
 
+      {/* ABOUT: section label */}
       <div className="text-[11px] font-semibold tracking-[.12em] mb-2" style={{ color:'var(--sidebar-muted)' }}>
         ASSISTANTS
       </div>
 
+      {/* ABOUT: scrollable list */}
       <div className="overflow-auto" style={{ maxHeight:'calc(100% - 118px)' }}>
         <div className="space-y-1.5">
           <AnimatePresence initial={false}>
@@ -352,40 +401,37 @@ export default function AssistantRail() {
         </div>
       </div>
 
-      {/* Modals */}
+      {/* ABOUT: modals */}
       <CreateModal open={createOpen} onClose={()=>setCreateOpen(false)} onCreate={addAssistant} />
       <RenameModal open={!!renId} initial={renName} onClose={()=>setRenId(null)} onSave={saveRename} />
       <ConfirmDelete open={!!delId} name={delName} onClose={()=>setDelId(null)} onConfirm={confirmDelete} />
 
-      {/* Theme tokens */}
+      {/* ABOUT: theme tokens (light vs dark) for input/chips/selected bg */}
       <style jsx>{`
-        /* Light */
+        /* Light theme */
         :global(:root:not([data-theme="dark"])) .assistant-rail{
           --rail-input-bg: #fff;
-          --rail-input-border: rgba(0,0,0,.14);
+          --rail-input-border: rgba(0,0,0,.18);    /* neutral hairline for light */
           --rail-input-text: #0f172a;
           --rail-input-muted: #64748b;
 
-          --rail-selected-bg: rgba(15,185,129,.10);  /* green tint in light too */
           --rail-avatar-bg: rgba(0,0,0,.06);
-
           --rail-chip-bg: #fff;
           --rail-chip-border: rgba(0,0,0,.12);
         }
-        /* Dark */
+        /* Dark theme */
         :global([data-theme="dark"]) .assistant-rail{
           --rail-input-bg: var(--card);
-          --rail-input-border: rgba(255,255,255,.78); /* thin white */
+          --rail-input-border: rgba(255,255,255,.78);  /* white-ish hairline in dark */
           --rail-input-text: var(--text);
           --rail-input-muted: var(--text-muted);
 
-          --rail-selected-bg: rgba(16,185,129,.10);   /* **GREEN**, not gray */
           --rail-avatar-bg: rgba(255,255,255,.06);
-
           --rail-chip-bg: var(--card);
           --rail-chip-border: var(--border);
         }
 
+        /* ABOUT: placeholder tint follows token */
         .assistant-rail input::placeholder{ color: var(--rail-input-muted); opacity: .9; }
       `}</style>
     </div>
