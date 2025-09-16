@@ -575,88 +575,153 @@ export default function Improve() {
       </header>
 
       {/* Canvas with internal scroll panes (no page scroll) */}
-      <div className="max-w-[1680px] mx-auto px-6 py-5">
-        <div className="grid gap-3" style={{ gridTemplateColumns: '320px 1fr' }}>
-          {/* Left rail */}
-          <aside className="h-[calc(100vh-140px)]" style={PANEL}>
-            <div className="p-3 border-b" style={{ borderColor:'var(--border)' }}>
-              <div className="flex items-center gap-2">
-                <Bot className="w-4 h-4" style={{ color:'var(--brand)' }} />
-                <div className="font-semibold">Assistants</div>
-              </div>
-              <div className="relative mt-3">
-                <input value={query} onChange={(e)=>setQuery(e.target.value)} placeholder="Search"
-                       className="w-full rounded-md pl-8 pr-3 py-2 text-sm outline-none" style={CARD}/>
-                <Search className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 opacity-70" />
-              </div>
-              <div className="mt-2 flex items-center gap-2">
-                <select value={sort} onChange={(e)=>setSort(e.target.value as any)} className="px-2 py-1 rounded-md text-xs" style={CARD}>
-                  <option value="pinned_first">Pinned</option>
-                  <option value="name_asc">Name</option>
-                  <option value="updated_desc">Recent</option>
-                </select>
-                <div className="flex items-center gap-1">
-                  <TagIcon className="w-4 h-4 opacity-70" />
-                  <input placeholder="Tag filter" value={tagFilter} onChange={(e)=>setTagFilter(e.target.value)}
-                         className="px-2 py-1 rounded-md text-xs" style={{ ...CARD, width:120 }}/>
-                </div>
-              </div>
+<div className="max-w-[1680px] mx-auto px-6 py-5">
+  <div className="grid gap-3" style={{ gridTemplateColumns: '320px 1fr' }}>
+    {/* Left rail */}
+    <aside className="h-[calc(100vh-140px)]" style={PANEL}>
+      <div className="p-3 border-b" style={{ borderColor: 'var(--border)' }}>
+        <div className="flex items-center gap-2">
+          <Bot className="w-4 h-4" style={{ color: 'var(--brand)' }} />
+          <div className="font-semibold">Assistants</div>
+        </div>
+        <div className="relative mt-3">
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search"
+            className="w-full rounded-md pl-8 pr-3 py-2 text-sm outline-none"
+            style={CARD}
+          />
+          <Search className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 opacity-70" />
+        </div>
+        <div className="mt-2 flex items-center gap-2">
+          <select
+            value={sort}
+            onChange={(e) => setSort(e.target.value as any)}
+            className="px-2 py-1 rounded-md text-xs"
+            style={CARD}
+          >
+            <option value="pinned_first">Pinned</option>
+            <option value="name_asc">Name</option>
+            <option value="updated_desc">Recent</option>
+          </select>
+          <div className="flex items-center gap-1">
+            <TagIcon className="w-4 h-4 opacity-70" />
+            <input
+              placeholder="Tag filter"
+              value={tagFilter}
+              onChange={(e) => setTagFilter(e.target.value)}
+              className="px-2 py-1 rounded-md text-xs"
+              style={{ ...CARD, width: 120 }}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="p-3 overflow-auto" style={{ maxHeight: 'calc(100% - 118px)' }}>
+        {loading ? (
+          <div className="grid place-items-center py-10 opacity-70">
+            <Loader2 className="w-5 h-5 animate-spin" />
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="text-sm opacity-80 py-10 text-center px-3">
+            No agents yet.
+            <div className="mt-2">
+              <Link
+                href="/builder"
+                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm"
+                style={{ background: 'var(--brand)', color: '#00120a' }}
+              >
+                Go to Builder
+              </Link>
             </div>
-            <div className="p-3 overflow-auto" style={{ maxHeight: 'calc(100% - 118px)' }}>
-              {loading ? (
-                <div className="grid place-items-center py-10 opacity-70"><Loader2 className="w-5 h-5 animate-spin" /></div>
-              ) : filtered.length === 0 ? (
-                <div className="text-sm opacity-80 py-10 text-center px-3">
-                  No agents yet.
-                  <div className="mt-2">
-                    <Link href="/builder" className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm"
-                          style={{ background: 'var(--brand)', color: '#00120a' }}>
-                      Go to Builder
-                    </Link>
-                  </div>
-                </div>
-              ) : (
-                <ul className="space-y-2">
-                  {filtered.map((b) => {
-                    let pinnedLocal=false, draftLocal=false, tagsLocal: string[]=[];
-                    try {
-                      if (userId) {
-                        const raw = localStorage.getItem(metaKey(userId, b.id));
-                        const m: AgentMeta = raw ? JSON.parse(raw) : {};
-                        pinnedLocal=!!m.pinned; draftLocal=!!m.draft; tagsLocal=m.tags||[];
-                      }
-                    } catch {}
-                    const active = selectedId === b.id;
-                    return (
-                      <li key={b.id}>
-                        <button onClick={()=>setSelectedId(b.id)} className={`w-full text-left px-3 py-2 rounded-lg text-sm flex items-center gap-2 transition ${active ? 'ring-1' : ''}`}
-                                style={{ ...CARD, borderColor: active ? 'var(--brand)' : 'var(--border)' }}>
-                          <div className="w-8 h-8 rounded-md grid place-items-center" style={{ background: 'rgba(0,0,0,.2)', border: '1px solid var(--border)' }}>
-                            <Bot className="w-4 h-4" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="truncate flex items-center gap-2">
-                              {b.name || 'Untitled'}
-                              {draftLocal ? <span className="text-[10px] px-1.5 py-[1px] rounded-full" style={{ background:'rgba(255,200,0,.12)', border:'1px solid rgba(255,200,0,.35)' }}>Draft</span> : null}
-                            </div>
-                            <div className="text-[11px] opacity-60 truncate">{b.model} · {b.id.slice(0,8)}</div>
-                            {tagsLocal.length>0 && (
-                              <div className="flex flex-wrap gap-1 mt-1">
-                                {tagsLocal.slice(0,3).map(t => (
-                                  <span key={t} className="text-[10px] px-1 py-[1px] rounded" style={{ background:'rgba(0,0,0,.15)', border:'1px solid var(--border)' }}>{t}</span>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                          {pinnedLocal ? <Star className="w-4 h-4" style={{ color:'var(--brand)' }} /> : null}
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </div>
-          </aside>
+          </div>
+        ) : (
+          <ul className="space-y-2">
+            {filtered.map((b) => {
+              let pinnedLocal = false,
+                draftLocal = false,
+                tagsLocal: string[] = [];
+              try {
+                if (userId) {
+                  const raw = localStorage.getItem(metaKey(userId, b.id));
+                  const m: AgentMeta = raw ? JSON.parse(raw) : {};
+                  pinnedLocal = !!m.pinned;
+                  draftLocal = !!m.draft;
+                  tagsLocal = m.tags || [];
+                }
+              } catch {}
+              const active = selectedId === b.id;
+              return (
+                <li key={b.id}>
+                  <button
+                    onClick={() => setSelectedId(b.id)}
+                    className={`w-full text-left px-3 py-2 rounded-lg text-sm flex items-center gap-2 transition ${
+                      active ? 'ring-1' : ''
+                    }`}
+                    style={{
+                      ...CARD,
+                      borderColor: active ? 'var(--brand)' : 'var(--border)',
+                    }}
+                  >
+                    <div
+                      className="w-8 h-8 rounded-md grid place-items-center"
+                      style={{
+                        background: 'rgba(0,0,0,.2)',
+                        border: '1px solid var(--border)',
+                      }}
+                    >
+                      <Bot className="w-4 h-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="truncate flex items-center gap-2">
+                        {b.name || 'Untitled'}
+                        {draftLocal ? (
+                          <span
+                            className="text-[10px] px-1.5 py-[1px] rounded-full"
+                            style={{
+                              background: 'rgba(255,200,0,.12)',
+                              border: '1px solid rgba(255,200,0,.35)',
+                            }}
+                          >
+                            Draft
+                          </span>
+                        ) : null}
+                      </div>
+                      <div className="text-[11px] opacity-60 truncate">
+                        {b.model} · {b.id.slice(0, 8)}
+                      </div>
+                      {tagsLocal.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {tagsLocal.slice(0, 3).map((t) => (
+                            <span
+                              key={t}
+                              className="text-[10px] px-1 py-[1px] rounded"
+                              style={{
+                                background: 'rgba(0,0,0,.15)',
+                                border: '1px solid var(--border)',
+                              }}
+                            >
+                              {t}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    {pinnedLocal ? (
+                      <Star className="w-4 h-4" style={{ color: 'var(--brand)' }} />
+                    ) : null}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    </aside>
+
+    {/* Right column continues… */}
+
 
           {/* Right column continues in PART 2… */}
           {/* Editor column (no internal scroll except textareas) */}
