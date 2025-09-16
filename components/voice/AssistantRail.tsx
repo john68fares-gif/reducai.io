@@ -20,7 +20,7 @@ const ACTIVE_KEY  = 'va:activeId';
 /* Brand tokens */
 const GREEN       = '#10b981';
 const GREEN_HOVER = '#0ea473';
-const GREEN_OL30  = 'rgba(16,185,129,.30)'; // 30% overlay
+const GREEN_OL30  = 'rgba(16,185,129,.30)';
 const GREEN_OL18  = 'rgba(16,185,129,.18)';
 const GREEN_OL14  = 'rgba(16,185,129,.14)';
 
@@ -197,7 +197,7 @@ function Row({
         boxShadow: active
           ? `0 12px 28px rgba(0,0,0,.36), 0 0 0 1px ${GREEN_OL18}, 0 0 18px ${GREEN_OL18}`
           : 'none',
-        fontFamily: 'var(--font-movatif, inherit)',
+        fontFamily: `"Movatif", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial`,
         position: 'relative',
         overflow: 'hidden',
       }}
@@ -211,10 +211,9 @@ function Row({
         }}
       >
         <Bot className="w-4 h-4" style={{ color:'var(--brand)' }} />
-        {/* Loading tint + spinner */}
+        {/* If the row itself is loading, tint the tile too */}
         {loading && (
-          <div className="absolute inset-0 rounded-md grid place-items-center"
-               style={{ background: GREEN_OL30 }}>
+          <div className="absolute inset-0 rounded-md grid place-items-center" style={{ background: GREEN_OL30 }}>
             <Loader2 className="h-4 w-4 animate-spin text-black/80" />
           </div>
         )}
@@ -246,7 +245,6 @@ function Row({
         </button>
       </div>
 
-      {/* Hover effect (soft) */}
       <style jsx>{`
         .rail-row:hover{
           background: linear-gradient(0deg, ${GREEN_OL14}, ${GREEN_OL14});
@@ -261,7 +259,7 @@ function Row({
 export default function AssistantRail() {
   const [assistants,setAssistants] = useState<AssistantLite[]>([]);
   const [activeId,setActiveId] = useState('');
-  const [loadingId,setLoadingId] = useState<string | null>(null); // ← loading phase state
+  const [loadingId,setLoadingId] = useState<string | null>(null); // full-screen overlay trigger
   const [q,setQ] = useState('');
   const [createOpen,setCreateOpen] = useState(false);
   const [renId,setRenId] = useState<string|null>(null);
@@ -283,13 +281,12 @@ export default function AssistantRail() {
     return !s?assistants:assistants.filter(a=>a.name.toLowerCase().includes(s) || (a.purpose||'').toLowerCase().includes(s));
   },[assistants,q]);
 
-  /* selection with quick loading phase */
+  /* selection with full-screen loading overlay */
   function select(id:string){
-    setLoadingId(id);                  // show the 30% green overlay + spinner
-    setActiveId(id);                   // keep behavior
-    writeActive(id);                   // notify the rest of the app
-    // keep the loading tint briefly so user perceives feedback
-    window.setTimeout(()=> setLoadingId(null), 420);
+    setLoadingId(id);
+    setActiveId(id);
+    writeActive(id);
+    window.setTimeout(()=> setLoadingId(null), 520); // keep visible briefly
   }
 
   /* CRUD */
@@ -320,7 +317,7 @@ export default function AssistantRail() {
 
   return (
     <div
-      className="assistant-rail px-3 py-3 h-full font-[Movatif]"   // ← apply Movatif here
+      className="assistant-rail px-3 py-3 h-full font-[Movatif]"
       style={{
         background:'var(--sidebar-bg)',
         borderRight:'1px solid rgba(255,255,255,.14)',
@@ -339,7 +336,7 @@ export default function AssistantRail() {
         <Plus className="w-4 h-4" /> Create Assistant
       </button>
 
-      {/* Search — hairline border */}
+      {/* Search — **hairline** 0.25px border (+shadow fallback) */}
       <div className="relative mb-3">
         <input
           value={q}
@@ -348,8 +345,8 @@ export default function AssistantRail() {
           className="w-full h-[32px] rounded-[10px] pl-8 pr-3 text-sm outline-none"
           style={{
             background:'var(--rail-input-bg)',
-            border: '0.5px solid var(--rail-input-border)',
-            boxShadow: '0 0 0 0.5px var(--rail-input-border)', // for browsers that quantize borders
+            border: '0.25px solid var(--rail-input-border)',
+            boxShadow: '0 0 0 0.25px var(--rail-input-border)',
             color:'var(--rail-input-text)',
           }}
         />
@@ -372,7 +369,7 @@ export default function AssistantRail() {
                 <Row
                   a={a}
                   active={a.id===activeId}
-                  loading={loadingId===a.id}           // ← drives the overlay/spinner
+                  loading={loadingId===a.id}
                   onClick={()=>select(a.id)}
                   onRename={()=>setRenId(a.id)}
                   onDelete={()=>setDelId(a.id)}
@@ -393,6 +390,14 @@ export default function AssistantRail() {
       <CreateModal open={createOpen} onClose={()=>setCreateOpen(false)} onCreate={addAssistant} />
       <RenameModal open={!!renId} initial={renName} onClose={()=>setRenId(null)} onSave={saveRename} />
       <ConfirmDelete open={!!delId} name={delName} onClose={()=>setDelId(null)} onConfirm={confirmDelete} />
+
+      {/* Full-screen loading overlay (brand green ~30% opacity) */}
+      {loadingId && (
+        <div className="fixed inset-0 z-[9999] grid place-items-center"
+             style={{ background: GREEN_OL30, backdropFilter: 'blur(1px)' }}>
+          <Loader2 className="h-6 w-6 animate-spin text-black/80" />
+        </div>
+      )}
 
       {/* Rail theme tokens */}
       <style jsx>{`
