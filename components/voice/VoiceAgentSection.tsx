@@ -24,11 +24,10 @@ class RailBoundary extends React.Component<{children:React.ReactNode},{hasError:
   render(){ return this.state.hasError ? <div className="px-3 py-3 text-xs opacity-70">Rail crashed</div> : this.props.children; }
 }
 
-/* ───────────────── Tokens ───────────────── */
+/* ───────────────── Tokens (global) ───────────────── */
 const ACTIVE_KEY = 'va:activeId';
 const CTA        = '#59d9b3';
 const CTA_HOVER  = '#54cfa9';
-
 const LS_KEYS = 'apiKeys.v1';
 const LS_SELECTED = 'apiKeys.selectedId';
 
@@ -36,11 +35,10 @@ const Tokens = () => (
   <style jsx global>{`
     .va-scope{
       --s-1: 6px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 20px; --s-6: 24px;
-      --radius-outer: 12px;
-      --radius-inner: 12px;
+      --radius-outer: 16px;
+      --radius-inner: 14px;
       --control-h: 44px;
-      --header-h: 86px;                 /* taller header */
-      --collapsed-h: var(--header-h);
+      --header-h: 86px;
       --fz-title: 18px; --fz-sub: 15px; --fz-body: 14px; --fz-label: 12.5px;
       --lh-body: 1.45; --ease: cubic-bezier(.22,.61,.36,1);
 
@@ -48,34 +46,109 @@ const Tokens = () => (
       --panel-alt: #0d1112;
 
       --input-bg: #101314;
-      --input-border: rgba(255,255,255,.04); /* almost no border */
-      --input-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 12px 30px rgba(0,0,0,.38);
+      --input-border: rgba(255,255,255,.04);  /* almost none */
+      --input-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 8px 18px rgba(0,0,0,.35);
 
       --menu-bg: #101314;
-      --menu-border: rgba(255,255,255,.16);
-      --menu-shadow: 0 42px 110px rgba(0,0,0,.62), 0 0 0 1px rgba(0,0,0,.35), 0 0 0 1px rgba(0,255,194,.10);
+      --menu-border: rgba(255,255,255,.12);
+      --menu-shadow: 0 40px 110px rgba(0,0,0,.62), 0 0 0 1px rgba(0,0,0,.35);
 
       --text: #eaf8f3; --text-muted: rgba(234,248,243,.62);
       --bg: #0b0e0f;
 
-      /* better ambient placement: wide, soft base + inner lift */
-      --shadow-green: 0 36px 120px rgba(89,217,179,.22), 0 10px 26px rgba(0,0,0,.45);
+      /* subtle ambient only (no heavy lift) */
+      --card-shadow: 0 14px 26px rgba(0,0,0,.32);
+      --card-border: rgba(255,255,255,.04);
+
+      /* vertical bands (rotated) + hover sheen */
+      --bands:
+        repeating-linear-gradient(
+          25deg,
+          rgba(255,255,255,.022) 0px,
+          rgba(255,255,255,.022) 34px,
+          rgba(0,0,0,.06) 34px,
+          rgba(0,0,0,.06) 68px
+        );
+      --band-tint:
+        linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,0));
+      --hover-sheen:
+        radial-gradient(120% 120% at 0% 0%, rgba(0,255,194,.10) 0%, rgba(0,255,194,0) 60%);
     }
 
     :root:not([data-theme="dark"]) .va-scope{
-      --panel: #fff; --panel-alt: #fff;
-      --input-bg: #fff; --input-border: rgba(0,0,0,.06);
-      --input-shadow: inset 0 1px 0 rgba(255,255,255,.8), 0 10px 26px rgba(0,0,0,.12);
-      --menu-bg: #fff; --menu-border: rgba(0,0,0,.10);
-      --menu-shadow: 0 42px 110px rgba(0,0,0,.20), 0 0 0 1px rgba(0,0,0,.05);
+      --panel: #ffffff; --panel-alt: #ffffff;
+      --input-bg: #ffffff; --input-border: rgba(0,0,0,.06);
+      --input-shadow: inset 0 1px 0 rgba(255,255,255,.8), 0 8px 18px rgba(0,0,0,.12);
+      --menu-bg: #ffffff; --menu-border: rgba(0,0,0,.10);
+      --menu-shadow: 0 40px 110px rgba(0,0,0,.22), 0 0 0 1px rgba(0,0,0,.05);
       --text: #0f1213; --text-muted: rgba(15,18,19,.62);
       --bg: #f6f7f8;
-      --shadow-green: 0 36px 120px rgba(89,217,179,.12), 0 10px 24px rgba(0,0,0,.12);
+      --card-shadow: 0 14px 24px rgba(0,0,0,.10);
+      --card-border: rgba(0,0,0,.06);
+      --bands:
+        repeating-linear-gradient(
+          25deg,
+          rgba(0,0,0,.035) 0px,
+          rgba(0,0,0,.035) 34px,
+          rgba(0,0,0,.06) 34px,
+          rgba(0,0,0,.06) 68px
+        );
+      --band-tint:
+        linear-gradient(180deg, rgba(0,0,0,.035), rgba(0,0,0,0));
+      --hover-sheen:
+        radial-gradient(120% 120% at 0% 0%, rgba(0,255,194,.08) 0%, rgba(0,255,194,0) 60%);
     }
 
     .va-main{ overflow: visible; position: relative; contain: none; }
-    .va-portal{ background: var(--menu-bg); border: 1px solid var(--menu-border); box-shadow: var(--menu-shadow); border-radius: 12px; }
-    .va-collapsing{ overflow: hidden; will-change: height; }
+
+    /* Card surface: dim, bands inside, almost no border. */
+    .va-card{
+      position: relative;
+      border: 1px solid var(--card-border);
+      background:
+        var(--hover-sheen),
+        var(--bands),
+        linear-gradient(180deg, var(--panel-alt), var(--panel));
+      background-blend-mode: screen, normal, normal;
+      border-radius: var(--radius-outer);
+      box-shadow: var(--card-shadow);
+      overflow: hidden;
+    }
+    .va-card:hover{
+      border-color: rgba(89,217,179,.16);
+    }
+    .va-card::after{
+      /* gentle top-left dark → light sweep to make it pop */
+      content:'';
+      position:absolute; inset:0;
+      pointer-events:none;
+      background:
+        linear-gradient(25deg, rgba(0,0,0,.16) 0%, rgba(0,0,0,0) 45%),
+        var(--band-tint);
+      mix-blend-mode: soft-light;
+    }
+
+    /* Dropdown portal */
+    .va-portal{
+      background: var(--menu-bg);
+      border: 1px solid var(--menu-border);
+      box-shadow: var(--menu-shadow);
+      border-radius: 14px;
+    }
+
+    /* Overlay glass */
+    .va-overlay{
+      background: rgba(0,0,0,.55);
+      backdrop-filter: blur(2px);
+    }
+    .va-sheet{
+      background:
+        radial-gradient(140% 160% at 0% 0%, rgba(0,255,194,.08) 0%, transparent 60%),
+        linear-gradient(180deg, var(--menu-bg), var(--menu-bg));
+      border: 1px solid var(--menu-border);
+      box-shadow: 0 28px 80px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.35) inset;
+      border-radius: 16px;
+    }
   `}</style>
 );
 
@@ -91,8 +164,7 @@ type AgentData = {
 
   ttsProvider: 'openai' | 'elevenlabs';
   voiceName: string;
-
-  apiKeyId?: string; // selected OpenAI key id
+  apiKeyId?: string;
 
   asrProvider: 'deepgram' | 'whisper' | 'assemblyai';
   asrLang: 'en' | 'nl' | 'es' | 'de';
@@ -254,14 +326,13 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
       style={{
         width:18, height:18, borderRadius:999,
         background: checked ? CTA : 'rgba(255,255,255,.12)',
-        transform:`translateX(${checked?22:0}px)`, transition:'transform .18s var(--ease)',
-        boxShadow: checked ? '0 0 8px rgba(89,217,179,.45)' : undefined
+        transform:`translateX(${checked?22:0}px)`, transition:'transform .18s var(--ease)'
       }}
     />
   </button>
 );
 
-/* Styled select — visual parity with StepV2 (solid surface + heavy portal) */
+/* Styled select (solid surface + visible portal) */
 function StyledSelect({
   value, onChange, options, placeholder, leftIcon
 }:{
@@ -309,7 +380,7 @@ function StyledSelect({
         className="w-full flex items-center justify-between gap-3 px-3 py-3 rounded-[14px] text-sm outline-none transition"
         style={{
           background:'var(--input-bg)',
-          border:'1px solid var(--input-border)', /* faint */
+          border:'1px solid var(--input-border)',
           boxShadow:'var(--input-shadow)',
           color:'var(--text)'
         }}
@@ -376,61 +447,38 @@ function StyledSelect({
   );
 }
 
-/* ───────────────── Small overlay for Generate ───────────────── */
-function PromptOverlay({
-  initial, onClose, onUse,
+/* ───────────────── Reusable overlay (matches last screenshot) ───────────────── */
+function ActionOverlay({
+  title, children, onClose, primaryText = 'Confirm', onPrimary
 }:{
-  initial: string; onClose: ()=>void; onUse: (v:string)=>void;
+  title: string; children: React.ReactNode; onClose: ()=>void; primaryText?: string; onPrimary?: ()=>void;
 }) {
-  const [val, setVal] = useState(initial);
-  const boxRef = useRef<HTMLDivElement|null>(null);
-
-  useEffect(() => {
-    const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    const onDown = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (!boxRef.current?.contains(t)) onClose();
-    };
-    window.addEventListener('keydown', onEsc);
-    window.addEventListener('mousedown', onDown);
-    return () => { window.removeEventListener('keydown', onEsc); window.removeEventListener('mousedown', onDown); };
-  }, [onClose]);
-
   return createPortal(
-    <div className="fixed inset-0 z-[99998] grid place-items-center px-4" style={{ background:'rgba(0,0,0,.55)' }}>
-      <div ref={boxRef} className="w-full max-w-[680px] rounded-[12px] p-4 md:p-5"
-           style={{ background:'var(--menu-bg)', border:'1px solid var(--menu-border)', boxShadow:'var(--menu-shadow)' }}>
+    <div className="fixed inset-0 z-[99998] grid place-items-center px-4 va-overlay">
+      <div className="va-sheet w-full max-w-[620px] p-4 md:p-6">
         <div className="flex items-center justify-between mb-3">
-          <div className="text-base font-semibold" style={{ color:'var(--text)' }}>Generate Base Prompt</div>
+          <div className="text-lg font-semibold" style={{ color:'var(--text)' }}>{title}</div>
           <button onClick={onClose} className="p-1 rounded hover:opacity-80" aria-label="Close">
             <X className="w-5 h-5" style={{ color:'var(--text-muted)' }} />
           </button>
         </div>
-        <div className="text-xs mb-3" style={{ color:'var(--text-muted)' }}>
-          Edit the template below or paste your own. “Use as Prompt” replaces the System Prompt.
-        </div>
-        <textarea
-          value={val}
-          onChange={(e)=>setVal(e.target.value)}
-          className="w-full bg-transparent outline-none rounded-[10px] px-3 py-2"
-          style={{ minHeight: 260, background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)', lineHeight:'var(--lh-body)', fontSize:'var(--fz-body)' }}
-        />
-        <div className="mt-3 flex items-center justify-end gap-2">
+        <div className="mb-4">{children}</div>
+        <div className="flex items-center justify-end gap-2">
           <button
             onClick={onClose}
-            className="h-9 px-3 rounded-[8px]"
-            style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)' }}
+            className="h-9 px-3 rounded-[10px]"
+            style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
           >
             Cancel
           </button>
           <button
-            onClick={()=>onUse(val)}
-            className="h-9 px-3 rounded-[8px] font-semibold"
-            style={{ background:CTA, color:'#0a0f0d', boxShadow:'0 14px 32px rgba(89,217,179,.30)' }}
+            onClick={onPrimary}
+            className="h-9 px-4 rounded-[10px] font-semibold"
+            style={{ background:CTA, color:'#0a0f0d', boxShadow:'0 14px 32px rgba(89,217,179,.26)' }}
             onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA_HOVER)}
             onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA)}
           >
-            Use as Prompt
+            {primaryText}
           </button>
         </div>
       </div>
@@ -439,7 +487,7 @@ function PromptOverlay({
   );
 }
 
-/* ───────────────── Section (title ABOVE, lighter/taller header, tiny gaps) ───────────────── */
+/* ───────────────── Section (title ABOVE, dim bands, tiny gaps) ───────────────── */
 function Section({
   title, icon, desc, children, defaultOpen = true
 }:{
@@ -454,28 +502,19 @@ function Section({
   useLayoutEffect(() => { measure(); }, [children, open]);
 
   return (
-    <div className="mb-[18px]"> {/* smaller gap between boxes */}
-      {/* Title ABOVE box */}
+    <div className="mb-[16px]">
       <div className="mb-[6px] text-sm font-medium" style={{ color:'var(--text-muted)' }}>
         {title}
       </div>
 
-      <div
-        className="rounded-[var(--radius-outer)] overflow-hidden"
-        style={{
-          background:'linear-gradient(180deg, var(--panel-alt), var(--panel))',
-          border:'1px solid var(--input-border)',  // almost no border
-          boxShadow:'var(--shadow-green)'
-        }}
-      >
-        {/* lighter, taller header */}
+      <div className="va-card">
+        {/* header */}
         <button
           onClick={()=>setOpen(v=>!v)}
-          className="w-full text-left px-4 sm:px-5 relative"
+          className="w-full text-left px-4 sm:px-5"
           style={{
             color:'var(--text)', minHeight:'var(--header-h)',
-            display:'grid', gridTemplateColumns:'1fr auto', alignItems:'center', gap:'12px',
-            background:'linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,0))'
+            display:'grid', gridTemplateColumns:'1fr auto', alignItems:'center', gap:'12px'
           }}
         >
           <span className="min-w-0 flex items-center gap-3">
@@ -497,8 +536,7 @@ function Section({
         {/* body */}
         <div
           ref={wrapRef}
-          className="va-collapsing"
-          style={{ height: open ? h : 0, transition: 'height 200ms var(--ease)' }}
+          style={{ height: open ? h : 0, transition: 'height 200ms var(--ease)', overflow:'hidden' }}
           onTransitionEnd={() => { if (open) measure(); }}
         >
           <div ref={innerRef} className="p-[var(--s-5)]">
@@ -521,9 +559,9 @@ export default function VoiceAgentSection() {
   const [publishing, setPublishing] = useState(false);
   const [calling, setCalling] = useState(false);
   const [toast, setToast] = useState<string>('');
-  const [showPromptOverlay, setShowPromptOverlay] = useState(false);
+  const [showGenerate, setShowGenerate] = useState(false);
 
-  // API Keys (scoped, like StepV2)
+  // API Keys (scoped, same as your other step)
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
 
   useEffect(() => {
@@ -540,7 +578,7 @@ export default function VoiceAgentSection() {
 
   useEffect(() => { if (activeId) saveAgentData(activeId, data); }, [activeId, data]);
 
-  // bootstrap api keys (copy of your StepV2 logic)
+  // bootstrap keys
   useEffect(() => {
     (async () => {
       try {
@@ -607,7 +645,7 @@ export default function VoiceAgentSection() {
 
       <div className="grid w-full" style={{ gridTemplateColumns: '260px 1fr' }}>
         {/* Rail */}
-        <div className="border-r sticky top-0 h-screen" style={{ borderColor:'rgba(255,255,255,.10)' }}>
+        <div className="sticky top-0 h-screen" style={{ borderRight:'1px solid rgba(255,255,255,.06)' }}>
           <RailBoundary><AssistantRail /></RailBoundary>
         </div>
 
@@ -639,9 +677,9 @@ export default function VoiceAgentSection() {
               onClick={doCallTest}
               disabled={calling}
               className="inline-flex items-center gap-2 rounded-[10px] font-semibold select-none disabled:opacity-60"
-              style={{ height:'var(--control-h)', padding:'0 18px', background:CTA, color:'#0a0f0d', boxShadow:'0 16px 36px rgba(89,217,179,.30)' }}
+              style={{ height:'var(--control-h)', padding:'0 18px', background:CTA, color:'#0a0f0d', boxShadow:'0 10px 26px rgba(89,217,179,.22)' }}
               onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA_HOVER)}
-              onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA)}
+              onMouseLeave={(e)=>((e.currentTarget as HTMLButtonButtonElement).style.background = CTA)}
             >
               <Phone className="w-4 h-4" /> {calling ? 'Calling…' : 'Talk to Assistant'}
             </button>
@@ -654,15 +692,13 @@ export default function VoiceAgentSection() {
             </div>
           ) : null}
 
-          {/* KPIs */}
-          <div className="grid gap-[14px] md:grid-cols-2 mb-[18px]">
-            <div className="relative p-[var(--s-4)] rounded-[12px]"
-                 style={{ background:'var(--panel)', border:'1px solid var(--input-border)', boxShadow:'var(--shadow-green)' }}>
+          {/* KPIs (dim, bands inside) */}
+          <div className="grid gap-[14px] md:grid-cols-2 mb-[16px]">
+            <div className="va-card p-[var(--s-4)]">
               <div className="text-xs mb-[6px]" style={{ color:'var(--text-muted)' }}>Cost</div>
               <div className="font-semibold" style={{ fontSize:'var(--fz-sub)', color:'var(--text)' }}>~$0.1/min</div>
             </div>
-            <div className="relative p-[var(--s-4)] rounded-[12px]"
-                 style={{ background:'var(--panel)', border:'1px solid var(--input-border)', boxShadow:'var(--shadow-green)' }}>
+            <div className="va-card p-[var(--s-4)]">
               <div className="text-xs mb-[6px]" style={{ color:'var(--text-muted)' }}>Latency</div>
               <div className="font-semibold" style={{ fontSize:'var(--fz-sub)', color:'var(--text)' }}>~1050 ms</div>
             </div>
@@ -707,9 +743,9 @@ export default function VoiceAgentSection() {
               <div className="flex items-center justify-between mb-[var(--s-2)]">
                 <div className="font-medium" style={{ fontSize:'var(--fz-label)' }}>System Prompt</div>
                 <button
-                  className="inline-flex items-center gap-2 rounded-[10px] text-sm transition hover:-translate-y-[1px]"
-                  style={{ height:36, padding:'0 12px', background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)' }}
-                  onClick={()=>setShowPromptOverlay(true)}
+                  className="inline-flex items-center gap-2 rounded-[10px] text-sm"
+                  style={{ height:36, padding:'0 12px', background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+                  onClick={()=>setShowGenerate(true)}
                 >
                   <Wand2 className="w-4 h-4" /> Generate
                 </button>
@@ -729,7 +765,7 @@ export default function VoiceAgentSection() {
             desc="Choose the TTS provider, voice, and OpenAI key."
             defaultOpen={true}
           >
-            {/* API Key selector (scoped storage import) */}
+            {/* OpenAI key import (scoped storage) */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[14px]">
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px] flex items-center gap-2" style={{ color:'var(--text)' }}>
@@ -775,7 +811,7 @@ export default function VoiceAgentSection() {
             </div>
 
             <div className="mt-[var(--s-2)] text-xs" style={{ color:'var(--text-muted)' }}>
-              Keep utterances short/specific for natural cadence. (ElevenLabs mapping can be added later.)
+              Keep utterances short/specific for natural cadence.
             </div>
           </Section>
 
@@ -840,12 +876,23 @@ export default function VoiceAgentSection() {
         </div>
       </div>
 
-      {showPromptOverlay && (
-        <PromptOverlay
-          initial={DEFAULT_AGENT.systemPrompt}
-          onClose={()=>setShowPromptOverlay(false)}
-          onUse={(v)=>{ set('systemPrompt')(v); setShowPromptOverlay(false); }}
-        />
+      {showGenerate && (
+        <ActionOverlay
+          title="Generate Base Prompt"
+          onClose={()=>setShowGenerate(false)}
+          primaryText="Use as Prompt"
+          onPrimary={()=>setShowGenerate(false)}
+        >
+          <textarea
+            defaultValue={DEFAULT_AGENT.systemPrompt}
+            onBlur={(e)=>set('systemPrompt')(e.currentTarget.value)}
+            className="w-full bg-transparent outline-none rounded-[12px] px-3 py-2"
+            style={{ minHeight: 260, background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)' }}
+          />
+          <div className="mt-2 text-xs" style={{ color:'var(--text-muted)' }}>
+            Paste or edit your base template. Saving uses this as the system prompt.
+          </div>
+        </ActionOverlay>
       )}
     </section>
   );
