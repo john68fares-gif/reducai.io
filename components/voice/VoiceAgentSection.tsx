@@ -63,42 +63,57 @@ const Tokens = () => (
       --band-green: 0,255,194; /* rgb for alpha control */
 
      /* === VERTICAL, WIDE BANDS with center darkening === */
-.va-scope{
-  /* wide green stripes (vertical) */
+/* === WIDE VERTICAL BANDS (center darkest) with SIDE GUTTERS === */
+.va-scope {
   --va-bands: repeating-linear-gradient(
     90deg,
-    rgba(0,255,194,.10) 0px,     /* stripe alpha – bump up/down to see it */
-    rgba(0,255,194,.10) 36px,    /* stripe width */
+    rgba(0, 255, 194, 0.10) 0px,
+    rgba(0, 255, 194, 0.10) 36px,
     transparent 36px,
-    transparent 72px            /* gap (keep ~2× stripe width) */
+    transparent 72px
   );
-
-  /* center is darkest; sides lighter */
   --va-center-dark: linear-gradient(
     90deg,
-    rgba(0,0,0,.08) 0%,
-    rgba(0,0,0,.34) 50%,         /* darkest middle */
-    rgba(0,0,0,.08) 100%
+    rgba(0, 0, 0, 0.08) 0%,
+    rgba(0, 0, 0, 0.34) 50%,
+    rgba(0, 0, 0, 0.08) 100%
   );
 
-  /* keep your existing tokens; no other vars required */
+  /* how much empty space on the sides of the pattern */
+  --va-band-inset-x: 18px;  /* ← tweak this to increase/decrease side spacing */
 }
 
-/* The card surface: center-dark on top of bands, then base gradient */
-.va-card{
+/* Base card surface (no pattern here) */
+.va-card {
   position: relative;
   border: 1px solid var(--card-border);
   border-radius: var(--radius-outer);
-  background:
-    var(--va-center-dark),
-    var(--va-bands),
-    linear-gradient(180deg, var(--panel-alt), var(--panel));
+  background: linear-gradient(180deg, var(--panel-alt), var(--panel));
   box-shadow: var(--card-shadow);
   overflow: hidden;
 }
 
-/* IMPORTANT: kill any earlier overlay that may hide bands */
-.va-card::before{ content: none !important; }
+/* Ensure content renders above the decorative layer */
+.va-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* Decorative pattern layer UNDER content, inset from the sides */
+.va-card::after {
+  content: "";
+  position: absolute;
+  inset: 0 var(--va-band-inset-x); /* top/bottom 0, left/right inset */
+  z-index: 0;
+  pointer-events: none;
+  background:
+    var(--va-center-dark),
+    var(--va-bands);
+  border-radius: inherit; /* keeps corners clean */
+}
+
+/* If you had an older overlay, keep it off */
+     .va-card::before { content: none !important; }
 
     :root:not([data-theme="dark"]) .va-scope{
       --panel: #ffffff; --panel-alt: #ffffff;
