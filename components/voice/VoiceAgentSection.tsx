@@ -49,7 +49,7 @@ const Tokens = () => (
       --border-weak: rgba(255,255,255,.09);
 
       /* Single box color (requested) */
-      --box: #223248;
+      --box: ##121919;
     }
 
     .va-main{ overflow: visible; position: relative; contain: none; }
