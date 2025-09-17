@@ -42,59 +42,135 @@ const Tokens = () => (
       --text: #ffffff;
       --text-muted: rgba(255,255,255,.72);
 
-      --input-bg: #101314;
-      --input-border: rgba(255,255,255,.10);
+      /* Your palette */
+      --c-core: #121919; /* darkest center */
+      --c-edge: #172222; /* target edge tone (slightly lighter than core) */
+
+      /* Box surface under the band */
+      --box: var(--c-edge);
+      --border-weak: rgba(255,255,255,.10);
+
+      /* Step geometry (center + 6 steps each side) */
+      --core-w: 24%;       /* width of the very dark center band */
+      --step-w: 4%;        /* width of each step band (6 per side → 24%) */
+
+      /* Precomputed step tones (progressively lighter from core → edge) */
+      --s1: color-mix(in oklab, var(--c-core) 85%, var(--c-edge));
+      --s2: color-mix(in oklab, var(--c-core) 70%, var(--c-edge));
+      --s3: color-mix(in oklab, var(--c-core) 55%, var(--c-edge));
+      --s4: color-mix(in oklab, var(--c-core) 40%, var(--c-edge));
+      --s5: color-mix(in oklab, var(--c-core) 25%, var(--c-edge));
+      --s6: color-mix(in oklab, var(--c-core) 10%, var(--c-edge));
+
+      /* Inputs */
+      --input-bg: #121617;
+      --input-border: rgba(255,255,255,.12);
       --input-shadow: inset 0 1px 0 rgba(255,255,255,.03), 0 8px 18px rgba(0,0,0,.35);
-
-      --border-weak: rgba(255,255,255,.09);
-
-      /* Single box color (requested) */
-      --box: ##121919;
     }
 
     .va-main{ overflow: visible; position: relative; contain: none; }
 
-    /* ONE-COLOR BOXES (no bands/gradients) */
+    /* Base card */
     .va-card{
       position: relative;
       border-radius: var(--radius-outer);
       border: 1px solid var(--border-weak);
-      background: var(--box);              /* ← solid #223248 */
+      background: var(--box); /* edge tone as base */
       box-shadow: 0 18px 40px rgba(0,0,0,.28);
       overflow: hidden;
       isolation: isolate;
     }
-    .va-card::before{ content:none !important; }
 
-    /* Header matches the same solid color */
+    /* HEADER: keep flat, uses edge tone to match sides */
     .va-card .va-head{
       min-height: var(--header-h);
-      display: grid;
-      grid-template-columns: 1fr auto;
-      align-items: center;
+      display: grid; grid-template-columns: 1fr auto; align-items: center;
       padding: 0 16px;
-      background: var(--box);              /* ← same solid */
+      background: var(--box); /* same as card base */
       border-bottom: 1px solid rgba(255,255,255,.06);
       color: var(--text);
     }
 
-    /* Dropdown / overlays */
+    /* THE BAND: center darkest, 6 stepped bands per side toward the edge tone */
+    .va-card::before{
+      content:'';
+      position:absolute; inset:0; pointer-events:none; z-index:0;
+
+      /* layout math helpers */
+      /* center starts at 50% - core/2 and ends at 50% + core/2
+         each step is --step-w wide; we place 6 steps per side */
+      background:
+        linear-gradient(
+          to right,
+
+          /* left outer margin (no overlay) */
+          transparent 0%,
+          transparent calc(50% - (var(--core-w)/2) - 6*var(--step-w)),
+
+          /* left steps (s6 → s1, lighter as we move outward from center) */
+          var(--s6) calc(50% - (var(--core-w)/2) - 6*var(--step-w)),
+          var(--s6) calc(50% - (var(--core-w)/2) - 5*var(--step-w)),
+
+          var(--s5) calc(50% - (var(--core-w)/2) - 5*var(--step-w)),
+          var(--s5) calc(50% - (var(--core-w)/2) - 4*var(--step-w)),
+
+          var(--s4) calc(50% - (var(--core-w)/2) - 4*var(--step-w)),
+          var(--s4) calc(50% - (var(--core-w)/2) - 3*var(--step-w)),
+
+          var(--s3) calc(50% - (var(--core-w)/2) - 3*var(--step-w)),
+          var(--s3) calc(50% - (var(--core-w)/2) - 2*var(--step-w)),
+
+          var(--s2) calc(50% - (var(--core-w)/2) - 2*var(--step-w)),
+          var(--s2) calc(50% - (var(--core-w)/2) - 1*var(--step-w)),
+
+          var(--s1) calc(50% - (var(--core-w)/2) - 1*var(--step-w)),
+          var(--s1) calc(50% - (var(--core-w)/2)),
+
+          /* core darkest */
+          var(--c-core) calc(50% - (var(--core-w)/2)),
+          var(--c-core) calc(50% + (var(--core-w)/2)),
+
+          /* right steps (mirror: s1 → s6) */
+          var(--s1) calc(50% + (var(--core-w)/2)),
+          var(--s1) calc(50% + (var(--core-w)/2) + 1*var(--step-w)),
+
+          var(--s2) calc(50% + (var(--core-w)/2) + 1*var(--step-w)),
+          var(--s2) calc(50% + (var(--core-w)/2) + 2*var(--step-w)),
+
+          var(--s3) calc(50% + (var(--core-w)/2) + 2*var(--step-w)),
+          var(--s3) calc(50% + (var(--core-w)/2) + 3*var(--step-w)),
+
+          var(--s4) calc(50% + (var(--core-w)/2) + 3*var(--step-w)),
+          var(--s4) calc(50% + (var(--core-w)/2) + 4*var(--step-w)),
+
+          var(--s5) calc(50% + (var(--core-w)/2) + 4*var(--step-w)),
+          var(--s5) calc(50% + (var(--core-w)/2) + 5*var(--step-w)),
+
+          var(--s6) calc(50% + (var(--core-w)/2) + 5*var(--step-w)),
+          var(--s6) calc(50% + (var(--core-w)/2) + 6*var(--step-w)),
+
+          /* right outer margin */
+          transparent calc(50% + (var(--core-w)/2) + 6*var(--step-w)),
+          transparent 100%
+        );
+    }
+
+    /* Portals/overlays unchanged */
     .va-portal{
-      background: #101314;
+      background: #111718;
       border: 1px solid rgba(255,255,255,.12);
       box-shadow: 0 36px 90px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.35);
       border-radius: 10px;
     }
     .va-overlay{ background: rgba(0,0,0,.55); backdrop-filter: blur(2px); }
     .va-sheet{
-      background: #101314;
+      background: #111718;
       border: 1px solid rgba(255,255,255,.12);
       box-shadow: 0 28px 80px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.35) inset;
       border-radius: 10px;
     }
   `}</style>
 );
-
 /* ───────────────── Types / storage ───────────────── */
 type ApiKey = { id: string; name: string; key: string };
 
