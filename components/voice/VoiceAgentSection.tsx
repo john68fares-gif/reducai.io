@@ -56,39 +56,28 @@ const Tokens = () => (
       --text: #eaf8f3; --text-muted: rgba(234,248,243,.62);
       --bg: #0b0e0f;
 
-      /* card visuals: tiny border, almost flat shadow */
       --card-shadow: 0 10px 18px rgba(0,0,0,.22);
       --card-border: rgba(255,255,255,.04);
 
-      /* ========= Vertical green bands (true vertical, under content) ========= */
-      /* tuning */
-      --stripe-gap: 28px;       /* distance between lines */
-      --stripe-thickness: 3px;  /* width of each line */
-      --stripe-ink: rgba(0,255,194,0.10);  /* faint brand green for lines */
+      /* ====== BAND PALETTE (GREEN) ====== */
+      --band-green: 0,255,194; /* rgb for alpha control */
 
-      /* vignette so the middle of the card is darkest, edges lighter (green-tinted) */
-      --edge-green:   rgba(0,255,194,0.08);
-      --center-green: rgba(0,255,194,0.22);
+      /* Wide vertical bands (under content). Keep subtle! */
+      --va-bands: repeating-linear-gradient(
+        90deg,
+        rgba(var(--band-green), .055) 0px,   /* light green stripe */
+        rgba(var(--band-green), .055) 22px,  /* stripe width */
+        rgba(0,0,0,0) 22px,
+        rgba(0,0,0,0) 44px                   /* gap -> wide bands */
+      );
 
-      /* vertical lines */
-      --bands:
-        repeating-linear-gradient(
-          90deg,
-          var(--stripe-ink) 0 var(--stripe-thickness),
-          rgba(0,255,194,0.00) var(--stripe-thickness) var(--stripe-gap)
-        );
-
-      /* center-dark sweep horizontally across the card */
-      --center-sweep:
-        linear-gradient(
-          90deg,
-          var(--edge-green) 0%,
-          var(--center-green) 50%,
-          var(--edge-green) 100%
-        );
-
-      /* tiny hover ring */
-      --hover-ring: 0 0 0 1px rgba(89,217,179,.14);
+      /* Darkest at center → lighter to sides (horizontal falloff) */
+      --va-center-dark: linear-gradient(
+        90deg,
+        rgba(0,0,0,.10) 0%,
+        rgba(0,0,0,.28) 50%,
+        rgba(0,0,0,.10) 100%
+      );
     }
 
     :root:not([data-theme="dark"]) .va-scope{
@@ -102,39 +91,44 @@ const Tokens = () => (
       --card-shadow: 0 10px 16px rgba(0,0,0,.10);
       --card-border: rgba(0,0,0,.06);
 
-      /* slightly lighter in light mode */
-      --stripe-ink: rgba(0,255,194,0.08);
-      --edge-green:   rgba(0,255,194,0.06);
-      --center-green: rgba(0,255,194,0.16);
+      --va-bands: repeating-linear-gradient(
+        90deg,
+        rgba(var(--band-green), .035) 0px,
+        rgba(var(--band-green), .035) 22px,
+        rgba(0,0,0,0) 22px,
+        rgba(0,0,0,0) 44px
+      );
+      --va-center-dark: linear-gradient(
+        90deg,
+        rgba(0,0,0,.03) 0%,
+        rgba(0,0,0,.10) 50%,
+        rgba(0,0,0,.03) 100%
+      );
     }
 
     .va-main{ overflow: visible; position: relative; contain: none; }
 
-    /* Card surface: solid background; decorative layers in ::before under content */
+    /* Card surface layering: bands + center falloff under content */
     .va-card{
       position: relative;
       border: 1px solid var(--card-border);
       border-radius: var(--radius-outer);
-      background: linear-gradient(180deg, var(--panel-alt), var(--panel));
+      background:
+        var(--va-center-dark),
+        var(--va-bands),
+        linear-gradient(180deg, var(--panel-alt), var(--panel));
       box-shadow: var(--card-shadow);
       overflow: hidden;
     }
-    /* put all real content above 0-layer */
+    /* put all child content above the bands */
     .va-card > * { position: relative; z-index: 1; }
 
-    /* bands + center vignette UNDER content */
-    .va-card::before{
-      content:'';
-      position:absolute; inset:0; pointer-events:none;
-      z-index:0;
-      background:
-        var(--bands),
-        var(--center-sweep);
-      background-blend-mode: multiply;
-      opacity: .30; /* a hair stronger so you can perceive the shadow; tweak 0.24—0.34 */
+    /* Header lighten to separate from body a bit */
+    .va-card .va-head{
+      background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,0));
     }
 
-    /* dropdown */
+    /* Dropdown portal */
     .va-portal{
       background: var(--menu-bg);
       border: 1px solid var(--menu-border);
@@ -142,7 +136,7 @@ const Tokens = () => (
       border-radius: 12px;
     }
 
-    /* overlay */
+    /* Overlay */
     .va-overlay{ background: rgba(0,0,0,.55); backdrop-filter: blur(2px); }
     .va-sheet{
       background: linear-gradient(180deg, var(--menu-bg), var(--menu-bg));
@@ -488,7 +482,7 @@ function ActionOverlay({
   );
 }
 
-/* ───────────────── Section (title ABOVE, banded card) ───────────────── */
+/* ───────────────── Section ───────────────── */
 function Section({
   title, icon, desc, children, defaultOpen = true
 }:{
@@ -512,7 +506,7 @@ function Section({
         {/* header */}
         <button
           onClick={()=>setOpen(v=>!v)}
-          className="w-full text-left px-4 sm:px-5"
+          className="va-head w-full text-left px-4 sm:px-5"
           style={{
             color:'var(--text)', minHeight:'var(--header-h)',
             display:'grid', gridTemplateColumns:'1fr auto', alignItems:'center', gap:'12px'
