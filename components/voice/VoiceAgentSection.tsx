@@ -24,14 +24,11 @@ class RailBoundary extends React.Component<{children:React.ReactNode},{hasError:
   render(){ return this.state.hasError ? <div className="px-3 py-3 text-xs opacity-70">Rail crashed</div> : this.props.children; }
 }
 
-/* ───────────────── Local tokens & banded style ─────────────────
-   Middle band = page background (var(--bg)).
-   6 subtle steps on each side fill the full width.
-   Bands are behind content (z-index:0). */
+/* ───────────────── Local tokens ───────────────── */
 const CTA       = '#59d9b3';
 const CTA_HOVER = '#54cfa9';
 
-/* Filled phone icon (so it's actually filled, not stroked) */
+/* Filled phone icon in white */
 function FilledPhoneIcon(props: React.SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden {...props}>
@@ -47,119 +44,77 @@ const Tokens = () => (
   <style jsx global>{`
     .va-scope{
       --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 20px; --s-6: 24px;
-      --radius-outer: 8px; /* less rounded */
+      --radius-outer: 10px; /* a bit less rounded */
       --control-h: 44px; --header-h: 88px;
       --fz-title: 18px; --fz-sub: 15px; --fz-body: 14px; --fz-label: 12.5px;
       --lh-body: 1.45; --ease: cubic-bezier(.22,.61,.36,1);
 
-      /* read from globals; do not override your theme */
+      /* Use your global tokens */
+      --text: var(--text, #fff);
+      --text-muted: var(--text-muted, rgba(255,255,255,.72));
       --page-bg: var(--bg);
-      --text: #fff;
-      --text-muted: rgba(255,255,255,.72);
 
-      --input-bg: #101314;
+      --input-bg: color-mix(in oklab, var(--page-bg) 94%, black 6%);
       --input-border: rgba(255,255,255,.10);
       --input-shadow: inset 0 1px 0 rgba(255,255,255,.03), 0 8px 18px rgba(0,0,0,.35);
       --border-weak: rgba(255,255,255,.10);
 
-      /* ---- Band math: core + 12 steps = 100% ----
-         20% + 12 * 6.6667% = 100% */
-      --core-w: 20%;
-      --step-w: 6.6667%;
-
-      /* ---- Ultra-subtle steps (slightly stronger so they show, still tiny) ---- */
-      --s1: color-mix(in oklab, var(--page-bg) 99.6%,  white 0.4%);
-      --s2: color-mix(in oklab, var(--page-bg) 99.4%,  white 0.6%);
-      --s3: color-mix(in oklab, var(--page-bg) 99.2%,  white 0.8%);
-      --s4: color-mix(in oklab, var(--page-bg) 99.0%,  white 1.0%);
-      --s5: color-mix(in oklab, var(--page-bg) 98.8%,  white 1.2%);
-      --s6: color-mix(in oklab, var(--page-bg) 98.6%,  white 1.4%);
+      --card-shadow: 0 18px 40px rgba(0,0,0,.28);
     }
 
     .va-main{ overflow: visible; position: relative; contain: none; }
 
-    /* Card base uses page bg; ::before paints bands BEHIND content */
     .va-card{
       position: relative;
       border-radius: var(--radius-outer);
       border: 1px solid var(--border-weak);
       background: var(--page-bg);
-      box-shadow: 0 18px 40px rgba(0,0,0,.28);
+      box-shadow: var(--card-shadow);
       overflow: hidden;
-      isolation: isolate; /* ensures ::before is below children when z-indexed */
+      isolation: isolate;
     }
 
-    /* Content above bands */
-    .va-card > * { position: relative; z-index: 1; }
-
-    /* Header transparent so the subtle band shows under it (still behind content) */
+    /* Header is a touch lighter than the card background (works in light & dark) */
     .va-card .va-head{
       min-height: var(--header-h);
       display: grid; grid-template-columns: 1fr auto; align-items: center;
       padding: 0 16px;
-      background: transparent;
-      border-bottom: 1px solid rgba(255,255,255,.06);
+      background: color-mix(in oklab, var(--page-bg) 90%, white 10%); /* <- lighter */
+      border-bottom: 1px solid rgba(255,255,255,.08);
       color: var(--text);
     }
 
-    /* Stepped band BEHIND content (z-index:0). Fills 100% width, no gaps. */
-    .va-scope .va-card::before{
-      content:'';
-      position:absolute; inset:0;
-      pointer-events:none;
-      z-index:0;
-      background:
-        linear-gradient(
-          to right,
-
-          /* left steps (lightest at edge, gently darkening toward core) */
-          var(--s6) 0%,
-          var(--s6) calc(0% + 1*var(--step-w)),
-          var(--s5) calc(0% + 1*var(--step-w)),
-          var(--s5) calc(0% + 2*var(--step-w)),
-          var(--s4) calc(0% + 2*var(--step-w)),
-          var(--s4) calc(0% + 3*var(--step-w)),
-          var(--s3) calc(0% + 3*var(--step-w)),
-          var(--s3) calc(0% + 4*var(--step-w)),
-          var(--s2) calc(0% + 4*var(--step-w)),
-          var(--s2) calc(0% + 5*var(--step-w)),
-          var(--s1) calc(0% + 5*var(--step-w)),
-          var(--s1) calc(0% + 6*var(--step-w)),
-
-          /* exact center = page bg */
-          var(--page-bg) calc(0% + 6*var(--step-w)),
-          var(--page-bg) calc(0% + 6*var(--step-w) + var(--core-w)),
-
-          /* right steps (mirror) */
-          var(--s1) calc(0% + 6*var(--step-w) + var(--core-w)),
-          var(--s1) calc(0% + 7*var(--step-w) + var(--core-w)),
-          var(--s2) calc(0% + 7*var(--step-w) + var(--core-w)),
-          var(--s2) calc(0% + 8*var(--step-w) + var(--core-w)),
-          var(--s3) calc(0% + 8*var(--step-w) + var(--core-w)),
-          var(--s3) calc(0% + 9*var(--step-w) + var(--core-w)),
-          var(--s4) calc(0% + 9*var(--step-w) + var(--core-w)),
-          var(--s4) calc(0% + 10*var(--step-w) + var(--core-w)),
-          var(--s5) calc(0% + 10*var(--step-w) + var(--core-w)),
-          var(--s5) calc(0% + 11*var(--step-w) + var(--core-w)),
-          var(--s6) calc(0% + 11*var(--step-w) + var(--core-w)),
-          var(--s6) 100%
-        );
-    }
-
-    /* Dropdowns / overlays */
     .va-portal{
-      background: #101314;
+      background: color-mix(in oklab, var(--page-bg) 80%, black 20%);
       border: 1px solid rgba(255,255,255,.12);
       box-shadow: 0 36px 90px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.35);
       border-radius: 10px;
     }
     .va-overlay{ background: rgba(0,0,0,.55); backdrop-filter: blur(2px); }
     .va-sheet{
-      background: #101314;
+      background: color-mix(in oklab, var(--page-bg) 84%, black 16%);
       border: 1px solid rgba(255,255,255,.12);
       box-shadow: 0 28px 80px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.35) inset;
       border-radius: 10px;
     }
+
+    /* Right-side call drawer */
+    .va-call-drawer{
+      position: fixed; inset: 0 0 0 auto; width: min(440px, 92vw);
+      display: grid; grid-template-rows: auto 1fr auto;
+      background: color-mix(in oklab, var(--page-bg) 86%, black 14%);
+      border-left: 1px solid rgba(255,255,255,.10);
+      box-shadow: -28px 0 80px rgba(0,0,0,.55);
+      transform: translateX(100%);
+      transition: transform 280ms var(--ease);
+      z-index: 99998;
+    }
+    .va-call-drawer.open{ transform: translateX(0); }
+    .va-call-overlay{
+      position: fixed; inset: 0; background: rgba(0,0,0,.5); backdrop-filter: blur(2px);
+      opacity: 0; pointer-events: none; transition: opacity 200ms var(--ease); z-index: 99997;
+    }
+    .va-call-overlay.open{ opacity: 1; pointer-events: auto; }
   `}</style>
 );
 
@@ -201,17 +156,17 @@ You are a blank template AI assistant with minimal default settings, designed to
 - Use clear and concise language to ensure effective communication.
 
 [Response Guidelines]
-- Avoid using any specific jargon or domain-specific language.
-- Keep responses straightforward and focused on the task at hand.
+- Avoid jargon unless asked.
+- Keep responses straightforward and focused.
 
-[Task & Goals]
-1. Serve as a versatile agent that can be tailored to fit different roles based on user instructions.
-2. Allow users to modify model parameters, such as temperature, messages, and other settings as needed.
-3. Ensure all adjustments are reflected in real-time to adapt to the current context.
+[Goals]
+1) Be adaptable to user instructions.
+2) Allow on-the-fly configuration updates.
+3) Reflect adjustments in real-time.
 
-[Error Handling / Fallback]
-- Prompt users for clarification if inputs are vague or unclear.
-- Gracefully handle any errors by providing a polite default response or seeking further instruction.`,
+[Fallback]
+- Ask for clarification if input is vague.
+- Handle errors politely and ask for the next instruction.`,
   ttsProvider: 'openai',
   voiceName: 'Alloy (American)',
   apiKeyId: '',
@@ -466,7 +421,7 @@ function ActionOverlay({
   title: string; children: React.ReactNode; onClose: ()=>void; primaryText?: string; onPrimary?: ()=>void;
 }) {
   return createPortal(
-    <div className="fixed inset-0 z-[99998] grid place-items-center px-4 va-overlay">
+    <div className="fixed inset-0 z-[99996] grid place-items-center px-4 va-overlay">
       <div className="va-sheet w-full max-w-[620px] p-4 md:p-6">
         <div className="flex items-center justify-between mb-3">
           <div className="text-lg font-semibold" style={{ color:'var(--text)' }}>{title}</div>
@@ -571,6 +526,10 @@ export default function VoiceAgentSection() {
   const [showGenerate, setShowGenerate] = useState(false);
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
 
+  // new: call drawer + prompt composer state
+  const [showCall, setShowCall] = useState(false);
+  const [composerText, setComposerText] = useState('');
+
   useEffect(() => {
     const handler = (e: Event) => setActiveId((e as CustomEvent<string>).detail);
     window.addEventListener('assistant:active', handler as EventListener);
@@ -602,7 +561,8 @@ export default function VoiceAgentSection() {
 
         setApiKeys(cleaned);
 
-        const globalSelected = await ss.getJSON<string>('apiKeys.selectedId', '');
+        const ss2 = await scopedStorage();
+        const globalSelected = await ss2.getJSON<string>('apiKeys.selectedId', '');
         const chosen =
           (data.apiKeyId && cleaned.some((k) => k.id === data.apiKeyId)) ? data.apiKeyId! :
           (globalSelected && cleaned.some((k) => k.id === globalSelected)) ? globalSelected :
@@ -610,14 +570,13 @@ export default function VoiceAgentSection() {
 
         if (chosen && chosen !== data.apiKeyId) {
           setData(prev => ({ ...prev, apiKeyId: chosen }));
-          await ss.setJSON('apiKeys.selectedId', chosen);
+          await ss2.setJSON('apiKeys.selectedId', chosen);
         }
       } catch {}
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* TSX-safe setter */
   function setField<K extends keyof AgentData>(k: K) {
     return (v: AgentData[K]) => setData(prev => ({ ...prev, [k]: v }));
   }
@@ -648,9 +607,90 @@ export default function VoiceAgentSection() {
     finally { setCalling(false); setTimeout(()=>setToast(''), 1800); }
   }
 
+  /* Build a concrete, VAPI-style prompt from base + user composer */
+  function buildPrompt(base: string, extra: string) {
+    const extraTrim = (extra || '').trim();
+    const addBlock = extraTrim
+      ? `
+
+[Extra Instructions From Builder]
+${extraTrim}
+
+[Behavioral Rules]
+- Respect all Extra Instructions above.
+- If a tool is required, ask concise clarifying questions first.
+- Keep replies short, structured, and immediately useful.`
+      : '';
+
+    return `${base}${addBlock}`;
+  }
+
   return (
     <section className="va-scope" style={{ background:'var(--bg)', color:'var(--text)' }}>
       <Tokens />
+
+      {/* CALL DRAWER + OVERLAY */}
+      {createPortal(
+        <>
+          <div className={`va-call-overlay ${showCall ? 'open' : ''}`} onClick={()=>setShowCall(false)} />
+          <aside className={`va-call-drawer ${showCall ? 'open' : ''}`} aria-hidden={!showCall}>
+            {/* drawer header (slightly lighter than panel) */}
+            <div
+              className="flex items-center justify-between px-4 h-[64px]"
+              style={{ background: 'color-mix(in oklab, var(--bg) 86%, white 14%)', borderBottom:'1px solid rgba(255,255,255,.1)' }}
+            >
+              <div className="font-semibold">Live Call</div>
+              <button
+                onClick={()=>setShowCall(false)}
+                className="px-2 py-1 rounded hover:opacity-80"
+                aria-label="Close call panel"
+                style={{ color:'var(--text-muted)', border:'1px solid rgba(255,255,255,.12)' }}
+              >
+                Close
+              </button>
+            </div>
+
+            {/* drawer body */}
+            <div className="p-4 overflow-y-auto">
+              <div className="rounded-lg p-4"
+                   style={{ background:'color-mix(in oklab, var(--bg) 92%, white 8%)', border:'1px solid rgba(255,255,255,.10)' }}>
+                <div className="text-sm mb-2" style={{ color:'var(--text-muted)' }}>Call status</div>
+                <div className="text-base font-semibold">Connected to Assistant</div>
+                <div className="mt-4 h-28 rounded-md"
+                     style={{
+                       background:'repeating-linear-gradient(90deg, rgba(255,255,255,.08) 0 2px, transparent 2px 6px)',
+                       border:'1px dashed rgba(255,255,255,.12)'
+                     }}
+                />
+                <div className="text-xs mt-2" style={{ color:'var(--text-muted)' }}>
+                  (Placeholder UI) Wire this to your WebRTC / VAPI call surface.
+                </div>
+              </div>
+            </div>
+
+            {/* drawer footer */}
+            <div className="p-4 border-t" style={{ borderColor:'rgba(255,255,255,.10)' }}>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={()=>setShowCall(false)}
+                  className="h-10 px-4 rounded-md font-semibold"
+                  style={{ background:'crimson', color:'#fff' }}
+                >
+                  End call
+                </button>
+                <button
+                  onClick={doCallTest}
+                  className="h-10 px-4 rounded-md"
+                  style={{ background:'var(--input-bg)', color:'var(--text)', border:'1px solid var(--input-border)' }}
+                >
+                  Test backend
+                </button>
+              </div>
+            </div>
+          </aside>
+        </>,
+        document.body
+      )}
 
       <div className="grid w-full" style={{ gridTemplateColumns: '260px 1fr' }}>
         {/* Rail */}
@@ -683,21 +723,20 @@ export default function VoiceAgentSection() {
             </button>
 
             <button
-              onClick={doCallTest}
-              disabled={calling}
-              className="inline-flex items-center gap-2 rounded-[10px] select-none disabled:opacity-60"
+              onClick={()=>setShowCall(true)}
+              className="inline-flex items-center gap-2 rounded-[10px] select-none"
               style={{
                 height:'var(--control-h)',
                 padding:'0 18px',
                 background:CTA,
-                color:'#ffffff',             /* make text pure white */
-                fontWeight: 700,            /* ~“1px bolder” than semibold */
+                color:'#ffffff',          /* white text */
+                fontWeight: 700,          /* slightly bolder */
                 boxShadow:'0 10px 22px rgba(89,217,179,.20)'
               }}
               onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA_HOVER)}
               onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA)}
             >
-              <FilledPhoneIcon style={{ color:'#0a0f0d' }} /> {/* filled phone icon */}
+              <FilledPhoneIcon style={{ color:'#ffffff' }} />
               Talk to Assistant
             </button>
           </div>
@@ -711,13 +750,23 @@ export default function VoiceAgentSection() {
 
           {/* KPIs */}
           <div className="grid gap-[12px] md:grid-cols-2 mb-[12px]">
-            <div className="va-card p-[var(--s-4)]">
-              <div className="text-xs mb-[6px]" style={{ color:'var(--text-muted)' }}>Cost</div>
-              <div className="font-semibold" style={{ fontSize:'var(--fz-sub)', color:'var(--text)' }}>~$0.1/min</div>
+            <div className="va-card">
+              <div className="va-head" style={{ minHeight: 48 }}>
+                <div className="text-xs" style={{ color:'var(--text-muted)' }}>Cost</div>
+                <div />
+              </div>
+              <div className="p-[var(--s-4)]">
+                <div className="font-semibold" style={{ fontSize:'var(--fz-sub)', color:'var(--text)' }}>~$0.1/min</div>
+              </div>
             </div>
-            <div className="va-card p-[var(--s-4)]">
-              <div className="text-xs mb-[6px]" style={{ color:'var(--text-muted)' }}>Latency</div>
-              <div className="font-semibold" style={{ fontSize:'var(--fz-sub)', color:'var(--text)' }}>~1050 ms</div>
+            <div className="va-card">
+              <div className="va-head" style={{ minHeight: 48 }}>
+                <div className="text-xs" style={{ color:'var(--text-muted)' }}>Latency</div>
+                <div />
+              </div>
+              <div className="p-[var(--s-4)]">
+                <div className="font-semibold" style={{ fontSize:'var(--fz-sub)', color:'var(--text)' }}>~1050 ms</div>
+              </div>
             </div>
           </div>
 
@@ -762,7 +811,7 @@ export default function VoiceAgentSection() {
                 <button
                   className="inline-flex items-center gap-2 rounded-[10px] text-sm"
                   style={{ height:36, padding:'0 12px', background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                  onClick={()=>setShowGenerate(true)}
+                  onClick={()=>{ setComposerText(''); setShowGenerate(true); }}
                 >
                   <Wand2 className="w-4 h-4" /> Generate
                 </button>
@@ -892,21 +941,32 @@ export default function VoiceAgentSection() {
         </div>
       </div>
 
+      {/* ---- Generate Prompt composer ---- */}
       {showGenerate && (
         <ActionOverlay
-          title="Generate Base Prompt"
+          title="Compose Prompt"
           onClose={()=>setShowGenerate(false)}
-          primaryText="Use as Prompt"
-          onPrimary={()=>setShowGenerate(false)}
+          primaryText="Generate"
+          onPrimary={()=>{
+            const merged = buildPrompt(DEFAULT_AGENT.systemPrompt, composerText);
+            setField('systemPrompt')(merged);
+            setShowGenerate(false);
+          }}
         >
-          <textarea
-            defaultValue={DEFAULT_AGENT.systemPrompt}
-            onBlur={(e)=>setField('systemPrompt')(e.currentTarget.value)}
-            className="w-full bg-transparent outline-none rounded-[10px] px-3 py-2"
-            style={{ minHeight: 260, background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)' }}
-          />
-          <div className="mt-2 text-xs" style={{ color:'var(--text-muted)' }}>
-            Paste or edit your base template. Saving uses this as the system prompt.
+          <div className="grid gap-2">
+            <label className="text-xs" style={{ color:'var(--text-muted)' }}>
+              Add extra instructions (persona, tone, tools, do/don’t):
+            </label>
+            <textarea
+              value={composerText}
+              onChange={(e)=>setComposerText(e.target.value)}
+              className="w-full bg-transparent outline-none rounded-[10px] px-3 py-2"
+              placeholder="e.g., Be a concise, friendly support agent. Always verify account ID before actions. Prefer bullet points."
+              style={{ minHeight: 160, background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)' }}
+            />
+            <div className="text-[11px]" style={{ color:'var(--text-muted)' }}>
+              Click <b>Generate</b> to merge these into the base template.
+            </div>
           </div>
         </ActionOverlay>
       )}
