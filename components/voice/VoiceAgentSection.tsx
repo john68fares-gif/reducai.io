@@ -38,133 +38,117 @@ const Tokens = () => (
       --fz-title: 18px; --fz-sub: 15px; --fz-body: 14px; --fz-label: 12.5px;
       --lh-body: 1.45; --ease: cubic-bezier(.22,.61,.36,1);
 
-      --bg: #0b0c10;
+      /* Pull colors from your global theme */
       --text: #ffffff;
       --text-muted: rgba(255,255,255,.72);
 
-      /* Your palette */
-      --c-core: #121919; /* darkest center */
-      --c-edge: #172222; /* target edge tone (slightly lighter than core) */
+      /* Alias to page background from globals (light/dark compatible) */
+      --page-bg: var(--bg);
 
-      /* Box surface under the band */
-      --box: var(--c-edge);
+      /* Card border + inputs (unchanged) */
+      --input-bg: #101314;
+      --input-border: rgba(255,255,255,.10);
+      --input-shadow: inset 0 1px 0 rgba(255,255,255,.03), 0 8px 18px rgba(0,0,0,.35);
       --border-weak: rgba(255,255,255,.10);
 
-      /* Step geometry (center + 6 steps each side) */
-      --core-w: 24%;       /* width of the very dark center band */
-      --step-w: 4%;        /* width of each step band (6 per side → 24%) */
+      /* ---- Band layout: center + 6 steps each side = 100% ----
+         Choose core + 12*step = 100%
+         Example: 16% + 12 * 7% = 100% */
+      --core-w: 16%;
+      --step-w: 7%;
 
-      /* Precomputed step tones (progressively lighter from core → edge) */
-      --s1: color-mix(in oklab, var(--c-core) 85%, var(--c-edge));
-      --s2: color-mix(in oklab, var(--c-core) 70%, var(--c-edge));
-      --s3: color-mix(in oklab, var(--c-core) 55%, var(--c-edge));
-      --s4: color-mix(in oklab, var(--c-core) 40%, var(--c-edge));
-      --s5: color-mix(in oklab, var(--c-core) 25%, var(--c-edge));
-      --s6: color-mix(in oklab, var(--c-core) 10%, var(--c-edge));
-
-      /* Inputs */
-      --input-bg: #121617;
-      --input-border: rgba(255,255,255,.12);
-      --input-shadow: inset 0 1px 0 rgba(255,255,255,.03), 0 8px 18px rgba(0,0,0,.35);
+      /* ---- Ultra-subtle lightening steps (barely visible) ----
+         Nudge these up/down if you need slightly more/less contrast */
+      --s1: color-mix(in oklab, var(--page-bg) 99.8%, white 0.2%);
+      --s2: color-mix(in oklab, var(--page-bg) 99.65%, white 0.35%);
+      --s3: color-mix(in oklab, var(--page-bg) 99.5%,  white 0.5%);
+      --s4: color-mix(in oklab, var(--page-bg) 99.35%, white 0.65%);
+      --s5: color-mix(in oklab, var(--page-bg) 99.2%,  white 0.8%);
+      --s6: color-mix(in oklab, var(--page-bg) 99.0%,  white 1.0%);
     }
 
     .va-main{ overflow: visible; position: relative; contain: none; }
 
-    /* Base card */
+    /* Card base uses the page bg; steps will cover entire width */
     .va-card{
       position: relative;
       border-radius: var(--radius-outer);
       border: 1px solid var(--border-weak);
-      background: var(--box); /* edge tone as base */
+      background: var(--page-bg);
       box-shadow: 0 18px 40px rgba(0,0,0,.28);
       overflow: hidden;
-      isolation: isolate;
+      isolation: isolate; /* creates a local stacking context */
     }
 
-    /* HEADER: keep flat, uses edge tone to match sides */
+    /* Ensure content sits above the background bands */
+    .va-card > * { position: relative; z-index: 1; }
+
+    /* Header: transparent so bands subtly show under it */
     .va-card .va-head{
       min-height: var(--header-h);
       display: grid; grid-template-columns: 1fr auto; align-items: center;
       padding: 0 16px;
-      background: var(--box); /* same as card base */
+      background: transparent;
       border-bottom: 1px solid rgba(255,255,255,.06);
       color: var(--text);
     }
 
-    /* THE BAND: center darkest, 6 stepped bands per side toward the edge tone */
-    .va-card::before{
+    /* Stepped bands BEHIND content (z-index:0).
+       Left s6..s1 → CORE → right s1..s6. Fills 100% width, no gaps, no overlap. */
+    .va-scope .va-card::before{
       content:'';
-      position:absolute; inset:0; pointer-events:none; z-index:0;
+      position:absolute; inset:0;
+      pointer-events:none;
+      z-index:0;
 
-      /* layout math helpers */
-      /* center starts at 50% - core/2 and ends at 50% + core/2
-         each step is --step-w wide; we place 6 steps per side */
       background:
         linear-gradient(
           to right,
 
-          /* left outer margin (no overlay) */
-          transparent 0%,
-          transparent calc(50% - (var(--core-w)/2) - 6*var(--step-w)),
+          /* left steps */
+          var(--s6) 0%,
+          var(--s6) calc(0% + 1*var(--step-w)),
+          var(--s5) calc(0% + 1*var(--step-w)),
+          var(--s5) calc(0% + 2*var(--step-w)),
+          var(--s4) calc(0% + 2*var(--step-w)),
+          var(--s4) calc(0% + 3*var(--step-w)),
+          var(--s3) calc(0% + 3*var(--step-w)),
+          var(--s3) calc(0% + 4*var(--step-w)),
+          var(--s2) calc(0% + 4*var(--step-w)),
+          var(--s2) calc(0% + 5*var(--step-w)),
+          var(--s1) calc(0% + 5*var(--step-w)),
+          var(--s1) calc(0% + 6*var(--step-w)),
 
-          /* left steps (s6 → s1, lighter as we move outward from center) */
-          var(--s6) calc(50% - (var(--core-w)/2) - 6*var(--step-w)),
-          var(--s6) calc(50% - (var(--core-w)/2) - 5*var(--step-w)),
+          /* core = exact page background */
+          var(--page-bg) calc(0% + 6*var(--step-w)),
+          var(--page-bg) calc(0% + 6*var(--step-w) + var(--core-w)),
 
-          var(--s5) calc(50% - (var(--core-w)/2) - 5*var(--step-w)),
-          var(--s5) calc(50% - (var(--core-w)/2) - 4*var(--step-w)),
-
-          var(--s4) calc(50% - (var(--core-w)/2) - 4*var(--step-w)),
-          var(--s4) calc(50% - (var(--core-w)/2) - 3*var(--step-w)),
-
-          var(--s3) calc(50% - (var(--core-w)/2) - 3*var(--step-w)),
-          var(--s3) calc(50% - (var(--core-w)/2) - 2*var(--step-w)),
-
-          var(--s2) calc(50% - (var(--core-w)/2) - 2*var(--step-w)),
-          var(--s2) calc(50% - (var(--core-w)/2) - 1*var(--step-w)),
-
-          var(--s1) calc(50% - (var(--core-w)/2) - 1*var(--step-w)),
-          var(--s1) calc(50% - (var(--core-w)/2)),
-
-          /* core darkest */
-          var(--c-core) calc(50% - (var(--core-w)/2)),
-          var(--c-core) calc(50% + (var(--core-w)/2)),
-
-          /* right steps (mirror: s1 → s6) */
-          var(--s1) calc(50% + (var(--core-w)/2)),
-          var(--s1) calc(50% + (var(--core-w)/2) + 1*var(--step-w)),
-
-          var(--s2) calc(50% + (var(--core-w)/2) + 1*var(--step-w)),
-          var(--s2) calc(50% + (var(--core-w)/2) + 2*var(--step-w)),
-
-          var(--s3) calc(50% + (var(--core-w)/2) + 2*var(--step-w)),
-          var(--s3) calc(50% + (var(--core-w)/2) + 3*var(--step-w)),
-
-          var(--s4) calc(50% + (var(--core-w)/2) + 3*var(--step-w)),
-          var(--s4) calc(50% + (var(--core-w)/2) + 4*var(--step-w)),
-
-          var(--s5) calc(50% + (var(--core-w)/2) + 4*var(--step-w)),
-          var(--s5) calc(50% + (var(--core-w)/2) + 5*var(--step-w)),
-
-          var(--s6) calc(50% + (var(--core-w)/2) + 5*var(--step-w)),
-          var(--s6) calc(50% + (var(--core-w)/2) + 6*var(--step-w)),
-
-          /* right outer margin */
-          transparent calc(50% + (var(--core-w)/2) + 6*var(--step-w)),
-          transparent 100%
+          /* right steps (mirror) */
+          var(--s1) calc(0% + 6*var(--step-w) + var(--core-w)),
+          var(--s1) calc(0% + 7*var(--step-w) + var(--core-w)),
+          var(--s2) calc(0% + 7*var(--step-w) + var(--core-w)),
+          var(--s2) calc(0% + 8*var(--step-w) + var(--core-w)),
+          var(--s3) calc(0% + 8*var(--step-w) + var(--core-w)),
+          var(--s3) calc(0% + 9*var(--step-w) + var(--core-w)),
+          var(--s4) calc(0% + 9*var(--step-w) + var(--core-w)),
+          var(--s4) calc(0% + 10*var(--step-w) + var(--core-w)),
+          var(--s5) calc(0% + 10*var(--step-w) + var(--core-w)),
+          var(--s5) calc(0% + 11*var(--step-w) + var(--core-w)),
+          var(--s6) calc(0% + 11*var(--step-w) + var(--core-w)),
+          var(--s6) 100%
         );
     }
 
-    /* Portals/overlays unchanged */
+    /* Menus/overlays as before */
     .va-portal{
-      background: #111718;
+      background: #101314;
       border: 1px solid rgba(255,255,255,.12);
       box-shadow: 0 36px 90px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.35);
       border-radius: 10px;
     }
     .va-overlay{ background: rgba(0,0,0,.55); backdrop-filter: blur(2px); }
     .va-sheet{
-      background: #111718;
+      background: #101314;
       border: 1px solid rgba(255,255,255,.12);
       box-shadow: 0 28px 80px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.35) inset;
       border-radius: 10px;
