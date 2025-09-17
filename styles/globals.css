@@ -337,28 +337,39 @@ a { color: inherit; text-decoration: none; }
 }
 
 /* =====================================================
-   SUBTLE STRIPED DEPTH SURFACES + TIGHT RADIUS
-   (1px light, ~12–14px gap, ~0.02 alpha; invisible unless zoomed)
+   WIDE CENTER-DARK BANDS (Voice Agent sections)
+   Each band is wide; center is slightly darker, edges lighter.
+   Subtle alphas so it reads like soft shadow, not stripes.
    ===================================================== */
 
-/* Apply to any outer box for the BuildMyAgent-style “striped depth”. */
-.banded-surface {
-  position: relative;
-  border-radius: 8px; /* tighter outer corners */
-  background:
-    /* ultra-faint rotated bands (1px light, ~12px dark gap) */
-    repeating-linear-gradient(
-      128deg,
-      rgba(255,255,255,0.015) 0px,
-      rgba(255,255,255,0.015) 1px,
-      rgba(0,0,0,0.00)        1px,
-      rgba(0,0,0,0.00)        13px
-    ),
-    var(--card);
-  border: 1px solid var(--border);      /* “almost no” border, uses your token */
-  box-shadow: var(--shadow-card);       /* keep existing subtle shadow */
-  overflow: hidden;                     /* for the sweep overlay */
+.va-bands {
+  /* width of one full band “tile” */
+  --va-band-w: 320px;        /* adjust to 360/400 if you want even wider */
+  --va-band-clear: rgba(0,0,0,0);
+  --va-band-light: rgba(0,0,0,0.025);   /* edges */
+  --va-band-mid:   rgba(0,0,0,0.085);   /* center darkness */
+
+  /* vertical-ish, slight tilt */
+  background-image: repeating-linear-gradient(
+    118deg,
+    var(--va-band-clear) 0,
+    var(--va-band-light) calc(var(--va-band-w) * 0.25),
+    var(--va-band-mid)   calc(var(--va-band-w) * 0.50), /* darkest middle */
+    var(--va-band-light) calc(var(--va-band-w) * 0.75),
+    var(--va-band-clear) var(--va-band-w)
+  );
+  background-repeat: repeat;
+  background-size: auto; /* repeating-linear-gradient handles tiling */
 }
+
+/* Dark mode: tiny bit stronger so it shows as a shadow, not a stripe */
+[data-theme="dark"] .va-bands {
+  --va-band-light: rgba(0,0,0,0.035);
+  --va-band-mid:   rgba(0,0,0,0.11);
+}
+
+/* Optional: extra-wide bands for hero sections */
+.va-bands-xl { --va-band-w: 380px; }
 
 /* Slightly stronger ink in dark without becoming visible */
 [data-theme="dark"] .banded-surface {
