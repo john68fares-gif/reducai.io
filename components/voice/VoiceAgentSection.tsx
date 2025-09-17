@@ -5,7 +5,7 @@ import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 're
 import dynamic from 'next/dynamic';
 import { createPortal } from 'react-dom';
 import {
-  Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Phone, Rocket, Search, Check, Lock, X, KeyRound
+  Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Rocket, Search, Check, Lock, X, KeyRound
 } from 'lucide-react';
 import { scopedStorage } from '@/utils/scoped-storage';
 
@@ -24,52 +24,61 @@ class RailBoundary extends React.Component<{children:React.ReactNode},{hasError:
   render(){ return this.state.hasError ? <div className="px-3 py-3 text-xs opacity-70">Rail crashed</div> : this.props.children; }
 }
 
-/* ───────────────── Local tokens ─────────────────
+/* ───────────────── Local tokens & banded style ─────────────────
    Middle band = page background (var(--bg)).
-   6 tiny lightening steps on each side, behind content, fill full width. */
+   6 subtle steps on each side fill the full width.
+   Bands are behind content (z-index:0). */
 const CTA       = '#59d9b3';
 const CTA_HOVER = '#54cfa9';
+
+/* Filled phone icon (so it's actually filled, not stroked) */
+function FilledPhoneIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden {...props}>
+      <path
+        d="M6.62 10.79a15.053 15.053 0 006.59 6.59l2.2-2.2a1 1 0 011.03-.24c1.12.37 2.33.57 3.56.57a1 1 0 011 1v3.5a1 1 0 01-1 1C11.3 22 2 12.7 2 2.99a1 1 0 011-1H6.5a1 1 0 011 1c0 1.23.2 2.44.57 3.56a1 1 0 01-.24 1.03l-2.2 2.2z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
 
 const Tokens = () => (
   <style jsx global>{`
     .va-scope{
       --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 20px; --s-6: 24px;
-      --radius-outer: 16px;
+      --radius-outer: 8px; /* less rounded */
       --control-h: 44px; --header-h: 88px;
       --fz-title: 18px; --fz-sub: 15px; --fz-body: 14px; --fz-label: 12.5px;
       --lh-body: 1.45; --ease: cubic-bezier(.22,.61,.36,1);
 
-      /* Use your global theme vars */
-      --text: #ffffff;
+      /* read from globals; do not override your theme */
+      --page-bg: var(--bg);
+      --text: #fff;
       --text-muted: rgba(255,255,255,.72);
 
-      /* DO NOT override --bg; read it from globals */
-      --page-bg: var(--bg);
-
-      /* Inputs / borders */
       --input-bg: #101314;
       --input-border: rgba(255,255,255,.10);
       --input-shadow: inset 0 1px 0 rgba(255,255,255,.03), 0 8px 18px rgba(0,0,0,.35);
       --border-weak: rgba(255,255,255,.10);
 
-      /* ---- Layout math: core + 12 steps = 100% ----
-         16% + 12 * 7% = 100%  */
-      --core-w: 16%;
-      --step-w: 7%;
+      /* ---- Band math: core + 12 steps = 100% ----
+         20% + 12 * 6.6667% = 100% */
+      --core-w: 20%;
+      --step-w: 6.6667%;
 
-      /* ---- Ultra-subtle lightening per step (barely visible) ----
-         Nudge these numbers up/down if you want a hair more/less contrast. */
-      --s1: color-mix(in oklab, var(--page-bg) 99.85%, white 0.15%);
-      --s2: color-mix(in oklab, var(--page-bg) 99.7%,  white 0.30%);
-      --s3: color-mix(in oklab, var(--page-bg) 99.55%, white 0.45%);
-      --s4: color-mix(in oklab, var(--page-bg) 99.4%,  white 0.60%);
-      --s5: color-mix(in oklab, var(--page-bg) 99.25%, white 0.75%);
-      --s6: color-mix(in oklab, var(--page-bg) 99.1%,  white 0.90%);
+      /* ---- Ultra-subtle steps (slightly stronger so they show, still tiny) ---- */
+      --s1: color-mix(in oklab, var(--page-bg) 99.6%,  white 0.4%);
+      --s2: color-mix(in oklab, var(--page-bg) 99.4%,  white 0.6%);
+      --s3: color-mix(in oklab, var(--page-bg) 99.2%,  white 0.8%);
+      --s4: color-mix(in oklab, var(--page-bg) 99.0%,  white 1.0%);
+      --s5: color-mix(in oklab, var(--page-bg) 98.8%,  white 1.2%);
+      --s6: color-mix(in oklab, var(--page-bg) 98.6%,  white 1.4%);
     }
 
     .va-main{ overflow: visible; position: relative; contain: none; }
 
-    /* Card base: use the page bg; bands will render behind content */
+    /* Card base uses page bg; ::before paints bands BEHIND content */
     .va-card{
       position: relative;
       border-radius: var(--radius-outer);
@@ -77,31 +86,28 @@ const Tokens = () => (
       background: var(--page-bg);
       box-shadow: 0 18px 40px rgba(0,0,0,.28);
       overflow: hidden;
-      isolation: isolate;       /* local stacking context so ::before sits under children */
+      isolation: isolate; /* ensures ::before is below children when z-indexed */
     }
 
     /* Content above bands */
     .va-card > * { position: relative; z-index: 1; }
 
-    /* Header: transparent so the subtle band shows beneath */
+    /* Header transparent so the subtle band shows under it (still behind content) */
     .va-card .va-head{
       min-height: var(--header-h);
       display: grid; grid-template-columns: 1fr auto; align-items: center;
       padding: 0 16px;
-      background: transparent;  /* important */
+      background: transparent;
       border-bottom: 1px solid rgba(255,255,255,.06);
       color: var(--text);
     }
 
-    /* Stepped band BEHIND content (z-index:0).
-       Left s6..s1 → CORE (page bg) → right s1..s6.
-       Fills 100% width with no gaps/overlaps. */
+    /* Stepped band BEHIND content (z-index:0). Fills 100% width, no gaps. */
     .va-scope .va-card::before{
       content:'';
       position:absolute; inset:0;
       pointer-events:none;
       z-index:0;
-
       background:
         linear-gradient(
           to right,
@@ -120,7 +126,7 @@ const Tokens = () => (
           var(--s1) calc(0% + 5*var(--step-w)),
           var(--s1) calc(0% + 6*var(--step-w)),
 
-          /* exact center = page background */
+          /* exact center = page bg */
           var(--page-bg) calc(0% + 6*var(--step-w)),
           var(--page-bg) calc(0% + 6*var(--step-w) + var(--core-w)),
 
@@ -140,7 +146,7 @@ const Tokens = () => (
         );
     }
 
-    /* Dropdowns / overlays (unchanged) */
+    /* Dropdowns / overlays */
     .va-portal{
       background: #101314;
       border: 1px solid rgba(255,255,255,.12);
@@ -679,12 +685,20 @@ export default function VoiceAgentSection() {
             <button
               onClick={doCallTest}
               disabled={calling}
-              className="inline-flex items-center gap-2 rounded-[10px] font-semibold select-none disabled:opacity-60"
-              style={{ height:'var(--control-h)', padding:'0 18px', background:CTA, color:'#0a0f0d', boxShadow:'0 10px 22px rgba(89,217,179,.20)' }}
+              className="inline-flex items-center gap-2 rounded-[10px] select-none disabled:opacity-60"
+              style={{
+                height:'var(--control-h)',
+                padding:'0 18px',
+                background:CTA,
+                color:'#ffffff',             /* make text pure white */
+                fontWeight: 700,            /* ~“1px bolder” than semibold */
+                boxShadow:'0 10px 22px rgba(89,217,179,.20)'
+              }}
               onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA_HOVER)}
               onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA)}
             >
-              <Phone className="w-4 h-4" /> {calling ? 'Calling…' : 'Talk to Assistant'}
+              <FilledPhoneIcon style={{ color:'#0a0f0d' }} /> {/* filled phone icon */}
+              Talk to Assistant
             </button>
           </div>
 
