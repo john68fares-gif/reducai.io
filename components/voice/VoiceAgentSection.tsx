@@ -60,7 +60,7 @@ const Tokens = () => (
       --card-shadow: 0 18px 40px rgba(0,0,0,.28);
 
       /* BOX COLOR → as requested */
-      --box: #223248;              /* all “boxes” use this */
+      --box: #223248;              /* all boxes use this */
       --box-head: color-mix(in oklab, var(--box) 92%, white 8%); /* slight lift for headers */
     }
 
@@ -76,11 +76,9 @@ const Tokens = () => (
       overflow: hidden;
       isolation: isolate;
     }
-    /* kill previous decorative background */
     .va-card::before{ content:none !important; }
     .va-card > * { position: relative; z-index: 1; }
 
-    /* Header: slightly lighter than the box so it separates */
     .va-card .va-head{
       min-height: var(--header-h);
       display: grid;
@@ -306,7 +304,7 @@ function StyledSelect({
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return q ? options.filter(o => o.label.toLowerCase().includes(q)) : options;
-  }, [options, query]);
+    }, [options, query]);
 
   useLayoutEffect(() => {
     if (!open) return;
@@ -561,8 +559,10 @@ export default function VoiceAgentSection() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const set = <K extends keyof AgentData>(k: K) => (v: AgentData[K]) =>
-    setData(prev => ({ ...prev, [k]: v }));
+  /* FIX: use a named generic function so TSX parser doesn’t confuse it with JSX */
+  function setField<K extends keyof AgentData>(k: K) {
+    return (v: AgentData[K]) => setData(prev => ({ ...prev, [k]: v }));
+  }
 
   const modelOpts = useMemo(()=>modelOptsFor(data.provider), [data.provider]);
   const dialectOpts = useMemo(()=>dialectsFor(data.asrLang), [data.asrLang]);
@@ -665,19 +665,19 @@ export default function VoiceAgentSection() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px]">
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]" style={{ color:'var(--text)' }}>Provider</div>
-                <StyledSelect value={data.provider} onChange={(v)=>set('provider')(v as AgentData['provider'])} options={providerOpts}/>
+                <StyledSelect value={data.provider} onChange={(v)=>setField('provider')(v as AgentData['provider'])} options={providerOpts}/>
               </div>
 
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]" style={{ color:'var(--text)' }}>Model</div>
-                <StyledSelect value={data.model} onChange={set('model')} options={modelOpts}/>
+                <StyledSelect value={data.model} onChange={setField('model')} options={modelOpts}/>
               </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt-[var(--s-4)]">
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]" style={{ color:'var(--text)' }}>First Message Mode</div>
-                <StyledSelect value={data.firstMode} onChange={set('firstMode')} options={firstMessageModes}/>
+                <StyledSelect value={data.firstMode} onChange={setField('firstMode')} options={firstMessageModes}/>
               </div>
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]" style={{ color:'var(--text)' }}>First Message</div>
@@ -685,7 +685,7 @@ export default function VoiceAgentSection() {
                   className="w-full bg-transparent outline-none rounded-[10px] px-3"
                   style={{ height:'var(--control-h)', background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)', fontSize:'var(--fz-body)' }}
                   value={data.firstMsg}
-                  onChange={(e)=>set('firstMsg')(e.target.value)}
+                  onChange={(e)=>setField('firstMsg')(e.target.value)}
                 />
               </div>
             </div>
@@ -705,7 +705,7 @@ export default function VoiceAgentSection() {
                 className="w-full bg-transparent outline-none rounded-[10px] px-3 py-[10px]"
                 style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)', minHeight:130, lineHeight:'var(--lh-body)', fontSize:'var(--fz-body)' }}
                 value={data.systemPrompt}
-                onChange={(e)=>set('systemPrompt')(e.target.value)}
+                onChange={(e)=>setField('systemPrompt')(e.target.value)}
               />
             </div>
           </Section>
@@ -725,7 +725,7 @@ export default function VoiceAgentSection() {
                 <StyledSelect
                   value={data.apiKeyId || ''}
                   onChange={async (val)=>{
-                    set('apiKeyId')(val);
+                    setField('apiKeyId')(val);
                     try { const ss = await scopedStorage(); await ss.ensureOwnerGuard(); await ss.setJSON(LS_SELECTED, val); } catch {}
                   }}
                   options={[
@@ -743,7 +743,7 @@ export default function VoiceAgentSection() {
                 <div className="mb-[var(--s-2)] text-[12.5px]" style={{ color:'var(--text)' }}>Voice Provider</div>
                 <StyledSelect
                   value={data.ttsProvider}
-                  onChange={(v)=>set('ttsProvider')(v as AgentData['ttsProvider'])}
+                  onChange={(v)=>setField('ttsProvider')(v as AgentData['ttsProvider'])}
                   options={ttsProviders}
                 />
               </div>
@@ -754,7 +754,7 @@ export default function VoiceAgentSection() {
                 <div className="mb-[var(--s-2)] text-[12.5px]" style={{ color:'var(--text)' }}>Voice</div>
                 <StyledSelect
                   value={data.voiceName}
-                  onChange={set('voiceName')}
+                  onChange={setField('voiceName')}
                   options={openAiVoices}
                   placeholder="— Choose —"
                 />
@@ -775,7 +775,7 @@ export default function VoiceAgentSection() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px]">
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]" style={{ color:'var(--text)' }}>Provider</div>
-                <StyledSelect value={data.asrProvider} onChange={(v)=>set('asrProvider')(v as AgentData['asrProvider'])} options={asrProviders}/>
+                <StyledSelect value={data.asrProvider} onChange={(v)=>setField('asrProvider')(v as AgentData['asrProvider'])} options={asrProviders}/>
               </div>
 
               <div>
@@ -784,23 +784,24 @@ export default function VoiceAgentSection() {
                   value={data.asrLang}
                   onChange={(v)=>{
                     const lang = v as AgentData['asrLang'];
-                    set('asrLang')(lang);
-                    if (lang !== 'en') set('asrDialect')('standard');
+                    setField('asrLang')(lang);
+                    if (lang !== 'en') setField('asrDialect')('standard');
                   }}
                   options={asrLanguages}
                 />
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt={[12].toString()}>
+            {/* FIXED: mt class */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt-[var(--s-4)]">
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]" style={{ color:'var(--text)' }}>Dialect</div>
-                <StyledSelect value={data.asrDialect} onChange={(v)=>set('asrDialect')(v as AgentData['asrDialect'])} options={dialectOpts}/>
+                <StyledSelect value={data.asrDialect} onChange={(v)=>setField('asrDialect')(v as AgentData['asrDialect'])} options={dialectOpts}/>
               </div>
 
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]" style={{ color:'var(--text)' }}>Model</div>
-                <StyledSelect value={data.asrModel} onChange={set('asrModel')} options={asrModelOpts}/>
+                <StyledSelect value={data.asrModel} onChange={setField('asrModel')} options={asrModelOpts}/>
               </div>
             </div>
 
@@ -812,7 +813,7 @@ export default function VoiceAgentSection() {
                 <input
                   type="range" min={0} max={1} step={0.01}
                   value={data.confidence}
-                  onChange={(e)=>set('confidence')(parseFloat(e.target.value))}
+                  onChange={(e)=>setField('confidence')(parseFloat(e.target.value))}
                   style={{ width:'100%' }}
                 />
               </div>
@@ -836,7 +837,7 @@ export default function VoiceAgentSection() {
         >
           <textarea
             defaultValue={DEFAULT_AGENT.systemPrompt}
-            onBlur={(e)=>set('systemPrompt')(e.currentTarget.value)}
+            onBlur={(e)=>setField('systemPrompt')(e.currentTarget.value)}
             className="w-full bg-transparent outline-none rounded-[10px] px-3 py-2"
             style={{ minHeight: 260, background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)' }}
           />
