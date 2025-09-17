@@ -39,17 +39,16 @@ const Tokens = () => (
       --radius-outer: 12px;
       --radius-inner: 12px;
       --control-h: 44px;
-      --header-h: 82px;                 /* taller header */
+      --header-h: 86px;                 /* taller header */
       --collapsed-h: var(--header-h);
       --fz-title: 18px; --fz-sub: 15px; --fz-body: 14px; --fz-label: 12.5px;
       --lh-body: 1.45; --ease: cubic-bezier(.22,.61,.36,1);
 
       --panel: #0f1314;
       --panel-alt: #0d1112;
-      --border-weak: rgba(255,255,255,.08);
 
       --input-bg: #101314;
-      --input-border: rgba(255,255,255,.16);
+      --input-border: rgba(255,255,255,.04); /* almost no border */
       --input-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 12px 30px rgba(0,0,0,.38);
 
       --menu-bg: #101314;
@@ -62,15 +61,10 @@ const Tokens = () => (
       /* better ambient placement: wide, soft base + inner lift */
       --shadow-green: 0 36px 120px rgba(89,217,179,.22), 0 10px 26px rgba(0,0,0,.45);
     }
-    .va-title-chip{
-      color: rgba(234,248,243,.58);
-      border: 1px dashed rgba(234,248,243,.14);
-      background: linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,0));
-    }
 
     :root:not([data-theme="dark"]) .va-scope{
-      --panel: #fff; --panel-alt: #fff; --border-weak: rgba(0,0,0,.08);
-      --input-bg: #fff; --input-border: rgba(0,0,0,.12);
+      --panel: #fff; --panel-alt: #fff;
+      --input-bg: #fff; --input-border: rgba(0,0,0,.06);
       --input-shadow: inset 0 1px 0 rgba(255,255,255,.8), 0 10px 26px rgba(0,0,0,.12);
       --menu-bg: #fff; --menu-border: rgba(0,0,0,.10);
       --menu-shadow: 0 42px 110px rgba(0,0,0,.20), 0 0 0 1px rgba(0,0,0,.05);
@@ -98,7 +92,7 @@ type AgentData = {
   ttsProvider: 'openai' | 'elevenlabs';
   voiceName: string;
 
-  apiKeyId?: string; // NEW — selected OpenAI key id
+  apiKeyId?: string; // selected OpenAI key id
 
   asrProvider: 'deepgram' | 'whisper' | 'assemblyai';
   asrLang: 'en' | 'nl' | 'es' | 'de';
@@ -315,7 +309,7 @@ function StyledSelect({
         className="w-full flex items-center justify-between gap-3 px-3 py-3 rounded-[14px] text-sm outline-none transition"
         style={{
           background:'var(--input-bg)',
-          border:'1px solid var(--input-border)',
+          border:'1px solid var(--input-border)', /* faint */
           boxShadow:'var(--input-shadow)',
           color:'var(--text)'
         }}
@@ -445,7 +439,7 @@ function PromptOverlay({
   );
 }
 
-/* ───────────────── Section (lighter + taller header, smaller gaps) ───────────────── */
+/* ───────────────── Section (title ABOVE, lighter/taller header, tiny gaps) ───────────────── */
 function Section({
   title, icon, desc, children, defaultOpen = true
 }:{
@@ -461,11 +455,16 @@ function Section({
 
   return (
     <div className="mb-[18px]"> {/* smaller gap between boxes */}
+      {/* Title ABOVE box */}
+      <div className="mb-[6px] text-sm font-medium" style={{ color:'var(--text-muted)' }}>
+        {title}
+      </div>
+
       <div
         className="rounded-[var(--radius-outer)] overflow-hidden"
         style={{
           background:'linear-gradient(180deg, var(--panel-alt), var(--panel))',
-          border:'1px solid var(--border-weak)',
+          border:'1px solid var(--input-border)',  // almost no border
           boxShadow:'var(--shadow-green)'
         }}
       >
@@ -507,11 +506,6 @@ function Section({
           </div>
         </div>
       </div>
-
-      {/* grey title chip between boxes */}
-      <div className="mx-1 mt-[10px] mb-[2px] inline-flex items-center gap-2 px-2.5 py-1 rounded-[10px] va-title-chip text-[11.5px]">
-        {title}
-      </div>
     </div>
   );
 }
@@ -529,7 +523,7 @@ export default function VoiceAgentSection() {
   const [toast, setToast] = useState<string>('');
   const [showPromptOverlay, setShowPromptOverlay] = useState(false);
 
-  // API Keys (scoped, same behavior as StepV2)
+  // API Keys (scoped, like StepV2)
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
 
   useEffect(() => {
@@ -613,7 +607,7 @@ export default function VoiceAgentSection() {
 
       <div className="grid w-full" style={{ gridTemplateColumns: '260px 1fr' }}>
         {/* Rail */}
-        <div className="border-r sticky top-0 h-screen" style={{ borderColor:'rgba(255,255,255,.14)' }}>
+        <div className="border-r sticky top-0 h-screen" style={{ borderColor:'rgba(255,255,255,.10)' }}>
           <RailBoundary><AssistantRail /></RailBoundary>
         </div>
 
@@ -663,12 +657,12 @@ export default function VoiceAgentSection() {
           {/* KPIs */}
           <div className="grid gap-[14px] md:grid-cols-2 mb-[18px]">
             <div className="relative p-[var(--s-4)] rounded-[12px]"
-                 style={{ background:'var(--panel)', border:'1px solid var(--border-weak)', boxShadow:'var(--shadow-green)' }}>
+                 style={{ background:'var(--panel)', border:'1px solid var(--input-border)', boxShadow:'var(--shadow-green)' }}>
               <div className="text-xs mb-[6px]" style={{ color:'var(--text-muted)' }}>Cost</div>
               <div className="font-semibold" style={{ fontSize:'var(--fz-sub)', color:'var(--text)' }}>~$0.1/min</div>
             </div>
             <div className="relative p-[var(--s-4)] rounded-[12px]"
-                 style={{ background:'var(--panel)', border:'1px solid var(--border-weak)', boxShadow:'var(--shadow-green)' }}>
+                 style={{ background:'var(--panel)', border:'1px solid var(--input-border)', boxShadow:'var(--shadow-green)' }}>
               <div className="text-xs mb-[6px]" style={{ color:'var(--text-muted)' }}>Latency</div>
               <div className="font-semibold" style={{ fontSize:'var(--fz-sub)', color:'var(--text)' }}>~1050 ms</div>
             </div>
