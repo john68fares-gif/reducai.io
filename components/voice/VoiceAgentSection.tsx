@@ -24,7 +24,7 @@ class RailBoundary extends React.Component<{children:React.ReactNode},{hasError:
   render(){ return this.state.hasError ? <div className="px-3 py-3 text-xs opacity-70">Rail crashed</div> : this.props.children; }
 }
 
-/* ───────────────── Local tokens (flat dark surfaces) ───────────────── */
+/* ───────────────── Local tokens (flat + center band) ───────────────── */
 const ACTIVE_KEY = 'va:activeId';
 const CTA        = '#59d9b3';
 const CTA_HOVER  = '#54cfa9';
@@ -35,20 +35,20 @@ const Tokens = () => (
   <style jsx global>{`
     .va-scope{
       --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 20px; --s-6: 24px;
-      --radius-outer: 8px; --radius-inner: 12px;
+      --radius-outer: 6px;        /* less rounded */
+      --radius-inner: 10px;
       --control-h: 44px;
       --header-h: 88px;
       --fz-title: 18px; --fz-sub: 15px; --fz-body: 14px; --fz-label: 12.5px;
       --lh-body: 1.45; --ease: cubic-bezier(.22,.61,.36,1);
 
-      /* FLAT DARK PALETTE */
+      /* Base dark */
       --bg: #0b0e0f;
-      --panel: #0f1214;      /* card/box fill */
-      --panel-alt: #0f1214;  /* same: flat */
+      --panel: #0f1214;      /* page panels */
       --text: #eaf8f3;
       --text-muted: rgba(234,248,243,.66);
 
-      --border-weak: rgba(255,255,255,.06);  /* almost none */
+      --border-weak: rgba(255,255,255,.06);
       --input-bg: #101314;
       --input-border: rgba(255,255,255,.08);
       --input-shadow: inset 0 1px 0 rgba(255,255,255,.03), 0 8px 18px rgba(0,0,0,.35);
@@ -57,13 +57,20 @@ const Tokens = () => (
       --menu-border: rgba(255,255,255,.12);
       --menu-shadow: 0 36px 90px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.35);
 
-      --card-shadow: 0 18px 40px rgba(0,0,0,.28);  /* tasteful depth */
+      --card-shadow: 0 18px 40px rgba(0,0,0,.28);
+
+      /* Boxes: one grade lighter than page panel */
+      --panel-lite: color-mix(in oklab, var(--panel) 92%, white 8%);
+
+      /* Single centered band settings */
+      --band-w: 22px; /* not very wide */
+      --band-ink: rgba(0,255,194,0.08); /* subtle green/darker */
     }
 
     :root:not([data-theme="dark"]) .va-scope{
       --bg: #f6f7f8;
-      --panel: #0f1214;      /* keep the boxes dark even in light theme */
-      --panel-alt: #0f1214;
+      /* keep dark style for the boxes; compute lite from a dark base for consistency */
+      --panel: #0f1214;
       --text: #eaf8f3;
       --text-muted: rgba(234,248,243,.66);
       --border-weak: rgba(255,255,255,.08);
@@ -72,38 +79,54 @@ const Tokens = () => (
       --input-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 10px 22px rgba(0,0,0,.28);
       --menu-bg: #0f1214; --menu-border: rgba(255,255,255,.14); --menu-shadow: 0 36px 90px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.35);
       --card-shadow: 0 18px 40px rgba(0,0,0,.28);
+      --panel-lite: color-mix(in oklab, var(--panel) 92%, white 8%);
     }
 
     .va-main{ overflow: visible; position: relative; contain: none; }
 
-    /* FLAT CARD: NO STRIPES, NO GRADIENTS */
+    /* Card with one centered vertical band under content */
     .va-card{
       position: relative;
       border-radius: var(--radius-outer);
       border: 1px solid var(--border-weak);
-      background: var(--panel);
+      background-color: var(--panel-lite);   /* one grade lighter */
       box-shadow: var(--card-shadow);
       overflow: hidden;
+      isolation: isolate; /* keep pseudo behind content clean */
     }
+    .va-card::before{
+      content:'';
+      position:absolute; inset:0; pointer-events:none; z-index:0; /* under content */
+      /* single band centered */
+      background-image:
+        linear-gradient(
+          to right,
+          transparent calc(50% - var(--band-w) / 2),
+          var(--band-ink) calc(50% - var(--band-w) / 2),
+          var(--band-ink) calc(50% + var(--band-w) / 2),
+          transparent calc(50% + var(--band-w) / 2)
+        );
+    }
+    /* put actual content above the band */
+    .va-card > * { position: relative; z-index: 1; }
 
-    /* Taller/lighter header strip to separate from body */
+    /* Header: a hint lighter so it separates, but still flat */
     .va-card .va-head{
       min-height: var(--header-h);
       display: grid;
       grid-template-columns: 1fr auto;
       align-items: center;
       padding: 0 16px;
-      /* just slightly lighter so it separates */
-      background: color-mix(in oklab, var(--panel) 85%, white 15%);
+      background: color-mix(in oklab, var(--panel-lite) 88%, white 12%);
       border-bottom: 1px solid rgba(255,255,255,.04);
     }
 
-    /* Visible dropdown portal */
+    /* Dropdown portal */
     .va-portal{
       background: var(--menu-bg);
       border: 1px solid var(--menu-border);
       box-shadow: var(--menu-shadow);
-      border-radius: 12px;
+      border-radius: 10px;
     }
 
     /* Overlay */
@@ -112,7 +135,7 @@ const Tokens = () => (
       background: var(--menu-bg);
       border: 1px solid var(--menu-border);
       box-shadow: 0 28px 80px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.35) inset;
-      border-radius: 12px;
+      border-radius: 10px;
     }
   `}</style>
 );
@@ -297,7 +320,7 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
-/* Solid select (flat, visible portal) */
+/* Solid select */
 function StyledSelect({
   value, onChange, options, placeholder, leftIcon
 }:{
@@ -342,7 +365,7 @@ function StyledSelect({
         ref={btnRef}
         type="button"
         onClick={() => { setOpen(v=>!v); setTimeout(()=>searchRef.current?.focus(),0); }}
-        className="w-full flex items-center justify-between gap-3 px-3 py-3 rounded-[12px] text-sm outline-none transition"
+        className="w-full flex items-center justify-between gap-3 px-3 py-3 rounded-[10px] text-sm outline-none transition"
         style={{
           background:'var(--input-bg)',
           border:'1px solid var(--input-border)',
@@ -412,7 +435,7 @@ function StyledSelect({
   );
 }
 
-/* ───────────────── Overlay (flat) ───────────────── */
+/* ───────────────── Overlay ───────────────── */
 function ActionOverlay({
   title, children, onClose, primaryText = 'Confirm', onPrimary
 }:{
@@ -452,7 +475,7 @@ function ActionOverlay({
   );
 }
 
-/* ───────────────── Section (flat dark box) ───────────────── */
+/* ───────────────── Section ───────────────── */
 function Section({
   title, icon, desc, children, defaultOpen = true
 }:{
@@ -468,7 +491,6 @@ function Section({
 
   return (
     <div className="mb-[12px]">
-      {/* title above the box */}
       <div className="mb-[6px] text-sm font-medium" style={{ color:'var(--text-muted)' }}>
         {title}
       </div>
@@ -583,7 +605,7 @@ export default function VoiceAgentSection() {
     setSaving(true); setToast('');
     try { await apiSave(activeId, data); setToast('Saved'); }
     catch { setToast('Save failed'); }
-    finally { setSaving(false); setTimeout(()=>setToast(''), 1400); }
+    finally { setSaving false; setTimeout(()=>setToast(''), 1400); }
   }
   async function doPublish(){
     if (!activeId) { setToast('Select or create an agent'); return; }
@@ -653,7 +675,7 @@ export default function VoiceAgentSection() {
             </div>
           ) : null}
 
-          {/* KPIs (flat dark cards) */}
+          {/* KPIs */}
           <div className="grid gap-[12px] md:grid-cols-2 mb-[12px]">
             <div className="va-card p-[var(--s-4)]">
               <div className="text-xs mb-[6px]" style={{ color:'var(--text-muted)' }}>Cost</div>
@@ -692,7 +714,7 @@ export default function VoiceAgentSection() {
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]" style={{ color:'var(--text)' }}>First Message</div>
                 <input
-                  className="w-full bg-transparent outline-none rounded-[12px] px-3"
+                  className="w-full bg-transparent outline-none rounded-[10px] px-3"
                   style={{ height:'var(--control-h)', background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)', fontSize:'var(--fz-body)' }}
                   value={data.firstMsg}
                   onChange={(e)=>set('firstMsg')(e.target.value)}
@@ -712,7 +734,7 @@ export default function VoiceAgentSection() {
                 </button>
               </div>
               <textarea
-                className="w-full bg-transparent outline-none rounded-[12px] px-3 py-[10px]"
+                className="w-full bg-transparent outline-none rounded-[10px] px-3 py-[10px]"
                 style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)', minHeight:130, lineHeight:'var(--lh-body)', fontSize:'var(--fz-body)' }}
                 value={data.systemPrompt}
                 onChange={(e)=>set('systemPrompt')(e.target.value)}
