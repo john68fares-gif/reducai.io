@@ -48,7 +48,7 @@ const Tokens = () => (
       --fz-title: 18px; --fz-sub: 15px; --fz-body: 14px; --fz-label: 12.5px;
       --lh-body: 1.45; --ease: cubic-bezier(.22,.61,.36,1);
 
-      --page-bg: var(--bg);                 /* uses your global theme background */
+      --page-bg: var(--bg);
       --text: var(--text, #fff);
       --text-muted: var(--text-muted, rgba(255,255,255,.72));
 
@@ -58,7 +58,7 @@ const Tokens = () => (
       --border-weak: rgba(255,255,255,.10);
 
       --card-shadow: 0 18px 40px rgba(0,0,0,.28);
-      --green-shadow: 0 6px 12px rgba(89,217,179,.18); /* tiny green bottom glow */
+      --green-shadow: 0 6px 12px rgba(89,217,179,.18);
     }
 
     .va-main{ overflow: visible; position: relative; contain: none; }
@@ -68,12 +68,11 @@ const Tokens = () => (
       border-radius: var(--radius-outer);
       border: 1px solid var(--border-weak);
       background: var(--page-bg);
-      box-shadow: var(--card-shadow), var(--green-shadow); /* green bottom shadow */
+      box-shadow: var(--card-shadow), var(--green-shadow);
       overflow: hidden;
       isolation: isolate;
     }
 
-    /* Header = same dark as page with a whisper gradient, not lighter */
     .va-card .va-head{
       min-height: var(--header-h);
       display: grid; grid-template-columns: 1fr auto; align-items: center;
@@ -91,7 +90,6 @@ const Tokens = () => (
       color: var(--text);
     }
 
-    /* SOLID overlays / sheets (no transparency anywhere) */
     .va-overlay{ background: #0b0c10; } /* opaque */
     .va-sheet{
       background: color-mix(in oklab, var(--page-bg) 88%, black 12%);
@@ -106,7 +104,6 @@ const Tokens = () => (
       border-radius: 10px;
     }
 
-    /* FIXED assistant sidebar */
     .va-left-fixed{
       position: fixed; inset: 0 auto 0 0; width: 260px;
       border-right: 1px solid rgba(255,255,255,.06);
@@ -115,7 +112,6 @@ const Tokens = () => (
     }
     .va-left-fixed .rail-scroll{ position: absolute; inset: 0; overflow: auto; }
 
-    /* Right chat drawer (solid) */
     .va-call-drawer{
       position: fixed; inset: 0 0 0 auto; width: min(520px, 92vw);
       display: grid; grid-template-rows: auto 1fr auto;
@@ -128,12 +124,11 @@ const Tokens = () => (
     }
     .va-call-drawer.open{ transform: translateX(0); }
     .va-call-overlay{
-      position: fixed; inset: 0; background: #0b0c10; /* opaque */
+      position: fixed; inset: 0; background: #0b0c10;
       opacity: 0; pointer-events: none; transition: opacity 200ms var(--ease); z-index: 99997;
     }
     .va-call-overlay.open{ opacity: 1; pointer-events: auto; }
 
-    /* Chat bubbles */
     .chat-msg{ max-width: 85%; padding: 10px 12px; border-radius: 12px; }
     .chat-user{
       background: color-mix(in oklab, var(--page-bg) 86%, white 14%);
@@ -153,9 +148,8 @@ const Tokens = () => (
     }
     @keyframes blink { 50% { opacity: 0; } }
 
-    /* Diff highlight colors */
-    .diff-add{ color: #00ffc2; }                     /* green */
-    .diff-del{ color: #ff5a5a; text-decoration: line-through; } /* red */
+    .diff-add{ color: #00ffc2; }
+    .diff-del{ color: #ff5a5a; text-decoration: line-through; }
   `}</style>
 );
 
@@ -557,7 +551,7 @@ export default function VoiceAgentSection() {
   // prompt typing states
   const [typingActive, setTypingActive] = useState(false);
   const [typingText, setTypingText] = useState('');
-  const [diffHTML, setDiffHTML] = useState<string>(''); // shown below textarea
+  const [diffHTML, setDiffHTML] = useState<string>('');
 
   // chat drawer + generate overlay state
   const [showCall, setShowCall] = useState(false);
@@ -665,19 +659,16 @@ ${lines.map(l => `- ${l}`).join('\n')}
     return `${base}${block}`;
   }
 
-  /* Simple diff: highlight appended part in green; detect any removed leading part as red */
+  /* Simple diff (added green / removed red) */
   function computeDiffHTML(oldText: string, newText: string) {
-    // If new starts with old → additions only
     if (newText.startsWith(oldText)) {
       const added = newText.slice(oldText.length);
       return `${escapeHTML(oldText)}<span class="diff-add">${escapeHTML(added)}</span>`;
     }
-    // If old starts with new → removals
     if (oldText.startsWith(newText)) {
       const removed = oldText.slice(newText.length);
       return `${escapeHTML(newText)}<span class="diff-del">${escapeHTML(removed)}</span>`;
     }
-    // Fallback: show both with markers
     return `<span class="diff-del">${escapeHTML(oldText)}</span>\n<span class="diff-add">${escapeHTML(newText)}</span>`;
   }
 
@@ -699,10 +690,8 @@ ${lines.map(l => `- ${l}`).join('\n')}
       setTypingText(slice);
       if (i >= finalText.length) {
         clearInterval(id);
-        // set final prompt value
         setField('systemPrompt')(finalText);
         setTypingActive(false);
-        // show diff under the prompt (additions green, removals red)
         setDiffHTML(computeDiffHTML(baseTextAtStart, finalText));
       }
     }, 18);
@@ -710,12 +699,10 @@ ${lines.map(l => `- ${l}`).join('\n')}
 
   /* Generate flow */
   function startGenerate() {
-    baseBeforeGenRef.current = data.systemPrompt;     // snapshot
+    baseBeforeGenRef.current = data.systemPrompt;
     setGenPhase('loading');
-    // fake server latency
     setTimeout(() => {
       const merged = buildPrompt(baseBeforeGenRef.current, composerText);
-      // close overlay, then type into the main prompt box
       setShowGenerate(false);
       typeIntoPrompt(merged, baseBeforeGenRef.current);
       setGenPhase('done');
@@ -890,7 +877,7 @@ ${lines.map(l => `- ${l}`).join('\n')}
                 )}
               </div>
 
-              {/* diff bar under the prompt */}
+              {/* diff bar */}
               {diffHTML && (
                 <div
                   className="mt-2 rounded-[10px] p-3 text-[12px]"
@@ -981,8 +968,7 @@ ${lines.map(l => `- ${l}`).join('\n')}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt-[var(--s-4)]">
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]">Dialect</div>
-                <StyledSelect value={data.asrDialect} onChange={(v)=>setField('asrDialect')(v as AgentData['asrDialect'])} options={d
-ialectOpts}/>
+                <StyledSelect value={data.asrDialect} onChange={(v)=>setField('asrDialect')(v as AgentData['asrDialect'])} options={dialectOpts}/>
               </div>
 
               <div>
@@ -1019,7 +1005,7 @@ ialectOpts}/>
         <>
           <div className={`va-call-overlay ${showCall ? 'open' : ''}`} onClick={()=>setShowCall(false)} />
           <aside className={`va-call-drawer ${showCall ? 'open' : ''}`} aria-hidden={!showCall}>
-            {/* header (same dark with gentle gradient) */}
+            {/* header */}
             <div
               className="flex items-center justify-between px-4 h-[64px]"
               style={{
