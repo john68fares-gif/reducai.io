@@ -62,23 +62,41 @@ const Tokens = () => (
       /* ====== BAND PALETTE (GREEN) ====== */
       --band-green: 0,255,194; /* rgb for alpha control */
 
-      /* Wide vertical bands (under content). Keep subtle! */
-      --va-bands: repeating-linear-gradient(
-        90deg,
-        rgba(var(--band-green), .055) 0px,   /* light green stripe */
-        rgba(var(--band-green), .055) 22px,  /* stripe width */
-        rgba(0,0,0,0) 22px,
-        rgba(0,0,0,0) 44px                   /* gap -> wide bands */
-      );
+      /* === STRIPES: wide, vertical; CENTER DARK falloff makes stripes lighten as they move out === */
+.va-scope{
+  /* 1) vertical green stripes (wide) */
+  --va-bands: repeating-linear-gradient(
+    90deg,                          /* vertical */
+    rgba(0,255,194,.09) 0px,        /* stripe color + subtle opacity */
+    rgba(0,255,194,.09) 36px,       /* stripe width (← make wider/narrower) */
+    transparent 36px,
+    transparent 72px                /* gap (keep 2× stripe width for even rhythm) */
+  );
 
-      /* Darkest at center → lighter to sides (horizontal falloff) */
-      --va-center-dark: linear-gradient(
-        90deg,
-        rgba(0,0,0,.10) 0%,
-        rgba(0,0,0,.28) 50%,
-        rgba(0,0,0,.10) 100%
-      );
-    }
+  /* 2) center-dark vignette — makes the middle stripes darkest, sides lighter */
+  --va-center-dark: linear-gradient(
+    90deg,
+    rgba(0,0,0,.08) 0%,
+    rgba(0,0,0,.34) 50%,            /* darkest at center */
+    rgba(0,0,0,.08) 100%
+  );
+
+  /* you can nudge the numbers: .09 -> .07 for subtler green; .34 -> .28 for gentler center */
+}
+
+/* Put the center-dark on TOP of bands so it darkens the middle evenly,
+   then the base panel gradient at the bottom. Content is already above via z-index in your code. */
+.va-card{
+  position: relative;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-outer);
+  background:
+    var(--va-center-dark),                                  /* top overlay */
+    var(--va-bands),                                        /* stripes */
+    linear-gradient(180deg, var(--panel-alt), var(--panel));/* base */
+  box-shadow: var(--card-shadow);
+  overflow: hidden;
+}
 
     :root:not([data-theme="dark"]) .va-scope{
       --panel: #ffffff; --panel-alt: #ffffff;
