@@ -26,6 +26,7 @@ class RailBoundary extends React.Component<{children:React.ReactNode},{hasError:
 /* ───────────────── Tokens / constants ───────────────── */
 const CTA       = '#59d9b3';
 const CTA_HOVER = '#54cfa9';
+const ACTIVE_KEY = 'va:activeId';
 
 function PhoneFilled(props: React.SVGProps<SVGSVGElement>) {
   return (
@@ -196,7 +197,6 @@ You are a blank template AI assistant with minimal default settings.
   numerals: false,
 };
 
-const ACTIVE_KEY = 'va:activeId';
 const keyFor = (id: string) => `va:agent:${id}`;
 const loadAgentData = (id: string): AgentData => {
   try { const raw = localStorage.getItem(keyFor(id)); if (raw) return { ...DEFAULT_AGENT, ...(JSON.parse(raw)||{}) }; }
@@ -505,13 +505,15 @@ export default function VoiceAgentSection() {
 
   useEffect(() => { if (activeId) saveAgentData(activeId, data); }, [activeId, data]);
 
+  // bootstrap keys (fixed variable names)
   useEffect(() => {
     (async () => {
       try {
-        const ss = await scopedStorage();
-        await ss.ensureOwnerGuard();
-        const v1 = await ss.getJSON<ApiKey[]>('apiKeys.v1', []);
-        const legacy = await ss.getJSON<ApiKey[]>('apiKeys', []);
+        const store = await scopedStorage();
+        await store.ensureOwnerGuard();
+
+        const v1 = await store.getJSON<ApiKey[]>('apiKeys.v1', []);
+        const legacy = await store.getJSON<ApiKey[]>('apiKeys', []);
         const merged = Array.isArray(v1) && v1.length ? v1 : Array.isArray(legacy) ? legacy : [];
         const cleaned = merged
           .filter(Boolean)
@@ -520,8 +522,7 @@ export default function VoiceAgentSection() {
 
         setApiKeys(cleaned);
 
-        const ss = await scopedStorage();
-        const globalSelected = await ss.getJSON<string>('apiKeys.selectedId', '');
+        const globalSelected = await store.getJSON<string>('apiKeys.selectedId', '');
         const chosen =
           (data.apiKeyId && cleaned.some((k) => k.id === data.apiKeyId)) ? data.apiKeyId! :
           (globalSelected && cleaned.some((k) => k.id === globalSelected)) ? globalSelected :
@@ -529,7 +530,7 @@ export default function VoiceAgentSection() {
 
         if (chosen && chosen !== data.apiKeyId) {
           setData(prev => ({ ...prev, apiKeyId: chosen }));
-          await ss.setJSON('apiKeys.selectedId', chosen);
+          await store.setJSON('apiKeys.selectedId', chosen);
         }
       } catch {}
     })();
@@ -541,7 +542,6 @@ export default function VoiceAgentSection() {
   }
 
   const modelOpts = useMemo(()=>modelOptsFor(data.provider), [data.provider]);
-  const asrModelOpts = useMemo(()=>asrModelsFor(data.asrProvider), [data.asrProvider]);
 
   async function doSave(){
     if (!activeId) { setToast('Select or create an agent'); return; }
@@ -641,7 +641,6 @@ ${lines.map(l => `- ${l}`).join('\n')}
       return;
     }
     const u = new SpeechSynthesisUtterance(`Hi, I'm ${data.name}. This is a short preview of my voice.`);
-    // try to pick an English voice that roughly matches the chosen label
     const voices = window.speechSynthesis.getVoices();
     const guess = voices.find(v => v.lang.startsWith('en') && new RegExp(data.voiceName.split(' ')[0], 'i').test(v.name)) ||
                   voices.find(v => v.lang.startsWith('en'));
@@ -837,7 +836,7 @@ ${lines.map(l => `- ${l}`).join('\n')}
                   value={data.apiKeyId || ''}
                   onChange={async (val)=>{
                     setField('apiKeyId')(val);
-                    try { const ss = await scopedStorage(); await ss.ensureOwnerGuard(); await ss.setJSON('apiKeys.selectedId', val); } catch {}
+                    try { const store = await scopedStorage(); await store.ensureOwnerGuard(); await store.setJSON('apiKeys.selectedId', val); } catch {}
                   }}
                   options={[
                     { value: '', label: 'Select an API key…' },
@@ -845,6 +844,9 @@ ${lines.map(l => `- ${l}`).join('\n')}
                   ]}
                   leftIcon={<KeyRound className="w-4 h-4" style={{ color: CTA }} />}
                 />
+                <div className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
+                  Keys are stored per-account via scoped storage. Manage them in the API Keys page.
+                </div>
               </div>
 
               <div>
@@ -1031,5 +1033,3 @@ ${lines.map(l => `- ${l}`).join('\n')}
     </section>
   );
 }
-
-const ACTIVE_KEY = 'va:activeId';
