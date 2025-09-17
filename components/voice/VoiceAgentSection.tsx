@@ -24,7 +24,7 @@ class RailBoundary extends React.Component<{children:React.ReactNode},{hasError:
   render(){ return this.state.hasError ? <div className="px-3 py-3 text-xs opacity-70">Rail crashed</div> : this.props.children; }
 }
 
-/* ───────────────── Tokens (global) ───────────────── */
+/* ───────────────── Tokens / Theme ───────────────── */
 const ACTIVE_KEY = 'va:activeId';
 const CTA        = '#59d9b3';
 const CTA_HOVER  = '#54cfa9';
@@ -35,10 +35,10 @@ const Tokens = () => (
   <style jsx global>{`
     .va-scope{
       --s-1: 6px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 20px; --s-6: 24px;
-      --radius-outer: 8px;           /* less rounded outer */
+      --radius-outer: 10px;              /* less rounded outer */
       --radius-inner: 12px;
       --control-h: 44px;
-      --header-h: 86px;
+      --header-h: 88px;
       --fz-title: 18px; --fz-sub: 15px; --fz-body: 14px; --fz-label: 12.5px;
       --lh-body: 1.45; --ease: cubic-bezier(.22,.61,.36,1);
 
@@ -46,92 +46,53 @@ const Tokens = () => (
       --panel-alt: #0d1112;
 
       --input-bg: #101314;
-      --input-border: rgba(255,255,255,.04);  /* almost none */
+      --input-border: rgba(255,255,255,.06);
       --input-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 6px 14px rgba(0,0,0,.30);
 
       --menu-bg: #101314;
       --menu-border: rgba(255,255,255,.12);
       --menu-shadow: 0 40px 110px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.35);
 
-      --text: #eaf8f3; --text-muted: rgba(234,248,243,.62);
+      --text: #eaf8f3; --text-muted: rgba(234,248,243,.66);
       --bg: #0b0e0f;
 
       --card-shadow: 0 10px 18px rgba(0,0,0,.22);
-      --card-border: rgba(255,255,255,.04);
+      --card-border: rgba(255,255,255,.06);
 
-      /* ====== BAND PALETTE (GREEN) ====== */
-      --band-green: 0,255,194; /* rgb for alpha control */
-
-     /* === VERTICAL, WIDE BANDS with center darkening === */
-/* === WIDE VERTICAL BANDS (center darkest) with SIDE GUTTERS === */
-.va-scope {
-  --va-bands: repeating-linear-gradient(
-    90deg,
-    rgba(0, 255, 194, 0.10) 0px,
-    rgba(0, 255, 194, 0.10) 36px,
-    transparent 36px,
-    transparent 72px
-  );
-  --va-center-dark: linear-gradient(
-    90deg,
-    rgba(0, 0, 0, 0.08) 0%,
-    rgba(0, 0, 0, 0.34) 50%,
-    rgba(0, 0, 0, 0.08) 100%
-  );
-
-  /* how much empty space on the sides of the pattern */
-  --va-band-inset-x: 18px;  /* ← tweak this to increase/decrease side spacing */
-}
-
-/* Base card surface (no pattern here) */
-.va-card {
-  position: relative;
-  border: 1px solid var(--card-border);
-  border-radius: var(--radius-outer);
-  background: linear-gradient(180deg, var(--panel-alt), var(--panel));
-  box-shadow: var(--card-shadow);
-  overflow: hidden;
-}
-
-/* Ensure content renders above the decorative layer */
-.va-card > * {
-  position: relative;
-  z-index: 1;
-}
-
-/* Decorative pattern layer UNDER content, inset from the sides */
-.va-card::after {
-  content: "";
-  position: absolute;
-  inset: 0 var(--va-band-inset-x); /* top/bottom 0, left/right inset */
-  z-index: 0;
-  pointer-events: none;
-  background:
-    var(--va-center-dark),
-    var(--va-bands);
-  border-radius: inherit; /* keeps corners clean */
-}
-
-/* If you had an older overlay, keep it off */
-     .va-card::before { content: none !important; }
+      /* === WIDE VERTICAL BANDS (center darkest) with side gutters === */
+      --va-bands: repeating-linear-gradient(
+        90deg,
+        rgba(0,255,194,.10) 0px,  /* stripe visibility */
+        rgba(0,255,194,.10) 36px, /* stripe width */
+        transparent 36px,
+        transparent 72px         /* gap (≈2× width) */
+      );
+      --va-center-dark: linear-gradient(
+        90deg,
+        rgba(0,0,0,.08) 0%,
+        rgba(0,0,0,.34) 50%,      /* darkest center */
+        rgba(0,0,0,.08) 100%
+      );
+      --va-band-inset-x: 18px;    /* ← left/right spacing for pattern */
+    }
 
     :root:not([data-theme="dark"]) .va-scope{
       --panel: #ffffff; --panel-alt: #ffffff;
-      --input-bg: #ffffff; --input-border: rgba(0,0,0,.06);
+      --input-bg: #ffffff; --input-border: rgba(0,0,0,.08);
       --input-shadow: inset 0 1px 0 rgba(255,255,255,.8), 0 8px 16px rgba(0,0,0,.10);
       --menu-bg: #ffffff; --menu-border: rgba(0,0,0,.10);
       --menu-shadow: 0 40px 110px rgba(0,0,0,.20), 0 0 0 1px rgba(0,0,0,.05);
       --text: #0f1213; --text-muted: rgba(15,18,19,.62);
       --bg: #f6f7f8;
       --card-shadow: 0 10px 16px rgba(0,0,0,.10);
-      --card-border: rgba(0,0,0,.06);
+      --card-border: rgba(0,0,0,.08);
 
       --va-bands: repeating-linear-gradient(
         90deg,
-        rgba(var(--band-green), .035) 0px,
-        rgba(var(--band-green), .035) 22px,
-        rgba(0,0,0,0) 22px,
-        rgba(0,0,0,0) 44px
+        rgba(0,170,140,.08) 0px,
+        rgba(0,170,140,.08) 36px,
+        transparent 36px,
+        transparent 72px
       );
       --va-center-dark: linear-gradient(
         90deg,
@@ -143,27 +104,35 @@ const Tokens = () => (
 
     .va-main{ overflow: visible; position: relative; contain: none; }
 
-    /* Card surface layering: bands + center falloff under content */
+    /* Base card: we draw patterns with ::after so content stays above easily */
     .va-card{
       position: relative;
       border: 1px solid var(--card-border);
       border-radius: var(--radius-outer);
-      background:
-        var(--va-center-dark),
-        var(--va-bands),
-        linear-gradient(180deg, var(--panel-alt), var(--panel));
+      background: linear-gradient(180deg, var(--panel-alt), var(--panel));
       box-shadow: var(--card-shadow);
       overflow: hidden;
     }
-    /* put all child content above the bands */
-    .va-card > * { position: relative; z-index: 1; }
+    /* content above */
+    .va-card > *{ position: relative; z-index: 1; }
 
-    /* Header lighten to separate from body a bit */
-    .va-card .va-head{
-      background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,0));
+    /* Decorative layer (under content), inset from sides */
+    .va-card::after{
+      content: "";
+      position: absolute;
+      inset: 0 var(--va-band-inset-x);  /* top/bottom 0, left/right inset */
+      z-index: 0;
+      pointer-events: none;
+      background:
+        var(--va-center-dark), /* center dark vignette */
+        var(--va-bands);       /* vertical stripes */
+      border-radius: inherit;
     }
 
-    /* Dropdown portal */
+    /* kill older overlays if any */
+    .va-card::before{ content: none !important; }
+
+    /* Dropdown / menu */
     .va-portal{
       background: var(--menu-bg);
       border: 1px solid var(--menu-border);
@@ -517,7 +486,7 @@ function ActionOverlay({
   );
 }
 
-/* ───────────────── Section ───────────────── */
+/* ───────────────── Section (title ABOVE; lighter header) ───────────────── */
 function Section({
   title, icon, desc, children, defaultOpen = true
 }:{
@@ -541,10 +510,11 @@ function Section({
         {/* header */}
         <button
           onClick={()=>setOpen(v=>!v)}
-          className="va-head w-full text-left px-4 sm:px-5"
+          className="w-full text-left px-4 sm:px-5"
           style={{
             color:'var(--text)', minHeight:'var(--header-h)',
-            display:'grid', gridTemplateColumns:'1fr auto', alignItems:'center', gap:'12px'
+            display:'grid', gridTemplateColumns:'1fr auto', alignItems:'center', gap:'12px',
+            background:'linear-gradient(180deg, rgba(255,255,255,.055), rgba(255,255,255,0))' /* slightly lighter header */
           }}
         >
           <span className="min-w-0 flex items-center gap-3">
