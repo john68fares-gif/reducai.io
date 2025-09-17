@@ -2,18 +2,19 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
-import AssistantRail from '@/components/voice/AssistantRail'; // ← fixed rail (no dynamic)
+import AssistantRail from '@/components/voice/AssistantRail';
 import { createPortal } from 'react-dom';
 import {
   Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Rocket, Search, Check, Lock, X, KeyRound, Play, Square
 } from 'lucide-react';
 import { scopedStorage } from '@/utils/scoped-storage';
 
-/* ───────────────── Tokens / constants ───────────────── */
-const CTA       = '#59d9b3';
+/* ───────────────── constants ───────────────── */
+const CTA = '#59d9b3';
 const CTA_HOVER = '#54cfa9';
 const ACTIVE_KEY = 'va:activeId';
 
+/* Filled phone icon */
 function PhoneFilled(props: React.SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 24 24" width="16" height="16" {...props} aria-hidden>
@@ -25,6 +26,7 @@ function PhoneFilled(props: React.SVGProps<SVGSVGElement>) {
   );
 }
 
+/* ───────────────── theme tokens (SOLID surfaces) ───────────────── */
 const Tokens = () => (
   <style jsx global>{`
     .va-scope{
@@ -34,13 +36,12 @@ const Tokens = () => (
       --fz-title: 18px; --fz-sub: 15px; --fz-body: 14px; --fz-label: 12.5px;
       --lh-body: 1.45; --ease: cubic-bezier(.22,.61,.36,1);
 
-      /* Use SOLID theme surfaces (no transparency) */
       --page-bg: var(--bg);
-      --panel-bg: var(--panel);
+      --panel-bg: var(--panel);      /* SOLID */
       --text: var(--text);
       --text-muted: var(--text-muted);
 
-      --input-bg: var(--panel-bg);
+      --input-bg: var(--panel-bg);   /* SOLID */
       --input-border: rgba(255,255,255,.10);
       --input-shadow: 0 0 0 1px rgba(255,255,255,.06) inset;
 
@@ -48,13 +49,11 @@ const Tokens = () => (
       --card-shadow: 0 22px 44px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px rgba(89,217,179,.20);
     }
 
-    .va-main{ overflow: visible; position: relative; contain: none; }
-
     .va-card{
       position: relative;
       border-radius: var(--radius-outer);
       border: 1px solid var(--border-weak);
-      background: var(--panel-bg);         /* SOLID */
+      background: var(--panel-bg);
       box-shadow: var(--card-shadow);
       overflow: hidden;
       isolation: isolate;
@@ -64,7 +63,7 @@ const Tokens = () => (
       min-height: var(--header-h);
       display: grid; grid-template-columns: 1fr auto; align-items: center;
       padding: 0 16px;
-      /* header: same dark color with a very soft center band */
+      /* same dark color with very light center band */
       background: linear-gradient(90deg,
         var(--panel-bg) 0%,
         color-mix(in oklab, var(--panel-bg) 98%, white 2%) 50%,
@@ -73,29 +72,28 @@ const Tokens = () => (
       color: var(--text);
     }
 
-    /* FIXED Assistant rail */
+    /* FIXED rail */
     .va-left-fixed{
       position: fixed; inset: 0 auto 0 0; width: 260px; z-index: 12;
-      background: var(--panel-bg);               /* SOLID */
+      background: var(--panel-bg);
       border-right: 1px solid rgba(255,255,255,.06);
       box-shadow: 14px 0 28px rgba(0,0,0,.08);
       display: flex; flex-direction: column;
     }
     .va-left-fixed .rail-scroll{ overflow:auto; flex:1; }
 
-    /* Dropdown menu is SOLID */
+    /* Solid dropdown menu */
     .va-menu{
-      background: var(--panel-bg);               /* SOLID */
+      background: var(--panel-bg);
       border: 1px solid rgba(255,255,255,.12);
       box-shadow: 0 36px 90px rgba(0,0,0,.55);
       border-radius: 10px;
     }
 
-    /* Blur overlay: no dark scrim; drawer is solid */
+    /* Drawer + overlay: blur only (no dark scrim) */
     .va-blur-overlay{
       position: fixed; inset: 0; z-index: 9996;
-      background: transparent;                   /* not dark */
-      backdrop-filter: blur(3px);
+      background: transparent; backdrop-filter: blur(3px);
       opacity: 0; pointer-events: none; transition: opacity 200ms var(--ease);
     }
     .va-blur-overlay.open{ opacity: 1; pointer-events: auto; }
@@ -103,14 +101,14 @@ const Tokens = () => (
     .va-call-drawer{
       position: fixed; inset: 0 0 0 auto; width: min(540px, 92vw); z-index: 9997;
       display: grid; grid-template-rows: auto 1fr auto;
-      background: var(--panel-bg);               /* SOLID */
+      background: var(--panel-bg);
       border-left: 1px solid rgba(255,255,255,.10);
       box-shadow: -28px 0 80px rgba(0,0,0,.55);
       transform: translateX(100%); transition: transform 280ms var(--ease);
     }
     .va-call-drawer.open{ transform: translateX(0); }
 
-    /* Generate overlay (modal) */
+    /* Modal (Generate) */
     .va-modal-wrap{ position: fixed; inset: 0; z-index: 9994; }
     .va-modal-blur{ position:absolute; inset:0; backdrop-filter: blur(4px); }
     .va-modal-center{ position:absolute; inset:0; display:grid; place-items:center; padding: 20px; }
@@ -126,7 +124,7 @@ const Tokens = () => (
   `}</style>
 );
 
-/* ───────────────── Types / storage ───────────────── */
+/* ───────────────── types / storage ───────────────── */
 type ApiKey = { id: string; name: string; key: string };
 
 type AgentData = {
@@ -186,7 +184,7 @@ const saveAgentData = (id: string, data: AgentData) => {
   try { localStorage.setItem(keyFor(id), JSON.stringify(data)); } catch {}
 };
 
-/* ───────────────── Mock backend ───────────────── */
+/* ───────────────── mock backend ───────────────── */
 async function apiSave(agentId: string, payload: AgentData){
   const r = await fetch(`/api/voice/agent/${agentId}/save`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
@@ -200,7 +198,7 @@ async function apiPublish(agentId: string){
   return r.json();
 }
 
-/* ───────────────── Options ───────────────── */
+/* ───────────────── options ───────────────── */
 type Opt = { value: string; label: string; disabled?: boolean; note?: string };
 
 const providerOpts: Opt[] = [
@@ -266,7 +264,6 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
-/* Solid select */
 function StyledSelect({
   value, onChange, options, placeholder, leftIcon
 }:{
@@ -340,7 +337,7 @@ function StyledSelect({
             >
               <div
                 className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[10px]"
-                style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)' }}
+                style={{ background:'var(--panel-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
               >
                 <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
                 <input
@@ -381,36 +378,30 @@ function StyledSelect({
   );
 }
 
-/* ───────────────── Section ───────────────── */
+/* ───────────────── Section (better expand) ───────────────── */
 function Section({
   title, icon, desc, children, defaultOpen = true
 }:{
   title: string; icon: React.ReactNode; desc?: string; children: React.ReactNode; defaultOpen?: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
-  const wrapRef = useRef<HTMLDivElement|null>(null);
   const innerRef = useRef<HTMLDivElement|null>(null);
   const [h, setH] = useState<number>(0);
-
   const measure = () => { if (innerRef.current) setH(innerRef.current.offsetHeight); };
   useLayoutEffect(() => { measure(); }, [children, open]);
 
   return (
     <div className="mb-[12px]">
-      <div className="mb-[6px] text-sm font-medium" style={{ color:'var(--text-muted)' }}>
-        {title}
-      </div>
+      <div className="mb-[6px] text-sm font-medium" style={{ color:'var(--text-muted)' }}>{title}</div>
 
       <div className="va-card">
-        {/* header */}
         <button
           onClick={()=>setOpen(v=>!v)}
           className="va-head w-full text-left"
           style={{ color:'var(--text)' }}
         >
           <span className="min-w-0 flex items-center gap-3">
-            <span className="inline-grid place-items-center w-7 h-7 rounded-full"
-                  style={{ background:'rgba(89,217,179,.10)' }}>
+            <span className="inline-grid place-items-center w-7 h-7 rounded-full" style={{ background:'rgba(89,217,179,.10)' }}>
               {icon}
             </span>
             <span className="min-w-0">
@@ -424,9 +415,7 @@ function Section({
           </span>
         </button>
 
-        {/* body – smoother expand */}
         <div
-          ref={wrapRef}
           style={{
             height: open ? h : 0,
             opacity: open ? 1 : 0,
@@ -436,9 +425,7 @@ function Section({
           }}
           onTransitionEnd={() => { if (open) measure(); }}
         >
-          <div ref={innerRef} className="p-[var(--s-5)]">
-            {children}
-          </div>
+          <div ref={innerRef} className="p-[var(--s-5)]">{children}</div>
         </div>
       </div>
     </div>
@@ -457,14 +444,14 @@ export default function VoiceAgentSection() {
   const [toast, setToast] = useState<string>('');
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
 
-  // chat drawer
+  /* Chat drawer */
   const [showCall, setShowCall] = useState(false);
   const [messages, setMessages] = useState<Array<{role:'user'|'assistant'; text:string}>>([
     { role: 'assistant', text: 'Hi! Ready when you are.' }
   ]);
   const [chatInput, setChatInput] = useState('');
 
-  // generate overlay + diff
+  /* Generate overlay + diff */
   const [showGenerate, setShowGenerate] = useState(false);
   const [composerText, setComposerText] = useState('');
   const [genPhase, setGenPhase] = useState<'idle'|'loading'>('idle');
@@ -472,10 +459,8 @@ export default function VoiceAgentSection() {
   const [pendingPrompt, setPendingPrompt] = useState<string>('');
   const [showDiff, setShowDiff] = useState(false);
 
-  // voice list for preview
+  /* Voices (Web Speech) */
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
-  const [playing, setPlaying] = useState(false);
-  const utterRef = useRef<SpeechSynthesisUtterance|null>(null);
   useEffect(() => {
     const load = () => setVoices(window.speechSynthesis.getVoices());
     load();
@@ -483,6 +468,7 @@ export default function VoiceAgentSection() {
     return () => { (window.speechSynthesis as any).onvoiceschanged = null; };
   }, []);
 
+  /* Rail change listener */
   useEffect(() => {
     const handler = (e: Event) => setActiveId((e as CustomEvent<string>).detail);
     window.addEventListener('assistant:active', handler as EventListener);
@@ -497,7 +483,7 @@ export default function VoiceAgentSection() {
 
   useEffect(() => { if (activeId) saveAgentData(activeId, data); }, [activeId, data]);
 
-  // bootstrap keys (no duplicate "ss")
+  // bootstrap keys (no duplicate ss var)
   useEffect(() => {
     (async () => {
       try {
@@ -550,20 +536,11 @@ export default function VoiceAgentSection() {
     finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
   }
 
-  /* Build new prompt from composer text */
+  /* Build prompt from extra text */
   function buildPrompt(base: string, extraRaw: string) {
     const extra = (extraRaw || '').trim();
     if (!extra) return base;
-
-    const lines = extra
-      .split(/\n+/)
-      .map(s => s.trim())
-      .filter(Boolean)
-      .map(s => {
-        const t = s[0] ? s[0].toUpperCase() + s.slice(1) : s;
-        return /[.!?]$/.test(t) ? t : `${t}.`;
-      });
-
+    const lines = extra.split(/\n+/).map(s => s.trim()).filter(Boolean).map(s => /[.!?]$/.test(s) ? s : `${s}.`);
     const block = `
 
 [Extra Instructions]
@@ -573,7 +550,6 @@ ${lines.map(l => `- ${l}`).join('\n')}
 - Always respect the Extra Instructions above.
 - Keep replies concise and useful.
 - Ask for missing info before acting.`;
-
     return `${base}${block}`;
   }
 
@@ -582,7 +558,6 @@ ${lines.map(l => `- ${l}`).join('\n')}
       ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'} as any)[c]
     );
   }
-
   function diffHTML(oldText: string, newText: string) {
     if (newText.startsWith(oldText)) {
       const add = newText.slice(oldText.length);
@@ -601,21 +576,11 @@ ${lines.map(l => `- ${l}`).join('\n')}
     setTimeout(() => {
       const merged = buildPrompt(basePromptRef.current, composerText);
       setPendingPrompt(merged);
-      setShowDiff(true);
-      setShowGenerate(false);
-      setGenPhase('idle');
+      setShowDiff(true); setShowGenerate(false); setGenPhase('idle');
     }, 700);
   }
-
-  function acceptDiff(){
-    setData(prev => ({ ...prev, systemPrompt: pendingPrompt }));
-    setPendingPrompt('');
-    setShowDiff(false);
-  }
-  function declineDiff(){
-    setPendingPrompt('');
-    setShowDiff(false);
-  }
+  function acceptDiff(){ setData(prev => ({ ...prev, systemPrompt: pendingPrompt })); setPendingPrompt(''); setShowDiff(false); }
+  function declineDiff(){ setPendingPrompt(''); setShowDiff(false); }
 
   function sendChat() {
     const txt = chatInput.trim();
@@ -626,23 +591,17 @@ ${lines.map(l => `- ${l}`).join('\n')}
     setTimeout(() => setMessages(m => [...m, { role: 'assistant', text: reply }]), 350);
   }
 
-  function togglePreview(){
-    if (playing) {
-      window.speechSynthesis.cancel();
-      setPlaying(false);
-      return;
-    }
-    const u = new SpeechSynthesisUtterance(`Hi, I'm ${data.name}. This is a short preview of my voice.`);
-    // best effort match: by voiceName, else any English voice
-    const vByName = voices.find(v => v.name.toLowerCase().includes(data.voiceName.split(' ')[0].toLowerCase()));
-    const vEn = voices.find(v => v.lang?.toLowerCase().startsWith('en'));
-    if (vByName) u.voice = vByName; else if (vEn) u.voice = vEn;
-    utterRef.current = u;
-    u.onend = () => setPlaying(false);
-    setPlaying(true);
+  function playPreview(){
+    const u = new SpeechSynthesisUtterance(`Hi, I'm ${data.name || 'your assistant'}. This is a preview.`);
+    const byName = voices.find(v => v.name.toLowerCase().includes((data.voiceName || '').split(' ')[0]?.toLowerCase() || ''));
+    const en = voices.find(v => v.lang?.startsWith('en'));
+    if (byName) u.voice = byName; else if (en) u.voice = en;
+    window.speechSynthesis.cancel();
     window.speechSynthesis.speak(u);
   }
+  function stopPreview(){ window.speechSynthesis.cancel(); }
 
+  /* ───────────── render ───────────── */
   return (
     <section className="va-scope" style={{ background:'var(--bg)', color:'var(--text)' }}>
       <Tokens />
@@ -656,8 +615,7 @@ ${lines.map(l => `- ${l}`).join('\n')}
 
       {/* RIGHT CONTENT */}
       <div style={{ marginLeft: 260 }}>
-        <div className="va-main px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w-[1160px]"
-             style={{ fontSize:'var(--fz-body)', lineHeight:'var(--lh-body)' }}>
+        <div className="px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w-[1160px]" style={{ fontSize:'var(--fz-body)', lineHeight:'var(--lh-body)' }}>
 
           {/* Actions */}
           <div className="mb-[var(--s-4)] flex flex-wrap items-center justify-end gap-[var(--s-3)]">
@@ -682,15 +640,11 @@ ${lines.map(l => `- ${l}`).join('\n')}
             <button
               onClick={()=>setShowCall(true)}
               className="inline-flex items-center gap-2 rounded-[10px] select-none"
-              style={{
-                height:'var(--control-h)', padding:'0 18px',
-                background:CTA, color:'#ffffff', fontWeight:700,
-                boxShadow:'0 10px 22px rgba(89,217,179,.20)'
-              }}
+              style={{ height:'var(--control-h)', padding:'0 18px', background:CTA, color:'#fff', fontWeight:700, boxShadow:'0 10px 22px rgba(89,217,179,.20)' }}
               onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA_HOVER)}
               onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA)}
             >
-              <PhoneFilled style={{ color:'#ffffff' }} />
+              <PhoneFilled style={{ color:'#fff' }} />
               Talk to Assistant
             </button>
           </div>
@@ -706,20 +660,18 @@ ${lines.map(l => `- ${l}`).join('\n')}
           <div className="grid gap-[12px] md:grid-cols-2 mb-[12px]">
             <div className="va-card">
               <div className="va-head" style={{ minHeight: 56 }}>
-                <div className="text-xs" style={{ color:'var(--text-muted)' }}>Cost</div>
-                <div />
+                <div className="text-xs" style={{ color:'var(--text-muted)' }}>Cost</div><div />
               </div>
               <div className="p-[var(--s-4)]">
-                <div className="font-semibold" style={{ fontSize:'var(--fz-sub)', color:'var(--text)' }}>~$0.1/min</div>
+                <div className="font-semibold" style={{ fontSize:'var(--fz-sub)' }}>~$0.1/min</div>
               </div>
             </div>
             <div className="va-card">
               <div className="va-head" style={{ minHeight: 56 }}>
-                <div className="text-xs" style={{ color:'var(--text-muted)' }}>Latency</div>
-                <div />
+                <div className="text-xs" style={{ color:'var(--text-muted)' }}>Latency</div><div />
               </div>
               <div className="p-[var(--s-4)]">
-                <div className="font-semibold" style={{ fontSize:'var(--fz-sub)', color:'var(--text)' }}>~1050 ms</div>
+                <div className="font-semibold" style={{ fontSize:'var(--fz-sub)' }}>~1050 ms</div>
               </div>
             </div>
           </div>
@@ -738,7 +690,7 @@ ${lines.map(l => `- ${l}`).join('\n')}
                   value={data.name}
                   onChange={(e)=>setField('name')(e.target.value)}
                   className="w-full bg-transparent outline-none rounded-[10px] px-3"
-                  style={{ height:'var(--control-h)', background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)' }}
+                  style={{ height:'var(--control-h)', background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
                   placeholder="e.g., Riley"
                 />
               </div>
@@ -776,33 +728,24 @@ ${lines.map(l => `- ${l}`).join('\n')}
                   </button>
                 </div>
 
-                {/* Prompt editor with optional diff layer */}
                 <div style={{ position:'relative' }}>
                   <textarea
                     className="w-full bg-transparent outline-none rounded-[12px] px-3 py-[12px]"
-                    style={{ minHeight: 360, background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)', lineHeight:'var(--lh-body)', fontSize:'var(--fz-body)' }}
+                    style={{ minHeight: 360, background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
                     value={data.systemPrompt}
                     onChange={(e)=>setField('systemPrompt')(e.target.value)}
                   />
                   {showDiff && (
                     <div
                       className="absolute inset-0 rounded-[12px] px-3 py-[12px] overflow-auto"
-                      style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.12)', boxShadow:'var(--input-shadow)', color:'var(--text)' }}
+                      style={{ background:'var(--panel-bg)', border:'1px solid rgba(255,255,255,.12)', color:'var(--text)' }}
                     >
                       <div dangerouslySetInnerHTML={{ __html: diffHTML(basePromptRef.current, pendingPrompt) }} />
                       <div className="mt-3 flex gap-2">
-                        <button
-                          onClick={acceptDiff}
-                          className="h-9 px-3 rounded-[10px] font-semibold"
-                          style={{ background:CTA, color:'#ffffff' }}
-                        >
+                        <button onClick={acceptDiff} className="h-9 px-3 rounded-[10px] font-semibold" style={{ background:CTA, color:'#fff' }}>
                           Accept changes
                         </button>
-                        <button
-                          onClick={declineDiff}
-                          className="h-9 px-3 rounded-[10px]"
-                          style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                        >
+                        <button onClick={declineDiff} className="h-9 px-3 rounded-[10px]" style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}>
                           Decline
                         </button>
                       </div>
@@ -841,31 +784,25 @@ ${lines.map(l => `- ${l}`).join('\n')}
                 </div>
               </div>
 
-              {/* Voice + player */}
-              <div className="grid grid-cols-[1fr_auto] gap-[8px] items-end">
-                <div>
-                  <div className="mb-[var(--s-2)] text-[12.5px]">Voice</div>
-                  <StyledSelect
-                    value={data.voiceName}
-                    onChange={setField('voiceName')}
-                    options={openAiVoices}
-                    placeholder="— Choose —"
-                  />
-                </div>
-
-                <button
-                  onClick={togglePreview}
-                  className="w-12 h-12 rounded-full grid place-items-center"
-                  aria-label="Preview voice"
-                  style={{
-                    background: playing ? 'color-mix(in oklab, var(--panel) 78%, black 22%)' : CTA,
-                    color: playing ? 'var(--text)' : '#0a0f0d',
-                    boxShadow: playing ? '0 0 0 1px rgba(89,217,179,.24)' : '0 10px 22px rgba(89,217,179,.20)'
-                  }}
-                >
-                  {playing ? <Square className="w-5 h-5" /> : <Play className="w-5 h-5" />}
-                </button>
+              <div>
+                <div className="mb-[var(--s-2)] text-[12.5px]">Voice Provider</div>
+                <StyledSelect value={data.ttsProvider} onChange={(v)=>setField('ttsProvider')(v as AgentData['ttsProvider'])} options={ttsProviders}/>
               </div>
+            </div>
+
+            <div className="grid grid-cols-[1fr_auto_auto] gap-[12px] mt-[var(--s-4)] items-end">
+              <div>
+                <div className="mb-[var(--s-2)] text-[12.5px]">Voice</div>
+                <StyledSelect value={data.voiceName} onChange={setField('voiceName')} options={openAiVoices} placeholder="— Choose —" />
+              </div>
+              <button onClick={playPreview} className="w-12 h-12 rounded-full grid place-items-center" aria-label="Preview voice"
+                style={{ background: CTA, color:'#0a0f0d', boxShadow:'0 10px 22px rgba(89,217,179,.20)' }}>
+                <Play className="w-5 h-5" />
+              </button>
+              <button onClick={stopPreview} className="w-12 h-12 rounded-full grid place-items-center border" aria-label="Stop preview"
+                style={{ background: 'var(--panel-bg)', color:'var(--text)', borderColor:'var(--input-border)' }}>
+                <Square className="w-5 h-5" />
+              </button>
             </div>
           </Section>
 
@@ -880,7 +817,118 @@ ${lines.map(l => `- ${l}`).join('\n')}
                 <div className="mb-[var(--s-2)] text-[12.5px]">Provider</div>
                 <StyledSelect value={data.asrProvider} onChange={(v)=>setField('asrProvider')(v as AgentData['asrProvider'])} options={asrProviders}/>
               </div>
-
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]">Model</div>
-                <Styled
+                <StyledSelect value={data.asrModel} onChange={setField('asrModel')} options={asrModelsFor(data.asrProvider)}/>
+              </div>
+            </div>
+            <div className="mt-[var(--s-4)] grid sm:grid-cols-2 gap-[12px]">
+              <div className="flex items-center justify-between p-3 rounded-[10px]" style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}>
+                <span className="text-sm">Background Denoising Enabled</span>
+                <Toggle checked={data.denoise} onChange={setField('denoise')} />
+              </div>
+              <div className="flex items-center justify-between p-3 rounded-[10px]" style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}>
+                <span className="text-sm">Use Numerals</span>
+                <Toggle checked={data.numerals} onChange={setField('numerals')} />
+              </div>
+            </div>
+          </Section>
+        </div>
+      </div>
+
+      {/* Drawer + blur overlay */}
+      {createPortal(
+        <>
+          <div className={`va-blur-overlay ${showCall ? 'open' : ''}`} onClick={()=>setShowCall(false)} />
+          <aside className={`va-call-drawer ${showCall ? 'open' : ''}`} aria-hidden={!showCall}>
+            <div className="flex items-center justify-between px-4 h-[64px]"
+                 style={{ background:'var(--panel-bg)', borderBottom:'1px solid rgba(255,255,255,.1)' }}>
+              <div className="font-semibold">Chat with {data.name || 'Assistant'}</div>
+              <button onClick={()=>setShowCall(false)} className="px-2 py-1 rounded border"
+                      style={{ color:'var(--text)', borderColor:'var(--input-border)', background:'var(--panel-bg)' }}>
+                Close
+              </button>
+            </div>
+
+            <div className="p-4 overflow-y-auto flex flex-col gap-3">
+              {messages.map((m, i) => (
+                <div key={i} className="flex flex-col" style={{ alignItems: m.role==='user' ? 'flex-end' : 'flex-start' }}>
+                  <div className="text-[11px]" style={{ color:'var(--text-muted)' }}>
+                    {m.role==='user' ? 'You' : (data.name || 'Assistant')}
+                  </div>
+                  <div className={`chat-msg ${m.role==='user' ? 'chat-user' : 'chat-ai'}`} style={{ color:'var(--text)' }}>
+                    {m.text}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="p-3" style={{ borderTop:'1px solid rgba(255,255,255,.10)' }}>
+              <form onSubmit={(e)=>{ e.preventDefault(); sendChat(); }} className="flex items-center gap-2">
+                <input
+                  value={chatInput}
+                  onChange={(e)=>setChatInput(e.target.value)}
+                  placeholder={`Message ${data.name || 'Assistant'}…`}
+                  className="flex-1 rounded-md px-3 py-2 outline-none"
+                  style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+                />
+                <button type="submit" className="h-10 px-4 rounded-md font-semibold" style={{ background:CTA, color:'#fff' }}>
+                  Send
+                </button>
+              </form>
+            </div>
+          </aside>
+        </>,
+        document.body
+      )}
+
+      {/* Generate overlay */}
+      {showGenerate && createPortal(
+        <div className="va-modal-wrap" role="dialog" aria-modal>
+          <div className="va-modal-blur" onClick={()=>{ if (genPhase==='idle') setShowGenerate(false); }} />
+          <div className="va-modal-center">
+            <div className="va-sheet w-full max-w-[760px] p-4 md:p-6">
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-lg font-semibold">Compose Prompt</div>
+                <button onClick={()=>{ if (genPhase==='idle') setShowGenerate(false); }} className="p-1 rounded hover:opacity-80" aria-label="Close">
+                  <X className="w-5 h-5" style={{ color:'var(--text-muted)' }} />
+                </button>
+              </div>
+              <div className="grid gap-3">
+                <label className="text-xs" style={{ color:'var(--text-muted)' }}>
+                  Add extra instructions (persona, tone, rules, tools):
+                </label>
+                <textarea
+                  value={composerText}
+                  onChange={(e)=>setComposerText(e.target.value)}
+                  className="w-full bg-transparent outline-none rounded-[10px] px-3 py-2"
+                  placeholder="e.g., Friendly, crisp answers. Confirm account ID before actions."
+                  style={{ minHeight: 180, background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+                />
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    onClick={()=>setShowGenerate(false)}
+                    disabled={genPhase==='loading'}
+                    className="h-9 px-3 rounded-[10px]"
+                    style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={startGenerate}
+                    disabled={genPhase==='loading'}
+                    className="h-9 px-4 rounded-[10px] font-semibold"
+                    style={{ background:CTA, color:'#fff' }}
+                  >
+                    {genPhase==='loading' ? 'Generating…' : 'Generate'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+    </section>
+  );
+}
