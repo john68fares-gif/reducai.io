@@ -267,3 +267,91 @@ a { color: inherit; text-decoration: none; }
   position: relative;
   z-index: 1;
 }
+
+/* =====================================================
+   BANDED CARD — matches the screenshot vibe
+   ===================================================== */
+:root{
+  /* Tunables (dark-mode tuned; still fine in light) */
+  --ra-card-base: #223248;                                       /* main box tone */
+  --ra-card-core: #0D393F;                                       /* darkest center (green-blue) */
+  --ra-card-edge: color-mix(in oklab, #223248 88%, white 12%);   /* just a bit lighter than base */
+
+  --ra-band-core-w: 36%;  /* width of the dark center */
+  --ra-band-mid-w:  12%;  /* mid “shoulders” each side */
+  --ra-band-edge-w: 10%;  /* soft edge feather each side */
+}
+
+/* Add this class to any card container */
+.ra-card-banded{
+  position: relative;
+  background: var(--ra-card-base);
+  border-radius: 16px;                    /* matches your cards */
+  border: 1px solid var(--border);
+  box-shadow:
+    var(--shadow-card),
+    0 0 0 1px rgba(0,255,194,.09);        /* mint aura like the photo */
+  overflow: hidden;
+  isolation: isolate;
+}
+
+/* Header plays nice over the band */
+.ra-card-banded .section-bar,
+.ra-card-banded .va-head{
+  background: transparent;                 /* let band show */
+}
+
+/* Center band (darkest middle → slightly lighter sides) */
+.ra-card-banded::before{
+  content:'';
+  position:absolute; inset:0; pointer-events:none; z-index:0;
+  background:
+    linear-gradient(
+      to right,
+
+      /* left margin */
+      transparent 0%,
+      transparent calc(50% - (var(--ra-band-core-w) / 2 + var(--ra-band-mid-w) + var(--ra-band-edge-w))),
+
+      /* left edge (slightly lighter than base) */
+      color-mix(in oklab, var(--ra-card-edge) 55%, transparent)
+        calc(50% - (var(--ra-band-core-w) / 2 + var(--ra-band-mid-w) + var(--ra-band-edge-w))),
+      color-mix(in oklab, var(--ra-card-edge) 55%, transparent)
+        calc(50% - (var(--ra-band-core-w) / 2 + var(--ra-band-mid-w))),
+
+      /* left mid (base tone) */
+      color-mix(in oklab, var(--ra-card-base) 72%, transparent)
+        calc(50% - (var(--ra-band-core-w) / 2 + var(--ra-band-mid-w))),
+      color-mix(in oklab, var(--ra-card-base) 72%, transparent)
+        calc(50% - (var(--ra-band-core-w) / 2)),
+
+      /* core darkest */
+      color-mix(in oklab, var(--ra-card-core) 94%, transparent)
+        calc(50% - (var(--ra-band-core-w) / 2)),
+      color-mix(in oklab, var(--ra-card-core) 94%, transparent)
+        calc(50% + (var(--ra-band-core-w) / 2)),
+
+      /* right mid */
+      color-mix(in oklab, var(--ra-card-base) 72%, transparent)
+        calc(50% + (var(--ra-band-core-w) / 2)),
+      color-mix(in oklab, var(--ra-card-base) 72%, transparent)
+        calc(50% + (var(--ra-band-core-w) / 2 + var(--ra-band-mid-w))),
+
+      /* right edge (slightly lighter) */
+      color-mix(in oklab, var(--ra-card-edge) 55%, transparent)
+        calc(50% + (var(--ra-band-core-w) / 2 + var(--ra-band-mid-w))),
+      color-mix(in oklab, var(--ra-card-edge) 55%, transparent)
+        calc(50% + (var(--ra-band-core-w) / 2 + var(--ra-band-mid-w) + var(--ra-band-edge-w))),
+
+      /* right margin */
+      transparent calc(50% + (var(--ra-band-core-w) / 2 + var(--ra-band-mid-w) + var(--ra-band-edge-w))),
+      transparent 100%
+    );
+}
+
+/* Optional vertical embedding so the band feels inside the card */
+.ra-card-banded::after{
+  content:'';
+  position:absolute; inset:0; pointer-events:none; z-index:0;
+  background: linear-gradient(to bottom, rgba(0,0,0,.18), transparent 18%, transparent 82%, rgba(0,0,0,.18));
+}
