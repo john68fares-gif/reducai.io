@@ -24,7 +24,7 @@ class RailBoundary extends React.Component<{children:React.ReactNode},{hasError:
   render(){ return this.state.hasError ? <div className="px-3 py-3 text-xs opacity-70">Rail crashed</div> : this.props.children; }
 }
 
-/* ───────────────── Tokens / global CSS ───────────────── */
+/* ───────────────── Local tokens (flat dark surfaces) ───────────────── */
 const ACTIVE_KEY = 'va:activeId';
 const CTA        = '#59d9b3';
 const CTA_HOVER  = '#54cfa9';
@@ -34,117 +34,79 @@ const LS_SELECTED = 'apiKeys.selectedId';
 const Tokens = () => (
   <style jsx global>{`
     .va-scope{
-      --s-1: 6px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 20px; --s-6: 24px;
-      --radius-outer: 10px;
-      --radius-inner: 12px;
+      --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 20px; --s-6: 24px;
+      --radius-outer: 8px; --radius-inner: 12px;
       --control-h: 44px;
-      --header-h: 86px;
+      --header-h: 88px;
       --fz-title: 18px; --fz-sub: 15px; --fz-body: 14px; --fz-label: 12.5px;
       --lh-body: 1.45; --ease: cubic-bezier(.22,.61,.36,1);
 
-      --panel: #0f1314;
-      --panel-alt: #0d1112;
+      /* FLAT DARK PALETTE */
+      --bg: #0b0e0f;
+      --panel: #0f1214;      /* card/box fill */
+      --panel-alt: #0f1214;  /* same: flat */
+      --text: #eaf8f3;
+      --text-muted: rgba(234,248,243,.66);
 
+      --border-weak: rgba(255,255,255,.06);  /* almost none */
       --input-bg: #101314;
-      --input-border: rgba(255,255,255,.05);
-      --input-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 6px 14px rgba(0,0,0,.30);
+      --input-border: rgba(255,255,255,.08);
+      --input-shadow: inset 0 1px 0 rgba(255,255,255,.03), 0 8px 18px rgba(0,0,0,.35);
 
       --menu-bg: #101314;
       --menu-border: rgba(255,255,255,.12);
-      --menu-shadow: 0 40px 110px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.35);
+      --menu-shadow: 0 36px 90px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.35);
 
-      --text: #eaf8f3; --text-muted: rgba(234,248,243,.62);
-      --bg: #0b0e0f;
-
-      --card-shadow: 0 10px 18px rgba(0,0,0,.22);
-      --card-border: rgba(255,255,255,.04);
-
-      /* LINES-AS-GRADIENT knobs */
-      --line-w: 34px;                         /* dark line width */
-      --gap-w: 18px;                          /* light line width */
-      --stripe-dark: rgba(0,255,194,.16);     /* darker green line */
-      --stripe-light: rgba(0,255,194,.06);    /* lighter green line */
+      --card-shadow: 0 18px 40px rgba(0,0,0,.28);  /* tasteful depth */
     }
 
     :root:not([data-theme="dark"]) .va-scope{
-      --panel: #ffffff; --panel-alt: #ffffff;
-      --input-bg: #ffffff; --input-border: rgba(0,0,0,.08);
-      --input-shadow: inset 0 1px 0 rgba(255,255,255,.8), 0 8px 16px rgba(0,0,0,.10);
-      --menu-bg: #ffffff; --menu-border: rgba(0,0,0,.10);
-      --menu-shadow: 0 40px 110px rgba(0,0,0,.20), 0 0 0 1px rgba(0,0,0,.05);
-      --text: #0f1213; --text-muted: rgba(15,18,19,.62);
       --bg: #f6f7f8;
-      --card-shadow: 0 10px 16px rgba(0,0,0,.10);
-      --card-border: rgba(0,0,0,.06);
-
-      /* slightly softer greens for light mode */
-      --stripe-dark: rgba(0,182,139,.12);
-      --stripe-light: rgba(0,182,139,.05);
+      --panel: #0f1214;      /* keep the boxes dark even in light theme */
+      --panel-alt: #0f1214;
+      --text: #eaf8f3;
+      --text-muted: rgba(234,248,243,.66);
+      --border-weak: rgba(255,255,255,.08);
+      --input-bg: #111416;
+      --input-border: rgba(255,255,255,.12);
+      --input-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 10px 22px rgba(0,0,0,.28);
+      --menu-bg: #0f1214; --menu-border: rgba(255,255,255,.14); --menu-shadow: 0 36px 90px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.35);
+      --card-shadow: 0 18px 40px rgba(0,0,0,.28);
     }
 
     .va-main{ overflow: visible; position: relative; contain: none; }
 
-    /* Base card */
+    /* FLAT CARD: NO STRIPES, NO GRADIENTS */
     .va-card{
       position: relative;
-      border: 1px solid var(--card-border);
       border-radius: var(--radius-outer);
-      background: linear-gradient(180deg, var(--panel-alt), var(--panel));
+      border: 1px solid var(--border-weak);
+      background: var(--panel);
       box-shadow: var(--card-shadow);
       overflow: hidden;
     }
 
-    /* Make all child content sit on top of the pattern */
-    .va-card > *{ position: relative; z-index: 1; }
-
-    /* The vertical “lines as gradient” pattern under content */
-    .va-card::after{
-      content:"";
-      position:absolute;
-      inset: 0 18px;                          /* left/right breathing room */
-      z-index:0;
-      pointer-events:none;
-      border-radius: inherit;
-
-      /* stack: center-dark vignette + repeating vertical green lines */
-      background:
-        linear-gradient(
-          90deg,
-          rgba(0,0,0,.26) 0%,
-          rgba(0,0,0,.52) 50%,
-          rgba(0,0,0,.26) 100%
-        ),
-        repeating-linear-gradient(
-          90deg,
-          var(--stripe-dark) 0 calc(var(--line-w)),
-          var(--stripe-light) calc(var(--line-w)) calc(var(--line-w) + var(--gap-w))
-        );
-
-      /* fade a touch toward the edges so sides read lighter */
-      -webkit-mask-image: radial-gradient(130% 95% at 50% 50%,
-        rgba(255,255,255,1) 0%,
-        rgba(255,255,255,.8) 60%,
-        rgba(255,255,255,.35) 85%,
-        rgba(255,255,255,0) 100%);
-      mask-image: radial-gradient(130% 95% at 50% 50%,
-        rgba(255,255,255,1) 0%,
-        rgba(255,255,255,.8) 60%,
-        rgba(255,255,255,.35) 85%,
-        rgba(255,255,255,0) 100%);
+    /* Taller/lighter header strip to separate from body */
+    .va-card .va-head{
+      min-height: var(--header-h);
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      padding: 0 16px;
+      /* just slightly lighter so it separates */
+      background: color-mix(in oklab, var(--panel) 85%, white 15%);
+      border-bottom: 1px solid rgba(255,255,255,.04);
     }
 
-    /* Header shading: just a hint lighter to separate */
-    .va-card .va-hdr{
-      background: linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,0));
-    }
-
-    /* Dropdown portal + overlay + sheet */
+    /* Visible dropdown portal */
     .va-portal{
       background: var(--menu-bg);
       border: 1px solid var(--menu-border);
       box-shadow: var(--menu-shadow);
       border-radius: 12px;
     }
+
+    /* Overlay */
     .va-overlay{ background: rgba(0,0,0,.55); backdrop-filter: blur(2px); }
     .va-sheet{
       background: var(--menu-bg);
@@ -335,7 +297,7 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
-/* Styled select (solid surface + visible portal) */
+/* Solid select (flat, visible portal) */
 function StyledSelect({
   value, onChange, options, placeholder, leftIcon
 }:{
@@ -450,7 +412,7 @@ function StyledSelect({
   );
 }
 
-/* ───────────────── Reusable overlay ───────────────── */
+/* ───────────────── Overlay (flat) ───────────────── */
 function ActionOverlay({
   title, children, onClose, primaryText = 'Confirm', onPrimary
 }:{
@@ -490,7 +452,7 @@ function ActionOverlay({
   );
 }
 
-/* ───────────────── Section ───────────────── */
+/* ───────────────── Section (flat dark box) ───────────────── */
 function Section({
   title, icon, desc, children, defaultOpen = true
 }:{
@@ -505,7 +467,8 @@ function Section({
   useLayoutEffect(() => { measure(); }, [children, open]);
 
   return (
-    <div className="mb-[14px]">
+    <div className="mb-[12px]">
+      {/* title above the box */}
       <div className="mb-[6px] text-sm font-medium" style={{ color:'var(--text-muted)' }}>
         {title}
       </div>
@@ -514,11 +477,8 @@ function Section({
         {/* header */}
         <button
           onClick={()=>setOpen(v=>!v)}
-          className="va-hdr w-full text-left px-4 sm:px-5"
-          style={{
-            color:'var(--text)', minHeight:'var(--header-h)',
-            display:'grid', gridTemplateColumns:'1fr auto', alignItems:'center', gap:'12px'
-          }}
+          className="va-head w-full text-left"
+          style={{ color:'var(--text)' }}
         >
           <span className="min-w-0 flex items-center gap-3">
             <span className="inline-grid place-items-center w-7 h-7 rounded-full"
@@ -563,8 +523,6 @@ export default function VoiceAgentSection() {
   const [calling, setCalling] = useState(false);
   const [toast, setToast] = useState<string>('');
   const [showGenerate, setShowGenerate] = useState(false);
-
-  // API Keys (scoped, same as your other step)
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
 
   useEffect(() => {
@@ -695,8 +653,8 @@ export default function VoiceAgentSection() {
             </div>
           ) : null}
 
-          {/* KPIs */}
-          <div className="grid gap-[12px] md:grid-cols-2 mb-[14px]">
+          {/* KPIs (flat dark cards) */}
+          <div className="grid gap-[12px] md:grid-cols-2 mb-[12px]">
             <div className="va-card p-[var(--s-4)]">
               <div className="text-xs mb-[6px]" style={{ color:'var(--text-muted)' }}>Cost</div>
               <div className="font-semibold" style={{ fontSize:'var(--fz-sub)', color:'var(--text)' }}>~$0.1/min</div>
