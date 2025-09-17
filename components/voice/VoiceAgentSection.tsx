@@ -1,11 +1,10 @@
-// components/voice/VoiceAgentSection.tsx
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
 import dynamic from 'next/dynamic';
 import { createPortal } from 'react-dom';
 import {
-  Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Rocket, Search, Check, Lock, X, KeyRound
+  Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Rocket, Search, Check, Lock, X, KeyRound, Play, Square
 } from 'lucide-react';
 import { scopedStorage } from '@/utils/scoped-storage';
 
@@ -24,13 +23,13 @@ class RailBoundary extends React.Component<{children:React.ReactNode},{hasError:
   render(){ return this.state.hasError ? <div className="px-3 py-3 text-xs opacity-70">Rail crashed</div> : this.props.children; }
 }
 
-/* ───────────────── Local tokens ───────────────── */
+/* ───────────────── Tokens / constants ───────────────── */
 const CTA       = '#59d9b3';
 const CTA_HOVER = '#54cfa9';
 
-function FilledPhoneIcon(props: React.SVGProps<SVGSVGElement>) {
+function PhoneFilled(props: React.SVGProps<SVGSVGElement>) {
   return (
-    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden {...props}>
+    <svg viewBox="0 0 24 24" width="16" height="16" {...props} aria-hidden>
       <path
         d="M6.62 10.79a15.053 15.053 0 006.59 6.59l2.2-2.2a1 1 0 011.03-.24c1.12.37 2.33.57 3.56.57a1 1 0 011 1v3.5a1 1 0 01-1 1C11.3 22 2 12.7 2 2.99a1 1 0 011-1H6.5a1 1 0 011 1c0 1.23.2 2.44.57 3.56a1 1 0 01-.24 1.03l-2.2 2.2z"
         fill="currentColor"
@@ -57,8 +56,8 @@ const Tokens = () => (
       --input-shadow: inset 0 1px 0 rgba(255,255,255,.03), 0 8px 18px rgba(0,0,0,.35);
       --border-weak: rgba(255,255,255,.10);
 
-      --card-shadow: 0 18px 40px rgba(0,0,0,.28);
-      --green-shadow: 0 6px 12px rgba(89,217,179,.18);
+      --card-shadow: 0 22px 44px rgba(0,0,0,.30), 0 0 0 1px rgba(255,255,255,.06) inset, 0 8px 28px rgba(89,217,179,.10);
+      --green-ring: 0 0 0 1px rgba(89,217,179,.24);
     }
 
     .va-main{ overflow: visible; position: relative; contain: none; }
@@ -68,7 +67,7 @@ const Tokens = () => (
       border-radius: var(--radius-outer);
       border: 1px solid var(--border-weak);
       background: var(--page-bg);
-      box-shadow: var(--card-shadow), var(--green-shadow);
+      box-shadow: var(--card-shadow);
       overflow: hidden;
       isolation: isolate;
     }
@@ -81,53 +80,40 @@ const Tokens = () => (
         linear-gradient(
           90deg,
           color-mix(in oklab, var(--page-bg) 100%, transparent) 0%,
-          color-mix(in oklab, var(--page-bg) 99%, white 1%) 35%,
-          var(--page-bg) 50%,
-          color-mix(in oklab, var(--page-bg) 99%, black 1%) 65%,
-          var(--page-bg) 100%
+          color-mix(in oklab, var(--page-bg) 98%, white 2%) 50%,
+          color-mix(in oklab, var(--page-bg) 100%, transparent) 100%
         );
       border-bottom: 1px solid rgba(255,255,255,.08);
       color: var(--text);
     }
 
-    .va-overlay{ background: #0b0c10; } /* opaque */
-    .va-sheet{
-      background: color-mix(in oklab, var(--page-bg) 88%, black 12%);
-      border: 1px solid rgba(255,255,255,.12);
-      box-shadow: 0 28px 80px rgba(0,0,0,.70);
-      border-radius: 12px;
-    }
-    .va-portal{
-      background: color-mix(in oklab, var(--page-bg) 92%, black 8%);
-      border: 1px solid rgba(255,255,255,.12);
-      box-shadow: 0 36px 90px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.35);
-      border-radius: 10px;
-    }
-
+    /* fixed rail */
     .va-left-fixed{
-      position: fixed; inset: 0 auto 0 0; width: 260px;
+      position: fixed; inset: 0 auto 0 0; width: 260px; z-index: 10;
       border-right: 1px solid rgba(255,255,255,.06);
       background: var(--page-bg);
       overflow: hidden;
     }
     .va-left-fixed .rail-scroll{ position: absolute; inset: 0; overflow: auto; }
 
+    /* drawer: page stays visible; backdrop just blurs */
+    .va-blur-overlay{
+      position: fixed; inset: 0; z-index: 99996;
+      background: rgba(0,0,0,0); backdrop-filter: blur(3px);
+      opacity: 0; pointer-events: none; transition: opacity 200ms var(--ease);
+    }
+    .va-blur-overlay.open{ opacity: 1; pointer-events: auto; }
+
     .va-call-drawer{
-      position: fixed; inset: 0 0 0 auto; width: min(520px, 92vw);
+      position: fixed; inset: 0 0 0 auto; width: min(540px, 92vw); z-index: 99997;
       display: grid; grid-template-rows: auto 1fr auto;
       background: color-mix(in oklab, var(--page-bg) 86%, black 14%);
       border-left: 1px solid rgba(255,255,255,.10);
       box-shadow: -28px 0 80px rgba(0,0,0,.55);
       transform: translateX(100%);
       transition: transform 280ms var(--ease);
-      z-index: 99998;
     }
     .va-call-drawer.open{ transform: translateX(0); }
-    .va-call-overlay{
-      position: fixed; inset: 0; background: #0b0c10;
-      opacity: 0; pointer-events: none; transition: opacity 200ms var(--ease); z-index: 99997;
-    }
-    .va-call-overlay.open{ opacity: 1; pointer-events: auto; }
 
     .chat-msg{ max-width: 85%; padding: 10px 12px; border-radius: 12px; }
     .chat-user{
@@ -141,15 +127,22 @@ const Tokens = () => (
       align-self: flex-start;
     }
 
-    .type-caret{
-      display:inline-block; width: 6px; height: 1em;
-      background: currentColor; margin-left: 3px; animation: blink 1s step-end infinite;
-      vertical-align: bottom;
-    }
+    .type-caret{ display:inline-block; width: 6px; height: 1em; background: currentColor; margin-left: 3px; animation: blink 1s step-end infinite; vertical-align: bottom; }
     @keyframes blink { 50% { opacity: 0; } }
 
     .diff-add{ color: #00ffc2; }
-    .diff-del{ color: #ff5a5a; text-decoration: line-through; }
+    .diff-del{ color: #ff5050; text-decoration: line-through; }
+
+    /* solid overlay with blur behind (not dark) */
+    .va-modal-wrap{ position: fixed; inset: 0; z-index: 99994; }
+    .va-modal-blur{ position:absolute; inset:0; backdrop-filter: blur(4px); }
+    .va-modal-center{ position:absolute; inset:0; display:grid; place-items:center; padding: 20px; }
+    .va-sheet{
+      background: color-mix(in oklab, var(--page-bg) 90%, black 10%);
+      border: 1px solid rgba(255,255,255,.12);
+      box-shadow: 0 28px 80px rgba(0,0,0,.70);
+      border-radius: 12px;
+    }
   `}</style>
 );
 
@@ -169,13 +162,10 @@ type AgentData = {
   apiKeyId?: string;
 
   asrProvider: 'deepgram' | 'whisper' | 'assemblyai';
-  asrLang: 'en' | 'nl' | 'es' | 'de';
-  asrDialect: 'en-US' | 'en-UK' | 'en-AU' | 'standard';
   asrModel: string;
 
   denoise: boolean;
   numerals: boolean;
-  confidence: number;
 };
 
 const DEFAULT_AGENT: AgentData = {
@@ -186,7 +176,7 @@ const DEFAULT_AGENT: AgentData = {
   firstMsg: 'Hello.',
   systemPrompt:
 `[Identity]
-You are a blank template AI assistant with minimal default settings, designed to be easily customizable.
+You are a blank template AI assistant with minimal default settings.
 
 [Style]
 - Neutral, concise, helpful.
@@ -201,12 +191,9 @@ You are a blank template AI assistant with minimal default settings, designed to
   voiceName: 'Alloy (American)',
   apiKeyId: '',
   asrProvider: 'deepgram',
-  asrLang: 'en',
-  asrDialect: 'en-US',
   asrModel: 'Nova 2',
   denoise: false,
   numerals: false,
-  confidence: 0.4,
 };
 
 const ACTIVE_KEY = 'va:activeId';
@@ -252,12 +239,6 @@ const modelOptsFor = (provider: string): Opt[] =>
       ]
     : [{ value: 'coming', label: 'Models coming soon', disabled: true }];
 
-const firstMessageModes: Opt[] = [
-  { value: 'Assistant speaks first', label: 'Assistant speaks first' },
-  { value: 'User speaks first',      label: 'User speaks first' },
-  { value: 'Silent until tool required', label: 'Silent until tool required' },
-];
-
 const ttsProviders: Opt[] = [
   { value: 'openai',    label: 'OpenAI' },
   { value: 'elevenlabs', label: 'ElevenLabs — coming soon', disabled: true, note: 'soon' },
@@ -275,24 +256,6 @@ const asrProviders: Opt[] = [
   { value: 'whisper',    label: 'Whisper — coming soon', disabled: true, note: 'soon' },
   { value: 'assemblyai', label: 'AssemblyAI — coming soon', disabled: true, note: 'soon' },
 ];
-
-const asrLanguages: Opt[] = [
-  { value: 'en', label: 'English' },
-  { value: 'nl', label: 'Dutch' },
-  { value: 'es', label: 'Spanish' },
-  { value: 'de', label: 'German' },
-];
-
-const dialectsFor = (lang: string): Opt[] => {
-  if (lang === 'en') {
-    return [
-      { value: 'en-US', label: 'English — American' },
-      { value: 'en-UK', label: 'English — British' },
-      { value: 'en-AU', label: 'English — Australian' },
-    ];
-  }
-  return [{ value: 'standard', label: 'Standard' }];
-};
 
 const asrModelsFor = (asr: string): Opt[] =>
   asr === 'deepgram'
@@ -387,8 +350,9 @@ function StyledSelect({
         ? createPortal(
             <div
               ref={portalRef}
-              className="va-portal fixed z-[99999] p-3"
+              className="fixed z-[99999] p-3 va-sheet"
               style={{
+                position: 'fixed',
                 top: rect.openUp ? rect.top - 8 : rect.top + 8,
                 left: rect.left,
                 width: rect.width,
@@ -435,46 +399,6 @@ function StyledSelect({
           )
         : null}
     </>
-  );
-}
-
-/* ───────────────── Overlay (generic) ───────────────── */
-function ActionOverlay({
-  title, children, onClose, primaryText = 'Confirm', onPrimary, primaryWhite = false
-}:{
-  title: string; children: React.ReactNode; onClose: ()=>void; primaryText?: string; onPrimary?: ()=>void; primaryWhite?: boolean;
-}) {
-  return createPortal(
-    <div className="fixed inset-0 z-[99996] grid place-items-center px-4 va-overlay">
-      <div className="va-sheet w-full max-w-[700px] p-4 md:p-6">
-        <div className="flex items-center justify-between mb-3">
-          <div className="text-lg font-semibold" style={{ color:'var(--text)' }}>{title}</div>
-          <button onClick={onClose} className="p-1 rounded hover:opacity-80" aria-label="Close">
-            <X className="w-5 h-5" style={{ color:'var(--text-muted)' }} />
-          </button>
-        </div>
-        <div className="mb-4">{children}</div>
-        <div className="flex items-center justify-end gap-2">
-          <button
-            onClick={onClose}
-            className="h-9 px-3 rounded-[10px]"
-            style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-          >
-            Cancel
-          </button>
-          <button
-            onClick={onPrimary}
-            className="h-9 px-4 rounded-[10px] font-semibold"
-            style={{ background:CTA, color: primaryWhite ? '#ffffff' : '#0a0f0d', boxShadow:'0 12px 26px rgba(89,217,179,.22)' }}
-            onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA_HOVER)}
-            onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA)}
-          >
-            {primaryText}
-          </button>
-        </div>
-      </div>
-    </div>,
-    document.body
   );
 }
 
@@ -548,22 +472,24 @@ export default function VoiceAgentSection() {
   const [toast, setToast] = useState<string>('');
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
 
-  // prompt typing states
-  const [typingActive, setTypingActive] = useState(false);
-  const [typingText, setTypingText] = useState('');
-  const [diffHTML, setDiffHTML] = useState<string>('');
-
-  // chat drawer + generate overlay state
+  // chat drawer
   const [showCall, setShowCall] = useState(false);
   const [messages, setMessages] = useState<Array<{role:'user'|'assistant'; text:string}>>([
     { role: 'assistant', text: 'Hi! Ready when you are.' }
   ]);
   const [chatInput, setChatInput] = useState('');
 
+  // generate overlay + diff
   const [showGenerate, setShowGenerate] = useState(false);
   const [composerText, setComposerText] = useState('');
-  const [genPhase, setGenPhase] = useState<'idle'|'loading'|'done'>('idle');
-  const baseBeforeGenRef = useRef<string>(''); // snapshot of prompt before generation
+  const [genPhase, setGenPhase] = useState<'idle'|'loading'>('idle');
+  const basePromptRef = useRef<string>('');
+  const [pendingPrompt, setPendingPrompt] = useState<string>('');
+  const [showDiff, setShowDiff] = useState(false);
+
+  // voice preview
+  const [playing, setPlaying] = useState(false);
+  const utterRef = useRef<SpeechSynthesisUtterance|null>(null);
 
   useEffect(() => {
     const handler = (e: Event) => setActiveId((e as CustomEvent<string>).detail);
@@ -594,6 +520,7 @@ export default function VoiceAgentSection() {
 
         setApiKeys(cleaned);
 
+        const ss = await scopedStorage();
         const globalSelected = await ss.getJSON<string>('apiKeys.selectedId', '');
         const chosen =
           (data.apiKeyId && cleaned.some((k) => k.id === data.apiKeyId)) ? data.apiKeyId! :
@@ -614,7 +541,6 @@ export default function VoiceAgentSection() {
   }
 
   const modelOpts = useMemo(()=>modelOptsFor(data.provider), [data.provider]);
-  const dialectOpts = useMemo(()=>dialectsFor(data.asrLang), [data.asrLang]);
   const asrModelOpts = useMemo(()=>asrModelsFor(data.asrProvider), [data.asrProvider]);
 
   async function doSave(){
@@ -632,7 +558,7 @@ export default function VoiceAgentSection() {
     finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
   }
 
-  /* Build prompt by translating extra text into directive lines */
+  /* Build new prompt from composer text */
   function buildPrompt(base: string, extraRaw: string) {
     const extra = (extraRaw || '').trim();
     if (!extra) return base;
@@ -659,54 +585,44 @@ ${lines.map(l => `- ${l}`).join('\n')}
     return `${base}${block}`;
   }
 
-  /* Simple diff (added green / removed red) */
-  function computeDiffHTML(oldText: string, newText: string) {
-    if (newText.startsWith(oldText)) {
-      const added = newText.slice(oldText.length);
-      return `${escapeHTML(oldText)}<span class="diff-add">${escapeHTML(added)}</span>`;
-    }
-    if (oldText.startsWith(newText)) {
-      const removed = oldText.slice(newText.length);
-      return `${escapeHTML(newText)}<span class="diff-del">${escapeHTML(removed)}</span>`;
-    }
-    return `<span class="diff-del">${escapeHTML(oldText)}</span>\n<span class="diff-add">${escapeHTML(newText)}</span>`;
-  }
-
   function escapeHTML(s: string){
     return s.replace(/[&<>"]/g, (c) =>
       ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'} as any)[c]
     );
   }
 
-  /* Typing animation inside the main prompt box */
-  function typeIntoPrompt(finalText: string, baseTextAtStart: string) {
-    setTypingActive(true);
-    setTypingText('');
-    let i = 0;
-    const step = Math.max(1, Math.floor(finalText.length / 60));
-    const id = setInterval(() => {
-      i += step;
-      const slice = finalText.slice(0, i);
-      setTypingText(slice);
-      if (i >= finalText.length) {
-        clearInterval(id);
-        setField('systemPrompt')(finalText);
-        setTypingActive(false);
-        setDiffHTML(computeDiffHTML(baseTextAtStart, finalText));
-      }
-    }, 18);
+  function diffHTML(oldText: string, newText: string) {
+    if (newText.startsWith(oldText)) {
+      const add = newText.slice(oldText.length);
+      return `${escapeHTML(oldText)}<span class="diff-add">${escapeHTML(add)}</span>`;
+    }
+    if (oldText.startsWith(newText)) {
+      const del = oldText.slice(newText.length);
+      return `${escapeHTML(newText)}<span class="diff-del">${escapeHTML(del)}</span>`;
+    }
+    return `<span class="diff-del">${escapeHTML(oldText)}</span>\n<span class="diff-add">${escapeHTML(newText)}</span>`;
   }
 
-  /* Generate flow */
   function startGenerate() {
-    baseBeforeGenRef.current = data.systemPrompt;
+    basePromptRef.current = data.systemPrompt;
     setGenPhase('loading');
     setTimeout(() => {
-      const merged = buildPrompt(baseBeforeGenRef.current, composerText);
+      const merged = buildPrompt(basePromptRef.current, composerText);
+      setPendingPrompt(merged);
+      setShowDiff(true);
       setShowGenerate(false);
-      typeIntoPrompt(merged, baseBeforeGenRef.current);
-      setGenPhase('done');
+      setGenPhase('idle');
     }, 700);
+  }
+
+  function acceptDiff(){
+    setData(prev => ({ ...prev, systemPrompt: pendingPrompt }));
+    setPendingPrompt('');
+    setShowDiff(false);
+  }
+  function declineDiff(){
+    setPendingPrompt('');
+    setShowDiff(false);
   }
 
   function sendChat() {
@@ -716,6 +632,24 @@ ${lines.map(l => `- ${l}`).join('\n')}
     setChatInput('');
     const reply = `${data.name || 'Assistant'}: "${txt}" received. How can I help further?`;
     setTimeout(() => setMessages(m => [...m, { role: 'assistant', text: reply }]), 350);
+  }
+
+  function togglePreview(){
+    if (playing) {
+      window.speechSynthesis.cancel();
+      setPlaying(false);
+      return;
+    }
+    const u = new SpeechSynthesisUtterance(`Hi, I'm ${data.name}. This is a short preview of my voice.`);
+    // try to pick an English voice that roughly matches the chosen label
+    const voices = window.speechSynthesis.getVoices();
+    const guess = voices.find(v => v.lang.startsWith('en') && new RegExp(data.voiceName.split(' ')[0], 'i').test(v.name)) ||
+                  voices.find(v => v.lang.startsWith('en'));
+    if (guess) u.voice = guess;
+    utterRef.current = u;
+    u.onend = () => setPlaying(false);
+    setPlaying(true);
+    window.speechSynthesis.speak(u);
   }
 
   return (
@@ -765,7 +699,7 @@ ${lines.map(l => `- ${l}`).join('\n')}
               onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA_HOVER)}
               onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA)}
             >
-              <FilledPhoneIcon style={{ color:'#ffffff' }} />
+              <PhoneFilled style={{ color:'#ffffff' }} />
               Talk to Assistant
             </button>
           </div>
@@ -814,7 +748,7 @@ ${lines.map(l => `- ${l}`).join('\n')}
                   onChange={(e)=>setField('name')(e.target.value)}
                   className="w-full bg-transparent outline-none rounded-[10px] px-3"
                   style={{ height:'var(--control-h)', background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)' }}
-                  placeholder="e.g., Nova"
+                  placeholder="e.g., Riley"
                 />
               </div>
               <div>
@@ -830,68 +764,68 @@ ${lines.map(l => `- ${l}`).join('\n')}
               </div>
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]">First Message Mode</div>
-                <StyledSelect value={data.firstMode} onChange={setField('firstMode')} options={firstMessageModes}/>
+                <StyledSelect value={data.firstMode} onChange={setField('firstMode')} options={[
+                  { value: 'Assistant speaks first', label: 'Assistant speaks first' },
+                  { value: 'User speaks first', label: 'User speaks first' },
+                  { value: 'Silent until tool required', label: 'Silent until tool required' },
+                ]}/>
               </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt-[var(--s-4)]">
-              <div>
-                <div className="mb-[var(--s-2)] text-[12.5px]">First Message</div>
-                <input
-                  className="w-full bg-transparent outline-none rounded-[10px] px-3"
-                  style={{ height:'var(--control-h)', background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)' }}
-                  value={data.firstMsg}
-                  onChange={(e)=>setField('firstMsg')(e.target.value)}
-                />
-              </div>
-            </div>
+              <div className="md:col-span-2">
+                <div className="flex items-center justify-between mb-[var(--s-2)]">
+                  <div className="font-medium" style={{ fontSize:'var(--fz-label)' }}>System Prompt</div>
+                  <button
+                    className="inline-flex items-center gap-2 rounded-[10px] text-sm"
+                    style={{ height:36, padding:'0 12px', background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+                    onClick={()=>{ setComposerText(''); setShowGenerate(true); setGenPhase('idle'); }}
+                  >
+                    <Wand2 className="w-4 h-4" /> Generate
+                  </button>
+                </div>
 
-            <div className="mt-[var(--s-4)]">
-              <div className="flex items-center justify-between mb-[var(--s-2)]">
-                <div className="font-medium" style={{ fontSize:'var(--fz-label)' }}>System Prompt</div>
-                <button
-                  className="inline-flex items-center gap-2 rounded-[10px] text-sm"
-                  style={{ height:36, padding:'0 12px', background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                  onClick={()=>{ setComposerText(''); setShowGenerate(true); setGenPhase('idle'); }}
-                >
-                  <Wand2 className="w-4 h-4" /> Generate
-                </button>
-              </div>
-
-              {/* Prompt editor with typing overlay */}
-              <div style={{ position:'relative' }}>
-                {!typingActive ? (
+                {/* Prompt editor with optional diff layer */}
+                <div style={{ position:'relative' }}>
                   <textarea
                     className="w-full bg-transparent outline-none rounded-[12px] px-3 py-[12px]"
-                    style={{ minHeight: 320, background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)', lineHeight:'var(--lh-body)', fontSize:'var(--fz-body)' }}
+                    style={{ minHeight: 360, background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)', lineHeight:'var(--lh-body)', fontSize:'var(--fz-body)' }}
                     value={data.systemPrompt}
-                    onChange={(e)=>{ setField('systemPrompt')(e.target.value); setDiffHTML(''); }}
+                    onChange={(e)=>setField('systemPrompt')(e.target.value)}
                   />
-                ) : (
-                  <div
-                    className="w-full rounded-[12px] px-3 py-[12px] whitespace-pre-wrap"
-                    style={{ minHeight: 320, background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)', lineHeight:'var(--lh-body)', fontSize:'var(--fz-body)' }}
-                  >
-                    {typingText}<span className="type-caret" />
-                  </div>
-                )}
+                  {showDiff && (
+                    <div
+                      className="absolute inset-0 rounded-[12px] px-3 py-[12px] overflow-auto"
+                      style={{ background:'color-mix(in oklab, var(--bg) 94%, black 6%)', border:'1px solid rgba(255,255,255,.12)', boxShadow:'var(--input-shadow)', color:'var(--text)' }}
+                    >
+                      <div dangerouslySetInnerHTML={{ __html: diffHTML(basePromptRef.current, pendingPrompt) }} />
+                      <div className="mt-3 flex gap-2">
+                        <button
+                          onClick={acceptDiff}
+                          className="h-9 px-3 rounded-[10px] font-semibold"
+                          style={{ background:CTA, color:'#ffffff' }}
+                        >
+                          Accept changes
+                        </button>
+                        <button
+                          onClick={declineDiff}
+                          className="h-9 px-3 rounded-[10px]"
+                          style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+                        >
+                          Decline
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
-
-              {/* diff bar */}
-              {diffHTML && (
-                <div
-                  className="mt-2 rounded-[10px] p-3 text-[12px]"
-                  style={{ background:'color-mix(in oklab, var(--bg) 92%, black 8%)', border:'1px solid rgba(255,255,255,.10)', color:'var(--text)' }}
-                  dangerouslySetInnerHTML={{ __html: diffHTML }}
-                />
-              )}
             </div>
           </Section>
 
           <Section
             title="Voice"
             icon={<Volume2 className="w-4 h-4" style={{ color: CTA }} />}
-            desc="Choose the TTS provider, voice, and OpenAI key."
+            desc="Choose TTS and preview the voice."
             defaultOpen={true}
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px]">
@@ -911,9 +845,6 @@ ${lines.map(l => `- ${l}`).join('\n')}
                   ]}
                   leftIcon={<KeyRound className="w-4 h-4" style={{ color: CTA }} />}
                 />
-                <div className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
-                  Keys are stored per-account via scoped storage. Manage them in the API Keys page.
-                </div>
               </div>
 
               <div>
@@ -926,7 +857,7 @@ ${lines.map(l => `- ${l}`).join('\n')}
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt-[var(--s-4)]">
+            <div className="grid grid-cols-1 md:grid-cols-[1fr,auto] gap-[12px] mt-[var(--s-4)] items-center">
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]">Voice</div>
                 <StyledSelect
@@ -936,13 +867,26 @@ ${lines.map(l => `- ${l}`).join('\n')}
                   placeholder="— Choose —"
                 />
               </div>
+
+              <button
+                onClick={togglePreview}
+                className="w-12 h-12 rounded-full grid place-items-center"
+                aria-label="Preview voice"
+                style={{
+                  background: playing ? 'color-mix(in oklab, var(--bg) 78%, black 22%)' : CTA,
+                  color: playing ? 'var(--text)' : '#0a0f0d',
+                  boxShadow: playing ? 'var(--green-ring)' : '0 10px 22px rgba(89,217,179,.20)'
+                }}
+              >
+                {playing ? <Square className="w-5 h-5" /> : <Play className="w-5 h-5" />}
+              </button>
             </div>
           </Section>
 
           <Section
             title="Transcriber"
             icon={<Mic className="w-4 h-4" style={{ color: CTA }} />}
-            desc="Speech-to-text configuration for calls."
+            desc="Transcription settings"
             defaultOpen={true}
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px]">
@@ -952,60 +896,33 @@ ${lines.map(l => `- ${l}`).join('\n')}
               </div>
 
               <div>
-                <div className="mb-[var(--s-2)] text-[12.5px]">Language</div>
-                <StyledSelect
-                  value={data.asrLang}
-                  onChange={(v)=>{
-                    const lang = v as AgentData['asrLang'];
-                    setField('asrLang')(lang);
-                    if (lang !== 'en') setField('asrDialect')('standard');
-                  }}
-                  options={asrLanguages}
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt-[var(--s-4)]">
-              <div>
-                <div className="mb-[var(--s-2)] text-[12.5px]">Dialect</div>
-                <StyledSelect value={data.asrDialect} onChange={(v)=>setField('asrDialect')(v as AgentData['asrDialect'])} options={dialectOpts}/>
-              </div>
-
-              <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]">Model</div>
-                <StyledSelect value={data.asrModel} onChange={setField('asrModel')} options={asrModelOpts}/>
+                <StyledSelect value={data.asrModel} onChange={setField('asrModel')} options={asrModelsFor(data.asrProvider)}/>
               </div>
             </div>
 
-            <div className="grid grid-cols-[1fr_auto] gap-[var(--s-3)] items-center mt-[var(--s-4)]">
-              <div className="flex items-center gap-3">
-                <span className="text-xs" style={{ color:'var(--text-muted)' }}>
-                  Confidence Threshold
-                </span>
-                <input
-                  type="range" min={0} max={1} step={0.01}
-                  value={data.confidence}
-                  onChange={(e)=>setField('confidence')(parseFloat(e.target.value))}
-                  style={{ width:'100%' }}
-                />
+            <div className="mt-[var(--s-4)] grid sm:grid-cols-2 gap-[12px]">
+              <div className="flex items-center justify-between p-3 rounded-[10px]"
+                   style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)' }}>
+                <span className="text-sm">Background Denoising Enabled</span>
+                <Toggle checked={data.denoise} onChange={setField('denoise')} />
               </div>
-              <div
-                className="px-2.5 py-1.5 rounded-md text-xs"
-                style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', minWidth:46, textAlign:'center', color:'var(--text)' }}
-              >
-                {data.confidence.toFixed(1)}
+
+              <div className="flex items-center justify-between p-3 rounded-[10px]"
+                   style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)' }}>
+                <span className="text-sm">Use Numerals</span>
+                <Toggle checked={data.numerals} onChange={setField('numerals')} />
               </div>
             </div>
           </Section>
         </div>
       </div>
 
-      {/* ---- Right chat drawer ---- */}
+      {/* ---- Chat drawer + blur overlay ---- */}
       {createPortal(
         <>
-          <div className={`va-call-overlay ${showCall ? 'open' : ''}`} onClick={()=>setShowCall(false)} />
+          <div className={`va-blur-overlay ${showCall ? 'open' : ''}`} onClick={()=>setShowCall(false)} />
           <aside className={`va-call-drawer ${showCall ? 'open' : ''}`} aria-hidden={!showCall}>
-            {/* header */}
             <div
               className="flex items-center justify-between px-4 h-[64px]"
               style={{
@@ -1025,7 +942,6 @@ ${lines.map(l => `- ${l}`).join('\n')}
               </button>
             </div>
 
-            {/* body (messages) */}
             <div className="p-4 overflow-y-auto flex flex-col gap-3">
               {messages.map((m, i) => (
                 <div key={i} className="flex flex-col" style={{ alignItems: m.role==='user' ? 'flex-end' : 'flex-start' }}>
@@ -1039,8 +955,7 @@ ${lines.map(l => `- ${l}`).join('\n')}
               ))}
             </div>
 
-            {/* footer (composer) */}
-            <div className="p-3 border-top" style={{ borderTop:'1px solid rgba(255,255,255,.10)' }}>
+            <div className="p-3" style={{ borderTop:'1px solid rgba(255,255,255,.10)' }}>
               <form
                 onSubmit={(e)=>{ e.preventDefault(); sendChat(); }}
                 className="flex items-center gap-2"
@@ -1066,45 +981,55 @@ ${lines.map(l => `- ${l}`).join('\n')}
         document.body
       )}
 
-      {/* ---- Generate Prompt overlay (solid) ---- */}
-      {showGenerate && (
-        <ActionOverlay
-          title="Compose Prompt"
-          onClose={()=>{ if (genPhase==='loading') return; setShowGenerate(false); }}
-          primaryText={genPhase==='idle' ? 'Generate' : genPhase==='loading' ? 'Generating…' : 'Close'}
-          onPrimary={()=>{
-            if (genPhase==='idle') startGenerate();
-            else setShowGenerate(false);
-          }}
-          primaryWhite
-        >
-          <div className="grid gap-3">
-            <label className="text-xs" style={{ color:'var(--text-muted)' }}>
-              Add extra instructions (persona, tone, rules, tools):
-            </label>
-            <textarea
-              value={composerText}
-              onChange={(e)=>setComposerText(e.target.value)}
-              className="w-full bg-transparent outline-none rounded-[10px] px-3 py-2"
-              placeholder="e.g., Be friendly and concise. Confirm account ID before actions. Prefer bullet points."
-              style={{ minHeight: 160, background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)' }}
-            />
-
-            {genPhase==='loading' && (
-              <div className="flex items-center gap-2 text-sm">
-                <span className="w-4 h-4 rounded-full border-2 border-t-transparent animate-spin" />
-                Generating…
+      {/* ---- Generate overlay (solid, blur behind) ---- */}
+      {showGenerate && createPortal(
+        <div className="va-modal-wrap" role="dialog" aria-modal>
+          <div className="va-modal-blur" onClick={()=>{ if (genPhase==='idle') setShowGenerate(false); }} />
+          <div className="va-modal-center">
+            <div className="va-sheet w-full max-w-[760px] p-4 md:p-6">
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-lg font-semibold" style={{ color:'var(--text)' }}>Compose Prompt</div>
+                <button onClick={()=>{ if (genPhase==='idle') setShowGenerate(false); }} className="p-1 rounded hover:opacity-80" aria-label="Close">
+                  <X className="w-5 h-5" style={{ color:'var(--text-muted)' }} />
+                </button>
               </div>
-            )}
-
-            {genPhase==='done' && (
-              <div className="text-xs" style={{ color:'var(--text-muted)' }}>
-                The prompt was generated and typed into the main editor.
+              <div className="grid gap-3">
+                <label className="text-xs" style={{ color:'var(--text-muted)' }}>
+                  Add extra instructions (persona, tone, rules, tools):
+                </label>
+                <textarea
+                  value={composerText}
+                  onChange={(e)=>setComposerText(e.target.value)}
+                  className="w-full bg-transparent outline-none rounded-[10px] px-3 py-2"
+                  placeholder="e.g., Friendly, crisp answers. Confirm account ID before actions."
+                  style={{ minHeight: 180, background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)' }}
+                />
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    onClick={()=>setShowGenerate(false)}
+                    disabled={genPhase==='loading'}
+                    className="h-9 px-3 rounded-[10px]"
+                    style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={startGenerate}
+                    disabled={genPhase==='loading'}
+                    className="h-9 px-4 rounded-[10px] font-semibold"
+                    style={{ background:CTA, color:'#ffffff', boxShadow:'0 12px 26px rgba(89,217,179,.22)' }}
+                  >
+                    {genPhase==='loading' ? 'Generating…' : 'Generate'}
+                  </button>
+                </div>
               </div>
-            )}
+            </div>
           </div>
-        </ActionOverlay>
+        </div>,
+        document.body
       )}
     </section>
   );
 }
+
+const ACTIVE_KEY = 'va:activeId';
