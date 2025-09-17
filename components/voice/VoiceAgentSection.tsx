@@ -24,7 +24,7 @@ class RailBoundary extends React.Component<{children:React.ReactNode},{hasError:
   render(){ return this.state.hasError ? <div className="px-3 py-3 text-xs opacity-70">Rail crashed</div> : this.props.children; }
 }
 
-/* ───────────────── Local tokens (flat + center band) ───────────────── */
+/* ───────────────── Local tokens ───────────────── */
 const ACTIVE_KEY = 'va:activeId';
 const CTA        = '#59d9b3';
 const CTA_HOVER  = '#54cfa9';
@@ -35,7 +35,7 @@ const Tokens = () => (
   <style jsx global>{`
     .va-scope{
       --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 20px; --s-6: 24px;
-      --radius-outer: 6px;      /* less rounded */
+      --radius-outer: 6px;
       --radius-inner: 10px;
       --control-h: 44px;
       --header-h: 88px;
@@ -44,13 +44,13 @@ const Tokens = () => (
 
       /* Base dark */
       --bg: #0b0e0f;
-      --panel: #0f1214;  /* page */
+      --panel: #0f1214;
       --text: #eaf8f3;
       --text-muted: rgba(234,248,243,.66);
 
-      --border-weak: rgba(255,255,255,.06);
+      --border-weak: rgba(255,255,255,.07);
       --input-bg: #101314;
-      --input-border: rgba(255,255,255,.08);
+      --input-border: rgba(255,255,255,.10);
       --input-shadow: inset 0 1px 0 rgba(255,255,255,.03), 0 8px 18px rgba(0,0,0,.35);
 
       --menu-bg: #101314;
@@ -59,83 +59,38 @@ const Tokens = () => (
 
       --card-shadow: 0 18px 40px rgba(0,0,0,.28);
 
-      /* Boxes: ~3% lighter than panel */
-      --panel-lite: color-mix(in oklab, var(--panel) 97%, white 3%);
-
-      /* Center band widths */
-      --band-core-w: 30%;  /* wide darkest center */
-      --band-mid-w:  12%;  /* mid step width (each side) */
-      --band-edge-w: 10%;  /* edge step width (each side) */
-
-      /* Colors you provided */
-      --c-mid:  #223248;  /* mid step */
-      --c-core: #0D393F;  /* center darkest */
-      --c-edge: #3E8874;  /* outer edge lightest */
+      /* BOX COLOR → as requested */
+      --box: #223248;              /* all “boxes” use this */
+      --box-head: color-mix(in oklab, var(--box) 92%, white 8%); /* slight lift for headers */
     }
 
     .va-main{ overflow: visible; position: relative; contain: none; }
 
-    /* Card with a centered band gradation under content */
+    /* Card: solid #223248, no band/gradient */
     .va-card{
       position: relative;
       border-radius: var(--radius-outer);
       border: 1px solid var(--border-weak);
-      background-color: var(--panel-lite);   /* subtle lighter box */
+      background-color: var(--box);
       box-shadow: var(--card-shadow);
       overflow: hidden;
       isolation: isolate;
     }
-    .va-card::before{
-      content:'';
-      position:absolute; inset:0; pointer-events:none; z-index:0; /* under content */
-      /* Build from center out: darkest (#0D393F) -> mid (#223248) -> edge (#3E8874) -> transparent */
-      background:
-        linear-gradient(
-          to right,
-
-          /* Left transparent margin */
-          transparent 0%,
-          transparent calc(50% - (var(--band-core-w) / 2 + var(--band-mid-w) + var(--band-edge-w))),
-
-          /* Left edge (lightest) */
-          rgba(62,136,116,0.06) calc(50% - (var(--band-core-w) / 2 + var(--band-mid-w) + var(--band-edge-w))),
-          rgba(62,136,116,0.06) calc(50% - (var(--band-core-w) / 2 + var(--band-mid-w))),
-
-          /* Left mid */
-          rgba(34,50,72,0.10) calc(50% - (var(--band-core-w) / 2 + var(--band-mid-w))),
-          rgba(34,50,72,0.10) calc(50% - (var(--band-core-w) / 2)),
-
-          /* Core darkest */
-          #0D393F              calc(50% - (var(--band-core-w) / 2)),
-          #0D393F              calc(50% + (var(--band-core-w) / 2)),
-
-          /* Right mid */
-          rgba(34,50,72,0.10) calc(50% + (var(--band-core-w) / 2)),
-          rgba(34,50,72,0.10) calc(50% + (var(--band-core-w) / 2 + var(--band-mid-w))),
-
-          /* Right edge (lightest) */
-          rgba(62,136,116,0.06) calc(50% + (var(--band-core-w) / 2 + var(--band-mid-w))),
-          rgba(62,136,116,0.06) calc(50% + (var(--band-core-w) / 2 + var(--band-mid-w) + var(--band-edge-w))),
-
-          /* Right transparent margin */
-          transparent          calc(50% + (var(--band-core-w) / 2 + var(--band-mid-w) + var(--band-edge-w))),
-          transparent          100%
-        );
-    }
+    /* kill previous decorative background */
+    .va-card::before{ content:none !important; }
     .va-card > * { position: relative; z-index: 1; }
 
-    /* Header: a hint lighter so it separates, but still flat */
+    /* Header: slightly lighter than the box so it separates */
     .va-card .va-head{
       min-height: var(--header-h);
       display: grid;
       grid-template-columns: 1fr auto;
       align-items: center;
       padding: 0 16px;
-      background: color-mix(in oklab, var(--panel-lite) 88%, white 12%);
-      border-bottom: 1px solid rgba(255,255,255,.04);
+      background: var(--box-head);
+      border-bottom: 1px solid rgba(255,255,255,.06);
     }
 
-    /* Dropdown portal */
     .va-portal{
       background: var(--menu-bg);
       border: 1px solid var(--menu-border);
@@ -143,7 +98,6 @@ const Tokens = () => (
       border-radius: 10px;
     }
 
-    /* Overlay */
     .va-overlay{ background: rgba(0,0,0,.55); backdrop-filter: blur(2px); }
     .va-sheet{
       background: var(--menu-bg);
@@ -838,7 +792,7 @@ export default function VoiceAgentSection() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt-[var(--s-4)]">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt={[12].toString()}>
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]" style={{ color:'var(--text)' }}>Dialect</div>
                 <StyledSelect value={data.asrDialect} onChange={(v)=>set('asrDialect')(v as AgentData['asrDialect'])} options={dialectOpts}/>
