@@ -24,9 +24,8 @@ class RailBoundary extends React.Component<{children:React.ReactNode},{hasError:
   render(){ return this.state.hasError ? <div className="px-3 py-3 text-xs opacity-70">Rail crashed</div> : this.props.children; }
 }
 
-/* ───────────────── Local design tokens (scoped) ─────────────────
-   NOTE: no gradient here; the band effect comes from globals `.ra-card-banded`
-   to keep the look consistent across the app. */
+/* ───────────────── Local tokens ─────────────────
+   Flat, single-color boxes (#223248) — no gradients. */
 const CTA       = '#59d9b3';
 const CTA_HOVER = '#54cfa9';
 
@@ -47,37 +46,39 @@ const Tokens = () => (
       --input-border: rgba(255,255,255,.10);
       --input-shadow: inset 0 1px 0 rgba(255,255,255,.03), 0 8px 18px rgba(0,0,0,.35);
 
-      /* Base box color (under the global band) */
-      --box: #223248;
       --border-weak: rgba(255,255,255,.09);
+
+      /* Single box color (requested) */
+      --box: #223248;
     }
 
     .va-main{ overflow: visible; position: relative; contain: none; }
 
-    /* Card base: DO NOT add ::before here (global .ra-card-banded adds the band) */
+    /* ONE-COLOR BOXES (no bands/gradients) */
     .va-card{
       position: relative;
       border-radius: var(--radius-outer);
       border: 1px solid var(--border-weak);
-      background-color: var(--box);
-      box-shadow: inset 0 0 22px rgba(0,0,0,.28), 0 0 20px rgba(0,255,194,.06);
+      background: var(--box);              /* ← solid #223248 */
+      box-shadow: 0 18px 40px rgba(0,0,0,.28);
       overflow: hidden;
       isolation: isolate;
     }
+    .va-card::before{ content:none !important; }
 
-    /* Header transparent so the band shows through */
+    /* Header matches the same solid color */
     .va-card .va-head{
       min-height: var(--header-h);
       display: grid;
       grid-template-columns: 1fr auto;
       align-items: center;
       padding: 0 16px;
-      background: transparent; /* important for band visibility */
+      background: var(--box);              /* ← same solid */
       border-bottom: 1px solid rgba(255,255,255,.06);
       color: var(--text);
     }
 
-    /* Dropdown/sheets keep your dark UI */
+    /* Dropdown / overlays */
     .va-portal{
       background: #101314;
       border: 1px solid rgba(255,255,255,.12);
@@ -450,8 +451,7 @@ function Section({
         {title}
       </div>
 
-      {/* add global banded look */}
-      <div className="va-card ra-card-banded">
+      <div className="va-card">
         {/* header */}
         <button
           onClick={()=>setOpen(v=>!v)}
@@ -549,7 +549,7 @@ export default function VoiceAgentSection() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* FIX: named generic so TSX parser doesn’t think it's JSX */
+  /* TSX-safe setter helper */
   function setField<K extends keyof AgentData>(k: K) {
     return (v: AgentData[K]) => setData(prev => ({ ...prev, [k]: v }));
   }
@@ -635,11 +635,11 @@ export default function VoiceAgentSection() {
 
           {/* KPIs */}
           <div className="grid gap-[12px] md:grid-cols-2 mb-[12px]">
-            <div className="va-card ra-card-banded p-[var(--s-4)]">
+            <div className="va-card p-[var(--s-4)]">
               <div className="text-xs mb-[6px]" style={{ color:'var(--text-muted)' }}>Cost</div>
               <div className="font-semibold" style={{ fontSize:'var(--fz-sub)', color:'var(--text)' }}>~$0.1/min</div>
             </div>
-            <div className="va-card ra-card-banded p-[var(--s-4)]">
+            <div className="va-card p-[var(--s-4)]">
               <div className="text-xs mb-[6px]" style={{ color:'var(--text-muted)' }}>Latency</div>
               <div className="font-semibold" style={{ fontSize:'var(--fz-sub)', color:'var(--text)' }}>~1050 ms</div>
             </div>
