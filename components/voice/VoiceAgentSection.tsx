@@ -35,8 +35,8 @@ const Tokens = () => (
   <style jsx global>{`
     .va-scope{
       --s-1: 6px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 20px; --s-6: 24px;
-      --radius-outer: 16px;
-      --radius-inner: 14px;
+      --radius-outer: 8px;           /* less rounded outer */
+      --radius-inner: 12px;
       --control-h: 44px;
       --header-h: 86px;
       --fz-title: 18px; --fz-sub: 15px; --fz-body: 14px; --fz-label: 12.5px;
@@ -47,107 +47,92 @@ const Tokens = () => (
 
       --input-bg: #101314;
       --input-border: rgba(255,255,255,.04);  /* almost none */
-      --input-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 8px 18px rgba(0,0,0,.35);
+      --input-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 6px 14px rgba(0,0,0,.30);
 
       --menu-bg: #101314;
       --menu-border: rgba(255,255,255,.12);
-      --menu-shadow: 0 40px 110px rgba(0,0,0,.62), 0 0 0 1px rgba(0,0,0,.35);
+      --menu-shadow: 0 40px 110px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.35);
 
       --text: #eaf8f3; --text-muted: rgba(234,248,243,.62);
       --bg: #0b0e0f;
 
-      /* subtle ambient only (no heavy lift) */
-      --card-shadow: 0 14px 26px rgba(0,0,0,.32);
+      /* card visuals: tiny border, almost flat shadow */
+      --card-shadow: 0 10px 18px rgba(0,0,0,.22);
       --card-border: rgba(255,255,255,.04);
 
-      /* vertical bands (rotated) + hover sheen */
+      /* SUPER-SUBTLE rotated vertical bands (invisible unless zoomed) */
       --bands:
         repeating-linear-gradient(
-          25deg,
-          rgba(255,255,255,.022) 0px,
-          rgba(255,255,255,.022) 34px,
-          rgba(0,0,0,.06) 34px,
-          rgba(0,0,0,.06) 68px
+          128deg,                    /* tilt so they read as vertical-ish */
+          rgba(255,255,255,0.015) 0px,
+          rgba(255,255,255,0.015) 1px, /* 1px light line */
+          rgba(0,0,0,0.00)        1px,
+          rgba(0,0,0,0.00)        13px /* 12px gap */
         );
-      --band-tint:
-        linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,0));
-      --hover-sheen:
-        radial-gradient(120% 120% at 0% 0%, rgba(0,255,194,.10) 0%, rgba(0,255,194,0) 60%);
+      /* gentle dark→light sweep from top-left */
+      --sweep: linear-gradient(25deg, rgba(0,0,0,.10) 0%, rgba(0,0,0,0) 45%);
+      /* microscopic hover ring */
+      --hover-ring: 0 0 0 1px rgba(89,217,179,.14);
     }
 
     :root:not([data-theme="dark"]) .va-scope{
       --panel: #ffffff; --panel-alt: #ffffff;
       --input-bg: #ffffff; --input-border: rgba(0,0,0,.06);
-      --input-shadow: inset 0 1px 0 rgba(255,255,255,.8), 0 8px 18px rgba(0,0,0,.12);
+      --input-shadow: inset 0 1px 0 rgba(255,255,255,.8), 0 8px 16px rgba(0,0,0,.10);
       --menu-bg: #ffffff; --menu-border: rgba(0,0,0,.10);
-      --menu-shadow: 0 40px 110px rgba(0,0,0,.22), 0 0 0 1px rgba(0,0,0,.05);
+      --menu-shadow: 0 40px 110px rgba(0,0,0,.20), 0 0 0 1px rgba(0,0,0,.05);
       --text: #0f1213; --text-muted: rgba(15,18,19,.62);
       --bg: #f6f7f8;
-      --card-shadow: 0 14px 24px rgba(0,0,0,.10);
+      --card-shadow: 0 10px 16px rgba(0,0,0,.10);
       --card-border: rgba(0,0,0,.06);
+
       --bands:
         repeating-linear-gradient(
-          25deg,
-          rgba(0,0,0,.035) 0px,
-          rgba(0,0,0,.035) 34px,
-          rgba(0,0,0,.06) 34px,
-          rgba(0,0,0,.06) 68px
+          128deg,
+          rgba(0,0,0,0.018) 0px,
+          rgba(0,0,0,0.018) 1px,
+          rgba(0,0,0,0.00)  1px,
+          rgba(0,0,0,0.00)  14px
         );
-      --band-tint:
-        linear-gradient(180deg, rgba(0,0,0,.035), rgba(0,0,0,0));
-      --hover-sheen:
-        radial-gradient(120% 120% at 0% 0%, rgba(0,255,194,.08) 0%, rgba(0,255,194,0) 60%);
+      --sweep: linear-gradient(25deg, rgba(0,0,0,.06) 0%, rgba(0,0,0,0) 45%);
     }
 
     .va-main{ overflow: visible; position: relative; contain: none; }
 
-    /* Card surface: dim, bands inside, almost no border. */
+    /* Card surface: bands + sweep, minimal border; hover gets a faint ring only */
     .va-card{
       position: relative;
       border: 1px solid var(--card-border);
+      border-radius: var(--radius-outer);
       background:
-        var(--hover-sheen),
         var(--bands),
         linear-gradient(180deg, var(--panel-alt), var(--panel));
-      background-blend-mode: screen, normal, normal;
-      border-radius: var(--radius-outer);
       box-shadow: var(--card-shadow);
       overflow: hidden;
     }
-    .va-card:hover{
-      border-color: rgba(89,217,179,.16);
-    }
-    .va-card::after{
-      /* gentle top-left dark → light sweep to make it pop */
+    .va-card::before{
       content:'';
-      position:absolute; inset:0;
-      pointer-events:none;
-      background:
-        linear-gradient(25deg, rgba(0,0,0,.16) 0%, rgba(0,0,0,0) 45%),
-        var(--band-tint);
+      position:absolute; inset:0; pointer-events:none;
+      background: var(--sweep);
       mix-blend-mode: soft-light;
     }
+    .va-card:hover{ box-shadow: var(--card-shadow), var(--hover-ring); }
 
     /* Dropdown portal */
     .va-portal{
       background: var(--menu-bg);
       border: 1px solid var(--menu-border);
       box-shadow: var(--menu-shadow);
-      border-radius: 14px;
+      border-radius: 12px;
     }
 
-    /* Overlay glass */
-    .va-overlay{
-      background: rgba(0,0,0,.55);
-      backdrop-filter: blur(2px);
-    }
+    /* Overlay */
+    .va-overlay{ background: rgba(0,0,0,.55); backdrop-filter: blur(2px); }
     .va-sheet{
-      background:
-        radial-gradient(140% 160% at 0% 0%, rgba(0,255,194,.08) 0%, transparent 60%),
-        linear-gradient(180deg, var(--menu-bg), var(--menu-bg));
+      background: linear-gradient(180deg, var(--menu-bg), var(--menu-bg));
       border: 1px solid var(--menu-border);
       box-shadow: 0 28px 80px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.35) inset;
-      border-radius: 16px;
+      border-radius: 12px;
     }
   `}</style>
 );
@@ -377,7 +362,7 @@ function StyledSelect({
         ref={btnRef}
         type="button"
         onClick={() => { setOpen(v=>!v); setTimeout(()=>searchRef.current?.focus(),0); }}
-        className="w-full flex items-center justify-between gap-3 px-3 py-3 rounded-[14px] text-sm outline-none transition"
+        className="w-full flex items-center justify-between gap-3 px-3 py-3 rounded-[12px] text-sm outline-none transition"
         style={{
           background:'var(--input-bg)',
           border:'1px solid var(--input-border)',
@@ -405,7 +390,7 @@ function StyledSelect({
               }}
             >
               <div
-                className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[12px]"
+                className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[10px]"
                 style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)' }}
               >
                 <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
@@ -425,9 +410,9 @@ function StyledSelect({
                     key={o.value}
                     disabled={o.disabled}
                     onClick={()=>{ if (o.disabled) return; onChange(o.value); setOpen(false); }}
-                    className="w-full text-left text-sm px-3 py-2 rounded-[10px] transition flex items-center gap-2 disabled:opacity-60"
+                    className="w-full text-left text-sm px-3 py-2 rounded-[8px] transition flex items-center gap-2 disabled:opacity-60"
                     style={{ color:'var(--text)', background:'transparent', border:'1px solid transparent', cursor:o.disabled?'not-allowed':'pointer' }}
-                    onMouseEnter={(e)=>{ if (o.disabled) return; const el=e.currentTarget as HTMLButtonElement; el.style.background='rgba(0,255,194,0.10)'; el.style.border='1px solid rgba(0,255,194,0.35)'; }}
+                    onMouseEnter={(e)=>{ if (o.disabled) return; const el=e.currentTarget as HTMLButtonElement; el.style.background='rgba(0,255,194,0.08)'; el.style.border='1px solid rgba(0,255,194,0.28)'; }}
                     onMouseLeave={(e)=>{ const el=e.currentTarget as HTMLButtonElement; el.style.background='transparent'; el.style.border='1px solid transparent'; }}
                   >
                     {o.disabled ? <Lock className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" style={{ opacity: o.value===value ? 1 : 0 }} />}
@@ -447,7 +432,7 @@ function StyledSelect({
   );
 }
 
-/* ───────────────── Reusable overlay (matches last screenshot) ───────────────── */
+/* ───────────────── Reusable overlay ───────────────── */
 function ActionOverlay({
   title, children, onClose, primaryText = 'Confirm', onPrimary
 }:{
@@ -474,7 +459,7 @@ function ActionOverlay({
           <button
             onClick={onPrimary}
             className="h-9 px-4 rounded-[10px] font-semibold"
-            style={{ background:CTA, color:'#0a0f0d', boxShadow:'0 14px 32px rgba(89,217,179,.26)' }}
+            style={{ background:CTA, color:'#0a0f0d', boxShadow:'0 12px 26px rgba(89,217,179,.22)' }}
             onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA_HOVER)}
             onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA)}
           >
@@ -487,7 +472,7 @@ function ActionOverlay({
   );
 }
 
-/* ───────────────── Section (title ABOVE, dim bands, tiny gaps) ───────────────── */
+/* ───────────────── Section (title ABOVE, subtle banded surface) ───────────────── */
 function Section({
   title, icon, desc, children, defaultOpen = true
 }:{
@@ -502,7 +487,7 @@ function Section({
   useLayoutEffect(() => { measure(); }, [children, open]);
 
   return (
-    <div className="mb-[16px]">
+    <div className="mb-[14px]">
       <div className="mb-[6px] text-sm font-medium" style={{ color:'var(--text-muted)' }}>
         {title}
       </div>
@@ -514,7 +499,8 @@ function Section({
           className="w-full text-left px-4 sm:px-5"
           style={{
             color:'var(--text)', minHeight:'var(--header-h)',
-            display:'grid', gridTemplateColumns:'1fr auto', alignItems:'center', gap:'12px'
+            display:'grid', gridTemplateColumns:'1fr auto', alignItems:'center', gap:'12px',
+            background:'linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,0))' /* lighter header */
           }}
         >
           <span className="min-w-0 flex items-center gap-3">
@@ -677,9 +663,9 @@ export default function VoiceAgentSection() {
               onClick={doCallTest}
               disabled={calling}
               className="inline-flex items-center gap-2 rounded-[10px] font-semibold select-none disabled:opacity-60"
-              style={{ height:'var(--control-h)', padding:'0 18px', background:CTA, color:'#0a0f0d', boxShadow:'0 10px 26px rgba(89,217,179,.22)' }}
+              style={{ height:'var(--control-h)', padding:'0 18px', background:CTA, color:'#0a0f0d', boxShadow:'0 10px 22px rgba(89,217,179,.20)' }}
               onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA_HOVER)}
-              onMouseLeave={(e)=>((e.currentTarget as HTMLButtonButtonElement).style.background = CTA)}
+              onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA)}
             >
               <Phone className="w-4 h-4" /> {calling ? 'Calling…' : 'Talk to Assistant'}
             </button>
@@ -692,8 +678,8 @@ export default function VoiceAgentSection() {
             </div>
           ) : null}
 
-          {/* KPIs (dim, bands inside) */}
-          <div className="grid gap-[14px] md:grid-cols-2 mb-[16px]">
+          {/* KPIs */}
+          <div className="grid gap-[12px] md:grid-cols-2 mb-[14px]">
             <div className="va-card p-[var(--s-4)]">
               <div className="text-xs mb-[6px]" style={{ color:'var(--text-muted)' }}>Cost</div>
               <div className="font-semibold" style={{ fontSize:'var(--fz-sub)', color:'var(--text)' }}>~$0.1/min</div>
@@ -711,7 +697,7 @@ export default function VoiceAgentSection() {
             desc="Configure the assistant’s reasoning model and first message."
             defaultOpen={true}
           >
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-[14px]">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px]">
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]" style={{ color:'var(--text)' }}>Provider</div>
                 <StyledSelect value={data.provider} onChange={(v)=>set('provider')(v as AgentData['provider'])} options={providerOpts}/>
@@ -723,7 +709,7 @@ export default function VoiceAgentSection() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-[14px] mt-[var(--s-4)]">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt-[var(--s-4)]">
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]" style={{ color:'var(--text)' }}>First Message Mode</div>
                 <StyledSelect value={data.firstMode} onChange={set('firstMode')} options={firstMessageModes}/>
@@ -766,7 +752,7 @@ export default function VoiceAgentSection() {
             defaultOpen={true}
           >
             {/* OpenAI key import (scoped storage) */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-[14px]">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px]">
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px] flex items-center gap-2" style={{ color:'var(--text)' }}>
                   <KeyRound className="w-4 h-4 opacity-80" /> OpenAI API Key
@@ -798,7 +784,7 @@ export default function VoiceAgentSection() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-[14px] mt-[var(--s-4)]">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt-[var(--s-4)]">
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]" style={{ color:'var(--text)' }}>Voice</div>
                 <StyledSelect
@@ -821,7 +807,7 @@ export default function VoiceAgentSection() {
             desc="Speech-to-text configuration for calls."
             defaultOpen={true}
           >
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-[14px]">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px]">
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]" style={{ color:'var(--text)' }}>Provider</div>
                 <StyledSelect value={data.asrProvider} onChange={(v)=>set('asrProvider')(v as AgentData['asrProvider'])} options={asrProviders}/>
@@ -841,7 +827,7 @@ export default function VoiceAgentSection() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-[14px] mt-[var(--s-4)]">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt-[var(--s-4)]">
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]" style={{ color:'var(--text)' }}>Dialect</div>
                 <StyledSelect value={data.asrDialect} onChange={(v)=>set('asrDialect')(v as AgentData['asrDialect'])} options={dialectOpts}/>
@@ -886,7 +872,7 @@ export default function VoiceAgentSection() {
           <textarea
             defaultValue={DEFAULT_AGENT.systemPrompt}
             onBlur={(e)=>set('systemPrompt')(e.currentTarget.value)}
-            className="w-full bg-transparent outline-none rounded-[12px] px-3 py-2"
+            className="w-full bg-transparent outline-none rounded-[10px] px-3 py-2"
             style={{ minHeight: 260, background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)' }}
           />
           <div className="mt-2 text-xs" style={{ color:'var(--text-muted)' }}>
