@@ -29,17 +29,17 @@
   --brand-weak: rgba(0,255,194,.28);
 
   /* NEW: Support accent (PURPLE) for selective use */
-  --brand-alt: #6b62ff;              /* main plum */
-  --brand-alt-weak: rgba(107,98,255,.28); /* faint plum glow */
+  --brand-alt: #6b62ff;
+  --brand-alt-weak: rgba(107,98,255,.28);
 
   /* Text */
   --text: #0b0c10;
   --text-muted: rgba(11,12,16,.65);
 
   /* Surfaces */
-  --bg: #f6f8f9;          /* page */
-  --panel: #ffffff;       /* big panels / shells */
-  --card: #ffffff;        /* cards */
+  --bg: #f6f8f9;
+  --panel: #ffffff;
+  --card: #ffffff;
   --border: rgba(11,12,16,.10);
   --ring: rgba(0,0,0,.06);
 
@@ -134,7 +134,7 @@ a { color: inherit; text-decoration: none; }
   background: var(--sidebar-bg);
   color: var(--sidebar-text);
   border-right: 1px solid var(--sidebar-border);
-  box-shadow: inset 0 0 18px rgba(0,0,0,0.28); /* subtle edge separator for dark + light */
+  box-shadow: inset 0 0 18px rgba(0,0,0,0.28);
 }
 .sidebar .muted { color: var(--sidebar-muted); }
 
@@ -189,7 +189,7 @@ a { color: inherit; text-decoration: none; }
 .backdrop { background: rgba(0,0,0,.55); }
 
 /* =====================================================
-   BUILDER / COLLECTIONS LOOK (matches Phone Numbers / API Keys)
+   BUILDER / COLLECTIONS LOOK
    ===================================================== */
 .section-bar {
   position: relative;
@@ -199,7 +199,7 @@ a { color: inherit; text-decoration: none; }
   background: var(--panel);
   color: var(--text);
   border-bottom: 1px solid var(--border);
-  box-shadow: 0 12px 24px rgba(0,0,0,.04); /* light pop in light mode */
+  box-shadow: 0 12px 24px rgba(0,0,0,.04);
   border-top-left-radius: 16px; border-top-right-radius: 16px;
 }
 .section-pill {
@@ -210,10 +210,7 @@ a { color: inherit; text-decoration: none; }
   box-shadow: var(--shadow-card);
   font-size: 13px; font-weight: 600;
 }
-.section-body {
-  /* cards sit directly on page; no big white panel wrapper */
-  padding: 18px 18px 28px 18px;
-}
+.section-body { padding: 18px 18px 28px 18px; }
 .builder-input {
   background: var(--card);
   color: var(--text);
@@ -241,12 +238,10 @@ a { color: inherit; text-decoration: none; }
 }
 
 /* =====================================================
-   ELEVATION & GLOW HELPERS (non-destructive)
+   ELEVATION & GLOW HELPERS
    ===================================================== */
 :root {
-  /* stronger but tasteful depth */
   --shadow-strong: 0 28px 70px rgba(0,0,0,.12), 0 10px 26px rgba(0,0,0,.08), 0 0 0 1px rgba(0,0,0,.02);
-  /* faint neon ring that won’t shift surface colors */
   --ring-brand-soft: rgba(0,255,194,.10);
   --ring-brand-line: rgba(0,255,194,.06);
 }
@@ -297,106 +292,88 @@ a { color: inherit; text-decoration: none; }
 }
 
 /* =====================================================
-   VOICE STUDIO HELPERS (layout + match API Keys roundness)
+   VOICE STUDIO HELPERS
    ===================================================== */
 .voice-studio { --page-x-pad: 1rem; }
-@media (min-width:640px){ .voice-studio{ --page-x-pad: 1.5rem; } }  /* sm */
-@media (min-width:1024px){ .voice-studio{ --page-x-pad: 2rem; } }   /* lg */
+@media (min-width:640px){ .voice-studio{ --page-x-pad: 1.5rem; } }
+@media (min-width:1024px){ .voice-studio{ --page-x-pad: 2rem; } }
 
-/* Pull the assistant list column left so it touches the main app sidebar.
-   Uses --app-sidebar-w if your app sets it; falls back to 248px. */
 .voice-studio .flush-left {
   margin-left: calc((var(--page-x-pad) + var(--app-sidebar-w, 248px)) * -1);
   padding-left: var(--app-sidebar-w, 248px);
 }
-
-/* Keep the editor column aligned with the inner gutter */
 .voice-studio .editor-gutter { padding-left: var(--page-x-pad); }
-
-/* Round buttons to match API Keys page look */
 .btn-round { border-radius: 18px !important; }
 
 /* =====================================================
    DUAL-ACCENT HELPERS (opt-in purple)
    ===================================================== */
-
-/* Use purple for primary buttons/halo within a scoped container */
 .use-plum .btn-brand { background: var(--brand-alt); color: #0b0c10; }
 .use-plum .btn-brand.halo {
   box-shadow: 0 0 0 1px rgba(107,98,255,.20), 0 16px 36px rgba(0,0,0,.45);
 }
-
-/* Purple ring on focus states (e.g., inputs inside .use-plum) */
 .use-plum .ring-brand {
   box-shadow: 0 0 0 1px rgba(107,98,255,.20), 0 0 0 4px rgba(107,98,255,.35) !important;
 }
-
-/* Subtle gradient chip/badges using both accents */
 .accent-gradient {
   background-image: linear-gradient(135deg, var(--brand) 0%, var(--brand-alt) 100%);
 }
 
 /* =====================================================
-   WIDE CENTER-DARK BANDS (Voice Agent sections)
-   Each band is wide; center is slightly darker, edges lighter.
-   Subtle alphas so it reads like soft shadow, not stripes.
+   WIDE CENTER-DARK GREEN LINES (UNDER CONTENT)
    ===================================================== */
-
-.va-bands {
-  /* width of one full band “tile” */
-  --va-band-w: 320px;        /* adjust to 360/400 if you want even wider */
-  --va-band-clear: rgba(0,0,0,0);
-  --va-band-light: rgba(0,0,0,0.025);   /* edges */
-  --va-band-mid:   rgba(0,0,0,0.085);   /* center darkness */
-
-  /* vertical-ish, slight tilt */
-  background-image: repeating-linear-gradient(
-    118deg,
-    var(--va-band-clear) 0,
-    var(--va-band-light) calc(var(--va-band-w) * 0.25),
-    var(--va-band-mid)   calc(var(--va-band-w) * 0.50), /* darkest middle */
-    var(--va-band-light) calc(var(--va-band-w) * 0.75),
-    var(--va-band-clear) var(--va-band-w)
-  );
-  background-repeat: repeat;
-  background-size: auto; /* repeating-linear-gradient handles tiling */
+/* Usage: add class "va-surface" to any card/section that should get the look. */
+.va-surface{
+  position: relative;
+  overflow: hidden;
+  /* tune these to taste */
+  --va-line: 34px;                 /* width of a single green line */
+  --va-gap: 18px;                  /* gap between lines */
+  --va-dark: rgba(0,255,194,.22);  /* line color at center (darker) */
+  --va-light: rgba(0,255,194,.09); /* line color near edges (lighter) */
+  --va-center-a: .52;              /* how dark the middle gets (0–1) */
+  --va-edge-a: .14;                /* how dark the edges are (0–1) */
 }
 
-/* Dark mode: tiny bit stronger so it shows as a shadow, not a stripe */
-[data-theme="dark"] .va-bands {
-  --va-band-light: rgba(0,0,0,0.035);
-  --va-band-mid:   rgba(0,0,0,0.11);
-}
+/* Draw the stripes and the center-dark falloff UNDER children */
+.va-surface::after{
+  content:"";
+  position:absolute; inset:0;
+  z-index:0; pointer-events:none;
 
-/* Optional: extra-wide bands for hero sections */
-.va-bands-xl { --va-band-w: 380px; }
-
-/* Slightly stronger ink in dark without becoming visible */
-[data-theme="dark"] .banded-surface {
-  background:
+  /* Layer 1: repeating vertical green lines (uniform) */
+  background-image:
     repeating-linear-gradient(
-      128deg,
-      rgba(255,255,255,0.018) 0px,
-      rgba(255,255,255,0.018) 1px,
-      rgba(0,0,0,0.00)        1px,
-      rgba(0,0,0,0.00)        14px
+      90deg,
+      var(--va-dark) 0px,
+      var(--va-dark) var(--va-line),
+      transparent   var(--va-line),
+      transparent   calc(var(--va-line) + var(--va-gap))
     ),
-    var(--card);
+
+  /* Layer 2: center-dark -> edge-light mask that tints the whole surface.
+     This makes every stripe darkest in the middle and lighter toward sides. */
+    linear-gradient(
+      90deg,
+      rgba(0,0,0,var(--va-edge-a))   0%,
+      rgba(0,0,0,var(--va-center-a)) 50%,
+      rgba(0,0,0,var(--va-edge-a))   100%
+    );
+  background-blend-mode: normal, multiply;  /* apply the mask over the stripes */
 }
 
-/* Gentle dark→light sweep from top-left (no heavy drop shadow) */
-.banded-surface::before {
-  content: "";
-  position: absolute; inset: 0; pointer-events: none;
-  background: linear-gradient(25deg, rgba(0,0,0,.10) 0%, rgba(0,0,0,0) 45%);
-  mix-blend-mode: soft-light;
-}
+/* Children above the stripes */
+.va-surface > * { position: relative; z-index: 1; }
 
-/* Microscopic hover ring to make it “pop” without visible borders at rest */
-.banded-surface:hover {
-  box-shadow:
-    var(--shadow-card),
-    0 0 0 1px rgba(0,255,194,.14);
+/* Wider variant if you want chunkier lines */
+.va-surface--xl{ --va-line: 44px; --va-gap: 24px; }
+
+/* Slightly stronger in dark so it still reads as shadow, not loud stripes */
+[data-theme="dark"] .va-surface{
+  --va-dark: rgba(0,255,194,.24);
+  --va-light: rgba(0,255,194,.11);
+  --va-center-a: .60;
+  --va-edge-a: .18;
 }
 
 /* Utility if you need even less rounding on some elements */
