@@ -1,27 +1,13 @@
+// components/voice/VoiceAgentSection.tsx
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
-import dynamic from 'next/dynamic';
+import AssistantRail from '@/components/voice/AssistantRail'; // ← fixed rail (no dynamic)
 import { createPortal } from 'react-dom';
 import {
   Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Rocket, Search, Check, Lock, X, KeyRound, Play, Square
 } from 'lucide-react';
 import { scopedStorage } from '@/utils/scoped-storage';
-
-/* ───────────────── Dynamic rail ───────────────── */
-const AssistantRail = dynamic(
-  () =>
-    import('@/components/voice/AssistantRail')
-      .then(m => m.default ?? m)
-      .catch(() => () => <div className="px-3 py-3 text-xs opacity-70">Rail unavailable</div>),
-  { ssr: false, loading: () => <div className="px-3 py-3 text-xs opacity-70">Loading…</div> }
-);
-
-class RailBoundary extends React.Component<{children:React.ReactNode},{hasError:boolean}> {
-  constructor(p:any){ super(p); this.state={hasError:false}; }
-  static getDerivedStateFromError(){ return {hasError:true}; }
-  render(){ return this.state.hasError ? <div className="px-3 py-3 text-xs opacity-70">Rail crashed</div> : this.props.children; }
-}
 
 /* ───────────────── Tokens / constants ───────────────── */
 const CTA       = '#59d9b3';
@@ -48,17 +34,18 @@ const Tokens = () => (
       --fz-title: 18px; --fz-sub: 15px; --fz-body: 14px; --fz-label: 12.5px;
       --lh-body: 1.45; --ease: cubic-bezier(.22,.61,.36,1);
 
+      /* Use SOLID theme surfaces (no transparency) */
       --page-bg: var(--bg);
-      --text: var(--text, #fff);
-      --text-muted: var(--text-muted, rgba(255,255,255,.72));
+      --panel-bg: var(--panel);
+      --text: var(--text);
+      --text-muted: var(--text-muted);
 
-      --input-bg: color-mix(in oklab, var(--page-bg) 94%, black 6%);
+      --input-bg: var(--panel-bg);
       --input-border: rgba(255,255,255,.10);
-      --input-shadow: inset 0 1px 0 rgba(255,255,255,.03), 0 8px 18px rgba(0,0,0,.35);
-      --border-weak: rgba(255,255,255,.10);
+      --input-shadow: 0 0 0 1px rgba(255,255,255,.06) inset;
 
-      --card-shadow: 0 22px 44px rgba(0,0,0,.30), 0 0 0 1px rgba(255,255,255,.06) inset, 0 8px 28px rgba(89,217,179,.10);
-      --green-ring: 0 0 0 1px rgba(89,217,179,.24);
+      --border-weak: rgba(255,255,255,.10);
+      --card-shadow: 0 22px 44px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px rgba(89,217,179,.20);
     }
 
     .va-main{ overflow: visible; position: relative; contain: none; }
@@ -67,7 +54,7 @@ const Tokens = () => (
       position: relative;
       border-radius: var(--radius-outer);
       border: 1px solid var(--border-weak);
-      background: var(--page-bg);
+      background: var(--panel-bg);         /* SOLID */
       box-shadow: var(--card-shadow);
       overflow: hidden;
       isolation: isolate;
@@ -77,73 +64,65 @@ const Tokens = () => (
       min-height: var(--header-h);
       display: grid; grid-template-columns: 1fr auto; align-items: center;
       padding: 0 16px;
-      background:
-        linear-gradient(
-          90deg,
-          color-mix(in oklab, var(--page-bg) 100%, transparent) 0%,
-          color-mix(in oklab, var(--page-bg) 98%, white 2%) 50%,
-          color-mix(in oklab, var(--page-bg) 100%, transparent) 100%
-        );
+      /* header: same dark color with a very soft center band */
+      background: linear-gradient(90deg,
+        var(--panel-bg) 0%,
+        color-mix(in oklab, var(--panel-bg) 98%, white 2%) 50%,
+        var(--panel-bg) 100%);
       border-bottom: 1px solid rgba(255,255,255,.08);
       color: var(--text);
     }
 
-    /* fixed rail */
+    /* FIXED Assistant rail */
     .va-left-fixed{
-      position: fixed; inset: 0 auto 0 0; width: 260px; z-index: 10;
+      position: fixed; inset: 0 auto 0 0; width: 260px; z-index: 12;
+      background: var(--panel-bg);               /* SOLID */
       border-right: 1px solid rgba(255,255,255,.06);
-      background: var(--page-bg);
-      overflow: hidden;
+      box-shadow: 14px 0 28px rgba(0,0,0,.08);
+      display: flex; flex-direction: column;
     }
-    .va-left-fixed .rail-scroll{ position: absolute; inset: 0; overflow: auto; }
+    .va-left-fixed .rail-scroll{ overflow:auto; flex:1; }
 
-    /* drawer: page stays visible; backdrop just blurs */
+    /* Dropdown menu is SOLID */
+    .va-menu{
+      background: var(--panel-bg);               /* SOLID */
+      border: 1px solid rgba(255,255,255,.12);
+      box-shadow: 0 36px 90px rgba(0,0,0,.55);
+      border-radius: 10px;
+    }
+
+    /* Blur overlay: no dark scrim; drawer is solid */
     .va-blur-overlay{
-      position: fixed; inset: 0; z-index: 99996;
-      background: rgba(0,0,0,0); backdrop-filter: blur(3px);
+      position: fixed; inset: 0; z-index: 9996;
+      background: transparent;                   /* not dark */
+      backdrop-filter: blur(3px);
       opacity: 0; pointer-events: none; transition: opacity 200ms var(--ease);
     }
     .va-blur-overlay.open{ opacity: 1; pointer-events: auto; }
 
     .va-call-drawer{
-      position: fixed; inset: 0 0 0 auto; width: min(540px, 92vw); z-index: 99997;
+      position: fixed; inset: 0 0 0 auto; width: min(540px, 92vw); z-index: 9997;
       display: grid; grid-template-rows: auto 1fr auto;
-      background: color-mix(in oklab, var(--page-bg) 86%, black 14%);
+      background: var(--panel-bg);               /* SOLID */
       border-left: 1px solid rgba(255,255,255,.10);
       box-shadow: -28px 0 80px rgba(0,0,0,.55);
-      transform: translateX(100%);
-      transition: transform 280ms var(--ease);
+      transform: translateX(100%); transition: transform 280ms var(--ease);
     }
     .va-call-drawer.open{ transform: translateX(0); }
 
-    .chat-msg{ max-width: 85%; padding: 10px 12px; border-radius: 12px; }
-    .chat-user{
-      background: color-mix(in oklab, var(--page-bg) 86%, white 14%);
-      border: 1px solid rgba(255,255,255,.10);
-      align-self: flex-end;
-    }
-    .chat-ai{
-      background: color-mix(in oklab, var(--page-bg) 80%, black 20%);
-      border: 1px solid rgba(255,255,255,.10);
-      align-self: flex-start;
-    }
+    /* Generate overlay (modal) */
+    .va-modal-wrap{ position: fixed; inset: 0; z-index: 9994; }
+    .va-modal-blur{ position:absolute; inset:0; backdrop-filter: blur(4px); }
+    .va-modal-center{ position:absolute; inset:0; display:grid; place-items:center; padding: 20px; }
+    .va-sheet{ background: var(--panel-bg); border: 1px solid rgba(255,255,255,.12); box-shadow: 0 28px 80px rgba(0,0,0,.70); border-radius: 12px; }
 
-    .type-caret{ display:inline-block; width: 6px; height: 1em; background: currentColor; margin-left: 3px; animation: blink 1s step-end infinite; vertical-align: bottom; }
-    @keyframes blink { 50% { opacity: 0; } }
+    /* Chat bubbles */
+    .chat-msg{ max-width: 85%; padding: 10px 12px; border-radius: 12px; }
+    .chat-user{ background: var(--panel-bg); border: 1px solid rgba(255,255,255,.12); align-self: flex-end; }
+    .chat-ai{   background: color-mix(in oklab, var(--panel-bg) 92%, black 8%); border: 1px solid rgba(255,255,255,.12); align-self: flex-start; }
 
     .diff-add{ color: #00ffc2; }
     .diff-del{ color: #ff5050; text-decoration: line-through; }
-
-    /* solid overlay with blur behind (not dark) */
-    .va-modal-wrap{ position: fixed; inset: 0; z-index: 99994; }
-    .va-modal-blur{ position:absolute; inset:0; backdrop-filter: blur(4px); }
-    .va-modal-center{ position:absolute; inset:0; display:grid; place-items:center; padding: 20px; }
-    .va-sheet{
-      background: color-mix(in oklab, var(--page-bg) 90%, black 10%);
-      border: 1px solid rgba(255,255,255,.12);
-      box-shadow: 0 28px 80px rgba(0,0,0,.70);
-      border-radius: 12px;
-    }
   `}</style>
 );
 
@@ -287,6 +266,7 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
+/* Solid select */
 function StyledSelect({
   value, onChange, options, placeholder, leftIcon
 }:{
@@ -350,9 +330,8 @@ function StyledSelect({
         ? createPortal(
             <div
               ref={portalRef}
-              className="fixed z-[99999] p-3 va-sheet"
+              className="va-menu fixed z-[9999] p-3"
               style={{
-                position: 'fixed',
                 top: rect.openUp ? rect.top - 8 : rect.top + 8,
                 left: rect.left,
                 width: rect.width,
@@ -445,10 +424,16 @@ function Section({
           </span>
         </button>
 
-        {/* body */}
+        {/* body – smoother expand */}
         <div
           ref={wrapRef}
-          style={{ height: open ? h : 0, transition: 'height 200ms var(--ease)', overflow:'hidden' }}
+          style={{
+            height: open ? h : 0,
+            opacity: open ? 1 : 0,
+            transform: open ? 'translateY(0)' : 'translateY(-4px)',
+            transition: 'height 240ms var(--ease), opacity 220ms var(--ease), transform 240ms var(--ease)',
+            overflow:'hidden'
+          }}
           onTransitionEnd={() => { if (open) measure(); }}
         >
           <div ref={innerRef} className="p-[var(--s-5)]">
@@ -487,9 +472,16 @@ export default function VoiceAgentSection() {
   const [pendingPrompt, setPendingPrompt] = useState<string>('');
   const [showDiff, setShowDiff] = useState(false);
 
-  // voice preview
+  // voice list for preview
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [playing, setPlaying] = useState(false);
   const utterRef = useRef<SpeechSynthesisUtterance|null>(null);
+  useEffect(() => {
+    const load = () => setVoices(window.speechSynthesis.getVoices());
+    load();
+    (window.speechSynthesis as any).onvoiceschanged = load;
+    return () => { (window.speechSynthesis as any).onvoiceschanged = null; };
+  }, []);
 
   useEffect(() => {
     const handler = (e: Event) => setActiveId((e as CustomEvent<string>).detail);
@@ -505,7 +497,7 @@ export default function VoiceAgentSection() {
 
   useEffect(() => { if (activeId) saveAgentData(activeId, data); }, [activeId, data]);
 
-  // bootstrap keys (fixed variable names)
+  // bootstrap keys (no duplicate "ss")
   useEffect(() => {
     (async () => {
       try {
@@ -641,10 +633,10 @@ ${lines.map(l => `- ${l}`).join('\n')}
       return;
     }
     const u = new SpeechSynthesisUtterance(`Hi, I'm ${data.name}. This is a short preview of my voice.`);
-    const voices = window.speechSynthesis.getVoices();
-    const guess = voices.find(v => v.lang.startsWith('en') && new RegExp(data.voiceName.split(' ')[0], 'i').test(v.name)) ||
-                  voices.find(v => v.lang.startsWith('en'));
-    if (guess) u.voice = guess;
+    // best effort match: by voiceName, else any English voice
+    const vByName = voices.find(v => v.name.toLowerCase().includes(data.voiceName.split(' ')[0].toLowerCase()));
+    const vEn = voices.find(v => v.lang?.toLowerCase().startsWith('en'));
+    if (vByName) u.voice = vByName; else if (vEn) u.voice = vEn;
     utterRef.current = u;
     u.onend = () => setPlaying(false);
     setPlaying(true);
@@ -656,11 +648,11 @@ ${lines.map(l => `- ${l}`).join('\n')}
       <Tokens />
 
       {/* FIXED ASSISTANT SIDEBAR */}
-      <div className="va-left-fixed">
+      <aside className="va-left-fixed">
         <div className="rail-scroll">
-          <RailBoundary><AssistantRail /></RailBoundary>
+          <AssistantRail />
         </div>
-      </div>
+      </aside>
 
       {/* RIGHT CONTENT */}
       <div style={{ marginLeft: 260 }}>
@@ -795,7 +787,7 @@ ${lines.map(l => `- ${l}`).join('\n')}
                   {showDiff && (
                     <div
                       className="absolute inset-0 rounded-[12px] px-3 py-[12px] overflow-auto"
-                      style={{ background:'color-mix(in oklab, var(--bg) 94%, black 6%)', border:'1px solid rgba(255,255,255,.12)', boxShadow:'var(--input-shadow)', color:'var(--text)' }}
+                      style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.12)', boxShadow:'var(--input-shadow)', color:'var(--text)' }}
                     >
                       <div dangerouslySetInnerHTML={{ __html: diffHTML(basePromptRef.current, pendingPrompt) }} />
                       <div className="mt-3 flex gap-2">
@@ -849,39 +841,31 @@ ${lines.map(l => `- ${l}`).join('\n')}
                 </div>
               </div>
 
-              <div>
-                <div className="mb-[var(--s-2)] text-[12.5px]">Voice Provider</div>
-                <StyledSelect
-                  value={data.ttsProvider}
-                  onChange={(v)=>setField('ttsProvider')(v as AgentData['ttsProvider'])}
-                  options={ttsProviders}
-                />
-              </div>
-            </div>
+              {/* Voice + player */}
+              <div className="grid grid-cols-[1fr_auto] gap-[8px] items-end">
+                <div>
+                  <div className="mb-[var(--s-2)] text-[12.5px]">Voice</div>
+                  <StyledSelect
+                    value={data.voiceName}
+                    onChange={setField('voiceName')}
+                    options={openAiVoices}
+                    placeholder="— Choose —"
+                  />
+                </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-[1fr,auto] gap-[12px] mt-[var(--s-4)] items-center">
-              <div>
-                <div className="mb-[var(--s-2)] text-[12.5px]">Voice</div>
-                <StyledSelect
-                  value={data.voiceName}
-                  onChange={setField('voiceName')}
-                  options={openAiVoices}
-                  placeholder="— Choose —"
-                />
+                <button
+                  onClick={togglePreview}
+                  className="w-12 h-12 rounded-full grid place-items-center"
+                  aria-label="Preview voice"
+                  style={{
+                    background: playing ? 'color-mix(in oklab, var(--panel) 78%, black 22%)' : CTA,
+                    color: playing ? 'var(--text)' : '#0a0f0d',
+                    boxShadow: playing ? '0 0 0 1px rgba(89,217,179,.24)' : '0 10px 22px rgba(89,217,179,.20)'
+                  }}
+                >
+                  {playing ? <Square className="w-5 h-5" /> : <Play className="w-5 h-5" />}
+                </button>
               </div>
-
-              <button
-                onClick={togglePreview}
-                className="w-12 h-12 rounded-full grid place-items-center"
-                aria-label="Preview voice"
-                style={{
-                  background: playing ? 'color-mix(in oklab, var(--bg) 78%, black 22%)' : CTA,
-                  color: playing ? 'var(--text)' : '#0a0f0d',
-                  boxShadow: playing ? 'var(--green-ring)' : '0 10px 22px rgba(89,217,179,.20)'
-                }}
-              >
-                {playing ? <Square className="w-5 h-5" /> : <Play className="w-5 h-5" />}
-              </button>
             </div>
           </Section>
 
@@ -899,137 +883,4 @@ ${lines.map(l => `- ${l}`).join('\n')}
 
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]">Model</div>
-                <StyledSelect value={data.asrModel} onChange={setField('asrModel')} options={asrModelsFor(data.asrProvider)}/>
-              </div>
-            </div>
-
-            <div className="mt-[var(--s-4)] grid sm:grid-cols-2 gap-[12px]">
-              <div className="flex items-center justify-between p-3 rounded-[10px]"
-                   style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)' }}>
-                <span className="text-sm">Background Denoising Enabled</span>
-                <Toggle checked={data.denoise} onChange={setField('denoise')} />
-              </div>
-
-              <div className="flex items-center justify-between p-3 rounded-[10px]"
-                   style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)' }}>
-                <span className="text-sm">Use Numerals</span>
-                <Toggle checked={data.numerals} onChange={setField('numerals')} />
-              </div>
-            </div>
-          </Section>
-        </div>
-      </div>
-
-      {/* ---- Chat drawer + blur overlay ---- */}
-      {createPortal(
-        <>
-          <div className={`va-blur-overlay ${showCall ? 'open' : ''}`} onClick={()=>setShowCall(false)} />
-          <aside className={`va-call-drawer ${showCall ? 'open' : ''}`} aria-hidden={!showCall}>
-            <div
-              className="flex items-center justify-between px-4 h-[64px]"
-              style={{
-                background:
-                  'linear-gradient(90deg, color-mix(in oklab, var(--bg) 100%, transparent), color-mix(in oklab, var(--bg) 99%, white 1%) 40%, var(--bg))',
-                borderBottom:'1px solid rgba(255,255,255,.1)'
-              }}
-            >
-              <div className="font-semibold">Chat with {data.name || 'Assistant'}</div>
-              <button
-                onClick={()=>setShowCall(false)}
-                className="px-2 py-1 rounded"
-                aria-label="Close"
-                style={{ color:'var(--text)', border:'1px solid rgba(255,255,255,.12)', background:'color-mix(in oklab, var(--bg) 90%, black 10%)' }}
-              >
-                Close
-              </button>
-            </div>
-
-            <div className="p-4 overflow-y-auto flex flex-col gap-3">
-              {messages.map((m, i) => (
-                <div key={i} className="flex flex-col" style={{ alignItems: m.role==='user' ? 'flex-end' : 'flex-start' }}>
-                  <div className="text-[11px]" style={{ color:'var(--text-muted)' }}>
-                    {m.role==='user' ? 'You' : (data.name || 'Assistant')}
-                  </div>
-                  <div className={`chat-msg ${m.role==='user' ? 'chat-user' : 'chat-ai'}`} style={{ color:'var(--text)' }}>
-                    {m.text}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="p-3" style={{ borderTop:'1px solid rgba(255,255,255,.10)' }}>
-              <form
-                onSubmit={(e)=>{ e.preventDefault(); sendChat(); }}
-                className="flex items-center gap-2"
-              >
-                <input
-                  value={chatInput}
-                  onChange={(e)=>setChatInput(e.target.value)}
-                  placeholder={`Message ${data.name || 'Assistant'}…`}
-                  className="flex-1 rounded-md px-3 py-2 outline-none"
-                  style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                />
-                <button
-                  type="submit"
-                  className="h-10 px-4 rounded-md font-semibold"
-                  style={{ background:CTA, color:'#ffffff' }}
-                >
-                  Send
-                </button>
-              </form>
-            </div>
-          </aside>
-        </>,
-        document.body
-      )}
-
-      {/* ---- Generate overlay (solid, blur behind) ---- */}
-      {showGenerate && createPortal(
-        <div className="va-modal-wrap" role="dialog" aria-modal>
-          <div className="va-modal-blur" onClick={()=>{ if (genPhase==='idle') setShowGenerate(false); }} />
-          <div className="va-modal-center">
-            <div className="va-sheet w-full max-w-[760px] p-4 md:p-6">
-              <div className="flex items-center justify-between mb-3">
-                <div className="text-lg font-semibold" style={{ color:'var(--text)' }}>Compose Prompt</div>
-                <button onClick={()=>{ if (genPhase==='idle') setShowGenerate(false); }} className="p-1 rounded hover:opacity-80" aria-label="Close">
-                  <X className="w-5 h-5" style={{ color:'var(--text-muted)' }} />
-                </button>
-              </div>
-              <div className="grid gap-3">
-                <label className="text-xs" style={{ color:'var(--text-muted)' }}>
-                  Add extra instructions (persona, tone, rules, tools):
-                </label>
-                <textarea
-                  value={composerText}
-                  onChange={(e)=>setComposerText(e.target.value)}
-                  className="w-full bg-transparent outline-none rounded-[10px] px-3 py-2"
-                  placeholder="e.g., Friendly, crisp answers. Confirm account ID before actions."
-                  style={{ minHeight: 180, background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)' }}
-                />
-                <div className="flex items-center justify-end gap-2">
-                  <button
-                    onClick={()=>setShowGenerate(false)}
-                    disabled={genPhase==='loading'}
-                    className="h-9 px-3 rounded-[10px]"
-                    style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={startGenerate}
-                    disabled={genPhase==='loading'}
-                    className="h-9 px-4 rounded-[10px] font-semibold"
-                    style={{ background:CTA, color:'#ffffff', boxShadow:'0 12px 26px rgba(89,217,179,.22)' }}
-                  >
-                    {genPhase==='loading' ? 'Generating…' : 'Generate'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
-    </section>
-  );
-}
+                <Styled
