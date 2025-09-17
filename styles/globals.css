@@ -335,3 +335,58 @@ a { color: inherit; text-decoration: none; }
 .accent-gradient {
   background-image: linear-gradient(135deg, var(--brand) 0%, var(--brand-alt) 100%);
 }
+
+/* =====================================================
+   SUBTLE STRIPED DEPTH SURFACES + TIGHT RADIUS
+   (1px light, ~12–14px gap, ~0.02 alpha; invisible unless zoomed)
+   ===================================================== */
+
+/* Apply to any outer box for the BuildMyAgent-style “striped depth”. */
+.banded-surface {
+  position: relative;
+  border-radius: 8px; /* tighter outer corners */
+  background:
+    /* ultra-faint rotated bands (1px light, ~12px dark gap) */
+    repeating-linear-gradient(
+      128deg,
+      rgba(255,255,255,0.015) 0px,
+      rgba(255,255,255,0.015) 1px,
+      rgba(0,0,0,0.00)        1px,
+      rgba(0,0,0,0.00)        13px
+    ),
+    var(--card);
+  border: 1px solid var(--border);      /* “almost no” border, uses your token */
+  box-shadow: var(--shadow-card);       /* keep existing subtle shadow */
+  overflow: hidden;                     /* for the sweep overlay */
+}
+
+/* Slightly stronger ink in dark without becoming visible */
+[data-theme="dark"] .banded-surface {
+  background:
+    repeating-linear-gradient(
+      128deg,
+      rgba(255,255,255,0.018) 0px,
+      rgba(255,255,255,0.018) 1px,
+      rgba(0,0,0,0.00)        1px,
+      rgba(0,0,0,0.00)        14px
+    ),
+    var(--card);
+}
+
+/* Gentle dark→light sweep from top-left (no heavy drop shadow) */
+.banded-surface::before {
+  content: "";
+  position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(25deg, rgba(0,0,0,.10) 0%, rgba(0,0,0,0) 45%);
+  mix-blend-mode: soft-light;
+}
+
+/* Microscopic hover ring to make it “pop” without visible borders at rest */
+.banded-surface:hover {
+  box-shadow:
+    var(--shadow-card),
+    0 0 0 1px rgba(0,255,194,.14);
+}
+
+/* Utility if you need even less rounding on some elements */
+.rounded-tight { border-radius: 8px !important; }
