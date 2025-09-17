@@ -35,7 +35,7 @@ const Tokens = () => (
   <style jsx global>{`
     .va-scope{
       --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 20px; --s-6: 24px;
-      --radius-outer: 6px;        /* less rounded */
+      --radius-outer: 6px;      /* less rounded */
       --radius-inner: 10px;
       --control-h: 44px;
       --header-h: 88px;
@@ -44,7 +44,7 @@ const Tokens = () => (
 
       /* Base dark */
       --bg: #0b0e0f;
-      --panel: #0f1214;      /* page panels */
+      --panel: #0f1214;  /* page */
       --text: #eaf8f3;
       --text-muted: rgba(234,248,243,.66);
 
@@ -59,55 +59,69 @@ const Tokens = () => (
 
       --card-shadow: 0 18px 40px rgba(0,0,0,.28);
 
-      /* Boxes: one grade lighter than page panel */
-      --panel-lite: color-mix(in oklab, var(--panel) 92%, white 8%);
+      /* Boxes: ~3% lighter than panel */
+      --panel-lite: color-mix(in oklab, var(--panel) 97%, white 3%);
 
-      /* Single centered band settings */
-      --band-w: 22px; /* not very wide */
-      --band-ink: rgba(0,255,194,0.08); /* subtle green/darker */
-    }
+      /* Center band widths */
+      --band-core-w: 30%;  /* wide darkest center */
+      --band-mid-w:  12%;  /* mid step width (each side) */
+      --band-edge-w: 10%;  /* edge step width (each side) */
 
-    :root:not([data-theme="dark"]) .va-scope{
-      --bg: #f6f7f8;
-      /* keep dark style for the boxes; compute lite from a dark base for consistency */
-      --panel: #0f1214;
-      --text: #eaf8f3;
-      --text-muted: rgba(234,248,243,.66);
-      --border-weak: rgba(255,255,255,.08);
-      --input-bg: #111416;
-      --input-border: rgba(255,255,255,.12);
-      --input-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 10px 22px rgba(0,0,0,.28);
-      --menu-bg: #0f1214; --menu-border: rgba(255,255,255,.14); --menu-shadow: 0 36px 90px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.35);
-      --card-shadow: 0 18px 40px rgba(0,0,0,.28);
-      --panel-lite: color-mix(in oklab, var(--panel) 92%, white 8%);
+      /* Colors you provided */
+      --c-mid:  #223248;  /* mid step */
+      --c-core: #0D393F;  /* center darkest */
+      --c-edge: #3E8874;  /* outer edge lightest */
     }
 
     .va-main{ overflow: visible; position: relative; contain: none; }
 
-    /* Card with one centered vertical band under content */
+    /* Card with a centered band gradation under content */
     .va-card{
       position: relative;
       border-radius: var(--radius-outer);
       border: 1px solid var(--border-weak);
-      background-color: var(--panel-lite);   /* one grade lighter */
+      background-color: var(--panel-lite);   /* subtle lighter box */
       box-shadow: var(--card-shadow);
       overflow: hidden;
-      isolation: isolate; /* keep pseudo behind content clean */
+      isolation: isolate;
     }
     .va-card::before{
       content:'';
       position:absolute; inset:0; pointer-events:none; z-index:0; /* under content */
-      /* single band centered */
-      background-image:
+      /* Build from center out: darkest (#0D393F) -> mid (#223248) -> edge (#3E8874) -> transparent */
+      background:
         linear-gradient(
           to right,
-          transparent calc(50% - var(--band-w) / 2),
-          var(--band-ink) calc(50% - var(--band-w) / 2),
-          var(--band-ink) calc(50% + var(--band-w) / 2),
-          transparent calc(50% + var(--band-w) / 2)
+
+          /* Left transparent margin */
+          transparent 0%,
+          transparent calc(50% - (var(--band-core-w) / 2 + var(--band-mid-w) + var(--band-edge-w))),
+
+          /* Left edge (lightest) */
+          rgba(62,136,116,0.06) calc(50% - (var(--band-core-w) / 2 + var(--band-mid-w) + var(--band-edge-w))),
+          rgba(62,136,116,0.06) calc(50% - (var(--band-core-w) / 2 + var(--band-mid-w))),
+
+          /* Left mid */
+          rgba(34,50,72,0.10) calc(50% - (var(--band-core-w) / 2 + var(--band-mid-w))),
+          rgba(34,50,72,0.10) calc(50% - (var(--band-core-w) / 2)),
+
+          /* Core darkest */
+          #0D393F              calc(50% - (var(--band-core-w) / 2)),
+          #0D393F              calc(50% + (var(--band-core-w) / 2)),
+
+          /* Right mid */
+          rgba(34,50,72,0.10) calc(50% + (var(--band-core-w) / 2)),
+          rgba(34,50,72,0.10) calc(50% + (var(--band-core-w) / 2 + var(--band-mid-w))),
+
+          /* Right edge (lightest) */
+          rgba(62,136,116,0.06) calc(50% + (var(--band-core-w) / 2 + var(--band-mid-w))),
+          rgba(62,136,116,0.06) calc(50% + (var(--band-core-w) / 2 + var(--band-mid-w) + var(--band-edge-w))),
+
+          /* Right transparent margin */
+          transparent          calc(50% + (var(--band-core-w) / 2 + var(--band-mid-w) + var(--band-edge-w))),
+          transparent          100%
         );
     }
-    /* put actual content above the band */
     .va-card > * { position: relative; z-index: 1; }
 
     /* Header: a hint lighter so it separates, but still flat */
