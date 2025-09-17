@@ -24,7 +24,7 @@ class RailBoundary extends React.Component<{children:React.ReactNode},{hasError:
   render(){ return this.state.hasError ? <div className="px-3 py-3 text-xs opacity-70">Rail crashed</div> : this.props.children; }
 }
 
-/* ───────────────── Tokens / Theme ───────────────── */
+/* ───────────────── Tokens / global CSS ───────────────── */
 const ACTIVE_KEY = 'va:activeId';
 const CTA        = '#59d9b3';
 const CTA_HOVER  = '#54cfa9';
@@ -35,10 +35,10 @@ const Tokens = () => (
   <style jsx global>{`
     .va-scope{
       --s-1: 6px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 20px; --s-6: 24px;
-      --radius-outer: 10px;              /* less rounded outer */
+      --radius-outer: 10px;
       --radius-inner: 12px;
       --control-h: 44px;
-      --header-h: 88px;
+      --header-h: 86px;
       --fz-title: 18px; --fz-sub: 15px; --fz-body: 14px; --fz-label: 12.5px;
       --lh-body: 1.45; --ease: cubic-bezier(.22,.61,.36,1);
 
@@ -46,34 +46,24 @@ const Tokens = () => (
       --panel-alt: #0d1112;
 
       --input-bg: #101314;
-      --input-border: rgba(255,255,255,.06);
+      --input-border: rgba(255,255,255,.05);
       --input-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 6px 14px rgba(0,0,0,.30);
 
       --menu-bg: #101314;
       --menu-border: rgba(255,255,255,.12);
       --menu-shadow: 0 40px 110px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.35);
 
-      --text: #eaf8f3; --text-muted: rgba(234,248,243,.66);
+      --text: #eaf8f3; --text-muted: rgba(234,248,243,.62);
       --bg: #0b0e0f;
 
       --card-shadow: 0 10px 18px rgba(0,0,0,.22);
-      --card-border: rgba(255,255,255,.06);
+      --card-border: rgba(255,255,255,.04);
 
-      /* === WIDE VERTICAL BANDS (center darkest) with side gutters === */
-      --va-bands: repeating-linear-gradient(
-        90deg,
-        rgba(0,255,194,.10) 0px,  /* stripe visibility */
-        rgba(0,255,194,.10) 36px, /* stripe width */
-        transparent 36px,
-        transparent 72px         /* gap (≈2× width) */
-      );
-      --va-center-dark: linear-gradient(
-        90deg,
-        rgba(0,0,0,.08) 0%,
-        rgba(0,0,0,.34) 50%,      /* darkest center */
-        rgba(0,0,0,.08) 100%
-      );
-      --va-band-inset-x: 18px;    /* ← left/right spacing for pattern */
+      /* LINES-AS-GRADIENT knobs */
+      --line-w: 34px;                         /* dark line width */
+      --gap-w: 18px;                          /* light line width */
+      --stripe-dark: rgba(0,255,194,.16);     /* darker green line */
+      --stripe-light: rgba(0,255,194,.06);    /* lighter green line */
     }
 
     :root:not([data-theme="dark"]) .va-scope{
@@ -85,26 +75,16 @@ const Tokens = () => (
       --text: #0f1213; --text-muted: rgba(15,18,19,.62);
       --bg: #f6f7f8;
       --card-shadow: 0 10px 16px rgba(0,0,0,.10);
-      --card-border: rgba(0,0,0,.08);
+      --card-border: rgba(0,0,0,.06);
 
-      --va-bands: repeating-linear-gradient(
-        90deg,
-        rgba(0,170,140,.08) 0px,
-        rgba(0,170,140,.08) 36px,
-        transparent 36px,
-        transparent 72px
-      );
-      --va-center-dark: linear-gradient(
-        90deg,
-        rgba(0,0,0,.03) 0%,
-        rgba(0,0,0,.10) 50%,
-        rgba(0,0,0,.03) 100%
-      );
+      /* slightly softer greens for light mode */
+      --stripe-dark: rgba(0,182,139,.12);
+      --stripe-light: rgba(0,182,139,.05);
     }
 
     .va-main{ overflow: visible; position: relative; contain: none; }
 
-    /* Base card: we draw patterns with ::after so content stays above easily */
+    /* Base card */
     .va-card{
       position: relative;
       border: 1px solid var(--card-border);
@@ -113,37 +93,61 @@ const Tokens = () => (
       box-shadow: var(--card-shadow);
       overflow: hidden;
     }
-    /* content above */
+
+    /* Make all child content sit on top of the pattern */
     .va-card > *{ position: relative; z-index: 1; }
 
-    /* Decorative layer (under content), inset from sides */
+    /* The vertical “lines as gradient” pattern under content */
     .va-card::after{
-      content: "";
-      position: absolute;
-      inset: 0 var(--va-band-inset-x);  /* top/bottom 0, left/right inset */
-      z-index: 0;
-      pointer-events: none;
-      background:
-        var(--va-center-dark), /* center dark vignette */
-        var(--va-bands);       /* vertical stripes */
+      content:"";
+      position:absolute;
+      inset: 0 18px;                          /* left/right breathing room */
+      z-index:0;
+      pointer-events:none;
       border-radius: inherit;
+
+      /* stack: center-dark vignette + repeating vertical green lines */
+      background:
+        linear-gradient(
+          90deg,
+          rgba(0,0,0,.26) 0%,
+          rgba(0,0,0,.52) 50%,
+          rgba(0,0,0,.26) 100%
+        ),
+        repeating-linear-gradient(
+          90deg,
+          var(--stripe-dark) 0 calc(var(--line-w)),
+          var(--stripe-light) calc(var(--line-w)) calc(var(--line-w) + var(--gap-w))
+        );
+
+      /* fade a touch toward the edges so sides read lighter */
+      -webkit-mask-image: radial-gradient(130% 95% at 50% 50%,
+        rgba(255,255,255,1) 0%,
+        rgba(255,255,255,.8) 60%,
+        rgba(255,255,255,.35) 85%,
+        rgba(255,255,255,0) 100%);
+      mask-image: radial-gradient(130% 95% at 50% 50%,
+        rgba(255,255,255,1) 0%,
+        rgba(255,255,255,.8) 60%,
+        rgba(255,255,255,.35) 85%,
+        rgba(255,255,255,0) 100%);
     }
 
-    /* kill older overlays if any */
-    .va-card::before{ content: none !important; }
+    /* Header shading: just a hint lighter to separate */
+    .va-card .va-hdr{
+      background: linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,0));
+    }
 
-    /* Dropdown / menu */
+    /* Dropdown portal + overlay + sheet */
     .va-portal{
       background: var(--menu-bg);
       border: 1px solid var(--menu-border);
       box-shadow: var(--menu-shadow);
       border-radius: 12px;
     }
-
-    /* Overlay */
     .va-overlay{ background: rgba(0,0,0,.55); backdrop-filter: blur(2px); }
     .va-sheet{
-      background: linear-gradient(180deg, var(--menu-bg), var(--menu-bg));
+      background: var(--menu-bg);
       border: 1px solid var(--menu-border);
       box-shadow: 0 28px 80px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.35) inset;
       border-radius: 12px;
@@ -486,7 +490,7 @@ function ActionOverlay({
   );
 }
 
-/* ───────────────── Section (title ABOVE; lighter header) ───────────────── */
+/* ───────────────── Section ───────────────── */
 function Section({
   title, icon, desc, children, defaultOpen = true
 }:{
@@ -510,11 +514,10 @@ function Section({
         {/* header */}
         <button
           onClick={()=>setOpen(v=>!v)}
-          className="w-full text-left px-4 sm:px-5"
+          className="va-hdr w-full text-left px-4 sm:px-5"
           style={{
             color:'var(--text)', minHeight:'var(--header-h)',
-            display:'grid', gridTemplateColumns:'1fr auto', alignItems:'center', gap:'12px',
-            background:'linear-gradient(180deg, rgba(255,255,255,.055), rgba(255,255,255,0))' /* slightly lighter header */
+            display:'grid', gridTemplateColumns:'1fr auto', alignItems:'center', gap:'12px'
           }}
         >
           <span className="min-w-0 flex items-center gap-3">
