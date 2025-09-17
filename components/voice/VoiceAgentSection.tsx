@@ -62,41 +62,43 @@ const Tokens = () => (
       /* ====== BAND PALETTE (GREEN) ====== */
       --band-green: 0,255,194; /* rgb for alpha control */
 
-      /* === STRIPES: wide, vertical; CENTER DARK falloff makes stripes lighten as they move out === */
+     /* === VERTICAL, WIDE BANDS with center darkening === */
 .va-scope{
-  /* 1) vertical green stripes (wide) */
+  /* wide green stripes (vertical) */
   --va-bands: repeating-linear-gradient(
-    90deg,                          /* vertical */
-    rgba(0,255,194,.09) 0px,        /* stripe color + subtle opacity */
-    rgba(0,255,194,.09) 36px,       /* stripe width (← make wider/narrower) */
+    90deg,
+    rgba(0,255,194,.10) 0px,     /* stripe alpha – bump up/down to see it */
+    rgba(0,255,194,.10) 36px,    /* stripe width */
     transparent 36px,
-    transparent 72px                /* gap (keep 2× stripe width for even rhythm) */
+    transparent 72px            /* gap (keep ~2× stripe width) */
   );
 
-  /* 2) center-dark vignette — makes the middle stripes darkest, sides lighter */
+  /* center is darkest; sides lighter */
   --va-center-dark: linear-gradient(
     90deg,
     rgba(0,0,0,.08) 0%,
-    rgba(0,0,0,.34) 50%,            /* darkest at center */
+    rgba(0,0,0,.34) 50%,         /* darkest middle */
     rgba(0,0,0,.08) 100%
   );
 
-  /* you can nudge the numbers: .09 -> .07 for subtler green; .34 -> .28 for gentler center */
+  /* keep your existing tokens; no other vars required */
 }
 
-/* Put the center-dark on TOP of bands so it darkens the middle evenly,
-   then the base panel gradient at the bottom. Content is already above via z-index in your code. */
+/* The card surface: center-dark on top of bands, then base gradient */
 .va-card{
   position: relative;
   border: 1px solid var(--card-border);
   border-radius: var(--radius-outer);
   background:
-    var(--va-center-dark),                                  /* top overlay */
-    var(--va-bands),                                        /* stripes */
-    linear-gradient(180deg, var(--panel-alt), var(--panel));/* base */
+    var(--va-center-dark),
+    var(--va-bands),
+    linear-gradient(180deg, var(--panel-alt), var(--panel));
   box-shadow: var(--card-shadow);
   overflow: hidden;
 }
+
+/* IMPORTANT: kill any earlier overlay that may hide bands */
+.va-card::before{ content: none !important; }
 
     :root:not([data-theme="dark"]) .va-scope{
       --panel: #ffffff; --panel-alt: #ffffff;
