@@ -1,3 +1,4 @@
+// components/voice/VoiceAgentSection.tsx
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
@@ -27,7 +28,6 @@ class RailBoundary extends React.Component<{children:React.ReactNode},{hasError:
 const CTA       = '#59d9b3';
 const CTA_HOVER = '#54cfa9';
 
-/* Filled phone icon (white) */
 function FilledPhoneIcon(props: React.SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden {...props}>
@@ -48,7 +48,7 @@ const Tokens = () => (
       --fz-title: 18px; --fz-sub: 15px; --fz-body: 14px; --fz-label: 12.5px;
       --lh-body: 1.45; --ease: cubic-bezier(.22,.61,.36,1);
 
-      --page-bg: var(--bg);
+      --page-bg: var(--bg);                 /* uses your global theme background */
       --text: var(--text, #fff);
       --text-muted: var(--text-muted, rgba(255,255,255,.72));
 
@@ -58,6 +58,7 @@ const Tokens = () => (
       --border-weak: rgba(255,255,255,.10);
 
       --card-shadow: 0 18px 40px rgba(0,0,0,.28);
+      --green-shadow: 0 6px 12px rgba(89,217,179,.18); /* tiny green bottom glow */
     }
 
     .va-main{ overflow: visible; position: relative; contain: none; }
@@ -67,12 +68,12 @@ const Tokens = () => (
       border-radius: var(--radius-outer);
       border: 1px solid var(--border-weak);
       background: var(--page-bg);
-      box-shadow: var(--card-shadow);
+      box-shadow: var(--card-shadow), var(--green-shadow); /* green bottom shadow */
       overflow: hidden;
       isolation: isolate;
     }
 
-    /* Header = same dark as page with a tiny gradient (not “lighter”) */
+    /* Header = same dark as page with a whisper gradient, not lighter */
     .va-card .va-head{
       min-height: var(--header-h);
       display: grid; grid-template-columns: 1fr auto; align-items: center;
@@ -81,44 +82,40 @@ const Tokens = () => (
         linear-gradient(
           90deg,
           color-mix(in oklab, var(--page-bg) 100%, transparent) 0%,
-          color-mix(in oklab, var(--page-bg) 98%, white 2%) 25%,
+          color-mix(in oklab, var(--page-bg) 99%, white 1%) 35%,
           var(--page-bg) 50%,
-          color-mix(in oklab, var(--page-bg) 98%, black 2%) 75%,
+          color-mix(in oklab, var(--page-bg) 99%, black 1%) 65%,
           var(--page-bg) 100%
         );
       border-bottom: 1px solid rgba(255,255,255,.08);
       color: var(--text);
     }
 
-    /* Dropdowns / overlays */
+    /* SOLID overlays / sheets (no transparency anywhere) */
+    .va-overlay{ background: #0b0c10; } /* opaque */
+    .va-sheet{
+      background: color-mix(in oklab, var(--page-bg) 88%, black 12%);
+      border: 1px solid rgba(255,255,255,.12);
+      box-shadow: 0 28px 80px rgba(0,0,0,.70);
+      border-radius: 12px;
+    }
     .va-portal{
-      background: color-mix(in oklab, var(--page-bg) 80%, black 20%);
+      background: color-mix(in oklab, var(--page-bg) 92%, black 8%);
       border: 1px solid rgba(255,255,255,.12);
       box-shadow: 0 36px 90px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.35);
       border-radius: 10px;
     }
 
-    /* Not transparent modal sheet */
-    .va-overlay{ background: rgba(0,0,0,.72); }
-    .va-sheet{
-      background: color-mix(in oklab, var(--page-bg) 88%, black 12%); /* solid */
-      border: 1px solid rgba(255,255,255,.12);
-      box-shadow: 0 28px 80px rgba(0,0,0,.60);
-      border-radius: 12px;
-    }
-
-    /* Fixed assistant sidebar */
+    /* FIXED assistant sidebar */
     .va-left-fixed{
       position: fixed; inset: 0 auto 0 0; width: 260px;
       border-right: 1px solid rgba(255,255,255,.06);
       background: var(--page-bg);
       overflow: hidden;
     }
-    .va-left-fixed .rail-scroll{
-      position: absolute; inset: 0; overflow: auto;
-    }
+    .va-left-fixed .rail-scroll{ position: absolute; inset: 0; overflow: auto; }
 
-    /* Right-side call drawer with chat */
+    /* Right chat drawer (solid) */
     .va-call-drawer{
       position: fixed; inset: 0 0 0 auto; width: min(520px, 92vw);
       display: grid; grid-template-rows: auto 1fr auto;
@@ -131,7 +128,7 @@ const Tokens = () => (
     }
     .va-call-drawer.open{ transform: translateX(0); }
     .va-call-overlay{
-      position: fixed; inset: 0; background: rgba(0,0,0,.54);
+      position: fixed; inset: 0; background: #0b0c10; /* opaque */
       opacity: 0; pointer-events: none; transition: opacity 200ms var(--ease); z-index: 99997;
     }
     .va-call-overlay.open{ opacity: 1; pointer-events: auto; }
@@ -155,6 +152,10 @@ const Tokens = () => (
       vertical-align: bottom;
     }
     @keyframes blink { 50% { opacity: 0; } }
+
+    /* Diff highlight colors */
+    .diff-add{ color: #00ffc2; }                     /* green */
+    .diff-del{ color: #ff5a5a; text-decoration: line-through; } /* red */
   `}</style>
 );
 
@@ -162,7 +163,7 @@ const Tokens = () => (
 type ApiKey = { id: string; name: string; key: string };
 
 type AgentData = {
-  name: string; // NEW: assistant display name
+  name: string;
   provider: 'openai' | 'anthropic' | 'google';
   model: string;
   firstMode: string;
@@ -184,7 +185,7 @@ type AgentData = {
 };
 
 const DEFAULT_AGENT: AgentData = {
-  name: 'Assistant', // default
+  name: 'Assistant',
   provider: 'openai',
   model: 'GPT-4o',
   firstMode: 'Assistant speaks first',
@@ -451,7 +452,7 @@ function ActionOverlay({
 }) {
   return createPortal(
     <div className="fixed inset-0 z-[99996] grid place-items-center px-4 va-overlay">
-      <div className="va-sheet w-full max-w-[680px] p-4 md:p-6">
+      <div className="va-sheet w-full max-w-[700px] p-4 md:p-6">
         <div className="flex items-center justify-between mb-3">
           <div className="text-lg font-semibold" style={{ color:'var(--text)' }}>{title}</div>
           <button onClick={onClose} className="p-1 rounded hover:opacity-80" aria-label="Close">
@@ -553,6 +554,11 @@ export default function VoiceAgentSection() {
   const [toast, setToast] = useState<string>('');
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
 
+  // prompt typing states
+  const [typingActive, setTypingActive] = useState(false);
+  const [typingText, setTypingText] = useState('');
+  const [diffHTML, setDiffHTML] = useState<string>(''); // shown below textarea
+
   // chat drawer + generate overlay state
   const [showCall, setShowCall] = useState(false);
   const [messages, setMessages] = useState<Array<{role:'user'|'assistant'; text:string}>>([
@@ -562,8 +568,8 @@ export default function VoiceAgentSection() {
 
   const [showGenerate, setShowGenerate] = useState(false);
   const [composerText, setComposerText] = useState('');
-  const [genLoading, setGenLoading] = useState<'idle'|'loading'|'typing'>('idle');
-  const [genPreview, setGenPreview] = useState('');
+  const [genPhase, setGenPhase] = useState<'idle'|'loading'|'done'>('idle');
+  const baseBeforeGenRef = useRef<string>(''); // snapshot of prompt before generation
 
   useEffect(() => {
     const handler = (e: Event) => setActiveId((e as CustomEvent<string>).detail);
@@ -579,13 +585,11 @@ export default function VoiceAgentSection() {
 
   useEffect(() => { if (activeId) saveAgentData(activeId, data); }, [activeId, data]);
 
-  // bootstrap keys
   useEffect(() => {
     (async () => {
       try {
         const ss = await scopedStorage();
         await ss.ensureOwnerGuard();
-
         const v1 = await ss.getJSON<ApiKey[]>('apiKeys.v1', []);
         const legacy = await ss.getJSON<ApiKey[]>('apiKeys', []);
         const merged = Array.isArray(v1) && v1.length ? v1 : Array.isArray(legacy) ? legacy : [];
@@ -634,7 +638,7 @@ export default function VoiceAgentSection() {
     finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
   }
 
-  /* Build prompt by translating extra text into directive-y lines */
+  /* Build prompt by translating extra text into directive lines */
   function buildPrompt(base: string, extraRaw: string) {
     const extra = (extraRaw || '').trim();
     if (!extra) return base;
@@ -644,12 +648,12 @@ export default function VoiceAgentSection() {
       .map(s => s.trim())
       .filter(Boolean)
       .map(s => {
-        // normalize: add trailing period, turn “be friendly” -> “Be friendly.”
         const t = s[0] ? s[0].toUpperCase() + s.slice(1) : s;
         return /[.!?]$/.test(t) ? t : `${t}.`;
       });
 
     const block = `
+
 [Extra Instructions]
 ${lines.map(l => `- ${l}`).join('\n')}
 
@@ -658,40 +662,64 @@ ${lines.map(l => `- ${l}`).join('\n')}
 - Keep replies concise and useful.
 - Ask for missing info before acting.`;
 
-    return `${base}\n${block}`;
+    return `${base}${block}`;
   }
 
-  // typing animation for genPreview
-  function typeIntoPreview(text: string) {
-    setGenPreview('');
+  /* Simple diff: highlight appended part in green; detect any removed leading part as red */
+  function computeDiffHTML(oldText: string, newText: string) {
+    // If new starts with old → additions only
+    if (newText.startsWith(oldText)) {
+      const added = newText.slice(oldText.length);
+      return `${escapeHTML(oldText)}<span class="diff-add">${escapeHTML(added)}</span>`;
+    }
+    // If old starts with new → removals
+    if (oldText.startsWith(newText)) {
+      const removed = oldText.slice(newText.length);
+      return `${escapeHTML(newText)}<span class="diff-del">${escapeHTML(removed)}</span>`;
+    }
+    // Fallback: show both with markers
+    return `<span class="diff-del">${escapeHTML(oldText)}</span>\n<span class="diff-add">${escapeHTML(newText)}</span>`;
+  }
+
+  function escapeHTML(s: string){
+    return s.replace(/[&<>"]/g, (c) =>
+      ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'} as any)[c]
+    );
+  }
+
+  /* Typing animation inside the main prompt box */
+  function typeIntoPrompt(finalText: string, baseTextAtStart: string) {
+    setTypingActive(true);
+    setTypingText('');
     let i = 0;
-    setGenLoading('typing');
+    const step = Math.max(1, Math.floor(finalText.length / 60));
     const id = setInterval(() => {
-      i += Math.max(1, Math.floor(text.length / 60));
-      setGenPreview(text.slice(0, i));
-      if (i >= text.length) {
+      i += step;
+      const slice = finalText.slice(0, i);
+      setTypingText(slice);
+      if (i >= finalText.length) {
         clearInterval(id);
-        setGenLoading('idle');
+        // set final prompt value
+        setField('systemPrompt')(finalText);
+        setTypingActive(false);
+        // show diff under the prompt (additions green, removals red)
+        setDiffHTML(computeDiffHTML(baseTextAtStart, finalText));
       }
     }, 18);
   }
 
-  function onGenerate() {
-    setGenLoading('loading');
-    const merged = buildPrompt(DEFAULT_AGENT.systemPrompt, composerText);
-    // small pause then “types” it out
+  /* Generate flow */
+  function startGenerate() {
+    baseBeforeGenRef.current = data.systemPrompt;     // snapshot
+    setGenPhase('loading');
+    // fake server latency
     setTimeout(() => {
-      typeIntoPreview(merged);
-    }, 600);
-  }
-
-  function applyGenerated() {
-    const finalText = genPreview || buildPrompt(DEFAULT_AGENT.systemPrompt, composerText);
-    setField('systemPrompt')(finalText);
-    setShowGenerate(false);
-    setComposerText('');
-    setGenPreview('');
-    setGenLoading('idle');
+      const merged = buildPrompt(baseBeforeGenRef.current, composerText);
+      // close overlay, then type into the main prompt box
+      setShowGenerate(false);
+      typeIntoPrompt(merged, baseBeforeGenRef.current);
+      setGenPhase('done');
+    }, 700);
   }
 
   function sendChat() {
@@ -699,9 +727,8 @@ ${lines.map(l => `- ${l}`).join('\n')}
     if (!txt) return;
     setMessages(m => [...m, { role: 'user', text: txt }]);
     setChatInput('');
-    // fake assistant reply for UI
-    const reply = `${data.name}: I heard "${txt}". How can I help further?`;
-    setTimeout(() => setMessages(m => [...m, { role: 'assistant', text: reply }]), 400);
+    const reply = `${data.name || 'Assistant'}: "${txt}" received. How can I help further?`;
+    setTimeout(() => setMessages(m => [...m, { role: 'assistant', text: reply }]), 350);
   }
 
   return (
@@ -715,7 +742,7 @@ ${lines.map(l => `- ${l}`).join('\n')}
         </div>
       </div>
 
-      {/* RIGHT CONTENT (adds left padding so it doesn't sit under the fixed rail) */}
+      {/* RIGHT CONTENT */}
       <div style={{ marginLeft: 260 }}>
         <div className="va-main px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w-[1160px]"
              style={{ fontSize:'var(--fz-body)', lineHeight:'var(--lh-body)' }}>
@@ -838,17 +865,39 @@ ${lines.map(l => `- ${l}`).join('\n')}
                 <button
                   className="inline-flex items-center gap-2 rounded-[10px] text-sm"
                   style={{ height:36, padding:'0 12px', background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                  onClick={()=>{ setComposerText(''); setGenPreview(''); setGenLoading('idle'); setShowGenerate(true); }}
+                  onClick={()=>{ setComposerText(''); setShowGenerate(true); setGenPhase('idle'); }}
                 >
                   <Wand2 className="w-4 h-4" /> Generate
                 </button>
               </div>
-              <textarea
-                className="w-full bg-transparent outline-none rounded-[12px] px-3 py-[12px]"
-                style={{ minHeight: 320, background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)', lineHeight:'var(--lh-body)', fontSize:'var(--fz-body)' }}
-                value={data.systemPrompt}
-                onChange={(e)=>setField('systemPrompt')(e.target.value)}
-              />
+
+              {/* Prompt editor with typing overlay */}
+              <div style={{ position:'relative' }}>
+                {!typingActive ? (
+                  <textarea
+                    className="w-full bg-transparent outline-none rounded-[12px] px-3 py-[12px]"
+                    style={{ minHeight: 320, background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)', lineHeight:'var(--lh-body)', fontSize:'var(--fz-body)' }}
+                    value={data.systemPrompt}
+                    onChange={(e)=>{ setField('systemPrompt')(e.target.value); setDiffHTML(''); }}
+                  />
+                ) : (
+                  <div
+                    className="w-full rounded-[12px] px-3 py-[12px] whitespace-pre-wrap"
+                    style={{ minHeight: 320, background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)', lineHeight:'var(--lh-body)', fontSize:'var(--fz-body)' }}
+                  >
+                    {typingText}<span className="type-caret" />
+                  </div>
+                )}
+              </div>
+
+              {/* diff bar under the prompt */}
+              {diffHTML && (
+                <div
+                  className="mt-2 rounded-[10px] p-3 text-[12px]"
+                  style={{ background:'color-mix(in oklab, var(--bg) 92%, black 8%)', border:'1px solid rgba(255,255,255,.10)', color:'var(--text)' }}
+                  dangerouslySetInnerHTML={{ __html: diffHTML }}
+                />
+              )}
             </div>
           </Section>
 
@@ -932,7 +981,8 @@ ${lines.map(l => `- ${l}`).join('\n')}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt-[var(--s-4)]">
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]">Dialect</div>
-                <StyledSelect value={data.asrDialect} onChange={(v)=>setField('asrDialect')(v as AgentData['asrDialect'])} options={dialectOpts}/>
+                <StyledSelect value={data.asrDialect} onChange={(v)=>setField('asrDialect')(v as AgentData['asrDialect'])} options={d
+ialectOpts}/>
               </div>
 
               <div>
@@ -974,14 +1024,14 @@ ${lines.map(l => `- ${l}`).join('\n')}
               className="flex items-center justify-between px-4 h-[64px]"
               style={{
                 background:
-                  'linear-gradient(90deg, color-mix(in oklab, var(--bg) 100%, transparent), color-mix(in oklab, var(--bg) 98%, white 2%) 40%, var(--bg))',
+                  'linear-gradient(90deg, color-mix(in oklab, var(--bg) 100%, transparent), color-mix(in oklab, var(--bg) 99%, white 1%) 40%, var(--bg))',
                 borderBottom:'1px solid rgba(255,255,255,.1)'
               }}
             >
               <div className="font-semibold">Chat with {data.name || 'Assistant'}</div>
               <button
                 onClick={()=>setShowCall(false)}
-                className="px-2 py-1 rounded hover:opacity-80"
+                className="px-2 py-1 rounded"
                 aria-label="Close"
                 style={{ color:'var(--text)', border:'1px solid rgba(255,255,255,.12)', background:'color-mix(in oklab, var(--bg) 90%, black 10%)' }}
               >
@@ -1004,7 +1054,7 @@ ${lines.map(l => `- ${l}`).join('\n')}
             </div>
 
             {/* footer (composer) */}
-            <div className="p-3 border-t" style={{ borderColor:'rgba(255,255,255,.10)' }}>
+            <div className="p-3 border-top" style={{ borderTop:'1px solid rgba(255,255,255,.10)' }}>
               <form
                 onSubmit={(e)=>{ e.preventDefault(); sendChat(); }}
                 className="flex items-center gap-2"
@@ -1030,15 +1080,15 @@ ${lines.map(l => `- ${l}`).join('\n')}
         document.body
       )}
 
-      {/* ---- Generate Prompt overlay (solid, loading, typing) ---- */}
+      {/* ---- Generate Prompt overlay (solid) ---- */}
       {showGenerate && (
         <ActionOverlay
           title="Compose Prompt"
-          onClose={()=>{ if (genLoading==='loading') return; setShowGenerate(false); }}
-          primaryText={genLoading==='loading' ? 'Generating…' : genLoading==='typing' ? 'Use Prompt' : 'Generate'}
+          onClose={()=>{ if (genPhase==='loading') return; setShowGenerate(false); }}
+          primaryText={genPhase==='idle' ? 'Generate' : genPhase==='loading' ? 'Generating…' : 'Close'}
           onPrimary={()=>{
-            if (genLoading==='idle') onGenerate();
-            else if (genLoading==='typing' || genPreview) applyGenerated();
+            if (genPhase==='idle') startGenerate();
+            else setShowGenerate(false);
           }}
           primaryWhite
         >
@@ -1050,36 +1100,22 @@ ${lines.map(l => `- ${l}`).join('\n')}
               value={composerText}
               onChange={(e)=>setComposerText(e.target.value)}
               className="w-full bg-transparent outline-none rounded-[10px] px-3 py-2"
-              placeholder="e.g., Be a friendly, concise support agent. Confirm account ID before any action. Prefer bullet points."
+              placeholder="e.g., Be friendly and concise. Confirm account ID before actions. Prefer bullet points."
               style={{ minHeight: 160, background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)' }}
             />
 
-            {/* Preview / loader / typing */}
-            <div className="mt-2 rounded-[10px] p-3"
-              style={{ background:'color-mix(in oklab, var(--bg) 90%, black 10%)', border:'1px solid rgba(255,255,255,.10)', color:'var(--text)' }}
-            >
-              {genLoading === 'idle' && !genPreview && (
-                <div className="text-xs" style={{ color:'var(--text-muted)' }}>
-                  Click <b>Generate</b> to build a usable system prompt preview here.
-                </div>
-              )}
+            {genPhase==='loading' && (
+              <div className="flex items-center gap-2 text-sm">
+                <span className="w-4 h-4 rounded-full border-2 border-t-transparent animate-spin" />
+                Generating…
+              </div>
+            )}
 
-              {genLoading === 'loading' && (
-                <div className="flex items-center gap-2 text-sm">
-                  <span className="w-4 h-4 rounded-full border-2 border-t-transparent animate-spin" />
-                  Generating…
-                </div>
-              )}
-
-              {(genLoading === 'typing' || genPreview) && (
-                <pre
-                  style={{ whiteSpace:'pre-wrap', wordBreak:'break-word', fontSize:12, lineHeight:1.5 }}
-                >
-                  {genPreview}
-                  {genLoading === 'typing' && <span className="type-caret" />}
-                </pre>
-              )}
-            </div>
+            {genPhase==='done' && (
+              <div className="text-xs" style={{ color:'var(--text-muted)' }}>
+                The prompt was generated and typed into the main editor.
+              </div>
+            )}
           </div>
         </ActionOverlay>
       )}
