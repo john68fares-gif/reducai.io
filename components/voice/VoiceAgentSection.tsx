@@ -60,15 +60,20 @@ const Tokens = () => (
       --card-shadow: 0 10px 18px rgba(0,0,0,.22);
       --card-border: rgba(255,255,255,.04);
 
-      /* SUPER-SUBTLE rotated vertical bands (invisible unless zoomed) */
+      /* ───────── WIDE CENTER-DARK BANDS (very subtle) ─────────
+         One repeated tile per band: light → darker middle → light.
+         Alphas are low so it reads like a soft shadow, not stripes. */
+      --band-w: 360px; /* width of one band; increase to 400px if you want even wider */
       --bands:
         repeating-linear-gradient(
-          128deg,                    /* tilt so they read as vertical-ish */
-          rgba(255,255,255,0.015) 0px,
-          rgba(255,255,255,0.015) 1px, /* 1px light line */
-          rgba(0,0,0,0.00)        1px,
-          rgba(0,0,0,0.00)        13px /* 12px gap */
+          118deg,
+          rgba(0,0,0,0.00)                   0,
+          rgba(0,0,0,0.035) calc(var(--band-w) * 0.25),
+          rgba(0,0,0,0.11)  calc(var(--band-w) * 0.50), /* darkest midpoint */
+          rgba(0,0,0,0.035) calc(var(--band-w) * 0.75),
+          rgba(0,0,0,0.00)  var(--band-w)
         );
+
       /* gentle dark→light sweep from top-left */
       --sweep: linear-gradient(25deg, rgba(0,0,0,.10) 0%, rgba(0,0,0,0) 45%);
       /* microscopic hover ring */
@@ -86,13 +91,16 @@ const Tokens = () => (
       --card-shadow: 0 10px 16px rgba(0,0,0,.10);
       --card-border: rgba(0,0,0,.06);
 
+      /* same shape but lighter ink for light mode */
+      --band-w: 360px;
       --bands:
         repeating-linear-gradient(
-          128deg,
-          rgba(0,0,0,0.018) 0px,
-          rgba(0,0,0,0.018) 1px,
-          rgba(0,0,0,0.00)  1px,
-          rgba(0,0,0,0.00)  14px
+          118deg,
+          rgba(0,0,0,0.00)                   0,
+          rgba(0,0,0,0.025) calc(var(--band-w) * 0.25),
+          rgba(0,0,0,0.085) calc(var(--band-w) * 0.50),
+          rgba(0,0,0,0.025) calc(var(--band-w) * 0.75),
+          rgba(0,0,0,0.00)  var(--band-w)
         );
       --sweep: linear-gradient(25deg, rgba(0,0,0,.06) 0%, rgba(0,0,0,0) 45%);
     }
