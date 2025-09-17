@@ -605,7 +605,7 @@ export default function VoiceAgentSection() {
     setSaving(true); setToast('');
     try { await apiSave(activeId, data); setToast('Saved'); }
     catch { setToast('Save failed'); }
-    finally { setSaving false; setTimeout(()=>setToast(''), 1400); }
+    finally { setSaving(false); setTimeout(()=>setToast(''), 1400); }
   }
   async function doPublish(){
     if (!activeId) { setToast('Select or create an agent'); return; }
