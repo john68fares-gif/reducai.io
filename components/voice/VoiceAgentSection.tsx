@@ -5,7 +5,8 @@ import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 're
 import AssistantRail from '@/components/voice/AssistantRail';
 import { createPortal } from 'react-dom';
 import {
-  Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Rocket, Search, Check, Lock, X, KeyRound, Play, Square
+  Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Rocket, Search, Check, Lock, X, KeyRound,
+  Play, Square
 } from 'lucide-react';
 import { scopedStorage } from '@/utils/scoped-storage';
 
@@ -26,10 +27,16 @@ function PhoneFilled(props: React.SVGProps<SVGSVGElement>) {
   );
 }
 
-/* ───────────────── theme tokens (SOLID surfaces) ───────────────── */
+/* ───────────────── theme tokens (force SOLID) ───────────────── */
 const Tokens = () => (
   <style jsx global>{`
     .va-scope{
+      /* Hard fallbacks so nothing is transparent even if global vars are missing */
+      --bg: #0b0c10;
+      --panel: #0d0f11;
+      --text: #e6f1ef;
+      --text-muted: #9fb4ad;
+
       --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 20px; --s-6: 24px;
       --radius-outer: 10px;
       --control-h: 44px; --header-h: 88px;
@@ -38,9 +45,6 @@ const Tokens = () => (
 
       --page-bg: var(--bg);
       --panel-bg: var(--panel);      /* SOLID */
-      --text: var(--text);
-      --text-muted: var(--text-muted);
-
       --input-bg: var(--panel-bg);   /* SOLID */
       --input-border: rgba(255,255,255,.10);
       --input-shadow: 0 0 0 1px rgba(255,255,255,.06) inset;
@@ -63,16 +67,15 @@ const Tokens = () => (
       min-height: var(--header-h);
       display: grid; grid-template-columns: 1fr auto; align-items: center;
       padding: 0 16px;
-      /* same dark color with very light center band */
       background: linear-gradient(90deg,
         var(--panel-bg) 0%,
-        color-mix(in oklab, var(--panel-bg) 98%, white 2%) 50%,
+        color-mix(in oklab, var(--panel-bg) 97%, white 3%) 50%,
         var(--panel-bg) 100%);
       border-bottom: 1px solid rgba(255,255,255,.08);
       color: var(--text);
     }
 
-    /* FIXED rail */
+    /* FIXED rail (always visible) */
     .va-left-fixed{
       position: fixed; inset: 0 auto 0 0; width: 260px; z-index: 12;
       background: var(--panel-bg);
@@ -90,10 +93,11 @@ const Tokens = () => (
       border-radius: 10px;
     }
 
-    /* Drawer + overlay: blur only (no dark scrim) */
+    /* Drawer + overlay: SOLID scrim + blur */
     .va-blur-overlay{
       position: fixed; inset: 0; z-index: 9996;
-      background: transparent; backdrop-filter: blur(3px);
+      background: rgba(8,10,12,.6);
+      backdrop-filter: blur(3px);
       opacity: 0; pointer-events: none; transition: opacity 200ms var(--ease);
     }
     .va-blur-overlay.open{ opacity: 1; pointer-events: auto; }
@@ -108,9 +112,9 @@ const Tokens = () => (
     }
     .va-call-drawer.open{ transform: translateX(0); }
 
-    /* Modal (Generate) */
+    /* Modal (Generate) — solid sheet */
     .va-modal-wrap{ position: fixed; inset: 0; z-index: 9994; }
-    .va-modal-blur{ position:absolute; inset:0; backdrop-filter: blur(4px); }
+    .va-modal-blur{ position:absolute; inset:0; background: rgba(8,10,12,.65); backdrop-filter: blur(4px); }
     .va-modal-center{ position:absolute; inset:0; display:grid; place-items:center; padding: 20px; }
     .va-sheet{ background: var(--panel-bg); border: 1px solid rgba(255,255,255,.12); box-shadow: 0 28px 80px rgba(0,0,0,.70); border-radius: 12px; }
 
@@ -264,11 +268,12 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
+/* Select with solid menu + optional menu header (used by Voice picker to include a player) */
 function StyledSelect({
-  value, onChange, options, placeholder, leftIcon
+  value, onChange, options, placeholder, leftIcon, menuTop
 }:{
   value: string; onChange: (v: string) => void;
-  options: Opt[]; placeholder?: string; leftIcon?: React.ReactNode;
+  options: Opt[]; placeholder?: string; leftIcon?: React.ReactNode; menuTop?: React.ReactNode;
 }) {
   const btnRef = useRef<HTMLButtonElement|null>(null);
   const portalRef = useRef<HTMLDivElement|null>(null);
@@ -286,7 +291,7 @@ function StyledSelect({
   useLayoutEffect(() => {
     if (!open) return;
     const r = btnRef.current?.getBoundingClientRect(); if (!r) return;
-    const openUp = r.bottom + 320 > window.innerHeight;
+    const openUp = r.bottom + 360 > window.innerHeight;
     setRect({ top: openUp ? r.top : r.bottom, left: r.left, width: r.width, openUp });
   }, [open]);
 
@@ -335,6 +340,8 @@ function StyledSelect({
                 transform: rect.openUp ? 'translateY(-100%)' : 'none'
               }}
             >
+              {menuTop ? <div className="mb-2">{menuTop}</div> : null}
+
               <div
                 className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[10px]"
                 style={{ background:'var(--panel-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
@@ -420,7 +427,7 @@ function Section({
             height: open ? h : 0,
             opacity: open ? 1 : 0,
             transform: open ? 'translateY(0)' : 'translateY(-4px)',
-            transition: 'height 240ms var(--ease), opacity 220ms var(--ease), transform 240ms var(--ease)',
+            transition: 'height 260ms var(--ease), opacity 230ms var(--ease), transform 260ms var(--ease)',
             overflow:'hidden'
           }}
           onTransitionEnd={() => { if (open) measure(); }}
@@ -468,7 +475,7 @@ export default function VoiceAgentSection() {
     return () => { (window.speechSynthesis as any).onvoiceschanged = null; };
   }, []);
 
-  /* Rail change listener */
+  /* Rail change listener (keeps sidebar active & visible) */
   useEffect(() => {
     const handler = (e: Event) => setActiveId((e as CustomEvent<string>).detail);
     window.addEventListener('assistant:active', handler as EventListener);
@@ -483,7 +490,7 @@ export default function VoiceAgentSection() {
 
   useEffect(() => { if (activeId) saveAgentData(activeId, data); }, [activeId, data]);
 
-  // bootstrap keys (no duplicate ss var)
+  // bootstrap keys
   useEffect(() => {
     (async () => {
       try {
@@ -536,7 +543,7 @@ export default function VoiceAgentSection() {
     finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
   }
 
-  /* Build prompt from extra text */
+  /* Prompt composer */
   function buildPrompt(base: string, extraRaw: string) {
     const extra = (extraRaw || '').trim();
     if (!extra) return base;
@@ -577,11 +584,12 @@ ${lines.map(l => `- ${l}`).join('\n')}
       const merged = buildPrompt(basePromptRef.current, composerText);
       setPendingPrompt(merged);
       setShowDiff(true); setShowGenerate(false); setGenPhase('idle');
-    }, 700);
+    }, 650);
   }
   function acceptDiff(){ setData(prev => ({ ...prev, systemPrompt: pendingPrompt })); setPendingPrompt(''); setShowDiff(false); }
   function declineDiff(){ setPendingPrompt(''); setShowDiff(false); }
 
+  /* mock chat */
   function sendChat() {
     const txt = chatInput.trim();
     if (!txt) return;
@@ -591,8 +599,9 @@ ${lines.map(l => `- ${l}`).join('\n')}
     setTimeout(() => setMessages(m => [...m, { role: 'assistant', text: reply }]), 350);
   }
 
-  function playPreview(){
-    const u = new SpeechSynthesisUtterance(`Hi, I'm ${data.name || 'your assistant'}. This is a preview.`);
+  /* Voice preview logic */
+  function speakPreview(line?: string){
+    const u = new SpeechSynthesisUtterance(line || `Hi, I'm ${data.name || 'your assistant'}. This is a preview.`);
     const byName = voices.find(v => v.name.toLowerCase().includes((data.voiceName || '').split(' ')[0]?.toLowerCase() || ''));
     const en = voices.find(v => v.lang?.startsWith('en'));
     if (byName) u.voice = byName; else if (en) u.voice = en;
@@ -606,7 +615,7 @@ ${lines.map(l => `- ${l}`).join('\n')}
     <section className="va-scope" style={{ background:'var(--bg)', color:'var(--text)' }}>
       <Tokens />
 
-      {/* FIXED ASSISTANT SIDEBAR */}
+      {/* FIXED ASSISTANT SIDEBAR (explicit import, always present) */}
       <aside className="va-left-fixed">
         <div className="rail-scroll">
           <AssistantRail />
@@ -640,7 +649,7 @@ ${lines.map(l => `- ${l}`).join('\n')}
             <button
               onClick={()=>setShowCall(true)}
               className="inline-flex items-center gap-2 rounded-[10px] select-none"
-              style={{ height:'var(--control-h)', padding:'0 18px', background:CTA, color:'#fff', fontWeight:700, boxShadow:'0 10px 22px rgba(89,217,179,.20)' }}
+              style={{ height:'var(--control-h)', padding:'0 18px', background:CTA, color:'#0a0f0d', fontWeight:700, boxShadow:'0 10px 22px rgba(89,217,179,.20)' }}
               onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA_HOVER)}
               onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA)}
             >
@@ -790,12 +799,47 @@ ${lines.map(l => `- ${l}`).join('\n')}
               </div>
             </div>
 
-            <div className="grid grid-cols-[1fr_auto_auto] gap-[12px] mt-[var(--s-4)] items-end">
+            <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_auto] gap-[12px] mt-[var(--s-4)] items-end">
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]">Voice</div>
-                <StyledSelect value={data.voiceName} onChange={setField('voiceName')} options={openAiVoices} placeholder="— Choose —" />
+
+                {/* Voice select WITH PLAYER inside its dropdown */}
+                <StyledSelect
+                  value={data.voiceName}
+                  onChange={setField('voiceName')}
+                  options={openAiVoices}
+                  placeholder="— Choose —"
+                  menuTop={
+                    <div className="flex items-center justify-between px-3 py-2 rounded-[10px]"
+                         style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}>
+                      <div className="text-xs" style={{ color:'var(--text-muted)' }}>Preview</div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={()=>speakPreview(`This is ${data.voiceName || 'the selected'} voice preview.`)}
+                          className="w-8 h-8 rounded-full grid place-items-center"
+                          aria-label="Play voice"
+                          style={{ background: CTA, color:'#0a0f0d' }}
+                        >
+                          <Play className="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={stopPreview}
+                          className="w-8 h-8 rounded-full grid place-items-center border"
+                          aria-label="Stop preview"
+                          style={{ background: 'var(--panel-bg)', color:'var(--text)', borderColor:'var(--input-border)' }}
+                        >
+                          <Square className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  }
+                />
               </div>
-              <button onClick={playPreview} className="w-12 h-12 rounded-full grid place-items-center" aria-label="Preview voice"
+
+              {/* Keep external quick buttons too */}
+              <button onClick={()=>speakPreview()} className="w-12 h-12 rounded-full grid place-items-center" aria-label="Preview voice"
                 style={{ background: CTA, color:'#0a0f0d', boxShadow:'0 10px 22px rgba(89,217,179,.20)' }}>
                 <Play className="w-5 h-5" />
               </button>
@@ -882,7 +926,7 @@ ${lines.map(l => `- ${l}`).join('\n')}
         document.body
       )}
 
-      {/* Generate overlay */}
+      {/* Generate overlay (solid) */}
       {showGenerate && createPortal(
         <div className="va-modal-wrap" role="dialog" aria-modal>
           <div className="va-modal-blur" onClick={()=>{ if (genPhase==='idle') setShowGenerate(false); }} />
