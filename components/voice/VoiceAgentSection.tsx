@@ -24,82 +24,70 @@ class RailBoundary extends React.Component<{children:React.ReactNode},{hasError:
   render(){ return this.state.hasError ? <div className="px-3 py-3 text-xs opacity-70">Rail crashed</div> : this.props.children; }
 }
 
-/* ───────────────── Local tokens ───────────────── */
-const ACTIVE_KEY = 'va:activeId';
-const CTA        = '#59d9b3';
-const CTA_HOVER  = '#54cfa9';
-const LS_KEYS = 'apiKeys.v1';
-const LS_SELECTED = 'apiKeys.selectedId';
+/* ───────────────── Local design tokens (scoped) ─────────────────
+   NOTE: no gradient here; the band effect comes from globals `.ra-card-banded`
+   to keep the look consistent across the app. */
+const CTA       = '#59d9b3';
+const CTA_HOVER = '#54cfa9';
 
 const Tokens = () => (
   <style jsx global>{`
     .va-scope{
       --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 20px; --s-6: 24px;
-      --radius-outer: 6px;
-      --radius-inner: 10px;
-      --control-h: 44px;
-      --header-h: 88px;
+      --radius-outer: 16px;
+      --control-h: 44px; --header-h: 88px;
       --fz-title: 18px; --fz-sub: 15px; --fz-body: 14px; --fz-label: 12.5px;
       --lh-body: 1.45; --ease: cubic-bezier(.22,.61,.36,1);
 
-      /* Base dark */
-      --bg: #0b0e0f;
-      --panel: #0f1214;
-      --text: #eaf8f3;
-      --text-muted: rgba(234,248,243,.66);
+      --bg: #0b0c10;
+      --text: #ffffff;
+      --text-muted: rgba(255,255,255,.72);
 
-      --border-weak: rgba(255,255,255,.07);
       --input-bg: #101314;
       --input-border: rgba(255,255,255,.10);
       --input-shadow: inset 0 1px 0 rgba(255,255,255,.03), 0 8px 18px rgba(0,0,0,.35);
 
-      --menu-bg: #101314;
-      --menu-border: rgba(255,255,255,.12);
-      --menu-shadow: 0 36px 90px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.35);
-
-      --card-shadow: 0 18px 40px rgba(0,0,0,.28);
-
-      /* BOX COLOR → as requested */
-      --box: #223248;              /* all boxes use this */
-      --box-head: color-mix(in oklab, var(--box) 92%, white 8%); /* slight lift for headers */
+      /* Base box color (under the global band) */
+      --box: #223248;
+      --border-weak: rgba(255,255,255,.09);
     }
 
     .va-main{ overflow: visible; position: relative; contain: none; }
 
-    /* Card: solid #223248, no band/gradient */
+    /* Card base: DO NOT add ::before here (global .ra-card-banded adds the band) */
     .va-card{
       position: relative;
       border-radius: var(--radius-outer);
       border: 1px solid var(--border-weak);
       background-color: var(--box);
-      box-shadow: var(--card-shadow);
+      box-shadow: inset 0 0 22px rgba(0,0,0,.28), 0 0 20px rgba(0,255,194,.06);
       overflow: hidden;
       isolation: isolate;
     }
-    .va-card::before{ content:none !important; }
-    .va-card > * { position: relative; z-index: 1; }
 
+    /* Header transparent so the band shows through */
     .va-card .va-head{
       min-height: var(--header-h);
       display: grid;
       grid-template-columns: 1fr auto;
       align-items: center;
       padding: 0 16px;
-      background: var(--box-head);
+      background: transparent; /* important for band visibility */
       border-bottom: 1px solid rgba(255,255,255,.06);
+      color: var(--text);
     }
 
+    /* Dropdown/sheets keep your dark UI */
     .va-portal{
-      background: var(--menu-bg);
-      border: 1px solid var(--menu-border);
-      box-shadow: var(--menu-shadow);
+      background: #101314;
+      border: 1px solid rgba(255,255,255,.12);
+      box-shadow: 0 36px 90px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.35);
       border-radius: 10px;
     }
-
     .va-overlay{ background: rgba(0,0,0,.55); backdrop-filter: blur(2px); }
     .va-sheet{
-      background: var(--menu-bg);
-      border: 1px solid var(--menu-border);
+      background: #101314;
+      border: 1px solid rgba(255,255,255,.12);
       box-shadow: 0 28px 80px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.35) inset;
       border-radius: 10px;
     }
@@ -167,6 +155,7 @@ You are a blank template AI assistant with minimal default settings, designed to
   confidence: 0.4,
 };
 
+const ACTIVE_KEY = 'va:activeId';
 const keyFor = (id: string) => `va:agent:${id}`;
 const loadAgentData = (id: string): AgentData => {
   try { const raw = localStorage.getItem(keyFor(id)); if (raw) return { ...DEFAULT_AGENT, ...(JSON.parse(raw)||{}) }; }
@@ -304,7 +293,7 @@ function StyledSelect({
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return q ? options.filter(o => o.label.toLowerCase().includes(q)) : options;
-    }, [options, query]);
+  }, [options, query]);
 
   useLayoutEffect(() => {
     if (!open) return;
@@ -461,7 +450,8 @@ function Section({
         {title}
       </div>
 
-      <div className="va-card">
+      {/* add global banded look */}
+      <div className="va-card ra-card-banded">
         {/* header */}
         <button
           onClick={()=>setOpen(v=>!v)}
@@ -534,7 +524,7 @@ export default function VoiceAgentSection() {
         const ss = await scopedStorage();
         await ss.ensureOwnerGuard();
 
-        const v1 = await ss.getJSON<ApiKey[]>(LS_KEYS, []);
+        const v1 = await ss.getJSON<ApiKey[]>('apiKeys.v1', []);
         const legacy = await ss.getJSON<ApiKey[]>('apiKeys', []);
         const merged = Array.isArray(v1) && v1.length ? v1 : Array.isArray(legacy) ? legacy : [];
         const cleaned = merged
@@ -544,7 +534,7 @@ export default function VoiceAgentSection() {
 
         setApiKeys(cleaned);
 
-        const globalSelected = await ss.getJSON<string>(LS_SELECTED, '');
+        const globalSelected = await ss.getJSON<string>('apiKeys.selectedId', '');
         const chosen =
           (data.apiKeyId && cleaned.some((k) => k.id === data.apiKeyId)) ? data.apiKeyId! :
           (globalSelected && cleaned.some((k) => k.id === globalSelected)) ? globalSelected :
@@ -552,14 +542,14 @@ export default function VoiceAgentSection() {
 
         if (chosen && chosen !== data.apiKeyId) {
           setData(prev => ({ ...prev, apiKeyId: chosen }));
-          await ss.setJSON(LS_SELECTED, chosen);
+          await ss.setJSON('apiKeys.selectedId', chosen);
         }
       } catch {}
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* FIX: use a named generic function so TSX parser doesn’t confuse it with JSX */
+  /* FIX: named generic so TSX parser doesn’t think it's JSX */
   function setField<K extends keyof AgentData>(k: K) {
     return (v: AgentData[K]) => setData(prev => ({ ...prev, [k]: v }));
   }
@@ -645,11 +635,11 @@ export default function VoiceAgentSection() {
 
           {/* KPIs */}
           <div className="grid gap-[12px] md:grid-cols-2 mb-[12px]">
-            <div className="va-card p-[var(--s-4)]">
+            <div className="va-card ra-card-banded p-[var(--s-4)]">
               <div className="text-xs mb-[6px]" style={{ color:'var(--text-muted)' }}>Cost</div>
               <div className="font-semibold" style={{ fontSize:'var(--fz-sub)', color:'var(--text)' }}>~$0.1/min</div>
             </div>
-            <div className="va-card p-[var(--s-4)]">
+            <div className="va-card ra-card-banded p-[var(--s-4)]">
               <div className="text-xs mb-[6px]" style={{ color:'var(--text-muted)' }}>Latency</div>
               <div className="font-semibold" style={{ fontSize:'var(--fz-sub)', color:'var(--text)' }}>~1050 ms</div>
             </div>
@@ -726,7 +716,7 @@ export default function VoiceAgentSection() {
                   value={data.apiKeyId || ''}
                   onChange={async (val)=>{
                     setField('apiKeyId')(val);
-                    try { const ss = await scopedStorage(); await ss.ensureOwnerGuard(); await ss.setJSON(LS_SELECTED, val); } catch {}
+                    try { const ss = await scopedStorage(); await ss.ensureOwnerGuard(); await ss.setJSON('apiKeys.selectedId', val); } catch {}
                   }}
                   options={[
                     { value: '', label: 'Select an API key…' },
@@ -792,7 +782,6 @@ export default function VoiceAgentSection() {
               </div>
             </div>
 
-            {/* FIXED: mt class */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt-[var(--s-4)]">
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]" style={{ color:'var(--text)' }}>Dialect</div>
