@@ -1,4 +1,3 @@
-// components/voice/VoiceAgentSection.tsx
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
@@ -28,7 +27,7 @@ class RailBoundary extends React.Component<{children:React.ReactNode},{hasError:
 const CTA       = '#59d9b3';
 const CTA_HOVER = '#54cfa9';
 
-/* Filled phone icon in white */
+/* Filled phone icon (white) */
 function FilledPhoneIcon(props: React.SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden {...props}>
@@ -44,15 +43,14 @@ const Tokens = () => (
   <style jsx global>{`
     .va-scope{
       --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 20px; --s-6: 24px;
-      --radius-outer: 10px; /* a bit less rounded */
+      --radius-outer: 10px;
       --control-h: 44px; --header-h: 88px;
       --fz-title: 18px; --fz-sub: 15px; --fz-body: 14px; --fz-label: 12.5px;
       --lh-body: 1.45; --ease: cubic-bezier(.22,.61,.36,1);
 
-      /* Use your global tokens */
+      --page-bg: var(--bg);
       --text: var(--text, #fff);
       --text-muted: var(--text-muted, rgba(255,255,255,.72));
-      --page-bg: var(--bg);
 
       --input-bg: color-mix(in oklab, var(--page-bg) 94%, black 6%);
       --input-border: rgba(255,255,255,.10);
@@ -74,33 +72,55 @@ const Tokens = () => (
       isolation: isolate;
     }
 
-    /* Header is a touch lighter than the card background (works in light & dark) */
+    /* Header = same dark as page with a tiny gradient (not “lighter”) */
     .va-card .va-head{
       min-height: var(--header-h);
       display: grid; grid-template-columns: 1fr auto; align-items: center;
       padding: 0 16px;
-      background: color-mix(in oklab, var(--page-bg) 90%, white 10%); /* <- lighter */
+      background:
+        linear-gradient(
+          90deg,
+          color-mix(in oklab, var(--page-bg) 100%, transparent) 0%,
+          color-mix(in oklab, var(--page-bg) 98%, white 2%) 25%,
+          var(--page-bg) 50%,
+          color-mix(in oklab, var(--page-bg) 98%, black 2%) 75%,
+          var(--page-bg) 100%
+        );
       border-bottom: 1px solid rgba(255,255,255,.08);
       color: var(--text);
     }
 
+    /* Dropdowns / overlays */
     .va-portal{
       background: color-mix(in oklab, var(--page-bg) 80%, black 20%);
       border: 1px solid rgba(255,255,255,.12);
       box-shadow: 0 36px 90px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.35);
       border-radius: 10px;
     }
-    .va-overlay{ background: rgba(0,0,0,.55); backdrop-filter: blur(2px); }
+
+    /* Not transparent modal sheet */
+    .va-overlay{ background: rgba(0,0,0,.72); }
     .va-sheet{
-      background: color-mix(in oklab, var(--page-bg) 84%, black 16%);
+      background: color-mix(in oklab, var(--page-bg) 88%, black 12%); /* solid */
       border: 1px solid rgba(255,255,255,.12);
-      box-shadow: 0 28px 80px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.35) inset;
-      border-radius: 10px;
+      box-shadow: 0 28px 80px rgba(0,0,0,.60);
+      border-radius: 12px;
     }
 
-    /* Right-side call drawer */
+    /* Fixed assistant sidebar */
+    .va-left-fixed{
+      position: fixed; inset: 0 auto 0 0; width: 260px;
+      border-right: 1px solid rgba(255,255,255,.06);
+      background: var(--page-bg);
+      overflow: hidden;
+    }
+    .va-left-fixed .rail-scroll{
+      position: absolute; inset: 0; overflow: auto;
+    }
+
+    /* Right-side call drawer with chat */
     .va-call-drawer{
-      position: fixed; inset: 0 0 0 auto; width: min(440px, 92vw);
+      position: fixed; inset: 0 0 0 auto; width: min(520px, 92vw);
       display: grid; grid-template-rows: auto 1fr auto;
       background: color-mix(in oklab, var(--page-bg) 86%, black 14%);
       border-left: 1px solid rgba(255,255,255,.10);
@@ -111,10 +131,30 @@ const Tokens = () => (
     }
     .va-call-drawer.open{ transform: translateX(0); }
     .va-call-overlay{
-      position: fixed; inset: 0; background: rgba(0,0,0,.5); backdrop-filter: blur(2px);
+      position: fixed; inset: 0; background: rgba(0,0,0,.54);
       opacity: 0; pointer-events: none; transition: opacity 200ms var(--ease); z-index: 99997;
     }
     .va-call-overlay.open{ opacity: 1; pointer-events: auto; }
+
+    /* Chat bubbles */
+    .chat-msg{ max-width: 85%; padding: 10px 12px; border-radius: 12px; }
+    .chat-user{
+      background: color-mix(in oklab, var(--page-bg) 86%, white 14%);
+      border: 1px solid rgba(255,255,255,.10);
+      align-self: flex-end;
+    }
+    .chat-ai{
+      background: color-mix(in oklab, var(--page-bg) 80%, black 20%);
+      border: 1px solid rgba(255,255,255,.10);
+      align-self: flex-start;
+    }
+
+    .type-caret{
+      display:inline-block; width: 6px; height: 1em;
+      background: currentColor; margin-left: 3px; animation: blink 1s step-end infinite;
+      vertical-align: bottom;
+    }
+    @keyframes blink { 50% { opacity: 0; } }
   `}</style>
 );
 
@@ -122,6 +162,7 @@ const Tokens = () => (
 type ApiKey = { id: string; name: string; key: string };
 
 type AgentData = {
+  name: string; // NEW: assistant display name
   provider: 'openai' | 'anthropic' | 'google';
   model: string;
   firstMode: string;
@@ -143,30 +184,24 @@ type AgentData = {
 };
 
 const DEFAULT_AGENT: AgentData = {
+  name: 'Assistant', // default
   provider: 'openai',
   model: 'GPT-4o',
   firstMode: 'Assistant speaks first',
   firstMsg: 'Hello.',
   systemPrompt:
 `[Identity]
-You are a blank template AI assistant with minimal default settings, designed to be easily customizable for various use cases.
+You are a blank template AI assistant with minimal default settings, designed to be easily customizable.
 
 [Style]
-- Maintain a neutral and adaptable tone suitable for a wide range of contexts.
-- Use clear and concise language to ensure effective communication.
+- Neutral, concise, helpful.
 
-[Response Guidelines]
-- Avoid jargon unless asked.
-- Keep responses straightforward and focused.
-
-[Goals]
-1) Be adaptable to user instructions.
-2) Allow on-the-fly configuration updates.
-3) Reflect adjustments in real-time.
+[Guidelines]
+- Avoid unnecessary jargon.
+- Keep responses focused.
 
 [Fallback]
-- Ask for clarification if input is vague.
-- Handle errors politely and ask for the next instruction.`,
+- Ask for clarification when needed.`,
   ttsProvider: 'openai',
   voiceName: 'Alloy (American)',
   apiKeyId: '',
@@ -201,11 +236,6 @@ async function apiSave(agentId: string, payload: AgentData){
 async function apiPublish(agentId: string){
   const r = await fetch(`/api/voice/agent/${agentId}/publish`, { method: 'POST' }).catch(()=>null);
   if (!r?.ok) throw new Error('Publish failed');
-  return r.json();
-}
-async function apiCallTest(agentId: string){
-  const r = await fetch(`/api/voice/agent/${agentId}/call-test`, { method: 'POST' }).catch(()=>null);
-  if (!r?.ok) throw new Error('Test call failed');
   return r.json();
 }
 
@@ -299,7 +329,6 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
-/* Solid select */
 function StyledSelect({
   value, onChange, options, placeholder, leftIcon
 }:{
@@ -414,15 +443,15 @@ function StyledSelect({
   );
 }
 
-/* ───────────────── Overlay ───────────────── */
+/* ───────────────── Overlay (generic) ───────────────── */
 function ActionOverlay({
-  title, children, onClose, primaryText = 'Confirm', onPrimary
+  title, children, onClose, primaryText = 'Confirm', onPrimary, primaryWhite = false
 }:{
-  title: string; children: React.ReactNode; onClose: ()=>void; primaryText?: string; onPrimary?: ()=>void;
+  title: string; children: React.ReactNode; onClose: ()=>void; primaryText?: string; onPrimary?: ()=>void; primaryWhite?: boolean;
 }) {
   return createPortal(
     <div className="fixed inset-0 z-[99996] grid place-items-center px-4 va-overlay">
-      <div className="va-sheet w-full max-w-[620px] p-4 md:p-6">
+      <div className="va-sheet w-full max-w-[680px] p-4 md:p-6">
         <div className="flex items-center justify-between mb-3">
           <div className="text-lg font-semibold" style={{ color:'var(--text)' }}>{title}</div>
           <button onClick={onClose} className="p-1 rounded hover:opacity-80" aria-label="Close">
@@ -441,7 +470,7 @@ function ActionOverlay({
           <button
             onClick={onPrimary}
             className="h-9 px-4 rounded-[10px] font-semibold"
-            style={{ background:CTA, color:'#0a0f0d', boxShadow:'0 12px 26px rgba(89,217,179,.22)' }}
+            style={{ background:CTA, color: primaryWhite ? '#ffffff' : '#0a0f0d', boxShadow:'0 12px 26px rgba(89,217,179,.22)' }}
             onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA_HOVER)}
             onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA)}
           >
@@ -521,14 +550,20 @@ export default function VoiceAgentSection() {
 
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
-  const [calling, setCalling] = useState(false);
   const [toast, setToast] = useState<string>('');
-  const [showGenerate, setShowGenerate] = useState(false);
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
 
-  // new: call drawer + prompt composer state
+  // chat drawer + generate overlay state
   const [showCall, setShowCall] = useState(false);
+  const [messages, setMessages] = useState<Array<{role:'user'|'assistant'; text:string}>>([
+    { role: 'assistant', text: 'Hi! Ready when you are.' }
+  ]);
+  const [chatInput, setChatInput] = useState('');
+
+  const [showGenerate, setShowGenerate] = useState(false);
   const [composerText, setComposerText] = useState('');
+  const [genLoading, setGenLoading] = useState<'idle'|'loading'|'typing'>('idle');
+  const [genPreview, setGenPreview] = useState('');
 
   useEffect(() => {
     const handler = (e: Event) => setActiveId((e as CustomEvent<string>).detail);
@@ -561,8 +596,7 @@ export default function VoiceAgentSection() {
 
         setApiKeys(cleaned);
 
-        const ss2 = await scopedStorage();
-        const globalSelected = await ss2.getJSON<string>('apiKeys.selectedId', '');
+        const globalSelected = await ss.getJSON<string>('apiKeys.selectedId', '');
         const chosen =
           (data.apiKeyId && cleaned.some((k) => k.id === data.apiKeyId)) ? data.apiKeyId! :
           (globalSelected && cleaned.some((k) => k.id === globalSelected)) ? globalSelected :
@@ -570,7 +604,7 @@ export default function VoiceAgentSection() {
 
         if (chosen && chosen !== data.apiKeyId) {
           setData(prev => ({ ...prev, apiKeyId: chosen }));
-          await ss2.setJSON('apiKeys.selectedId', chosen);
+          await ss.setJSON('apiKeys.selectedId', chosen);
         }
       } catch {}
     })();
@@ -599,106 +633,90 @@ export default function VoiceAgentSection() {
     catch { setToast('Publish failed'); }
     finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
   }
-  async function doCallTest(){
-    if (!activeId) { setToast('Select or create an agent'); return; }
-    setCalling(true); setToast('');
-    try { await apiCallTest(activeId); setToast('Calling…'); }
-    catch { setToast('Test call failed'); }
-    finally { setCalling(false); setTimeout(()=>setToast(''), 1800); }
+
+  /* Build prompt by translating extra text into directive-y lines */
+  function buildPrompt(base: string, extraRaw: string) {
+    const extra = (extraRaw || '').trim();
+    if (!extra) return base;
+
+    const lines = extra
+      .split(/\n+/)
+      .map(s => s.trim())
+      .filter(Boolean)
+      .map(s => {
+        // normalize: add trailing period, turn “be friendly” -> “Be friendly.”
+        const t = s[0] ? s[0].toUpperCase() + s.slice(1) : s;
+        return /[.!?]$/.test(t) ? t : `${t}.`;
+      });
+
+    const block = `
+[Extra Instructions]
+${lines.map(l => `- ${l}`).join('\n')}
+
+[Behavior]
+- Always respect the Extra Instructions above.
+- Keep replies concise and useful.
+- Ask for missing info before acting.`;
+
+    return `${base}\n${block}`;
   }
 
-  /* Build a concrete, VAPI-style prompt from base + user composer */
-  function buildPrompt(base: string, extra: string) {
-    const extraTrim = (extra || '').trim();
-    const addBlock = extraTrim
-      ? `
+  // typing animation for genPreview
+  function typeIntoPreview(text: string) {
+    setGenPreview('');
+    let i = 0;
+    setGenLoading('typing');
+    const id = setInterval(() => {
+      i += Math.max(1, Math.floor(text.length / 60));
+      setGenPreview(text.slice(0, i));
+      if (i >= text.length) {
+        clearInterval(id);
+        setGenLoading('idle');
+      }
+    }, 18);
+  }
 
-[Extra Instructions From Builder]
-${extraTrim}
+  function onGenerate() {
+    setGenLoading('loading');
+    const merged = buildPrompt(DEFAULT_AGENT.systemPrompt, composerText);
+    // small pause then “types” it out
+    setTimeout(() => {
+      typeIntoPreview(merged);
+    }, 600);
+  }
 
-[Behavioral Rules]
-- Respect all Extra Instructions above.
-- If a tool is required, ask concise clarifying questions first.
-- Keep replies short, structured, and immediately useful.`
-      : '';
+  function applyGenerated() {
+    const finalText = genPreview || buildPrompt(DEFAULT_AGENT.systemPrompt, composerText);
+    setField('systemPrompt')(finalText);
+    setShowGenerate(false);
+    setComposerText('');
+    setGenPreview('');
+    setGenLoading('idle');
+  }
 
-    return `${base}${addBlock}`;
+  function sendChat() {
+    const txt = chatInput.trim();
+    if (!txt) return;
+    setMessages(m => [...m, { role: 'user', text: txt }]);
+    setChatInput('');
+    // fake assistant reply for UI
+    const reply = `${data.name}: I heard "${txt}". How can I help further?`;
+    setTimeout(() => setMessages(m => [...m, { role: 'assistant', text: reply }]), 400);
   }
 
   return (
     <section className="va-scope" style={{ background:'var(--bg)', color:'var(--text)' }}>
       <Tokens />
 
-      {/* CALL DRAWER + OVERLAY */}
-      {createPortal(
-        <>
-          <div className={`va-call-overlay ${showCall ? 'open' : ''}`} onClick={()=>setShowCall(false)} />
-          <aside className={`va-call-drawer ${showCall ? 'open' : ''}`} aria-hidden={!showCall}>
-            {/* drawer header (slightly lighter than panel) */}
-            <div
-              className="flex items-center justify-between px-4 h-[64px]"
-              style={{ background: 'color-mix(in oklab, var(--bg) 86%, white 14%)', borderBottom:'1px solid rgba(255,255,255,.1)' }}
-            >
-              <div className="font-semibold">Live Call</div>
-              <button
-                onClick={()=>setShowCall(false)}
-                className="px-2 py-1 rounded hover:opacity-80"
-                aria-label="Close call panel"
-                style={{ color:'var(--text-muted)', border:'1px solid rgba(255,255,255,.12)' }}
-              >
-                Close
-              </button>
-            </div>
-
-            {/* drawer body */}
-            <div className="p-4 overflow-y-auto">
-              <div className="rounded-lg p-4"
-                   style={{ background:'color-mix(in oklab, var(--bg) 92%, white 8%)', border:'1px solid rgba(255,255,255,.10)' }}>
-                <div className="text-sm mb-2" style={{ color:'var(--text-muted)' }}>Call status</div>
-                <div className="text-base font-semibold">Connected to Assistant</div>
-                <div className="mt-4 h-28 rounded-md"
-                     style={{
-                       background:'repeating-linear-gradient(90deg, rgba(255,255,255,.08) 0 2px, transparent 2px 6px)',
-                       border:'1px dashed rgba(255,255,255,.12)'
-                     }}
-                />
-                <div className="text-xs mt-2" style={{ color:'var(--text-muted)' }}>
-                  (Placeholder UI) Wire this to your WebRTC / VAPI call surface.
-                </div>
-              </div>
-            </div>
-
-            {/* drawer footer */}
-            <div className="p-4 border-t" style={{ borderColor:'rgba(255,255,255,.10)' }}>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={()=>setShowCall(false)}
-                  className="h-10 px-4 rounded-md font-semibold"
-                  style={{ background:'crimson', color:'#fff' }}
-                >
-                  End call
-                </button>
-                <button
-                  onClick={doCallTest}
-                  className="h-10 px-4 rounded-md"
-                  style={{ background:'var(--input-bg)', color:'var(--text)', border:'1px solid var(--input-border)' }}
-                >
-                  Test backend
-                </button>
-              </div>
-            </div>
-          </aside>
-        </>,
-        document.body
-      )}
-
-      <div className="grid w-full" style={{ gridTemplateColumns: '260px 1fr' }}>
-        {/* Rail */}
-        <div className="sticky top-0 h-screen" style={{ borderRight:'1px solid rgba(255,255,255,.06)' }}>
+      {/* FIXED ASSISTANT SIDEBAR */}
+      <div className="va-left-fixed">
+        <div className="rail-scroll">
           <RailBoundary><AssistantRail /></RailBoundary>
         </div>
+      </div>
 
-        {/* Content */}
+      {/* RIGHT CONTENT (adds left padding so it doesn't sit under the fixed rail) */}
+      <div style={{ marginLeft: 260 }}>
         <div className="va-main px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w-[1160px]"
              style={{ fontSize:'var(--fz-body)', lineHeight:'var(--lh-body)' }}>
 
@@ -726,11 +744,8 @@ ${extraTrim}
               onClick={()=>setShowCall(true)}
               className="inline-flex items-center gap-2 rounded-[10px] select-none"
               style={{
-                height:'var(--control-h)',
-                padding:'0 18px',
-                background:CTA,
-                color:'#ffffff',          /* white text */
-                fontWeight: 700,          /* slightly bolder */
+                height:'var(--control-h)', padding:'0 18px',
+                background:CTA, color:'#ffffff', fontWeight:700,
                 boxShadow:'0 10px 22px rgba(89,217,179,.20)'
               }}
               onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA_HOVER)}
@@ -751,7 +766,7 @@ ${extraTrim}
           {/* KPIs */}
           <div className="grid gap-[12px] md:grid-cols-2 mb-[12px]">
             <div className="va-card">
-              <div className="va-head" style={{ minHeight: 48 }}>
+              <div className="va-head" style={{ minHeight: 56 }}>
                 <div className="text-xs" style={{ color:'var(--text-muted)' }}>Cost</div>
                 <div />
               </div>
@@ -760,7 +775,7 @@ ${extraTrim}
               </div>
             </div>
             <div className="va-card">
-              <div className="va-head" style={{ minHeight: 48 }}>
+              <div className="va-head" style={{ minHeight: 56 }}>
                 <div className="text-xs" style={{ color:'var(--text-muted)' }}>Latency</div>
                 <div />
               </div>
@@ -774,31 +789,43 @@ ${extraTrim}
           <Section
             title="Model"
             icon={<Gauge className="w-4 h-4" style={{ color: CTA }} />}
-            desc="Configure the assistant’s reasoning model and first message."
+            desc="Configure the model, assistant name, and first message."
             defaultOpen={true}
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px]">
               <div>
-                <div className="mb-[var(--s-2)] text-[12.5px]" style={{ color:'var(--text)' }}>Provider</div>
-                <StyledSelect value={data.provider} onChange={(v)=>setField('provider')(v as AgentData['provider'])} options={providerOpts}/>
+                <div className="mb-[var(--s-2)] text-[12.5px]">Assistant Name</div>
+                <input
+                  value={data.name}
+                  onChange={(e)=>setField('name')(e.target.value)}
+                  className="w-full bg-transparent outline-none rounded-[10px] px-3"
+                  style={{ height:'var(--control-h)', background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)' }}
+                  placeholder="e.g., Nova"
+                />
               </div>
-
               <div>
-                <div className="mb-[var(--s-2)] text-[12.5px]" style={{ color:'var(--text)' }}>Model</div>
-                <StyledSelect value={data.model} onChange={setField('model')} options={modelOpts}/>
+                <div className="mb-[var(--s-2)] text-[12.5px]">Provider</div>
+                <StyledSelect value={data.provider} onChange={(v)=>setField('provider')(v as AgentData['provider'])} options={providerOpts}/>
               </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt-[var(--s-4)]">
               <div>
-                <div className="mb-[var(--s-2)] text-[12.5px]" style={{ color:'var(--text)' }}>First Message Mode</div>
-                <StyledSelect value={data.firstMode} onChange={setField('firstMode')} options={firstMessageModes}/>
+                <div className="mb-[var(--s-2)] text-[12.5px]">Model</div>
+                <StyledSelect value={data.model} onChange={setField('model')} options={modelOpts}/>
               </div>
               <div>
-                <div className="mb-[var(--s-2)] text-[12.5px]" style={{ color:'var(--text)' }}>First Message</div>
+                <div className="mb-[var(--s-2)] text-[12.5px]">First Message Mode</div>
+                <StyledSelect value={data.firstMode} onChange={setField('firstMode')} options={firstMessageModes}/>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt-[var(--s-4)]">
+              <div>
+                <div className="mb-[var(--s-2)] text-[12.5px]">First Message</div>
                 <input
                   className="w-full bg-transparent outline-none rounded-[10px] px-3"
-                  style={{ height:'var(--control-h)', background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)', fontSize:'var(--fz-body)' }}
+                  style={{ height:'var(--control-h)', background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)' }}
                   value={data.firstMsg}
                   onChange={(e)=>setField('firstMsg')(e.target.value)}
                 />
@@ -811,14 +838,14 @@ ${extraTrim}
                 <button
                   className="inline-flex items-center gap-2 rounded-[10px] text-sm"
                   style={{ height:36, padding:'0 12px', background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                  onClick={()=>{ setComposerText(''); setShowGenerate(true); }}
+                  onClick={()=>{ setComposerText(''); setGenPreview(''); setGenLoading('idle'); setShowGenerate(true); }}
                 >
                   <Wand2 className="w-4 h-4" /> Generate
                 </button>
               </div>
               <textarea
-                className="w-full bg-transparent outline-none rounded-[10px] px-3 py-[10px]"
-                style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)', minHeight:130, lineHeight:'var(--lh-body)', fontSize:'var(--fz-body)' }}
+                className="w-full bg-transparent outline-none rounded-[12px] px-3 py-[12px]"
+                style={{ minHeight: 320, background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)', lineHeight:'var(--lh-body)', fontSize:'var(--fz-body)' }}
                 value={data.systemPrompt}
                 onChange={(e)=>setField('systemPrompt')(e.target.value)}
               />
@@ -833,7 +860,7 @@ ${extraTrim}
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px]">
               <div>
-                <div className="mb-[var(--s-2)] text-[12.5px] flex items-center gap-2" style={{ color:'var(--text)' }}>
+                <div className="mb-[var(--s-2)] text-[12.5px] flex items-center gap-2">
                   <KeyRound className="w-4 h-4 opacity-80" /> OpenAI API Key
                 </div>
                 <StyledSelect
@@ -854,7 +881,7 @@ ${extraTrim}
               </div>
 
               <div>
-                <div className="mb-[var(--s-2)] text-[12.5px]" style={{ color:'var(--text)' }}>Voice Provider</div>
+                <div className="mb-[var(--s-2)] text-[12.5px]">Voice Provider</div>
                 <StyledSelect
                   value={data.ttsProvider}
                   onChange={(v)=>setField('ttsProvider')(v as AgentData['ttsProvider'])}
@@ -865,7 +892,7 @@ ${extraTrim}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt-[var(--s-4)]">
               <div>
-                <div className="mb-[var(--s-2)] text-[12.5px]" style={{ color:'var(--text)' }}>Voice</div>
+                <div className="mb-[var(--s-2)] text-[12.5px]">Voice</div>
                 <StyledSelect
                   value={data.voiceName}
                   onChange={setField('voiceName')}
@@ -873,10 +900,6 @@ ${extraTrim}
                   placeholder="— Choose —"
                 />
               </div>
-            </div>
-
-            <div className="mt-[var(--s-2)] text-xs" style={{ color:'var(--text-muted)' }}>
-              Keep utterances short/specific for natural cadence.
             </div>
           </Section>
 
@@ -888,12 +911,12 @@ ${extraTrim}
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px]">
               <div>
-                <div className="mb-[var(--s-2)] text-[12.5px]" style={{ color:'var(--text)' }}>Provider</div>
+                <div className="mb-[var(--s-2)] text-[12.5px]">Provider</div>
                 <StyledSelect value={data.asrProvider} onChange={(v)=>setField('asrProvider')(v as AgentData['asrProvider'])} options={asrProviders}/>
               </div>
 
               <div>
-                <div className="mb-[var(--s-2)] text-[12.5px]" style={{ color:'var(--text)' }}>Language</div>
+                <div className="mb-[var(--s-2)] text-[12.5px]">Language</div>
                 <StyledSelect
                   value={data.asrLang}
                   onChange={(v)=>{
@@ -908,12 +931,12 @@ ${extraTrim}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt-[var(--s-4)]">
               <div>
-                <div className="mb-[var(--s-2)] text-[12.5px]" style={{ color:'var(--text)' }}>Dialect</div>
+                <div className="mb-[var(--s-2)] text-[12.5px]">Dialect</div>
                 <StyledSelect value={data.asrDialect} onChange={(v)=>setField('asrDialect')(v as AgentData['asrDialect'])} options={dialectOpts}/>
               </div>
 
               <div>
-                <div className="mb-[var(--s-2)] text-[12.5px]" style={{ color:'var(--text)' }}>Model</div>
+                <div className="mb-[var(--s-2)] text-[12.5px]">Model</div>
                 <StyledSelect value={data.asrModel} onChange={setField('asrModel')} options={asrModelOpts}/>
               </div>
             </div>
@@ -941,31 +964,121 @@ ${extraTrim}
         </div>
       </div>
 
-      {/* ---- Generate Prompt composer ---- */}
+      {/* ---- Right chat drawer ---- */}
+      {createPortal(
+        <>
+          <div className={`va-call-overlay ${showCall ? 'open' : ''}`} onClick={()=>setShowCall(false)} />
+          <aside className={`va-call-drawer ${showCall ? 'open' : ''}`} aria-hidden={!showCall}>
+            {/* header (same dark with gentle gradient) */}
+            <div
+              className="flex items-center justify-between px-4 h-[64px]"
+              style={{
+                background:
+                  'linear-gradient(90deg, color-mix(in oklab, var(--bg) 100%, transparent), color-mix(in oklab, var(--bg) 98%, white 2%) 40%, var(--bg))',
+                borderBottom:'1px solid rgba(255,255,255,.1)'
+              }}
+            >
+              <div className="font-semibold">Chat with {data.name || 'Assistant'}</div>
+              <button
+                onClick={()=>setShowCall(false)}
+                className="px-2 py-1 rounded hover:opacity-80"
+                aria-label="Close"
+                style={{ color:'var(--text)', border:'1px solid rgba(255,255,255,.12)', background:'color-mix(in oklab, var(--bg) 90%, black 10%)' }}
+              >
+                Close
+              </button>
+            </div>
+
+            {/* body (messages) */}
+            <div className="p-4 overflow-y-auto flex flex-col gap-3">
+              {messages.map((m, i) => (
+                <div key={i} className="flex flex-col" style={{ alignItems: m.role==='user' ? 'flex-end' : 'flex-start' }}>
+                  <div className="text-[11px]" style={{ color:'var(--text-muted)' }}>
+                    {m.role==='user' ? 'You' : (data.name || 'Assistant')}
+                  </div>
+                  <div className={`chat-msg ${m.role==='user' ? 'chat-user' : 'chat-ai'}`} style={{ color:'var(--text)' }}>
+                    {m.text}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* footer (composer) */}
+            <div className="p-3 border-t" style={{ borderColor:'rgba(255,255,255,.10)' }}>
+              <form
+                onSubmit={(e)=>{ e.preventDefault(); sendChat(); }}
+                className="flex items-center gap-2"
+              >
+                <input
+                  value={chatInput}
+                  onChange={(e)=>setChatInput(e.target.value)}
+                  placeholder={`Message ${data.name || 'Assistant'}…`}
+                  className="flex-1 rounded-md px-3 py-2 outline-none"
+                  style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+                />
+                <button
+                  type="submit"
+                  className="h-10 px-4 rounded-md font-semibold"
+                  style={{ background:CTA, color:'#ffffff' }}
+                >
+                  Send
+                </button>
+              </form>
+            </div>
+          </aside>
+        </>,
+        document.body
+      )}
+
+      {/* ---- Generate Prompt overlay (solid, loading, typing) ---- */}
       {showGenerate && (
         <ActionOverlay
           title="Compose Prompt"
-          onClose={()=>setShowGenerate(false)}
-          primaryText="Generate"
+          onClose={()=>{ if (genLoading==='loading') return; setShowGenerate(false); }}
+          primaryText={genLoading==='loading' ? 'Generating…' : genLoading==='typing' ? 'Use Prompt' : 'Generate'}
           onPrimary={()=>{
-            const merged = buildPrompt(DEFAULT_AGENT.systemPrompt, composerText);
-            setField('systemPrompt')(merged);
-            setShowGenerate(false);
+            if (genLoading==='idle') onGenerate();
+            else if (genLoading==='typing' || genPreview) applyGenerated();
           }}
+          primaryWhite
         >
-          <div className="grid gap-2">
+          <div className="grid gap-3">
             <label className="text-xs" style={{ color:'var(--text-muted)' }}>
-              Add extra instructions (persona, tone, tools, do/don’t):
+              Add extra instructions (persona, tone, rules, tools):
             </label>
             <textarea
               value={composerText}
               onChange={(e)=>setComposerText(e.target.value)}
               className="w-full bg-transparent outline-none rounded-[10px] px-3 py-2"
-              placeholder="e.g., Be a concise, friendly support agent. Always verify account ID before actions. Prefer bullet points."
+              placeholder="e.g., Be a friendly, concise support agent. Confirm account ID before any action. Prefer bullet points."
               style={{ minHeight: 160, background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)' }}
             />
-            <div className="text-[11px]" style={{ color:'var(--text-muted)' }}>
-              Click <b>Generate</b> to merge these into the base template.
+
+            {/* Preview / loader / typing */}
+            <div className="mt-2 rounded-[10px] p-3"
+              style={{ background:'color-mix(in oklab, var(--bg) 90%, black 10%)', border:'1px solid rgba(255,255,255,.10)', color:'var(--text)' }}
+            >
+              {genLoading === 'idle' && !genPreview && (
+                <div className="text-xs" style={{ color:'var(--text-muted)' }}>
+                  Click <b>Generate</b> to build a usable system prompt preview here.
+                </div>
+              )}
+
+              {genLoading === 'loading' && (
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="w-4 h-4 rounded-full border-2 border-t-transparent animate-spin" />
+                  Generating…
+                </div>
+              )}
+
+              {(genLoading === 'typing' || genPreview) && (
+                <pre
+                  style={{ whiteSpace:'pre-wrap', wordBreak:'break-word', fontSize:12, lineHeight:1.5 }}
+                >
+                  {genPreview}
+                  {genLoading === 'typing' && <span className="type-caret" />}
+                </pre>
+              )}
             </div>
           </div>
         </ActionOverlay>
