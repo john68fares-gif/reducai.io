@@ -60,23 +60,34 @@ const Tokens = () => (
       --card-shadow: 0 10px 18px rgba(0,0,0,.22);
       --card-border: rgba(255,255,255,.04);
 
-      /* ───────── WIDE CENTER-DARK BANDS (very subtle) ─────────
-         One repeated tile per band: light → darker middle → light.
-         Alphas are low so it reads like a soft shadow, not stripes. */
-      --band-w: 360px; /* width of one band; increase to 400px if you want even wider */
+      /* ========= Vertical green bands (true vertical, under content) ========= */
+      /* tuning */
+      --stripe-gap: 28px;       /* distance between lines */
+      --stripe-thickness: 3px;  /* width of each line */
+      --stripe-ink: rgba(0,255,194,0.10);  /* faint brand green for lines */
+
+      /* vignette so the middle of the card is darkest, edges lighter (green-tinted) */
+      --edge-green:   rgba(0,255,194,0.08);
+      --center-green: rgba(0,255,194,0.22);
+
+      /* vertical lines */
       --bands:
         repeating-linear-gradient(
-          118deg,
-          rgba(0,0,0,0.00)                   0,
-          rgba(0,0,0,0.035) calc(var(--band-w) * 0.25),
-          rgba(0,0,0,0.11)  calc(var(--band-w) * 0.50), /* darkest midpoint */
-          rgba(0,0,0,0.035) calc(var(--band-w) * 0.75),
-          rgba(0,0,0,0.00)  var(--band-w)
+          90deg,
+          var(--stripe-ink) 0 var(--stripe-thickness),
+          rgba(0,255,194,0.00) var(--stripe-thickness) var(--stripe-gap)
         );
 
-      /* gentle dark→light sweep from top-left */
-      --sweep: linear-gradient(25deg, rgba(0,0,0,.10) 0%, rgba(0,0,0,0) 45%);
-      /* microscopic hover ring */
+      /* center-dark sweep horizontally across the card */
+      --center-sweep:
+        linear-gradient(
+          90deg,
+          var(--edge-green) 0%,
+          var(--center-green) 50%,
+          var(--edge-green) 100%
+        );
+
+      /* tiny hover ring */
       --hover-ring: 0 0 0 1px rgba(89,217,179,.14);
     }
 
@@ -91,42 +102,39 @@ const Tokens = () => (
       --card-shadow: 0 10px 16px rgba(0,0,0,.10);
       --card-border: rgba(0,0,0,.06);
 
-      /* same shape but lighter ink for light mode */
-      --band-w: 360px;
-      --bands:
-        repeating-linear-gradient(
-          118deg,
-          rgba(0,0,0,0.00)                   0,
-          rgba(0,0,0,0.025) calc(var(--band-w) * 0.25),
-          rgba(0,0,0,0.085) calc(var(--band-w) * 0.50),
-          rgba(0,0,0,0.025) calc(var(--band-w) * 0.75),
-          rgba(0,0,0,0.00)  var(--band-w)
-        );
-      --sweep: linear-gradient(25deg, rgba(0,0,0,.06) 0%, rgba(0,0,0,0) 45%);
+      /* slightly lighter in light mode */
+      --stripe-ink: rgba(0,255,194,0.08);
+      --edge-green:   rgba(0,255,194,0.06);
+      --center-green: rgba(0,255,194,0.16);
     }
 
     .va-main{ overflow: visible; position: relative; contain: none; }
 
-    /* Card surface: bands + sweep, minimal border; hover gets a faint ring only */
+    /* Card surface: solid background; decorative layers in ::before under content */
     .va-card{
       position: relative;
       border: 1px solid var(--card-border);
       border-radius: var(--radius-outer);
-      background:
-        var(--bands),
-        linear-gradient(180deg, var(--panel-alt), var(--panel));
+      background: linear-gradient(180deg, var(--panel-alt), var(--panel));
       box-shadow: var(--card-shadow);
       overflow: hidden;
     }
+    /* put all real content above 0-layer */
+    .va-card > * { position: relative; z-index: 1; }
+
+    /* bands + center vignette UNDER content */
     .va-card::before{
       content:'';
       position:absolute; inset:0; pointer-events:none;
-      background: var(--sweep);
-      mix-blend-mode: soft-light;
+      z-index:0;
+      background:
+        var(--bands),
+        var(--center-sweep);
+      background-blend-mode: multiply;
+      opacity: .30; /* a hair stronger so you can perceive the shadow; tweak 0.24—0.34 */
     }
-    .va-card:hover{ box-shadow: var(--card-shadow), var(--hover-ring); }
 
-    /* Dropdown portal */
+    /* dropdown */
     .va-portal{
       background: var(--menu-bg);
       border: 1px solid var(--menu-border);
@@ -134,7 +142,7 @@ const Tokens = () => (
       border-radius: 12px;
     }
 
-    /* Overlay */
+    /* overlay */
     .va-overlay{ background: rgba(0,0,0,.55); backdrop-filter: blur(2px); }
     .va-sheet{
       background: linear-gradient(180deg, var(--menu-bg), var(--menu-bg));
@@ -480,7 +488,7 @@ function ActionOverlay({
   );
 }
 
-/* ───────────────── Section (title ABOVE, subtle banded surface) ───────────────── */
+/* ───────────────── Section (title ABOVE, banded card) ───────────────── */
 function Section({
   title, icon, desc, children, defaultOpen = true
 }:{
@@ -507,8 +515,7 @@ function Section({
           className="w-full text-left px-4 sm:px-5"
           style={{
             color:'var(--text)', minHeight:'var(--header-h)',
-            display:'grid', gridTemplateColumns:'1fr auto', alignItems:'center', gap:'12px',
-            background:'linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,0))' /* lighter header */
+            display:'grid', gridTemplateColumns:'1fr auto', alignItems:'center', gap:'12px'
           }}
         >
           <span className="min-w-0 flex items-center gap-3">
