@@ -25,7 +25,8 @@ class RailBoundary extends React.Component<{children:React.ReactNode},{hasError:
 }
 
 /* ───────────────── Local tokens ─────────────────
-   Flat, single-color boxes (#223248) — no gradients. */
+   Middle band = page background (var(--bg)).
+   6 tiny lightening steps on each side, behind content, fill full width. */
 const CTA       = '#59d9b3';
 const CTA_HOVER = '#54cfa9';
 
@@ -38,38 +39,37 @@ const Tokens = () => (
       --fz-title: 18px; --fz-sub: 15px; --fz-body: 14px; --fz-label: 12.5px;
       --lh-body: 1.45; --ease: cubic-bezier(.22,.61,.36,1);
 
-      /* Pull colors from your global theme */
+      /* Use your global theme vars */
       --text: #ffffff;
       --text-muted: rgba(255,255,255,.72);
 
-      /* Alias to page background from globals (light/dark compatible) */
+      /* DO NOT override --bg; read it from globals */
       --page-bg: var(--bg);
 
-      /* Card border + inputs (unchanged) */
+      /* Inputs / borders */
       --input-bg: #101314;
       --input-border: rgba(255,255,255,.10);
       --input-shadow: inset 0 1px 0 rgba(255,255,255,.03), 0 8px 18px rgba(0,0,0,.35);
       --border-weak: rgba(255,255,255,.10);
 
-      /* ---- Band layout: center + 6 steps each side = 100% ----
-         Choose core + 12*step = 100%
-         Example: 16% + 12 * 7% = 100% */
+      /* ---- Layout math: core + 12 steps = 100% ----
+         16% + 12 * 7% = 100%  */
       --core-w: 16%;
       --step-w: 7%;
 
-      /* ---- Ultra-subtle lightening steps (barely visible) ----
-         Nudge these up/down if you need slightly more/less contrast */
-      --s1: color-mix(in oklab, var(--page-bg) 99.8%, white 0.2%);
-      --s2: color-mix(in oklab, var(--page-bg) 99.65%, white 0.35%);
-      --s3: color-mix(in oklab, var(--page-bg) 99.5%,  white 0.5%);
-      --s4: color-mix(in oklab, var(--page-bg) 99.35%, white 0.65%);
-      --s5: color-mix(in oklab, var(--page-bg) 99.2%,  white 0.8%);
-      --s6: color-mix(in oklab, var(--page-bg) 99.0%,  white 1.0%);
+      /* ---- Ultra-subtle lightening per step (barely visible) ----
+         Nudge these numbers up/down if you want a hair more/less contrast. */
+      --s1: color-mix(in oklab, var(--page-bg) 99.85%, white 0.15%);
+      --s2: color-mix(in oklab, var(--page-bg) 99.7%,  white 0.30%);
+      --s3: color-mix(in oklab, var(--page-bg) 99.55%, white 0.45%);
+      --s4: color-mix(in oklab, var(--page-bg) 99.4%,  white 0.60%);
+      --s5: color-mix(in oklab, var(--page-bg) 99.25%, white 0.75%);
+      --s6: color-mix(in oklab, var(--page-bg) 99.1%,  white 0.90%);
     }
 
     .va-main{ overflow: visible; position: relative; contain: none; }
 
-    /* Card base uses the page bg; steps will cover entire width */
+    /* Card base: use the page bg; bands will render behind content */
     .va-card{
       position: relative;
       border-radius: var(--radius-outer);
@@ -77,24 +77,25 @@ const Tokens = () => (
       background: var(--page-bg);
       box-shadow: 0 18px 40px rgba(0,0,0,.28);
       overflow: hidden;
-      isolation: isolate; /* creates a local stacking context */
+      isolation: isolate;       /* local stacking context so ::before sits under children */
     }
 
-    /* Ensure content sits above the background bands */
+    /* Content above bands */
     .va-card > * { position: relative; z-index: 1; }
 
-    /* Header: transparent so bands subtly show under it */
+    /* Header: transparent so the subtle band shows beneath */
     .va-card .va-head{
       min-height: var(--header-h);
       display: grid; grid-template-columns: 1fr auto; align-items: center;
       padding: 0 16px;
-      background: transparent;
+      background: transparent;  /* important */
       border-bottom: 1px solid rgba(255,255,255,.06);
       color: var(--text);
     }
 
-    /* Stepped bands BEHIND content (z-index:0).
-       Left s6..s1 → CORE → right s1..s6. Fills 100% width, no gaps, no overlap. */
+    /* Stepped band BEHIND content (z-index:0).
+       Left s6..s1 → CORE (page bg) → right s1..s6.
+       Fills 100% width with no gaps/overlaps. */
     .va-scope .va-card::before{
       content:'';
       position:absolute; inset:0;
@@ -105,7 +106,7 @@ const Tokens = () => (
         linear-gradient(
           to right,
 
-          /* left steps */
+          /* left steps (lightest at edge, gently darkening toward core) */
           var(--s6) 0%,
           var(--s6) calc(0% + 1*var(--step-w)),
           var(--s5) calc(0% + 1*var(--step-w)),
@@ -119,7 +120,7 @@ const Tokens = () => (
           var(--s1) calc(0% + 5*var(--step-w)),
           var(--s1) calc(0% + 6*var(--step-w)),
 
-          /* core = exact page background */
+          /* exact center = page background */
           var(--page-bg) calc(0% + 6*var(--step-w)),
           var(--page-bg) calc(0% + 6*var(--step-w) + var(--core-w)),
 
@@ -139,7 +140,7 @@ const Tokens = () => (
         );
     }
 
-    /* Menus/overlays as before */
+    /* Dropdowns / overlays (unchanged) */
     .va-portal{
       background: #101314;
       border: 1px solid rgba(255,255,255,.12);
@@ -155,6 +156,7 @@ const Tokens = () => (
     }
   `}</style>
 );
+
 /* ───────────────── Types / storage ───────────────── */
 type ApiKey = { id: string; name: string; key: string };
 
@@ -609,7 +611,7 @@ export default function VoiceAgentSection() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* TSX-safe setter helper */
+  /* TSX-safe setter */
   function setField<K extends keyof AgentData>(k: K) {
     return (v: AgentData[K]) => setData(prev => ({ ...prev, [k]: v }));
   }
@@ -766,7 +768,6 @@ export default function VoiceAgentSection() {
             desc="Choose the TTS provider, voice, and OpenAI key."
             defaultOpen={true}
           >
-            {/* OpenAI key import (scoped storage) */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px]">
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px] flex items-center gap-2" style={{ color:'var(--text)' }}>
