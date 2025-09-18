@@ -1,23 +1,21 @@
 // pages/improve.tsx
-// Live Test that behaves like Support. Split lanes, send-to-both, version drag, local previews.
-// Clear Pre/System/Post vs Quick Rule. Auto-naming snapshots. Fixed-page scrolling.
-// Updates:
-// - Save UX: "Save + Snapshot" and optional Auto-snapshot toggle
-// - Quick Rule: "Merge into System" (no confusion with Save)
-// - Pictures/Videos/Files tabs auto-open the picker
-// - Drag version onto input footer to test that version (or onto Lane B)
-// - Allow sending attachments without text
-// - Prompt section helpers & clearer structure
-// - Stable local user id + localStorage agent fallback (so it works even without auth/API)
+// Improve = fine-tune, test, compare existing agents (no create/import/delete here).
+// Features:
+// - API-only agent list (optional x-owner-id), no local seeding.
+// - Save + Snapshot (PATCH existing agent).
+// - Quick Rule merges into System (optionally snapshot).
+// - Lanes A/B, send-to-both, drag version to Lane B or to footer for one-shot test.
+// - Attachments (pics/vids/files), auto-open pickers, drag-drop.
+// - Local Memory (per-agent) + Version snapshots (per-agent) in localStorage only.
 
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import Link from 'next/link';
 import {
-  Bot, Search, Loader2, Save, Trash2, RefreshCw, History, RotateCcw, X, Upload, Download,
-  Copy, Check, MessageSquare, Send, Layers, CornerDownRight, ChevronDown, Image as ImageIcon,
-  Paperclip, Film, FileText, Info
+  Bot, Search, Loader2, Save, RefreshCw, History, RotateCcw, X,
+  Copy, Check, MessageSquare, Send, Layers, CornerDownRight, ChevronDown,
+  Image as ImageIcon, Paperclip, Film, FileText, Info
 } from 'lucide-react';
 
 type BotRow = {
@@ -42,7 +40,6 @@ type Version = {
 };
 
 type ChatMsg = { role: 'user' | 'assistant' | 'system'; content: string };
-
 type Attachment = { id: string; name: string; mime: string; url?: string; size?: number };
 
 const PANEL: React.CSSProperties = {
@@ -51,16 +48,14 @@ const PANEL: React.CSSProperties = {
   borderRadius: 14,
   boxShadow: '0 3px 14px rgba(0,0,0,.08)',
 };
-
 const CARD: React.CSSProperties = {
   background: 'color-mix(in oklab, var(--bg) 98%, transparent)',
   border: '1px solid color-mix(in oklab, var(--border) 92%, transparent)',
   borderRadius: 10,
 };
 
-const versionsKey = (o: string, a: string) => `versions:${o}:${a}`;
-const memoryKey = (o: string, a: string) => `memory:${o}:${a}`;
-const agentsKey = (o: string) => `agents:${o}`;
+const versionsKey = (o: string, a: string) => `versions:${o || 'anon'}:${a}`;
+const memoryKey = (o: string, a: string) => `memory:${o || 'anon'}:${a}`;
 const fmtTime = (ts: number) => new Date(ts).toLocaleString();
 
 const stripMd = (t: string) =>
@@ -77,7 +72,7 @@ function SplitIcon() {
   );
 }
 
-// Heuristic short label for changes
+// Snapshot label heuristic
 function autoLabel(prevSys: string, nextSys: string): string {
   const before = stripMd(prevSys || '');
   const after = stripMd(nextSys || '');
@@ -91,20 +86,6 @@ function autoLabel(prevSys: string, nextSys: string): string {
   if (/formal/i.test(after)) return 'Formal tone';
   if (/casual|friendly/i.test(after)) return 'Casual tone';
   return (added || 'Prompt edited').slice(0, 48);
-}
-
-function summarizeTitle(system: string) {
-  const s = stripMd(system);
-  const hints = [
-    { r: /\byes\/?no\b|only\s+(yes|no)/i, t: 'Yes/No Only' },
-    { r: /\bjson|schema/i, t: 'JSON Output' },
-    { r: /\bconcise|brief|short/i, t: 'Concise Answers' },
-    { r: /\bformal\b/i, t: 'Formal Tone' },
-    { r: /\bcasual|friendly\b/i, t: 'Casual Tone' },
-    { r: /\bmarkdown|code fence/i, t: 'Markdown Format' },
-  ];
-  for (const h of hints) if (h.r.test(s)) return h.t;
-  return (s.split('\n')[0] || 'Variant').slice(0, 48);
 }
 
 // Compose effective system from pieces
@@ -123,7 +104,9 @@ function composeSystem(base: string, quickRules: string, pre: string, post: stri
 }
 
 export default function Improve() {
+  // If you have auth, set this to the current user/account id; else leave null to fetch all
   const [userId, setUserId] = useState<string | null>(null);
+
   const [list, setList] = useState<BotRow[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = useMemo(() => list.find(b => b.id === selectedId) || null, [list, selectedId]);
@@ -149,11 +132,7 @@ export default function Improve() {
   const [copied, setCopied] = useState(false);
   const [autoSnapshot, setAutoSnapshot] = useState(true);
 
-  // Assistants rail
-  const [query, setQuery] = useState('');
-  const [sort, setSort] = useState<'pinned_first' | 'name_asc' | 'updated_desc'>('pinned_first');
-
-  // Live test lanes
+  // Lanes
   const [laneB, setLaneB] = useState<Version | null>(null);
   const [sendBoth, setSendBoth] = useState(false);
   const [activeLane, setActiveLane] = useState<'A' | 'B'>('A');
@@ -162,7 +141,7 @@ export default function Improve() {
   const [busy, setBusy] = useState(false);
   const [input, setInput] = useState('');
 
-  // Input tabs: pictures / videos / files
+  // Composer tabs
   type Tab = 'text' | 'pics' | 'vids' | 'files';
   const [tab, setTab] = useState<Tab>('text');
   const [pics, setPics] = useState<Attachment[]>([]);
@@ -172,89 +151,36 @@ export default function Improve() {
   const vidsRef = useRef<HTMLInputElement | null>(null);
   const filesRef = useRef<HTMLInputElement | null>(null);
 
-  // Drag-over highlight for input footer (drop version here)
+  // Footer drag
   const [dropActive, setDropActive] = useState(false);
-
-  // One-shot test version (drag to footer or click "Test" on a card)
   const [testVersion, setTestVersion] = useState<Version | null>(null);
 
-  // Init user (stable local dev id)
+  // If you have auth/session, populate userId here
   useEffect(() => {
-    let dev = localStorage.getItem('dev:userId');
-    if (!dev) {
-      dev = `dev_${Math.random().toString(36).slice(2, 10)}`;
-      localStorage.setItem('dev:userId', dev);
-    }
-    setUserId(dev);
+    setUserId(null); // leave null to fetch all agents returned by API
   }, []);
 
-  // Fetch bots (API first; fallback to localStorage; auto-seed if empty)
-  const fetchBots = useCallback(async (uid: string) => {
+  // Fetch agents from API (no local fallback/seed)
+  const fetchBots = useCallback(async () => {
     try {
-      // 1) Try API with owner filter
-      let res = await fetch(`/api/chatbots?ownerId=${encodeURIComponent(uid)}`, { headers: { 'x-owner-id': uid } });
-      let json = await res.json().catch(() => null);
-      let rows: BotRow[] = Array.isArray(json?.data) ? json.data : [];
-
-      // 2) Try API without filter
-      if (rows.length === 0) {
-        res = await fetch(`/api/chatbots`, { headers: { 'x-owner-id': uid } });
-        json = await res.json().catch(() => null);
-        rows = Array.isArray(json?.data) ? json.data : [];
-      }
-
-      // 3) Fallback to localStorage
-      if (rows.length === 0) {
-        const ak = agentsKey(uid);
-        try {
-          const raw = localStorage.getItem(ak);
-          if (raw) rows = JSON.parse(raw) as BotRow[];
-        } catch {}
-        // 4) Auto-seed a sample if still empty
-        if (rows.length === 0) {
-          const sample: BotRow = {
-            id: `dev-agent-${Date.now()}`,
-            ownerId: uid,
-            name: 'Support Assistant',
-            model: 'gpt-4o-mini',
-            temperature: 0.5,
-            system: 'Answer briefly and helpfully.',
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          };
-          rows = [sample];
-          try { localStorage.setItem(ak, JSON.stringify(rows)); } catch {}
-        }
-      }
-
+      const headers: Record<string, string> = {};
+      if (userId) headers['x-owner-id'] = userId;
+      const res = await fetch('/api/chatbots', { headers });
+      const json = await res.json().catch(() => null);
+      const rows: BotRow[] = Array.isArray(json?.data) ? json.data : [];
       setList(rows);
       if (!selectedId && rows.length) setSelectedId(rows[0].id);
     } catch (e) {
       console.error('[Improve] fetchBots failed:', e);
-      // last-resort local seed
-      const uidKey = agentsKey(uid);
-      const sample: BotRow = {
-        id: `dev-agent-${Date.now()}`,
-        ownerId: uid,
-        name: 'Support Assistant',
-        model: 'gpt-4o-mini',
-        temperature: 0.5,
-        system: 'Answer briefly and helpfully.',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      const rows = [sample];
-      try { localStorage.setItem(uidKey, JSON.stringify(rows)); } catch {}
-      setList(rows);
-      setSelectedId(sample.id);
+      setList([]);
     }
-  }, [selectedId]);
+  }, [userId, selectedId]);
 
-  useEffect(() => { if (userId) void fetchBots(userId); }, [userId, fetchBots]);
+  useEffect(() => { void fetchBots(); }, [fetchBots]);
 
-  // Load selection (state + versions + memory)
+  // Load selection (versions + memory)
   useEffect(() => {
-    if (!selected || !userId) return;
+    if (!selected) return;
     setName(selected.name || '');
     setModel(selected.model || 'gpt-4o');
     setTemperature(Number.isFinite(selected.temperature) ? selected.temperature : 0.5);
@@ -262,11 +188,11 @@ export default function Improve() {
     setPrePrompt(''); setPostPrompt(''); setQuickRule('');
     setLaneB(null); setMsgsA([]); setMsgsB([]); setInput('');
     try {
-      const rawV = localStorage.getItem(versionsKey(userId, selected.id));
+      const rawV = localStorage.getItem(versionsKey(userId || 'all', selected.id));
       setVersions(rawV ? (JSON.parse(rawV) as Version[]) : []);
     } catch { setVersions([]); }
     try {
-      const mem = localStorage.getItem(memoryKey(userId, selected.id));
+      const mem = localStorage.getItem(memoryKey(userId || 'all', selected.id));
       setMemoryText(mem || '');
     } catch { setMemoryText(''); }
     setDirty(false);
@@ -291,7 +217,9 @@ export default function Improve() {
     setDirty(d);
   }, [name, model, temperature, system, prePrompt, postPrompt, quickRule, selected]);
 
-  // Assistants filter/sort
+  // Filter/sort
+  const [query, setQuery] = useState('');
+  const [sort, setSort] = useState<'pinned_first' | 'name_asc' | 'updated_desc'>('pinned_first');
   const filtered = useMemo(() => {
     let rows = [...list];
     if (query.trim()) {
@@ -311,75 +239,46 @@ export default function Improve() {
   const copyId = async () => { if (!selected) return; await navigator.clipboard.writeText(selected.id); setCopied(true); setTimeout(() => setCopied(false), 900); };
   const fmtTok = (s: string) => Math.max(1, Math.round((s || '').length / 4));
 
-  // Snapshot helper
+  // Snapshots
   function makeSnapshot(prev?: BotRow) {
-    if (!selectedId || !userId) return;
+    if (!selectedId) return;
     const label = autoLabel(prev?.system || '', system);
     const v: Version = { id: `v_${Date.now()}`, ts: Date.now(), label, name, model, temperature, system };
     const next = [v, ...versions].slice(0, 80);
     setVersions(next);
-    localStorage.setItem(versionsKey(userId, selectedId), JSON.stringify(next));
+    try { localStorage.setItem(versionsKey(userId || 'all', selectedId), JSON.stringify(next)); } catch {}
   }
 
+  // Save (PATCH existing)
   async function saveEdits() {
-    if (!userId || !selectedId) return;
+    if (!selected || !selectedId) return;
     try {
       setSaving(true);
       const prev = list.find(b => b.id === selectedId);
-      // create snapshot (explicit)
       makeSnapshot(prev);
 
-      // best-effort server patch
-      try {
-        await fetch(`/api/chatbots/${selectedId}?ownerId=${encodeURIComponent(userId)}`, {
-          method: 'PATCH', headers: { 'Content-Type': 'application/json', 'x-owner-id': userId },
-          body: JSON.stringify({ name, model, temperature, system }),
-        });
-      } catch {}
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (userId) headers['x-owner-id'] = userId;
 
-      // refresh list shallow + persist to local mirror
-      setList(cur => {
-        const updated: BotRow = {
-          id: selectedId, ownerId: userId, name, model, temperature, system,
-          createdAt: prev?.createdAt || new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        };
-        const next = cur.some(b => b.id === selectedId) ? cur.map(b => b.id === selectedId ? updated : b) : [updated, ...cur];
-        try { localStorage.setItem(agentsKey(userId), JSON.stringify(next)); } catch {}
-        return next;
-      });
+      await fetch(`/api/chatbots/${selectedId}`, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({ name, model, temperature, system }),
+      }).catch(() => { /* swallow network error; Improve is editor only */ });
+
+      // Shallow refresh in UI
+      setList(cur => cur.map(b => b.id === selectedId ? {
+        ...b, name, model, temperature, system, updatedAt: new Date().toISOString()
+      } : b));
       setDirty(false);
     } catch {
-      alert('Failed to save (local copy kept).');
+      alert('Failed to save.');
     } finally {
       setSaving(false);
     }
   }
 
-  async function deleteSelected() {
-    if (!userId || !selectedId) return;
-    if (!confirm('Delete this assistant?')) return;
-    try {
-      // best-effort server delete
-      try {
-        await fetch(`/api/chatbots/${selectedId}?ownerId=${encodeURIComponent(userId)}`, { method: 'DELETE', headers: { 'x-owner-id': userId } });
-      } catch {}
-
-      // update local list + storage
-      setList(cur => {
-        const next = cur.filter(b => b.id !== selectedId);
-        try { localStorage.setItem(agentsKey(userId), JSON.stringify(next)); } catch {}
-        return next;
-      });
-      localStorage.removeItem(versionsKey(userId, selectedId));
-      localStorage.removeItem(memoryKey(userId, selectedId));
-      setSelectedId(null);
-    } catch {
-      alert('Failed to delete locally.');
-    }
-  }
-
-  // Quick Rule → merge into System (visible)
+  // Quick Rule → merge into System
   function applyQuickRule() {
     if (!quickRule.trim()) return;
     const merged = composeSystem(system, quickRule, '', '', null);
@@ -392,19 +291,17 @@ export default function Improve() {
     }
   }
 
-  // Memory helper (very light): keep last ~1000 chars of conversation gist
+  // Memory: keep last ~1000 chars of conversation gist
   function updateLocalMemory(from: ChatMsg[]) {
-    if (!useMemory || !userId || !selected) return;
+    if (!useMemory || !selected) return;
     const last = from.slice(-12).map(m => `${m.role === 'user' ? 'User' : 'AI'}: ${stripMd(m.content)}`).join(' | ');
     const mem = `User prefs & style (heuristic): ${last}`.slice(0, 1000);
     setMemoryText(mem);
-    try { localStorage.setItem(memoryKey(userId, selected.id), mem); } catch {}
+    try { localStorage.setItem(memoryKey(userId || 'all', selected.id), mem); } catch {}
   }
 
-  // Current composer attachments (pictures + videos + files)
-  const currentAttachments = React.useCallback(() => {
-    return [...pics, ...vids, ...files];
-  }, [pics, vids, files]);
+  // Composer attachments
+  const currentAttachments = useCallback(() => [...pics, ...vids, ...files], [pics, vids, files]);
 
   // File helpers
   function fileToAttachment(file: File): Promise<Attachment> {
@@ -415,9 +312,7 @@ export default function Improve() {
         const fr = new FileReader();
         fr.onload = () => resolve({ ...base, url: String(fr.result || '') });
         fr.readAsDataURL(file);
-      } else {
-        resolve(base);
-      }
+      } else resolve(base);
     });
   }
   async function addFiles(fileList: FileList | null, kind: 'pics' | 'vids' | 'files') {
@@ -429,8 +324,7 @@ export default function Improve() {
     if (kind === 'files') setFiles(prev => [...prev, ...atts.filter(a => !a.mime.startsWith('image/') && !a.mime.startsWith('video/'))].slice(0, 16));
   }
 
-  // --- Chat send (Support style) ---
-  // Send a message to lane A or B (supporting attachments)
+  // API ask → lane
   const sendToLane = useCallback(
     async (which: 'A' | 'B', text: string, attachments: Attachment[]) => {
       const laneVersion =
@@ -439,13 +333,12 @@ export default function Improve() {
           : laneB
           ? { system: laneB.system, model: laneB.model, temperature: laneB.temperature, versionId: laneB.id }
           : null;
-
       if (!laneVersion) return;
 
       const memory = useMemory ? memoryText : '';
       const effectiveSystem = composeSystem(laneVersion.system, '', prePrompt, postPrompt, memory);
 
-      // optimistic add (user bubble)
+      // optimistic user bubble
       const userMsg =
         (text && text.trim()) ||
         (attachments.length ? `(sent ${attachments.length} attachment${attachments.length > 1 ? 's' : ''})` : '');
@@ -466,13 +359,7 @@ export default function Improve() {
             system: effectiveSystem,
             model: laneVersion.model,
             temperature: laneVersion.temperature,
-            attachments: attachments.map(a => ({
-              id: a.id,
-              name: a.name,
-              mime: a.mime,
-              url: a.url,
-              size: a.size,
-            })),
+            attachments: attachments.map(a => ({ id: a.id, name: a.name, mime: a.mime, url: a.url, size: a.size })),
           }),
         });
 
@@ -502,27 +389,23 @@ export default function Improve() {
     [selected, laneB, system, model, temperature, prePrompt, postPrompt, useMemory, memoryText, msgsA, msgsB]
   );
 
-  // Master send that routes to lanes, supports "testVersion" one-shot, and attachments-only sends
+  // Master send
   async function sendPrompt() {
     if (busy) return;
-
     const t = (input || '').trim();
-    const atts = [...pics, ...vids, ...files];
+    const atts = currentAttachments();
     if (!t && atts.length === 0) return;
 
-    // clear composer immediately
+    // clear composer
     setInput('');
-    setPics([]);
-    setVids([]);
-    setFiles([]);
+    setPics([]); setVids([]); setFiles([]);
 
-    // One-shot test with a chosen version (applies to focused lane for this single send)
+    // one-shot test with chosen version
     if (testVersion) {
       const lane = activeLane;
       const memory = useMemory ? memoryText : '';
       const effectiveSystem = composeSystem(testVersion.system, '', prePrompt, postPrompt, memory);
 
-      // optimistic user bubble
       const userMsg = t || (atts.length ? `(sent ${atts.length} attachment${atts.length > 1 ? 's' : ''})` : '');
       if (lane === 'A') setMsgsA(cur => [...cur, { role: 'user', content: userMsg }]);
       else setMsgsB(cur => [...cur, { role: 'user', content: userMsg }]);
@@ -542,7 +425,6 @@ export default function Improve() {
             attachments: atts.map(a => ({ id: a.id, name: a.name, mime: a.mime, url: a.url, size: a.size })),
           }),
         });
-
         const data = await res.json().catch(() => null);
         const reply =
           data?.ok && typeof data?.message === 'string'
@@ -564,13 +446,12 @@ export default function Improve() {
         else setMsgsB(cur => [...cur, { role: 'assistant', content: fallback }]);
       } finally {
         setBusy(false);
-        setTestVersion(null); // one-shot complete
+        setTestVersion(null);
       }
-
       return;
     }
 
-    // Normal routing
+    // normal routing
     if (sendBoth && laneB) {
       await Promise.all([sendToLane('A', t, atts), sendToLane('B', t, atts)]);
     } else {
@@ -578,7 +459,7 @@ export default function Improve() {
     }
   }
 
-  // --- Footer drag-and-test (drop a version to test only next message) ---
+  // Footer drag: set testVersion
   const footerDragOver: React.DragEventHandler = (e) => {
     if (!versions.length) return;
     if (!e.dataTransfer) return;
@@ -616,7 +497,7 @@ export default function Improve() {
     }
   };
 
-  // --- Auto-open pickers when switching tabs ---
+  // Auto-open pickers
   useEffect(() => {
     const openSoon = (fn: () => void) => setTimeout(fn, 10);
     if (tab === 'pics') openSoon(() => picsRef.current?.click());
@@ -624,7 +505,7 @@ export default function Improve() {
     if (tab === 'files') openSoon(() => filesRef.current?.click());
   }, [tab]);
 
-  // --- UI ---
+  // UI
   return (
     <div className="h-screen w-full overflow-hidden" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
       {/* Top bar */}
@@ -642,56 +523,20 @@ export default function Improve() {
           <label className="ml-2 text-xs inline-flex items-center gap-2 px-2 py-1 rounded-md" style={{ ...CARD }}>
             <input type="checkbox" checked={autoSnapshot} onChange={e=>setAutoSnapshot(e.target.checked)} />
             Auto-snapshot on Quick Rule
-            <Info className="w-3.5 h-3.5 opacity-60" title="When ON, applying a Quick Rule also creates a snapshot." />
+            <Info className="w-3.5 h-3.5 opacity-60" title="When ON, applying a Quick Rule also creates a version snapshot." />
           </label>
 
           <div className="ml-auto flex items-center gap-2">
-            <button onClick={() => userId && fetchBots(userId)} className="px-3 py-1.5 rounded-md text-sm" style={{ ...CARD }}>
+            <button onClick={() => void fetchBots()} className="px-3 py-1.5 rounded-md text-sm" style={{ ...CARD }}>
               <RefreshCw className="inline w-4 h-4 mr-1" /> Refresh
             </button>
-            {/* Import */}
-            <label className="px-3 py-1.5 rounded-md text-sm cursor-pointer" style={{ ...CARD }}>
-              <Upload className="inline w-4 h-4 mr-1" /> Import
-              <input type="file" accept="application/json" className="hidden" onChange={async e => {
-                const f = e.target.files?.[0]; if (!f || !userId) return;
-                try {
-                  const text = await f.text(); const parsed = JSON.parse(text); const a = parsed?.agent || parsed;
-                  const resp = await fetch('/api/chatbots', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json', 'x-owner-id': userId },
-                    body: JSON.stringify({ name: a.name || 'Imported Agent', model: a.model || 'gpt-4o', temperature: typeof a.temperature==='number'?a.temperature:0.5, system: a.system || '' }),
-                  });
-                  const j = await resp.json().catch(()=>null);
-                  if (j?.ok && j?.data?.id) {
-                    await fetchBots(userId);
-                    setSelectedId(j.data.id);
-                  } else {
-                    // also mirror to local on failure
-                    const sample: BotRow = {
-                      id: `dev-agent-${Date.now()}`, ownerId: userId,
-                      name: a.name || 'Imported Agent', model: a.model || 'gpt-4o', temperature: typeof a.temperature==='number'?a.temperature:0.5, system: a.system || '',
-                      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-                    };
-                    setList(cur => {
-                      const next = [sample, ...cur];
-                      try { localStorage.setItem(agentsKey(userId), JSON.stringify(next)); } catch {}
-                      return next;
-                    });
-                    setSelectedId(sample.id);
-                  }
-                } catch { alert('Import failed'); }
-              }} />
-            </label>
-            {/* Export */}
-            <button onClick={() => {
-              if (!selected) return;
-              const payload = { type:'reduc.ai/agent', version:1, agent:{ ...selected } };
-              const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement('a');
-              a.href = url; a.download = `${(name || 'agent').replace(/\s+/g,'_')}.json`; a.click(); URL.revokeObjectURL(url);
-            }} className="px-3 py-1.5 rounded-md text-sm" style={{ ...CARD }}>
-              <Download className="inline w-4 h-4 mr-1" /> Export
-            </button>
+
+            {/* Copy ID of current */}
+            {selected && (
+              <button onClick={copyId} className="px-3 py-1.5 rounded-md text-sm" style={{ ...CARD }}>
+                {copied ? <><Check className="inline w-4 h-4 mr-1" /> Copied</> : <><Copy className="inline w-4 h-4 mr-1" /> Copy ID</>}
+              </button>
+            )}
 
             {/* Save + Snapshot */}
             <button
@@ -701,12 +546,6 @@ export default function Improve() {
               style={{ background: 'var(--brand)', color: '#00120a' }}>
               <Save className="w-4 h-4" />
               <span>Save + Snapshot</span>
-            </button>
-            {/* Delete */}
-            <button onClick={deleteSelected} disabled={!selected || saving}
-              className="px-3 py-1.5 rounded-md text-sm disabled:opacity-60"
-              style={{ background: 'rgba(255,80,80,.12)', border: '1px solid rgba(255,80,80,.35)' }}>
-              <Trash2 className="inline w-4 h-4 mr-1" /> Delete
             </button>
           </div>
         </div>
@@ -737,35 +576,10 @@ export default function Improve() {
             <div className="p-3 overflow-auto" style={{ maxHeight: 'calc(100% - 90px)' }}>
               {filtered.length === 0 ? (
                 <div className="text-sm opacity-80 py-8 text-center">
-                  No agents.
-                  <div className="mt-3 flex flex-col items-center gap-2">
-                    <button
-                      onClick={() => {
-                        if (!userId) return;
-                        const sample: BotRow = {
-                          id: `dev-agent-${Date.now()}`,
-                          ownerId: userId,
-                          name: 'My First Agent',
-                          model: 'gpt-4o-mini',
-                          temperature: 0.5,
-                          system: 'Answer briefly and helpfully.',
-                          createdAt: new Date().toISOString(),
-                          updatedAt: new Date().toISOString(),
-                        };
-                        setList(cur => {
-                          const next = [sample, ...cur];
-                          try { localStorage.setItem(agentsKey(userId), JSON.stringify(next)); } catch {}
-                          return next;
-                        });
-                        setSelectedId(sample.id);
-                      }}
-                      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm"
-                      style={{ background: 'var(--brand)', color: '#00120a' }}
-                    >
-                      Create sample agent (local)
-                    </button>
-
-                    <Link href="/builder" className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm" style={{ border: '1px solid var(--border)' }}>
+                  No agents found.
+                  <div className="mt-2">
+                    <Link href="/builder" className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm"
+                      style={{ background: 'var(--brand)', color: '#00120a' }}>
                       Go to Builder
                     </Link>
                   </div>
@@ -787,14 +601,6 @@ export default function Improve() {
                             <div className="truncate">{b.name || 'Untitled'}</div>
                             <div className="text-[11px] opacity-60 truncate">{b.model} · {b.id.slice(0,8)}</div>
                           </div>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); void navigator.clipboard.writeText(b.id); setCopied(true); setTimeout(()=>setCopied(false), 900); }}
-                            className="text-[10px] px-2 py-1 rounded-md"
-                            style={CARD}
-                            title="Copy ID"
-                          >
-                            {copied ? 'Copied ✓' : 'Copy ID'}
-                          </button>
                         </button>
                       </li>
                     );
@@ -959,12 +765,8 @@ export default function Improve() {
                 onDragOver={(e)=>{footerDragOver(e);}}
                 onDragLeave={footerDragLeave}
                 onDrop={(e)=>{footerDrop(e); onFooterFileDrop(e as any);}}
-                style={{
-                  border: dropActive ? '1px dashed var(--brand)' : '1px dashed transparent',
-                  padding: 8
-                }}
+                style={{ border: dropActive ? '1px dashed var(--brand)' : '1px dashed transparent', padding: 8 }}
               >
-                {/* Testing pill if a test version is set */}
                 {testVersion && (
                   <div className="flex items-center gap-2 text-xs mb-1">
                     <span className="px-2 py-1 rounded-md" style={{ ...CARD, borderColor: 'var(--brand)' }}>
