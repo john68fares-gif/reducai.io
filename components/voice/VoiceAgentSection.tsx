@@ -1,983 +1,411 @@
-// components/voice/VoiceAgentSection.tsx
+// pages/improve.tsx
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
-import dynamic from 'next/dynamic';
-import { createPortal } from 'react-dom';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Rocket, Search, Check, Lock, X, KeyRound,
-  Play, Square
+  Bot, History, Send, Sparkles, Save, RotateCcw, Copy, Trash2,
+  ChevronDown, ChevronUp, X, Check, Wand2, Plus
 } from 'lucide-react';
-import { scopedStorage } from '@/utils/scoped-storage';
 
-// ⬇️ load AssistantRail client-side only so it never flashes or mis-measures on SSR
-const AssistantRail = dynamic(() => import('@/components/voice/AssistantRail'), { ssr: false });
+/* =========================================================
+   THEME HELPERS
+   ========================================================= */
+const BRAND = '#00ffc2';
+const card = 'bg-[rgba(13,15,17,0.92)] border border-[rgba(0,255,194,0.18)] shadow-[inset_0_0_22px_rgba(0,0,0,0.28),0_10px_30px_rgba(0,255,194,0.06)] rounded-2xl';
+const btn = 'px-3.5 h-9 rounded-xl font-medium hover:brightness-110 active:scale-[.99] transition';
+const btnGreen = `${btn} bg-[${BRAND}] text-black`;
+const btnGhost = `${btn} bg-white/5 text-white border border-white/10`;
+const label = 'text-xs uppercase tracking-wider text-white/60';
 
-/* ─────────── constants ─────────── */
-const CTA = '#59d9b3';
-const CTA_HOVER = '#54cfa9';
-const ACTIVE_KEY = 'va:activeId';
-
-/* phone icon */
-function PhoneFilled(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" width="16" height="16" {...props} aria-hidden>
-      <path
-        d="M6.62 10.79a15.053 15.053 0 006.59 6.59l2.2-2.2a1 1 0 011.03-.24c1.12.37 2.33.57 3.56.57a1 1 0 011 1v3.5a1 1 0 01-1 1C11.3 22 2 12.7 2 2.99a1 1 0 011-1H6.5a1 1 0 011 1c0 1.23.2 2.44.57 3.56a1 1 0 01-.24 1.03l-2.2 2.2z"
-        fill="currentColor"
-      />
-    </svg>
-  );
-}
-
-/* ─────────── SOLID theme + layout vars ─────────── */
-const Tokens = () => (
-  <style jsx global>{`
-    .va-scope{
-      --bg:#0b0c10; --panel:#0d0f11; --text:#e6f1ef; --text-muted:#9fb4ad;
-
-      --s-2:8px; --s-3:12px; --s-4:16px; --s-5:20px; --s-6:24px;
-      --radius-outer:8px;
-      --control-h:44px; --header-h:88px;
-      --fz-title:18px; --fz-sub:15px; --fz-body:14px; --fz-label:12.5px;
-      --lh-body:1.45; --ease:cubic-bezier(.22,.61,.36,1);
-
-      /* Layout: measured at runtime */
-      --app-sidebar-w: 240px; /* updated by ResizeObserver */
-      --rail-w: 260px;
-
-      --page-bg:var(--bg);
-      --panel-bg:var(--panel);
-      --input-bg:var(--panel);
-      --input-border:rgba(255,255,255,.10);
-      --input-shadow:0 0 0 1px rgba(255,255,255,.06) inset;
-
-      --border-weak:rgba(255,255,255,.10);
-      --card-shadow:0 22px 44px rgba(0,0,0,.28),
-                    0 0 0 1px rgba(255,255,255,.06) inset,
-                    0 0 0 1px rgba(89,217,179,.20);
-    }
-
-    .va-card{
-      border-radius:var(--radius-outer);
-      border:1px solid var(--border-weak);
-      background:var(--panel-bg);
-      box-shadow:var(--card-shadow);
-      overflow:hidden; isolation:isolate;
-    }
-
-    .va-head{
-      min-height:var(--header-h);
-      display:grid; grid-template-columns:1fr auto; align-items:center;
-      padding:0 16px;
-      background:linear-gradient(90deg,
-        var(--panel-bg) 0%,
-        color-mix(in oklab, var(--panel-bg) 97%, white 3%) 50%,
-        var(--panel-bg) 100%);
-      border-bottom:1px solid rgba(255,255,255,.08);
-      color:var(--text);
-    }
-
-    /* AssistantRail is pinned immediately to the right of your global sidebar */
-    .va-left-fixed{
-      position:fixed;
-      top:0; bottom:0;
-      left:var(--app-sidebar-w);
-      width:var(--rail-w);
-      z-index:12;
-      background:var(--panel-bg);
-      border-right:1px solid rgba(255,255,255,.06);
-      box-shadow:14px 0 28px rgba(0,0,0,.08);
-      display:flex; flex-direction:column;
-    }
-    .va-left-fixed .rail-scroll{ overflow:auto; flex:1; }
-
-    /* Page content shifts by (app sidebar + rail) so it never drifts */
-    .va-page{
-      margin-left: calc(var(--app-sidebar-w) + var(--rail-w));
-      transition: margin-left 180ms var(--ease);
-    }
-
-    /* dropdown menu base (solid) */
-    .va-menu{
-      background:var(--panel-bg);
-      border:1px solid rgba(255,255,255,.12);
-      box-shadow:0 36px 90px rgba(0,0,0,.55);
-      border-radius:10px;
-    }
-
-    /* Drawer + modal are solid (no blur) */
-    .va-blur-overlay{
-      position:fixed; inset:0; z-index:9996;
-      background:rgba(8,10,12,.78); /* solid overlay, no blur */
-      opacity:0; pointer-events:none; transition:opacity 200ms var(--ease);
-    }
-    .va-blur-overlay.open{ opacity:1; pointer-events:auto; }
-
-    .va-call-drawer{
-      position:fixed; inset:0 0 0 auto; width:min(540px,92vw); z-index:9997;
-      display:grid; grid-template-rows:auto 1fr auto;
-      background:var(--panel-bg);
-      border-left:1px solid rgba(255,255,255,.10);
-      box-shadow:-28px 0 80px rgba(0,0,0,.55);
-      transform:translateX(100%); transition:transform 280ms var(--ease);
-    }
-    .va-call-drawer.open{ transform:translateX(0); }
-
-    .va-modal-wrap{ position:fixed; inset:0; z-index:9998; }
-    .va-modal-center{ position:absolute; inset:0; display:grid; place-items:center; padding:20px; }
-    .va-sheet{ background:var(--panel-bg); border:1px solid rgba(255,255,255,.12); box-shadow:0 28px 80px rgba(0,0,0,.70); border-radius:12px; }
-
-    .chat-msg{ max-width:85%; padding:10px 12px; border-radius:12px; }
-    .chat-user{ background:var(--panel-bg); border:1px solid rgba(255,255,255,.12); align-self:flex-end; }
-    .chat-ai{ background:color-mix(in oklab, var(--panel-bg) 92%, black 8%); border:1px solid rgba(255,255,255,.12); align-self:flex-start; }
-
-    /* Force every dropdown popover and children solid */
-    .va-scope .va-menu,
-    .va-scope .va-menu * {
-      background: var(--panel-bg) !important;
-      color: var(--text) !important;
-      border-color: var(--input-border) !important;
-      box-shadow: none !important;
-      backdrop-filter: none !important;
-    }
-  `}</style>
-);
-
-/* ─────────── types / storage ─────────── */
-type ApiKey = { id: string; name: string; key: string };
-
-type AgentData = {
-  name: string;
-  provider: 'openai' | 'anthropic' | 'google';
-  model: string;
-  firstMode: string;
-  firstMsg: string;
-  systemPrompt: string;
-
-  ttsProvider: 'openai' | 'elevenlabs';
-  voiceName: string;
-  apiKeyId?: string;
-
-  asrProvider: 'deepgram' | 'whisper' | 'assemblyai';
-  asrModel: string;
-
-  denoise: boolean;
-  numerals: boolean;
+/* =========================================================
+   TYPES
+   ========================================================= */
+type Version = {
+  id: string;
+  title: string;
+  createdAt: number;
+  prompt: string;
 };
 
-const DEFAULT_AGENT: AgentData = {
-  name: 'Assistant',
-  provider: 'openai',
-  model: 'GPT-4o',
-  firstMode: 'Assistant speaks first',
-  firstMsg: 'Hello.',
-  systemPrompt:
+type ChatMsg = { role: 'user'|'assistant'|'system'; content: string };
+
+/* =========================================================
+   STORAGE KEYS (scoped)
+   ========================================================= */
+const K_SCOPE           = 'improve';
+const K_VERSIONS        = `${K_SCOPE}:versions.v1`;
+const K_ACTIVE_VERSION  = `${K_SCOPE}:activeVersionId.v1`;
+const K_CHAT            = `${K_SCOPE}:chat.v1`;
+
+/* =========================================================
+   UTILS
+   ========================================================= */
+// Remove stray ** from markdown-y prompts
+function cleanPrompt(p: string) {
+  return p.replace(/\*\*/g, '');
+}
+function nowId() {
+  return Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+function fmtDate(ts: number) {
+  const d = new Date(ts);
+  return d.toLocaleString();
+}
+
+// Heuristic title if no AI route available
+function inferTitleFromPrompt(prompt: string) {
+  const firstLine = prompt.split('\n').map(s => s.trim()).find(Boolean) || '';
+  const tags = [];
+  if (/sales|convert|lead/i.test(prompt)) tags.push('Sales');
+  if (/support|help|faq/i.test(prompt)) tags.push('Support');
+  if (/neutral|template|versatile/i.test(prompt)) tags.push('Template');
+  const head = firstLine.replace(/[\[\]]/g,'').slice(0,40);
+  const tagStr = tags.length ? ` • ${tags.join(' / ')}` : '';
+  return (head || 'Updated Prompt') + tagStr;
+}
+
+// Try your API first, fallback to heuristic
+async function nameWithAI(prompt: string): Promise<string> {
+  try {
+    const r = await fetch('/api/ai/name', {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json' },
+      body: JSON.stringify({ prompt })
+    });
+    if (r.ok) {
+      const j = await r.json();
+      const t = (j?.title || '').toString().trim();
+      if (t) return t;
+    }
+  } catch {}
+  return inferTitleFromPrompt(prompt);
+}
+
+/* =========================================================
+   DEFAULT BASE PROMPT (from your spec)
+   ========================================================= */
+function buildBasePrompt(name: string, goal: string) {
+  return cleanPrompt(
 `[Identity]
-You are a blank template AI assistant with minimal default settings.
+You are ${name || 'a blank template AI assistant'} with minimal default settings, designed to be easily customizable for various use cases.
 
 [Style]
-- Neutral, concise, helpful.
+- Maintain a neutral and adaptable tone suitable for a wide range of contexts.
+- Use clear and concise language to ensure effective communication.
 
-[Guidelines]
-- Avoid unnecessary jargon.
-- Keep responses focused.
+[Response Guidelines]
+- Avoid using any specific jargon or domain-specific language unless the user explicitly asks.
+- Keep responses straightforward and focused on the task at hand.
 
-[Fallback]
-- Ask for clarification when needed.`,
-  ttsProvider: 'openai',
-  voiceName: 'Alloy (American)',
-  apiKeyId: '',
-  asrProvider: 'deepgram',
-  asrModel: 'Nova 2',
-  denoise: false,
-  numerals: false,
-};
+[Task & Goals]
+1. ${goal || 'Serve as a versatile agent ready to be tailored for different roles based on user instructions.'}
+2. Allow users to modify model parameters (temperature, messages, and other settings) as needed.
+3. Reflect adjustments in real time to adapt to the current context.
 
-const keyFor = (id: string) => `va:agent:${id}`;
-const loadAgentData = (id: string): AgentData => {
-  try { const raw = localStorage.getItem(keyFor(id)); if (raw) return { ...DEFAULT_AGENT, ...(JSON.parse(raw)||{}) }; }
-  catch {}
-  return { ...DEFAULT_AGENT };
-};
-const saveAgentData = (id: string, data: AgentData) => {
-  try { localStorage.setItem(keyFor(id), JSON.stringify(data)); } catch {}
-};
-
-/* ─────────── mock backend ─────────── */
-async function apiSave(agentId: string, payload: AgentData){
-  const r = await fetch(`/api/voice/agent/${agentId}/save`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
-  }).catch(()=>null);
-  if (!r?.ok) throw new Error('Save failed');
-  return r.json();
-}
-async function apiPublish(agentId: string){
-  const r = await fetch(`/api/voice/agent/${agentId}/publish`, { method: 'POST' }).catch(()=>null);
-  if (!r?.ok) throw new Error('Publish failed');
-  return r.json();
+[Error Handling / Fallback]
+- Ask for clarification when inputs are vague or unclear.
+`);
 }
 
-/* ─────────── options ─────────── */
-type Opt = { value: string; label: string; disabled?: boolean; note?: string };
-
-const providerOpts: Opt[] = [
-  { value: 'openai',     label: 'OpenAI' },
-  { value: 'anthropic',  label: 'Anthropic — coming soon', disabled: true, note: 'soon' },
-  { value: 'google',     label: 'Google — coming soon',    disabled: true, note: 'soon' },
-];
-
-const modelOptsFor = (provider: string): Opt[] =>
-  provider === 'openai'
-    ? [
-        { value: 'GPT-4o',  label: 'GPT-4o' },
-        { value: 'GPT-4.1', label: 'GPT-4.1' },
-        { value: 'o4-mini', label: 'o4-mini' },
-      ]
-    : [{ value: 'coming', label: 'Models coming soon', disabled: true }];
-
-const ttsProviders: Opt[] = [
-  { value: 'openai',    label: 'OpenAI' },
-  { value: 'elevenlabs', label: 'ElevenLabs — coming soon', disabled: true, note: 'soon' },
-];
-
-const openAiVoices: Opt[] = [
-  { value: 'Alloy (American)',     label: 'Alloy (American)' },
-  { value: 'Verse (American)',     label: 'Verse (American)' },
-  { value: 'Coral (British)',      label: 'Coral (British)' },
-  { value: 'Amber (Australian)',   label: 'Amber (Australian)' },
-];
-
-const asrProviders: Opt[] = [
-  { value: 'deepgram',   label: 'Deepgram' },
-  { value: 'whisper',    label: 'Whisper — coming soon', disabled: true, note: 'soon' },
-  { value: 'assemblyai', label: 'AssemblyAI — coming soon', disabled: true, note: 'soon' },
-];
-
-const asrModelsFor = (asr: string): Opt[] =>
-  asr === 'deepgram'
-    ? [
-        { value: 'Nova 2', label: 'Nova 2' },
-        { value: 'Nova',   label: 'Nova' },
-      ]
-    : [{ value: 'coming', label: 'Models coming soon', disabled: true }];
-
-/* ─────────── UI atoms ─────────── */
-const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}) => (
-  <button
-    onClick={()=>onChange(!checked)}
-    className="inline-flex items-center"
-    style={{
-      height:28, width:50, padding:'0 6px', borderRadius:999, justifyContent:'flex-start',
-      background: checked ? 'color-mix(in oklab, #59d9b3 18%, var(--input-bg))' : 'var(--input-bg)',
-      border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)'
-    }}
-    aria-pressed={checked}
-  >
-    <span
-      style={{
-        width:18, height:18, borderRadius:999,
-        background: checked ? CTA : 'rgba(255,255,255,.12)',
-        transform:`translateX(${checked?22:0}px)`, transition:'transform .18s var(--ease)'
-      }}
-    />
-  </button>
-);
-
-/* Select with SOLID menu (opens under the control, scrolls with page) */
-function StyledSelect({
-  value, onChange, options, placeholder, leftIcon, menuTop
-}:{
-  value: string; onChange: (v: string) => void;
-  options: Opt[]; placeholder?: string; leftIcon?: React.ReactNode; menuTop?: React.ReactNode;
-}) {
-  const wrapRef = useRef<HTMLDivElement|null>(null);
-  const btnRef = useRef<HTMLButtonElement|null>(null);
-  const searchRef = useRef<HTMLInputElement|null>(null);
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState('');
-
-  const current = options.find(o => o.value === value) || null;
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return q ? options.filter(o => o.label.toLowerCase().includes(q)) : options;
-  }, [options, query, value]);
-
-  useEffect(() => {
-    if (!open) return;
-    const off = (e: MouseEvent) => {
-      if (wrapRef.current?.contains(e.target as Node)) return;
-      setOpen(false);
-    };
-    const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
-    window.addEventListener('mousedown', off);
-    window.addEventListener('keydown', onEsc);
-    return () => { window.removeEventListener('mousedown', off); window.removeEventListener('keydown', onEsc); };
-  }, [open]);
-
-  return (
-    <div ref={wrapRef} className="relative">
-      <button
-        ref={btnRef}
-        type="button"
-        onClick={() => { setOpen(v=>!v); setTimeout(()=>searchRef.current?.focus(),0); }}
-        className="w-full flex items-center justify-between gap-3 px-3 py-3 rounded-[10px] text-sm outline-none transition"
-        style={{
-          background:'var(--input-bg)',
-          border:'1px solid var(--input-border)',
-          boxShadow:'var(--input-shadow)',
-          color:'var(--text)'
-        }}
-      >
-        <span className="flex items-center gap-2 truncate">
-          {leftIcon}
-          <span className="truncate">{current ? current.label : (placeholder || '— Choose —')}</span>
-        </span>
-        <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)' }} />
-      </button>
-
-      {open && (
-        <div
-          className="va-menu absolute z-[60] p-3"
-          style={{
-            top: 'calc(100% + 8px)',
-            left: 0,
-            width: '100%',
-            background: 'var(--panel-bg)',
-            border: '1px solid var(--input-border)',
-            borderRadius: 10 as any
-          }}
-        >
-          {menuTop ? <div className="mb-2">{menuTop}</div> : null}
-
-          <div
-            className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[10px]"
-            style={{ background:'var(--panel-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-          >
-            <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
-            <input
-              ref={searchRef}
-              value={query}
-              onChange={(e)=>setQuery(e.target.value)}
-              placeholder="Type to filter…"
-              className="w-full bg-transparent outline-none text-sm"
-              style={{ color:'var(--text)' }}
-            />
-          </div>
-
-          <div className="max-h-72 overflow-y-auto pr-1" style={{ scrollbarWidth:'thin' }}>
-            {filtered.map(o => (
-              <button
-                key={o.value}
-                disabled={o.disabled}
-                onClick={()=>{ if (o.disabled) return; onChange(o.value); setOpen(false); }}
-                className="w-full text-left text-sm px-3 py-2 rounded-[8px] transition flex items-center gap-2 disabled:opacity-60"
-                style={{
-                  color:'var(--text)',
-                  background:'var(--panel-bg)',
-                  border:'1px solid var(--panel-bg)',
-                  cursor:o.disabled?'not-allowed':'pointer'
-                }}
-                onMouseEnter={(e)=>{ if (o.disabled) return;
-                  const el=e.currentTarget as HTMLButtonElement;
-                  el.style.background = 'color-mix(in oklab, var(--panel-bg) 88%, white 12%)';
-                  el.style.border = '1px solid var(--input-border)';
-                }}
-                onMouseLeave={(e)=>{
-                  const el=e.currentTarget as HTMLButtonElement;
-                  el.style.background = 'var(--panel-bg)';
-                  el.style.border = '1px solid var(--panel-bg)';
-                }}
-              >
-                {o.disabled ? <Lock className="w-3.5 h-3.5" /> :
-                  <Check className="w-3.5 h-3.5" style={{ opacity: o.value===value ? 1 : 0 }} />}
-                <span className="flex-1 truncate">{o.label}</span>
-                {o.note ? <span className="text-[11px]" style={{ color:'var(--text-muted)' }}>{o.note}</span> : null}
-              </button>
-            ))}
-            {filtered.length===0 && (
-              <div className="px-3 py-6 text-sm" style={{ color:'var(--text-muted)' }}>No matches.</div>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ─────────── Section (expand anim) ─────────── */
-function Section({
-  title, icon, desc, children, defaultOpen = true
-}:{
-  title: string; icon: React.ReactNode; desc?: string; children: React.ReactNode; defaultOpen?: boolean;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  const innerRef = useRef<HTMLDivElement|null>(null);
-  const [h, setH] = useState<number>(0);
-  const measure = () => { if (innerRef.current) setH(innerRef.current.offsetHeight); };
-  useLayoutEffect(() => { measure(); }, [children, open]);
-
-  return (
-    <div className="mb-[12px]">
-      <div className="mb-[6px] text-sm font-medium" style={{ color:'var(--text-muted)' }}>{title}</div>
-
-      <div className="va-card">
-        <button onClick={()=>setOpen(v=>!v)} className="va-head w-full text-left" style={{ color:'var(--text)' }}>
-          <span className="min-w-0 flex items-center gap-3">
-            <span className="inline-grid place-items-center w-7 h-7 rounded-full" style={{ background:'rgba(89,217,179,.10)' }}>
-              {icon}
-            </span>
-            <span className="min-w-0">
-              <span className="block font-semibold truncate" style={{ fontSize:'var(--fz-title)' }}>{title}</span>
-              {desc ? <span className="block text-xs truncate" style={{ color:'var(--text-muted)' }}>{desc}</span> : null}
-            </span>
-          </span>
-          <span className="justify-self-end">
-            {open ? <ChevronUp className="w-4 h-4" style={{ color:'var(--text-muted)' }}/> :
-                    <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)' }}/>}
-          </span>
-        </button>
-
-        <div
-          style={{
-            height: open ? h : 0,
-            opacity: open ? 1 : 0,
-            transform: open ? 'translateY(0)' : 'translateY(-4px)',
-            transition: 'height 260ms var(--ease), opacity 230ms var(--ease), transform 260ms var(--ease)',
-            overflow:'hidden'
-          }}
-          onTransitionEnd={() => { if (open) measure(); }}
-        >
-          <div ref={innerRef} className="p-[var(--s-5)]">{children}</div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ─────────── Page ─────────── */
-export default function VoiceAgentSection() {
-  /* Measure the real app sidebar so our rail "touches" it and moves with collapse */
-  useEffect(() => {
-    const candidates = [
-      '[data-app-sidebar]',
-      'aside[aria-label="Sidebar"]',
-      'aside[class*="sidebar"]',
-      '#sidebar'
-    ];
-    const el = document.querySelector<HTMLElement>(candidates.join(', '));
-    const setW = (w:number) => document.documentElement.style.setProperty('--app-sidebar-w', `${Math.round(w)}px`);
-    if (!el) { setW(240); return; }
-    setW(el.getBoundingClientRect().width);
-    const ro = new ResizeObserver((entries) => {
-      const w = entries[0]?.contentRect?.width ?? el.getBoundingClientRect().width;
-      setW(w);
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
-  const [activeId, setActiveId] = useState<string>(() => {
-    try { return localStorage.getItem(ACTIVE_KEY) || ''; } catch { return ''; }
+/* =========================================================
+   HOOKS: persisted state
+   ========================================================= */
+function useLocalJSON<T>(key: string, initial: T) {
+  const [val, setVal] = useState<T>(() => {
+    try {
+      const raw = localStorage.getItem(key);
+      return raw ? JSON.parse(raw) as T : initial;
+    } catch { return initial; }
   });
-  const [data, setData] = useState<AgentData>(() => (activeId ? loadAgentData(activeId) : DEFAULT_AGENT));
+  useEffect(() => {
+    try { localStorage.setItem(key, JSON.stringify(val)); } catch {}
+  }, [key, val]);
+  return [val, setVal] as const;
+}
 
-  const [saving, setSaving] = useState(false);
-  const [publishing, setPublishing] = useState(false);
-  const [toast, setToast] = useState<string>('');
-  const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
+/* =========================================================
+   MAIN
+   ========================================================= */
+export default function ImprovePage() {
+  // Layout: full-viewport workspace that doesn't scroll the page
+  // Panels themselves handle scroll (overflow-auto)
+  const [versions, setVersions] = useLocalJSON<Version[]>(K_VERSIONS, []);
+  const [activeId, setActiveId] = useLocalJSON<string | null>(K_ACTIVE_VERSION, null);
+  const active = useMemo(() => versions.find(v => v.id === activeId) || null, [versions, activeId]);
 
-  const [showCall, setShowCall] = useState(false);
-  const [messages, setMessages] = useState<Array<{role:'user'|'assistant'; text:string}>>([
-    { role: 'assistant', text: 'Hi! Ready when you are.' }
-  ]);
-  const [chatInput, setChatInput] = useState('');
+  const [chat, setChat] = useLocalJSON<ChatMsg[]>(K_CHAT, []);
+  const [userText, setUserText] = useState('');
 
+  // Modal for Generate AI
   const [showGenerate, setShowGenerate] = useState(false);
-  const [composerText, setComposerText] = useState('');
-  const [genPhase, setGenPhase] = useState<'idle'|'loading'>('idle');
-  const basePromptRef = useRef<string>('');
-  const [pendingPrompt, setPendingPrompt] = useState<string>('');
+  const [genName, setGenName] = useState('');
+  const [genGoal, setGenGoal] = useState('');
 
-  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+  // Editor state
+  const [draft, setDraft] = useState<string>(active?.prompt || '');
+
+  // Keep editor in sync when switching versions
+  useEffect(() => { setDraft(active?.prompt || ''); }, [activeId]);
+
+  // Seed first version if none exists
   useEffect(() => {
-    const load = () => setVoices(window.speechSynthesis.getVoices());
-    load();
-    (window.speechSynthesis as any).onvoiceschanged = load;
-    return () => { (window.speechSynthesis as any).onvoiceschanged = null; };
-  }, []);
-
-  useEffect(() => {
-    const handler = (e: Event) => setActiveId((e as CustomEvent<string>).detail);
-    window.addEventListener('assistant:active', handler as EventListener);
-    return () => window.removeEventListener('assistant:active', handler as EventListener);
-  }, []);
-
-  useEffect(() => {
-    if (!activeId) return;
-    setData(loadAgentData(activeId));
-    try { localStorage.setItem(ACTIVE_KEY, activeId); } catch {}
-  }, [activeId]);
-
-  useEffect(() => { if (activeId) saveAgentData(activeId, data); }, [activeId, data]);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const store = await scopedStorage();
-        await store.ensureOwnerGuard();
-
-        const v1 = await store.getJSON<ApiKey[]>('apiKeys.v1', []);
-        const legacy = await store.getJSON<ApiKey[]>('apiKeys', []);
-        const merged = Array.isArray(v1) && v1.length ? v1 : Array.isArray(legacy) ? legacy : [];
-        const cleaned = merged
-          .filter(Boolean)
-          .map((k: any) => ({ id: String(k?.id || ''), name: String(k?.name || ''), key: String(k?.key || '') }))
-          .filter((k) => k.id && k.name);
-
-        setApiKeys(cleaned);
-
-        const globalSelected = await store.getJSON<string>('apiKeys.selectedId', '');
-        const chosen =
-          (data.apiKeyId && cleaned.some((k) => k.id === data.apiKeyId)) ? data.apiKeyId! :
-          (globalSelected && cleaned.some((k) => k.id === globalSelected)) ? globalSelected :
-          (cleaned[0]?.id || '');
-
-        if (chosen && chosen !== data.apiKeyId) {
-          setData(prev => ({ ...prev, apiKeyId: chosen }));
-          await store.setJSON('apiKeys.selectedId', chosen);
-        }
-      } catch {}
-    })();
+    if (!versions.length) {
+      const id = nowId();
+      const v: Version = {
+        id,
+        title: 'Initial Template',
+        createdAt: Date.now(),
+        prompt: buildBasePrompt('a blank template AI assistant', '')
+      };
+      setVersions([v]);
+      setActiveId(id);
+      setDraft(v.prompt);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function setField<K extends keyof AgentData>(k: K) {
-    return (v: AgentData[K]) => setData(prev => ({ ...prev, [k]: v }));
-  }
+  const saveNewVersion = async () => {
+    const cleaned = cleanPrompt(draft || '');
+    const title = await nameWithAI(cleaned);
+    const v: Version = {
+      id: nowId(),
+      title,
+      createdAt: Date.now(),
+      prompt: cleaned
+    };
+    setVersions(prev => [v, ...prev]);
+    setActiveId(v.id);
+  };
 
-  const modelOpts = useMemo(()=>modelOptsFor(data.provider), [data.provider]);
+  const rollbackTo = (id: string) => {
+    const v = versions.find(x => x.id === id);
+    if (!v) return;
+    setActiveId(v.id);
+    setDraft(v.prompt);
+  };
 
-  async function doSave(){
-    if (!activeId) { setToast('Select or create an agent'); return; }
-    setSaving(true); setToast('');
-    try { await apiSave(activeId, data); setToast('Saved'); }
-    catch { setToast('Save failed'); }
-    finally { setSaving(false); setTimeout(()=>setToast(''), 1400); }
-  }
-  async function doPublish(){
-    if (!activeId) { setToast('Select or create an agent'); return; }
-    setPublishing(true); setToast('');
-    try { await apiPublish(activeId); setToast('Published'); }
-    catch { setToast('Publish failed'); }
-    finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
-  }
+  const deleteVersion = (id: string) => {
+    setVersions(prev => prev.filter(v => v.id !== id));
+    if (activeId === id) {
+      const next = versions.find(v => v.id !== id) || null;
+      setActiveId(next?.id || null);
+      setDraft(next?.prompt || '');
+    }
+  };
 
-  function buildPrompt(base: string, extraRaw: string) {
-    const extra = (extraRaw || '').trim();
-    if (!extra) return base;
-    const lines = extra.split(/\n+/).map(s => s.trim()).filter(Boolean).map(s => /[.!?]$/.test(s) ? s : `${s}.`);
-    const block = `
+  const copyPrompt = async () => {
+    try {
+      await navigator.clipboard.writeText(draft || '');
+    } catch {}
+  };
 
-[Extra Instructions]
-${lines.map(l => `- ${l}`).join('\n')}
+  const sendUser = () => {
+    const t = userText.trim();
+    if (!t) return;
+    const next = [...chat, { role:'user', content:t } as ChatMsg];
 
-[Behavior]
-- Always respect the Extra Instructions above.
-- Keep replies concise and useful.
-- Ask for missing info before acting.`;
-    return `${base}${block}`;
-  }
+    // Simple local echo assistant; replace with your real /api/chat if you want
+    const reply = emulateAssistantReply(draft, t);
+    const next2 = [...next, { role:'assistant', content: reply } as ChatMsg];
 
-  function startGenerate() {
-    basePromptRef.current = data.systemPrompt;
-    setGenPhase('loading');
-    setTimeout(() => {
-      const merged = buildPrompt(basePromptRef.current, composerText);
-      setPendingPrompt(merged);
-      setShowGenerate(false);
-      setGenPhase('idle');
-      setToast('Preview generated – click Apply to save');
-    }, 500);
-  }
-  const acceptDiff = () => { setData(p => ({ ...p, systemPrompt: pendingPrompt })); setPendingPrompt(''); };
-  const declineDiff = () => { setPendingPrompt(''); };
+    setChat(next2);
+    setUserText('');
+  };
 
-  function sendChat() {
-    const txt = chatInput.trim();
-    if (!txt) return;
-    setMessages(m => [...m, { role: 'user', text: txt }]);
-    setChatInput('');
-    const reply = `${data.name || 'Assistant'}: "${txt}" received. How can I help further?`;
-    setTimeout(() => setMessages(m => [...m, { role: 'assistant', text: reply }]), 350);
-  }
-
-  function speakPreview(line?: string){
-    const u = new SpeechSynthesisUtterance(line || `Hi, I'm ${data.name || 'your assistant'}. This is a preview.`);
-    const byName = voices.find(v => v.name.toLowerCase().includes((data.voiceName || '').split(' ')[0]?.toLowerCase() || ''));
-    const en = voices.find(v => v.lang?.startsWith('en'));
-    if (byName) u.voice = byName; else if (en) u.voice = en;
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(u);
-  }
-  const stopPreview = () => window.speechSynthesis.cancel();
+  const headerBorder = 'border-b border-white/[.06] bg-[rgba(8,10,12,0.75)] backdrop-blur';
 
   return (
-    <section className="va-scope" style={{ background:'var(--bg)', color:'var(--text)' }}>
-      <Tokens />
-
-      {/* Assistant Rail pinned to app sidebar */}
-      <aside className="va-left-fixed">
-        <div className="rail-scroll">
-          <AssistantRail />
+    <div className="fixed inset-0 grid" style={{ gridTemplateRows: '56px 1fr', background: 'radial-gradient(1200px 600px at 20% -10%, rgba(0,255,194,.06), transparent), #0b0c10' }}>
+      {/* Header */}
+      <header className={`${headerBorder} flex items-center px-4 gap-2`}>
+        <div className="flex items-center gap-2 text-white/80">
+          <Bot size={18} className="opacity-80" />
+          <span className="font-medium">Improve Studio</span>
         </div>
-      </aside>
+        <div className="ml-auto flex items-center gap-2">
+          <button className={btnGhost} onClick={() => setShowGenerate(true)}>
+            <Sparkles size={16} className="mr-2" /> Generate AI
+          </button>
+          <button className={btnGreen} onClick={saveNewVersion}>
+            <Save size={16} className="mr-2" /> Save as Version
+          </button>
+        </div>
+      </header>
 
-      {/* Page content uses calc(app-sidebar + rail) so it always lines up */}
-      <div className="va-page">
-        <div className="px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w-[1160px]" style={{ fontSize:'var(--fz-body)', lineHeight:'var(--lh-body)' }}>
-
-          <div className="mb-[var(--s-4)] flex flex-wrap items-center justify-end gap-[var(--s-3)]">
-            <button
-              onClick={doSave}
-              disabled={saving}
-              className="inline-flex items-center gap-2 rounded-[10px] px-4 text-sm transition hover:-translate-y-[1px] disabled:opacity-60"
-              style={{ height:'var(--control-h)', background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)' }}
-            >
-              {saving ? 'Saving…' : 'Save'}
-            </button>
-
-            <button
-              onClick={doPublish}
-              disabled={publishing}
-              className="inline-flex items-center gap-2 rounded-[10px] px-4 text-sm transition hover:-translate-y-[1px] disabled:opacity-60"
-              style={{ height:'var(--control-h)', background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)' }}
-            >
-              <Rocket className="w-4 h-4" /> {publishing ? 'Publishing…' : 'Publish'}
-            </button>
-
-            <button
-              onClick={()=>{ setShowCall(true); }}
-              className="inline-flex items-center gap-2 rounded-[10px] select-none"
-              style={{ height:'var(--control-h)', padding:'0 18px', background:CTA, color:'#ffffff', fontWeight:700, boxShadow:'0 10px 22px rgba(89,217,179,.20)' }}
-              onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA_HOVER)}
-              onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA)}
-            >
-              <PhoneFilled style={{ color:'#ffffff' }} />
-              <span style={{ color:'#ffffff' }}>Talk to Assistant</span>
+      {/* Workspace: left rail (versions), center (prompt editor), right (chat test, largest) */}
+      <div className="grid h-full gap-3 p-3 overflow-hidden" style={{ gridTemplateColumns: '280px 520px 1fr' }}>
+        {/* Versions Rail */}
+        <section className={`${card} overflow-hidden flex flex-col`}>
+          <div className="p-3 pb-2"><div className={label}>Versions</div></div>
+          <div className="px-3 pb-3">
+            <button className={`${btnGreen} w-full`} onClick={async () => {
+              const v: Version = {
+                id: nowId(),
+                title: 'New Draft',
+                createdAt: Date.now(),
+                prompt: buildBasePrompt('', '')
+              };
+              setVersions(prev => [v, ...prev]);
+              setActiveId(v.id);
+              setDraft(v.prompt);
+            }}>
+              <Plus size={16} className="mr-2" /> New Draft
             </button>
           </div>
-
-          {toast ? (
-            <div className="mb-[var(--s-4)] inline-flex items-center gap-2 px-3 py-1.5 rounded-[10px]"
-                 style={{ background:'rgba(89,217,179,.10)', color:'var(--text)', boxShadow:'0 0 0 1px rgba(89,217,179,.16) inset' }}>
-              <Check className="w-4 h-4" /> {toast}
-            </div>
-          ) : null}
-
-          <div className="grid gap-[12px] md:grid-cols-2 mb-[12px]">
-            <div className="va-card">
-              <div className="va-head" style={{ minHeight: 56 }}>
-                <div className="text-xs" style={{ color:'var(--text-muted)' }}>Cost</div><div />
-              </div>
-              <div className="p-[var(--s-4)]">
-                <div className="font-semibold" style={{ fontSize:'var(--fz-sub)' }}>~$0.1/min</div>
-              </div>
-            </div>
-            <div className="va-card">
-              <div className="va-head" style={{ minHeight: 56 }}>
-                <div className="text-xs" style={{ color:'var(--text-muted)' }}>Latency</div><div />
-              </div>
-              <div className="p-[var(--s-4)]">
-                <div className="font-semibold" style={{ fontSize:'var(--fz-sub)' }}>~1050 ms</div>
-              </div>
-            </div>
-          </div>
-
-          <Section
-            title="Model"
-            icon={<Gauge className="w-4 h-4" style={{ color: CTA }} />}
-            desc="Configure the model, assistant name, and first message."
-            defaultOpen={true}
-          >
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px]">
-              <div>
-                <div className="mb-[var(--s-2)] text-[12.5px]">Assistant Name</div>
-                <input
-                  value={data.name}
-                  onChange={(e)=>setField('name')(e.target.value)}
-                  className="w-full bg-transparent outline-none rounded-[10px] px-3"
-                  style={{ height:'var(--control-h)', background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                  placeholder="e.g., Riley"
-                />
-              </div>
-              <div>
-                <div className="mb-[var(--s-2)] text-[12.5px]">Provider</div>
-                <StyledSelect value={data.provider} onChange={(v)=>setField('provider')(v as AgentData['provider'])} options={providerOpts}/>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt-[var(--s-4)]">
-              <div>
-                <div className="mb-[var(--s-2)] text-[12.5px]">Model</div>
-                <StyledSelect value={data.model} onChange={setField('model')} options={modelOpts}/>
-              </div>
-              <div>
-                <div className="mb-[var(--s-2)] text-[12.5px]">First Message Mode</div>
-                <StyledSelect value={data.firstMode} onChange={setField('firstMode')} options={[
-                  { value: 'Assistant speaks first', label: 'Assistant speaks first' },
-                  { value: 'User speaks first', label: 'User speaks first' },
-                  { value: 'Silent until tool required', label: 'Silent until tool required' },
-                ]}/>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt-[var(--s-4)]">
-              <div className="md:col-span-2">
-                <div className="flex items-center justify-between mb-[var(--s-2)]">
-                  <div className="font-medium" style={{ fontSize:'var(--fz-label)' }}>System Prompt</div>
-                  <div className="flex items-center gap-2">
-                    {pendingPrompt && (
-                      <>
-                        <button
-                          onClick={acceptDiff}
-                          className="h-9 px-3 rounded-[10px] font-semibold"
-                          style={{ background:CTA, color:'#0a0f0d' }}
-                        >
-                          Apply
-                        </button>
-                        <button
-                          onClick={declineDiff}
-                          className="h-9 px-3 rounded-[10px]"
-                          style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                        >
-                          Discard
-                        </button>
-                      </>
-                    )}
-                    <button
-                      className="inline-flex items-center gap-2 rounded-[10px] text-sm"
-                      style={{ height:36, padding:'0 12px', background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                      onClick={()=>{ setComposerText(''); setShowGenerate(true); setGenPhase('idle'); }}
-                    >
-                      <Wand2 className="w-4 h-4" /> Generate
+          <div className="flex-1 overflow-auto px-2 pb-2 space-y-2">
+            {versions.map(v => {
+              const active = v.id === activeId;
+              return (
+                <div
+                  key={v.id}
+                  className={`p-3 ${active ? 'border-[2px] border-[rgba(0,255,194,0.55)]' : 'border border-white/10'} rounded-xl bg-white/5 hover:bg-white/[.07] transition`}
+                >
+                  <div className="text-sm font-medium line-clamp-1">{v.title}</div>
+                  <div className="text-[11px] text-white/50">{fmtDate(v.createdAt)}</div>
+                  <div className="mt-2 flex gap-1.5">
+                    <button className={`${btnGhost} h-8`} onClick={() => { setActiveId(v.id); setDraft(v.prompt); }}>
+                      <History size={14} className="mr-1.5" /> Open
+                    </button>
+                    <button className={`${btnGhost} h-8`} onClick={() => rollbackTo(v.id)}>
+                      <RotateCcw size={14} className="mr-1.5" /> Rollback
+                    </button>
+                    <button className="h-8 px-2 rounded-lg bg-white/5 text-white/70 border border-white/10 hover:bg-red-500/10 hover:text-red-300"
+                            onClick={() => deleteVersion(v.id)}>
+                      <Trash2 size={14} />
                     </button>
                   </div>
                 </div>
+              );
+            })}
+            {!versions.length && (
+              <div className="text-xs text-white/50 px-2">No versions yet. Click <b>New Draft</b> to begin.</div>
+            )}
+          </div>
+        </section>
 
-                <div style={{ position:'relative' }}>
-                  <textarea
-                    className="w-full bg-transparent outline-none rounded-[12px] px-3 py-[12px]"
-                    style={{ minHeight: 360, background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                    value={pendingPrompt || data.systemPrompt}
-                    onChange={(e)=>{
-                      if (pendingPrompt) setPendingPrompt(e.target.value);
-                      else setField('systemPrompt')(e.target.value);
-                    }}
-                  />
+        {/* Prompt Editor (scrolls inside) */}
+        <section className={`${card} overflow-hidden flex flex-col`}>
+          <div className="p-3 pb-2"><div className={label}>Prompt</div></div>
+          <div className="flex-1 overflow-auto p-3">
+            <textarea
+              className="w-full h-[calc(100%-0px)] min-h-[420px] resize-none bg-black/30 border border-white/10 rounded-xl p-3 text-sm leading-6 text-white/90 outline-none focus:border-[rgba(0,255,194,0.6)]"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder="[Identity] ..."
+            />
+          </div>
+          <div className="p-3 border-t border-white/10 flex items-center gap-2">
+            <button className={btnGhost} onClick={copyPrompt}><Copy size={16} className="mr-2" /> Copy</button>
+            <button className={btnGreen} onClick={saveNewVersion}><Save size={16} className="mr-2" /> Save Version</button>
+          </div>
+        </section>
+
+        {/* Test Chat (largest) */}
+        <section className={`${card} overflow-hidden flex flex-col`}>
+          <div className="p-3 pb-2 flex items-center justify-between">
+            <div>
+              <div className={label}>Test the AI</div>
+              <div className="text-[11.5px] text-white/60">Uses your current prompt preview (cleaned of **)</div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button className={btnGhost} onClick={() => setChat([])}><RotateCcw size={14} className="mr-2" /> Reset</button>
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-auto px-3 pb-3 space-y-8">
+            {chat.length === 0 && (
+              <div className="text-white/50 text-sm px-1">Start chatting with your agent to validate tone and behavior.</div>
+            )}
+            {chat.map((m, i) => (
+              <div key={i} className={`max-w-[88%] ${m.role === 'user' ? 'ml-auto' : ''}`}>
+                <div className={`px-3 py-2 rounded-xl border text-sm leading-6 ${
+                  m.role === 'user'
+                    ? 'bg-[rgba(0,255,194,0.1)] border-[rgba(0,255,194,0.25)]'
+                    : 'bg-white/5 border-white/10'
+                }`}>
+                  {m.content}
                 </div>
               </div>
-            </div>
-          </Section>
+            ))}
+          </div>
 
-          <Section
-            title="Voice"
-            icon={<Volume2 className="w-4 h-4" style={{ color: CTA }} />}
-            desc="Choose TTS and preview the voice."
-            defaultOpen={true}
-          >
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px]">
-              <div>
-                <div className="mb-[var(--s-2)] text-[12.5px] flex items-center gap-2">
-                  <KeyRound className="w-4 h-4 opacity-80" /> OpenAI API Key
-                </div>
-                <StyledSelect
-                  value={data.apiKeyId || ''}
-                  onChange={async (val)=>{
-                    setField('apiKeyId')(val);
-                    try { const store = await scopedStorage(); await store.ensureOwnerGuard(); await store.setJSON('apiKeys.selectedId', val); } catch {}
-                  }}
-                  options={[
-                    { value: '', label: 'Select an API key…' },
-                    ...apiKeys.map(k=>({ value: k.id, label: `${k.name} ••••${(k.key||'').slice(-4).toUpperCase()}` }))
-                  ]}
-                  leftIcon={<KeyRound className="w-4 h-4" style={{ color: CTA }} />}
-                />
-                <div className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
-                  Keys are stored per-account via scoped storage. Manage them in the API Keys page.
-                </div>
-              </div>
-
-              <div>
-                <div className="mb-[var(--s-2)] text-[12.5px]">Voice Provider</div>
-                <StyledSelect value={data.ttsProvider} onChange={(v)=>setField('ttsProvider')(v as AgentData['ttsProvider'])} options={ttsProviders}/>
-              </div>
+          <div className="p-3 border-t border-white/10">
+            <div className="flex items-center gap-2">
+              <input
+                value={userText}
+                onChange={(e) => setUserText(e.target.value)}
+                onKeyDown={(e) => (e.key === 'Enter' && !e.shiftKey ? (e.preventDefault(), sendUser()) : null)}
+                placeholder="Ask something…"
+                className="flex-1 h-10 rounded-xl bg-black/30 border border-white/10 px-3 text-sm outline-none focus:border-[rgba(0,255,194,0.6)]"
+              />
+              <button className={btnGreen} onClick={sendUser}><Send size={16} className="mr-2" /> Send</button>
             </div>
-
-            <div className="grid grid-cols-1 mt-[var(--s-4)]">
-              <div>
-                <div className="mb-[var(--s-2)] text-[12.5px]">Voice</div>
-                <StyledSelect
-                  value={data.voiceName}
-                  onChange={setField('voiceName')}
-                  options={openAiVoices}
-                  placeholder="— Choose —"
-                  menuTop={
-                    <div className="flex items-center justify-between px-3 py-2 rounded-[10px]"
-                         style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}>
-                      <div className="text-xs" style={{ color:'var(--text-muted)' }}>Preview</div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={()=>speakPreview(`This is ${data.voiceName || 'the selected'} voice preview.`)}
-                          className="w-8 h-8 rounded-full grid place-items-center"
-                          aria-label="Play voice"
-                          style={{ background: CTA, color:'#0a0f0d' }}
-                        >
-                          <Play className="w-4 h-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={stopPreview}
-                          className="w-8 h-8 rounded-full grid place-items-center border"
-                          aria-label="Stop preview"
-                          style={{ background: 'var(--panel-bg)', color:'var(--text)', borderColor:'var(--input-border)' }}
-                        >
-                          <Square className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  }
-                />
-              </div>
-            </div>
-          </Section>
-
-          <Section
-            title="Transcriber"
-            icon={<Mic className="w-4 h-4" style={{ color: CTA }} />}
-            desc="Transcription settings"
-            defaultOpen={true}
-          >
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px]">
-              <div>
-                <div className="mb-[var(--s-2)] text-[12.5px]">Provider</div>
-                <StyledSelect value={data.asrProvider} onChange={(v)=>setField('asrProvider')(v as AgentData['asrProvider'])} options={asrProviders}/>
-              </div>
-              <div>
-                <div className="mb-[var(--s-2)] text-[12.5px]">Model</div>
-                <StyledSelect value={data.asrModel} onChange={setField('asrModel')} options={asrModelsFor(data.asrProvider)}/>
-              </div>
-            </div>
-            <div className="mt-[var(--s-4)] grid sm:grid-cols-2 gap-[12px]">
-              <div className="flex items-center justify-between p-3 rounded-[10px]" style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}>
-                <span className="text-sm">Background Denoising Enabled</span>
-                <Toggle checked={data.denoise} onChange={setField('denoise')} />
-              </div>
-              <div className="flex items-center justify-between p-3 rounded-[10px]" style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}>
-                <span className="text-sm">Use Numerals</span>
-                <Toggle checked={data.numerals} onChange={setField('numerals')} />
-              </div>
-            </div>
-          </Section>
-        </div>
+          </div>
+        </section>
       </div>
 
-      {/* Solid modal (only the box, overlay is solid, no blur) */}
+      {/* Generate AI overlay */}
       {showGenerate && (
-        <div className="va-modal-wrap" role="dialog" aria-modal>
-          <div className="va-blur-overlay open" onClick={()=>{ if (genPhase==='idle') setShowGenerate(false); }} />
-          <div className="va-modal-center">
-            <div className="va-sheet w-full max-w-[760px] p-4 md:p-6">
-              <div className="flex items-center justify-between mb-3">
-                <div className="text-lg font-semibold">Compose Prompt</div>
-                <button onClick={()=>{ if (genPhase==='idle') setShowGenerate(false); }} className="p-1 rounded hover:opacity-80" aria-label="Close">
-                  <X className="w-5 h-5" style={{ color:'var(--text-muted)' }} />
-                </button>
-              </div>
-              <div className="grid gap-3">
-                <label className="text-xs" style={{ color:'var(--text-muted)' }}>
-                  Add extra instructions (persona, tone, rules, tools):
-                </label>
-                <textarea
-                  value={composerText}
-                  onChange={(e)=>setComposerText(e.target.value)}
-                  className="w-full bg-transparent outline-none rounded-[10px] px-3 py-2"
-                  placeholder="e.g., Friendly, crisp answers. Confirm account ID before actions."
-                  style={{ minHeight: 180, background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+        <div className="fixed inset-0 grid place-items-center z-50" style={{ background:'rgba(0,0,0,.6)' }}>
+          <div className={`${card} p-4 w-[520px]`}>
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-sm font-medium">Generate Base Prompt</div>
+              <button className="p-1.5 rounded-lg hover:bg-white/10" onClick={() => setShowGenerate(false)}>
+                <X size={16} className="text-white/70" />
+              </button>
+            </div>
+            <div className="grid gap-3">
+              <div>
+                <div className={label}>Agent Name</div>
+                <input
+                  className="mt-1 w-full h-10 rounded-xl bg-black/30 border border-white/10 px-3 text-sm outline-none focus:border-[rgba(0,255,194,0.6)]"
+                  value={genName} onChange={e=>setGenName(e.target.value)} placeholder="e.g., Neutral Assistant"
                 />
-                <div className="flex items-center justify-end gap-2">
-                  <button
-                    onClick={()=>setShowGenerate(false)}
-                    disabled={genPhase==='loading'}
-                    className="h-9 px-3 rounded-[10px]"
-                    style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={startGenerate}
-                    disabled={genPhase==='loading'}
-                    className="h-9 px-4 rounded-[10px] font-semibold"
-                    style={{ background:CTA, color:'#0a0f0d' }}
-                  >
-                    {genPhase==='loading' ? 'Generating…' : 'Generate'}
-                  </button>
-                </div>
               </div>
+              <div>
+                <div className={label}>Primary Goal</div>
+                <input
+                  className="mt-1 w-full h-10 rounded-xl bg-black/30 border border-white/10 px-3 text-sm outline-none focus:border-[rgba(0,255,194,0.6)]"
+                  value={genGoal} onChange={e=>setGenGoal(e.target.value)} placeholder="e.g., Answer questions clearly and concisely"
+                />
+              </div>
+            </div>
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button className={btnGhost} onClick={()=>setShowGenerate(false)}>Cancel</button>
+              <button
+                className={btnGreen}
+                onClick={()=>{
+                  const base = buildBasePrompt(genName, genGoal);
+                  setDraft(base);
+                  setShowGenerate(false);
+                }}
+              >
+                <Sparkles size={16} className="mr-2" /> Use Template
+              </button>
             </div>
           </div>
         </div>
       )}
-
-      {/* Call drawer */}
-      {createPortal(
-        <>
-          <div
-            className={`va-blur-overlay ${showCall ? 'open' : ''}`}
-            onClick={()=> setShowCall(false)}
-          />
-          <aside className={`va-call-drawer ${showCall ? 'open' : ''}`} aria-hidden={!showCall}>
-            <div className="flex items-center justify-between px-4 h-[64px]"
-                 style={{ background:'var(--panel-bg)', borderBottom:'1px solid rgba(255,255,255,.1)' }}>
-              <div className="font-semibold">Chat with {data.name || 'Assistant'}</div>
-              <button onClick={()=>setShowCall(false)} className="px-2 py-1 rounded border"
-                      style={{ color:'var(--text)', borderColor:'var(--input-border)', background:'var(--panel-bg)' }}>
-                Close
-              </button>
-            </div>
-
-            <div className="p-4 overflow-y-auto flex flex-col gap-3">
-              {messages.map((m, i) => (
-                <div key={i} className="flex flex-col" style={{ alignItems: m.role==='user' ? 'flex-end' : 'flex-start' }}>
-                  <div className="text-[11px]" style={{ color:'var(--text-muted)' }}>
-                    {m.role==='user' ? 'You' : (data.name || 'Assistant')}
-                  </div>
-                  <div className={`chat-msg ${m.role==='user' ? 'chat-user' : 'chat-ai'}`} style={{ color:'var(--text)' }}>
-                    {m.text}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="p-3" style={{ borderTop:'1px solid rgba(255,255,255,.10)' }}>
-              <form onSubmit={(e)=>{ e.preventDefault(); sendChat(); }} className="flex items-center gap-2">
-                <input
-                  value={chatInput}
-                  onChange={(e)=>setChatInput(e.target.value)}
-                  placeholder={`Message ${data.name || 'Assistant'}…`}
-                  className="flex-1 rounded-md px-3 py-2 outline-none"
-                  style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                />
-                <button type="submit" className="h-10 px-4 rounded-md font-semibold" style={{ background:CTA, color:'#fff' }}>
-                  Send
-                </button>
-              </form>
-            </div>
-          </aside>
-        </>,
-        document.body
-      )}
-    </section>
+    </div>
   );
+}
+
+/* =========================================================
+   SIMPLE LOCAL ASSISTANT (replace with your real API)
+   ========================================================= */
+function emulateAssistantReply(prompt: string, user: string) {
+  const cleaned = cleanPrompt(prompt);
+  // Tiny behavior: mirror guidance from the prompt
+  if (/neutral|concise|clear/i.test(cleaned)) {
+    return summarize(user);
+  }
+  return `Based on current rules, here's a direct response:\n${summarize(user)}`;
+}
+
+function summarize(text: string) {
+  // very small heuristic "make it concise"
+  let t = text.trim();
+  t = t.replace(/\s+/g, ' ');
+  if (t.length > 220) t = t.slice(0, 200) + '…';
+  return t;
 }
