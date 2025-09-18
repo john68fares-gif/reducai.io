@@ -1,3 +1,4 @@
+// components/voice/AssistantRail.tsx
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
@@ -24,16 +25,14 @@ const FOLDERS_KEY      = 'agentFolders';
 const ACTIVE_KEY       = 'va:activeId';
 const ACTIVE_FOLDERKEY = 'va:activeFolderId';
 
-/* Brand */
+/* Brand / visuals */
 const CTA        = '#59d9b3';
 const CTA_HOVER  = '#54cfa9';
-const GREEN_LINE = 'rgba(89,217,179,.20)';     // green outline like your boxes
-const LIGHT_OVERLAY = 'rgba(0,0,0,0.60)';
-
-/* Shadows to mirror “overlay box” feel */
-const BOX_SHADOW      = '0 22px 44px rgba(0,0,0,.18), 0 0 0 1px rgba(255,255,255,.60) inset, 0 0 0 1px rgba(89,217,179,.20)';
-const ITEM_SHADOW     = '0 10px 24px rgba(0,0,0,.08), 0 0 0 1px rgba(255,255,255,.50) inset, 0 0 0 1px rgba(89,217,179,.16)';
-const HOVER_BOXSHADOW = '0 16px 36px rgba(0,0,0,.10), 0 0 0 1px rgba(255,255,255,.55) inset, 0 0 0 1px rgba(89,217,179,.26)';
+const GREEN_LINE = 'rgba(89,217,179,.20)';       // the green outline you liked
+const OVERLAY_BG = 'rgba(8,10,12,.78)';          // dark overlay background (keep for dark mode)
+const BOX_SHADOW     = '0 22px 44px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px rgba(89,217,179,.20)';
+const ITEM_SHADOW    = '0 12px 28px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px rgba(89,217,179,.20)';
+const HOVER_BOXSHADOW= '0 16px 36px rgba(0,0,0,.36), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px rgba(89,217,179,.26)';
 
 /* Utils */
 function uid() {
@@ -62,15 +61,15 @@ function writeActive(id:string){
   try { window.dispatchEvent(new CustomEvent('assistant:active', { detail: id })); } catch {}
 }
 
-/* ---------- Modal shells (PORTALED, light overlay style) ---------- */
+/* ---------- Modal shell (overlay + green border/shadow) ---------- */
 function ModalShell({ children }:{ children:React.ReactNode }) {
   if (typeof document === 'undefined') return null;
   return createPortal(
     <>
-      <div className="fixed inset-0 z-[100000] pointer-events-auto animate-[fadeIn_140ms_ease]" style={{ background: LIGHT_OVERLAY }} />
+      <div className="fixed inset-0 z-[100000] pointer-events-auto" style={{ background: 'var(--overlay-bg)' }} />
       <div className="fixed inset-0 z-[100001] flex items-center justify-center px-4">
         <div
-          className="w-full max-w-[720px] rounded-[16px] overflow-hidden animate-[popIn_140ms_ease]"
+          className="w-full max-w-[720px] rounded-[12px] overflow-hidden"
           style={{
             background: 'var(--panel)',
             color: 'var(--text)',
@@ -116,13 +115,12 @@ function ModalHeader({ icon, title, subtitle, onClose }:{
   );
 }
 
-/* Create Assistant */
+/* ---------- Create / Rename / Delete modals ---------- */
 function CreateModal({ open, onClose, onCreate }:{
   open:boolean; onClose:()=>void; onCreate:(name:string)=>void;
 }) {
   const [name,setName] = useState('');
-  const [saving,setSaving] = useState(false);
-  useEffect(()=>{ if(open){ setName(''); setSaving(false); } },[open]);
+  useEffect(()=>{ if(open) setName(''); },[open]);
   if(!open) return null;
   const can = name.trim().length>1;
   return (
@@ -132,34 +130,31 @@ function CreateModal({ open, onClose, onCreate }:{
         <label className="block text-xs mb-1" style={{ color:'var(--text-muted)' }}>Name</label>
         <input
           value={name} onChange={(e)=>setName(e.target.value)}
-          className="w-full h-[44px] rounded-[12px] px-3 text-sm outline-none"
-          style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)', boxShadow:'inset 0 1px 0 rgba(0,0,0,.04)' }}
+          className="w-full h-[44px] rounded-[10px] px-3 text-sm outline-none"
+          style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)', boxShadow:'inset 0 1px 0 rgba(255,255,255,.06)' }}
           placeholder="e.g., Sales Bot" autoFocus
         />
       </div>
       <div className="px-6 pb-6 flex gap-3">
         <button onClick={onClose}
-                className="w-full h-[44px] rounded-[12px]"
+                className="w-full h-[44px] rounded-[10px] font-semibold"
                 style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)' }}>
           Cancel
         </button>
         <button
-          disabled={!can||saving}
-          onClick={async()=>{ if(!can) return; setSaving(true); await new Promise(r=>setTimeout(r,420)); onCreate(name.trim()); setSaving(false); }}
-          className="w-full h-[44px] rounded-[12px] font-semibold disabled:opacity-60 flex items-center justify-center gap-2"
-          style={{ background:CTA, color:'#ffffff', boxShadow:'0 10px 22px rgba(0,0,0,.12)', border:`1px solid ${GREEN_LINE}` }}
+          disabled={!can}
+          onClick={()=> can && onCreate(name.trim())}
+          className="w-full h-[44px] rounded-[10px] font-semibold disabled:opacity-60"
+          style={{ background:CTA, color:'#ffffff', boxShadow:'0 10px 22px rgba(0,0,0,.24)', border:`1px solid ${GREEN_LINE}` }}
           onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA_HOVER)}
           onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA)}
         >
-          {saving ? <span className="w-4 h-4 rounded-full border-2 border-white/60 border-t-transparent animate-spin" /> : <Plus className="w-4 h-4" />}
           Create
         </button>
       </div>
     </ModalShell>
   );
 }
-
-/* Rename / Delete */
 function RenameModal({ open, initial, onClose, onSave }:{
   open:boolean; initial:string; onClose:()=>void; onSave:(v:string)=>void;
 }) {
@@ -173,20 +168,20 @@ function RenameModal({ open, initial, onClose, onSave }:{
       <div className="px-6 py-5">
         <label className="block text-xs mb-1" style={{ color:'var(--text-muted)' }}>Name</label>
         <input value={val} onChange={(e)=>setVal(e.target.value)}
-               className="w-full h-[44px] rounded-[12px] px-3 text-sm outline-none"
-               style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)' }} />
+               className="w-full h-[44px] rounded-[10px] px-3 text-sm outline-none"
+               style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)', boxShadow:'inset 0 1px 0 rgba(255,255,255,.06)' }} />
       </div>
       <div className="px-6 pb-6 flex gap-3">
         <button onClick={onClose}
-                className="w-full h-[44px] rounded-[12px]"
+                className="w-full h-[44px] rounded-[10px] font-semibold"
                 style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)' }}>
           Cancel
         </button>
         <button
           disabled={!can}
           onClick={()=> onSave(val.trim())}
-          className="w-full h-[44px] rounded-[12px] font-semibold disabled:opacity-60"
-          style={{ background:CTA, color:'#ffffff', border:`1px solid ${GREEN_LINE}` }}
+          className="w-full h-[44px] rounded-[10px] font-semibold disabled:opacity-60"
+          style={{ background:CTA, color:'#ffffff', boxShadow:'0 10px 22px rgba(0,0,0,.24)', border:`1px solid ${GREEN_LINE}` }}
           onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA_HOVER)}
           onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA)}
         >
@@ -211,13 +206,13 @@ function ConfirmDelete({ open, name, onClose, onConfirm }:{
       </div>
       <div className="px-6 pb-6 flex gap-3">
         <button onClick={onClose}
-                className="w-full h-[44px] rounded-[12px]"
+                className="w-full h-[44px] rounded-[10px] font-semibold"
                 style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)' }}>
           Cancel
         </button>
         <button onClick={onConfirm}
-                className="w-full h-[44px] rounded-[12px] font-semibold"
-                style={{ background:CTA, color:'#ffffff', border:`1px solid ${GREEN_LINE}` }}
+                className="w-full h-[44px] rounded-[10px] font-semibold"
+                style={{ background:CTA, color:'#ffffff', boxShadow:'0 10px 22px rgba(0,0,0,.24)', border:`1px solid ${GREEN_LINE}` }}
                 onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA_HOVER)}
                 onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA)}>
           Delete
@@ -227,14 +222,15 @@ function ConfirmDelete({ open, name, onClose, onConfirm }:{
   );
 }
 
-/* ---------- Create Folder (OVERLAY) ---------- */
+/* ---------- Create Folder (OVERLAY modal) ---------- */
 function CreateFolderModal({
   open, onClose, onCreate
 }:{ open:boolean; onClose:()=>void; onCreate:(name:string)=>Promise<void>|void }) {
-  const [name,setName]=useState(''); const [saving,setSaving]=useState(false);
-  useEffect(()=>{ if(open){ setName(''); setSaving(false);} },[open]);
-  if(!open) return null;
+  const [name,setName]=useState('');
   const can = name.trim().length>1;
+  useEffect(()=>{ if(open){ setName(''); } },[open]);
+  if(!open) return null;
+
   return (
     <ModalShell>
       <ModalHeader icon={<FolderPlus className="w-5 h-5" style={{ color:CTA }}/>} title="Create Folder" onClose={onClose}/>
@@ -242,7 +238,7 @@ function CreateFolderModal({
         <label className="block text-xs mb-1" style={{ color:'var(--text-muted)' }}>Folder name</label>
         <input
           value={name} onChange={(e)=>setName(e.target.value)}
-          className="w-full h-[44px] rounded-[12px] px-3 text-sm outline-none"
+          className="w-full h-[44px] rounded-[10px] px-3 text-sm outline-none"
           style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)' }}
           placeholder="e.g., Team A"
           autoFocus
@@ -250,19 +246,18 @@ function CreateFolderModal({
       </div>
       <div className="px-6 pb-6 flex gap-3">
         <button onClick={onClose}
-                className="w-full h-[44px] rounded-[12px]"
+                className="w-full h-[44px] rounded-[10px]"
                 style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)' }}>
           Cancel
         </button>
         <button
-          disabled={!can||saving}
-          onClick={async ()=>{ if(!can) return; setSaving(true); await new Promise(r=>setTimeout(r,420)); await onCreate(name.trim()); setSaving(false); }}
-          className="w-full h-[44px] rounded-[12px] font-semibold disabled:opacity-60 flex items-center justify-center gap-2"
+          disabled={!can}
+          onClick={async()=>{ if(!can) return; await onCreate(name.trim()); onClose(); }}
+          className="w-full h-[44px] rounded-[10px] font-semibold disabled:opacity-60"
           style={{ background:CTA, color:'#ffffff', border:`1px solid ${GREEN_LINE}` }}
           onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA_HOVER)}
           onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA)}
         >
-          {saving ? <span className="w-4 h-4 rounded-full border-2 border-white/60 border-t-transparent animate-spin" /> : <FolderPlus className="w-4 h-4" />}
           Create
         </button>
       </div>
@@ -281,7 +276,7 @@ function Row({
       draggable
       onDragStart={()=>onDragStart(a.id)}
       onClick={onClick}
-      className="rail-row w-full text-left rounded-[12px] px-3 flex items-center gap-2 group transition will-change-transform"
+      className="rail-row w-full text-left rounded-[12px] px-3 flex items-center gap-2 group transition"
       style={{
         minHeight: 60,
         background: 'var(--panel)',
@@ -295,9 +290,9 @@ function Row({
       <div
         className="relative w-10 h-10 rounded-md grid place-items-center shrink-0"
         style={{
-          background:'linear-gradient(135deg,#f7fafc 0%,#f1f5f9 100%)',
+          background:'var(--tile-bg)',
           border:`1px solid ${GREEN_LINE}`,
-          boxShadow:'inset 0 1px 0 rgba(255,255,255,.8)'
+          boxShadow:'inset 0 1px 0 rgba(255,255,255,.06)'
         }}
       >
         <Bot className="w-4 h-4" style={{ color:CTA }} />
@@ -374,7 +369,7 @@ export default function AssistantRail() {
   const [folders,setFolders] = useState<FolderLite[]>([]);
   const [activeId,setActiveId] = useState('');
   const [activeFolderId,setActiveFolderId] = useState<string|''>('');
-  const [overlay,setOverlay] = useState(false); // switch overlay
+  const [overlay,setOverlay] = useState(false);
   const [initialLoading,setInitialLoading] = useState(true);
   const [q,setQ] = useState('');
   const [createOpen,setCreateOpen] = useState(false);
@@ -393,20 +388,20 @@ export default function AssistantRail() {
     setActiveId(firstId);
     if (firstId) writeActive(firstId);
     setActiveFolderId(savedFolder || '');
-    setTimeout(()=>setInitialLoading(false), 500);
+    setTimeout(()=>setInitialLoading(false), 420);
   })(); },[]);
 
   const filtered = useMemo(()=> {
     const s=q.trim().toLowerCase();
-    const list = activeFolderId ? assistants.filter(a=>a.folderId===activeFolderId) : assistants.filter(a=>!a.folderId);
-    return !s ? list : list.filter(a=>(`${a.name} ${(a.purpose||'')}`.toLowerCase().includes(s)));
+    const scoped = activeFolderId ? assistants.filter(a=>a.folderId===activeFolderId) : assistants.filter(a=>!a.folderId);
+    return !s ? scoped : scoped.filter(a=>(`${a.name} ${(a.purpose||'')}`.toLowerCase().includes(s)));
   },[assistants,q,activeFolderId]);
 
   function select(id:string){
     setOverlay(true);
     setActiveId(id);
     writeActive(id);
-    window.setTimeout(()=> setOverlay(false), 620);
+    window.setTimeout(()=> setOverlay(false), 520);
   }
 
   function addAssistant(name:string){
@@ -435,7 +430,6 @@ export default function AssistantRail() {
     const f:FolderLite = { id: uid(), name, createdAt: Date.now() };
     const next=[f, ...folders];
     setFolders(next); saveFolders(next);
-    setShowCreateFolder(false);
   }
   function moveAssistantsToFolder(ids:string[], folderId:string|null){
     const next = assistants.map(a => ids.includes(a.id) ? { ...a, folderId } : a);
@@ -455,8 +449,7 @@ export default function AssistantRail() {
       <div
         className="assistant-rail h-full flex flex-col"
         style={{
-          /* LIGHT MODE — scoped to this rail only */
-          background:'var(--sidebar-bg)',
+          background: 'var(--sidebar-bg)',       // THEME AWARE
           borderRight:`1px solid ${GREEN_LINE}`,
           color:'var(--sidebar-text)',
         }}
@@ -474,11 +467,11 @@ export default function AssistantRail() {
           }}
         >
           <div className="grid grid-cols-2 gap-2">
-            {/* Left: Create (green, white text) */}
+            {/* Left: Create (green/white) */}
             <button
               type="button"
-              className="inline-flex items-center justify-center gap-2 rounded-[12px] font-semibold"
-              style={{ height: 36, background: CTA, color:'#ffffff', boxShadow:'0 10px 22px rgba(0,0,0,.10)', border:`1px solid ${GREEN_LINE}` }}
+              className="inline-flex items-center justify-center gap-2 rounded-[10px] font-semibold"
+              style={{ height: 36, background: CTA, color:'#ffffff', boxShadow:'0 10px 22px rgba(0,0,0,.24)', border:`1px solid ${GREEN_LINE}` }}
               onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA_HOVER)}
               onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA)}
               onClick={()=> setCreateOpen(true)}
@@ -490,7 +483,7 @@ export default function AssistantRail() {
             {/* Right: + Folder (opens overlay) */}
             <button
               type="button"
-              className="inline-flex items-center justify-center gap-2 rounded-[12px] font-semibold"
+              className="inline-flex items-center justify-center gap-2 rounded-[10px] font-semibold"
               style={{ height: 36, background:'var(--panel)', color:'var(--text)', border:`1px solid ${GREEN_LINE}`, boxShadow: ITEM_SHADOW }}
               onClick={()=> setShowCreateFolder(true)}
             >
@@ -505,11 +498,11 @@ export default function AssistantRail() {
               value={q}
               onChange={(e)=>setQ(e.target.value)}
               placeholder="Search assistants"
-              className="w-full h-[34px] rounded-[12px] pl-8 pr-3 text-sm outline-none"
+              className="w-full h-[34px] rounded-[10px] pl-8 pr-3 text-sm outline-none"
               style={{
                 background:'var(--panel)',
                 border: `1px solid ${GREEN_LINE}`,
-                boxShadow: 'inset 0 1px 0 rgba(0,0,0,.04)',
+                boxShadow: 'inset 0 1px 0 rgba(255,255,255,.06)',
                 color:'var(--text)'
               }}
             />
@@ -519,7 +512,7 @@ export default function AssistantRail() {
             />
           </div>
 
-          {/* Scope crumb */}
+          {/* Section label / crumb */}
           <div className="mt-3 flex items-center justify-between">
             <div className="text-[11px] font-semibold tracking-[.12em]" style={{ color:'var(--sidebar-muted)' }}>
               {inAllScope ? 'ALL' : 'FOLDER'}
@@ -527,7 +520,7 @@ export default function AssistantRail() {
             {!inAllScope && (
               <button
                 onClick={()=>{ setActiveFolderId(''); try{ localStorage.setItem(ACTIVE_FOLDERKEY,''); }catch{} }}
-                className="inline-flex items-center gap-1 px-2 py-1 rounded-[10px]"
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-[8px]"
                 style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)' }}
               >
                 <ArrowLeft className="w-4 h-4" /> Back to All
@@ -620,44 +613,61 @@ export default function AssistantRail() {
         <ConfirmDelete open={!!delId} name={delName} onClose={()=>setDelId(null)} onConfirm={confirmDelete} />
         <CreateFolderModal open={showCreateFolder} onClose={()=>setShowCreateFolder(false)} onCreate={async(name)=>createFolder(name)} />
 
-        {/* Light theme tokens (scoped!) + shimmer */}
+        {/* Theme tokens (THEME AWARE). Light is applied when account theme is light.
+           Dark stays exactly like your current overlay vibe. */}
         <style jsx>{`
-          .assistant-rail{
-            /* Light palette that fits your API Keys page */
-            --sidebar-bg: #f8fafc; /* slate-50-ish */
+          /* Light mode (applies when the app/root is NOT dark) */
+          :global(:root:not([data-theme="dark"])) .assistant-rail{
+            --sidebar-bg: #f8fafc; /* light slate */
             --sidebar-text: #0f172a;
             --sidebar-muted: #64748b;
             --panel: #ffffff;
             --text: #0f172a;
             --text-muted: #64748b;
+            --tile-bg: linear-gradient(135deg,#f7fafc 0%,#eef2f7 100%);
+            --brand-weak: rgba(89,217,179,.14);
+            --overlay-bg: rgba(0,0,0,.60); /* light overlay for modals */
           }
+
+          /* Dark mode (kept as you have it now) */
+          :global([data-theme="dark"]) .assistant-rail{
+            --sidebar-bg: ${OVERLAY_BG};   /* same as overlays */
+            --sidebar-text: #e6f1ef;
+            --sidebar-muted: #9fb4ad;
+            --panel: #0d0f11;              /* solid dark boxes */
+            --text: #e6f1ef;
+            --text-muted: #9fb4ad;
+            --tile-bg: linear-gradient(135deg,#0f1214 0%,#11181a 100%);
+            --brand-weak: rgba(89,217,179,.10);
+            --overlay-bg: ${OVERLAY_BG};
+          }
+
           @keyframes shimmerLine {
             0%{ background-position:-200% 0; }
             100%{ background-position:200% 0; }
           }
           .shimmer{
-            background-image: linear-gradient(90deg, rgba(0,0,0,0.03) 25%, rgba(0,0,0,0.06) 37%, rgba(0,0,0,0.03) 63%);
+            background-image: linear-gradient(90deg, rgba(0,0,0,0.04) 25%, rgba(0,0,0,0.06) 37%, rgba(0,0,0,0.04) 63%);
             background-size: 200% 100%;
             animation: shimmerLine 1.2s ease-in-out infinite;
+            opacity:.85;
           }
-          @keyframes fadeIn { from{opacity:0} to{opacity:1} }
-          @keyframes popIn { from{ transform:scale(.98); opacity:0 } to{ transform:scale(1); opacity:1 } }
         `}</style>
       </div>
 
-      {/* Switch loader — overlay with animated dots */}
+      {/* Switch loader — full-screen, uses theme-aware overlay + green border recipe */}
       <AnimatePresence>
         {overlay && (
           <motion.div
             key="assistant-switch"
             className="fixed inset-0 z-[100002] flex items-center justify-center"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            style={{ background: LIGHT_OVERLAY }}
+            style={{ background: 'var(--overlay-bg)' }}
           >
             <motion.div
               initial={{ scale: 0.96, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              className="px-6 py-5 rounded-[14px]"
+              className="px-6 py-5 rounded-[12px]"
               style={{
                 border: `1px solid ${GREEN_LINE}`,
                 background: 'var(--panel)',
@@ -667,22 +677,9 @@ export default function AssistantRail() {
             >
               <div className="flex items-center gap-3">
                 <Loader2 className="w-5 h-5 animate-spin" />
-                <div className="text-sm">
-                  Loading assistant<span className="inline-block w-6 text-left animate-[dots_1.2s_steps(4,end)_infinite]"></span>
-                </div>
+                <div className="text-sm">Loading assistant…</div>
               </div>
             </motion.div>
-
-            <style jsx>{`
-              @keyframes dots {
-                0% { content: ''; }
-                25% { content: '.'; }
-                50% { content: '..'; }
-                75% { content: '...'; }
-                100% { content: ''; }
-              }
-              .animate-[dots_1.2s_steps(4,end)_infinite]::after { content:''; animation:dots 1.2s steps(4,end) infinite; }
-            `}</style>
           </motion.div>
         )}
       </AnimatePresence>
