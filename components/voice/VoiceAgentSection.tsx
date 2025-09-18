@@ -92,13 +92,6 @@ const Tokens = () => (
       border-bottom:1px solid rgba(255,255,255,.08);
       color:var(--text);
     }
-
-    .va-menu-panel{
-      background:var(--panel-bg);
-      border:1px solid ${GREEN_LINE};
-      border-radius:10px;
-      box-shadow:0 36px 90px rgba(0,0,0,.55);
-    }
   `}</style>
 );
 
@@ -114,7 +107,7 @@ type AgentData = {
   systemPrompt: string;
 
   ttsProvider: 'openai' | 'elevenlabs';
-  voiceName: string;       // actual voice id/name used by TTS
+  voiceName: string; // we will store the user-friendly name to avoid mismatch
   apiKeyId?: string;
 
   asrProvider: 'deepgram' | 'whisper' | 'assemblyai';
@@ -176,7 +169,7 @@ async function apiPublish(agentId: string){
   return r.json();
 }
 
-/* ─────────── options helpers ─────────── */
+/* ─────────── option helpers ─────────── */
 type Opt = { value: string; label: string; disabled?: boolean; note?: string };
 
 const providerOpts: Opt[] = [
@@ -235,11 +228,10 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
-/* ─────────── Select with portal menu + rail-style glow + inline player ─────────── */
+/* ─────────── Select with portal + SOLID panel + rail-style glow + inline player ─────────── */
 function StyledSelect({
   value, onChange, options, placeholder, leftIcon, menuTop,
-  onPreview /* returns a promise that plays/handles audio for the given value */,
-  isPreviewing /* which value is currently previewing */
+  onPreview, isPreviewing
 }:{
   value: string; onChange: (v: string) => void;
   options: Opt[]; placeholder?: string; leftIcon?: React.ReactNode; menuTop?: React.ReactNode;
@@ -259,7 +251,6 @@ function StyledSelect({
     return q ? options.filter(o => o.label.toLowerCase().includes(q)) : options;
   }, [options, query, value]);
 
-  // position menu into viewport (fixed) and portal to body
   const computeRect = () => {
     if (!btnRef.current) return;
     const r = btnRef.current.getBoundingClientRect();
@@ -337,15 +328,19 @@ function StyledSelect({
             left: menuRect.left,
             width: menuRect.width,
             maxHeight: menuRect.maxH,
-            overflow:'hidden'
+            overflow:'hidden',
+            background:'var(--panel)', // solid — no transparency
+            border:`1px solid ${GREEN_LINE}`,
+            borderRadius:10,
+            boxShadow:'0 36px 90px rgba(0,0,0,.55)'
           }}
         >
-          {menuTop ? <div className="p-3 border-b" style={{ borderColor: GREEN_LINE }}>{menuTop}</div> : null}
+          {menuTop ? <div className="p-3" style={{ borderBottom:`1px solid ${GREEN_LINE}` }}>{menuTop}</div> : null}
 
           <div className="p-3">
             <div
               className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[10px]"
-              style={{ background:'var(--panel-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+              style={{ background:'var(--panel)', border:'1px solid var(--input-border)', color:'var(--text)' }}
             >
               <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
               <input
@@ -380,13 +375,13 @@ function StyledSelect({
                     )}
                     <span className="truncate">{o.label}</span>
 
-                    {/* Inline player button (doesn't close the menu) */}
+                    {/* Inline player (inside dropdown). Does not close menu. */}
                     {onPreview ? (
                       <button
                         type="button"
                         onClick={async (e)=>{ e.stopPropagation(); await onPreview(o.value); }}
                         className="w-7 h-7 rounded-full grid place-items-center"
-                        style={{ border:'1px solid var(--input-border)', background:'var(--panel-bg)' }}
+                        style={{ border:'1px solid var(--input-border)', background:'var(--panel)' }}
                         aria-label={isPreviewing === o.value ? 'Stop preview' : 'Play preview'}
                         title={isPreviewing === o.value ? 'Stop' : 'Play'}
                       >
@@ -402,20 +397,20 @@ function StyledSelect({
             </div>
           </div>
 
-          {/* rail-style green overlay on hover/active */}
+          {/* rail-style green overlay on hover/active (on top) */}
           <style jsx>{`
             .va-option::after{
               content:'';
               position:absolute; inset:0;
               border-radius:10px;
-              background:${GREEN_LINE};
+              background:${CTA};
               opacity:0;
               mix-blend-mode:screen;
               pointer-events:none;
-              transition:opacity .18s var(--ease), transform .18s var(--ease);
+              transition:opacity .18s ease, transform .18s ease;
             }
-            .va-option:hover::after{ opacity:.18; transform: translateY(-1px); }
-            .va-option:active::after{ opacity:.30; }
+            .va-option:hover::after{ opacity:.20; transform: translateY(-1px); }
+            .va-option:active::after{ opacity:.34; }
           `}</style>
         </div>,
         document.body
@@ -476,7 +471,7 @@ function Section({
 
 /* ─────────── Page ─────────── */
 export default function VoiceAgentSection() {
-  /* measure app sidebar so rail aligns */
+  /* measure sidebar so rail aligns */
   useEffect(() => {
     const candidates = ['[data-app-sidebar]','aside[aria-label="Sidebar"]','aside[class*="sidebar"]','#sidebar'];
     const el = document.querySelector<HTMLElement>(candidates.join(', '));
@@ -513,10 +508,9 @@ export default function VoiceAgentSection() {
   const basePromptRef = useRef<string>('');
   const [pendingPrompt, setPendingPrompt] = useState<string>('');
 
-  /* ---- OpenAI voices + preview ---- */
-  type VoiceOpt = { value: string; label: string; note?: string };
+  /* ---- OpenAI voices + inline dropdown preview ---- */
+  type VoiceOpt = { value: string; label: string };
   const [voiceOpts, setVoiceOpts] = useState<VoiceOpt[]>([
-    // fallback until API route is ready
     { value: 'Alloy (American)', label: 'Alloy (American)' },
     { value: 'Verse (American)', label: 'Verse (American)' },
     { value: 'Coral (British)',  label: 'Coral (British)' },
@@ -525,33 +519,30 @@ export default function VoiceAgentSection() {
   const [previewing, setPreviewing] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // fetch from your API route; ignore errors and keep fallback list
+  // Load voices from your API if available; store NAME as the value to keep selection stable
   useEffect(() => {
     (async () => {
       try {
         const r = await fetch('/api/openai/voices');
         if (!r.ok) return;
-        const arr = await r.json(); // [{id,name,preview?}]
+        const arr = await r.json(); // [{id,name}]
         if (Array.isArray(arr) && arr.length) {
-          setVoiceOpts(arr.map((v:any) => ({ value: String(v.id || v.name), label: String(v.name || v.id) })));
+          setVoiceOpts(arr.map((v:any) => ({ value: String(v.name || v.id), label: String(v.name || v.id) })));
         }
       } catch {}
     })();
   }, []);
 
-  async function previewVoice(v: string) {
+  async function previewVoice(name: string) {
     try {
-      if (previewing === v) {
-        // stop
+      if (previewing === name) {
         setPreviewing(null);
         if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; }
         return;
       }
-      setPreviewing(v);
-      // stop any existing
+      setPreviewing(name);
       if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; }
-      // fetch preview stream (implement this route)
-      const url = `/api/voice/preview?voice=${encodeURIComponent(v)}`;
+      const url = `/api/voice/preview?voice=${encodeURIComponent(name)}`;
       const a = new Audio(url);
       audioRef.current = a;
       a.onended = () => setPreviewing(null);
@@ -561,7 +552,7 @@ export default function VoiceAgentSection() {
     }
   }
 
-  /* web speech preview for the little top preview buttons (unchanged) */
+  /* (top-of-section) quick preview via Web Speech — separate from dropdown */
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   useEffect(() => {
     const load = () => setVoices(window.speechSynthesis.getVoices());
@@ -791,7 +782,7 @@ ${lines.map(l => `- ${l}`).join('\n')}
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt-[var(--s-4)]">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap_[12px] mt-[var(--s-4)]">
               <div className="md:col-span-2">
                 <div className="flex items-center justify-between mb-[var(--s-2)]">
                   <div className="font-medium" style={{ fontSize:'var(--fz-label)' }}>System Prompt</div>
@@ -853,7 +844,7 @@ ${lines.map(l => `- ${l}`).join('\n')}
                 <div className="mb-[var(--s-2)] text-[12.5px]">Voice</div>
                 <StyledSelect
                   value={data.voiceName}
-                  onChange={(v)=>setField('voiceName')(v)}
+                  onChange={(v)=>setField('voiceName')(v)} // store the NAME so selection works
                   options={voiceOpts}
                   placeholder="— Choose —"
                   onPreview={previewVoice}
@@ -920,7 +911,7 @@ ${lines.map(l => `- ${l}`).join('\n')}
         </div>
       </div>
 
-      {/* Generate overlay — blur UNDER the box */}
+      {/* Generate overlay — SAME style as AssistantRail modals (blur UNDER, box ABOVE) */}
       {showGenerate && (
         <>
           <div
@@ -930,29 +921,35 @@ ${lines.map(l => `- ${l}`).join('\n')}
           />
           <div className="fixed inset-0 grid place-items-center px-4" style={{ zIndex: Z_MODAL }}>
             <div
-              className="w-full max-w-[720px] rounded-[12px] overflow-hidden"
+              className="w-full max-w-[560px] rounded-[10px] overflow-hidden"
               style={{
-                background:'var(--panel)',
-                color:'var(--text)',
-                border:`1px solid ${GREEN_LINE}`,
+                background: 'var(--panel)',
+                color: 'var(--text)',
+                border: `1px solid ${GREEN_LINE}`,
+                maxHeight: '86vh',
                 boxShadow:'0 22px 44px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px rgba(89,217,179,.20)'
               }}
             >
               <div
-                className="flex items-center px-6 py-5"
+                className="flex items-center justify-between px-6 py-4"
                 style={{
-                  background:`linear-gradient(90deg, var(--panel) 0%, color-mix(in oklab, var(--panel) 97%, white 3%) 50%, var(--panel) 100%)`,
+                  background:`linear-gradient(90deg,var(--panel) 0%,color-mix(in oklab,var(--panel) 97%, white 3%) 50%,var(--panel) 100%)`,
                   borderBottom:`1px solid ${GREEN_LINE}`
                 }}
               >
-                <div className="w-10 h-10 rounded-xl grid place-items-center mr-3" style={{ background:'var(--brand-weak)' }}>
-                  <Wand2 className="w-5 h-5" style={{ color: CTA }} />
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl grid place-items-center" style={{ background:'var(--brand-weak)' }}>
+                    <span style={{ color: CTA, filter:'drop-shadow(0 0 8px rgba(89,217,179,.35))' }}>
+                      <Wand2 className="w-5 h-5" />
+                    </span>
+                  </div>
+                  <div className="text-lg font-semibold">Compose Prompt</div>
                 </div>
-                <div className="text-lg font-semibold">Compose Prompt</div>
+                <span className="w-5 h-5" />
               </div>
 
               <div className="px-6 py-5">
-                <label className="text-xs block mb-2" style={{ color:'var(--text-muted)' }}>
+                <label className="block text-xs mb-2" style={{ color:'var(--text-muted)' }}>
                   Add extra instructions (persona, tone, rules, tools):
                 </label>
                 <textarea
