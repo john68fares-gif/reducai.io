@@ -28,6 +28,8 @@ class RailBoundary extends React.Component<{children:React.ReactNode},{hasError:
 /* ─────────── constants ─────────── */
 const CTA = '#59d9b3';
 const CTA_HOVER = '#54cfa9';
+const GREEN_LINE = 'rgba(89,217,179,.20)';          // match Rail hairline
+const GREEN_GLOW = '0 10px 26px rgba(89,217,179,.28)'; // hover glow for dropdown rows
 const ACTIVE_KEY = 'va:activeId';
 
 /* phone icon */
@@ -67,7 +69,7 @@ const Tokens = () => (
       --border-weak:rgba(255,255,255,.10);
       --card-shadow:0 22px 44px rgba(0,0,0,.28),
                     0 0 0 1px rgba(255,255,255,.06) inset,
-                    0 0 0 1px rgba(89,217,179,.20);
+                    0 0 0 1px ${GREEN_LINE};
     }
 
     .va-card{
@@ -113,9 +115,10 @@ const Tokens = () => (
     /* dropdown menu base (solid) */
     .va-menu{
       background:var(--panel-bg);
-      border:1px solid rgba(255,255,255,.12);
+      border:1px solid ${GREEN_LINE};
       box-shadow:0 36px 90px rgba(0,0,0,.55);
       border-radius:10px;
+      overflow:hidden;
     }
 
     /* Drawer + modal are solid (no blur) */
@@ -143,16 +146,6 @@ const Tokens = () => (
     .chat-msg{ max-width:85%; padding:10px 12px; border-radius:12px; }
     .chat-user{ background:var(--panel-bg); border:1px solid rgba(255,255,255,.12); align-self:flex-end; }
     .chat-ai{ background:color-mix(in oklab, var(--panel-bg) 92%, black 8%); border:1px solid rgba(255,255,255,.12); align-self:flex-start; }
-
-    /* Force every dropdown popover and children solid */
-    .va-scope .va-menu,
-    .va-scope .va-menu * {
-      background: var(--panel-bg) !important;
-      color: var(--text) !important;
-      border-color: var(--input-border) !important;
-      box-shadow: none !important;
-      backdrop-filter: none !important;
-    }
   `}</style>
 );
 
@@ -296,7 +289,7 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
-/* Select with SOLID menu (opens under the control, scrolls with page) */
+/* Select — NO sections; green glow hover like you asked */
 function StyledSelect({
   value, onChange, options, placeholder, leftIcon, menuTop
 }:{
@@ -355,8 +348,7 @@ function StyledSelect({
             top: 'calc(100% + 8px)',
             left: 0,
             width: '100%',
-            background: 'var(--panel-bg)',
-            border: '1px solid var(--input-border)',
+            border: `1px solid ${GREEN_LINE}`,
             borderRadius: 10 as any
           }}
         >
@@ -383,28 +375,33 @@ function StyledSelect({
                 key={o.value}
                 disabled={o.disabled}
                 onClick={()=>{ if (o.disabled) return; onChange(o.value); setOpen(false); }}
-                className="w-full text-left text-sm px-3 py-2 rounded-[8px] transition flex items-center gap-2 disabled:opacity-60"
+                className="w-full text-left text-sm px-3 py-2 rounded-[8px] transition grid grid-cols-[18px_1fr_auto] items-center gap-2 disabled:opacity-60"
                 style={{
-                  color:'var(--text)',
+                  color: o.disabled ? 'var(--text-muted)' : 'var(--text)',
                   background:'var(--panel-bg)',
-                  border:'1px solid var(--panel-bg)',
+                  border:'none',                 // no internal borders (not sectioned)
+                  boxShadow:'none',
                   cursor:o.disabled?'not-allowed':'pointer'
                 }}
                 onMouseEnter={(e)=>{ if (o.disabled) return;
                   const el=e.currentTarget as HTMLButtonElement;
-                  el.style.background = 'color-mix(in oklab, var(--panel-bg) 88%, white 12%)';
-                  el.style.border = '1px solid var(--input-border)';
+                  el.style.boxShadow = `${GREEN_GLOW}`;
+                  el.style.transform = 'translateY(-1px)';
                 }}
                 onMouseLeave={(e)=>{
                   const el=e.currentTarget as HTMLButtonElement;
-                  el.style.background = 'var(--panel-bg)';
-                  el.style.border = '1px solid var(--panel-bg)';
+                  el.style.boxShadow = 'none';
+                  el.style.transform = 'translateY(0)';
                 }}
               >
-                {o.disabled ? <Lock className="w-3.5 h-3.5" /> :
-                  <Check className="w-3.5 h-3.5" style={{ opacity: o.value===value ? 1 : 0 }} />}
-                <span className="flex-1 truncate">{o.label}</span>
-                {o.note ? <span className="text-[11px]" style={{ color:'var(--text-muted)' }}>{o.note}</span> : null}
+                {/* left icon slot — check only if selected */}
+                {o.disabled ? (
+                  <Lock className="w-3.5 h-3.5" />
+                ) : (
+                  <Check className="w-3.5 h-3.5" style={{ opacity: o.value===value ? 1 : 0 }} />
+                )}
+                <span className="truncate">{o.label}</span>
+                {o.note ? <span className="text-[11px]" style={{ color:'var(--text-muted)' }}>{o.note}</span> : <span />}
               </button>
             ))}
             {filtered.length===0 && (
@@ -893,20 +890,42 @@ ${lines.map(l => `- ${l}`).join('\n')}
         </div>
       </div>
 
-      {/* Solid modal (only the box, overlay is solid, no blur) */}
+      {/* Generate overlay — match AssistantRail style (blurred dim bg, green hairline, no X) */}
       {showGenerate && (
         <div className="va-modal-wrap" role="dialog" aria-modal>
-          <div className="va-blur-overlay open" onClick={()=>{ if (genPhase==='idle') setShowGenerate(false); }} />
+          {/* rail-style overlay */}
+          <div
+            className="fixed inset-0 z-[100000]"
+            style={{ background:'rgba(6,8,10,.62)', backdropFilter:'blur(6px)' }}
+            onClick={()=>{ if (genPhase==='idle') setShowGenerate(false); }}
+          />
           <div className="va-modal-center">
-            <div className="va-sheet w-full max-w-[760px] p-4 md:p-6">
-              <div className="flex items-center justify-between mb-3">
+            <div
+              className="w-full max-w-[720px] rounded-[12px] overflow-hidden"
+              style={{
+                background:'var(--panel)',
+                color:'var(--text)',
+                border:`1px solid ${GREEN_LINE}`,
+                boxShadow:'0 22px 44px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px rgba(89,217,179,.20)'
+              }}
+            >
+              {/* modal header like rail (icon + title, no X) */}
+              <div
+                className="flex items-center px-6 py-5"
+                style={{
+                  background:`linear-gradient(90deg, var(--panel) 0%, color-mix(in oklab, var(--panel) 97%, white 3%) 50%, var(--panel) 100%)`,
+                  borderBottom:`1px solid ${GREEN_LINE}`
+                }}
+              >
+                <div className="w-10 h-10 rounded-xl grid place-items-center mr-3" style={{ background:'var(--brand-weak)' }}>
+                  <Wand2 className="w-5 h-5" style={{ color: CTA }} />
+                </div>
                 <div className="text-lg font-semibold">Compose Prompt</div>
-                <button onClick={()=>{ if (genPhase==='idle') setShowGenerate(false); }} className="p-1 rounded hover:opacity-80" aria-label="Close">
-                  <X className="w-5 h-5" style={{ color:'var(--text-muted)' }} />
-                </button>
               </div>
-              <div className="grid gap-3">
-                <label className="text-xs" style={{ color:'var(--text-muted)' }}>
+
+              {/* modal body */}
+              <div className="px-6 py-5">
+                <label className="text-xs block mb-2" style={{ color:'var(--text-muted)' }}>
                   Add extra instructions (persona, tone, rules, tools):
                 </label>
                 <textarea
@@ -916,31 +935,33 @@ ${lines.map(l => `- ${l}`).join('\n')}
                   placeholder="e.g., Friendly, crisp answers. Confirm account ID before actions."
                   style={{ minHeight: 180, background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
                 />
-                <div className="flex items-center justify-end gap-2">
-                  <button
-                    onClick={()=>setShowGenerate(false)}
-                    disabled={genPhase==='loading'}
-                    className="h-9 px-3 rounded-[10px]"
-                    style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={startGenerate}
-                    disabled={genPhase==='loading'}
-                    className="h-9 px-4 rounded-[10px] font-semibold"
-                    style={{ background:CTA, color:'#0a0f0d' }}
-                  >
-                    {genPhase==='loading' ? 'Generating…' : 'Generate'}
-                  </button>
-                </div>
+              </div>
+
+              {/* footer buttons (Cancel with white border, Generate green) */}
+              <div className="px-6 pb-6 flex gap-3">
+                <button
+                  onClick={()=>{ if (genPhase==='idle') setShowGenerate(false); }}
+                  disabled={genPhase==='loading'}
+                  className="w-full h-[44px] rounded-[10px]"
+                  style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.9)', color:'var(--text)', fontWeight:600 }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={startGenerate}
+                  disabled={genPhase==='loading'}
+                  className="w-full h-[44px] rounded-[10px] font-semibold"
+                  style={{ background:CTA, color:'#0a0f0d' }}
+                >
+                  {genPhase==='loading' ? 'Generating…' : 'Generate'}
+                </button>
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Call drawer */}
+      {/* Call drawer (unchanged) */}
       {createPortal(
         <>
           <div
