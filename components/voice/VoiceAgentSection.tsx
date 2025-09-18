@@ -2,7 +2,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
-import AssistantRail from '@/components/voice/AssistantRail'; // <-- import present
+import AssistantRail from '@/components/voice/AssistantRail'; // ✅ explicit import
 import { createPortal } from 'react-dom';
 import {
   Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Rocket, Search, Check, Lock, X, KeyRound,
@@ -27,11 +27,10 @@ function PhoneFilled(props: React.SVGProps<SVGSVGElement>) {
   );
 }
 
-/* ─────────── SOLID theme (no transparency anywhere) ─────────── */
+/* ─────────── SOLID + BLUR: panel solid, surroundings blurred ─────────── */
 const Tokens = () => (
   <style jsx global>{`
     .va-scope{
-      /* hard fallbacks */
       --bg:#0b0c10; --panel:#0d0f11; --text:#e6f1ef; --text-muted:#9fb4ad;
 
       --s-2:8px; --s-3:12px; --s-4:16px; --s-5:20px; --s-6:24px;
@@ -41,8 +40,8 @@ const Tokens = () => (
       --lh-body:1.45; --ease:cubic-bezier(.22,.61,.36,1);
 
       --page-bg:var(--bg);
-      --panel-bg:var(--panel);      /* SOLID */
-      --input-bg:var(--panel);      /* SOLID */
+      --panel-bg:var(--panel);      /* SOLID PANELS */
+      --input-bg:var(--panel);      /* SOLID INPUTS */
       --input-border:rgba(255,255,255,.10);
       --input-shadow:0 0 0 1px rgba(255,255,255,.06) inset;
 
@@ -72,7 +71,7 @@ const Tokens = () => (
       color:var(--text);
     }
 
-    /* fixed assistant rail */
+    /* Fixed Assistant Rail — solid */
     .va-left-fixed{
       position:fixed; inset:0 auto 0 0; width:260px; z-index:12;
       background:var(--panel-bg);
@@ -82,7 +81,7 @@ const Tokens = () => (
     }
     .va-left-fixed .rail-scroll{ overflow:auto; flex:1; }
 
-    /* dropdown menu — SOLID */
+    /* Dropdown menu — SOLID (no transparency) */
     .va-menu{
       background:var(--panel-bg);
       border:1px solid rgba(255,255,255,.12);
@@ -90,17 +89,19 @@ const Tokens = () => (
       border-radius:10px;
     }
 
-    /* overlays — SOLID scrim + blur + pulse animation on click */
+    /* Global blurred scrim (used behind panels/overlays) */
     @keyframes overlayPulse { 0%{transform:scale(1);opacity:.98} 60%{transform:scale(1.02);opacity:1} 100%{transform:scale(1);opacity:.98} }
     .va-blur-overlay{
       position:fixed; inset:0; z-index:9996;
-      background:rgba(8,10,12,.88); /* SOLID */
-      backdrop-filter:blur(3px);
+      background:rgba(8,10,12,.55); /* lighter alpha so blur is visible */
+      backdrop-filter:blur(8px);
+      -webkit-backdrop-filter:blur(8px);
       opacity:0; pointer-events:none; transition:opacity 200ms var(--ease);
     }
     .va-blur-overlay.open{ opacity:1; pointer-events:auto; }
     .va-blur-overlay.pulse{ animation:overlayPulse 320ms var(--ease); }
 
+    /* Right call/chat drawer — SOLID above the blurred scrim */
     .va-call-drawer{
       position:fixed; inset:0 0 0 auto; width:min(540px,92vw); z-index:9997;
       display:grid; grid-template-rows:auto 1fr auto;
@@ -111,13 +112,23 @@ const Tokens = () => (
     }
     .va-call-drawer.open{ transform:translateX(0); }
 
-    /* modal */
-    .va-modal-wrap{ position:fixed; inset:0; z-index:9994; }
-    .va-modal-blur{ position:absolute; inset:0; background:rgba(8,10,12,.88); backdrop-filter:blur(4px); } /* SOLID */
+    /* Generate overlay — blurred background, solid sheet */
+    .va-modal-wrap{ position:fixed; inset:0; z-index:9998; }
+    .va-modal-blur{
+      position:absolute; inset:0;
+      background:rgba(8,10,12,.55);
+      backdrop-filter:blur(8px);
+      -webkit-backdrop-filter:blur(8px);
+    }
     .va-modal-center{ position:absolute; inset:0; display:grid; place-items:center; padding:20px; }
-    .va-sheet{ background:var(--panel-bg); border:1px solid rgba(255,255,255,.12); box-shadow:0 28px 80px rgba(0,0,0,.70); border-radius:12px; }
+    .va-sheet{
+      background:var(--panel-bg);
+      border:1px solid rgba(255,255,255,.12);
+      box-shadow:0 28px 80px rgba(0,0,0,.70);
+      border-radius:12px; /* sheet stays solid */
+    }
 
-    /* chat */
+    /* Chat bubbles */
     .chat-msg{ max-width:85%; padding:10px 12px; border-radius:12px; }
     .chat-user{ background:var(--panel-bg); border:1px solid rgba(255,255,255,.12); align-self:flex-end; }
     .chat-ai{ background:color-mix(in oklab, var(--panel-bg) 92%, black 8%); border:1px solid rgba(255,255,255,.12); align-self:flex-start; }
@@ -267,7 +278,7 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
-/* Select with SOLID menu + optional menu header (used by Voice picker to embed player) */
+/* Solid select + solid dropdown menu */
 function StyledSelect({
   value, onChange, options, placeholder, leftIcon, menuTop
 }:{
@@ -314,7 +325,7 @@ function StyledSelect({
         onClick={() => { setOpen(v=>!v); setTimeout(()=>searchRef.current?.focus(),0); }}
         className="w-full flex items-center justify-between gap-3 px-3 py-3 rounded-[10px] text-sm outline-none transition"
         style={{
-          background:'var(--input-bg)', /* SOLID */
+          background:'var(--input-bg)',  /* ✅ SOLID */
           border:'1px solid var(--input-border)',
           boxShadow:'var(--input-shadow)',
           color:'var(--text)'
@@ -471,7 +482,7 @@ export default function VoiceAgentSection() {
     return () => { (window.speechSynthesis as any).onvoiceschanged = null; };
   }, []);
 
-  /* Rail events */
+  /* Listen to rail selection */
   useEffect(() => {
     const handler = (e: Event) => setActiveId((e as CustomEvent<string>).detail);
     window.addEventListener('assistant:active', handler as EventListener);
@@ -602,7 +613,7 @@ ${lines.map(l => `- ${l}`).join('\n')}
     <section className="va-scope" style={{ background:'var(--bg)', color:'var(--text)' }}>
       <Tokens />
 
-      {/* FIXED ASSISTANT SIDEBAR */}
+      {/* ✅ FIXED ASSISTANT SIDEBAR (imported) */}
       <aside className="va-left-fixed">
         <div className="rail-scroll">
           <AssistantRail />
@@ -786,7 +797,7 @@ ${lines.map(l => `- ${l}`).join('\n')}
               </div>
             </div>
 
-            {/* Voice select WITH PLAYER inside dropdown (button inside, as requested) */}
+            {/* Voice select with player in dropdown (solid) */}
             <div className="grid grid-cols-1 mt-[var(--s-4)]">
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]">Voice</div>
@@ -856,7 +867,7 @@ ${lines.map(l => `- ${l}`).join('\n')}
         </div>
       </div>
 
-      {/* Drawer + SOLID overlay with click animation */}
+      {/* ✅ Blurred scrim under the drawer; drawer itself stays solid */}
       {createPortal(
         <>
           <div
@@ -905,7 +916,7 @@ ${lines.map(l => `- ${l}`).join('\n')}
         document.body
       )}
 
-      {/* Generate overlay (SOLID) with same pulse-on-click */}
+      {/* ✅ Generate overlay with blurred background, solid sheet */}
       {showGenerate && createPortal(
         <div className="va-modal-wrap" role="dialog" aria-modal>
           <div className="va-modal-blur" onClick={()=>{ if (genPhase==='idle') { setShowGenerate(false); pulseOverlay(); } }} />
