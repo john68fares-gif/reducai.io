@@ -1,10 +1,9 @@
-// components/voice/AssistantRail.tsx
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Search, Plus, Bot, Trash2, Edit3, X, AlertTriangle, Loader2,
-  FolderPlus, Folder as FolderIcon, MoveRight
+  FolderPlus, Folder as FolderIcon
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { createPortal } from 'react-dom';
@@ -20,7 +19,7 @@ export type AssistantLite = {
   name: string;
   purpose?: string;
   createdAt?: number;
-  folderId?: string | null; // NEW: grouping
+  folderId?: string | null;
 };
 type Folder = { id: string; name: string; createdAt?: number };
 
@@ -30,15 +29,10 @@ const FOLDERS_KEY       = 'agentFolders.v1';
 const ACTIVE_KEY        = 'va:activeId';
 const ACTIVE_FOLDER_KEY = 'va:activeFolderId';
 
-/* Brand / theme (match Section style + overlay vibe) */
-const CTA        = '#59d9b3';
-const CTA_HOVER  = '#54cfa9';
-const BRAND_OL30 = 'rgba(89,217,179,.30)';
-const BRAND_OL18 = 'rgba(89,217,179,.18)';
-const BRAND_OL14 = 'rgba(89,217,179,.14)';
-
-/* Overlay background used across app (you said you love it) */
-const OVERLAY_BG = 'rgba(8,10,12,.78)';
+/* Brand & overlay vibe */
+const CTA       = '#59d9b3';
+const CTA_HOVER = '#54cfa9';
+const OVERLAY_BG = 'rgba(8,10,12,.78)'; // rail bg = overlay bg
 
 /* Utils */
 function uid() {
@@ -70,14 +64,12 @@ function writeActiveFolder(id:string){
   try { localStorage.setItem(ACTIVE_FOLDER_KEY, id); } catch {}
 }
 
-/* ---------- Modal shells (PORTALED) ---------- */
+/* ---------- Modal shells ---------- */
 function ModalShell({ children }:{ children:React.ReactNode }) {
   if (typeof document === 'undefined') return null;
   return createPortal(
     <>
-      {/* Solid overlay you like */}
       <div className="fixed inset-0 z-[100000] pointer-events-auto" style={{ background: OVERLAY_BG }} />
-      {/* Card uses section-like gradient header via each modal’s header */}
       <div className="fixed inset-0 z-[100001] flex items-center justify-center px-4">
         <div
           className="w-full max-w-[720px] rounded-[12px] overflow-hidden"
@@ -85,9 +77,7 @@ function ModalShell({ children }:{ children:React.ReactNode }) {
             background: 'var(--panel)',
             color: 'var(--text)',
             border: `1px solid ${CTA}`,
-            /* overlay-ish shadow */
-            boxShadow:
-              '0 22px 44px rgba(0,0,0,.38), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px rgba(89,217,179,.20)'
+            boxShadow: '0 22px 44px rgba(0,0,0,.38), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px rgba(89,217,179,.20)'
           }}
         >
           {children}
@@ -104,7 +94,6 @@ function ModalHeader({ icon, title, subtitle, onClose }:{
   return (
     <div
       className="flex items-center justify-between px-6 py-5"
-      /* Gradient header like your section heads */
       style={{
         background: `linear-gradient(90deg,
           var(--panel) 0%,
@@ -122,16 +111,16 @@ function ModalHeader({ icon, title, subtitle, onClose }:{
           {subtitle && <div className="text-xs" style={{ color:'var(--text-muted)' }}>{subtitle}</div>}
         </div>
       </div>
-      <button onClick={onClose} className="p-2 rounded hover:opacity-70" aria-label="Close modal">
+      <button onClick={onClose} className="p-2 rounded hover:opacity-70" aria-label="Close">
         <X className="w-4 h-4" style={{ color:'var(--text)' }}/>
       </button>
     </div>
   );
 }
 
-/* Create / Rename / Delete / Folder modals */
-function CreateModal({ open, onClose, onCreate, inFolder }:{
-  open:boolean; onClose:()=>void; onCreate:(name:string)=>void; inFolder?:boolean;
+/* Create / Rename / Delete / Folder modals — green borders + white text on green btns */
+function CreateModal({ open, onClose, onCreate }:{
+  open:boolean; onClose:()=>void; onCreate:(name:string)=>void;
 }) {
   const [name,setName] = useState('');
   useEffect(()=>{ if(open) setName(''); },[open]);
@@ -139,24 +128,14 @@ function CreateModal({ open, onClose, onCreate, inFolder }:{
   const can = name.trim().length>1;
   return (
     <ModalShell>
-      <ModalHeader
-        icon={<Plus className="w-5 h-5" style={{ color:CTA }}/>}
-        title={inFolder ? 'Create Assistant in Folder' : 'Create Assistant'}
-        onClose={onClose}
-      />
+      <ModalHeader icon={<Plus className="w-5 h-5" style={{ color:CTA }}/>} title="Create Assistant" onClose={onClose}/>
       <div className="px-6 py-5">
         <label className="block text-xs mb-1" style={{ color:'var(--text-muted)' }}>Name</label>
         <input
           value={name} onChange={(e)=>setName(e.target.value)}
           className="w-full h-[44px] rounded-[10px] px-3 text-sm outline-none"
-          style={{
-            background:'var(--panel)',
-            border:`1px solid ${CTA}`,
-            color:'var(--text)',
-            boxShadow:'0 0 0 1px rgba(255,255,255,.06) inset'
-          }}
-          placeholder="e.g., Sales Bot"
-          autoFocus
+          style={{ background:'var(--panel)', border:`1px solid ${CTA}`, color:'var(--text)', boxShadow:'0 0 0 1px rgba(255,255,255,.06) inset' }}
+          placeholder="e.g., Sales Bot" autoFocus
         />
       </div>
       <div className="px-6 pb-6 flex gap-3">
@@ -261,7 +240,7 @@ function CreateFolderModal({ open, onClose, onCreate }:{
           value={name} onChange={(e)=>setName(e.target.value)}
           className="w-full h-[44px] rounded-[10px] px-3 text-sm outline-none"
           style={{ background:'var(--panel)', border:`1px solid ${CTA}`, color:'var(--text)', boxShadow:'0 0 0 1px rgba(255,255,255,.06) inset' }}
-          placeholder="e.g., Dental Clients"
+          placeholder="e.g., Clients"
           autoFocus
         />
       </div>
@@ -286,15 +265,17 @@ function CreateFolderModal({ open, onClose, onCreate }:{
   );
 }
 
-/* ---------- Row (assistant item) ---------- */
+/* ---------- Row (assistant item) with drag handle ---------- */
 function Row({
-  a, active, onClick, onRename, onDelete, onMove, inFolder
+  a, active, onClick, onRename, onDelete, onDragStart
 }:{
-  a:AssistantLite; active:boolean; onClick:()=>void; onRename:()=>void; onDelete:()=>void; onMove:()=>void; inFolder?:boolean;
+  a:AssistantLite; active:boolean; onClick:()=>void; onRename:()=>void; onDelete:()=>void; onDragStart:(id:string)=>void;
 }) {
   return (
     <button
       onClick={onClick}
+      draggable
+      onDragStart={(e)=>{ e.dataTransfer.setData('text/x-assistant-id', a.id); onDragStart(a.id); }}
       className="rail-row w-full text-left rounded-[10px] px-3 flex items-center gap-2 group transition"
       style={{
         minHeight: 60,
@@ -306,7 +287,6 @@ function Row({
         overflow: 'hidden',
       }}
     >
-      {/* Tile avatar */}
       <div
         className="relative w-10 h-10 rounded-md grid place-items-center shrink-0"
         style={{
@@ -319,22 +299,13 @@ function Row({
       </div>
 
       <div className="min-w-0 flex-1">
-        <div className="text-sm font-semibold truncate" style={{ color: active ? '#fff' : 'var(--text)' }}>{a.name}</div>
+        <div className="text-sm font-medium truncate">{a.name}</div>
         <div className="text-[11px] truncate" style={{ color:'var(--sidebar-muted)' }}>
-          {a.purpose || (inFolder ? 'In folder' : 'Unfiled')}
+          {a.purpose || (a.folderId ? 'Filed' : 'Unfiled')}
         </div>
       </div>
 
       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-        <button
-          onClick={(e)=>{ e.stopPropagation(); onMove(); }}
-          className="px-2 h-[30px] rounded-[10px]"
-          style={{ background:'var(--panel)', border:`1px solid ${CTA}`, color:'var(--text)' }}
-          aria-label="Move to folder"
-          title="Move to folder"
-        >
-          <MoveRight className="w-4 h-4" />
-        </button>
         <button
           onClick={(e)=>{ e.stopPropagation(); onRename(); }}
           className="px-2 h-[30px] rounded-[10px]"
@@ -356,21 +327,51 @@ function Row({
   );
 }
 
+/* ---------- Folder pill (droppable) ---------- */
+function FolderPill({
+  id, name, active, onClick, onDropAssistant
+}:{
+  id:string; name:string; active:boolean; onClick:()=>void; onDropAssistant:(aid:string|null)=>void;
+}) {
+  const [over, setOver] = useState(false);
+  return (
+    <button
+      onClick={onClick}
+      onDragOver={(e)=>{ e.preventDefault(); setOver(true); }}
+      onDragLeave={()=>setOver(false)}
+      onDrop={(e)=>{ e.preventDefault(); setOver(false); const aid=e.dataTransfer.getData('text/x-assistant-id')||null; onDropAssistant(aid); }}
+      className="px-3 h-[28px] rounded-[999px] text-sm"
+      style={{
+        background: active ? 'rgba(89,217,179,.30)' : 'var(--panel)',
+        color: active ? '#ffffff' : 'var(--text)',
+        border:`1px solid ${CTA}`,
+        boxShadow: active || over
+          ? '0 10px 24px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px rgba(89,217,179,.20)'
+          : '0 0 0 1px rgba(255,255,255,.06) inset',
+        outline: over ? `2px solid ${CTA}` : 'none'
+      }}
+      title={id==='unfiled' ? 'Drop here to unfile' : (id==='all' ? 'All (folders + unfiled)' : 'Drop an assistant to move here')}
+    >
+      <span className="inline-flex items-center gap-2">
+        {id!=='all' && id!=='unfiled' ? <FolderIcon className="w-3.5 h-3.5" /> : null}
+        {name}
+      </span>
+    </button>
+  );
+}
+
 /* ---------- Main rail ---------- */
 export default function AssistantRail() {
   const [assistants,setAssistants] = useState<AssistantLite[]>([]);
   const [folders,setFolders] = useState<Folder[]>([]);
   const [activeId,setActiveId] = useState('');
   const [activeFolderId,setActiveFolderId] = useState<string>('all'); // 'all' | folderId | 'unfiled'
-  const [overlay,setOverlay] = useState(false); // legit loading overlay
+  const [overlay,setOverlay] = useState(false);
   const [q,setQ] = useState('');
-
-  /* modals */
   const [createOpen,setCreateOpen] = useState(false);
   const [renId,setRenId] = useState<string|null>(null);
   const [delId,setDelId] = useState<string|null>(null);
   const [createFolderOpen,setCreateFolderOpen] = useState(false);
-  const [moveId,setMoveId] = useState<string|null>(null);
 
   /* initial load + restore selection */
   useEffect(()=>{ (async()=>{
@@ -385,40 +386,22 @@ export default function AssistantRail() {
     if (firstId) writeActive(firstId);
   })(); },[]);
 
-  /* filtering */
-  const filterByFolder = (arr:AssistantLite[]) => {
-    if (activeFolderId === 'all') return arr;
-    if (activeFolderId === 'unfiled') return arr.filter(a=>!a.folderId);
-    return arr.filter(a=>a.folderId === activeFolderId);
-  };
-  const filtered = useMemo(()=> {
-    const s=q.trim().toLowerCase();
-    const base = filterByFolder(assistants);
-    const res = !s?base:base.filter(a=>a.name.toLowerCase().includes(s) || (a.purpose||'').toLowerCase().includes(s));
-    return res;
-  },[assistants,q,activeFolderId]);
-
-  /* selection + legit loading */
+  /* helpers */
   function runLoading(cb:()=>void){
     setOverlay(true);
     setTimeout(()=>{ cb(); setOverlay(false); }, 520);
   }
   function select(id:string){
-    runLoading(()=>{
-      setActiveId(id);
-      writeActive(id);
-    });
+    runLoading(()=>{ setActiveId(id); writeActive(id); });
   }
   function selectFolder(fid:string){
-    runLoading(()=>{
-      setActiveFolderId(fid);
-      writeActiveFolder(fid);
-    });
+    runLoading(()=>{ setActiveFolderId(fid); writeActiveFolder(fid); });
   }
 
-  /* CRUD assistants */
+  /* CRUD */
   function addAssistant(name:string){
-    const a:AssistantLite = { id: uid(), name, createdAt: Date.now(), purpose:'', folderId: (activeFolderId!=='all' && activeFolderId!=='unfiled') ? activeFolderId : undefined };
+    const folderScope = (activeFolderId!=='all' && activeFolderId!=='unfiled') ? activeFolderId : null;
+    const a:AssistantLite = { id: uid(), name, createdAt: Date.now(), purpose:'', folderId: folderScope };
     const next=[a, ...assistants];
     setAssistants(next); saveAssistants(next);
     select(a.id);
@@ -438,8 +421,6 @@ export default function AssistantRail() {
     }
     setDelId(null);
   }
-
-  /* Folders */
   function addFolder(name:string){
     const f:Folder = { id: uid(), name, createdAt: Date.now() };
     const next=[f, ...folders];
@@ -447,13 +428,31 @@ export default function AssistantRail() {
     setCreateFolderOpen(false);
     selectFolder(f.id);
   }
-  function moveAssistantToFolder(aid:string, fid:string|null){
-    const next = assistants.map(a=> a.id===aid ? { ...a, folderId: fid || undefined } : a);
+  function moveAssistantToFolder(aid:string|null, fid:string|null){
+    if (!aid) return;
+    const next = assistants.map(a=> a.id===aid ? { ...a, folderId: fid || null } : a);
     setAssistants(next); saveAssistants(next);
-    setMoveId(null);
   }
 
-  /* computed text */
+  /* filter:
+     - 'all' => show FOLDERS + UNFILED assistants only
+     - 'unfiled' => only unfiled
+     - specific folder => only assistants in that folder
+  */
+  const filtered = useMemo(()=> {
+    const s=q.trim().toLowerCase();
+    let base:AssistantLite[] = [];
+    if (activeFolderId === 'all') {
+      base = assistants.filter(a=>!a.folderId); // only unfiled assistants
+    } else if (activeFolderId === 'unfiled') {
+      base = assistants.filter(a=>!a.folderId);
+    } else {
+      base = assistants.filter(a=>a.folderId === activeFolderId);
+    }
+    const res = !s?base:base.filter(a=>a.name.toLowerCase().includes(s) || (a.purpose||'').toLowerCase().includes(s));
+    return res;
+  },[assistants,q,activeFolderId]);
+
   const renName = assistants.find(a=>a.id===renId)?.name || '';
   const delName = assistants.find(a=>a.id===delId)?.name;
 
@@ -462,12 +461,12 @@ export default function AssistantRail() {
       <div
         className="assistant-rail h-full flex flex-col"
         style={{
-          background: OVERLAY_BG, // same color as overlays
-          borderRight: `1px solid ${CTA}`,
+          background: OVERLAY_BG,              // rail background = overlay background
+          borderRight:`1px solid ${CTA}`,
           color:'var(--sidebar-text)',
         }}
       >
-        {/* Rail header — gradient like section header */}
+        {/* Header: gradient + green lines */}
         <div
           className="px-3 py-3"
           style={{
@@ -480,7 +479,7 @@ export default function AssistantRail() {
           }}
         >
           <div className="grid grid-cols-[1fr_auto] gap-2">
-            {/* LEFT: Create assistant (green, white text) */}
+            {/* Create assistant (left) — green bg, WHITE text */}
             <button
               type="button"
               className="inline-flex items-center justify-center gap-2 rounded-[10px] font-semibold"
@@ -493,7 +492,7 @@ export default function AssistantRail() {
               <span>Create</span>
             </button>
 
-            {/* RIGHT: New Folder */}
+            {/* Create folder (right) */}
             <button
               type="button"
               className="inline-flex items-center justify-center gap-2 rounded-[10px] font-semibold"
@@ -507,32 +506,17 @@ export default function AssistantRail() {
             </button>
           </div>
 
-          {/* Folder pills */}
+          {/* Folder pills (droppable) */}
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            {[
-              { id:'all', name:'All' },
-              ...folders,
-              { id:'unfiled', name:'Unfiled' },
-            ].map(f=>(
-              <button
-                key={f.id}
-                onClick={()=> selectFolder(f.id)}
-                className="px-3 h-[28px] rounded-[999px] text-sm"
-                style={{
-                  background: activeFolderId===f.id ? BRAND_OL30 : 'var(--panel)',
-                  color: activeFolderId===f.id ? '#ffffff' : 'var(--text)',
-                  border:`1px solid ${CTA}`,
-                  boxShadow: activeFolderId===f.id
-                    ? '0 10px 24px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px rgba(89,217,179,.20)'
-                    : '0 0 0 1px rgba(255,255,255,.06) inset'
-                }}
-              >
-                <span className="inline-flex items-center gap-2">
-                  {f.id!=='all' && f.id!=='unfiled' ? <FolderIcon className="w-3.5 h-3.5" /> : null}
-                  {f.name}
-                </span>
-              </button>
+            <FolderPill id="all" name="All" active={activeFolderId==='all'} onClick={()=>selectFolder('all')}
+              onDropAssistant={(aid)=>{/* don't file into 'all' */}} />
+            {folders.map(f=>(
+              <FolderPill key={f.id} id={f.id} name={f.name} active={activeFolderId===f.id}
+                onClick={()=>selectFolder(f.id)}
+                onDropAssistant={(aid)=>moveAssistantToFolder(aid, f.id)} />
             ))}
+            <FolderPill id="unfiled" name="Unfiled" active={activeFolderId==='unfiled'} onClick={()=>selectFolder('unfiled')}
+              onDropAssistant={(aid)=>moveAssistantToFolder(aid, null)} />
           </div>
 
           {/* Search */}
@@ -555,32 +539,62 @@ export default function AssistantRail() {
             />
           </div>
 
-          {/* Section label */}
           <div className="mt-3 text-[11px] font-semibold tracking-[.12em]" style={{ color:'var(--sidebar-muted)' }}>
-            {activeFolderId==='all' ? 'ASSISTANTS' : activeFolderId==='unfiled' ? 'UNFILED ASSISTANTS' : 'FOLDER CONTENTS'}
+            {activeFolderId==='all' ? 'FOLDERS & UNFILED' : activeFolderId==='unfiled' ? 'UNFILED ASSISTANTS' : 'FOLDER CONTENTS'}
           </div>
         </div>
 
         {/* LIST */}
         <div className="px-3 py-3 overflow-auto" style={{ flex:1 }}>
           <div className="space-y-2">
+            {/* In ALL view, show folder tiles first */}
+            {activeFolderId==='all' && (
+              <div className="grid grid-cols-1 gap-2">
+                {folders.map(f=>(
+                  <button
+                    key={f.id}
+                    onClick={()=>selectFolder(f.id)}
+                    onDragOver={(e)=>e.preventDefault()}
+                    onDrop={(e)=>{ const aid=e.dataTransfer.getData('text/x-assistant-id')||null; moveAssistantToFolder(aid, f.id); }}
+                    className="w-full rounded-[10px] px-3 py-3 text-left"
+                    style={{
+                      background:'var(--panel)',
+                      border:`1px solid ${CTA}`,
+                      boxShadow:'0 12px 28px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px rgba(89,217,179,.20)',
+                      color:'var(--text)'
+                    }}
+                    title="Drop an assistant to move here"
+                  >
+                    <div className="flex items-center gap-2">
+                      <FolderIcon className="w-4 h-4" style={{ color: CTA }} />
+                      <div className="font-medium truncate">{f.name}</div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+
             <AnimatePresence initial={false}>
               {filtered.map(a=>(
                 <motion.div key={a.id} initial={{ opacity:0, y:6 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:-6 }}>
                   <Row
                     a={a}
                     active={a.id===activeId}
-                    inFolder={!!a.folderId}
                     onClick={()=>select(a.id)}
                     onRename={()=>setRenId(a.id)}
                     onDelete={()=>setDelId(a.id)}
-                    onMove={()=>setMoveId(a.id)}
+                    onDragStart={()=>{}}
                   />
                 </motion.div>
               ))}
             </AnimatePresence>
 
-            {filtered.length===0 && (
+            {activeFolderId==='all' && filtered.length===0 && folders.length===0 && (
+              <div className="text-xs py-8 text-center" style={{ color:'var(--sidebar-muted)' }}>
+                Nothing here yet.
+              </div>
+            )}
+            {activeFolderId!=='all' && filtered.length===0 && (
               <div className="text-xs py-8 text-center" style={{ color:'var(--sidebar-muted)' }}>
                 No assistants here yet.
               </div>
@@ -589,71 +603,30 @@ export default function AssistantRail() {
         </div>
 
         {/* Modals */}
-        <CreateModal open={createOpen} onClose={()=>setCreateOpen(false)} onCreate={addAssistant} inFolder={activeFolderId!=='all'} />
+        <CreateModal open={createOpen} onClose={()=>setCreateOpen(false)} onCreate={addAssistant} />
         <RenameModal open={!!renId} initial={renName} onClose={()=>setRenId(null)} onSave={saveRename} />
         <ConfirmDelete open={!!delId} name={delName} onClose={()=>setDelId(null)} onConfirm={confirmDelete} />
         <CreateFolderModal open={createFolderOpen} onClose={()=>setCreateFolderOpen(false)} onCreate={addFolder} />
 
-        {/* Move-to-Folder mini sheet */}
-        {moveId && (
-          <ModalShell>
-            <ModalHeader
-              icon={<MoveRight className="w-5 h-5" style={{ color:CTA }}/>}
-              title="Move Assistant"
-              onClose={()=>setMoveId(null)}
-            />
-            <div className="px-6 py-5">
-              <div className="grid gap-2">
-                <button
-                  onClick={()=> moveAssistantToFolder(moveId, null)}
-                  className="w-full text-left px-3 py-2 rounded-[10px]"
-                  style={{ background:'var(--panel)', border:`1px solid ${CTA}`, color:'var(--text)' }}
-                >
-                  Unfiled
-                </button>
-                {folders.map(f=>(
-                  <button
-                    key={f.id}
-                    onClick={()=> moveAssistantToFolder(moveId, f.id)}
-                    className="w-full text-left px-3 py-2 rounded-[10px]"
-                    style={{ background:'var(--panel)', border:`1px solid ${CTA}`, color:'var(--text)' }}
-                  >
-                    <span className="inline-flex items-center gap-2">
-                      <FolderIcon className="w-4 h-4" />
-                      {f.name}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="px-6 pb-6 flex justify-end">
-              <button
-                onClick={()=>setMoveId(null)}
-                className="h-[36px] px-3 rounded-[10px] font-semibold"
-                style={{ background:'var(--panel)', border:`1px solid ${CTA}`, color:'var(--text)' }}
-              >
-                Close
-              </button>
-            </div>
-          </ModalShell>
-        )}
-
-        {/* Rail theme details (inherit globals, only ensure readable text) */}
         <style jsx>{`
           /* Light */
           :global(:root:not([data-theme="dark"])) .assistant-rail{
             --sidebar-text: #0f172a;
-            --sidebar-muted: #64748b;
+            --sidebar-muted: #9aa6b2;
+            --panel: #0d0f11; /* keep solid panels for contrast with overlay bg */
+            --text: #e6f1ef;
+            --text-muted:#9fb4ad;
           }
           /* Dark */
           :global([data-theme="dark"]) .assistant-rail{
             --sidebar-text: var(--text);
             --sidebar-muted: var(--text-muted);
+            --panel: var(--panel);
           }
         `}</style>
       </div>
 
-      {/* Legit loading overlay (skeleton + overlay-glow) */}
+      {/* Legit loading overlay (same as overlay vibe) */}
       <AnimatePresence>
         {overlay && (
           <motion.div
@@ -673,7 +646,6 @@ export default function AssistantRail() {
                 <Loader2 className="w-5 h-5 animate-spin" />
                 <div className="text-sm">Loading…</div>
               </div>
-              {/* skeleton rows */}
               <div className="space-y-2">
                 {[1,2,3,4].map(i=>(
                   <div key={i} className="h-[52px] rounded-[10px] overflow-hidden"
