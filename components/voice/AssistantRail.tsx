@@ -27,12 +27,13 @@ const ACTIVE_KEY        = 'va:activeId';
 const ACTIVE_FOLDER_KEY = 'va:activeFolderId';
 
 /* Brand */
-const GREEN_LINE = 'rgba(89,217,179,.20)'; // use for borders AND icon tint now
-const GREEN_ICON = GREEN_LINE;
+const CTA       = '#59d9b3';                  // bright brand green (icons/glow)
+const GREEN_LINE = 'rgba(89,217,179,.20)';    // hairline borders
+const GREEN_ICON = CTA;                        // <— make icons shiny/bright
 
 /* Row glow overlays */
-const HOVER_OPACITY  = 0.18;
-const ACTIVE_OPACITY = 0.30;
+const HOVER_OPACITY  = 0.20;
+const ACTIVE_OPACITY = 0.34;
 
 /* Utils */
 function uid() {
@@ -82,7 +83,6 @@ function ModalShell({ children }:{ children:React.ReactNode }) {
             background: 'var(--panel)',
             color: 'var(--text)',
             border: `1px solid ${GREEN_LINE}`,
-            /* narrower & taller feel */
             maxHeight: '86vh'
           }}
         >
@@ -106,9 +106,12 @@ function ModalHeader({ icon, title, subtitle }:{
       }}
     >
       <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-xl grid place-items-center" style={{ background:'var(--brand-weak)' }}>
-          {/* icon uses GREEN_LINE tint */}
-          <span className="[&>*]:text-[inherit]" style={{ color: GREEN_ICON }}>{icon}</span>
+        <div className="w-10 h-10 rounded-xl grid place-items-center"
+             style={{ background:'var(--brand-weak)' }}>
+          {/* brighter + subtle glow */}
+          <span style={{ color: GREEN_ICON, filter:'drop-shadow(0 0 8px rgba(89,217,179,.35))' }}>
+            {icon}
+          </span>
         </div>
         <div className="min-w-0">
           <div className="text-lg font-semibold" style={{ color:'var(--text)' }}>{title}</div>
@@ -152,7 +155,7 @@ function CreateModal({ open, onClose, onCreate }:{
           disabled={!can}
           onClick={()=> can && onCreate(name.trim())}
           className="w-full h-[44px] rounded-[10px] font-semibold disabled:opacity-60"
-          style={{ background:'rgba(89,217,179,1)', color:'#fff' }}
+          style={{ background:CTA, color:'#fff' }}
         >
           Create
         </button>
@@ -186,7 +189,7 @@ function RenameModal({ open, initial, onClose, onSave }:{
           disabled={!can}
           onClick={()=> can && onSave(val.trim())}
           className="w-full h-[44px] rounded-[10px] font-semibold disabled:opacity-60"
-          style={{ background:'rgba(89,217,179,1)', color:'#fff' }}
+          style={{ background:CTA, color:'#fff' }}
         >
           Save
         </button>
@@ -215,7 +218,7 @@ function ConfirmDelete({ open, name, onClose, onConfirm }:{
         </button>
         <button onClick={onConfirm}
                 className="w-full h-[44px] rounded-[10px] font-semibold"
-                style={{ background:'#ef4444', color:'#fff' }}>
+                style={{ background:'#ef4444', color:'#fff', border:'1px solid #ef4444' }}>
           Delete
         </button>
       </div>
@@ -223,7 +226,7 @@ function ConfirmDelete({ open, name, onClose, onConfirm }:{
   );
 }
 
-/* ---------- Text-only assistant row with green overlay glow ---------- */
+/* ---------- Text-only assistant row with green overlay + TOP shadow ---------- */
 function AssistantRow({
   a, active, onClick, onRename, onDelete, onDragStart
 }:{
@@ -238,8 +241,9 @@ function AssistantRow({
       data-active={active ? 'true' : 'false'}
       style={{ background:'transparent', color:'var(--text)', position:'relative' }}
     >
-      {/* icons = GREEN_LINE tint */}
+      {/* icons = bright CTA */}
       <Bot className="w-4 h-4" style={{ color: GREEN_ICON }} />
+
       <div className="min-w-0 flex-1">
         <div className="text-[15px] font-semibold truncate">{a.name}</div>
         <div className="text-[12px] truncate" style={{ color:'var(--sidebar-muted)' }}>
@@ -248,38 +252,52 @@ function AssistantRow({
       </div>
 
       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        {/* Rename = WHITE */}
         <button
           onClick={(e)=>{ e.stopPropagation(); onRename(); }}
           className="px-2 h-[28px] rounded-[8px]"
-          style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)' }}
+          style={{ background:'#ffffff', border:`1px solid ${GREEN_LINE}`, color:'#0b0f0e' }}
           aria-label="Rename"
         >
           <Edit3 className="w-4 h-4" style={{ color: GREEN_ICON }} />
         </button>
+        {/* Delete = RED */}
         <button
           onClick={(e)=>{ e.stopPropagation(); onDelete(); }}
           className="px-2 h-[28px] rounded-[8px]"
-          style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)' }}
+          style={{ background:'#ef4444', border:'1px solid #ef4444', color:'#ffffff' }}
           aria-label="Delete"
         >
-          <Trash2 className="w-4 h-4" style={{ color: GREEN_ICON }} />
+          <Trash2 className="w-4 h-4" />
         </button>
       </div>
 
-      {/* green overlay glow */}
+      {/* green full overlay glow */}
       <style jsx>{`
         .ai-row::after{
           content:'';
           position:absolute; inset:0;
           border-radius:12px;
-          background: ${GREEN_LINE};
-          opacity: 0;
+          background:${CTA};
+          opacity:0;
           pointer-events:none;
           transition: opacity .18s ease, transform .18s ease;
-          mix-blend-mode: screen;
+          mix-blend-mode:screen;
         }
-        .ai-row:hover::after{ opacity: ${HOVER_OPACITY}; }
-        .ai-row[data-active="true"]::after{ opacity: ${ACTIVE_OPACITY}; }
+        /* soft “top shadow” highlight */
+        .ai-row::before{
+          content:'';
+          position:absolute; left:8px; right:8px; top:-6px;
+          height:16px; border-radius:12px;
+          background:radial-gradient(60% 80% at 50% 100%, rgba(89,217,179,.45) 0%, rgba(89,217,179,0) 100%);
+          opacity:0; pointer-events:none;
+          transition:opacity .18s ease;
+          filter:blur(6px);
+        }
+        .ai-row:hover::after{ opacity:${HOVER_OPACITY}; }
+        .ai-row[data-active="true"]::after{ opacity:${ACTIVE_OPACITY}; }
+        .ai-row:hover::before{ opacity:.75; }
+        .ai-row[data-active="true"]::before{ opacity:1; }
         .ai-row:hover{ transform: translateY(-1px); }
       `}</style>
     </button>
@@ -376,7 +394,6 @@ export default function AssistantRail() {
   }
 
   function select(id:string){
-    // freeze immediately, then show veil
     freezePage(true);
     setVeil(true);
     setActiveId(id);
@@ -432,14 +449,13 @@ export default function AssistantRail() {
     <>
       <div
         className="assistant-rail h-full flex flex-col"
-        /* rail bg = same header gradient so top & body match */
         style={{
           background:`linear-gradient(90deg,var(--panel) 0%,color-mix(in oklab,var(--panel) 97%, white 3%) 50%,var(--panel) 100%)`,
           borderRight:`1px solid ${GREEN_LINE}`,
           color:'var(--sidebar-text)'
         }}
       >
-        {/* TOP — visuals untouched aside from filling the bar and icon tint */}
+        {/* TOP */}
         <div
           className="px-3 py-3"
           style={{
@@ -447,12 +463,11 @@ export default function AssistantRail() {
             borderBottom:`1px solid ${GREEN_LINE}`
           }}
         >
-          {/* full-width, no gap, “one piece” control */}
           <div className="grid grid-cols-2 gap-0">
             <button
               type="button"
               className="inline-flex items-center justify-center gap-2 font-semibold px-3 rounded-l-[10px] border-r"
-              style={{ height:36, background:'rgba(89,217,179,1)', color:'#fff', border:`1px solid ${GREEN_LINE}`, borderRightColor: 'transparent' }}
+              style={{ height:36, background:CTA, color:'#fff', border:`1px solid ${GREEN_LINE}`, borderRightColor: 'transparent' }}
               onClick={()=> setCreateOpen(true)}
             >
               <Plus className="w-4 h-4" style={{ color:'#fff' }} />
@@ -465,8 +480,7 @@ export default function AssistantRail() {
               onClick={()=>{ setNewFolderName(''); setNewFolderOpen(true); }}
               aria-label="New Folder"
             >
-              {/* icon tinted to GREEN_LINE */}
-              <FolderPlus className="w-4 h-4" style={{ color: GREEN_ICON }} />
+              <FolderPlus className="w-4 h-4" style={{ color: GREEN_ICON, filter:'drop-shadow(0 0 8px rgba(89,217,179,.35))' }} />
               <span className="sr-only">New Folder</span>
             </button>
           </div>
@@ -531,7 +545,8 @@ export default function AssistantRail() {
               ))}
             </div>
           ) : (
-            <div className="space-y-0.5">
+            // no line under each assistant — remove any visual separation
+            <div className="space-y-0">
               <AnimatePresence initial={false}>
                 {filtered.map(a=>(
                   <motion.div key={a.id} initial={{ opacity:0, y:4 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:-4 }}>
@@ -593,7 +608,7 @@ export default function AssistantRail() {
                     setNewFolderOpen(false);
                   }}
                   className="w-full h-[44px] rounded-[10px] font-semibold"
-                  style={{ background:'rgba(89,217,179,1)', color:'#fff' }}
+                  style={{ background:CTA, color:'#fff' }}
                 >
                   Create
                 </button>
@@ -602,7 +617,7 @@ export default function AssistantRail() {
           )}
         </AnimatePresence>
 
-        {/* Theme tokens */}
+        {/* Theme + freeze */}
         <style jsx>{`
           /* Light */
           :global(:root:not([data-theme="dark"])) .assistant-rail{
@@ -617,14 +632,11 @@ export default function AssistantRail() {
             --sidebar-text: var(--text);
             --sidebar-muted: var(--text-muted);
           }
-          /* freeze (scroll + interactions) while loading veil is up */
-          :global(html.va-freeze), :global(body.va-freeze){
-            overflow: hidden !important;
-          }
+          :global(html.va-freeze), :global(body.va-freeze){ overflow:hidden !important; }
         `}</style>
       </div>
 
-      {/* FULL-SCREEN loading veil (freeze is applied before this anim kicks in) */}
+      {/* FULL-SCREEN loading veil */}
       {typeof document !== 'undefined' && createPortal(
         <AnimatePresence>
           {veil && (
@@ -638,10 +650,7 @@ export default function AssistantRail() {
               style={{ zIndex: 2147483647, background:'rgba(0,0,0,.72)', backdropFilter:'blur(4px)' }}
             >
               <div className="w-full h-full grid place-items-center">
-                <motion.div
-                  initial={{ scale: .94 }} animate={{ scale: 1 }} transition={{ duration: .18 }}
-                  className="grid place-items-center"
-                >
+                <motion.div initial={{ scale: .94 }} animate={{ scale: 1 }} transition={{ duration: .18 }}>
                   <Loader2 className="w-9 h-9 animate-spin" style={{ color:'#fff' }} />
                 </motion.div>
               </div>
