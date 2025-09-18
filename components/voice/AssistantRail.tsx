@@ -9,15 +9,14 @@ import {
 import { AnimatePresence, motion } from 'framer-motion';
 import { createPortal } from 'react-dom';
 
-/* Optional scoped storage helper (falls back to localStorage if missing) */
+/* Optional scoped storage helper */
 type Scoped = { getJSON<T>(k:string,f:T):Promise<T>; setJSON(k:string,v:unknown):Promise<void> };
 let scopedStorageFn: undefined | (() => Promise<Scoped>);
 try { scopedStorageFn = require('@/utils/scoped-storage').scopedStorage; } catch {}
 
 /* Types */
 export type AssistantLite = {
-  id: string; name: string; purpose?: string;
-  createdAt?: number; folderId?: string | null
+  id: string; name: string; purpose?: string; createdAt?: number; folderId?: string | null
 };
 type FolderLite = { id: string; name: string; createdAt?: number };
 
@@ -32,9 +31,9 @@ const CTA        = '#59d9b3';
 const CTA_HOVER  = '#54cfa9';
 const GREEN_LINE = 'rgba(89,217,179,.20)';
 
-/* Glows for assistant rows (hover / active) */
-const GLOW_HOVER  = '0 10px 26px rgba(89,217,179,.22), 0 0 0 1px rgba(89,217,179,.20) inset';
-const GLOW_ACTIVE = '0 16px 40px rgba(89,217,179,.32), 0 0 0 1px rgba(89,217,179,.22) inset';
+/* Row glow overlays (use ::after so it “sits on top”) */
+const HOVER_OPACITY  = 0.18; // ~18%
+const ACTIVE_OPACITY = 0.28; // ~28%
 
 /* Utils */
 function uid() {
@@ -63,27 +62,19 @@ function writeActive(id:string){
   try { window.dispatchEvent(new CustomEvent('assistant:active', { detail: id })); } catch {}
 }
 
-/* ---------- Modal shells (PORTALED with blur overlay) ---------- */
+/* ---------- Modal shells (PORTALED + blur backdrop) ---------- */
 function ModalShell({ children }:{ children:React.ReactNode }) {
   if (typeof document === 'undefined') return null;
   return createPortal(
     <>
       <div
         className="fixed inset-0 z-[100000]"
-        style={{
-          background: 'rgba(6,8,10,.62)',
-          backdropFilter: 'blur(6px)'
-        }}
+        style={{ background:'rgba(6,8,10,.62)', backdropFilter:'blur(6px)' }}
       />
       <div className="fixed inset-0 z-[100001] flex items-center justify-center px-4">
         <div
           className="w-full max-w-[720px] rounded-[14px] overflow-hidden"
-          style={{
-            /* keep same header card look (solid box) */
-            background: 'var(--panel)',
-            color: 'var(--text)',
-            border: `1px solid ${GREEN_LINE}`,
-          }}
+          style={{ background:'var(--panel)', color:'var(--text)', border:`1px solid ${GREEN_LINE}` }}
         >
           {children}
         </div>
@@ -100,11 +91,8 @@ function ModalHeader({ icon, title, subtitle }:{
     <div
       className="flex items-center justify-between px-6 py-5"
       style={{
-        background: `linear-gradient(90deg,
-          var(--panel) 0%,
-          color-mix(in oklab, var(--panel) 97%, white 3%) 50%,
-          var(--panel) 100%)`,
-        borderBottom: `1px solid ${GREEN_LINE}`
+        background:`linear-gradient(90deg,var(--panel) 0%,color-mix(in oklab,var(--panel) 97%, white 3%) 50%,var(--panel) 100%)`,
+        borderBottom:`1px solid ${GREEN_LINE}`
       }}
     >
       <div className="flex items-center gap-3">
@@ -116,13 +104,13 @@ function ModalHeader({ icon, title, subtitle }:{
           {subtitle && <div className="text-xs" style={{ color:'var(--text-muted)' }}>{subtitle}</div>}
         </div>
       </div>
-      {/* No “X” — per your request */}
+      {/* no X */}
       <span className="w-5 h-5" />
     </div>
   );
 }
 
-/* Create / Rename / Delete assistant modals */
+/* Modals */
 function CreateModal({ open, onClose, onCreate }:{
   open:boolean; onClose:()=>void; onCreate:(name:string)=>void;
 }) {
@@ -138,11 +126,7 @@ function CreateModal({ open, onClose, onCreate }:{
         <input
           value={name} onChange={(e)=>setName(e.target.value)}
           className="w-full h-[44px] rounded-[10px] px-3 text-sm outline-none"
-          style={{
-            background:'var(--panel)',
-            border:`1px solid ${GREEN_LINE}`,
-            color:'var(--text)'
-          }}
+          style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)' }}
           placeholder="e.g., Sales Bot" autoFocus
         />
       </div>
@@ -150,18 +134,14 @@ function CreateModal({ open, onClose, onCreate }:{
         <button
           onClick={onClose}
           className="w-full h-[44px] rounded-[10px] font-semibold"
-          style={{
-            background:'var(--panel)',
-            border:'1px solid rgba(255,255,255,.75)',
-            color:'var(--text)'
-          }}>
+          style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.8)', color:'var(--text)' }}>
           Cancel
         </button>
         <button
           disabled={!can}
           onClick={()=> can && onCreate(name.trim())}
           className="w-full h-[44px] rounded-[10px] font-semibold disabled:opacity-60"
-          style={{ background:CTA, color:'#ffffff' }}
+          style={{ background:CTA, color:'#fff' }}
           onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA_HOVER)}
           onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA)}
         >
@@ -190,14 +170,14 @@ function RenameModal({ open, initial, onClose, onSave }:{
       <div className="px-6 pb-6 flex gap-3">
         <button onClick={onClose}
                 className="w-full h-[44px] rounded-[10px] font-semibold"
-                style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.75)', color:'var(--text)' }}>
+                style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.8)', color:'var(--text)' }}>
           Cancel
         </button>
         <button
           disabled={!can}
           onClick={()=> can && onSave(val.trim())}
           className="w-full h-[44px] rounded-[10px] font-semibold disabled:opacity-60"
-          style={{ background:CTA, color:'#ffffff' }}
+          style={{ background:CTA, color:'#fff' }}
           onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA_HOVER)}
           onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA)}
         >
@@ -223,12 +203,12 @@ function ConfirmDelete({ open, name, onClose, onConfirm }:{
       <div className="px-6 pb-6 flex gap-3">
         <button onClick={onClose}
                 className="w-full h-[44px] rounded-[10px] font-semibold"
-                style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.75)', color:'var(--text)' }}>
+                style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.8)', color:'var(--text)' }}>
           Cancel
         </button>
         <button onClick={onConfirm}
                 className="w-full h-[44px] rounded-[10px] font-semibold"
-                style={{ background:'#ef4444', color:'#ffffff' }}>
+                style={{ background:'#ef4444', color:'#fff' }}>
           Delete
         </button>
       </div>
@@ -236,7 +216,7 @@ function ConfirmDelete({ open, name, onClose, onConfirm }:{
   );
 }
 
-/* ---------- Simple text row (no border/box) ---------- */
+/* ---------- Text-only assistant row with green overlay glow ---------- */
 function AssistantRow({
   a, active, onClick, onRename, onDelete, onDragStart
 }:{
@@ -247,15 +227,12 @@ function AssistantRow({
       draggable
       onDragStart={()=>onDragStart(a.id)}
       onClick={onClick}
-      className="group w-full text-left rounded-[12px] px-3 py-3 flex items-center gap-2 transition"
-      style={{
-        background: 'transparent',
-        color: 'var(--text)',
-        boxShadow: active ? GLOW_ACTIVE : 'none'
-      }}
+      className={`ai-row group w-full text-left rounded-[12px] px-3 py-3 flex items-center gap-2 transition`}
+      data-active={active ? 'true' : 'false'}
+      style={{ background:'transparent', color:'var(--text)', position:'relative' }}
     >
-      {/* (tiny bot icon for alignment; modern tint) */}
-      <Bot className="w-4 h-4 opacity-80" style={{ color: CTA }} />
+      {/* icons = same CTA green as boxes */}
+      <Bot className="w-4 h-4" style={{ color: CTA }} />
       <div className="min-w-0 flex-1">
         <div className="text-[15px] font-semibold truncate">{a.name}</div>
         <div className="text-[12px] truncate" style={{ color:'var(--sidebar-muted)' }}>
@@ -270,7 +247,7 @@ function AssistantRow({
           style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)' }}
           aria-label="Rename"
         >
-          <Edit3 className="w-4 h-4" />
+          <Edit3 className="w-4 h-4" style={{ color:CTA }} />
         </button>
         <button
           onClick={(e)=>{ e.stopPropagation(); onDelete(); }}
@@ -278,15 +255,25 @@ function AssistantRow({
           style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)' }}
           aria-label="Delete"
         >
-          <Trash2 className="w-4 h-4" />
+          <Trash2 className="w-4 h-4" style={{ color:CTA }} />
         </button>
       </div>
 
+      {/* green overlay glow */}
       <style jsx>{`
-        button.group:hover{
-          box-shadow: ${GLOW_HOVER};
-          transform: translateY(-1px);
+        .ai-row::after{
+          content:'';
+          position:absolute; inset:0;
+          border-radius:12px;
+          background: ${CTA};
+          opacity: 0; /* default off */
+          pointer-events:none;
+          transition: opacity .18s ease, transform .18s ease;
+          mix-blend-mode: normal;
         }
+        .ai-row:hover::after{ opacity: ${HOVER_OPACITY}; }
+        .ai-row[data-active="true"]::after{ opacity: ${ACTIVE_OPACITY}; }
+        .ai-row:hover{ transform: translateY(-1px); }
       `}</style>
     </button>
   );
@@ -308,11 +295,7 @@ function FolderRow({
         if (ids.length) onDropIds(ids);
       }}
       className="w-full text-left rounded-[12px] px-3 py-2 flex items-center gap-2 transition"
-      style={{
-        background:'var(--panel)',
-        border:`1px solid ${GREEN_LINE}`,
-        color:'var(--text)'
-      }}
+      style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)' }}
     >
       <Folder className="w-4 h-4" style={{ color: CTA }} />
       <div className="min-w-0 flex-1 truncate">{f.name}</div>
@@ -326,7 +309,7 @@ export default function AssistantRail() {
   const [folders,setFolders] = useState<FolderLite[]>([]);
   const [activeId,setActiveId] = useState('');
   const [activeFolderId,setActiveFolderId] = useState<string|''>('');
-  const [veil,setVeil] = useState(false);               // full page loading overlay
+  const [veil,setVeil] = useState(false);               // full-screen loader (portal)
   const [initialLoading,setInitialLoading] = useState(true);
   const [q,setQ] = useState('');
   const [createOpen,setCreateOpen] = useState(false);
@@ -350,7 +333,7 @@ export default function AssistantRail() {
     if (firstId) writeActive(firstId);
 
     setActiveFolderId(savedFolder || '');
-    setTimeout(()=>setInitialLoading(false), 380);
+    setTimeout(()=>setInitialLoading(false), 320);
   })(); },[]);
 
   const filtered = useMemo(()=>{
@@ -363,10 +346,10 @@ export default function AssistantRail() {
   },[assistants,q,activeFolderId]);
 
   function select(id:string){
-    setVeil(true);
+    setVeil(true);                  // show full-screen veil
     setActiveId(id);
     writeActive(id);
-    window.setTimeout(()=> setVeil(false), 700); // full-page legit feel
+    window.setTimeout(()=> setVeil(false), 750);
   }
 
   /* Assistant CRUD */
@@ -417,30 +400,22 @@ export default function AssistantRail() {
     <>
       <div
         className="assistant-rail h-full flex flex-col"
-        /* Make the whole rail use the same background COLOR as the top header */
-        style={{
-          background: 'var(--panel)',
-          borderRight:`1px solid ${GREEN_LINE}`,
-          color:'var(--sidebar-text)',
-        }}
+        /* background stays aligned with the top; NOT changing it */
+        style={{ background:'var(--panel)', borderRight:`1px solid ${GREEN_LINE}`, color:'var(--sidebar-text)' }}
       >
-        {/* Header — unchanged look */}
+        {/* TOP — UNTOUCHED except for icon greens */}
         <div
           className="px-3 py-3"
           style={{
-            background: `linear-gradient(90deg,
-              var(--panel) 0%,
-              color-mix(in oklab, var(--panel) 97%, white 3%) 50%,
-              var(--panel) 100%)`,
+            background:`linear-gradient(90deg,var(--panel) 0%,color-mix(in oklab,var(--panel) 97%, white 3%) 50%,var(--panel) 100%)`,
             borderBottom:`1px solid ${GREEN_LINE}`
           }}
         >
           <div className="grid grid-cols-[auto_1fr] gap-2">
-            {/* Create Assistant (left, green with white text) */}
             <button
               type="button"
               className="inline-flex items-center justify-center gap-2 rounded-[10px] font-semibold px-3"
-              style={{ height: 36, background: CTA, color:'#ffffff', border:`1px solid ${GREEN_LINE}` }}
+              style={{ height:36, background:CTA, color:'#fff', border:`1px solid ${GREEN_LINE}` }}
               onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA_HOVER)}
               onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA)}
               onClick={()=> setCreateOpen(true)}
@@ -448,41 +423,30 @@ export default function AssistantRail() {
               <Plus className="w-4 h-4" />
               Create
             </button>
-
-            {/* New Folder (icon only) */}
             <div className="flex justify-end">
               <button
                 type="button"
                 className="inline-flex items-center justify-center rounded-[10px] w-[36px]"
-                style={{ height: 36, background:'var(--panel)', color:'var(--text)', border:`1px solid ${GREEN_LINE}` }}
+                style={{ height:36, background:'var(--panel)', color:'var(--text)', border:`1px solid ${GREEN_LINE}` }}
                 onClick={()=>{ setNewFolderName(''); setNewFolderOpen(true); }}
                 aria-label="New Folder"
               >
-                <FolderPlus className="w-4 h-4" />
+                <FolderPlus className="w-4 h-4" style={{ color:CTA }} />
               </button>
             </div>
           </div>
 
-          {/* Search */}
           <div className="mt-3 relative">
             <input
               value={q}
               onChange={(e)=>setQ(e.target.value)}
               placeholder="Search assistants"
               className="w-full h-[34px] rounded-[10px] pl-8 pr-3 text-sm outline-none"
-              style={{
-                background:'var(--panel)',
-                border: `1px solid ${GREEN_LINE}`,
-                color:'var(--text)'
-              }}
+              style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)' }}
             />
-            <Search
-              className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2"
-              style={{ color:'var(--text-muted)' }}
-            />
+            <Search className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color:'var(--text-muted)' }} />
           </div>
 
-          {/* Scope / breadcrumb */}
           <div className="mt-3 flex items-center justify-between">
             <div className="text-[11px] font-semibold tracking-[.12em]" style={{ color:'var(--sidebar-muted)' }}>
               {inAllScope ? 'ALL' : 'FOLDER'}
@@ -493,7 +457,7 @@ export default function AssistantRail() {
                 className="inline-flex items-center gap-1 px-2 py-1 rounded-[8px]"
                 style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)' }}
               >
-                <ArrowLeft className="w-4 h-4" /> Back to All
+                <ArrowLeft className="w-4 h-4" style={{ color:CTA }} /> Back to All
               </button>
             )}
           </div>
@@ -501,7 +465,6 @@ export default function AssistantRail() {
 
         {/* LIST */}
         <div className="px-3 py-3 overflow-auto" style={{ flex:1 }}>
-          {/* In ALL scope show folders first */}
           {inAllScope && visibleFolders.length>0 && (
             <div className="mb-2">
               <div className="mb-2 text-[11px] font-semibold tracking-[.12em]" style={{ color:'var(--sidebar-muted)' }}>
@@ -520,23 +483,18 @@ export default function AssistantRail() {
                   />
                 ))}
               </div>
-
-              {/* Divider line between folders and unfiled assistants */}
               <div className="mt-3 mb-1" style={{ height:1, background:GREEN_LINE }} />
             </div>
           )}
 
-          {/* Skeletons on first paint */}
-          {initialLoading && (
+          {initialLoading ? (
             <div className="space-y-3">
               {[0,1,2,3].map(i=>(
                 <div key={i} className="h-[42px] rounded-[10px] animate-pulse"
                      style={{ background:'color-mix(in oklab, var(--panel) 90%, white 10%)', opacity:.55 }} />
               ))}
             </div>
-          )}
-
-          {!initialLoading && (
+          ) : (
             <div className="space-y-0.5">
               <AnimatePresence initial={false}>
                 {filtered.map(a=>(
@@ -587,7 +545,7 @@ export default function AssistantRail() {
                 <button
                   onClick={()=>setNewFolderOpen(false)}
                   className="w-full h-[44px] rounded-[10px] font-semibold"
-                  style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.75)', color:'var(--text)' }}
+                  style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.8)', color:'var(--text)' }}
                 >
                   Cancel
                 </button>
@@ -599,7 +557,7 @@ export default function AssistantRail() {
                     setNewFolderOpen(false);
                   }}
                   className="w-full h-[44px] rounded-[10px] font-semibold"
-                  style={{ background:CTA, color:'#ffffff' }}
+                  style={{ background:CTA, color:'#fff' }}
                 >
                   Create
                 </button>
@@ -608,13 +566,13 @@ export default function AssistantRail() {
           )}
         </AnimatePresence>
 
-        {/* Theme tokens for rail */}
+        {/* Theme tokens */}
         <style jsx>{`
           /* Light */
           :global(:root:not([data-theme="dark"])) .assistant-rail{
             --sidebar-text: #0f172a;
             --sidebar-muted: #64748b;
-            --panel: #ffffff;      /* same base as header in light */
+            --panel: #ffffff;
             --text: #0f172a;
             --text-muted: #64748b;
           }
@@ -622,24 +580,28 @@ export default function AssistantRail() {
           :global([data-theme="dark"]) .assistant-rail{
             --sidebar-text: var(--text);
             --sidebar-muted: var(--text-muted);
-            /* --panel picked from app tokens */
           }
         `}</style>
       </div>
 
-      {/* Full-page loading veil (legit) */}
-      <AnimatePresence>
-        {veil && (
-          <motion.div
-            key="switch-veil"
-            className="fixed inset-0 z-[100002] grid place-items-center"
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            style={{ background:'rgba(0,0,0,.65)', backdropFilter:'blur(4px)' }}
-          >
-            <Loader2 className="w-7 h-7 animate-spin" style={{ color:'#ffffff' }} />
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* FULL-SCREEN loading veil (highest z, portal) */}
+      {typeof document !== 'undefined' && createPortal(
+        <AnimatePresence>
+          {veil && (
+            <motion.div
+              key="switch-veil"
+              className="fixed inset-0"
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              style={{ zIndex: 2147483647, background:'rgba(0,0,0,.72)', backdropFilter:'blur(4px)' }}
+            >
+              <div className="w-full h-full grid place-items-center">
+                <Loader2 className="w-8 h-8 animate-spin" style={{ color:'#fff' }} />
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
     </>
   );
 }
