@@ -6,7 +6,7 @@ import dynamic from 'next/dynamic';
 import { createPortal } from 'react-dom';
 import {
   Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Rocket, Search, Check, Lock,
-  KeyRound, Play, Square
+  KeyRound, Play, Square, Pause
 } from 'lucide-react';
 import { scopedStorage } from '@/utils/scoped-storage';
 
@@ -32,7 +32,7 @@ const GREEN_LINE = 'rgba(89,217,179,.20)';
 const ACTIVE_KEY = 'va:activeId';
 const Z_OVERLAY = 100000;
 const Z_MODAL   = 100001;
-const Z_MENU    = 100010; // above cards & overlays
+const Z_MENU    = 100010; // dropdown above everything
 
 /* phone icon */
 function PhoneFilled(props: React.SVGProps<SVGSVGElement>) {
@@ -99,8 +99,6 @@ const Tokens = () => (
       border-radius:10px;
       box-shadow:0 36px 90px rgba(0,0,0,.55);
     }
-
-    /* Rail positioning helpers kept as-is */
   `}</style>
 );
 
@@ -116,7 +114,7 @@ type AgentData = {
   systemPrompt: string;
 
   ttsProvider: 'openai' | 'elevenlabs';
-  voiceName: string;
+  voiceName: string;       // actual voice id/name used by TTS
   apiKeyId?: string;
 
   asrProvider: 'deepgram' | 'whisper' | 'assemblyai';
@@ -178,7 +176,7 @@ async function apiPublish(agentId: string){
   return r.json();
 }
 
-/* ─────────── options ─────────── */
+/* ─────────── options helpers ─────────── */
 type Opt = { value: string; label: string; disabled?: boolean; note?: string };
 
 const providerOpts: Opt[] = [
@@ -199,13 +197,6 @@ const modelOptsFor = (provider: string): Opt[] =>
 const ttsProviders: Opt[] = [
   { value: 'openai',    label: 'OpenAI' },
   { value: 'elevenlabs', label: 'ElevenLabs — coming soon', disabled: true, note: 'soon' },
-];
-
-const openAiVoices: Opt[] = [
-  { value: 'Alloy (American)',     label: 'Alloy (American)' },
-  { value: 'Verse (American)',     label: 'Verse (American)' },
-  { value: 'Coral (British)',      label: 'Coral (British)' },
-  { value: 'Amber (Australian)',   label: 'Amber (Australian)' },
 ];
 
 const asrProviders: Opt[] = [
@@ -244,12 +235,16 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
-/* ─────────── Select with portal menu + rail-style glow ─────────── */
+/* ─────────── Select with portal menu + rail-style glow + inline player ─────────── */
 function StyledSelect({
-  value, onChange, options, placeholder, leftIcon, menuTop
+  value, onChange, options, placeholder, leftIcon, menuTop,
+  onPreview /* returns a promise that plays/handles audio for the given value */,
+  isPreviewing /* which value is currently previewing */
 }:{
   value: string; onChange: (v: string) => void;
   options: Opt[]; placeholder?: string; leftIcon?: React.ReactNode; menuTop?: React.ReactNode;
+  onPreview?: (v: string) => Promise<void>;
+  isPreviewing?: string | null;
 }) {
   const wrapRef = useRef<HTMLDivElement|null>(null);
   const btnRef = useRef<HTMLButtonElement|null>(null);
@@ -270,7 +265,7 @@ function StyledSelect({
     const r = btnRef.current.getBoundingClientRect();
     const spaceBelow = window.innerHeight - r.bottom - 12;
     const spaceAbove = r.top - 12;
-    const placeBelow = spaceBelow >= Math.min(320, Math.max(220, spaceAbove)); // prefer below if decent room
+    const placeBelow = spaceBelow >= Math.min(320, Math.max(220, spaceAbove));
     const maxH = Math.max(160, Math.min(320, placeBelow ? spaceBelow : spaceAbove));
     setMenuRect({
       top: Math.round(placeBelow ? r.bottom + 8 : r.top - 8),
@@ -342,7 +337,7 @@ function StyledSelect({
             left: menuRect.left,
             width: menuRect.width,
             maxHeight: menuRect.maxH,
-            overflow:'hidden' // inner scroller below
+            overflow:'hidden'
           }}
         >
           {menuTop ? <div className="p-3 border-b" style={{ borderColor: GREEN_LINE }}>{menuTop}</div> : null}
@@ -365,28 +360,41 @@ function StyledSelect({
 
             <div className="overflow-y-auto pr-1" style={{ maxHeight: menuRect.maxH - 70, scrollbarWidth:'thin' }}>
               {filtered.map(o => (
-                <button
-                  key={o.value}
-                  disabled={o.disabled}
-                  onClick={()=>{ if (o.disabled) return; onChange(o.value); setOpen(false); }}
-                  className="va-option w-full text-left text-sm px-3 py-2 rounded-[10px] transition grid grid-cols-[18px_1fr_auto] items-center gap-2 disabled:opacity-60"
-                  style={{
-                    position:'relative',
-                    color: o.disabled ? 'var(--text-muted)' : 'var(--text)',
-                    background:'transparent',
-                    border:'none',
-                    cursor:o.disabled?'not-allowed':'pointer'
-                  }}
-                >
-                  {/* left tick */}
-                  {o.disabled ? (
-                    <Lock className="w-3.5 h-3.5" />
-                  ) : (
-                    <Check className="w-3.5 h-3.5" style={{ opacity: o.value===value ? 1 : 0 }} />
-                  )}
-                  <span className="truncate">{o.label}</span>
-                  {o.note ? <span className="text-[11px]" style={{ color:'var(--text-muted)' }}>{o.note}</span> : <span />}
-                </button>
+                <div key={o.value} className="relative">
+                  <button
+                    disabled={o.disabled}
+                    onClick={()=>{ if (o.disabled) return; onChange(o.value); setOpen(false); }}
+                    className="va-option w-full text-left text-sm px-3 py-2 rounded-[10px] transition grid grid-cols-[18px_1fr_auto] items-center gap-2 disabled:opacity-60"
+                    style={{
+                      position:'relative',
+                      color: o.disabled ? 'var(--text-muted)' : 'var(--text)',
+                      background:'transparent',
+                      border:'none',
+                      cursor:o.disabled?'not-allowed':'pointer'
+                    }}
+                  >
+                    {o.disabled ? (
+                      <Lock className="w-3.5 h-3.5" />
+                    ) : (
+                      <Check className="w-3.5 h-3.5" style={{ opacity: o.value===value ? 1 : 0 }} />
+                    )}
+                    <span className="truncate">{o.label}</span>
+
+                    {/* Inline player button (doesn't close the menu) */}
+                    {onPreview ? (
+                      <button
+                        type="button"
+                        onClick={async (e)=>{ e.stopPropagation(); await onPreview(o.value); }}
+                        className="w-7 h-7 rounded-full grid place-items-center"
+                        style={{ border:'1px solid var(--input-border)', background:'var(--panel-bg)' }}
+                        aria-label={isPreviewing === o.value ? 'Stop preview' : 'Play preview'}
+                        title={isPreviewing === o.value ? 'Stop' : 'Play'}
+                      >
+                        {isPreviewing === o.value ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+                      </button>
+                    ) : <span />}
+                  </button>
+                </div>
               ))}
               {filtered.length===0 && (
                 <div className="px-3 py-6 text-sm" style={{ color:'var(--text-muted)' }}>No matches.</div>
@@ -468,13 +476,9 @@ function Section({
 
 /* ─────────── Page ─────────── */
 export default function VoiceAgentSection() {
+  /* measure app sidebar so rail aligns */
   useEffect(() => {
-    const candidates = [
-      '[data-app-sidebar]',
-      'aside[aria-label="Sidebar"]',
-      'aside[class*="sidebar"]',
-      '#sidebar'
-    ];
+    const candidates = ['[data-app-sidebar]','aside[aria-label="Sidebar"]','aside[class*="sidebar"]','#sidebar'];
     const el = document.querySelector<HTMLElement>(candidates.join(', '));
     const setW = (w:number) => document.documentElement.style.setProperty('--app-sidebar-w', `${Math.round(w)}px`);
     if (!el) { setW(240); return; }
@@ -509,6 +513,55 @@ export default function VoiceAgentSection() {
   const basePromptRef = useRef<string>('');
   const [pendingPrompt, setPendingPrompt] = useState<string>('');
 
+  /* ---- OpenAI voices + preview ---- */
+  type VoiceOpt = { value: string; label: string; note?: string };
+  const [voiceOpts, setVoiceOpts] = useState<VoiceOpt[]>([
+    // fallback until API route is ready
+    { value: 'Alloy (American)', label: 'Alloy (American)' },
+    { value: 'Verse (American)', label: 'Verse (American)' },
+    { value: 'Coral (British)',  label: 'Coral (British)' },
+    { value: 'Amber (Australian)', label: 'Amber (Australian)' },
+  ]);
+  const [previewing, setPreviewing] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  // fetch from your API route; ignore errors and keep fallback list
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch('/api/openai/voices');
+        if (!r.ok) return;
+        const arr = await r.json(); // [{id,name,preview?}]
+        if (Array.isArray(arr) && arr.length) {
+          setVoiceOpts(arr.map((v:any) => ({ value: String(v.id || v.name), label: String(v.name || v.id) })));
+        }
+      } catch {}
+    })();
+  }, []);
+
+  async function previewVoice(v: string) {
+    try {
+      if (previewing === v) {
+        // stop
+        setPreviewing(null);
+        if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; }
+        return;
+      }
+      setPreviewing(v);
+      // stop any existing
+      if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; }
+      // fetch preview stream (implement this route)
+      const url = `/api/voice/preview?voice=${encodeURIComponent(v)}`;
+      const a = new Audio(url);
+      audioRef.current = a;
+      a.onended = () => setPreviewing(null);
+      await a.play();
+    } catch {
+      setPreviewing(null);
+    }
+  }
+
+  /* web speech preview for the little top preview buttons (unchanged) */
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   useEffect(() => {
     const load = () => setVoices(window.speechSynthesis.getVoices());
@@ -516,7 +569,17 @@ export default function VoiceAgentSection() {
     (window.speechSynthesis as any).onvoiceschanged = load;
     return () => { (window.speechSynthesis as any).onvoiceschanged = null; };
   }, []);
+  function speakPreview(line?: string){
+    const u = new SpeechSynthesisUtterance(line || `Hi, I'm ${data.name || 'your assistant'}. This is a preview.`);
+    const byName = voices.find(v => v.name.toLowerCase().includes((data.voiceName || '').split(' ')[0]?.toLowerCase() || ''));
+    const en = voices.find(v => v.lang?.startsWith('en'));
+    if (byName) u.voice = byName; else if (en) u.voice = en;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(u);
+  }
+  const stopPreview = () => window.speechSynthesis.cancel();
 
+  /* listen for active rail id */
   useEffect(() => {
     const handler = (e: Event) => setActiveId((e as CustomEvent<string>).detail);
     window.addEventListener('assistant:active', handler as EventListener);
@@ -622,20 +685,11 @@ ${lines.map(l => `- ${l}`).join('\n')}
     setTimeout(() => setMessages(m => [...m, { role: 'assistant', text: reply }]), 350);
   }
 
-  function speakPreview(line?: string){
-    const u = new SpeechSynthesisUtterance(line || `Hi, I'm ${data.name || 'your assistant'}. This is a preview.`);
-    const byName = voices.find(v => v.name.toLowerCase().includes((data.voiceName || '').split(' ')[0]?.toLowerCase() || ''));
-    const en = voices.find(v => v.lang?.startsWith('en'));
-    if (byName) u.voice = byName; else if (en) u.voice = en;
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(u);
-  }
-  const stopPreview = () => window.speechSynthesis.cancel();
-
   return (
     <section className="va-scope" style={{ background:'var(--bg)', color:'var(--text)' }}>
       <Tokens />
 
+      {/* rail + content */}
       <div className="grid w-full" style={{ gridTemplateColumns: '260px 1fr' }}>
         <div className="sticky top-0 h-screen" style={{ borderRight:'1px solid rgba(255,255,255,.06)' }}>
           <RailBoundary><AssistantRail /></RailBoundary>
@@ -737,12 +791,11 @@ ${lines.map(l => `- ${l}`).join('\n')}
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap={[12]} className="mt-[var(--s-4)]">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt-[var(--s-4)]">
               <div className="md:col-span-2">
                 <div className="flex items-center justify-between mb-[var(--s-2)]">
                   <div className="font-medium" style={{ fontSize:'var(--fz-label)' }}>System Prompt</div>
                   <div className="flex items-center gap-2">
-                    {/* Apply/Discard added elsewhere if needed */}
                     <button
                       className="inline-flex items-center gap-2 rounded-[10px] text-sm"
                       style={{ height:36, padding:'0 12px', background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
@@ -797,46 +850,42 @@ ${lines.map(l => `- ${l}`).join('\n')}
               </div>
 
               <div>
-                <div className="mb-[var(--s-2)] text-[12.5px]">Voice Provider</div>
-                <StyledSelect value={data.ttsProvider} onChange={(v)=>setField('ttsProvider')(v as AgentData['ttsProvider'])} options={ttsProviders}/>
+                <div className="mb-[var(--s-2)] text-[12.5px]">Voice</div>
+                <StyledSelect
+                  value={data.voiceName}
+                  onChange={(v)=>setField('voiceName')(v)}
+                  options={voiceOpts}
+                  placeholder="— Choose —"
+                  onPreview={previewVoice}
+                  isPreviewing={previewing}
+                />
               </div>
             </div>
 
             <div className="grid grid-cols-1 mt-[var(--s-4)]">
-              <div>
-                <div className="mb-[var(--s-2)] text-[12.5px]">Voice</div>
-                <StyledSelect
-                  value={data.voiceName}
-                  onChange={setField('voiceName')}
-                  options={openAiVoices}
-                  placeholder="— Choose —"
-                  menuTop={
-                    <div className="flex items-center justify-between px-3 py-2 rounded-[10px]"
-                         style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}>
-                      <div className="text-xs" style={{ color:'var(--text-muted)' }}>Preview</div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={()=>speakPreview(`This is ${data.voiceName || 'the selected'} voice preview.`)}
-                          className="w-8 h-8 rounded-full grid place-items-center"
-                          aria-label="Play voice"
-                          style={{ background: CTA, color:'#0a0f0d' }}
-                        >
-                          <Play className="w-4 h-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={stopPreview}
-                          className="w-8 h-8 rounded-full grid place-items-center border"
-                          aria-label="Stop preview"
-                          style={{ background: 'var(--panel-bg)', color:'var(--text)', borderColor:'var(--input-border)' }}
-                        >
-                          <Square className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  }
-                />
+              <div className="flex items-center justify-between px-3 py-2 rounded-[10px]"
+                   style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}>
+                <div className="text-xs" style={{ color:'var(--text-muted)' }}>Quick web-speech preview</div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={()=>speakPreview(`This is ${data.voiceName || 'the selected'} voice preview.`)}
+                    className="w-8 h-8 rounded-full grid place-items-center"
+                    aria-label="Play voice"
+                    style={{ background: CTA, color:'#0a0f0d' }}
+                  >
+                    <Play className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={stopPreview}
+                    className="w-8 h-8 rounded-full grid place-items-center border"
+                    aria-label="Stop preview"
+                    style={{ background: 'var(--panel-bg)', color:'var(--text)', borderColor:'var(--input-border)' }}
+                  >
+                    <Square className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             </div>
           </Section>
@@ -947,8 +996,6 @@ ${lines.map(l => `- ${l}`).join('\n')}
           </div>
         </>
       )}
-
-      {/* Call drawer left as-is */}
     </section>
   );
 }
