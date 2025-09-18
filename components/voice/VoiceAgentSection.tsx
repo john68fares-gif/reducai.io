@@ -75,7 +75,7 @@ const Tokens = () => (
     }
 
     /* The assistant rail sits immediately to the right of the app's sidebar.
-       If your layout sets --app-nav-w, we'll use it; otherwise fallback to 72px. */
+       If your layout sets --app-nav-w, we'll use it; otherwise we set it at runtime. */
     .va-left-fixed{
       position:fixed;
       top:0; bottom:0;
@@ -96,7 +96,6 @@ const Tokens = () => (
       border-radius:10px;
     }
 
-    /* Make popover header feel like .va-head (solid + divider) */
     .va-menu-head{
       display:flex; align-items:center; gap:8px;
       padding:8px 10px;
@@ -105,14 +104,8 @@ const Tokens = () => (
       border-radius:8px;
     }
 
-    /* overlays */
     @keyframes overlayPulse { 0%{transform:scale(1);opacity:.98} 60%{transform:scale(1.02);opacity:1} 100%{transform:scale(1);opacity:.98} }
-    .va-blur-overlay{
-      position:fixed; inset:0; z-index:9996;
-      background:rgba(8,10,12,.88);
-      backdrop-filter:blur(3px);
-      opacity:0; pointer-events:none; transition:opacity 200ms var(--ease);
-    }
+    .va-blur-overlay{ position:fixed; inset:0; z-index:9996; background:rgba(8,10,12,.88); backdrop-filter:blur(3px); opacity:0; pointer-events:none; transition:opacity 200ms var(--ease); }
     .va-blur-overlay.open{ opacity:1; pointer-events:auto; }
     .va-blur-overlay.pulse{ animation:overlayPulse 320ms var(--ease); }
 
@@ -368,7 +361,6 @@ function StyledSelect({
             >
               {menuTop ? <div className="mb-2">{menuTop}</div> : null}
 
-              {/* Solid header row that mirrors .va-head */}
               <div className="va-menu-head mb-3 rounded-[10px]" style={{ color:'var(--text)' }}>
                 <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
                 <input
@@ -391,7 +383,7 @@ function StyledSelect({
                     style={{
                       color:'var(--text)',
                       background:'var(--panel-bg)',
-                      border:'1px solid var(--panel-bg)', // same as bg until hover
+                      border:'1px solid var(--panel-bg)',
                       cursor:o.disabled?'not-allowed':'pointer'
                     }}
                     onMouseEnter={(e)=>{ if (o.disabled) return;
@@ -507,6 +499,45 @@ export default function VoiceAgentSection() {
     return () => { (window.speechSynthesis as any).onvoiceschanged = null; };
   }, []);
 
+  /* ✅ Rail placement fix — ensure --app-nav-w matches the real sidebar width */
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+
+    const parsePx = (val: string | null) => {
+      if (!val) return NaN;
+      const n = parseFloat(val.toString().trim().replace('px',''));
+      return Number.isFinite(n) ? n : NaN;
+    };
+
+    const computeNavWidth = () => {
+      // 1) use CSS var if valid
+      const cssVar = getComputedStyle(root).getPropertyValue('--app-nav-w');
+      const cssVarPx = parsePx(cssVar);
+      if (!Number.isNaN(cssVarPx) && cssVarPx >= 0) return cssVarPx;
+
+      // 2) try common sidebar hooks
+      const el = document.querySelector<HTMLElement>('[data-app-nav], [data-sidebar], nav.sidebar, aside.sidebar');
+      if (el) {
+        const w = el.getBoundingClientRect().width;
+        if (w > 0) return w;
+      }
+
+      // 3) fallback
+      return 72;
+    };
+
+    const apply = () => {
+      const w = computeNavWidth();
+      root.style.setProperty('--app-nav-w', `${Math.round(w)}px`);
+    };
+
+    apply();
+    const onResize = () => apply();
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  /* end rail fix */
+
   useEffect(() => {
     const handler = (e: Event) => setActiveId((e as CustomEvent<string>).detail);
     window.addEventListener('assistant:active', handler as EventListener);
@@ -537,7 +568,8 @@ export default function VoiceAgentSection() {
 
         setApiKeys(cleaned);
 
-        const globalSelected = await store.getJSON<string>('apiKeys.selectedId', '');
+        const store2 = await scopedStorage();
+        const globalSelected = await store2.getJSON<string>('apiKeys.selectedId', '');
         const chosen =
           (data.apiKeyId && cleaned.some((k) => k.id === data.apiKeyId)) ? data.apiKeyId! :
           (globalSelected && cleaned.some((k) => k.id === globalSelected)) ? globalSelected :
@@ -545,7 +577,7 @@ export default function VoiceAgentSection() {
 
         if (chosen && chosen !== data.apiKeyId) {
           setData(prev => ({ ...prev, apiKeyId: chosen }));
-          await store.setJSON('apiKeys.selectedId', chosen);
+          await store2.setJSON('apiKeys.selectedId', chosen);
         }
       } catch {}
     })();
@@ -631,6 +663,7 @@ ${lines.map(l => `- ${l}`).join('\n')}
     <section className="va-scope" style={{ background:'var(--bg)', color:'var(--text)' }}>
       <Tokens />
 
+      {/* ✅ Rail now always aligned to the real app sidebar width */}
       <aside className="va-left-fixed">
         <div className="rail-scroll">
           <AssistantRail />
