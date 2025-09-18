@@ -56,6 +56,9 @@
   --ease: cubic-bezier(.22,.61,.36,1);
   --dur-quick: 160ms;
   --dur: 260ms;
+
+  /* ADDED: app left nav width so the Assistant rail can sit to the right of it */
+  --app-nav-w: 260px;
 }
 
 [data-theme="dark"] {
