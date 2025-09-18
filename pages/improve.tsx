@@ -1,6 +1,13 @@
 // pages/improve.tsx
 // Live Test that behaves like Support. Split lanes, send-to-both, version drag, local previews.
 // Clear Pre/System/Post vs Quick Rule. Auto-naming snapshots. Fixed-page scrolling.
+// Updates:
+// - Save UX: "Save + Snapshot" and optional Auto-snapshot toggle
+// - Quick Rule: "Merge into System" (no confusion with Save)
+// - Pictures/Videos/Files tabs auto-open the picker
+// - Drag version onto input footer to test that version (or onto Lane B)
+// - Allow sending attachments without text
+// - Prompt section helpers & clearer structure
 
 'use client';
 
@@ -9,7 +16,7 @@ import Link from 'next/link';
 import {
   Bot, Search, Loader2, Save, Trash2, RefreshCw, History, RotateCcw, X, Upload, Download,
   Copy, Check, MessageSquare, Send, Layers, CornerDownRight, ChevronDown, Image as ImageIcon,
-  Paperclip, Film, FileText
+  Paperclip, Film, FileText, Info
 } from 'lucide-react';
 
 type BotRow = {
@@ -59,7 +66,6 @@ const CARD: React.CSSProperties = {
 };
 
 const versionsKey = (o: string, a: string) => `versions:${o}:${a}`;
-const metaKey = (o: string, a: string) => `meta:${o}:${a}`;
 const memoryKey = (o: string, a: string) => `memory:${o}:${a}`;
 const fmtTime = (ts: number) => new Date(ts).toLocaleString();
 
@@ -74,16 +80,6 @@ function SplitIcon() {
     <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden>
       <path fill="currentColor" d="M4 4h6v16H4zM14 4h6v16h-6z" />
     </svg>
-  );
-}
-
-function TypingDots() {
-  return (
-    <span className="inline-flex gap-1 items-center">
-      <span className="w-2 h-2 rounded-full animate-bounce opacity-60" />
-      <span className="w-2 h-2 rounded-full animate-bounce opacity-60" style={{ animationDelay: '120ms' }} />
-      <span className="w-2 h-2 rounded-full animate-bounce opacity-60" style={{ animationDelay: '240ms' }} />
-    </span>
   );
 }
 
@@ -120,15 +116,15 @@ function summarizeTitle(system: string) {
 // Compose effective system from pieces
 function composeSystem(base: string, quickRules: string, pre: string, post: string, memory: string | null) {
   const blocks: string[] = [];
-  if (pre.trim()) blocks.push(`### PRE\n${pre.trim()}`);
-  if (memory && memory.trim()) blocks.push(`### MEMORY (local)\n${memory.trim()}`);
+  if (pre.trim()) blocks.push(`### PRE\n${pre.trim()}\n\n> Runs before the main system. Use for role/goals.`);
+  if (memory && memory.trim()) blocks.push(`### MEMORY (local)\n${memory.trim()}\n\n> Derived from recent chats to adapt tone & prefs.`);
   let main = base.trim();
   if (quickRules.trim()) {
     const lines = quickRules.split('\n').map(l => l.trim()).filter(Boolean);
     if (lines.length) main = `### RULES\n${lines.map((r, i) => `${i + 1}) ${r}`).join('\n')}\n\n${main}`;
   }
-  blocks.push(main);
-  if (post.trim()) blocks.push(`### POST\n${post.trim()}`);
+  blocks.push(`### SYSTEM (main)\n${main}\n\n> Core behavior. Keep concise and structured.`);
+  if (post.trim()) blocks.push(`### POST\n${post.trim()}\n\n> Runs after. Use for formatting/checks.`);
   return blocks.join('\n\n').trim();
 }
 
@@ -152,12 +148,12 @@ export default function Improve() {
   const [useMemory, setUseMemory] = useState(true);
   const [memoryText, setMemoryText] = useState('');
 
-  // Versions + meta
+  // Versions
   const [versions, setVersions] = useState<Version[]>([]);
-  const [notes, setNotes] = useState('');
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [autoSnapshot, setAutoSnapshot] = useState(true); // NEW
 
   // Assistants rail
   const [query, setQuery] = useState('');
@@ -181,6 +177,9 @@ export default function Improve() {
   const picsRef = useRef<HTMLInputElement | null>(null);
   const vidsRef = useRef<HTMLInputElement | null>(null);
   const filesRef = useRef<HTMLInputElement | null>(null);
+
+  // Drag-over highlight for input footer (drop version here)
+  const [dropActive, setDropActive] = useState(false);
 
   // Init user (local dev fallback)
   useEffect(() => {
@@ -242,10 +241,9 @@ export default function Improve() {
       model !== (selected.model || 'gpt-4o') ||
       Math.abs(temperature - (selected.temperature ?? 0.5)) > 1e-9 ||
       system !== (selected.system || '') ||
-      prePrompt !== '' || postPrompt !== '' || quickRule !== '' ||
-      notes !== '';
+      prePrompt !== '' || postPrompt !== '' || quickRule !== '';
     setDirty(d);
-  }, [name, model, temperature, system, prePrompt, postPrompt, quickRule, notes, selected]);
+  }, [name, model, temperature, system, prePrompt, postPrompt, quickRule, selected]);
 
   // Assistants filter/sort
   const filtered = useMemo(() => {
@@ -267,17 +265,23 @@ export default function Improve() {
   const copyId = async () => { if (!selected) return; await navigator.clipboard.writeText(selected.id); setCopied(true); setTimeout(() => setCopied(false), 900); };
   const fmtTok = (s: string) => Math.max(1, Math.round((s || '').length / 4));
 
+  // Snapshot helper
+  function makeSnapshot(prev?: BotRow) {
+    if (!selectedId || !userId) return;
+    const label = autoLabel(prev?.system || '', system);
+    const v: Version = { id: `v_${Date.now()}`, ts: Date.now(), label, name, model, temperature, system };
+    const next = [v, ...versions].slice(0, 80);
+    setVersions(next);
+    localStorage.setItem(versionsKey(userId, selectedId), JSON.stringify(next));
+  }
+
   async function saveEdits() {
     if (!userId || !selectedId) return;
     try {
       setSaving(true);
       const prev = list.find(b => b.id === selectedId);
-      // create snapshot
-      const label = autoLabel(prev?.system || '', system);
-      const v: Version = { id: `v_${Date.now()}`, ts: Date.now(), label, name, model, temperature, system };
-      const next = [v, ...versions].slice(0, 80);
-      setVersions(next);
-      localStorage.setItem(versionsKey(userId, selectedId), JSON.stringify(next));
+      // create snapshot (explicit)
+      makeSnapshot(prev);
       // patch server
       await fetch(`/api/chatbots/${selectedId}?ownerId=${encodeURIComponent(userId)}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json', 'x-owner-id': userId },
@@ -312,7 +316,10 @@ export default function Improve() {
     setSystem(merged);
     setQuickRule('');
     setDirty(true);
-    // optional auto snapshot? (you can wire a checkbox if you want)
+    if (autoSnapshot) {
+      const prev = list.find(b => b.id === selectedId!);
+      makeSnapshot(prev);
+    }
   }
 
   // Memory helper (very light): keep last ~1000 chars of conversation gist
@@ -325,6 +332,10 @@ export default function Improve() {
   }
 
   // --- Chat send (Support style) ---
+  function currentAttachments() {
+    return [...pics, ...vids, ...files];
+  }
+
   async function sendToLane(which: 'A' | 'B', text: string, attachments: Attachment[]) {
     const laneVersion = which === 'A'
       ? { system, model, temperature, versionId: null }
@@ -338,7 +349,14 @@ export default function Improve() {
       setter(cur => [...cur, { role, content }]);
 
     // optimistic add
-    if (which === 'A') append(setMsgsA, 'user', text); else append(setMsgsB, 'user', text);
+    if (text.trim()) {
+      if (which === 'A') append(setMsgsA, 'user', text); else append(setMsgsB, 'user', text);
+    }
+    if (attachments.length) {
+      const listNames = attachments.map(a => a.name).slice(0, 4).join(', ') + (attachments.length > 4 ? '…' : '');
+      const attNote = `(attachments: ${listNames})`;
+      if (which === 'A') append(setMsgsA, 'user', attNote); else append(setMsgsB, 'user', attNote);
+    }
     setBusy(true);
 
     try {
@@ -346,7 +364,7 @@ export default function Improve() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: text,
+          message: text || '(attachments only)',
           agentId: selected?.id || null,
           versionId: laneVersion.versionId,
           system: effectiveSystem,
@@ -359,8 +377,8 @@ export default function Improve() {
       const reply = data?.ok && typeof data?.message === 'string'
         ? sanitize(data.message)
         : (data?.message ? String(data.message) : 'Something went wrong.');
-      if (which === 'A') { append(setMsgsA, 'assistant', reply); updateLocalMemory([...msgsA, { role: 'user', content: text }, { role: 'assistant', content: reply }]); }
-      else { append(setMsgsB, 'assistant', reply); updateLocalMemory([...msgsB, { role: 'user', content: text }, { role: 'assistant', content: reply }]); }
+      if (which === 'A') { append(setMsgsA, 'assistant', reply); updateLocalMemory([...msgsA, { role: 'assistant', content: reply }]); }
+      else { append(setMsgsB, 'assistant', reply); updateLocalMemory([...msgsB, { role: 'assistant', content: reply }]); }
     } catch {
       const fallback = `Failed to contact server.`;
       if (which === 'A') append(setMsgsA, 'assistant', fallback); else append(setMsgsB, 'assistant', fallback);
@@ -371,10 +389,10 @@ export default function Improve() {
 
   async function sendPrompt() {
     const t = input.trim();
-    if (!t || busy) return;
+    const atts = currentAttachments();
+    if (!t && atts.length === 0) return;
 
-    // gather current tab attachments (local preview only)
-    const atts = [...pics, ...vids, ...files];
+    // clear compose box & staged attachments after we read them
     setInput('');
     setPics([]); setVids([]); setFiles([]);
 
@@ -389,43 +407,173 @@ export default function Improve() {
   const onVersionDragStart = (v: Version) => (e: React.DragEvent) => { e.dataTransfer.setData('text/plain', v.id); };
   const onLaneBDrop = (e: React.DragEvent) => {
     e.preventDefault();
+   
+    // optimistic add
+    if (attachments.length || text) {
+      const userMsg = text || (attachments.length ? `(sent ${attachments.length} attachment${attachments.length>1?'s':''})` : '');
+      if (which === 'A') setMsgsA(cur => [...cur, { role: 'user', content: userMsg }]);
+      else setMsgsB(cur => [...cur, { role: 'user', content: userMsg }]);
+    }
+    setBusy(true);
+
+    try {
+      const res = await fetch('/api/support/ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: text || '',
+          agentId: selected?.id || null,
+          versionId: laneVersion.versionId,
+          system: effectiveSystem,
+          model: laneVersion.model,
+          temperature: laneVersion.temperature,
+          attachments: attachments.map(a => ({ id: a.id, name: a.name, mime: a.mime, url: a.url, size: a.size })),
+        }),
+      });
+
+      const data = await res.json().catch(() => null);
+      const reply = data?.ok && typeof data?.message === 'string'
+        ? sanitize(data.message)
+        : (data?.message ? String(data.message) : 'Something went wrong.');
+
+      if (which === 'A') {
+        setMsgsA(cur => [...cur, { role: 'assistant', content: reply }]);
+        updateLocalMemory([...msgsA, { role:'user', content: text || '' }, { role:'assistant', content: reply }]);
+      } else {
+        setMsgsB(cur => [...cur, { role: 'assistant', content: reply }]);
+        updateLocalMemory([...msgsB, { role:'user', content: text || '' }, { role:'assistant', content: reply }]);
+      }
+    } catch {
+      const fallback = `Failed to contact server.`;
+      if (which === 'A') setMsgsA(cur => [...cur, { role:'assistant', content: fallback }]);
+      else setMsgsB(cur => [...cur, { role:'assistant', content: fallback }]);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // --- Footer drag-and-test (drop a version to test only next message) ---
+  const [testVersion, setTestVersion] = useState<Version | null>(null);
+  const footerDragOver: React.DragEventHandler = (e) => {
+    if (!versions.length) return;
+    const dt = e.dataTransfer;
+    if (!dt) return;
+    e.preventDefault();
+    setDropActive(true);
+  };
+  const footerDragLeave: React.DragEventHandler = () => setDropActive(false);
+  const footerDrop: React.DragEventHandler = (e) => {
+    e.preventDefault();
+    setDropActive(false);
     const id = e.dataTransfer.getData('text/plain');
     const v = versions.find(x => x.id === id);
-    if (v) { setLaneB(v); setActiveLane('A'); setMsgsB([]); }
+    if (v) setTestVersion(v);
   };
 
-  // Attach helpers
-  function fileToAttachment(file: File): Promise<Attachment> {
-    return new Promise(resolve => {
-      const id = `${file.name}_${file.size}_${crypto.randomUUID()}`;
-      const base: Attachment = { id, name: file.name, mime: file.type, size: file.size };
-      if (file.type.startsWith('image/') || file.type.startsWith('video/')) {
-        const fr = new FileReader();
-        fr.onload = () => resolve({ ...base, url: String(fr.result || '') });
-        fr.readAsDataURL(file);
-      } else {
-        resolve(base);
+  // Allow file drop onto footer to attach
+  const onFooterFileDrop: React.DragEventHandler<HTMLDivElement> = async (e) => {
+    if (!e.dataTransfer?.files?.length) return;
+    e.preventDefault();
+    const filesArr = Array.from(e.dataTransfer.files);
+    const img = filesArr.filter(f => f.type.startsWith('image/'));
+    const vid = filesArr.filter(f => f.type.startsWith('video/'));
+    const oth = filesArr.filter(f => !f.type.startsWith('image/') && !f.type.startsWith('video/'));
+    if (img.length) {
+      const atts = await Promise.all(img.map(fileToAttachment));
+      setPics(prev => [...prev, ...atts].slice(0,16));
+    }
+    if (vid.length) {
+      const atts = await Promise.all(vid.map(fileToAttachment));
+      setVids(prev => [...prev, ...atts].slice(0,8));
+    }
+    if (oth.length) {
+      const atts = await Promise.all(oth.map(fileToAttachment));
+      setFiles(prev => [...prev, ...atts].slice(0,16));
+    }
+  };
+
+  async function sendPrompt() {
+    if (busy) return;
+    const t = (input || '').trim();
+    const atts = currentAttachments();
+
+    if (!t && atts.length === 0) return;
+
+    setInput('');
+    // keep attachments if you want to reuse; here we clear after send:
+    setPics([]); setVids([]); setFiles([]);
+
+    // If a test version is set, we run it on the focused lane (A or B) for this one send
+    if (testVersion) {
+      const laneVersion = activeLane === 'A'
+        ? { system: testVersion.system, model: testVersion.model, temperature: testVersion.temperature, versionId: testVersion.id }
+        : { system: testVersion.system, model: testVersion.model, temperature: testVersion.temperature, versionId: testVersion.id };
+
+      // temporary send using the test version (doesn't change Lane B lock)
+      const memory = useMemory ? memoryText : '';
+      const effectiveSystem = composeSystem(laneVersion.system, '', prePrompt, postPrompt, memory);
+
+      // optimistic add
+      const userMsg = t || (atts.length ? `(sent ${atts.length} attachment${atts.length>1?'s':''})` : '');
+      if (activeLane === 'A') setMsgsA(cur => [...cur, { role: 'user', content: userMsg }]);
+      else setMsgsB(cur => [...cur, { role: 'user', content: userMsg }]);
+      setBusy(true);
+
+      try {
+        const res = await fetch('/api/support/ask', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: t || '',
+            agentId: selected?.id || null,
+            versionId: laneVersion.versionId,
+            system: effectiveSystem,
+            model: laneVersion.model,
+            temperature: laneVersion.temperature,
+            attachments: atts.map(a => ({ id: a.id, name: a.name, mime: a.mime, url: a.url, size: a.size })),
+          }),
+        });
+        const data = await res.json().catch(() => null);
+        const reply = data?.ok && typeof data?.message === 'string'
+          ? sanitize(data.message)
+          : (data?.message ? String(data.message) : 'Something went wrong.');
+
+        if (activeLane === 'A') {
+          setMsgsA(cur => [...cur, { role: 'assistant', content: reply }]);
+          updateLocalMemory([...msgsA, { role:'user', content: t || '' }, { role:'assistant', content: reply }]);
+        } else {
+          setMsgsB(cur => [...cur, { role: 'assistant', content: reply }]);
+          updateLocalMemory([...msgsB, { role:'user', content: t || '' }, { role:'assistant', content: reply }]);
+        }
+      } catch {
+        const fallback = 'Failed to contact server.';
+        if (activeLane === 'A') setMsgsA(cur => [...cur, { role:'assistant', content: fallback }]);
+        else setMsgsB(cur => [...cur, { role:'assistant', content: fallback }]);
+      } finally {
+        setBusy(false);
+        setTestVersion(null); // one-shot
       }
-    });
-  }
-  async function addFiles(fileList: FileList | null, kind: 'pics' | 'vids' | 'files') {
-    if (!fileList || !fileList.length) return;
-    const arr = Array.from(fileList).slice(0, 8);
-    const atts = await Promise.all(arr.map(fileToAttachment));
-    if (kind === 'pics') setPics(prev => [...prev, ...atts.filter(a => a.mime.startsWith('image/'))].slice(0, 16));
-    if (kind === 'vids') setVids(prev => [...prev, ...atts.filter(a => a.mime.startsWith('video/'))].slice(0, 8));
-    if (kind === 'files') setFiles(prev => [...prev, ...atts.filter(a => !a.mime.startsWith('image/') && !a.mime.startsWith('video/'))].slice(0, 16));
+
+      return;
+    }
+
+    // Normal routing
+    if (sendBoth && laneB) {
+      await Promise.all([sendToLane('A', t, atts), sendToLane('B', t, atts)]);
+    } else {
+      await sendToLane(activeLane, t, atts);
+    }
   }
 
-  // Lane highlight
-  const laneAClass = activeLane === 'A'
-    ? { borderColor: 'var(--brand)', boxShadow: '0 0 0 2px color-mix(in oklab, var(--brand) 40%, transparent) inset' }
-    : {};
-  const laneBClass = activeLane === 'B'
-    ? { borderColor: 'var(--brand)', boxShadow: '0 0 0 2px color-mix(in oklab, var(--brand) 40%, transparent) inset' }
-    : {};
+  // --- Auto-open pickers when switching tabs ---
+  useEffect(() => {
+    const openSoon = (fn: () => void) => setTimeout(fn, 10);
+    if (tab === 'pics') openSoon(() => picsRef.current?.click());
+    if (tab === 'vids') openSoon(() => vidsRef.current?.click());
+    if (tab === 'files') openSoon(() => filesRef.current?.click());
+  }, [tab]);
 
-  // UI
+  // --- UI ---
   return (
     <div className="h-screen w-full overflow-hidden" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
       {/* Top bar */}
@@ -434,18 +582,23 @@ export default function Improve() {
         <div className="max-w-[1600px] mx-auto flex items-center gap-3">
           <Layers className="w-5 h-5" />
           <h1 className="text-[18px] font-semibold">{selected ? (selected.name || 'Assistant') : 'Agent Tuning'}</h1>
+
           <span className="text-xs px-2 py-[2px] rounded-full" style={{ background: 'color-mix(in oklab, var(--text) 8%, transparent)', border: '1px solid var(--border)' }}>
             {saving ? 'Saving…' : dirty ? 'Unsaved changes' : 'Saved ✓'}
           </span>
-          {selected && (
-            <button onClick={copyId} className="text-xs px-2 py-1 rounded-md hover:opacity-90" style={{ ...CARD, marginLeft: 6 }}>
-              {copied ? <><Check className="inline w-3.5 h-3.5 mr-1" /> Copied</> : <><Copy className="inline w-3.5 h-3.5 mr-1" /> ID</>}
-            </button>
-          )}
+
+          {/* Auto-snapshot toggle */}
+          <label className="ml-2 text-xs inline-flex items-center gap-2 px-2 py-1 rounded-md" style={{ ...CARD }}>
+            <input type="checkbox" checked={autoSnapshot} onChange={e=>setAutoSnapshot(e.target.checked)} />
+            Auto-snapshot on Quick Rule
+            <Info className="w-3.5 h-3.5 opacity-60" title="When ON, applying a Quick Rule also creates a snapshot." />
+          </label>
+
           <div className="ml-auto flex items-center gap-2">
             <button onClick={() => userId && fetchBots(userId)} className="px-3 py-1.5 rounded-md text-sm" style={{ ...CARD }}>
               <RefreshCw className="inline w-4 h-4 mr-1" /> Refresh
             </button>
+            {/* Import */}
             <label className="px-3 py-1.5 rounded-md text-sm cursor-pointer" style={{ ...CARD }}>
               <Upload className="inline w-4 h-4 mr-1" /> Import
               <input type="file" accept="application/json" className="hidden" onChange={async e => {
@@ -461,23 +614,28 @@ export default function Improve() {
                 } catch { alert('Import failed'); }
               }} />
             </label>
+            {/* Export */}
             <button onClick={() => {
               if (!selected) return;
-              const payload = { type: 'reduc.ai/agent', version: 1, agent: { ...selected, meta: { notes } } };
-              const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-              const url = URL.createObjectURL(blob); const a = document.createElement('a');
-              a.href = url; a.download = `${(name || 'agent').replace(/\s+/g, '_')}.json`; a.click(); URL.revokeObjectURL(url);
+              const payload = { type:'reduc.ai/agent', version:1, agent:{ ...selected } };
+              const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url; a.download = `${(name || 'agent').replace(/\s+/g,'_')}.json`; a.click(); URL.revokeObjectURL(url);
             }} className="px-3 py-1.5 rounded-md text-sm" style={{ ...CARD }}>
               <Download className="inline w-4 h-4 mr-1" /> Export
             </button>
+
+            {/* Save + Snapshot */}
             <button
               onClick={() => !saving && dirty && saveEdits()}
               disabled={!dirty || saving}
               className="px-4 py-2 rounded-md text-sm disabled:opacity-60 flex items-center gap-1"
               style={{ background: 'var(--brand)', color: '#00120a' }}>
               <Save className="w-4 h-4" />
-              <span>Save</span>
+              <span>Save + Snapshot</span>
             </button>
+            {/* Delete */}
             <button onClick={deleteSelected} disabled={!selected || saving}
               className="px-3 py-1.5 rounded-md text-sm disabled:opacity-60"
               style={{ background: 'rgba(255,80,80,.12)', border: '1px solid rgba(255,80,80,.35)' }}>
@@ -487,7 +645,7 @@ export default function Improve() {
         </div>
       </header>
 
-      {/* Main grid */}
+      {/* 3-column layout */}
       <div className="max-w-[1600px] mx-auto px-6 py-5" style={{ height: 'calc(100vh - 62px)' }}>
         <div className="grid gap-3" style={{ gridTemplateColumns: '300px 1fr 300px', height: '100%' }}>
           {/* Left rail: Assistants */}
@@ -546,9 +704,9 @@ export default function Improve() {
             </div>
           </aside>
 
-          {/* Middle — Editor + Live Test */}
+          {/* Middle: Editor + Live Test */}
           <section className="h-full grid gap-3" style={{ gridTemplateRows: 'auto 1fr' }}>
-            {/* Compact editor */}
+            {/* Editor */}
             <div className="p-3" style={PANEL}>
               <div className="grid gap-3" style={{ gridTemplateColumns: '1.1fr 0.9fr 1fr' }}>
                 <div>
@@ -581,7 +739,7 @@ export default function Improve() {
                 </div>
               </div>
 
-              {/* Quick Rule + Show Prompt + Memory */}
+              {/* Quick Rule + Prompt visibility + Memory */}
               <div className="mt-3 grid gap-2 items-center" style={{ gridTemplateColumns: '1fr auto auto auto' }}>
                 <input
                   value={quickRule}
@@ -604,13 +762,13 @@ export default function Improve() {
               {showPromptBlock && (
                 <div className="mt-3 grid gap-3" style={{ gridTemplateColumns: '1fr 1fr' }}>
                   <div>
-                    <div className="text-xs opacity-70 mb-1">Pre Prompt <span className="opacity-50">(Optional, prepends)</span></div>
+                    <div className="text-xs opacity-70 mb-1">Pre Prompt <span className="opacity-50">(prepends)</span></div>
                     <textarea value={prePrompt} onChange={(e) => setPrePrompt(e.target.value)} rows={5}
                       className="w-full px-3 py-2 rounded-md outline-none font-mono text-sm" style={CARD}
                       placeholder="Optional: role, goals, boundaries…" />
                   </div>
                   <div>
-                    <div className="text-xs opacity-70 mb-1">Post Prompt <span className="opacity-50">(Optional, appends)</span></div>
+                    <div className="text-xs opacity-70 mb-1">Post Prompt <span className="opacity-50">(appends)</span></div>
                     <textarea value={postPrompt} onChange={(e) => setPostPrompt(e.target.value)} rows={5}
                       className="w-full px-3 py-2 rounded-md outline-none font-mono text-sm" style={CARD}
                       placeholder="Optional: formatting, checks, constraints…" />
@@ -646,7 +804,9 @@ export default function Improve() {
 
               <div className="grid gap-3" style={{ gridTemplateColumns: laneB ? '1fr 1fr' : '1fr', height: '100%', minHeight: 380 }}>
                 {/* Lane A */}
-                <div className="flex flex-col rounded-md border" style={{ ...CARD, ...laneAClass }}>
+                <div className="flex flex-col rounded-md border" style={{ ...CARD, ...(activeLane === 'A'
+                  ? { borderColor: 'var(--brand)', boxShadow: '0 0 0 2px color-mix(in oklab, var(--brand) 40%, transparent) inset' }
+                  : {}) }}>
                   <div className="px-3 py-2 border-b flex items-center justify-between" style={{ borderColor: 'var(--border)' }}>
                     <div className="text-sm font-medium">Lane A (current)</div>
                     <button onClick={() => setActiveLane('A')} className="text-xs px-2 py-1 rounded" style={CARD}>Focus</button>
@@ -659,7 +819,9 @@ export default function Improve() {
 
                 {/* Lane B */}
                 {laneB ? (
-                  <div className="flex flex-col rounded-md border" style={{ ...CARD, ...laneBClass }}>
+                  <div className="flex flex-col rounded-md border" style={{ ...CARD, ...(activeLane === 'B'
+                    ? { borderColor: 'var(--brand)', boxShadow: '0 0 0 2px color-mix(in oklab, var(--brand) 40%, transparent) inset' }
+                    : {}) }}>
                     <div className="px-3 py-2 border-b flex items-center justify-between" style={{ borderColor: 'var(--border)' }}>
                       <div className="text-sm">
                         <span className="font-medium">Lane B (version):</span> {laneB.label} <span className="opacity-60 text-xs">• {fmtTime(laneB.ts)}</span>
@@ -679,21 +841,45 @@ export default function Improve() {
                     className="rounded-md border grid place-items-center text-sm opacity-80"
                     style={{ ...CARD, borderStyle: 'dashed' }}
                     onDragOver={(e) => e.preventDefault()}
-                    onDrop={onLaneBDrop}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const id = e.dataTransfer.getData('text/plain');
+                      const v = versions.find(x => x.id === id);
+                      if (v) { setLaneB(v); setActiveLane('A'); setMsgsB([]); }
+                    }}
                   >
                     Drag a version card here to create Lane B
                   </div>
                 )}
               </div>
 
-              {/* Input with tabs */}
-              <div className="space-y-2">
+              {/* Input + Tabs + Footer Drop Target */}
+              <div
+                className="space-y-2 rounded-md"
+                onDragOver={(e)=>{footerDragOver(e);}}
+                onDragLeave={footerDragLeave}
+                onDrop={(e)=>{footerDrop(e); onFooterFileDrop(e as any);}}
+                style={{
+                  border: dropActive ? '1px dashed var(--brand)' : '1px dashed transparent',
+                  padding: 8
+                }}
+              >
+                {/* Testing pill if a test version is set */}
+                {testVersion && (
+                  <div className="flex items-center gap-2 text-xs mb-1">
+                    <span className="px-2 py-1 rounded-md" style={{ ...CARD, borderColor: 'var(--brand)' }}>
+                      Testing next message with <b className="ml-1" style={{ color:'var(--brand)' }}>{testVersion.label}</b>
+                    </span>
+                    <button className="text-xs px-2 py-1 rounded-md" style={CARD} onClick={()=>setTestVersion(null)}><X className="w-3.5 h-3.5" /></button>
+                  </div>
+                )}
+
                 <div className="flex items-center gap-2 text-xs">
                   <button onClick={()=>setTab('text')} className={`px-2 py-1 rounded ${tab==='text'?'ring-1':''}`} style={{ ...CARD, borderColor: tab==='text'?'var(--brand)':'var(--border)' }}>Text</button>
                   <button onClick={()=>setTab('pics')} className={`px-2 py-1 rounded ${tab==='pics'?'ring-1':''}`} style={{ ...CARD, borderColor: tab==='pics'?'var(--brand)':'var(--border)' }}><ImageIcon className="inline w-3.5 h-3.5 mr-1" />Pictures</button>
                   <button onClick={()=>setTab('vids')} className={`px-2 py-1 rounded ${tab==='vids'?'ring-1':''}`} style={{ ...CARD, borderColor: tab==='vids'?'var(--brand)':'var(--border)' }}><Film className="inline w-3.5 h-3.5 mr-1" />Videos</button>
                   <button onClick={()=>setTab('files')} className={`px-2 py-1 rounded ${tab==='files'?'ring-1':''}`} style={{ ...CARD, borderColor: tab==='files'?'var(--brand)':'var(--border)' }}><FileText className="inline w-3.5 h-3.5 mr-1" />Files</button>
-                  <div className="ml-auto text-[10px] opacity-50">only the chat scrolls; this footer stays fixed</div>
+                  <div className="ml-auto text-[10px] opacity-50">Tip: drag a version onto this footer to test it for one message</div>
                 </div>
 
                 {tab === 'text' && (
@@ -701,7 +887,7 @@ export default function Improve() {
                     <textarea
                       value={input}
                       onChange={(e) => setInput(e.target.value)}
-                      placeholder="Type a message…"
+                      placeholder="Type a message… (or just send attachments)"
                       rows={1}
                       className="flex-1 px-3 py-2 rounded-md bg-transparent outline-none resize-none text-sm"
                       style={CARD}
@@ -709,7 +895,7 @@ export default function Improve() {
                     />
                     <button
                       onClick={() => void sendPrompt()}
-                      disabled={busy || !input.trim()}
+                      disabled={busy || (!input.trim() && currentAttachments().length===0)}
                       className="px-3 py-2 rounded-md text-sm disabled:opacity-60 flex items-center gap-1"
                       style={{ background: 'var(--brand)', color: '#00120a' }}
                     >
@@ -718,6 +904,7 @@ export default function Improve() {
                   </div>
                 )}
 
+                {/* Pictures */}
                 {tab === 'pics' && (
                   <div className="flex items-center gap-2">
                     <input ref={picsRef} type="file" accept="image/*" multiple className="hidden" onChange={(e)=>addFiles(e.target.files,'pics')} />
@@ -731,12 +918,13 @@ export default function Improve() {
                         </div>
                       ))}
                     </div>
-                    <button onClick={() => void sendPrompt()} disabled={busy || !input.trim()} className="px-3 py-2 rounded-md text-sm disabled:opacity-60" style={{ background: 'var(--brand)', color: '#00120a' }}>
+                    <button onClick={() => void sendPrompt()} disabled={busy || (currentAttachments().length===0 && !input.trim())} className="px-3 py-2 rounded-md text-sm disabled:opacity-60" style={{ background: 'var(--brand)', color: '#00120a' }}>
                       {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Send className="w-4 h-4" /> Send</>}
                     </button>
                   </div>
                 )}
 
+                {/* Videos */}
                 {tab === 'vids' && (
                   <div className="flex items-center gap-2">
                     <input ref={vidsRef} type="file" accept="video/*" multiple className="hidden" onChange={(e)=>addFiles(e.target.files,'vids')} />
@@ -750,12 +938,13 @@ export default function Improve() {
                         </div>
                       ))}
                     </div>
-                    <button onClick={() => void sendPrompt()} disabled={busy || !input.trim()} className="px-3 py-2 rounded-md text-sm disabled:opacity-60" style={{ background: 'var(--brand)', color: '#00120a' }}>
+                    <button onClick={() => void sendPrompt()} disabled={busy || (currentAttachments().length===0 && !input.trim())} className="px-3 py-2 rounded-md text-sm disabled:opacity-60" style={{ background: 'var(--brand)', color: '#00120a' }}>
                       {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Send className="w-4 h-4" /> Send</>}
                     </button>
                   </div>
                 )}
 
+                {/* Files */}
                 {tab === 'files' && (
                   <div className="flex items-center gap-2">
                     <input ref={filesRef} type="file" multiple className="hidden" onChange={(e)=>addFiles(e.target.files,'files')} />
@@ -769,13 +958,13 @@ export default function Improve() {
                         </div>
                       ))}
                     </div>
-                    <button onClick={() => void sendPrompt()} disabled={busy || !input.trim()} className="px-3 py-2 rounded-md text-sm disabled:opacity-60" style={{ background: 'var(--brand)', color: '#00120a' }}>
+                    <button onClick={() => void sendPrompt()} disabled={busy || (currentAttachments().length===0 && !input.trim())} className="px-3 py-2 rounded-md text-sm disabled:opacity-60" style={{ background: 'var(--brand)', color: '#00120a' }}>
                       {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Send className="w-4 h-4" /> Send</>}
                     </button>
                   </div>
                 )}
 
-                <div className="text-[9px] opacity-40 text-center">drop files here</div>
+                <div className="text-[9px] opacity-40 text-center">Drop files or a version card here</div>
               </div>
             </div>
           </section>
@@ -788,11 +977,11 @@ export default function Improve() {
             </div>
             <div className="flex-1 overflow-auto p-3">
               {(!versions || versions.length === 0) ? (
-                <div className="text-sm opacity-60">No snapshots yet. Click <b>Save</b> to create one.</div>
+                <div className="text-sm opacity-60">No snapshots yet. Click <b>Save + Snapshot</b> to create one.</div>
               ) : (
                 <div className="space-y-2">
                   {versions.map(v => (
-                    <div key={v.id} draggable onDragStart={onVersionDragStart(v)}
+                    <div key={v.id} draggable onDragStart={(e)=>e.dataTransfer.setData('text/plain', v.id)}
                       className="group p-2 rounded-md text-sm border" style={{ ...CARD, cursor: 'grab' }}>
                       <div className="flex items-center justify-between gap-2">
                         <div className="min-w-0">
@@ -810,6 +999,9 @@ export default function Improve() {
                           </button>
                           <button onClick={() => setLaneB(v)} className="px-2 py-1 rounded-md text-xs" style={CARD} title="Open as Lane B">
                             <SplitIcon />
+                          </button>
+                          <button onClick={() => setTestVersion(v)} className="px-2 py-1 rounded-md text-xs" style={CARD} title="Test next message with this version">
+                            Test
                           </button>
                         </div>
                       </div>
