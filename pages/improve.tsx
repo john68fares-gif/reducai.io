@@ -331,91 +331,32 @@ export default function Improve() {
     try { localStorage.setItem(memoryKey(userId, selected.id), mem); } catch {}
   }
 
-  // --- Chat send (Support style) ---
-  function currentAttachments() {
-    return [...pics, ...vids, ...files];
-  }
+// --- Chat send (Support style) ---
+// Send a message to lane A or B (supporting attachments)
+const sendToLane = useCallback(
+  async (which: 'A' | 'B', text: string, attachments: Attachment[]) => {
+    const laneVersion =
+      which === 'A'
+        ? { system, model, temperature, versionId: null as string | null }
+        : laneB
+        ? { system: laneB.system, model: laneB.model, temperature: laneB.temperature, versionId: laneB.id }
+        : null;
 
-  async function sendToLane(which: 'A' | 'B', text: string, attachments: Attachment[]) {
-    const laneVersion = which === 'A'
-      ? { system, model, temperature, versionId: null }
-      : laneB ? { system: laneB.system, model: laneB.model, temperature: laneB.temperature, versionId: laneB.id } : null;
     if (!laneVersion) return;
 
     const memory = useMemory ? memoryText : '';
     const effectiveSystem = composeSystem(laneVersion.system, '', prePrompt, postPrompt, memory);
 
-    const append = (setter: React.Dispatch<React.SetStateAction<ChatMsg[]>>, role: 'user' | 'assistant', content: string) =>
-      setter(cur => [...cur, { role, content }]);
-
-    // optimistic add
-    if (text.trim()) {
-      if (which === 'A') append(setMsgsA, 'user', text); else append(setMsgsB, 'user', text);
-    }
-    if (attachments.length) {
-      const listNames = attachments.map(a => a.name).slice(0, 4).join(', ') + (attachments.length > 4 ? '…' : '');
-      const attNote = `(attachments: ${listNames})`;
-      if (which === 'A') append(setMsgsA, 'user', attNote); else append(setMsgsB, 'user', attNote);
-    }
-    setBusy(true);
-
-    try {
-      const res = await fetch('/api/support/ask', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: text || '(attachments only)',
-          agentId: selected?.id || null,
-          versionId: laneVersion.versionId,
-          system: effectiveSystem,
-          model: laneVersion.model,
-          temperature: laneVersion.temperature,
-          attachments: attachments.map(a => ({ id: a.id, name: a.name, mime: a.mime, url: a.url, size: a.size })),
-        }),
-      });
-      const data = await res.json().catch(() => null);
-      const reply = data?.ok && typeof data?.message === 'string'
-        ? sanitize(data.message)
-        : (data?.message ? String(data.message) : 'Something went wrong.');
-      if (which === 'A') { append(setMsgsA, 'assistant', reply); updateLocalMemory([...msgsA, { role: 'assistant', content: reply }]); }
-      else { append(setMsgsB, 'assistant', reply); updateLocalMemory([...msgsB, { role: 'assistant', content: reply }]); }
-    } catch {
-      const fallback = `Failed to contact server.`;
-      if (which === 'A') append(setMsgsA, 'assistant', fallback); else append(setMsgsB, 'assistant', fallback);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function sendPrompt() {
-    const t = input.trim();
-    const atts = currentAttachments();
-    if (!t && atts.length === 0) return;
-
-    // clear compose box & staged attachments after we read them
-    setInput('');
-    setPics([]); setVids([]); setFiles([]);
-
-    if (sendBoth && laneB) {
-      await Promise.all([sendToLane('A', t, atts), sendToLane('B', t, atts)]);
-    } else {
-      await sendToLane(activeLane, t, atts);
-    }
-  }
-
-  // Drag version → lane B
-  const onVersionDragStart = (v: Version) => (e: React.DragEvent) => { e.dataTransfer.setData('text/plain', v.id); };
-  const onLaneBDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-   
-    // optimistic add
-    if (attachments.length || text) {
-      const userMsg = text || (attachments.length ? `(sent ${attachments.length} attachment${attachments.length>1?'s':''})` : '');
+    // optimistic add (user bubble)
+    const userMsg =
+      (text && text.trim()) ||
+      (attachments.length ? `(sent ${attachments.length} attachment${attachments.length > 1 ? 's' : ''})` : '');
+    if (userMsg) {
       if (which === 'A') setMsgsA(cur => [...cur, { role: 'user', content: userMsg }]);
       else setMsgsB(cur => [...cur, { role: 'user', content: userMsg }]);
     }
-    setBusy(true);
 
+    setBusy(true);
     try {
       const res = await fetch('/api/support/ask', {
         method: 'POST',
@@ -427,30 +368,118 @@ export default function Improve() {
           system: effectiveSystem,
           model: laneVersion.model,
           temperature: laneVersion.temperature,
-          attachments: attachments.map(a => ({ id: a.id, name: a.name, mime: a.mime, url: a.url, size: a.size })),
+          attachments: attachments.map(a => ({
+            id: a.id,
+            name: a.name,
+            mime: a.mime,
+            url: a.url,
+            size: a.size,
+          })),
         }),
       });
 
       const data = await res.json().catch(() => null);
-      const reply = data?.ok && typeof data?.message === 'string'
-        ? sanitize(data.message)
-        : (data?.message ? String(data.message) : 'Something went wrong.');
+      const reply =
+        data?.ok && typeof data?.message === 'string'
+          ? sanitize(data.message)
+          : data?.message
+          ? String(data.message)
+          : 'Something went wrong.';
 
       if (which === 'A') {
         setMsgsA(cur => [...cur, { role: 'assistant', content: reply }]);
-        updateLocalMemory([...msgsA, { role:'user', content: text || '' }, { role:'assistant', content: reply }]);
+        updateLocalMemory([...msgsA, { role: 'user', content: text || '' }, { role: 'assistant', content: reply }]);
       } else {
         setMsgsB(cur => [...cur, { role: 'assistant', content: reply }]);
-        updateLocalMemory([...msgsB, { role:'user', content: text || '' }, { role:'assistant', content: reply }]);
+        updateLocalMemory([...msgsB, { role: 'user', content: text || '' }, { role: 'assistant', content: reply }]);
       }
     } catch {
-      const fallback = `Failed to contact server.`;
-      if (which === 'A') setMsgsA(cur => [...cur, { role:'assistant', content: fallback }]);
-      else setMsgsB(cur => [...cur, { role:'assistant', content: fallback }]);
+      const fallback = 'Failed to contact server.';
+      if (which === 'A') setMsgsA(cur => [...cur, { role: 'assistant', content: fallback }]);
+      else setMsgsB(cur => [...cur, { role: 'assistant', content: fallback }]);
     } finally {
       setBusy(false);
     }
+  },
+  [selected, laneB, system, model, temperature, prePrompt, postPrompt, useMemory, memoryText, msgsA, msgsB]
+);
+
+// Master send that routes to lanes, supports "testVersion" one-shot, and attachments-only sends
+async function sendPrompt() {
+  if (busy) return;
+
+  const t = (input || '').trim();
+  const atts = [...pics, ...vids, ...files];
+  if (!t && atts.length === 0) return;
+
+  // clear composer immediately
+  setInput('');
+  setPics([]);
+  setVids([]);
+  setFiles([]);
+
+  // One-shot test with a chosen version (applies to focused lane for this single send)
+  if (testVersion) {
+    const lane = activeLane;
+    const memory = useMemory ? memoryText : '';
+    const effectiveSystem = composeSystem(testVersion.system, '', prePrompt, postPrompt, memory);
+
+    // optimistic user bubble
+    const userMsg = t || (atts.length ? `(sent ${atts.length} attachment${atts.length > 1 ? 's' : ''})` : '');
+    if (lane === 'A') setMsgsA(cur => [...cur, { role: 'user', content: userMsg }]);
+    else setMsgsB(cur => [...cur, { role: 'user', content: userMsg }]);
+
+    setBusy(true);
+    try {
+      const res = await fetch('/api/support/ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: t || '',
+          agentId: selected?.id || null,
+          versionId: testVersion.id,
+          system: effectiveSystem,
+          model: testVersion.model,
+          temperature: testVersion.temperature,
+          attachments: atts.map(a => ({ id: a.id, name: a.name, mime: a.mime, url: a.url, size: a.size })),
+        }),
+      });
+
+      const data = await res.json().catch(() => null);
+      const reply =
+        data?.ok && typeof data?.message === 'string'
+          ? sanitize(data.message)
+          : data?.message
+          ? String(data.message)
+          : 'Something went wrong.';
+
+      if (lane === 'A') {
+        setMsgsA(cur => [...cur, { role: 'assistant', content: reply }]);
+        updateLocalMemory([...msgsA, { role: 'user', content: t || '' }, { role: 'assistant', content: reply }]);
+      } else {
+        setMsgsB(cur => [...cur, { role: 'assistant', content: reply }]);
+        updateLocalMemory([...msgsB, { role: 'user', content: t || '' }, { role: 'assistant', content: reply }]);
+      }
+    } catch {
+      const fallback = 'Failed to contact server.';
+      if (lane === 'A') setMsgsA(cur => [...cur, { role: 'assistant', content: fallback }]);
+      else setMsgsB(cur => [...cur, { role: 'assistant', content: fallback }]);
+    } finally {
+      setBusy(false);
+      setTestVersion(null); // one-shot complete
+    }
+
+    return;
   }
+
+  // Normal routing
+  if (sendBoth && laneB) {
+    await Promise.all([sendToLane('A', t, atts), sendToLane('B', t, atts)]);
+  } else {
+    await sendToLane(activeLane, t, atts);
+  }
+}
+
 
   // --- Footer drag-and-test (drop a version to test only next message) ---
   const [testVersion, setTestVersion] = useState<Version | null>(null);
