@@ -2,13 +2,16 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
-import AssistantRail from '@/components/voice/AssistantRail';
+import dynamic from 'next/dynamic';
 import { createPortal } from 'react-dom';
 import {
   Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Rocket, Search, Check, Lock, X, KeyRound,
   Play, Square
 } from 'lucide-react';
 import { scopedStorage } from '@/utils/scoped-storage';
+
+// Load rail dynamically (avoids SSR layout hiccups)
+const AssistantRail = dynamic(() => import('@/components/voice/AssistantRail'), { ssr: false });
 
 /* ─────────── constants ─────────── */
 const CTA = '#59d9b3';
@@ -71,8 +74,13 @@ const Tokens = () => (
       color:var(--text);
     }
 
+    /* The assistant rail sits immediately to the right of the app's sidebar.
+       If your layout sets --app-nav-w, we'll use it; otherwise fallback to 72px. */
     .va-left-fixed{
-      position:fixed; inset:0 auto 0 0; width:260px; z-index:12;
+      position:fixed;
+      top:0; bottom:0;
+      left:var(--app-nav-w, 72px);
+      width:260px; z-index:12;
       background:var(--panel-bg);
       border-right:1px solid rgba(255,255,255,.06);
       box-shadow:14px 0 28px rgba(0,0,0,.08);
@@ -86,6 +94,15 @@ const Tokens = () => (
       border:1px solid rgba(255,255,255,.12);
       box-shadow:0 36px 90px rgba(0,0,0,.55);
       border-radius:10px;
+    }
+
+    /* Make popover header feel like .va-head (solid + divider) */
+    .va-menu-head{
+      display:flex; align-items:center; gap:8px;
+      padding:8px 10px;
+      background:var(--panel-bg);
+      border-bottom:1px solid rgba(255,255,255,.08);
+      border-radius:8px;
     }
 
     /* overlays */
@@ -121,7 +138,7 @@ const Tokens = () => (
     .diff-add{ color:#00ffc2; }
     .diff-del{ color:#ff5050; text-decoration:line-through; }
 
-    /* ── HARD LOCK: every dropdown popover and ALL children are solid ── */
+    /* HARD LOCK: every dropdown popover and ALL children are solid */
     .va-scope .va-menu,
     .va-scope .va-menu * {
       background: var(--panel-bg) !important;
@@ -320,9 +337,9 @@ function StyledSelect({
         onClick={() => { setOpen(v=>!v); setTimeout(()=>searchRef.current?.focus(),0); }}
         className="w-full flex items-center justify-between gap-3 px-3 py-3 rounded-[10px] text-sm outline-none transition"
         style={{
-          background:'var(--input-bg)',
+          background:'var(--panel-bg)',                 // trigger now matches cards
           border:'1px solid var(--input-border)',
-          boxShadow:'var(--input-shadow)',
+          boxShadow:'0 0 0 1px rgba(255,255,255,.06) inset',
           color:'var(--text)'
         }}
       >
@@ -351,11 +368,8 @@ function StyledSelect({
             >
               {menuTop ? <div className="mb-2">{menuTop}</div> : null}
 
-              {/* search row kept, but dropdown transparency is what’s locked */}
-              <div
-                className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[10px]"
-                style={{ background:'var(--panel-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-              >
+              {/* Solid header row that mirrors .va-head */}
+              <div className="va-menu-head mb-3 rounded-[10px]" style={{ color:'var(--text)' }}>
                 <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
                 <input
                   ref={searchRef}
@@ -376,13 +390,13 @@ function StyledSelect({
                     className="w-full text-left text-sm px-3 py-2 rounded-[8px] transition flex items-center gap-2 disabled:opacity-60"
                     style={{
                       color:'var(--text)',
-                      background:'var(--panel-bg)',             // solid
-                      border:'1px solid var(--panel-bg)',       // same as bg
+                      background:'var(--panel-bg)',
+                      border:'1px solid var(--panel-bg)', // same as bg until hover
                       cursor:o.disabled?'not-allowed':'pointer'
                     }}
                     onMouseEnter={(e)=>{ if (o.disabled) return;
                       const el=e.currentTarget as HTMLButtonElement;
-                      el.style.background = 'color-mix(in oklab, var(--panel-bg) 88%, white 12%)'; // solid hover
+                      el.style.background = 'color-mix(in oklab, var(--panel-bg) 88%, white 12%)';
                       el.style.border = '1px solid var(--input-border)';
                     }}
                     onMouseLeave={(e)=>{
@@ -623,7 +637,8 @@ ${lines.map(l => `- ${l}`).join('\n')}
         </div>
       </aside>
 
-      <div style={{ marginLeft: 260 }}>
+      {/* push content by app sidebar + rail width */}
+      <div style={{ marginLeft: 'calc(var(--app-nav-w, 72px) + 260px)' }}>
         <div className="px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w-[1160px]" style={{ fontSize:'var(--fz-body)', lineHeight:'var(--lh-body)' }}>
 
           <div className="mb-[var(--s-4)] flex flex-wrap items-center justify-end gap-[var(--s-3)]">
