@@ -1,7 +1,8 @@
+// components/voice/AssistantRail.tsx
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Search, Plus, Bot, Trash2, Edit3, X, AlertTriangle, Loader2, Phone } from 'lucide-react';
+import { Search, Plus, Bot, Trash2, Edit3, X, AlertTriangle, Loader2 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { createPortal } from 'react-dom';
 
@@ -17,12 +18,12 @@ export type AssistantLite = { id: string; name: string; purpose?: string; create
 const STORAGE_KEY = 'agents';
 const ACTIVE_KEY  = 'va:activeId';
 
-/* Brand (match VoiceAgentSection) */
+/* Brand (keep for CTA only) */
 const CTA        = '#59d9b3';
 const CTA_HOVER  = '#54cfa9';
-const BRAND_OL30 = 'rgba(89,217,179,.30)';
-const BRAND_OL18 = 'rgba(89,217,179,.18)';
-const BRAND_OL14 = 'rgba(89,217,179,.14)';
+
+/* Use the SAME bg as overlays */
+const OVERLAY_BG = 'rgba(8,10,12,.78)';
 
 /* Utils */
 function uid() {
@@ -47,9 +48,9 @@ function ModalShell({ children }:{ children:React.ReactNode }) {
   if (typeof document === 'undefined') return null;
   return createPortal(
     <>
-      {/* OVERLAY: keep solid (not transparent/blur) */}
-      <div className="fixed inset-0 z-[100000] pointer-events-auto" style={{ background: 'rgba(8,10,12,.78)' }} />
-      {/* BOX: same style as other solid boxes (not the overlay) */}
+      {/* solid overlay you already use */}
+      <div className="fixed inset-0 z-[100000] pointer-events-auto" style={{ background: OVERLAY_BG }} />
+      {/* box uses same border/shadow recipe as your overlays */}
       <div className="fixed inset-0 z-[100001] flex items-center justify-center px-4">
         <div
           className="w-full max-w-[720px] rounded-[12px] overflow-hidden"
@@ -57,7 +58,7 @@ function ModalShell({ children }:{ children:React.ReactNode }) {
             background: 'var(--panel)',
             color: 'var(--text)',
             border: '1px solid var(--border)',
-            boxShadow: '0 22px 44px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px rgba(89,217,179,.20)'
+            boxShadow: '0 22px 44px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset'
           }}
         >
           {children}
@@ -74,13 +75,12 @@ function ModalHeader({ icon, title, subtitle, onClose }:{
   return (
     <div
       className="flex items-center justify-between px-6 py-5"
-      /* Gradient header like your section heads */
       style={{
         background: `linear-gradient(90deg,
           var(--panel) 0%,
           color-mix(in oklab, var(--panel) 97%, white 3%) 50%,
           var(--panel) 100%)`,
-        borderBottom: '1px solid rgba(255,255,255,.08)'
+        borderBottom: '1px solid var(--border)'
       }}
     >
       <div className="flex items-center gap-3">
@@ -99,7 +99,7 @@ function ModalHeader({ icon, title, subtitle, onClose }:{
   );
 }
 
-/* Create / Rename / Delete modals (unchanged logic, styled boxes) */
+/* Create / Rename / Delete modals */
 function CreateModal({ open, onClose, onCreate }:{
   open:boolean; onClose:()=>void; onCreate:(name:string)=>void;
 }) {
@@ -129,7 +129,8 @@ function CreateModal({ open, onClose, onCreate }:{
           disabled={!can}
           onClick={()=> can && onCreate(name.trim())}
           className="w-full h-[44px] rounded-[10px] font-semibold disabled:opacity-60"
-          style={{ background:CTA, color:'#0a0f0d', fontSize:12.5, boxShadow:'0 10px 22px rgba(89,217,179,.20)' }}
+          /* green button, WHITE text */
+          style={{ background:CTA, color:'#ffffff', fontSize:12.5, boxShadow:'0 10px 22px rgba(0,0,0,.18)' }}
           onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA_HOVER)}
           onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA)}
         >
@@ -165,7 +166,7 @@ function RenameModal({ open, initial, onClose, onSave }:{
           disabled={!can}
           onClick={()=> can && onSave(val.trim())}
           className="w-full h-[44px] rounded-[10px] font-semibold disabled:opacity-60"
-          style={{ background:CTA, color:'#0a0f0d', fontSize:12.5, boxShadow:'0 10px 22px rgba(89,217,179,.20)' }}
+          style={{ background:CTA, color:'#ffffff', fontSize:12.5, boxShadow:'0 10px 22px rgba(0,0,0,.18)' }}
           onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA_HOVER)}
           onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA)}
         >
@@ -196,7 +197,7 @@ function ConfirmDelete({ open, name, onClose, onConfirm }:{
         </button>
         <button onClick={onConfirm}
                 className="w-full h-[44px] rounded-[10px] font-semibold"
-                style={{ background:CTA, color:'#0a0f0d', fontSize:12.5, boxShadow:'0 10px 22px rgba(89,217,179,.20)' }}
+                style={{ background:CTA, color:'#ffffff', fontSize:12.5, boxShadow:'0 10px 22px rgba(0,0,0,.18)' }}
                 onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA_HOVER)}
                 onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA)}>
           Delete
@@ -215,18 +216,20 @@ function Row({
   return (
     <button
       onClick={onClick}
-      className="rail-row w-full text-left rounded-[10px] px-3 flex items-center gap-2 group transition"
+      className="rail-row w-full text-left rounded-[12px] px-3 flex items-center gap-2 group transition"
       style={{
         minHeight: 60,
-        background: active ? `linear-gradient(0deg, ${BRAND_OL30}, ${BRAND_OL30})` : 'var(--panel)',
+        background: 'var(--panel)',
+        /* IMPORTANT: same border as overlay boxes */
         border: '1px solid var(--border)',
-        boxShadow: '0 0 0 1px rgba(255,255,255,.06) inset',
+        /* same subtle inset as overlays; removed green glow */
+        boxShadow: '0 12px 28px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset',
         color: 'var(--sidebar-text)',
         position: 'relative',
         overflow: 'hidden',
       }}
     >
-      {/* Tile avatar */}
+      {/* Tile avatar — same border recipe */}
       <div
         className="relative w-10 h-10 rounded-md grid place-items-center shrink-0"
         style={{
@@ -239,7 +242,7 @@ function Row({
       </div>
 
       <div className="min-w-0 flex-1">
-        <div className="text-sm font-medium truncate">{a.name}</div>
+        <div className="text-sm font-medium truncate" style={{ color:'var(--text)' }}>{a.name}</div>
         <div className="text-[11px] truncate" style={{ color:'var(--sidebar-muted)' }}>
           {a.purpose || '—'}
         </div>
@@ -249,7 +252,7 @@ function Row({
         <button
           onClick={(e)=>{ e.stopPropagation(); onRename(); }}
           className="px-2 h-[30px] rounded-[10px]"
-          style={{ background:'var(--panel)', border:'1px solid var(--border)' }}
+          style={{ background:'var(--panel)', border:'1px solid var(--border)', color:'var(--text)' }}
           aria-label="Rename"
         >
           <Edit3 className="w-4 h-4" />
@@ -257,18 +260,18 @@ function Row({
         <button
           onClick={(e)=>{ e.stopPropagation(); onDelete(); }}
           className="px-2 h-[30px] rounded-[10px]"
-          style={{ background:'var(--panel)', border:'1px solid var(--border)' }}
+          style={{ background:'var(--panel)', border:'1px solid var(--border)', color:'var(--text)' }}
           aria-label="Delete"
         >
           <Trash2 className="w-4 h-4" />
         </button>
       </div>
 
-      {/* Soft hover */}
+      {/* Soft hover (no green tint) */}
       <style jsx>{`
         .rail-row:hover{
-          background: linear-gradient(0deg, ${BRAND_OL14}, ${BRAND_OL14});
-          box-shadow: 0 10px 24px rgba(0,0,0,.32), 0 0 0 1px ${BRAND_OL14};
+          background: color-mix(in oklab, var(--panel) 94%, white 6%);
+          box-shadow: 0 10px 24px rgba(0,0,0,.32), 0 0 0 1px var(--border);
         }
       `}</style>
     </button>
@@ -339,13 +342,14 @@ export default function AssistantRail() {
     <>
       <div
         className="assistant-rail h-full flex flex-col"
+        /* Sidebar background = EXACTLY the overlay bg you showed */
         style={{
-          background:'var(--sidebar-bg)',
-          borderRight:'1px solid rgba(255,255,255,.08)',
+          background: OVERLAY_BG,
+          borderRight:'1px solid var(--border)',
           color:'var(--sidebar-text)',
         }}
       >
-        {/* Rail header with gradient (sectioning) */}
+        {/* Rail header with your gradient & the same thin border line */}
         <div
           className="px-3 py-3"
           style={{
@@ -353,32 +357,21 @@ export default function AssistantRail() {
               var(--panel) 0%,
               color-mix(in oklab, var(--panel) 97%, white 3%) 50%,
               var(--panel) 100%)`,
-            borderBottom:'1px solid rgba(255,255,255,.08)'
+            borderBottom:'1px solid var(--border)'
           }}
         >
-          <div className="grid grid-cols-2 gap-2">
-            {/* Talk to Assistant — same style as page CTA (does not change your call logic) */}
+          {/* ONLY a Create button (green bg, white text) */}
+          <div className="grid grid-cols-1">
             <button
               type="button"
               className="inline-flex items-center justify-center gap-2 rounded-[10px] font-semibold"
-              style={{ height: 36, background: CTA, color:'#0a0f0d', boxShadow:'0 10px 22px rgba(89,217,179,.20)' }}
+              style={{ height: 36, background: CTA, color:'#ffffff', boxShadow:'0 10px 22px rgba(0,0,0,.18)', border:'1px solid transparent' }}
               onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA_HOVER)}
               onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA)}
-              onClick={()=> window.dispatchEvent(new CustomEvent('va:open-call'))}
-            >
-              <Phone className="w-4 h-4" />
-              <span>Talk to Assistant</span>
-            </button>
-
-            {/* Create Assistant */}
-            <button
-              type="button"
-              className="inline-flex items-center justify-center gap-2 rounded-[10px] font-semibold"
-              style={{ height: 36, background:'var(--panel)', color:'var(--text)', border:'1px solid var(--border)' }}
               onClick={()=> setCreateOpen(true)}
             >
               <Plus className="w-4 h-4" />
-              Create
+              Create Assistant
             </button>
           </div>
 
@@ -402,7 +395,6 @@ export default function AssistantRail() {
             />
           </div>
 
-          {/* Section label with fine tracking */}
           <div className="mt-3 text-[11px] font-semibold tracking-[.12em]" style={{ color:'var(--sidebar-muted)' }}>
             ASSISTANTS
           </div>
@@ -438,43 +430,46 @@ export default function AssistantRail() {
         <RenameModal open={!!renId} initial={renName} onClose={()=>setRenId(null)} onSave={saveRename} />
         <ConfirmDelete open={!!delId} name={delName} onClose={()=>setDelId(null)} onConfirm={confirmDelete} />
 
-        {/* Rail theme details */}
+        {/* Rail theme tokens — keep border thin + readable text */}
         <style jsx>{`
           /* Light */
           :global(:root:not([data-theme="dark"])) .assistant-rail{
-            --sidebar-bg: #fff;
-            --sidebar-text: #0f172a;
-            --sidebar-muted: #64748b;
-            --border: rgba(0,0,0,.12);
-            --panel: #ffffff;
+            --sidebar-text: #e6f1ef;
+            --sidebar-muted: #9fb4ad;
+            --panel: #0d0f11;      /* solid boxes on dark overlay */
+            --text: #e6f1ef;
+            --text-muted: #9fb4ad;
+            --border: rgba(255,255,255,.10);
           }
           /* Dark */
           :global([data-theme="dark"]) .assistant-rail{
-            --sidebar-bg: var(--panel);
             --sidebar-text: var(--text);
             --sidebar-muted: var(--text-muted);
             --border: rgba(255,255,255,.10);
-            --panel: var(--panel);
+            /* --panel is inherited from app tokens */
           }
         `}</style>
       </div>
 
-      {/* Full-screen loader (kept; not an overlay style change) */}
+      {/* Loader overlay — match overlay bg & box recipe */}
       <AnimatePresence>
         {overlay && (
           <motion.div
             key="assistant-switch"
             className="fixed inset-0 z-[100002] flex items-center justify-center"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            style={{
-              background: 'radial-gradient(1000px 500px at 50% -10%, var(--brand-weak), transparent 60%), var(--bg)'
-            }}
+            style={{ background: OVERLAY_BG }}
           >
             <motion.div
               initial={{ scale: 0.96, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               className="px-6 py-5 rounded-[12px]"
-              style={{ border: '1px solid var(--border)', background: 'var(--panel)', boxShadow: '0 22px 44px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px rgba(89,217,179,.20)', color:'var(--text)' }}
+              style={{
+                border: '1px solid var(--border)',
+                background: 'var(--panel)',
+                boxShadow: '0 22px 44px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset',
+                color:'var(--text)'
+              }}
             >
               <div className="flex items-center gap-3">
                 <Loader2 className="w-5 h-5 animate-spin" />
