@@ -2,7 +2,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
-import AssistantRail from '@/components/voice/AssistantRail';
+import AssistantRail from '@/components/voice/AssistantRail'; // <-- import present
 import { createPortal } from 'react-dom';
 import {
   Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Rocket, Search, Check, Lock, X, KeyRound,
@@ -10,12 +10,12 @@ import {
 } from 'lucide-react';
 import { scopedStorage } from '@/utils/scoped-storage';
 
-/* ───────────────── constants ───────────────── */
+/* ─────────── constants ─────────── */
 const CTA = '#59d9b3';
 const CTA_HOVER = '#54cfa9';
 const ACTIVE_KEY = 'va:activeId';
 
-/* Filled phone icon */
+/* phone icon */
 function PhoneFilled(props: React.SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 24 24" width="16" height="16" {...props} aria-hidden>
@@ -27,108 +27,107 @@ function PhoneFilled(props: React.SVGProps<SVGSVGElement>) {
   );
 }
 
-/* ───────────────── theme tokens (force SOLID) ───────────────── */
+/* ─────────── SOLID theme (no transparency anywhere) ─────────── */
 const Tokens = () => (
   <style jsx global>{`
     .va-scope{
-      /* Hard fallbacks so nothing is transparent even if global vars are missing */
-      --bg: #0b0c10;
-      --panel: #0d0f11;
-      --text: #e6f1ef;
-      --text-muted: #9fb4ad;
+      /* hard fallbacks */
+      --bg:#0b0c10; --panel:#0d0f11; --text:#e6f1ef; --text-muted:#9fb4ad;
 
-      --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 20px; --s-6: 24px;
-      --radius-outer: 10px;
-      --control-h: 44px; --header-h: 88px;
-      --fz-title: 18px; --fz-sub: 15px; --fz-body: 14px; --fz-label: 12.5px;
-      --lh-body: 1.45; --ease: cubic-bezier(.22,.61,.36,1);
+      --s-2:8px; --s-3:12px; --s-4:16px; --s-5:20px; --s-6:24px;
+      --radius-outer:10px;
+      --control-h:44px; --header-h:88px;
+      --fz-title:18px; --fz-sub:15px; --fz-body:14px; --fz-label:12.5px;
+      --lh-body:1.45; --ease:cubic-bezier(.22,.61,.36,1);
 
-      --page-bg: var(--bg);
-      --panel-bg: var(--panel);      /* SOLID */
-      --input-bg: var(--panel-bg);   /* SOLID */
-      --input-border: rgba(255,255,255,.10);
-      --input-shadow: 0 0 0 1px rgba(255,255,255,.06) inset;
+      --page-bg:var(--bg);
+      --panel-bg:var(--panel);      /* SOLID */
+      --input-bg:var(--panel);      /* SOLID */
+      --input-border:rgba(255,255,255,.10);
+      --input-shadow:0 0 0 1px rgba(255,255,255,.06) inset;
 
-      --border-weak: rgba(255,255,255,.10);
-      --card-shadow: 0 22px 44px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px rgba(89,217,179,.20);
+      --border-weak:rgba(255,255,255,.10);
+      --card-shadow:0 22px 44px rgba(0,0,0,.28),
+                    0 0 0 1px rgba(255,255,255,.06) inset,
+                    0 0 0 1px rgba(89,217,179,.20);
     }
 
     .va-card{
-      position: relative;
-      border-radius: var(--radius-outer);
-      border: 1px solid var(--border-weak);
-      background: var(--panel-bg);
-      box-shadow: var(--card-shadow);
-      overflow: hidden;
-      isolation: isolate;
+      border-radius:var(--radius-outer);
+      border:1px solid var(--border-weak);
+      background:var(--panel-bg);
+      box-shadow:var(--card-shadow);
+      overflow:hidden; isolation:isolate;
     }
 
-    .va-card .va-head{
-      min-height: var(--header-h);
-      display: grid; grid-template-columns: 1fr auto; align-items: center;
-      padding: 0 16px;
-      background: linear-gradient(90deg,
+    .va-head{
+      min-height:var(--header-h);
+      display:grid; grid-template-columns:1fr auto; align-items:center;
+      padding:0 16px;
+      background:linear-gradient(90deg,
         var(--panel-bg) 0%,
         color-mix(in oklab, var(--panel-bg) 97%, white 3%) 50%,
         var(--panel-bg) 100%);
-      border-bottom: 1px solid rgba(255,255,255,.08);
-      color: var(--text);
+      border-bottom:1px solid rgba(255,255,255,.08);
+      color:var(--text);
     }
 
-    /* FIXED rail (always visible) */
+    /* fixed assistant rail */
     .va-left-fixed{
-      position: fixed; inset: 0 auto 0 0; width: 260px; z-index: 12;
-      background: var(--panel-bg);
-      border-right: 1px solid rgba(255,255,255,.06);
-      box-shadow: 14px 0 28px rgba(0,0,0,.08);
-      display: flex; flex-direction: column;
+      position:fixed; inset:0 auto 0 0; width:260px; z-index:12;
+      background:var(--panel-bg);
+      border-right:1px solid rgba(255,255,255,.06);
+      box-shadow:14px 0 28px rgba(0,0,0,.08);
+      display:flex; flex-direction:column;
     }
     .va-left-fixed .rail-scroll{ overflow:auto; flex:1; }
 
-    /* Solid dropdown menu */
+    /* dropdown menu — SOLID */
     .va-menu{
-      background: var(--panel-bg);
-      border: 1px solid rgba(255,255,255,.12);
-      box-shadow: 0 36px 90px rgba(0,0,0,.55);
-      border-radius: 10px;
+      background:var(--panel-bg);
+      border:1px solid rgba(255,255,255,.12);
+      box-shadow:0 36px 90px rgba(0,0,0,.55);
+      border-radius:10px;
     }
 
-    /* Drawer + overlay: SOLID scrim + blur */
+    /* overlays — SOLID scrim + blur + pulse animation on click */
+    @keyframes overlayPulse { 0%{transform:scale(1);opacity:.98} 60%{transform:scale(1.02);opacity:1} 100%{transform:scale(1);opacity:.98} }
     .va-blur-overlay{
-      position: fixed; inset: 0; z-index: 9996;
-      background: rgba(8,10,12,.6);
-      backdrop-filter: blur(3px);
-      opacity: 0; pointer-events: none; transition: opacity 200ms var(--ease);
+      position:fixed; inset:0; z-index:9996;
+      background:rgba(8,10,12,.88); /* SOLID */
+      backdrop-filter:blur(3px);
+      opacity:0; pointer-events:none; transition:opacity 200ms var(--ease);
     }
-    .va-blur-overlay.open{ opacity: 1; pointer-events: auto; }
+    .va-blur-overlay.open{ opacity:1; pointer-events:auto; }
+    .va-blur-overlay.pulse{ animation:overlayPulse 320ms var(--ease); }
 
     .va-call-drawer{
-      position: fixed; inset: 0 0 0 auto; width: min(540px, 92vw); z-index: 9997;
-      display: grid; grid-template-rows: auto 1fr auto;
-      background: var(--panel-bg);
-      border-left: 1px solid rgba(255,255,255,.10);
-      box-shadow: -28px 0 80px rgba(0,0,0,.55);
-      transform: translateX(100%); transition: transform 280ms var(--ease);
+      position:fixed; inset:0 0 0 auto; width:min(540px,92vw); z-index:9997;
+      display:grid; grid-template-rows:auto 1fr auto;
+      background:var(--panel-bg);
+      border-left:1px solid rgba(255,255,255,.10);
+      box-shadow:-28px 0 80px rgba(0,0,0,.55);
+      transform:translateX(100%); transition:transform 280ms var(--ease);
     }
-    .va-call-drawer.open{ transform: translateX(0); }
+    .va-call-drawer.open{ transform:translateX(0); }
 
-    /* Modal (Generate) — solid sheet */
-    .va-modal-wrap{ position: fixed; inset: 0; z-index: 9994; }
-    .va-modal-blur{ position:absolute; inset:0; background: rgba(8,10,12,.65); backdrop-filter: blur(4px); }
-    .va-modal-center{ position:absolute; inset:0; display:grid; place-items:center; padding: 20px; }
-    .va-sheet{ background: var(--panel-bg); border: 1px solid rgba(255,255,255,.12); box-shadow: 0 28px 80px rgba(0,0,0,.70); border-radius: 12px; }
+    /* modal */
+    .va-modal-wrap{ position:fixed; inset:0; z-index:9994; }
+    .va-modal-blur{ position:absolute; inset:0; background:rgba(8,10,12,.88); backdrop-filter:blur(4px); }
+    .va-modal-center{ position:absolute; inset:0; display:grid; place-items:center; padding:20px; }
+    .va-sheet{ background:var(--panel-bg); border:1px solid rgba(255,255,255,.12); box-shadow:0 28px 80px rgba(0,0,0,.70); border-radius:12px; }
 
-    /* Chat bubbles */
-    .chat-msg{ max-width: 85%; padding: 10px 12px; border-radius: 12px; }
-    .chat-user{ background: var(--panel-bg); border: 1px solid rgba(255,255,255,.12); align-self: flex-end; }
-    .chat-ai{   background: color-mix(in oklab, var(--panel-bg) 92%, black 8%); border: 1px solid rgba(255,255,255,.12); align-self: flex-start; }
+    /* chat */
+    .chat-msg{ max-width:85%; padding:10px 12px; border-radius:12px; }
+    .chat-user{ background:var(--panel-bg); border:1px solid rgba(255,255,255,.12); align-self:flex-end; }
+    .chat-ai{ background:color-mix(in oklab, var(--panel-bg) 92%, black 8%); border:1px solid rgba(255,255,255,.12); align-self:flex-start; }
 
-    .diff-add{ color: #00ffc2; }
-    .diff-del{ color: #ff5050; text-decoration: line-through; }
+    .diff-add{ color:#00ffc2; }
+    .diff-del{ color:#ff5050; text-decoration:line-through; }
   `}</style>
 );
 
-/* ───────────────── types / storage ───────────────── */
+/* ─────────── types / storage ─────────── */
 type ApiKey = { id: string; name: string; key: string };
 
 type AgentData = {
@@ -188,7 +187,7 @@ const saveAgentData = (id: string, data: AgentData) => {
   try { localStorage.setItem(keyFor(id), JSON.stringify(data)); } catch {}
 };
 
-/* ───────────────── mock backend ───────────────── */
+/* ─────────── mock backend ─────────── */
 async function apiSave(agentId: string, payload: AgentData){
   const r = await fetch(`/api/voice/agent/${agentId}/save`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
@@ -202,7 +201,7 @@ async function apiPublish(agentId: string){
   return r.json();
 }
 
-/* ───────────────── options ───────────────── */
+/* ─────────── options ─────────── */
 type Opt = { value: string; label: string; disabled?: boolean; note?: string };
 
 const providerOpts: Opt[] = [
@@ -246,15 +245,15 @@ const asrModelsFor = (asr: string): Opt[] =>
       ]
     : [{ value: 'coming', label: 'Models coming soon', disabled: true }];
 
-/* ───────────────── UI atoms ───────────────── */
+/* ─────────── UI atoms ─────────── */
 const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}) => (
   <button
     onClick={()=>onChange(!checked)}
     className="inline-flex items-center"
     style={{
-      height: 28, width: 50, padding: '0 6px', borderRadius: 999, justifyContent: 'flex-start',
+      height:28, width:50, padding:'0 6px', borderRadius:999, justifyContent:'flex-start',
       background: checked ? 'color-mix(in oklab, #59d9b3 18%, var(--input-bg))' : 'var(--input-bg)',
-      border: '1px solid var(--input-border)', boxShadow: 'var(--input-shadow)'
+      border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)'
     }}
     aria-pressed={checked}
   >
@@ -268,7 +267,7 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
-/* Select with solid menu + optional menu header (used by Voice picker to include a player) */
+/* Select with SOLID menu + optional menu header (used by Voice picker to embed player) */
 function StyledSelect({
   value, onChange, options, placeholder, leftIcon, menuTop
 }:{
@@ -286,7 +285,8 @@ function StyledSelect({
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return q ? options.filter(o => o.label.toLowerCase().includes(q)) : options;
-  }, [options, query]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [options, query, value]);
 
   useLayoutEffect(() => {
     if (!open) return;
@@ -385,7 +385,7 @@ function StyledSelect({
   );
 }
 
-/* ───────────────── Section (better expand) ───────────────── */
+/* ─────────── Section (expand anim) ─────────── */
 function Section({
   title, icon, desc, children, defaultOpen = true
 }:{
@@ -402,11 +402,7 @@ function Section({
       <div className="mb-[6px] text-sm font-medium" style={{ color:'var(--text-muted)' }}>{title}</div>
 
       <div className="va-card">
-        <button
-          onClick={()=>setOpen(v=>!v)}
-          className="va-head w-full text-left"
-          style={{ color:'var(--text)' }}
-        >
+        <button onClick={()=>setOpen(v=>!v)} className="va-head w-full text-left" style={{ color:'var(--text)' }}>
           <span className="min-w-0 flex items-center gap-3">
             <span className="inline-grid place-items-center w-7 h-7 rounded-full" style={{ background:'rgba(89,217,179,.10)' }}>
               {icon}
@@ -439,7 +435,7 @@ function Section({
   );
 }
 
-/* ───────────────── Page ───────────────── */
+/* ─────────── Page ─────────── */
 export default function VoiceAgentSection() {
   const [activeId, setActiveId] = useState<string>(() => {
     try { return localStorage.getItem(ACTIVE_KEY) || ''; } catch { return ''; }
@@ -453,6 +449,7 @@ export default function VoiceAgentSection() {
 
   /* Chat drawer */
   const [showCall, setShowCall] = useState(false);
+  const [overlayPulse, setOverlayPulse] = useState(false);
   const [messages, setMessages] = useState<Array<{role:'user'|'assistant'; text:string}>>([
     { role: 'assistant', text: 'Hi! Ready when you are.' }
   ]);
@@ -475,7 +472,7 @@ export default function VoiceAgentSection() {
     return () => { (window.speechSynthesis as any).onvoiceschanged = null; };
   }, []);
 
-  /* Rail change listener (keeps sidebar active & visible) */
+  /* Rail events */
   useEffect(() => {
     const handler = (e: Event) => setActiveId((e as CustomEvent<string>).detail);
     window.addEventListener('assistant:active', handler as EventListener);
@@ -490,7 +487,7 @@ export default function VoiceAgentSection() {
 
   useEffect(() => { if (activeId) saveAgentData(activeId, data); }, [activeId, data]);
 
-  // bootstrap keys
+  // keys
   useEffect(() => {
     (async () => {
       try {
@@ -543,7 +540,7 @@ export default function VoiceAgentSection() {
     finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
   }
 
-  /* Prompt composer */
+  /* prompt composer + diff */
   function buildPrompt(base: string, extraRaw: string) {
     const extra = (extraRaw || '').trim();
     if (!extra) return base;
@@ -559,24 +556,12 @@ ${lines.map(l => `- ${l}`).join('\n')}
 - Ask for missing info before acting.`;
     return `${base}${block}`;
   }
-
-  function escapeHTML(s: string){
-    return s.replace(/[&<>"]/g, (c) =>
-      ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'} as any)[c]
-    );
-  }
+  const escapeHTML = (s:string) => s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'} as any)[c]);
   function diffHTML(oldText: string, newText: string) {
-    if (newText.startsWith(oldText)) {
-      const add = newText.slice(oldText.length);
-      return `${escapeHTML(oldText)}<span class="diff-add">${escapeHTML(add)}</span>`;
-    }
-    if (oldText.startsWith(newText)) {
-      const del = oldText.slice(newText.length);
-      return `${escapeHTML(newText)}<span class="diff-del">${escapeHTML(del)}</span>`;
-    }
+    if (newText.startsWith(oldText)) { const add = newText.slice(oldText.length); return `${escapeHTML(oldText)}<span class="diff-add">${escapeHTML(add)}</span>`; }
+    if (oldText.startsWith(newText)) { const del = oldText.slice(newText.length); return `${escapeHTML(newText)}<span class="diff-del">${escapeHTML(del)}</span>`; }
     return `<span class="diff-del">${escapeHTML(oldText)}</span>\n<span class="diff-add">${escapeHTML(newText)}</span>`;
   }
-
   function startGenerate() {
     basePromptRef.current = data.systemPrompt;
     setGenPhase('loading');
@@ -586,8 +571,8 @@ ${lines.map(l => `- ${l}`).join('\n')}
       setShowDiff(true); setShowGenerate(false); setGenPhase('idle');
     }, 650);
   }
-  function acceptDiff(){ setData(prev => ({ ...prev, systemPrompt: pendingPrompt })); setPendingPrompt(''); setShowDiff(false); }
-  function declineDiff(){ setPendingPrompt(''); setShowDiff(false); }
+  const acceptDiff = () => { setData(p => ({ ...p, systemPrompt: pendingPrompt })); setPendingPrompt(''); setShowDiff(false); };
+  const declineDiff = () => { setPendingPrompt(''); setShowDiff(false); };
 
   /* mock chat */
   function sendChat() {
@@ -599,7 +584,7 @@ ${lines.map(l => `- ${l}`).join('\n')}
     setTimeout(() => setMessages(m => [...m, { role: 'assistant', text: reply }]), 350);
   }
 
-  /* Voice preview logic */
+  /* TTS preview */
   function speakPreview(line?: string){
     const u = new SpeechSynthesisUtterance(line || `Hi, I'm ${data.name || 'your assistant'}. This is a preview.`);
     const byName = voices.find(v => v.name.toLowerCase().includes((data.voiceName || '').split(' ')[0]?.toLowerCase() || ''));
@@ -608,14 +593,17 @@ ${lines.map(l => `- ${l}`).join('\n')}
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(u);
   }
-  function stopPreview(){ window.speechSynthesis.cancel(); }
+  const stopPreview = () => window.speechSynthesis.cancel();
 
-  /* ───────────── render ───────────── */
+  /* overlay pulse trigger */
+  const pulseOverlay = () => { setOverlayPulse(true); setTimeout(()=>setOverlayPulse(false), 320); };
+
+  /* ─────────── render ─────────── */
   return (
     <section className="va-scope" style={{ background:'var(--bg)', color:'var(--text)' }}>
       <Tokens />
 
-      {/* FIXED ASSISTANT SIDEBAR (explicit import, always present) */}
+      {/* FIXED ASSISTANT SIDEBAR */}
       <aside className="va-left-fixed">
         <div className="rail-scroll">
           <AssistantRail />
@@ -647,14 +635,14 @@ ${lines.map(l => `- ${l}`).join('\n')}
             </button>
 
             <button
-              onClick={()=>setShowCall(true)}
+              onClick={()=>{ setShowCall(true); }}
               className="inline-flex items-center gap-2 rounded-[10px] select-none"
-              style={{ height:'var(--control-h)', padding:'0 18px', background:CTA, color:'#0a0f0d', fontWeight:700, boxShadow:'0 10px 22px rgba(89,217,179,.20)' }}
+              style={{ height:'var(--control-h)', padding:'0 18px', background:CTA, color:'#ffffff', fontWeight:700, boxShadow:'0 10px 22px rgba(89,217,179,.20)' }}
               onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA_HOVER)}
               onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA)}
             >
-              <PhoneFilled style={{ color:'#fff' }} />
-              Talk to Assistant
+              <PhoneFilled style={{ color:'#ffffff' }} />
+              <span style={{ color:'#ffffff' }}>Talk to Assistant</span>
             </button>
           </div>
 
@@ -799,11 +787,10 @@ ${lines.map(l => `- ${l}`).join('\n')}
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_auto] gap-[12px] mt-[var(--s-4)] items-end">
+            {/* Voice select WITH PLAYER inside dropdown (button inside, as requested) */}
+            <div className="grid grid-cols-1 mt-[var(--s-4)]">
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]">Voice</div>
-
-                {/* Voice select WITH PLAYER inside its dropdown */}
                 <StyledSelect
                   value={data.voiceName}
                   onChange={setField('voiceName')}
@@ -837,16 +824,6 @@ ${lines.map(l => `- ${l}`).join('\n')}
                   }
                 />
               </div>
-
-              {/* Keep external quick buttons too */}
-              <button onClick={()=>speakPreview()} className="w-12 h-12 rounded-full grid place-items-center" aria-label="Preview voice"
-                style={{ background: CTA, color:'#0a0f0d', boxShadow:'0 10px 22px rgba(89,217,179,.20)' }}>
-                <Play className="w-5 h-5" />
-              </button>
-              <button onClick={stopPreview} className="w-12 h-12 rounded-full grid place-items-center border" aria-label="Stop preview"
-                style={{ background: 'var(--panel-bg)', color:'var(--text)', borderColor:'var(--input-border)' }}>
-                <Square className="w-5 h-5" />
-              </button>
             </div>
           </Section>
 
@@ -880,10 +857,13 @@ ${lines.map(l => `- ${l}`).join('\n')}
         </div>
       </div>
 
-      {/* Drawer + blur overlay */}
+      {/* Drawer + SOLID overlay with click animation */}
       {createPortal(
         <>
-          <div className={`va-blur-overlay ${showCall ? 'open' : ''}`} onClick={()=>setShowCall(false)} />
+          <div
+            className={`va-blur-overlay ${showCall ? 'open' : ''} ${overlayPulse ? 'pulse' : ''}`}
+            onClick={()=>{ setShowCall(false); pulseOverlay(); }}
+          />
           <aside className={`va-call-drawer ${showCall ? 'open' : ''}`} aria-hidden={!showCall}>
             <div className="flex items-center justify-between px-4 h-[64px]"
                  style={{ background:'var(--panel-bg)', borderBottom:'1px solid rgba(255,255,255,.1)' }}>
@@ -926,10 +906,10 @@ ${lines.map(l => `- ${l}`).join('\n')}
         document.body
       )}
 
-      {/* Generate overlay (solid) */}
+      {/* Generate overlay (SOLID) with same pulse-on-click */}
       {showGenerate && createPortal(
         <div className="va-modal-wrap" role="dialog" aria-modal>
-          <div className="va-modal-blur" onClick={()=>{ if (genPhase==='idle') setShowGenerate(false); }} />
+          <div className="va-modal-blur" onClick={()=>{ if (genPhase==='idle') { setShowGenerate(false); pulseOverlay(); } }} />
           <div className="va-modal-center">
             <div className="va-sheet w-full max-w-[760px] p-4 md:p-6">
               <div className="flex items-center justify-between mb-3">
