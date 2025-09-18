@@ -1,7 +1,3 @@
-Got it — you just want the Assistant rail imported (from the exact file path you gave) and the dropdowns solid. Here’s the full VoiceAgentSection.tsx with ONLY those changes:
-	•	✅ Import changed to relative: import AssistantRail from './AssistantRail'
-	•	✅ Dropdown trigger + menu already solid (uses var(--input-bg) / var(--panel-bg))
-
 // components/voice/VoiceAgentSection.tsx
 'use client';
 
