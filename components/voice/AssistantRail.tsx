@@ -43,12 +43,12 @@ function writeActive(id:string){
   try { window.dispatchEvent(new CustomEvent('assistant:active', { detail: id })); } catch {}
 }
 
-/* ---------- Modal shells (PORTALED, high z-index, card styling) ---------- */
+/* ---------- Modal shells (PORTALED, keep behavior; match section look) ---------- */
 function ModalShell({ children }:{ children:React.ReactNode }) {
   if (typeof document === 'undefined') return null;
   return createPortal(
     <>
-      {/* overlay above everything */}
+      {/* overlay stays exactly as you had it */}
       <div
         className="fixed inset-0 z-[100000] pointer-events-auto"
         style={{
@@ -57,15 +57,16 @@ function ModalShell({ children }:{ children:React.ReactNode }) {
           WebkitBackdropFilter: 'blur(6px)'
         }}
       />
-      {/* centered sheet with same style as .card */}
+      {/* centered sheet — colors/radius/shadow now match VoiceAgentSection */}
       <div className="fixed inset-0 z-[100001] flex items-center justify-center px-4">
         <div
-          className="w-full max-w-[720px] rounded-[16px] overflow-hidden"
+          className="w-full max-w-[720px] overflow-hidden"
           style={{
-            background: 'var(--card)',
+            background: 'var(--panel-bg)',                   // was var(--card)
             color: 'var(--text)',
-            border: '1px solid var(--border)',
-            boxShadow: 'var(--shadow-card)'
+            border: '1px solid var(--input-border)',         // was var(--border)
+            borderRadius: 12,                                 // was 16/20 → section uses 12
+            boxShadow: '0 28px 80px rgba(0,0,0,.70)'         // match .va-sheet
           }}
         >
           {children}
@@ -83,8 +84,8 @@ function ModalHeader({ icon, title, subtitle, onClose }:{
     <div
       className="flex items-center justify-between px-6 py-5"
       style={{
-        background: 'var(--panel)',
-        borderBottom: '1px solid var(--border)'
+        background: 'var(--panel-bg)',                      // was var(--panel)
+        borderBottom: '1px solid var(--input-border)'       // align with section dividers
       }}
     >
       <div className="flex items-center gap-3">
@@ -118,21 +119,30 @@ function CreateModal({ open, onClose, onCreate }:{
         <label className="block text-xs mb-1" style={{ color:'var(--text-muted)' }}>Name</label>
         <input
           value={name} onChange={(e)=>setName(e.target.value)}
-          className="w-full h-[44px] rounded-[14px] px-3 text-sm outline-none border"
-          style={{ background:'var(--card)', borderColor:'var(--border)', color:'var(--text)' }}
+          className="w-full h-[44px] rounded-[10px] px-3 text-sm outline-none"
+          style={{
+            background:'var(--input-bg)',
+            border:'1px solid var(--input-border)',
+            boxShadow:'var(--input-shadow)',
+            color:'var(--text)'
+          }}
           placeholder="e.g., Sales Bot" autoFocus
         />
       </div>
       <div className="px-6 pb-6 flex gap-3">
         <button onClick={onClose}
-                className="w-full h-[44px] rounded-[14px] font-semibold border"
-                style={{ background:'var(--card)', borderColor:'var(--border)', color:'var(--text)' }}>
+                className="w-full h-[44px] rounded-[10px] font-semibold"
+                style={{
+                  background:'var(--input-bg)',
+                  border:'1px solid var(--input-border)',
+                  color:'var(--text)'
+                }}>
           Cancel
         </button>
         <button
           disabled={!can}
           onClick={()=> can && onCreate(name.trim())}
-          className="w-full h-[44px] rounded-[14px] font-semibold disabled:opacity-60"
+          className="w-full h-[44px] rounded-[10px] font-semibold disabled:opacity-60"
           style={{ background:GREEN, color:'#fff', fontSize:12.5 }}
           onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=GREEN_HOVER)}
           onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=GREEN)}
@@ -156,19 +166,28 @@ function RenameModal({ open, initial, onClose, onSave }:{
       <div className="px-6 py-5">
         <label className="block text-xs mb-1" style={{ color:'var(--text-muted)' }}>Name</label>
         <input value={val} onChange={(e)=>setVal(e.target.value)}
-               className="w-full h-[44px] rounded-[14px] px-3 text-sm outline-none border"
-               style={{ background:'var(--card)', borderColor:'var(--border)', color:'var(--text)' }} />
+               className="w-full h-[44px] rounded-[10px] px-3 text-sm outline-none"
+               style={{
+                 background:'var(--input-bg)',
+                 border:'1px solid var(--input-border)',
+                 boxShadow:'var(--input-shadow)',
+                 color:'var(--text)'
+               }} />
       </div>
       <div className="px-6 pb-6 flex gap-3">
         <button onClick={onClose}
-                className="w-full h-[44px] rounded-[14px] font-semibold border"
-                style={{ background:'var(--card)', borderColor:'var(--border)', color:'var(--text)' }}>
+                className="w-full h-[44px] rounded-[10px] font-semibold"
+                style={{
+                  background:'var(--input-bg)',
+                  border:'1px solid var(--input-border)',
+                  color:'var(--text)'
+                }}>
           Cancel
         </button>
         <button
           disabled={!can}
           onClick={()=> can && onSave(val.trim())}
-          className="w-full h-[44px] rounded-[14px] font-semibold disabled:opacity-60"
+          className="w-full h-[44px] rounded-[10px] font-semibold disabled:opacity-60"
           style={{ background:GREEN, color:'#fff', fontSize:12.5 }}
           onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=GREEN_HOVER)}
           onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=GREEN)}
@@ -194,12 +213,16 @@ function ConfirmDelete({ open, name, onClose, onConfirm }:{
       </div>
       <div className="px-6 pb-6 flex gap-3">
         <button onClick={onClose}
-                className="w-full h-[44px] rounded-[14px] font-semibold border"
-                style={{ background:'var(--card)', borderColor:'var(--border)', color:'var(--text)' }}>
+                className="w-full h-[44px] rounded-[10px] font-semibold"
+                style={{
+                  background:'var(--input-bg)',
+                  border:'1px solid var(--input-border)',
+                  color:'var(--text)'
+                }}>
           Cancel
         </button>
         <button onClick={onConfirm}
-                className="w-full h-[44px] rounded-[14px] font-semibold"
+                className="w-full h-[44px] rounded-[10px] font-semibold"
                 style={{ background:GREEN, color:'#fff', fontSize:12.5 }}
                 onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=GREEN_HOVER)}
                 onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=GREEN)}>
