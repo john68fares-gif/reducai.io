@@ -34,7 +34,7 @@ const Tokens = () => (
   <style jsx global>{`
     .va-scope{
       --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 20px; --s-6: 24px;
-      --radius-outer: 8px;
+      --radius-outer: 8px;     /* a bit less rounded */
       --radius-inner: 8px;
       --control-h: 44px;
       --header-h: 82px;
@@ -55,7 +55,7 @@ const Tokens = () => (
       --input-border: rgba(255,255,255,.10);
       --input-shadow: 0 0 0 1px rgba(0,0,0,.38) inset;
 
-      /* menus (SOLID) */
+      /* menus (SOLID, same hue) */
       --menu-bg: #101617;
       --menu-border: rgba(255,255,255,.12);
       --menu-shadow: 0 36px 90px rgba(0,0,0,.55);
@@ -104,7 +104,7 @@ const Tokens = () => (
     }
     .va-card > * { position: relative; z-index: 1; }
 
-    /* Dropdown / menus — SOLID panes, huge z-index so they sit OVER cards */
+    /* Dropdown / menus — SOLID panes, very high z-index so they sit OVER cards */
     .va-portal{
       background: var(--menu-bg);
       border: 1px solid var(--menu-border);
@@ -118,7 +118,6 @@ const Tokens = () => (
     .va-overlay {
       position: fixed; inset: 0; z-index: 99998;
       background: rgba(8,10,12,.82);  /* solid scrim */
-      /* NO blur here */
     }
     .va-sheet{
       background: var(--menu-bg);
@@ -289,7 +288,7 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
-/* Solid select with inline search; FIXED portal that tracks scroll/resize and sits OVER cards */
+/* Solid select with inline search; rendered in a FIXED portal over content */
 function StyledSelect({
   value, onChange, options, placeholder, leftIcon, rightAddon
 }:{
@@ -309,40 +308,21 @@ function StyledSelect({
     return q ? options.filter(o => o.label.toLowerCase().includes(q)) : options;
   }, [options, query]);
 
-  // Measure anchor and decide up/down
-  const measure = () => {
+  useEffect(() => {
+    if (!open) return;
     const r = btnRef.current?.getBoundingClientRect(); if (!r) return;
     const openUp = r.bottom + 320 > window.innerHeight;
     setRect({ top: openUp ? r.top : r.bottom, left: r.left, width: r.width, openUp });
-  };
 
-  useEffect(() => {
-    if (!open) return;
-    measure();
-
-    const onScroll = () => { measure(); };
-    const onResize = () => { measure(); };
     const off = (e: MouseEvent) => {
       if (btnRef.current?.contains(e.target as Node) || portalRef.current?.contains(e.target as Node)) return;
       setOpen(false);
     };
     const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
-
-    window.addEventListener('scroll', onScroll, true);
-    window.addEventListener('resize', onResize);
     window.addEventListener('mousedown', off);
     window.addEventListener('keydown', onEsc);
-
-    // focus search after paint
-    const id = requestAnimationFrame(()=>searchRef.current?.focus());
-
-    return () => {
-      cancelAnimationFrame(id);
-      window.removeEventListener('scroll', onScroll, true);
-      window.removeEventListener('resize', onResize);
-      window.removeEventListener('mousedown', off);
-      window.removeEventListener('keydown', onEsc);
-    };
+    setTimeout(()=>searchRef.current?.focus(),0);
+    return () => { window.removeEventListener('mousedown', off); window.removeEventListener('keydown', onEsc); };
   }, [open]);
 
   return (
@@ -717,9 +697,9 @@ export default function VoiceAgentSection() {
     <section className="va-scope" style={{ background:'var(--bg)', color:'var(--text)' }}>
       <Tokens />
 
-      {/* rail (260px) + centered content */}
+      {/* keep your grid: rail (260px) + content */}
       <div className="grid w-full" style={{ gridTemplateColumns: '260px 1fr' }}>
-        {/* Rail */}
+        {/* Rail (touching the left of this page area) */}
         <div className="sticky top-0 h-screen" style={{ borderRight:'1px solid rgba(255,255,255,.06)' }}>
           <RailBoundary><AssistantRail /></RailBoundary>
         </div>
@@ -961,7 +941,6 @@ function Section({
 
       <div className="va-card">
         <div className="va-card__band" />
-        {/* header */}
         <button onClick={()=>setOpen(v=>!v)} className="va-head w-full text-left">
           <span className="min-w-0 flex items-center gap-3">
             <span className="inline-grid place-items-center w-7 h-7 rounded-full"
@@ -979,7 +958,6 @@ function Section({
           </span>
         </button>
 
-        {/* body (smooth height), width/placement remain constant */}
         <AnimatePresence initial={false}>
           {open && (
             <motion.div
