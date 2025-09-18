@@ -71,7 +71,6 @@ const Tokens = () => (
       color:var(--text);
     }
 
-    /* fixed assistant rail */
     .va-left-fixed{
       position:fixed; inset:0 auto 0 0; width:260px; z-index:12;
       background:var(--panel-bg);
@@ -81,7 +80,7 @@ const Tokens = () => (
     }
     .va-left-fixed .rail-scroll{ overflow:auto; flex:1; }
 
-    /* dropdown menu base (can be overridden by inline below if needed) */
+    /* dropdown menu base */
     .va-menu{
       background:var(--panel-bg);
       border:1px solid rgba(255,255,255,.12);
@@ -89,7 +88,7 @@ const Tokens = () => (
       border-radius:10px;
     }
 
-    /* overlays — SOLID scrim + blur + pulse animation on click */
+    /* overlays */
     @keyframes overlayPulse { 0%{transform:scale(1);opacity:.98} 60%{transform:scale(1.02);opacity:1} 100%{transform:scale(1);opacity:.98} }
     .va-blur-overlay{
       position:fixed; inset:0; z-index:9996;
@@ -110,13 +109,11 @@ const Tokens = () => (
     }
     .va-call-drawer.open{ transform:translateX(0); }
 
-    /* modal */
     .va-modal-wrap{ position:fixed; inset:0; z-index:9994; }
     .va-modal-blur{ position:absolute; inset:0; background:rgba(8,10,12,.88); backdrop-filter:blur(4px); }
     .va-modal-center{ position:absolute; inset:0; display:grid; place-items:center; padding:20px; }
     .va-sheet{ background:var(--panel-bg); border:1px solid rgba(255,255,255,.12); box-shadow:0 28px 80px rgba(0,0,0,.70); border-radius:12px; }
 
-    /* chat */
     .chat-msg{ max-width:85%; padding:10px 12px; border-radius:12px; }
     .chat-user{ background:var(--panel-bg); border:1px solid rgba(255,255,255,.12); align-self:flex-end; }
     .chat-ai{ background:color-mix(in oklab, var(--panel-bg) 92%, black 8%); border:1px solid rgba(255,255,255,.12); align-self:flex-start; }
@@ -124,20 +121,14 @@ const Tokens = () => (
     .diff-add{ color:#00ffc2; }
     .diff-del{ color:#ff5050; text-decoration:line-through; }
 
-    /* ── HARDEN ALL POPPERS/MENUS TO SOLID (Radix, shadcn, Headless UI) ── */
-    .va-scope [role="menu"],
-    .va-scope [role="listbox"],
-    .va-scope .DropdownMenuContent,
-    .va-scope .SelectContent,
-    .va-scope .PopoverContent,
-    .va-scope .ContextMenuContent,
-    .va-scope [data-radix-popper-content-wrapper] > div {
+    /* ── HARD LOCK: every dropdown popover and ALL children are solid ── */
+    .va-scope .va-menu,
+    .va-scope .va-menu * {
       background: var(--panel-bg) !important;
       color: var(--text) !important;
-      border: 1px solid var(--input-border) !important;
-      box-shadow: 0 36px 90px rgba(0,0,0,.55) !important;
+      border-color: var(--input-border) !important;
+      box-shadow: none !important;
       backdrop-filter: none !important;
-      border-radius: 10px !important;
     }
   `}</style>
 );
@@ -282,7 +273,7 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
-/* Select with SOLID menu + optional menu header */
+/* Select with SOLID menu */
 function StyledSelect({
   value, onChange, options, placeholder, leftIcon, menuTop
 }:{
@@ -352,16 +343,15 @@ function StyledSelect({
                 left: rect.left,
                 width: rect.width,
                 transform: rect.openUp ? 'translateY(-100%)' : 'none',
-                /* force SOLID – inline so nothing can override */
                 background: 'var(--panel-bg)',
                 border: '1px solid var(--input-border)',
-                boxShadow: '0 36px 90px rgba(0,0,0,.55)',
                 borderRadius: 10 as any,
                 backdropFilter: 'none'
               }}
             >
               {menuTop ? <div className="mb-2">{menuTop}</div> : null}
 
+              {/* search row kept, but dropdown transparency is what’s locked */}
               <div
                 className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[10px]"
                 style={{ background:'var(--panel-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
@@ -384,11 +374,25 @@ function StyledSelect({
                     disabled={o.disabled}
                     onClick={()=>{ if (o.disabled) return; onChange(o.value); setOpen(false); }}
                     className="w-full text-left text-sm px-3 py-2 rounded-[8px] transition flex items-center gap-2 disabled:opacity-60"
-                    style={{ color:'var(--text)', background:'transparent', border:'1px solid transparent', cursor:o.disabled?'not-allowed':'pointer' }}
-                    onMouseEnter={(e)=>{ if (o.disabled) return; const el=e.currentTarget as HTMLButtonElement; el.style.background='rgba(0,255,194,0.08)'; el.style.border='1px solid rgba(0,255,194,0.28)'; }}
-                    onMouseLeave={(e)=>{ const el=e.currentTarget as HTMLButtonElement; el.style.background='transparent'; el.style.border='1px solid transparent'; }}
+                    style={{
+                      color:'var(--text)',
+                      background:'var(--panel-bg)',             // solid
+                      border:'1px solid var(--panel-bg)',       // same as bg
+                      cursor:o.disabled?'not-allowed':'pointer'
+                    }}
+                    onMouseEnter={(e)=>{ if (o.disabled) return;
+                      const el=e.currentTarget as HTMLButtonElement;
+                      el.style.background = 'color-mix(in oklab, var(--panel-bg) 88%, white 12%)'; // solid hover
+                      el.style.border = '1px solid var(--input-border)';
+                    }}
+                    onMouseLeave={(e)=>{
+                      const el=e.currentTarget as HTMLButtonElement;
+                      el.style.background = 'var(--panel-bg)';
+                      el.style.border = '1px solid var(--panel-bg)';
+                    }}
                   >
-                    {o.disabled ? <Lock className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" style={{ opacity: o.value===value ? 1 : 0 }} />}
+                    {o.disabled ? <Lock className="w-3.5 h-3.5" /> :
+                      <Check className="w-3.5 h-3.5" style={{ opacity: o.value===value ? 1 : 0 }} />}
                     <span className="flex-1 truncate">{o.label}</span>
                     {o.note ? <span className="text-[11px]" style={{ color:'var(--text-muted)' }}>{o.note}</span> : null}
                   </button>
@@ -467,7 +471,6 @@ export default function VoiceAgentSection() {
   const [toast, setToast] = useState<string>('');
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
 
-  /* Chat drawer */
   const [showCall, setShowCall] = useState(false);
   const [overlayPulse, setOverlayPulse] = useState(false);
   const [messages, setMessages] = useState<Array<{role:'user'|'assistant'; text:string}>>([
@@ -475,7 +478,6 @@ export default function VoiceAgentSection() {
   ]);
   const [chatInput, setChatInput] = useState('');
 
-  /* Generate overlay + diff */
   const [showGenerate, setShowGenerate] = useState(false);
   const [composerText, setComposerText] = useState('');
   const [genPhase, setGenPhase] = useState<'idle'|'loading'>('idle');
@@ -483,7 +485,6 @@ export default function VoiceAgentSection() {
   const [pendingPrompt, setPendingPrompt] = useState<string>('');
   const [showDiff, setShowDiff] = useState(false);
 
-  /* Voices (Web Speech) */
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   useEffect(() => {
     const load = () => setVoices(window.speechSynthesis.getVoices());
@@ -492,7 +493,6 @@ export default function VoiceAgentSection() {
     return () => { (window.speechSynthesis as any).onvoiceschanged = null; };
   }, []);
 
-  /* Rail events */
   useEffect(() => {
     const handler = (e: Event) => setActiveId((e as CustomEvent<string>).detail);
     window.addEventListener('assistant:active', handler as EventListener);
@@ -507,7 +507,6 @@ export default function VoiceAgentSection() {
 
   useEffect(() => { if (activeId) saveAgentData(activeId, data); }, [activeId, data]);
 
-  // keys
   useEffect(() => {
     (async () => {
       try {
@@ -560,7 +559,6 @@ export default function VoiceAgentSection() {
     finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
   }
 
-  /* prompt composer + diff */
   function buildPrompt(base: string, extraRaw: string) {
     const extra = (extraRaw || '').trim();
     if (!extra) return base;
@@ -594,7 +592,6 @@ ${lines.map(l => `- ${l}`).join('\n')}
   const acceptDiff = () => { setData(p => ({ ...p, systemPrompt: pendingPrompt })); setPendingPrompt(''); setShowDiff(false); };
   const declineDiff = () => { setPendingPrompt(''); setShowDiff(false); };
 
-  /* mock chat */
   function sendChat() {
     const txt = chatInput.trim();
     if (!txt) return;
@@ -604,7 +601,6 @@ ${lines.map(l => `- ${l}`).join('\n')}
     setTimeout(() => setMessages(m => [...m, { role: 'assistant', text: reply }]), 350);
   }
 
-  /* TTS preview */
   function speakPreview(line?: string){
     const u = new SpeechSynthesisUtterance(line || `Hi, I'm ${data.name || 'your assistant'}. This is a preview.`);
     const byName = voices.find(v => v.name.toLowerCase().includes((data.voiceName || '').split(' ')[0]?.toLowerCase() || ''));
@@ -615,26 +611,21 @@ ${lines.map(l => `- ${l}`).join('\n')}
   }
   const stopPreview = () => window.speechSynthesis.cancel();
 
-  /* overlay pulse trigger */
   const pulseOverlay = () => { setOverlayPulse(true); setTimeout(()=>setOverlayPulse(false), 320); };
 
-  /* ─────────── render ─────────── */
   return (
     <section className="va-scope" style={{ background:'var(--bg)', color:'var(--text)' }}>
       <Tokens />
 
-      {/* FIXED ASSISTANT SIDEBAR */}
       <aside className="va-left-fixed">
         <div className="rail-scroll">
           <AssistantRail />
         </div>
       </aside>
 
-      {/* RIGHT CONTENT */}
       <div style={{ marginLeft: 260 }}>
         <div className="px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w-[1160px]" style={{ fontSize:'var(--fz-body)', lineHeight:'var(--lh-body)' }}>
 
-          {/* Actions */}
           <div className="mb-[var(--s-4)] flex flex-wrap items-center justify-end gap-[var(--s-3)]">
             <button
               onClick={doSave}
@@ -673,7 +664,6 @@ ${lines.map(l => `- ${l}`).join('\n')}
             </div>
           ) : null}
 
-          {/* KPIs */}
           <div className="grid gap-[12px] md:grid-cols-2 mb-[12px]">
             <div className="va-card">
               <div className="va-head" style={{ minHeight: 56 }}>
@@ -693,7 +683,6 @@ ${lines.map(l => `- ${l}`).join('\n')}
             </div>
           </div>
 
-          {/* Sections */}
           <Section
             title="Model"
             icon={<Gauge className="w-4 h-4" style={{ color: CTA }} />}
@@ -752,22 +741,6 @@ ${lines.map(l => `- ${l}`).join('\n')}
                     value={data.systemPrompt}
                     onChange={(e)=>setField('systemPrompt')(e.target.value)}
                   />
-                  {showDiff && (
-                    <div
-                      className="absolute inset-0 rounded-[12px] px-3 py-[12px] overflow-auto"
-                      style={{ background:'var(--panel-bg)', border:'1px solid rgba(255,255,255,.12)', color:'var(--text)' }}
-                    >
-                      <div dangerouslySetInnerHTML={{ __html: diffHTML(basePromptRef.current, pendingPrompt) }} />
-                      <div className="mt-3 flex gap-2">
-                        <button onClick={acceptDiff} className="h-9 px-3 rounded-[10px] font-semibold" style={{ background:CTA, color:'#fff' }}>
-                          Accept changes
-                        </button>
-                        <button onClick={declineDiff} className="h-9 px-3 rounded-[10px]" style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}>
-                          Decline
-                        </button>
-                      </div>
-                    </div>
-                  )}
                 </div>
               </div>
             </div>
@@ -807,7 +780,6 @@ ${lines.map(l => `- ${l}`).join('\n')}
               </div>
             </div>
 
-            {/* Voice select WITH PLAYER inside dropdown */}
             <div className="grid grid-cols-1 mt-[var(--s-4)]">
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]">Voice</div>
@@ -877,7 +849,6 @@ ${lines.map(l => `- ${l}`).join('\n')}
         </div>
       </div>
 
-      {/* Drawer + SOLID overlay with click animation */}
       {createPortal(
         <>
           <div
@@ -926,7 +897,6 @@ ${lines.map(l => `- ${l}`).join('\n')}
         document.body
       )}
 
-      {/* Generate overlay (SOLID) with same pulse-on-click */}
       {showGenerate && createPortal(
         <div className="va-modal-wrap" role="dialog" aria-modal>
           <div className="va-modal-blur" onClick={()=>{ if (genPhase==='idle') { setShowGenerate(false); pulseOverlay(); } }} />
