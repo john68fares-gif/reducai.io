@@ -10,8 +10,20 @@ import {
 } from 'lucide-react';
 import { scopedStorage } from '@/utils/scoped-storage';
 
-// ⬇️ load AssistantRail client-side only so it never flashes or mis-measures on SSR
-const AssistantRail = dynamic(() => import('@/components/voice/AssistantRail'), { ssr: false });
+/* ───────────────── Assistant rail (fixed) ───────────────── */
+const AssistantRail = dynamic(
+  () =>
+    import('@/components/voice/AssistantRail')
+      .then(m => m.default ?? m)
+      .catch(() => () => <div className="px-3 py-3 text-xs opacity-70">Rail unavailable</div>),
+  { ssr: false, loading: () => <div className="px-3 py-3 text-xs opacity-70">Loading…</div> }
+);
+
+class RailBoundary extends React.Component<{children:React.ReactNode},{hasError:boolean}> {
+  constructor(p:any){ super(p); this.state={hasError:false}; }
+  static getDerivedStateFromError(){ return {hasError:true}; }
+  render(){ return this.state.hasError ? <div className="px-3 py-3 text-xs opacity-70">Rail crashed</div> : this.props.children; }
+}
 
 /* ─────────── constants ─────────── */
 const CTA = '#59d9b3';
@@ -626,17 +638,15 @@ ${lines.map(l => `- ${l}`).join('\n')}
     <section className="va-scope" style={{ background:'var(--bg)', color:'var(--text)' }}>
       <Tokens />
 
-      {/* Assistant Rail pinned to app sidebar */}
-      <aside className="va-left-fixed">
-        <div className="rail-scroll">
-          <AssistantRail />
+      {/* rail (260px) + centered content */}
+      <div className="grid w-full" style={{ gridTemplateColumns: '260px 1fr' }}>
+        {/* Rail */}
+        <div className="sticky top-0 h-screen" style={{ borderRight:'1px solid rgba(255,255,255,.06)' }}>
+          <RailBoundary><AssistantRail /></RailBoundary>
         </div>
-      </aside>
 
-      {/* Page content uses calc(app-sidebar + rail) so it always lines up */}
-      <div className="va-page">
+        {/* Content column */}
         <div className="px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w-[1160px]" style={{ fontSize:'var(--fz-body)', lineHeight:'var(--lh-body)' }}>
-
           <div className="mb-[var(--s-4)] flex flex-wrap items-center justify-end gap-[var(--s-3)]">
             <button
               onClick={doSave}
