@@ -179,7 +179,7 @@ You are a blank template AI assistant with minimal default settings, designed to
   asrModel: 'Nova 2',
 };
 
-const keyFor = (id: string) => va:agent:${id};
+const keyFor = (id: string) => `va:agent:${id}`;
 const loadAgentData = (id: string): AgentData => {
   try { const raw = localStorage.getItem(keyFor(id)); if (raw) return { ...DEFAULT_AGENT, ...(JSON.parse(raw)||{}) }; }
   catch {}
@@ -191,19 +191,19 @@ const saveAgentData = (id: string, data: AgentData) => {
 
 /* ───────────────── Mock backend ───────────────── */
 async function apiSave(agentId: string, payload: AgentData){
-  const r = await fetch(/api/voice/agent/${agentId}/save, {
+  const r = await fetch(`/api/voice/agent/${agentId}/save`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
   }).catch(()=>null);
   if (!r?.ok) throw new Error('Save failed');
   return r.json();
 }
 async function apiPublish(agentId: string){
-  const r = await fetch(/api/voice/agent/${agentId}/publish, { method: 'POST' }).catch(()=>null);
+  const r = await fetch(`/api/voice/agent/${agentId}/publish`, { method: 'POST' }).catch(()=>null);
   if (!r?.ok) throw new Error('Publish failed');
   return r.json();
 }
 async function apiCallTest(agentId: string){
-  const r = await fetch(/api/voice/agent/${agentId}/call-test, { method: 'POST' }).catch(()=>null);
+  const r = await fetch(`/api/voice/agent/${agentId}/call-test`, { method: 'POST' }).catch(()=>null);
   if (!r?.ok) throw new Error('Test call failed');
   return r.json();
 }
@@ -282,7 +282,7 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
       style={{
         width:18, height:18, borderRadius:999,
         background: checked ? CTA : 'rgba(255,255,255,.18)',
-        transform:translateX(${checked?22:0}px), transition:'transform .18s var(--ease)'
+        transform:`translateX(${checked?22:0}px)`, transition:'transform .18s var(--ease)'
       }}
     />
   </button>
@@ -421,7 +421,7 @@ function GenerateOverlay({
     const addon = extra.trim() ? `
 
 [Task & Goals]
-- ${extra.trim().replace(/\.$/, '')}. : '';
+- ${extra.trim().replace(/\.$/, '')}.` : '';
     return base.replace(/\n+$/,'') + addon + '\n';
   }
   function buildDiff(oldStr: string, newStr: string){
@@ -435,8 +435,8 @@ function GenerateOverlay({
       if (a === b){
         out.push(<span key={i}>{b}</span>);
       } else {
-        if (a && !b) out.push(<del key={r${i}} style={{ background:'rgba(255,99,71,.22)', color:'#ffb3a5', textDecorationColor:'#ffb3a5' }}>{a}</del>);
-        if (b && a !== b) out.push(<mark key={a${i}`} style={{ background:'rgba(89,217,179,.22)', color:'#aef0de' }}>{b}</mark>);
+        if (a && !b) out.push(<del key={`r${i}`} style={{ background:'rgba(255,99,71,.22)', color:'#ffb3a5', textDecorationColor:'#ffb3a5' }}>{a}</del>);
+        if (b && a !== b) out.push(<mark key={`a${i}`} style={{ background:'rgba(89,217,179,.22)', color:'#aef0de' }}>{b}</mark>);
       }
     }
     return out;
@@ -845,7 +845,7 @@ export default function VoiceAgentSection() {
                   }}
                   options={[
                     { value: '', label: 'Select an API key…' },
-                    ...apiKeys.map(k=>({ value: k.id, label: ${k.name} ••••${(k.key||'').slice(-4).toUpperCase()} }))
+                    ...apiKeys.map(k=>({ value: k.id, label: `${k.name} ••••${(k.key||'').slice(-4).toUpperCase()}` }))
                   ]}
                   leftIcon={<KeyRound className="w-4 h-4" style={{ color: CTA }} />}
                 />
