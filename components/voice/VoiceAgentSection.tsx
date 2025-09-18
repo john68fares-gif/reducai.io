@@ -44,7 +44,7 @@ const Tokens = () => (
 
       /* Base dark */
       --bg: #0b0e0f;
-      --panel: #0f1214;
+      --panel: #0f1214;  /* page */
       --text: #eaf8f3;
       --text-muted: rgba(234,248,243,.66);
 
@@ -53,7 +53,7 @@ const Tokens = () => (
       --input-border: rgba(255,255,255,.08);
       --input-shadow: inset 0 1px 0 rgba(255,255,255,.03), 0 8px 18px rgba(0,0,0,.35);
 
-      --menu-bg: #101314;                 /* SOLID dropdowns */
+      --menu-bg: #101314;
       --menu-border: rgba(255,255,255,.12);
       --menu-shadow: 0 36px 90px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.35);
 
@@ -63,18 +63,14 @@ const Tokens = () => (
       --panel-lite: color-mix(in oklab, var(--panel) 97%, white 3%);
 
       /* Center band widths */
-      --band-core-w: 30%;
-      --band-mid-w:  12%;
-      --band-edge-w: 10%;
+      --band-core-w: 30%;  /* wide darkest center */
+      --band-mid-w:  12%;  /* mid step width (each side) */
+      --band-edge-w: 10%;  /* edge step width (each side) */
 
-      /* Colors */
+      /* Colors you provided */
       --c-mid:  #223248;
       --c-core: #0D393F;
       --c-edge: #3E8874;
-
-      /* Layout for fixed rail beside the app's main sidebar */
-      --app-sidebar-w: 72px;   /* adjust to your main app sidebar width */
-      --va-rail-w: 260px;      /* assistant rail width */
     }
 
     .va-main{ overflow: visible; position: relative; contain: none; }
@@ -99,16 +95,16 @@ const Tokens = () => (
           transparent calc(50% - (var(--band-core-w) / 2 + var(--band-mid-w) + var(--band-edge-w))),
           rgba(62,136,116,0.06) calc(50% - (var(--band-core-w) / 2 + var(--band-mid-w) + var(--band-edge-w))),
           rgba(62,136,116,0.06) calc(50% - (var(--band-core-w) / 2 + var(--band-mid-w))),
-          rgba(34,50,72,0.10)   calc(50% - (var(--band-core-w) / 2 + var(--band-mid-w))),
-          rgba(34,50,72,0.10)   calc(50% - (var(--band-core-w) / 2)),
-          #0D393F               calc(50% - (var(--band-core-w) / 2)),
-          #0D393F               calc(50% + (var(--band-core-w) / 2)),
-          rgba(34,50,72,0.10)   calc(50% + (var(--band-core-w) / 2)),
-          rgba(34,50,72,0.10)   calc(50% + (var(--band-core-w) / 2 + var(--band-mid-w))),
+          rgba(34,50,72,0.10) calc(50% - (var(--band-core-w) / 2 + var(--band-mid-w))),
+          rgba(34,50,72,0.10) calc(50% - (var(--band-core-w) / 2)),
+          #0D393F              calc(50% - (var(--band-core-w) / 2)),
+          #0D393F              calc(50% + (var(--band-core-w) / 2)),
+          rgba(34,50,72,0.10) calc(50% + (var(--band-core-w) / 2)),
+          rgba(34,50,72,0.10) calc(50% + (var(--band-core-w) / 2 + var(--band-mid-w))),
           rgba(62,136,116,0.06) calc(50% + (var(--band-core-w) / 2 + var(--band-mid-w))),
           rgba(62,136,116,0.06) calc(50% + (var(--band-core-w) / 2 + var(--band-mid-w) + var(--band-edge-w))),
-          transparent           calc(50% + (var(--band-core-w) / 2 + var(--band-mid-w) + var(--band-edge-w))),
-          transparent 100%
+          transparent          calc(50% + (var(--band-core-w) / 2 + var(--band-mid-w) + var(--band-edge-w))),
+          transparent          100%
         );
     }
     .va-card > * { position: relative; z-index: 1; }
@@ -123,7 +119,7 @@ const Tokens = () => (
       border-bottom: 1px solid rgba(255,255,255,.04);
     }
 
-    /* Dropdown portal (SOLID) */
+    /* Dropdown portal — SOLID */
     .va-portal{
       background: var(--menu-bg);
       border: 1px solid var(--menu-border);
@@ -140,28 +136,18 @@ const Tokens = () => (
       border-radius: 10px;
     }
 
-    /* ✨ Fixed Assistant Rail EXACTLY beside main app sidebar, not under it */
-    .va-rail-fixed{
+    /* ✨ Fixed assistant rail to the left (same placement) */
+    .va-left-fixed{
       position: fixed;
-      top: 0; bottom: 0;
-      left: var(--app-sidebar-w);
-      width: var(--va-rail-w);
-      z-index: 30;
-      background: var(--panel);
+      inset: 0 auto 0 0;
+      width: 260px;
+      z-index: 12;
+      background: var(--panel-lite);
       border-right: 1px solid rgba(255,255,255,.06);
+      box-shadow: 14px 0 28px rgba(0,0,0,.08);
       display: flex; flex-direction: column;
     }
-    .va-rail-fixed .rail-scroll{ overflow:auto; flex:1; }
-
-    /* Content shifts to the right of both sidebars */
-    .va-content-wrap{
-      margin-left: calc(var(--app-sidebar-w) + var(--va-rail-w));
-    }
-
-    @media (max-width: 1024px){
-      .va-rail-fixed{ position: sticky; left: 0; width: var(--va-rail-w); }
-      .va-content-wrap{ margin-left: var(--va-rail-w); }
-    }
+    .va-left-fixed .rail-scroll{ overflow: auto; flex: 1; }
   `}</style>
 );
 
@@ -345,7 +331,7 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
-/* Solid select */
+/* Solid select (SOLID dropdown via portal) */
 function StyledSelect({
   value, onChange, options, placeholder, leftIcon
 }:{
@@ -618,8 +604,10 @@ export default function VoiceAgentSection() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const set = <K extends keyof AgentData>(k: K) => (v: AgentData[K]) =>
-    setData(prev => ({ ...prev, [k]: v }));
+  /* ✅ TSX-safe generic helper (no arrow generic) */
+  function set<K extends keyof AgentData>(k: K) {
+    return (v: AgentData[K]) => setData(prev => ({ ...prev, [k]: v }));
+  }
 
   const modelOpts = useMemo(()=>modelOptsFor(data.provider), [data.provider]);
   const dialectOpts = useMemo(()=>dialectsFor(data.asrLang), [data.asrLang]);
@@ -651,15 +639,15 @@ export default function VoiceAgentSection() {
     <section className="va-scope" style={{ background:'var(--bg)', color:'var(--text)' }}>
       <Tokens />
 
-      {/* FIXED RAIL BESIDE MAIN SIDEBAR */}
-      <aside className="va-rail-fixed">
+      {/* ✨ FIXED RAIL BESIDE MAIN SIDEBAR (same placement) */}
+      <aside className="va-left-fixed">
         <div className="rail-scroll">
           <RailBoundary><AssistantRail /></RailBoundary>
         </div>
       </aside>
 
-      {/* CONTENT SHIFTED RIGHT OF BOTH SIDEBARS */}
-      <div className="va-content-wrap">
+      {/* Content area shifted right of fixed rail */}
+      <div style={{ marginLeft: 260 }}>
         <div className="va-main px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w-[1160px]"
              style={{ fontSize:'var(--fz-body)', lineHeight:'var(--lh-body)' }}>
 
@@ -711,7 +699,7 @@ export default function VoiceAgentSection() {
             <div className="va-card p-[var(--s-4)]">
               <div className="text-xs mb-[6px]" style={{ color:'var(--text-muted)' }}>Latency</div>
               <div className="font-semibold" style={{ fontSize:'var(--fz-sub)', color:'var(--text)' }}>~1050 ms</div>
-            </div}
+            </div>
           </div>
 
           {/* Sections */}
@@ -851,7 +839,7 @@ export default function VoiceAgentSection() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt={[`var(--s-4)`] as unknown as number}>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt-[var(--s-4)]">
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]" style={{ color:'var(--text)' }}>Dialect</div>
                 <StyledSelect value={data.asrDialect} onChange={(v)=>set('asrDialect')(v as AgentData['asrDialect'])} options={dialectOpts}/>
@@ -899,7 +887,7 @@ export default function VoiceAgentSection() {
             className="w-full bg-transparent outline-none rounded-[10px] px-3 py-2"
             style={{ minHeight: 260, background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)' }}
           />
-          <div className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
+          <div className="mt-2 text-xs" style={{ color:'var(--text-muted)' }}>
             Paste or edit your base template. Saving uses this as the system prompt.
           </div>
         </ActionOverlay>
