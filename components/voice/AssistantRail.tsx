@@ -27,7 +27,7 @@ const GREEN_OL14  = 'rgba(16,185,129,.14)';
 
 /* Utils */
 function uid() {
-  return `a_${Date.now().toString(36)}_${crypto.getRandomValues(new Uint32Array(1))[0].toString(36)}`;
+  return a_${Date.now().toString(36)}_${crypto.getRandomValues(new Uint32Array(1))[0].toString(36)};
 }
 async function loadAssistants(): Promise<AssistantLite[]> {
   try { if (scopedStorageFn) { const ss = await scopedStorageFn(); return await ss.getJSON<AssistantLite[]>(STORAGE_KEY, []); } } catch {}
@@ -43,12 +43,12 @@ function writeActive(id:string){
   try { window.dispatchEvent(new CustomEvent('assistant:active', { detail: id })); } catch {}
 }
 
-/* ---------- Modal shells (PORTALED, keep behavior; match section look) ---------- */
+/* ---------- Modal shells (PORTALED, high z-index, card styling) ---------- */
 function ModalShell({ children }:{ children:React.ReactNode }) {
   if (typeof document === 'undefined') return null;
   return createPortal(
     <>
-      {/* overlay stays exactly as you had it */}
+      {/* overlay above everything */}
       <div
         className="fixed inset-0 z-[100000] pointer-events-auto"
         style={{
@@ -57,16 +57,15 @@ function ModalShell({ children }:{ children:React.ReactNode }) {
           WebkitBackdropFilter: 'blur(6px)'
         }}
       />
-      {/* centered sheet — colors/radius/shadow now match VoiceAgentSection */}
+      {/* centered sheet with same style as .card */}
       <div className="fixed inset-0 z-[100001] flex items-center justify-center px-4">
         <div
-          className="w-full max-w-[720px] overflow-hidden"
+          className="w-full max-w-[720px] rounded-[16px] overflow-hidden"
           style={{
-            background: 'var(--panel-bg)',                   // was var(--card)
+            background: 'var(--card)',
             color: 'var(--text)',
-            border: '1px solid var(--input-border)',         // was var(--border)
-            borderRadius: 12,                                 // was 16/20 → section uses 12
-            boxShadow: '0 28px 80px rgba(0,0,0,.70)'         // match .va-sheet
+            border: '1px solid var(--border)',
+            boxShadow: 'var(--shadow-card)'
           }}
         >
           {children}
@@ -84,8 +83,8 @@ function ModalHeader({ icon, title, subtitle, onClose }:{
     <div
       className="flex items-center justify-between px-6 py-5"
       style={{
-        background: 'var(--panel-bg)',                      // was var(--panel)
-        borderBottom: '1px solid var(--input-border)'       // align with section dividers
+        background: 'var(--panel)',
+        borderBottom: '1px solid var(--border)'
       }}
     >
       <div className="flex items-center gap-3">
@@ -119,30 +118,21 @@ function CreateModal({ open, onClose, onCreate }:{
         <label className="block text-xs mb-1" style={{ color:'var(--text-muted)' }}>Name</label>
         <input
           value={name} onChange={(e)=>setName(e.target.value)}
-          className="w-full h-[44px] rounded-[10px] px-3 text-sm outline-none"
-          style={{
-            background:'var(--input-bg)',
-            border:'1px solid var(--input-border)',
-            boxShadow:'var(--input-shadow)',
-            color:'var(--text)'
-          }}
+          className="w-full h-[44px] rounded-[14px] px-3 text-sm outline-none border"
+          style={{ background:'var(--card)', borderColor:'var(--border)', color:'var(--text)' }}
           placeholder="e.g., Sales Bot" autoFocus
         />
       </div>
       <div className="px-6 pb-6 flex gap-3">
         <button onClick={onClose}
-                className="w-full h-[44px] rounded-[10px] font-semibold"
-                style={{
-                  background:'var(--input-bg)',
-                  border:'1px solid var(--input-border)',
-                  color:'var(--text)'
-                }}>
+                className="w-full h-[44px] rounded-[14px] font-semibold border"
+                style={{ background:'var(--card)', borderColor:'var(--border)', color:'var(--text)' }}>
           Cancel
         </button>
         <button
           disabled={!can}
           onClick={()=> can && onCreate(name.trim())}
-          className="w-full h-[44px] rounded-[10px] font-semibold disabled:opacity-60"
+          className="w-full h-[44px] rounded-[14px] font-semibold disabled:opacity-60"
           style={{ background:GREEN, color:'#fff', fontSize:12.5 }}
           onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=GREEN_HOVER)}
           onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=GREEN)}
@@ -166,28 +156,19 @@ function RenameModal({ open, initial, onClose, onSave }:{
       <div className="px-6 py-5">
         <label className="block text-xs mb-1" style={{ color:'var(--text-muted)' }}>Name</label>
         <input value={val} onChange={(e)=>setVal(e.target.value)}
-               className="w-full h-[44px] rounded-[10px] px-3 text-sm outline-none"
-               style={{
-                 background:'var(--input-bg)',
-                 border:'1px solid var(--input-border)',
-                 boxShadow:'var(--input-shadow)',
-                 color:'var(--text)'
-               }} />
+               className="w-full h-[44px] rounded-[14px] px-3 text-sm outline-none border"
+               style={{ background:'var(--card)', borderColor:'var(--border)', color:'var(--text)' }} />
       </div>
       <div className="px-6 pb-6 flex gap-3">
         <button onClick={onClose}
-                className="w-full h-[44px] rounded-[10px] font-semibold"
-                style={{
-                  background:'var(--input-bg)',
-                  border:'1px solid var(--input-border)',
-                  color:'var(--text)'
-                }}>
+                className="w-full h-[44px] rounded-[14px] font-semibold border"
+                style={{ background:'var(--card)', borderColor:'var(--border)', color:'var(--text)' }}>
           Cancel
         </button>
         <button
           disabled={!can}
           onClick={()=> can && onSave(val.trim())}
-          className="w-full h-[44px] rounded-[10px] font-semibold disabled:opacity-60"
+          className="w-full h-[44px] rounded-[14px] font-semibold disabled:opacity-60"
           style={{ background:GREEN, color:'#fff', fontSize:12.5 }}
           onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=GREEN_HOVER)}
           onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=GREEN)}
@@ -213,16 +194,12 @@ function ConfirmDelete({ open, name, onClose, onConfirm }:{
       </div>
       <div className="px-6 pb-6 flex gap-3">
         <button onClick={onClose}
-                className="w-full h-[44px] rounded-[10px] font-semibold"
-                style={{
-                  background:'var(--input-bg)',
-                  border:'1px solid var(--input-border)',
-                  color:'var(--text)'
-                }}>
+                className="w-full h-[44px] rounded-[14px] font-semibold border"
+                style={{ background:'var(--card)', borderColor:'var(--border)', color:'var(--text)' }}>
           Cancel
         </button>
         <button onClick={onConfirm}
-                className="w-full h-[44px] rounded-[10px] font-semibold"
+                className="w-full h-[44px] rounded-[14px] font-semibold"
                 style={{ background:GREEN, color:'#fff', fontSize:12.5 }}
                 onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=GREEN_HOVER)}
                 onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=GREEN)}>
@@ -245,11 +222,11 @@ function Row({
       className="rail-row w-full text-left rounded-[12px] px-3 flex items-center gap-2 group transition"
       style={{
         minHeight: 60,
-        background: active ? `linear-gradient(0deg, ${GREEN_OL30}, ${GREEN_OL30})` : 'transparent',
+        background: active ? linear-gradient(0deg, ${GREEN_OL30}, ${GREEN_OL30}) : 'transparent',
         border: '1px solid transparent',
         color: 'var(--sidebar-text)',
         boxShadow: active
-          ? `0 12px 28px rgba(0,0,0,.36), 0 0 0 1px ${GREEN_OL18}, 0 0 18px ${GREEN_OL18}`
+          ? 0 12px 28px rgba(0,0,0,.36), 0 0 0 1px ${GREEN_OL18}, 0 0 18px ${GREEN_OL18}
           : 'none',
         position: 'relative',
         overflow: 'hidden',
@@ -293,12 +270,12 @@ function Row({
       </div>
 
       {/* Hover effect (soft) */}
-      <style jsx>{`
+      <style jsx>{
         .rail-row:hover{
           background: linear-gradient(0deg, ${GREEN_OL14}, ${GREEN_OL14});
           box-shadow: 0 10px 24px rgba(0,0,0,.32), 0 0 0 1px ${GREEN_OL14}, 0 0 14px ${GREEN_OL14};
         }
-      `}</style>
+      }</style>
     </button>
   );
 }
