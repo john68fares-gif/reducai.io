@@ -8,6 +8,7 @@
 // - Drag version onto input footer to test that version (or onto Lane B)
 // - Allow sending attachments without text
 // - Prompt section helpers & clearer structure
+// - Stable local user id + localStorage agent fallback (so it works even without auth/API)
 
 'use client';
 
@@ -40,14 +41,6 @@ type Version = {
   system: string;
 };
 
-type AgentMeta = {
-  pinned?: boolean;
-  draft?: boolean;
-  notes?: string;
-  lastOpenedAt?: number;
-  tags?: string[];
-};
-
 type ChatMsg = { role: 'user' | 'assistant' | 'system'; content: string };
 
 type Attachment = { id: string; name: string; mime: string; url?: string; size?: number };
@@ -67,6 +60,7 @@ const CARD: React.CSSProperties = {
 
 const versionsKey = (o: string, a: string) => `versions:${o}:${a}`;
 const memoryKey = (o: string, a: string) => `memory:${o}:${a}`;
+const agentsKey = (o: string) => `agents:${o}`;
 const fmtTime = (ts: number) => new Date(ts).toLocaleString();
 
 const stripMd = (t: string) =>
@@ -153,7 +147,7 @@ export default function Improve() {
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [autoSnapshot, setAutoSnapshot] = useState(true); // NEW
+  const [autoSnapshot, setAutoSnapshot] = useState(true);
 
   // Assistants rail
   const [query, setQuery] = useState('');
@@ -181,33 +175,81 @@ export default function Improve() {
   // Drag-over highlight for input footer (drop version here)
   const [dropActive, setDropActive] = useState(false);
 
-  // Init user (stable local dev id)
-useEffect(() => {
-  let dev = localStorage.getItem('dev:userId');
-  if (!dev) {
-    dev = `dev_${Math.random().toString(36).slice(2,10)}`;
-    localStorage.setItem('dev:userId', dev);
-  }
-  setUserId(dev);
-}, []);
+  // One-shot test version (drag to footer or click "Test" on a card)
+  const [testVersion, setTestVersion] = useState<Version | null>(null);
 
-  // Fetch bots
+  // Init user (stable local dev id)
+  useEffect(() => {
+    let dev = localStorage.getItem('dev:userId');
+    if (!dev) {
+      dev = `dev_${Math.random().toString(36).slice(2, 10)}`;
+      localStorage.setItem('dev:userId', dev);
+    }
+    setUserId(dev);
+  }, []);
+
+  // Fetch bots (API first; fallback to localStorage; auto-seed if empty)
   const fetchBots = useCallback(async (uid: string) => {
     try {
-      const res = await fetch(`/api/chatbots?ownerId=${encodeURIComponent(uid)}`, { headers: { 'x-owner-id': uid } });
-      const json = await res.json();
-      const rows: BotRow[] = json?.data || [];
+      // 1) Try API with owner filter
+      let res = await fetch(`/api/chatbots?ownerId=${encodeURIComponent(uid)}`, { headers: { 'x-owner-id': uid } });
+      let json = await res.json().catch(() => null);
+      let rows: BotRow[] = Array.isArray(json?.data) ? json.data : [];
+
+      // 2) Try API without filter
+      if (rows.length === 0) {
+        res = await fetch(`/api/chatbots`, { headers: { 'x-owner-id': uid } });
+        json = await res.json().catch(() => null);
+        rows = Array.isArray(json?.data) ? json.data : [];
+      }
+
+      // 3) Fallback to localStorage
+      if (rows.length === 0) {
+        const ak = agentsKey(uid);
+        try {
+          const raw = localStorage.getItem(ak);
+          if (raw) rows = JSON.parse(raw) as BotRow[];
+        } catch {}
+        // 4) Auto-seed a sample if still empty
+        if (rows.length === 0) {
+          const sample: BotRow = {
+            id: `dev-agent-${Date.now()}`,
+            ownerId: uid,
+            name: 'Support Assistant',
+            model: 'gpt-4o-mini',
+            temperature: 0.5,
+            system: 'Answer briefly and helpfully.',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          };
+          rows = [sample];
+          try { localStorage.setItem(ak, JSON.stringify(rows)); } catch {}
+        }
+      }
+
       setList(rows);
       if (!selectedId && rows.length) setSelectedId(rows[0].id);
-    } catch {
-      // fallback
-      const fallback: BotRow = {
-        id: 'dev-agent', ownerId: uid, name: 'Support Assistant', model: 'gpt-4o-mini',
-        temperature: 0.5, system: 'Answer briefly and helpfully.', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    } catch (e) {
+      console.error('[Improve] fetchBots failed:', e);
+      // last-resort local seed
+      const uidKey = agentsKey(uid);
+      const sample: BotRow = {
+        id: `dev-agent-${Date.now()}`,
+        ownerId: uid,
+        name: 'Support Assistant',
+        model: 'gpt-4o-mini',
+        temperature: 0.5,
+        system: 'Answer briefly and helpfully.',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
       };
-      setList([fallback]); setSelectedId('dev-agent');
+      const rows = [sample];
+      try { localStorage.setItem(uidKey, JSON.stringify(rows)); } catch {}
+      setList(rows);
+      setSelectedId(sample.id);
     }
   }, [selectedId]);
+
   useEffect(() => { if (userId) void fetchBots(userId); }, [userId, fetchBots]);
 
   // Load selection (state + versions + memory)
@@ -286,16 +328,29 @@ useEffect(() => {
       const prev = list.find(b => b.id === selectedId);
       // create snapshot (explicit)
       makeSnapshot(prev);
-      // patch server
-      await fetch(`/api/chatbots/${selectedId}?ownerId=${encodeURIComponent(userId)}`, {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json', 'x-owner-id': userId },
-        body: JSON.stringify({ name, model, temperature, system }),
+
+      // best-effort server patch
+      try {
+        await fetch(`/api/chatbots/${selectedId}?ownerId=${encodeURIComponent(userId)}`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json', 'x-owner-id': userId },
+          body: JSON.stringify({ name, model, temperature, system }),
+        });
+      } catch {}
+
+      // refresh list shallow + persist to local mirror
+      setList(cur => {
+        const updated: BotRow = {
+          id: selectedId, ownerId: userId, name, model, temperature, system,
+          createdAt: prev?.createdAt || new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+        const next = cur.some(b => b.id === selectedId) ? cur.map(b => b.id === selectedId ? updated : b) : [updated, ...cur];
+        try { localStorage.setItem(agentsKey(userId), JSON.stringify(next)); } catch {}
+        return next;
       });
-      // refresh list shallow
-      setList(cur => cur.map(b => b.id === selectedId ? { ...b, name, model, temperature, system, updatedAt: new Date().toISOString() } : b));
       setDirty(false);
-    } catch (e) {
-      alert('Failed to save');
+    } catch {
+      alert('Failed to save (local copy kept).');
     } finally {
       setSaving(false);
     }
@@ -305,12 +360,23 @@ useEffect(() => {
     if (!userId || !selectedId) return;
     if (!confirm('Delete this assistant?')) return;
     try {
-      await fetch(`/api/chatbots/${selectedId}?ownerId=${encodeURIComponent(userId)}`, { method: 'DELETE', headers: { 'x-owner-id': userId } });
+      // best-effort server delete
+      try {
+        await fetch(`/api/chatbots/${selectedId}?ownerId=${encodeURIComponent(userId)}`, { method: 'DELETE', headers: { 'x-owner-id': userId } });
+      } catch {}
+
+      // update local list + storage
+      setList(cur => {
+        const next = cur.filter(b => b.id !== selectedId);
+        try { localStorage.setItem(agentsKey(userId), JSON.stringify(next)); } catch {}
+        return next;
+      });
       localStorage.removeItem(versionsKey(userId, selectedId));
       localStorage.removeItem(memoryKey(userId, selectedId));
-      await fetchBots(userId);
       setSelectedId(null);
-    } catch { alert('Failed to delete'); }
+    } catch {
+      alert('Failed to delete locally.');
+    }
   }
 
   // Quick Rule → merge into System (visible)
@@ -336,166 +402,186 @@ useEffect(() => {
   }
 
   // Current composer attachments (pictures + videos + files)
-const currentAttachments = React.useCallback(() => {
-  return [...pics, ...vids, ...files];
-}, [pics, vids, files]);
+  const currentAttachments = React.useCallback(() => {
+    return [...pics, ...vids, ...files];
+  }, [pics, vids, files]);
 
-// --- Chat send (Support style) ---
-// Send a message to lane A or B (supporting attachments)
-const sendToLane = useCallback(
-  async (which: 'A' | 'B', text: string, attachments: Attachment[]) => {
-    const laneVersion =
-      which === 'A'
-        ? { system, model, temperature, versionId: null as string | null }
-        : laneB
-        ? { system: laneB.system, model: laneB.model, temperature: laneB.temperature, versionId: laneB.id }
-        : null;
+  // File helpers
+  function fileToAttachment(file: File): Promise<Attachment> {
+    return new Promise(resolve => {
+      const id = `${file.name}_${file.size}_${crypto.randomUUID?.() || Math.random().toString(36).slice(2)}`;
+      const base: Attachment = { id, name: file.name, mime: file.type, size: file.size };
+      if (file.type.startsWith('image/') || file.type.startsWith('video/')) {
+        const fr = new FileReader();
+        fr.onload = () => resolve({ ...base, url: String(fr.result || '') });
+        fr.readAsDataURL(file);
+      } else {
+        resolve(base);
+      }
+    });
+  }
+  async function addFiles(fileList: FileList | null, kind: 'pics' | 'vids' | 'files') {
+    if (!fileList || !fileList.length) return;
+    const arr = Array.from(fileList).slice(0, 8);
+    const atts = await Promise.all(arr.map(fileToAttachment));
+    if (kind === 'pics') setPics(prev => [...prev, ...atts.filter(a => a.mime.startsWith('image/'))].slice(0, 16));
+    if (kind === 'vids') setVids(prev => [...prev, ...atts.filter(a => a.mime.startsWith('video/'))].slice(0, 8));
+    if (kind === 'files') setFiles(prev => [...prev, ...atts.filter(a => !a.mime.startsWith('image/') && !a.mime.startsWith('video/'))].slice(0, 16));
+  }
 
-    if (!laneVersion) return;
+  // --- Chat send (Support style) ---
+  // Send a message to lane A or B (supporting attachments)
+  const sendToLane = useCallback(
+    async (which: 'A' | 'B', text: string, attachments: Attachment[]) => {
+      const laneVersion =
+        which === 'A'
+          ? { system, model, temperature, versionId: null as string | null }
+          : laneB
+          ? { system: laneB.system, model: laneB.model, temperature: laneB.temperature, versionId: laneB.id }
+          : null;
 
-    const memory = useMemory ? memoryText : '';
-    const effectiveSystem = composeSystem(laneVersion.system, '', prePrompt, postPrompt, memory);
+      if (!laneVersion) return;
 
-    // optimistic add (user bubble)
-    const userMsg =
-      (text && text.trim()) ||
-      (attachments.length ? `(sent ${attachments.length} attachment${attachments.length > 1 ? 's' : ''})` : '');
-    if (userMsg) {
-      if (which === 'A') setMsgsA(cur => [...cur, { role: 'user', content: userMsg }]);
+      const memory = useMemory ? memoryText : '';
+      const effectiveSystem = composeSystem(laneVersion.system, '', prePrompt, postPrompt, memory);
+
+      // optimistic add (user bubble)
+      const userMsg =
+        (text && text.trim()) ||
+        (attachments.length ? `(sent ${attachments.length} attachment${attachments.length > 1 ? 's' : ''})` : '');
+      if (userMsg) {
+        if (which === 'A') setMsgsA(cur => [...cur, { role: 'user', content: userMsg }]);
+        else setMsgsB(cur => [...cur, { role: 'user', content: userMsg }]);
+      }
+
+      setBusy(true);
+      try {
+        const res = await fetch('/api/support/ask', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: text || '',
+            agentId: selected?.id || null,
+            versionId: laneVersion.versionId,
+            system: effectiveSystem,
+            model: laneVersion.model,
+            temperature: laneVersion.temperature,
+            attachments: attachments.map(a => ({
+              id: a.id,
+              name: a.name,
+              mime: a.mime,
+              url: a.url,
+              size: a.size,
+            })),
+          }),
+        });
+
+        const data = await res.json().catch(() => null);
+        const reply =
+          data?.ok && typeof data?.message === 'string'
+            ? sanitize(data.message)
+            : data?.message
+            ? String(data.message)
+            : 'Something went wrong.';
+
+        if (which === 'A') {
+          setMsgsA(cur => [...cur, { role: 'assistant', content: reply }]);
+          updateLocalMemory([...msgsA, { role: 'user', content: text || '' }, { role: 'assistant', content: reply }]);
+        } else {
+          setMsgsB(cur => [...cur, { role: 'assistant', content: reply }]);
+          updateLocalMemory([...msgsB, { role: 'user', content: text || '' }, { role: 'assistant', content: reply }]);
+        }
+      } catch {
+        const fallback = 'Failed to contact server.';
+        if (which === 'A') setMsgsA(cur => [...cur, { role: 'assistant', content: fallback }]);
+        else setMsgsB(cur => [...cur, { role: 'assistant', content: fallback }]);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [selected, laneB, system, model, temperature, prePrompt, postPrompt, useMemory, memoryText, msgsA, msgsB]
+  );
+
+  // Master send that routes to lanes, supports "testVersion" one-shot, and attachments-only sends
+  async function sendPrompt() {
+    if (busy) return;
+
+    const t = (input || '').trim();
+    const atts = [...pics, ...vids, ...files];
+    if (!t && atts.length === 0) return;
+
+    // clear composer immediately
+    setInput('');
+    setPics([]);
+    setVids([]);
+    setFiles([]);
+
+    // One-shot test with a chosen version (applies to focused lane for this single send)
+    if (testVersion) {
+      const lane = activeLane;
+      const memory = useMemory ? memoryText : '';
+      const effectiveSystem = composeSystem(testVersion.system, '', prePrompt, postPrompt, memory);
+
+      // optimistic user bubble
+      const userMsg = t || (atts.length ? `(sent ${atts.length} attachment${atts.length > 1 ? 's' : ''})` : '');
+      if (lane === 'A') setMsgsA(cur => [...cur, { role: 'user', content: userMsg }]);
       else setMsgsB(cur => [...cur, { role: 'user', content: userMsg }]);
-    }
 
-    setBusy(true);
-    try {
-      const res = await fetch('/api/support/ask', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: text || '',
-          agentId: selected?.id || null,
-          versionId: laneVersion.versionId,
-          system: effectiveSystem,
-          model: laneVersion.model,
-          temperature: laneVersion.temperature,
-          attachments: attachments.map(a => ({
-            id: a.id,
-            name: a.name,
-            mime: a.mime,
-            url: a.url,
-            size: a.size,
-          })),
-        }),
-      });
+      setBusy(true);
+      try {
+        const res = await fetch('/api/support/ask', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: t || '',
+            agentId: selected?.id || null,
+            versionId: testVersion.id,
+            system: effectiveSystem,
+            model: testVersion.model,
+            temperature: testVersion.temperature,
+            attachments: atts.map(a => ({ id: a.id, name: a.name, mime: a.mime, url: a.url, size: a.size })),
+          }),
+        });
 
-      const data = await res.json().catch(() => null);
-      const reply =
-        data?.ok && typeof data?.message === 'string'
-          ? sanitize(data.message)
-          : data?.message
-          ? String(data.message)
-          : 'Something went wrong.';
+        const data = await res.json().catch(() => null);
+        const reply =
+          data?.ok && typeof data?.message === 'string'
+            ? sanitize(data.message)
+            : data?.message
+            ? String(data.message)
+            : 'Something went wrong.';
 
-      if (which === 'A') {
-        setMsgsA(cur => [...cur, { role: 'assistant', content: reply }]);
-        updateLocalMemory([...msgsA, { role: 'user', content: text || '' }, { role: 'assistant', content: reply }]);
-      } else {
-        setMsgsB(cur => [...cur, { role: 'assistant', content: reply }]);
-        updateLocalMemory([...msgsB, { role: 'user', content: text || '' }, { role: 'assistant', content: reply }]);
+        if (lane === 'A') {
+          setMsgsA(cur => [...cur, { role: 'assistant', content: reply }]);
+          updateLocalMemory([...msgsA, { role: 'user', content: t || '' }, { role: 'assistant', content: reply }]);
+        } else {
+          setMsgsB(cur => [...cur, { role: 'assistant', content: reply }]);
+          updateLocalMemory([...msgsB, { role: 'user', content: t || '' }, { role: 'assistant', content: reply }]);
+        }
+      } catch {
+        const fallback = 'Failed to contact server.';
+        if (lane === 'A') setMsgsA(cur => [...cur, { role: 'assistant', content: fallback }]);
+        else setMsgsB(cur => [...cur, { role: 'assistant', content: fallback }]);
+      } finally {
+        setBusy(false);
+        setTestVersion(null); // one-shot complete
       }
-    } catch {
-      const fallback = 'Failed to contact server.';
-      if (which === 'A') setMsgsA(cur => [...cur, { role: 'assistant', content: fallback }]);
-      else setMsgsB(cur => [...cur, { role: 'assistant', content: fallback }]);
-    } finally {
-      setBusy(false);
-    }
-  },
-  [selected, laneB, system, model, temperature, prePrompt, postPrompt, useMemory, memoryText, msgsA, msgsB]
-);
 
-// Master send that routes to lanes, supports "testVersion" one-shot, and attachments-only sends
-async function sendPrompt() {
-  if (busy) return;
-
-  const t = (input || '').trim();
-  const atts = [...pics, ...vids, ...files];
-  if (!t && atts.length === 0) return;
-
-  // clear composer immediately
-  setInput('');
-  setPics([]);
-  setVids([]);
-  setFiles([]);
-
-  // One-shot test with a chosen version (applies to focused lane for this single send)
-  if (testVersion) {
-    const lane = activeLane;
-    const memory = useMemory ? memoryText : '';
-    const effectiveSystem = composeSystem(testVersion.system, '', prePrompt, postPrompt, memory);
-
-    // optimistic user bubble
-    const userMsg = t || (atts.length ? `(sent ${atts.length} attachment${atts.length > 1 ? 's' : ''})` : '');
-    if (lane === 'A') setMsgsA(cur => [...cur, { role: 'user', content: userMsg }]);
-    else setMsgsB(cur => [...cur, { role: 'user', content: userMsg }]);
-
-    setBusy(true);
-    try {
-      const res = await fetch('/api/support/ask', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: t || '',
-          agentId: selected?.id || null,
-          versionId: testVersion.id,
-          system: effectiveSystem,
-          model: testVersion.model,
-          temperature: testVersion.temperature,
-          attachments: atts.map(a => ({ id: a.id, name: a.name, mime: a.mime, url: a.url, size: a.size })),
-        }),
-      });
-
-      const data = await res.json().catch(() => null);
-      const reply =
-        data?.ok && typeof data?.message === 'string'
-          ? sanitize(data.message)
-          : data?.message
-          ? String(data.message)
-          : 'Something went wrong.';
-
-      if (lane === 'A') {
-        setMsgsA(cur => [...cur, { role: 'assistant', content: reply }]);
-        updateLocalMemory([...msgsA, { role: 'user', content: t || '' }, { role: 'assistant', content: reply }]);
-      } else {
-        setMsgsB(cur => [...cur, { role: 'assistant', content: reply }]);
-        updateLocalMemory([...msgsB, { role: 'user', content: t || '' }, { role: 'assistant', content: reply }]);
-      }
-    } catch {
-      const fallback = 'Failed to contact server.';
-      if (lane === 'A') setMsgsA(cur => [...cur, { role: 'assistant', content: fallback }]);
-      else setMsgsB(cur => [...cur, { role: 'assistant', content: fallback }]);
-    } finally {
-      setBusy(false);
-      setTestVersion(null); // one-shot complete
+      return;
     }
 
-    return;
+    // Normal routing
+    if (sendBoth && laneB) {
+      await Promise.all([sendToLane('A', t, atts), sendToLane('B', t, atts)]);
+    } else {
+      await sendToLane(activeLane, t, atts);
+    }
   }
-
-  // Normal routing
-  if (sendBoth && laneB) {
-    await Promise.all([sendToLane('A', t, atts), sendToLane('B', t, atts)]);
-  } else {
-    await sendToLane(activeLane, t, atts);
-  }
-}
-
 
   // --- Footer drag-and-test (drop a version to test only next message) ---
-  const [testVersion, setTestVersion] = useState<Version | null>(null);
   const footerDragOver: React.DragEventHandler = (e) => {
     if (!versions.length) return;
-    const dt = e.dataTransfer;
-    if (!dt) return;
+    if (!e.dataTransfer) return;
     e.preventDefault();
     setDropActive(true);
   };
@@ -529,79 +615,6 @@ async function sendPrompt() {
       setFiles(prev => [...prev, ...atts].slice(0,16));
     }
   };
-
-  async function sendPrompt() {
-    if (busy) return;
-    const t = (input || '').trim();
-    const atts = currentAttachments();
-
-    if (!t && atts.length === 0) return;
-
-    setInput('');
-    // keep attachments if you want to reuse; here we clear after send:
-    setPics([]); setVids([]); setFiles([]);
-
-    // If a test version is set, we run it on the focused lane (A or B) for this one send
-    if (testVersion) {
-      const laneVersion = activeLane === 'A'
-        ? { system: testVersion.system, model: testVersion.model, temperature: testVersion.temperature, versionId: testVersion.id }
-        : { system: testVersion.system, model: testVersion.model, temperature: testVersion.temperature, versionId: testVersion.id };
-
-      // temporary send using the test version (doesn't change Lane B lock)
-      const memory = useMemory ? memoryText : '';
-      const effectiveSystem = composeSystem(laneVersion.system, '', prePrompt, postPrompt, memory);
-
-      // optimistic add
-      const userMsg = t || (atts.length ? `(sent ${atts.length} attachment${atts.length>1?'s':''})` : '');
-      if (activeLane === 'A') setMsgsA(cur => [...cur, { role: 'user', content: userMsg }]);
-      else setMsgsB(cur => [...cur, { role: 'user', content: userMsg }]);
-      setBusy(true);
-
-      try {
-        const res = await fetch('/api/support/ask', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            message: t || '',
-            agentId: selected?.id || null,
-            versionId: laneVersion.versionId,
-            system: effectiveSystem,
-            model: laneVersion.model,
-            temperature: laneVersion.temperature,
-            attachments: atts.map(a => ({ id: a.id, name: a.name, mime: a.mime, url: a.url, size: a.size })),
-          }),
-        });
-        const data = await res.json().catch(() => null);
-        const reply = data?.ok && typeof data?.message === 'string'
-          ? sanitize(data.message)
-          : (data?.message ? String(data.message) : 'Something went wrong.');
-
-        if (activeLane === 'A') {
-          setMsgsA(cur => [...cur, { role: 'assistant', content: reply }]);
-          updateLocalMemory([...msgsA, { role:'user', content: t || '' }, { role:'assistant', content: reply }]);
-        } else {
-          setMsgsB(cur => [...cur, { role: 'assistant', content: reply }]);
-          updateLocalMemory([...msgsB, { role:'user', content: t || '' }, { role:'assistant', content: reply }]);
-        }
-      } catch {
-        const fallback = 'Failed to contact server.';
-        if (activeLane === 'A') setMsgsA(cur => [...cur, { role:'assistant', content: fallback }]);
-        else setMsgsB(cur => [...cur, { role:'assistant', content: fallback }]);
-      } finally {
-        setBusy(false);
-        setTestVersion(null); // one-shot
-      }
-
-      return;
-    }
-
-    // Normal routing
-    if (sendBoth && laneB) {
-      await Promise.all([sendToLane('A', t, atts), sendToLane('B', t, atts)]);
-    } else {
-      await sendToLane(activeLane, t, atts);
-    }
-  }
 
   // --- Auto-open pickers when switching tabs ---
   useEffect(() => {
@@ -647,8 +660,24 @@ async function sendPrompt() {
                     method: 'POST', headers: { 'Content-Type': 'application/json', 'x-owner-id': userId },
                     body: JSON.stringify({ name: a.name || 'Imported Agent', model: a.model || 'gpt-4o', temperature: typeof a.temperature==='number'?a.temperature:0.5, system: a.system || '' }),
                   });
-                  const j = await resp.json();
-                  if (j?.ok && j?.data?.id) { await fetchBots(userId); setSelectedId(j.data.id); }
+                  const j = await resp.json().catch(()=>null);
+                  if (j?.ok && j?.data?.id) {
+                    await fetchBots(userId);
+                    setSelectedId(j.data.id);
+                  } else {
+                    // also mirror to local on failure
+                    const sample: BotRow = {
+                      id: `dev-agent-${Date.now()}`, ownerId: userId,
+                      name: a.name || 'Imported Agent', model: a.model || 'gpt-4o', temperature: typeof a.temperature==='number'?a.temperature:0.5, system: a.system || '',
+                      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+                    };
+                    setList(cur => {
+                      const next = [sample, ...cur];
+                      try { localStorage.setItem(agentsKey(userId), JSON.stringify(next)); } catch {}
+                      return next;
+                    });
+                    setSelectedId(sample.id);
+                  }
                 } catch { alert('Import failed'); }
               }} />
             </label>
@@ -709,9 +738,34 @@ async function sendPrompt() {
               {filtered.length === 0 ? (
                 <div className="text-sm opacity-80 py-8 text-center">
                   No agents.
-                  <div className="mt-2">
-                    <Link href="/builder" className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm"
-                      style={{ background: 'var(--brand)', color: '#00120a' }}>
+                  <div className="mt-3 flex flex-col items-center gap-2">
+                    <button
+                      onClick={() => {
+                        if (!userId) return;
+                        const sample: BotRow = {
+                          id: `dev-agent-${Date.now()}`,
+                          ownerId: userId,
+                          name: 'My First Agent',
+                          model: 'gpt-4o-mini',
+                          temperature: 0.5,
+                          system: 'Answer briefly and helpfully.',
+                          createdAt: new Date().toISOString(),
+                          updatedAt: new Date().toISOString(),
+                        };
+                        setList(cur => {
+                          const next = [sample, ...cur];
+                          try { localStorage.setItem(agentsKey(userId), JSON.stringify(next)); } catch {}
+                          return next;
+                        });
+                        setSelectedId(sample.id);
+                      }}
+                      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm"
+                      style={{ background: 'var(--brand)', color: '#00120a' }}
+                    >
+                      Create sample agent (local)
+                    </button>
+
+                    <Link href="/builder" className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm" style={{ border: '1px solid var(--border)' }}>
                       Go to Builder
                     </Link>
                   </div>
@@ -733,6 +787,14 @@ async function sendPrompt() {
                             <div className="truncate">{b.name || 'Untitled'}</div>
                             <div className="text-[11px] opacity-60 truncate">{b.model} · {b.id.slice(0,8)}</div>
                           </div>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); void navigator.clipboard.writeText(b.id); setCopied(true); setTimeout(()=>setCopied(false), 900); }}
+                            className="text-[10px] px-2 py-1 rounded-md"
+                            style={CARD}
+                            title="Copy ID"
+                          >
+                            {copied ? 'Copied ✓' : 'Copy ID'}
+                          </button>
                         </button>
                       </li>
                     );
