@@ -2,7 +2,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
-import AssistantRail from '@/components/voice/AssistantRail'; // <-- import present
+import AssistantRail from '@/components/voice/AssistantRail';
 import { createPortal } from 'react-dom';
 import {
   Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Rocket, Search, Check, Lock, X, KeyRound,
@@ -31,18 +31,17 @@ function PhoneFilled(props: React.SVGProps<SVGSVGElement>) {
 const Tokens = () => (
   <style jsx global>{`
     .va-scope{
-      /* hard fallbacks */
       --bg:#0b0c10; --panel:#0d0f11; --text:#e6f1ef; --text-muted:#9fb4ad;
 
       --s-2:8px; --s-3:12px; --s-4:16px; --s-5:20px; --s-6:24px;
-      --radius-outer:8px; /* less rounded */
+      --radius-outer:8px;
       --control-h:44px; --header-h:88px;
       --fz-title:18px; --fz-sub:15px; --fz-body:14px; --fz-label:12.5px;
       --lh-body:1.45; --ease:cubic-bezier(.22,.61,.36,1);
 
       --page-bg:var(--bg);
-      --panel-bg:var(--panel);      /* SOLID */
-      --input-bg:var(--panel);      /* SOLID */
+      --panel-bg:var(--panel);
+      --input-bg:var(--panel);
       --input-border:rgba(255,255,255,.10);
       --input-shadow:0 0 0 1px rgba(255,255,255,.06) inset;
 
@@ -82,7 +81,7 @@ const Tokens = () => (
     }
     .va-left-fixed .rail-scroll{ overflow:auto; flex:1; }
 
-    /* dropdown menu — SOLID */
+    /* dropdown menu base (can be overridden by inline below if needed) */
     .va-menu{
       background:var(--panel-bg);
       border:1px solid rgba(255,255,255,.12);
@@ -94,7 +93,7 @@ const Tokens = () => (
     @keyframes overlayPulse { 0%{transform:scale(1);opacity:.98} 60%{transform:scale(1.02);opacity:1} 100%{transform:scale(1);opacity:.98} }
     .va-blur-overlay{
       position:fixed; inset:0; z-index:9996;
-      background:rgba(8,10,12,.88); /* SOLID */
+      background:rgba(8,10,12,.88);
       backdrop-filter:blur(3px);
       opacity:0; pointer-events:none; transition:opacity 200ms var(--ease);
     }
@@ -113,7 +112,7 @@ const Tokens = () => (
 
     /* modal */
     .va-modal-wrap{ position:fixed; inset:0; z-index:9994; }
-    .va-modal-blur{ position:absolute; inset:0; background:rgba(8,10,12,.88); backdrop-filter:blur(4px); } /* SOLID */
+    .va-modal-blur{ position:absolute; inset:0; background:rgba(8,10,12,.88); backdrop-filter:blur(4px); }
     .va-modal-center{ position:absolute; inset:0; display:grid; place-items:center; padding:20px; }
     .va-sheet{ background:var(--panel-bg); border:1px solid rgba(255,255,255,.12); box-shadow:0 28px 80px rgba(0,0,0,.70); border-radius:12px; }
 
@@ -124,6 +123,22 @@ const Tokens = () => (
 
     .diff-add{ color:#00ffc2; }
     .diff-del{ color:#ff5050; text-decoration:line-through; }
+
+    /* ── HARDEN ALL POPPERS/MENUS TO SOLID (Radix, shadcn, Headless UI) ── */
+    .va-scope [role="menu"],
+    .va-scope [role="listbox"],
+    .va-scope .DropdownMenuContent,
+    .va-scope .SelectContent,
+    .va-scope .PopoverContent,
+    .va-scope .ContextMenuContent,
+    .va-scope [data-radix-popper-content-wrapper] > div {
+      background: var(--panel-bg) !important;
+      color: var(--text) !important;
+      border: 1px solid var(--input-border) !important;
+      box-shadow: 0 36px 90px rgba(0,0,0,.55) !important;
+      backdrop-filter: none !important;
+      border-radius: 10px !important;
+    }
   `}</style>
 );
 
@@ -267,7 +282,7 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
-/* Select with SOLID menu + optional menu header (used by Voice picker to embed player) */
+/* Select with SOLID menu + optional menu header */
 function StyledSelect({
   value, onChange, options, placeholder, leftIcon, menuTop
 }:{
@@ -314,7 +329,7 @@ function StyledSelect({
         onClick={() => { setOpen(v=>!v); setTimeout(()=>searchRef.current?.focus(),0); }}
         className="w-full flex items-center justify-between gap-3 px-3 py-3 rounded-[10px] text-sm outline-none transition"
         style={{
-          background:'var(--input-bg)', /* SOLID */
+          background:'var(--input-bg)',
           border:'1px solid var(--input-border)',
           boxShadow:'var(--input-shadow)',
           color:'var(--text)'
@@ -336,7 +351,13 @@ function StyledSelect({
                 top: rect.openUp ? rect.top - 8 : rect.top + 8,
                 left: rect.left,
                 width: rect.width,
-                transform: rect.openUp ? 'translateY(-100%)' : 'none'
+                transform: rect.openUp ? 'translateY(-100%)' : 'none',
+                /* force SOLID – inline so nothing can override */
+                background: 'var(--panel-bg)',
+                border: '1px solid var(--input-border)',
+                boxShadow: '0 36px 90px rgba(0,0,0,.55)',
+                borderRadius: 10 as any,
+                backdropFilter: 'none'
               }}
             >
               {menuTop ? <div className="mb-2">{menuTop}</div> : null}
@@ -786,7 +807,7 @@ ${lines.map(l => `- ${l}`).join('\n')}
               </div>
             </div>
 
-            {/* Voice select WITH PLAYER inside dropdown (button inside, as requested) */}
+            {/* Voice select WITH PLAYER inside dropdown */}
             <div className="grid grid-cols-1 mt-[var(--s-4)]">
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]">Voice</div>
