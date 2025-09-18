@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { scopedStorage } from '@/utils/scoped-storage';
 
-// Load rail dynamically (avoids SSR layout hiccups)
+// ⬇️ load AssistantRail client-side only so it never flashes or mis-measures on SSR
 const AssistantRail = dynamic(() => import('@/components/voice/AssistantRail'), { ssr: false });
 
 /* ─────────── constants ─────────── */
@@ -30,7 +30,7 @@ function PhoneFilled(props: React.SVGProps<SVGSVGElement>) {
   );
 }
 
-/* ─────────── SOLID theme (no transparency anywhere) ─────────── */
+/* ─────────── SOLID theme + layout vars ─────────── */
 const Tokens = () => (
   <style jsx global>{`
     .va-scope{
@@ -41,6 +41,10 @@ const Tokens = () => (
       --control-h:44px; --header-h:88px;
       --fz-title:18px; --fz-sub:15px; --fz-body:14px; --fz-label:12.5px;
       --lh-body:1.45; --ease:cubic-bezier(.22,.61,.36,1);
+
+      /* Layout: measured at runtime */
+      --app-sidebar-w: 240px; /* updated by ResizeObserver */
+      --rail-w: 260px;
 
       --page-bg:var(--bg);
       --panel-bg:var(--panel);
@@ -74,13 +78,13 @@ const Tokens = () => (
       color:var(--text);
     }
 
-    /* The assistant rail sits immediately to the right of the app's sidebar.
-       If your layout sets --app-nav-w, we'll use it; otherwise fallback to 72px. */
+    /* AssistantRail is pinned immediately to the right of your global sidebar */
     .va-left-fixed{
       position:fixed;
       top:0; bottom:0;
-      left:var(--app-nav-w, 72px);
-      width:260px; z-index:12;
+      left:var(--app-sidebar-w);
+      width:var(--rail-w);
+      z-index:12;
       background:var(--panel-bg);
       border-right:1px solid rgba(255,255,255,.06);
       box-shadow:14px 0 28px rgba(0,0,0,.08);
@@ -88,7 +92,13 @@ const Tokens = () => (
     }
     .va-left-fixed .rail-scroll{ overflow:auto; flex:1; }
 
-    /* dropdown menu base */
+    /* Page content shifts by (app sidebar + rail) so it never drifts */
+    .va-page{
+      margin-left: calc(var(--app-sidebar-w) + var(--rail-w));
+      transition: margin-left 180ms var(--ease);
+    }
+
+    /* dropdown menu base (solid) */
     .va-menu{
       background:var(--panel-bg);
       border:1px solid rgba(255,255,255,.12);
@@ -96,25 +106,13 @@ const Tokens = () => (
       border-radius:10px;
     }
 
-    /* Make popover header feel like .va-head (solid + divider) */
-    .va-menu-head{
-      display:flex; align-items:center; gap:8px;
-      padding:8px 10px;
-      background:var(--panel-bg);
-      border-bottom:1px solid rgba(255,255,255,.08);
-      border-radius:8px;
-    }
-
-    /* overlays */
-    @keyframes overlayPulse { 0%{transform:scale(1);opacity:.98} 60%{transform:scale(1.02);opacity:1} 100%{transform:scale(1);opacity:.98} }
+    /* Drawer + modal are solid (no blur) */
     .va-blur-overlay{
       position:fixed; inset:0; z-index:9996;
-      background:rgba(8,10,12,.88);
-      backdrop-filter:blur(3px);
+      background:rgba(8,10,12,.78); /* solid overlay, no blur */
       opacity:0; pointer-events:none; transition:opacity 200ms var(--ease);
     }
     .va-blur-overlay.open{ opacity:1; pointer-events:auto; }
-    .va-blur-overlay.pulse{ animation:overlayPulse 320ms var(--ease); }
 
     .va-call-drawer{
       position:fixed; inset:0 0 0 auto; width:min(540px,92vw); z-index:9997;
@@ -126,8 +124,7 @@ const Tokens = () => (
     }
     .va-call-drawer.open{ transform:translateX(0); }
 
-    .va-modal-wrap{ position:fixed; inset:0; z-index:9994; }
-    .va-modal-blur{ position:absolute; inset:0; background:rgba(8,10,12,.88); backdrop-filter:blur(4px); }
+    .va-modal-wrap{ position:fixed; inset:0; z-index:9998; }
     .va-modal-center{ position:absolute; inset:0; display:grid; place-items:center; padding:20px; }
     .va-sheet{ background:var(--panel-bg); border:1px solid rgba(255,255,255,.12); box-shadow:0 28px 80px rgba(0,0,0,.70); border-radius:12px; }
 
@@ -135,10 +132,7 @@ const Tokens = () => (
     .chat-user{ background:var(--panel-bg); border:1px solid rgba(255,255,255,.12); align-self:flex-end; }
     .chat-ai{ background:color-mix(in oklab, var(--panel-bg) 92%, black 8%); border:1px solid rgba(255,255,255,.12); align-self:flex-start; }
 
-    .diff-add{ color:#00ffc2; }
-    .diff-del{ color:#ff5050; text-decoration:line-through; }
-
-    /* HARD LOCK: every dropdown popover and ALL children are solid */
+    /* Force every dropdown popover and children solid */
     .va-scope .va-menu,
     .va-scope .va-menu * {
       background: var(--panel-bg) !important;
@@ -290,18 +284,17 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
-/* Select with SOLID menu */
+/* Select with SOLID menu (opens under the control, scrolls with page) */
 function StyledSelect({
   value, onChange, options, placeholder, leftIcon, menuTop
 }:{
   value: string; onChange: (v: string) => void;
   options: Opt[]; placeholder?: string; leftIcon?: React.ReactNode; menuTop?: React.ReactNode;
 }) {
+  const wrapRef = useRef<HTMLDivElement|null>(null);
   const btnRef = useRef<HTMLButtonElement|null>(null);
-  const portalRef = useRef<HTMLDivElement|null>(null);
   const searchRef = useRef<HTMLInputElement|null>(null);
   const [open, setOpen] = useState(false);
-  const [rect, setRect] = useState<{ top:number; left:number; width:number; openUp:boolean }|null>(null);
   const [query, setQuery] = useState('');
 
   const current = options.find(o => o.value === value) || null;
@@ -310,17 +303,10 @@ function StyledSelect({
     return q ? options.filter(o => o.label.toLowerCase().includes(q)) : options;
   }, [options, query, value]);
 
-  useLayoutEffect(() => {
-    if (!open) return;
-    const r = btnRef.current?.getBoundingClientRect(); if (!r) return;
-    const openUp = r.bottom + 360 > window.innerHeight;
-    setRect({ top: openUp ? r.top : r.bottom, left: r.left, width: r.width, openUp });
-  }, [open]);
-
   useEffect(() => {
     if (!open) return;
     const off = (e: MouseEvent) => {
-      if (btnRef.current?.contains(e.target as Node) || portalRef.current?.contains(e.target as Node)) return;
+      if (wrapRef.current?.contains(e.target as Node)) return;
       setOpen(false);
     };
     const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
@@ -330,16 +316,16 @@ function StyledSelect({
   }, [open]);
 
   return (
-    <>
+    <div ref={wrapRef} className="relative">
       <button
         ref={btnRef}
         type="button"
         onClick={() => { setOpen(v=>!v); setTimeout(()=>searchRef.current?.focus(),0); }}
         className="w-full flex items-center justify-between gap-3 px-3 py-3 rounded-[10px] text-sm outline-none transition"
         style={{
-          background:'var(--panel-bg)',                 // trigger now matches cards
+          background:'var(--input-bg)',
           border:'1px solid var(--input-border)',
-          boxShadow:'0 0 0 1px rgba(255,255,255,.06) inset',
+          boxShadow:'var(--input-shadow)',
           color:'var(--text)'
         }}
       >
@@ -350,76 +336,72 @@ function StyledSelect({
         <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)' }} />
       </button>
 
-      {open && rect && typeof document !== 'undefined'
-        ? createPortal(
-            <div
-              ref={portalRef}
-              className="va-menu fixed z-[9999] p-3"
-              style={{
-                top: rect.openUp ? rect.top - 8 : rect.top + 8,
-                left: rect.left,
-                width: rect.width,
-                transform: rect.openUp ? 'translateY(-100%)' : 'none',
-                background: 'var(--panel-bg)',
-                border: '1px solid var(--input-border)',
-                borderRadius: 10 as any,
-                backdropFilter: 'none'
-              }}
-            >
-              {menuTop ? <div className="mb-2">{menuTop}</div> : null}
+      {open && (
+        <div
+          className="va-menu absolute z-[60] p-3"
+          style={{
+            top: 'calc(100% + 8px)',
+            left: 0,
+            width: '100%',
+            background: 'var(--panel-bg)',
+            border: '1px solid var(--input-border)',
+            borderRadius: 10 as any
+          }}
+        >
+          {menuTop ? <div className="mb-2">{menuTop}</div> : null}
 
-              {/* Solid header row that mirrors .va-head */}
-              <div className="va-menu-head mb-3 rounded-[10px]" style={{ color:'var(--text)' }}>
-                <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
-                <input
-                  ref={searchRef}
-                  value={query}
-                  onChange={(e)=>setQuery(e.target.value)}
-                  placeholder="Type to filter…"
-                  className="w-full bg-transparent outline-none text-sm"
-                  style={{ color:'var(--text)' }}
-                />
-              </div>
+          <div
+            className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[10px]"
+            style={{ background:'var(--panel-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+          >
+            <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
+            <input
+              ref={searchRef}
+              value={query}
+              onChange={(e)=>setQuery(e.target.value)}
+              placeholder="Type to filter…"
+              className="w-full bg-transparent outline-none text-sm"
+              style={{ color:'var(--text)' }}
+            />
+          </div>
 
-              <div className="max-h-72 overflow-y-auto pr-1" style={{ scrollbarWidth:'thin' }}>
-                {filtered.map(o => (
-                  <button
-                    key={o.value}
-                    disabled={o.disabled}
-                    onClick={()=>{ if (o.disabled) return; onChange(o.value); setOpen(false); }}
-                    className="w-full text-left text-sm px-3 py-2 rounded-[8px] transition flex items-center gap-2 disabled:opacity-60"
-                    style={{
-                      color:'var(--text)',
-                      background:'var(--panel-bg)',
-                      border:'1px solid var(--panel-bg)', // same as bg until hover
-                      cursor:o.disabled?'not-allowed':'pointer'
-                    }}
-                    onMouseEnter={(e)=>{ if (o.disabled) return;
-                      const el=e.currentTarget as HTMLButtonElement;
-                      el.style.background = 'color-mix(in oklab, var(--panel-bg) 88%, white 12%)';
-                      el.style.border = '1px solid var(--input-border)';
-                    }}
-                    onMouseLeave={(e)=>{
-                      const el=e.currentTarget as HTMLButtonElement;
-                      el.style.background = 'var(--panel-bg)';
-                      el.style.border = '1px solid var(--panel-bg)';
-                    }}
-                  >
-                    {o.disabled ? <Lock className="w-3.5 h-3.5" /> :
-                      <Check className="w-3.5 h-3.5" style={{ opacity: o.value===value ? 1 : 0 }} />}
-                    <span className="flex-1 truncate">{o.label}</span>
-                    {o.note ? <span className="text-[11px]" style={{ color:'var(--text-muted)' }}>{o.note}</span> : null}
-                  </button>
-                ))}
-                {filtered.length===0 && (
-                  <div className="px-3 py-6 text-sm" style={{ color:'var(--text-muted)' }}>No matches.</div>
-                )}
-              </div>
-            </div>,
-            document.body
-          )
-        : null}
-    </>
+          <div className="max-h-72 overflow-y-auto pr-1" style={{ scrollbarWidth:'thin' }}>
+            {filtered.map(o => (
+              <button
+                key={o.value}
+                disabled={o.disabled}
+                onClick={()=>{ if (o.disabled) return; onChange(o.value); setOpen(false); }}
+                className="w-full text-left text-sm px-3 py-2 rounded-[8px] transition flex items-center gap-2 disabled:opacity-60"
+                style={{
+                  color:'var(--text)',
+                  background:'var(--panel-bg)',
+                  border:'1px solid var(--panel-bg)',
+                  cursor:o.disabled?'not-allowed':'pointer'
+                }}
+                onMouseEnter={(e)=>{ if (o.disabled) return;
+                  const el=e.currentTarget as HTMLButtonElement;
+                  el.style.background = 'color-mix(in oklab, var(--panel-bg) 88%, white 12%)';
+                  el.style.border = '1px solid var(--input-border)';
+                }}
+                onMouseLeave={(e)=>{
+                  const el=e.currentTarget as HTMLButtonElement;
+                  el.style.background = 'var(--panel-bg)';
+                  el.style.border = '1px solid var(--panel-bg)';
+                }}
+              >
+                {o.disabled ? <Lock className="w-3.5 h-3.5" /> :
+                  <Check className="w-3.5 h-3.5" style={{ opacity: o.value===value ? 1 : 0 }} />}
+                <span className="flex-1 truncate">{o.label}</span>
+                {o.note ? <span className="text-[11px]" style={{ color:'var(--text-muted)' }}>{o.note}</span> : null}
+              </button>
+            ))}
+            {filtered.length===0 && (
+              <div className="px-3 py-6 text-sm" style={{ color:'var(--text-muted)' }}>No matches.</div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -475,6 +457,26 @@ function Section({
 
 /* ─────────── Page ─────────── */
 export default function VoiceAgentSection() {
+  /* Measure the real app sidebar so our rail "touches" it and moves with collapse */
+  useEffect(() => {
+    const candidates = [
+      '[data-app-sidebar]',
+      'aside[aria-label="Sidebar"]',
+      'aside[class*="sidebar"]',
+      '#sidebar'
+    ];
+    const el = document.querySelector<HTMLElement>(candidates.join(', '));
+    const setW = (w:number) => document.documentElement.style.setProperty('--app-sidebar-w', `${Math.round(w)}px`);
+    if (!el) { setW(240); return; }
+    setW(el.getBoundingClientRect().width);
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect?.width ?? el.getBoundingClientRect().width;
+      setW(w);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   const [activeId, setActiveId] = useState<string>(() => {
     try { return localStorage.getItem(ACTIVE_KEY) || ''; } catch { return ''; }
   });
@@ -486,7 +488,6 @@ export default function VoiceAgentSection() {
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
 
   const [showCall, setShowCall] = useState(false);
-  const [overlayPulse, setOverlayPulse] = useState(false);
   const [messages, setMessages] = useState<Array<{role:'user'|'assistant'; text:string}>>([
     { role: 'assistant', text: 'Hi! Ready when you are.' }
   ]);
@@ -497,7 +498,6 @@ export default function VoiceAgentSection() {
   const [genPhase, setGenPhase] = useState<'idle'|'loading'>('idle');
   const basePromptRef = useRef<string>('');
   const [pendingPrompt, setPendingPrompt] = useState<string>('');
-  const [showDiff, setShowDiff] = useState(false);
 
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   useEffect(() => {
@@ -588,23 +588,20 @@ ${lines.map(l => `- ${l}`).join('\n')}
 - Ask for missing info before acting.`;
     return `${base}${block}`;
   }
-  const escapeHTML = (s:string) => s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'} as any)[c]);
-  function diffHTML(oldText: string, newText: string) {
-    if (newText.startsWith(oldText)) { const add = newText.slice(oldText.length); return `${escapeHTML(oldText)}<span class="diff-add">${escapeHTML(add)}</span>`; }
-    if (oldText.startsWith(newText)) { const del = oldText.slice(newText.length); return `${escapeHTML(newText)}<span class="diff-del">${escapeHTML(del)}</span>`; }
-    return `<span class="diff-del">${escapeHTML(oldText)}</span>\n<span class="diff-add">${escapeHTML(newText)}</span>`;
-  }
+
   function startGenerate() {
     basePromptRef.current = data.systemPrompt;
     setGenPhase('loading');
     setTimeout(() => {
       const merged = buildPrompt(basePromptRef.current, composerText);
       setPendingPrompt(merged);
-      setShowDiff(true); setShowGenerate(false); setGenPhase('idle');
-    }, 650);
+      setShowGenerate(false);
+      setGenPhase('idle');
+      setToast('Preview generated – click Apply to save');
+    }, 500);
   }
-  const acceptDiff = () => { setData(p => ({ ...p, systemPrompt: pendingPrompt })); setPendingPrompt(''); setShowDiff(false); };
-  const declineDiff = () => { setPendingPrompt(''); setShowDiff(false); };
+  const acceptDiff = () => { setData(p => ({ ...p, systemPrompt: pendingPrompt })); setPendingPrompt(''); };
+  const declineDiff = () => { setPendingPrompt(''); };
 
   function sendChat() {
     const txt = chatInput.trim();
@@ -625,20 +622,19 @@ ${lines.map(l => `- ${l}`).join('\n')}
   }
   const stopPreview = () => window.speechSynthesis.cancel();
 
-  const pulseOverlay = () => { setOverlayPulse(true); setTimeout(()=>setOverlayPulse(false), 320); };
-
   return (
     <section className="va-scope" style={{ background:'var(--bg)', color:'var(--text)' }}>
       <Tokens />
 
+      {/* Assistant Rail pinned to app sidebar */}
       <aside className="va-left-fixed">
         <div className="rail-scroll">
           <AssistantRail />
         </div>
       </aside>
 
-      {/* push content by app sidebar + rail width */}
-      <div style={{ marginLeft: 'calc(var(--app-nav-w, 72px) + 260px)' }}>
+      {/* Page content uses calc(app-sidebar + rail) so it always lines up */}
+      <div className="va-page">
         <div className="px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w-[1160px]" style={{ fontSize:'var(--fz-body)', lineHeight:'var(--lh-body)' }}>
 
           <div className="mb-[var(--s-4)] flex flex-wrap items-center justify-end gap-[var(--s-3)]">
@@ -740,21 +736,44 @@ ${lines.map(l => `- ${l}`).join('\n')}
               <div className="md:col-span-2">
                 <div className="flex items-center justify-between mb-[var(--s-2)]">
                   <div className="font-medium" style={{ fontSize:'var(--fz-label)' }}>System Prompt</div>
-                  <button
-                    className="inline-flex items-center gap-2 rounded-[10px] text-sm"
-                    style={{ height:36, padding:'0 12px', background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                    onClick={()=>{ setComposerText(''); setShowGenerate(true); setGenPhase('idle'); }}
-                  >
-                    <Wand2 className="w-4 h-4" /> Generate
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {pendingPrompt && (
+                      <>
+                        <button
+                          onClick={acceptDiff}
+                          className="h-9 px-3 rounded-[10px] font-semibold"
+                          style={{ background:CTA, color:'#0a0f0d' }}
+                        >
+                          Apply
+                        </button>
+                        <button
+                          onClick={declineDiff}
+                          className="h-9 px-3 rounded-[10px]"
+                          style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+                        >
+                          Discard
+                        </button>
+                      </>
+                    )}
+                    <button
+                      className="inline-flex items-center gap-2 rounded-[10px] text-sm"
+                      style={{ height:36, padding:'0 12px', background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+                      onClick={()=>{ setComposerText(''); setShowGenerate(true); setGenPhase('idle'); }}
+                    >
+                      <Wand2 className="w-4 h-4" /> Generate
+                    </button>
+                  </div>
                 </div>
 
                 <div style={{ position:'relative' }}>
                   <textarea
                     className="w-full bg-transparent outline-none rounded-[12px] px-3 py-[12px]"
                     style={{ minHeight: 360, background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                    value={data.systemPrompt}
-                    onChange={(e)=>setField('systemPrompt')(e.target.value)}
+                    value={pendingPrompt || data.systemPrompt}
+                    onChange={(e)=>{
+                      if (pendingPrompt) setPendingPrompt(e.target.value);
+                      else setField('systemPrompt')(e.target.value);
+                    }}
                   />
                 </div>
               </div>
@@ -864,11 +883,59 @@ ${lines.map(l => `- ${l}`).join('\n')}
         </div>
       </div>
 
+      {/* Solid modal (only the box, overlay is solid, no blur) */}
+      {showGenerate && (
+        <div className="va-modal-wrap" role="dialog" aria-modal>
+          <div className="va-blur-overlay open" onClick={()=>{ if (genPhase==='idle') setShowGenerate(false); }} />
+          <div className="va-modal-center">
+            <div className="va-sheet w-full max-w-[760px] p-4 md:p-6">
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-lg font-semibold">Compose Prompt</div>
+                <button onClick={()=>{ if (genPhase==='idle') setShowGenerate(false); }} className="p-1 rounded hover:opacity-80" aria-label="Close">
+                  <X className="w-5 h-5" style={{ color:'var(--text-muted)' }} />
+                </button>
+              </div>
+              <div className="grid gap-3">
+                <label className="text-xs" style={{ color:'var(--text-muted)' }}>
+                  Add extra instructions (persona, tone, rules, tools):
+                </label>
+                <textarea
+                  value={composerText}
+                  onChange={(e)=>setComposerText(e.target.value)}
+                  className="w-full bg-transparent outline-none rounded-[10px] px-3 py-2"
+                  placeholder="e.g., Friendly, crisp answers. Confirm account ID before actions."
+                  style={{ minHeight: 180, background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+                />
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    onClick={()=>setShowGenerate(false)}
+                    disabled={genPhase==='loading'}
+                    className="h-9 px-3 rounded-[10px]"
+                    style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={startGenerate}
+                    disabled={genPhase==='loading'}
+                    className="h-9 px-4 rounded-[10px] font-semibold"
+                    style={{ background:CTA, color:'#0a0f0d' }}
+                  >
+                    {genPhase==='loading' ? 'Generating…' : 'Generate'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Call drawer */}
       {createPortal(
         <>
           <div
-            className={`va-blur-overlay ${showCall ? 'open' : ''} ${overlayPulse ? 'pulse' : ''}`}
-            onClick={()=>{ setShowCall(false); pulseOverlay(); }}
+            className={`va-blur-overlay ${showCall ? 'open' : ''}`}
+            onClick={()=> setShowCall(false)}
           />
           <aside className={`va-call-drawer ${showCall ? 'open' : ''}`} aria-hidden={!showCall}>
             <div className="flex items-center justify-between px-4 h-[64px]"
@@ -909,53 +976,6 @@ ${lines.map(l => `- ${l}`).join('\n')}
             </div>
           </aside>
         </>,
-        document.body
-      )}
-
-      {showGenerate && createPortal(
-        <div className="va-modal-wrap" role="dialog" aria-modal>
-          <div className="va-modal-blur" onClick={()=>{ if (genPhase==='idle') { setShowGenerate(false); pulseOverlay(); } }} />
-          <div className="va-modal-center">
-            <div className="va-sheet w-full max-w-[760px] p-4 md:p-6">
-              <div className="flex items-center justify-between mb-3">
-                <div className="text-lg font-semibold">Compose Prompt</div>
-                <button onClick={()=>{ if (genPhase==='idle') setShowGenerate(false); }} className="p-1 rounded hover:opacity-80" aria-label="Close">
-                  <X className="w-5 h-5" style={{ color:'var(--text-muted)' }} />
-                </button>
-              </div>
-              <div className="grid gap-3">
-                <label className="text-xs" style={{ color:'var(--text-muted)' }}>
-                  Add extra instructions (persona, tone, rules, tools):
-                </label>
-                <textarea
-                  value={composerText}
-                  onChange={(e)=>setComposerText(e.target.value)}
-                  className="w-full bg-transparent outline-none rounded-[10px] px-3 py-2"
-                  placeholder="e.g., Friendly, crisp answers. Confirm account ID before actions."
-                  style={{ minHeight: 180, background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                />
-                <div className="flex items-center justify-end gap-2">
-                  <button
-                    onClick={()=>setShowGenerate(false)}
-                    disabled={genPhase==='loading'}
-                    className="h-9 px-3 rounded-[10px]"
-                    style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={startGenerate}
-                    disabled={genPhase==='loading'}
-                    className="h-9 px-4 rounded-[10px] font-semibold"
-                    style={{ background:CTA, color:'#fff' }}
-                  >
-                    {genPhase==='loading' ? 'Generating…' : 'Generate'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>,
         document.body
       )}
     </section>
