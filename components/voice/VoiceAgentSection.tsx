@@ -59,22 +59,21 @@ const Tokens = () => (
       --rail-w: 260px;
 
       --page-bg:var(--bg);
-
-      /* SOLID surfaces */
       --panel-bg:var(--panel);
       --input-bg:var(--panel);
       --input-border:rgba(255,255,255,.10);
       --input-shadow:0 0 0 1px rgba(255,255,255,.06) inset;
 
-      --border-weak:rgba(255,255,255,.12);
-      --card-shadow:0 26px 72px rgba(0,0,0,.50), 0 0 0 1px rgba(255,255,255,.06) inset;
-      --elev-strong:0 36px 90px rgba(0,0,0,.65);
+      --border-weak:rgba(255,255,255,.10);
+      --card-shadow:0 22px 44px rgba(0,0,0,.28),
+                    0 0 0 1px rgba(255,255,255,.06) inset,
+                    0 0 0 1px rgba(89,217,179,.20);
     }
 
     .va-card{
       border-radius:var(--radius-outer);
       border:1px solid var(--border-weak);
-      background:var(--panel-bg);        /* SOLID */
+      background:var(--panel-bg);
       box-shadow:var(--card-shadow);
       overflow:hidden; isolation:isolate;
     }
@@ -83,8 +82,11 @@ const Tokens = () => (
       min-height:var(--header-h);
       display:grid; grid-template-columns:1fr auto; align-items:center;
       padding:0 16px;
-      background:var(--panel-bg);        /* SOLID header bar */
-      border-bottom:1px solid rgba(255,255,255,.10);
+      background:linear-gradient(90deg,
+        var(--panel-bg) 0%,
+        color-mix(in oklab, var(--panel-bg) 97%, white 3%) 50%,
+        var(--panel-bg) 100%);
+      border-bottom:1px solid rgba(255,255,255,.08);
       color:var(--text);
     }
 
@@ -95,30 +97,31 @@ const Tokens = () => (
       left:var(--app-sidebar-w);
       width:var(--rail-w);
       z-index:12;
-      background:var(--panel-bg);        /* SOLID */
-      border-right:1px solid rgba(255,255,255,.10);
-      box-shadow:14px 0 28px rgba(0,0,0,.18);
+      background:var(--panel-bg);
+      border-right:1px solid rgba(255,255,255,.06);
+      box-shadow:14px 0 28px rgba(0,0,0,.08);
       display:flex; flex-direction:column;
     }
     .va-left-fixed .rail-scroll{ overflow:auto; flex:1; }
 
+    /* Page content shifts by (app sidebar + rail) so it never drifts */
     .va-page{
       margin-left: calc(var(--app-sidebar-w) + var(--rail-w));
       transition: margin-left 180ms var(--ease);
     }
 
-    /* Dropdown menu = SOLID panel with crisp borders */
+    /* dropdown menu base (solid) */
     .va-menu{
       background:var(--panel-bg);
-      border:1px solid var(--input-border);
-      box-shadow:var(--elev-strong);
+      border:1px solid rgba(255,255,255,.12);
+      box-shadow:0 36px 90px rgba(0,0,0,.55);
       border-radius:10px;
     }
 
-    /* Overlays are SOLID (no blur) */
+    /* Drawer + modal are solid (no blur) */
     .va-blur-overlay{
       position:fixed; inset:0; z-index:9996;
-      background:rgba(8,10,12,.78);      /* SOLID */
+      background:rgba(8,10,12,.78); /* solid overlay, no blur */
       opacity:0; pointer-events:none; transition:opacity 200ms var(--ease);
     }
     .va-blur-overlay.open{ opacity:1; pointer-events:auto; }
@@ -126,7 +129,7 @@ const Tokens = () => (
     .va-call-drawer{
       position:fixed; inset:0 0 0 auto; width:min(540px,92vw); z-index:9997;
       display:grid; grid-template-rows:auto 1fr auto;
-      background:var(--panel-bg);        /* SOLID */
+      background:var(--panel-bg);
       border-left:1px solid rgba(255,255,255,.10);
       box-shadow:-28px 0 80px rgba(0,0,0,.55);
       transform:translateX(100%); transition:transform 280ms var(--ease);
@@ -135,18 +138,19 @@ const Tokens = () => (
 
     .va-modal-wrap{ position:fixed; inset:0; z-index:9998; }
     .va-modal-center{ position:absolute; inset:0; display:grid; place-items:center; padding:20px; }
-    .va-sheet{ background:var(--panel-bg); border:1px solid var(--border-weak); box-shadow:var(--elev-strong); border-radius:12px; }
+    .va-sheet{ background:var(--panel-bg); border:1px solid rgba(255,255,255,.12); box-shadow:0 28px 80px rgba(0,0,0,.70); border-radius:12px; }
 
     .chat-msg{ max-width:85%; padding:10px 12px; border-radius:12px; }
-    .chat-user{ background:var(--panel-bg); border:1px solid var(--input-border); align-self:flex-end; }
-    .chat-ai{ background:color-mix(in oklab, var(--panel-bg) 92%, black 8%); border:1px solid var(--input-border); align-self:flex-start; }
+    .chat-user{ background:var(--panel-bg); border:1px solid rgba(255,255,255,.12); align-self:flex-end; }
+    .chat-ai{ background:color-mix(in oklab, var(--panel-bg) 92%, black 8%); border:1px solid rgba(255,255,255,.12); align-self:flex-start; }
 
-    /* Force every dropdown popover and children to the SOLID look */
+    /* Force every dropdown popover and children solid */
     .va-scope .va-menu,
     .va-scope .va-menu * {
-      background: var(--panel-bg);
-      color: var(--text);
-      border-color: var(--input-border);
+      background: var(--panel-bg) !important;
+      color: var(--text) !important;
+      border-color: var(--input-border) !important;
+      box-shadow: none !important;
       backdrop-filter: none !important;
     }
   `}</style>
@@ -292,7 +296,7 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
-/* Select with SOLID menu + polished styles + keyboard nav */
+/* Select with SOLID menu (opens under the control, scrolls with page) */
 function StyledSelect({
   value, onChange, options, placeholder, leftIcon, menuTop
 }:{
@@ -302,17 +306,14 @@ function StyledSelect({
   const wrapRef = useRef<HTMLDivElement|null>(null);
   const btnRef = useRef<HTMLButtonElement|null>(null);
   const searchRef = useRef<HTMLInputElement|null>(null);
-  const listRef = useRef<HTMLDivElement|null>(null);
-
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const [hoverIdx, setHoverIdx] = useState<number>(-1);
 
   const current = options.find(o => o.value === value) || null;
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return q ? options.filter(o => o.label.toLowerCase().includes(q)) : options;
-  }, [options, query]);
+  }, [options, query, value]);
 
   useEffect(() => {
     if (!open) return;
@@ -320,46 +321,18 @@ function StyledSelect({
       if (wrapRef.current?.contains(e.target as Node)) return;
       setOpen(false);
     };
-    const onEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { setOpen(false); btnRef.current?.focus(); }
-      if (!filtered.length) return;
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        setHoverIdx(i => Math.min((i < 0 ? -1 : i) + 1, filtered.length - 1));
-      }
-      if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        setHoverIdx(i => Math.max((i < 0 ? filtered.length : i) - 1, 0));
-      }
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        const item = filtered[Math.max(0, hoverIdx)];
-        if (item && !item.disabled) { onChange(item.value); setOpen(false); btnRef.current?.focus(); }
-      }
-    };
+    const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
     window.addEventListener('mousedown', off);
     window.addEventListener('keydown', onEsc);
     return () => { window.removeEventListener('mousedown', off); window.removeEventListener('keydown', onEsc); };
-  }, [open, filtered, hoverIdx, onChange]);
-
-  useEffect(() => {
-    if (!open) return;
-    setTimeout(() => searchRef.current?.focus(), 0);
-    setHoverIdx(Math.max(0, filtered.findIndex(o => o.value === value)));
-  }, [open]); // eslint-disable-line
-
-  useEffect(() => {
-    if (!open) return;
-    const el = listRef.current?.querySelector<HTMLButtonElement>(`[data-index="${hoverIdx}"]`);
-    el?.scrollIntoView({ block: 'nearest' });
-  }, [hoverIdx, open]);
+  }, [open]);
 
   return (
     <div ref={wrapRef} className="relative">
       <button
         ref={btnRef}
         type="button"
-        onClick={() => setOpen(v=>!v)}
+        onClick={() => { setOpen(v=>!v); setTimeout(()=>searchRef.current?.focus(),0); }}
         className="w-full flex items-center justify-between gap-3 px-3 py-3 rounded-[10px] text-sm outline-none transition"
         style={{
           background:'var(--input-bg)',
@@ -367,92 +340,73 @@ function StyledSelect({
           boxShadow:'var(--input-shadow)',
           color:'var(--text)'
         }}
-        aria-expanded={open}
       >
         <span className="flex items-center gap-2 truncate">
           {leftIcon}
           <span className="truncate">{current ? current.label : (placeholder || '— Choose —')}</span>
         </span>
-        <ChevronDown
-          className="w-4 h-4 transition-transform"
-          style={{ color:'var(--text-muted)', transform: open ? 'rotate(180deg)' : 'rotate(0deg)' }}
-        />
+        <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)' }} />
       </button>
 
       {open && (
         <div
-          className="va-menu absolute z-[60] p-0"
+          className="va-menu absolute z-[60] p-3"
           style={{
             top: 'calc(100% + 8px)',
             left: 0,
             width: '100%',
-            borderRadius: 10 as any,
-            overflow: 'hidden'
+            background: 'var(--panel-bg)',
+            border: '1px solid var(--input-border)',
+            borderRadius: 10 as any
           }}
         >
-          {/* Sticky search */}
+          {menuTop ? <div className="mb-2">{menuTop}</div> : null}
+
           <div
-            className="flex items-center gap-2 px-3 py-2"
-            style={{
-              position:'sticky', top:0, zIndex:1,
-              background:'var(--panel-bg)',
-              borderBottom:'1px solid var(--input-border)'
-            }}
+            className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[10px]"
+            style={{ background:'var(--panel-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
           >
             <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
             <input
               ref={searchRef}
               value={query}
-              onChange={(e)=>{ setQuery(e.target.value); setHoverIdx(0); }}
+              onChange={(e)=>setQuery(e.target.value)}
               placeholder="Type to filter…"
               className="w-full bg-transparent outline-none text-sm"
               style={{ color:'var(--text)' }}
             />
           </div>
 
-          {menuTop ? (
-            <div className="px-3 py-2" style={{ borderBottom:'1px solid var(--input-border)' }}>{menuTop}</div>
-          ) : null}
-
-          <div ref={listRef} className="max-h-72 overflow-y-auto py-2" style={{ scrollbarWidth:'thin' }}>
-            {filtered.map((o, i) => {
-              const selected = o.value === value;
-              const hovered = i === hoverIdx && !o.disabled;
-              return (
-                <button
-                  key={o.value}
-                  data-index={i}
-                  disabled={o.disabled}
-                  onMouseEnter={()=> setHoverIdx(i)}
-                  onClick={()=>{ if (o.disabled) return; onChange(o.value); setOpen(false); btnRef.current?.focus(); }}
-                  className="w-full text-left text-sm px-3 py-2 grid grid-cols-[18px_1fr_auto] items-center gap-2 disabled:opacity-60"
-                  style={{
-                    color: o.disabled ? 'var(--text-muted)' : 'var(--text)',
-                    background: hovered ? 'color-mix(in oklab, var(--panel-bg) 86%, white 14%)' : 'var(--panel-bg)',
-                    borderTop: '1px solid transparent',
-                  }}
-                >
-                  {/* left accent for selected */}
-                  <span
-                    aria-hidden
-                    style={{
-                      width: 6, height: 18, borderRadius: 8,
-                      background: selected ? CTA : 'transparent'
-                    }}
-                  />
-                  <span className="truncate">{o.label}</span>
-                  <span className="flex items-center gap-2">
-                    {o.note ? <span className="text-[11px]" style={{ color:'var(--text-muted)' }}>{o.note}</span> : null}
-                    {o.disabled ? (
-                      <Lock className="w-3.5 h-3.5" />
-                    ) : (
-                      <Check className="w-3.5 h-3.5" style={{ opacity: selected ? 1 : 0 }} />
-                    )}
-                  </span>
-                </button>
-              );
-            })}
-
+          <div className="max-h-72 overflow-y-auto pr-1" style={{ scrollbarWidth:'thin' }}>
+            {filtered.map(o => (
+              <button
+                key={o.value}
+                disabled={o.disabled}
+                onClick={()=>{ if (o.disabled) return; onChange(o.value); setOpen(false); }}
+                className="w-full text-left text-sm px-3 py-2 rounded-[8px] transition flex items-center gap-2 disabled:opacity-60"
+                style={{
+                  color:'var(--text)',
+                  background:'var(--panel-bg)',
+                  border:'1px solid var(--panel-bg)',
+                  cursor:o.disabled?'not-allowed':'pointer'
+                }}
+                onMouseEnter={(e)=>{ if (o.disabled) return;
+                  const el=e.currentTarget as HTMLButtonElement;
+                  el.style.background = 'color-mix(in oklab, var(--panel-bg) 88%, white 12%)';
+                  el.style.border = '1px solid var(--input-border)';
+                }}
+                onMouseLeave={(e)=>{
+                  const el=e.currentTarget as HTMLButtonElement;
+                  el.style.background = 'var(--panel-bg)';
+                  el.style.border = '1px solid var(--panel-bg)';
+                }}
+              >
+                {o.disabled ? <Lock className="w-3.5 h-3.5" /> :
+                  <Check className="w-3.5 h-3.5" style={{ opacity: o.value===value ? 1 : 0 }} />}
+                <span className="flex-1 truncate">{o.label}</span>
+                {o.note ? <span className="text-[11px]" style={{ color:'var(--text-muted)' }}>{o.note}</span> : null}
+              </button>
+            ))}
             {filtered.length===0 && (
               <div className="px-3 py-6 text-sm" style={{ color:'var(--text-muted)' }}>No matches.</div>
             )}
@@ -687,7 +641,7 @@ ${lines.map(l => `- ${l}`).join('\n')}
       {/* rail (260px) + centered content */}
       <div className="grid w-full" style={{ gridTemplateColumns: '260px 1fr' }}>
         {/* Rail */}
-        <div className="sticky top-0 h-screen" style={{ borderRight:'1px solid rgba(255,255,255,.10)' }}>
+        <div className="sticky top-0 h-screen" style={{ borderRight:'1px solid rgba(255,255,255,.06)' }}>
           <RailBoundary><AssistantRail /></RailBoundary>
         </div>
 
@@ -939,7 +893,7 @@ ${lines.map(l => `- ${l}`).join('\n')}
         </div>
       </div>
 
-      {/* Solid modal */}
+      {/* Solid modal (only the box, overlay is solid, no blur) */}
       {showGenerate && (
         <div className="va-modal-wrap" role="dialog" aria-modal>
           <div className="va-blur-overlay open" onClick={()=>{ if (genPhase==='idle') setShowGenerate(false); }} />
