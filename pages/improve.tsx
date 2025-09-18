@@ -181,11 +181,15 @@ export default function Improve() {
   // Drag-over highlight for input footer (drop version here)
   const [dropActive, setDropActive] = useState(false);
 
-  // Init user (local dev fallback)
-  useEffect(() => {
-    const id = localStorage.getItem('dev:userId') || 'local-owner';
-    setUserId(id);
-  }, []);
+  // Init user (stable local dev id)
+useEffect(() => {
+  let dev = localStorage.getItem('dev:userId');
+  if (!dev) {
+    dev = `dev_${Math.random().toString(36).slice(2,10)}`;
+    localStorage.setItem('dev:userId', dev);
+  }
+  setUserId(dev);
+}, []);
 
   // Fetch bots
   const fetchBots = useCallback(async (uid: string) => {
