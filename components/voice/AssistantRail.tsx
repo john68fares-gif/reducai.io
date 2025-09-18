@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Search, Plus, Bot, Trash2, Edit3, X, AlertTriangle, Loader2 } from 'lucide-react';
+import { Search, Plus, Bot, Trash2, Edit3, X, AlertTriangle, Loader2, Phone } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { createPortal } from 'react-dom';
 
@@ -17,7 +17,7 @@ export type AssistantLite = { id: string; name: string; purpose?: string; create
 const STORAGE_KEY = 'agents';
 const ACTIVE_KEY  = 'va:activeId';
 
-/* Brand + theme tokens (match VoiceAgentSection) */
+/* Brand (match VoiceAgentSection) */
 const CTA        = '#59d9b3';
 const CTA_HOVER  = '#54cfa9';
 const BRAND_OL30 = 'rgba(89,217,179,.30)';
@@ -47,22 +47,17 @@ function ModalShell({ children }:{ children:React.ReactNode }) {
   if (typeof document === 'undefined') return null;
   return createPortal(
     <>
-      {/* overlay above everything — solid, no blur (match VoiceAgentSection) */}
-      <div
-        className="fixed inset-0 z-[100000] pointer-events-auto"
-        style={{
-          background: 'rgba(8,10,12,.78)'
-        }}
-      />
-      {/* centered sheet with same style as solid cards */}
+      {/* OVERLAY: keep solid (not transparent/blur) */}
+      <div className="fixed inset-0 z-[100000] pointer-events-auto" style={{ background: 'rgba(8,10,12,.78)' }} />
+      {/* BOX: same style as other solid boxes (not the overlay) */}
       <div className="fixed inset-0 z-[100001] flex items-center justify-center px-4">
         <div
           className="w-full max-w-[720px] rounded-[12px] overflow-hidden"
           style={{
-            background: 'var(--card)',
+            background: 'var(--panel)',
             color: 'var(--text)',
             border: '1px solid var(--border)',
-            boxShadow: 'var(--card-shadow)'
+            boxShadow: '0 22px 44px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px rgba(89,217,179,.20)'
           }}
         >
           {children}
@@ -79,9 +74,13 @@ function ModalHeader({ icon, title, subtitle, onClose }:{
   return (
     <div
       className="flex items-center justify-between px-6 py-5"
+      /* Gradient header like your section heads */
       style={{
-        background: 'var(--panel)',
-        borderBottom: '1px solid var(--border)'
+        background: `linear-gradient(90deg,
+          var(--panel) 0%,
+          color-mix(in oklab, var(--panel) 97%, white 3%) 50%,
+          var(--panel) 100%)`,
+        borderBottom: '1px solid rgba(255,255,255,.08)'
       }}
     >
       <div className="flex items-center gap-3">
@@ -100,7 +99,7 @@ function ModalHeader({ icon, title, subtitle, onClose }:{
   );
 }
 
-/* Create / Rename / Delete modals */
+/* Create / Rename / Delete modals (unchanged logic, styled boxes) */
 function CreateModal({ open, onClose, onCreate }:{
   open:boolean; onClose:()=>void; onCreate:(name:string)=>void;
 }) {
@@ -115,22 +114,22 @@ function CreateModal({ open, onClose, onCreate }:{
         <label className="block text-xs mb-1" style={{ color:'var(--text-muted)' }}>Name</label>
         <input
           value={name} onChange={(e)=>setName(e.target.value)}
-          className="w-full h-[44px] rounded-[10px] px-3 text-sm outline-none border"
-          style={{ background:'var(--card)', borderColor:'var(--border)', color:'var(--text)' }}
+          className="w-full h-[44px] rounded-[10px] px-3 text-sm outline-none"
+          style={{ background:'var(--panel)', border:'1px solid var(--border)', color:'var(--text)', boxShadow:'0 0 0 1px rgba(255,255,255,.06) inset' }}
           placeholder="e.g., Sales Bot" autoFocus
         />
       </div>
       <div className="px-6 pb-6 flex gap-3">
         <button onClick={onClose}
-                className="w-full h-[44px] rounded-[10px] font-semibold border"
-                style={{ background:'var(--card)', borderColor:'var(--border)', color:'var(--text)' }}>
+                className="w-full h-[44px] rounded-[10px] font-semibold"
+                style={{ background:'var(--panel)', border:'1px solid var(--border)', color:'var(--text)' }}>
           Cancel
         </button>
         <button
           disabled={!can}
           onClick={()=> can && onCreate(name.trim())}
           className="w-full h-[44px] rounded-[10px] font-semibold disabled:opacity-60"
-          style={{ background:CTA, color:'#0a0f0d', fontSize:12.5 }}
+          style={{ background:CTA, color:'#0a0f0d', fontSize:12.5, boxShadow:'0 10px 22px rgba(89,217,179,.20)' }}
           onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA_HOVER)}
           onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA)}
         >
@@ -153,20 +152,20 @@ function RenameModal({ open, initial, onClose, onSave }:{
       <div className="px-6 py-5">
         <label className="block text-xs mb-1" style={{ color:'var(--text-muted)' }}>Name</label>
         <input value={val} onChange={(e)=>setVal(e.target.value)}
-               className="w-full h-[44px] rounded-[10px] px-3 text-sm outline-none border"
-               style={{ background:'var(--card)', borderColor:'var(--border)', color:'var(--text)' }} />
+               className="w-full h-[44px] rounded-[10px] px-3 text-sm outline-none"
+               style={{ background:'var(--panel)', border:'1px solid var(--border)', color:'var(--text)', boxShadow:'0 0 0 1px rgba(255,255,255,.06) inset' }} />
       </div>
       <div className="px-6 pb-6 flex gap-3">
         <button onClick={onClose}
-                className="w-full h-[44px] rounded-[10px] font-semibold border"
-                style={{ background:'var(--card)', borderColor:'var(--border)', color:'var(--text)' }}>
+                className="w-full h-[44px] rounded-[10px] font-semibold"
+                style={{ background:'var(--panel)', border:'1px solid var(--border)', color:'var(--text)' }}>
           Cancel
         </button>
         <button
           disabled={!can}
           onClick={()=> can && onSave(val.trim())}
           className="w-full h-[44px] rounded-[10px] font-semibold disabled:opacity-60"
-          style={{ background:CTA, color:'#0a0f0d', fontSize:12.5 }}
+          style={{ background:CTA, color:'#0a0f0d', fontSize:12.5, boxShadow:'0 10px 22px rgba(89,217,179,.20)' }}
           onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA_HOVER)}
           onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA)}
         >
@@ -191,13 +190,13 @@ function ConfirmDelete({ open, name, onClose, onConfirm }:{
       </div>
       <div className="px-6 pb-6 flex gap-3">
         <button onClick={onClose}
-                className="w-full h-[44px] rounded-[10px] font-semibold border"
-                style={{ background:'var(--card)', borderColor:'var(--border)', color:'var(--text)' }}>
+                className="w-full h-[44px] rounded-[10px] font-semibold"
+                style={{ background:'var(--panel)', border:'1px solid var(--border)', color:'var(--text)' }}>
           Cancel
         </button>
         <button onClick={onConfirm}
                 className="w-full h-[44px] rounded-[10px] font-semibold"
-                style={{ background:CTA, color:'#0a0f0d', fontSize:12.5 }}
+                style={{ background:CTA, color:'#0a0f0d', fontSize:12.5, boxShadow:'0 10px 22px rgba(89,217,179,.20)' }}
                 onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA_HOVER)}
                 onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA)}>
           Delete
@@ -219,22 +218,21 @@ function Row({
       className="rail-row w-full text-left rounded-[10px] px-3 flex items-center gap-2 group transition"
       style={{
         minHeight: 60,
-        background: active ? `linear-gradient(0deg, ${BRAND_OL30}, ${BRAND_OL30})` : 'transparent',
+        background: active ? `linear-gradient(0deg, ${BRAND_OL30}, ${BRAND_OL30})` : 'var(--panel)',
         border: '1px solid var(--border)',
+        boxShadow: '0 0 0 1px rgba(255,255,255,.06) inset',
         color: 'var(--sidebar-text)',
-        boxShadow: active
-          ? `0 12px 28px rgba(0,0,0,.36), 0 0 0 1px ${BRAND_OL18}, 0 0 18px ${BRAND_OL18}`
-          : 'none',
         position: 'relative',
         overflow: 'hidden',
       }}
     >
-      {/* Tile avatar — subtle inner brand glow */}
+      {/* Tile avatar */}
       <div
         className="relative w-10 h-10 rounded-md grid place-items-center shrink-0"
         style={{
-          background:'var(--rail-avatar-bg)',
-          border:'1px solid var(--sidebar-border)',
+          background:'linear-gradient(135deg,#0f1214 0%,#11181a 100%)',
+          border:'1px solid var(--border)',
+          boxShadow:'0 0 0 1px rgba(255,255,255,.06) inset'
         }}
       >
         <Bot className="w-4 h-4" style={{ color:CTA }} />
@@ -250,27 +248,27 @@ function Row({
       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
         <button
           onClick={(e)=>{ e.stopPropagation(); onRename(); }}
-          className="px-2 h-[30px] rounded-[10px] border"
-          style={{ background:'var(--rail-chip-bg)', borderColor:'var(--rail-chip-border)' }}
+          className="px-2 h-[30px] rounded-[10px]"
+          style={{ background:'var(--panel)', border:'1px solid var(--border)' }}
           aria-label="Rename"
         >
           <Edit3 className="w-4 h-4" />
         </button>
         <button
           onClick={(e)=>{ e.stopPropagation(); onDelete(); }}
-          className="px-2 h-[30px] rounded-[10px] border"
-          style={{ background:'var(--rail-chip-bg)', borderColor:'var(--rail-chip-border)' }}
+          className="px-2 h-[30px] rounded-[10px]"
+          style={{ background:'var(--panel)', border:'1px solid var(--border)' }}
           aria-label="Delete"
         >
           <Trash2 className="w-4 h-4" />
         </button>
       </div>
 
-      {/* Hover effect (soft brand) */}
+      {/* Soft hover */}
       <style jsx>{`
         .rail-row:hover{
           background: linear-gradient(0deg, ${BRAND_OL14}, ${BRAND_OL14});
-          box-shadow: 0 10px 24px rgba(0,0,0,.32), 0 0 0 1px ${BRAND_OL14}, 0 0 14px ${BRAND_OL14};
+          box-shadow: 0 10px 24px rgba(0,0,0,.32), 0 0 0 1px ${BRAND_OL14};
         }
       `}</style>
     </button>
@@ -303,7 +301,7 @@ export default function AssistantRail() {
     return !s?assistants:assistants.filter(a=>a.name.toLowerCase().includes(s) || (a.purpose||'').toLowerCase().includes(s));
   },[assistants,q]);
 
-  /* selection with AccountPage-style full-screen overlay */
+  /* selection with overlay */
   function select(id:string){
     setOverlay(true);
     setActiveId(id);
@@ -340,52 +338,79 @@ export default function AssistantRail() {
   return (
     <>
       <div
-        className="assistant-rail px-3 py-3 h-full"
+        className="assistant-rail h-full flex flex-col"
         style={{
           background:'var(--sidebar-bg)',
-          borderRight:'1px solid var(--border)',
+          borderRight:'1px solid rgba(255,255,255,.08)',
           color:'var(--sidebar-text)',
         }}
       >
-        {/* Create Assistant */}
-        <button
-          type="button"
-          className="w-full inline-flex items-center justify-center gap-2 rounded-[10px] font-semibold mb-3"
-          style={{ height: 38, background: CTA, color: '#0a0f0d', fontSize: 12.5, boxShadow:'0 10px 22px rgba(89,217,179,.20)' }}
-          onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA_HOVER)}
-          onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA)}
-          onClick={()=> setCreateOpen(true)}
+        {/* Rail header with gradient (sectioning) */}
+        <div
+          className="px-3 py-3"
+          style={{
+            background: `linear-gradient(90deg,
+              var(--panel) 0%,
+              color-mix(in oklab, var(--panel) 97%, white 3%) 50%,
+              var(--panel) 100%)`,
+            borderBottom:'1px solid rgba(255,255,255,.08)'
+          }}
         >
-          <Plus className="w-4 h-4" /> Create Assistant
-        </button>
+          <div className="grid grid-cols-2 gap-2">
+            {/* Talk to Assistant — same style as page CTA (does not change your call logic) */}
+            <button
+              type="button"
+              className="inline-flex items-center justify-center gap-2 rounded-[10px] font-semibold"
+              style={{ height: 36, background: CTA, color:'#0a0f0d', boxShadow:'0 10px 22px rgba(89,217,179,.20)' }}
+              onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA_HOVER)}
+              onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA)}
+              onClick={()=> window.dispatchEvent(new CustomEvent('va:open-call'))}
+            >
+              <Phone className="w-4 h-4" />
+              <span>Talk to Assistant</span>
+            </button>
 
-        {/* Search — ultra-thin hairline */}
-        <div className="relative mb-3">
-          <input
-            value={q}
-            onChange={(e)=>setQ(e.target.value)}
-            placeholder="Search assistants"
-            className="w-full h-[32px] rounded-[10px] pl-8 pr-3 text-sm outline-none"
-            style={{
-              background:'var(--card)',
-              border: '1px solid var(--border)',
-              boxShadow: '0 0 0 1px rgba(255,255,255,.06) inset',
-              color:'var(--text)'
-            }}
-          />
-          <Search
-            className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2"
-            style={{ color:'var(--text-muted)' }}
-          />
+            {/* Create Assistant */}
+            <button
+              type="button"
+              className="inline-flex items-center justify-center gap-2 rounded-[10px] font-semibold"
+              style={{ height: 36, background:'var(--panel)', color:'var(--text)', border:'1px solid var(--border)' }}
+              onClick={()=> setCreateOpen(true)}
+            >
+              <Plus className="w-4 h-4" />
+              Create
+            </button>
+          </div>
+
+          {/* Search */}
+          <div className="mt-3 relative">
+            <input
+              value={q}
+              onChange={(e)=>setQ(e.target.value)}
+              placeholder="Search assistants"
+              className="w-full h-[34px] rounded-[10px] pl-8 pr-3 text-sm outline-none"
+              style={{
+                background:'var(--panel)',
+                border: '1px solid var(--border)',
+                boxShadow: '0 0 0 1px rgba(255,255,255,.06) inset',
+                color:'var(--text)'
+              }}
+            />
+            <Search
+              className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2"
+              style={{ color:'var(--text-muted)' }}
+            />
+          </div>
+
+          {/* Section label with fine tracking */}
+          <div className="mt-3 text-[11px] font-semibold tracking-[.12em]" style={{ color:'var(--sidebar-muted)' }}>
+            ASSISTANTS
+          </div>
         </div>
 
-        <div className="text-[11px] font-semibold tracking-[.12em] mb-2" style={{ color:'var(--sidebar-muted)' }}>
-          ASSISTANTS
-        </div>
-
-        {/* List */}
-        <div className="overflow-auto" style={{ maxHeight:'calc(100% - 118px)' }}>
-          <div className="space-y-1.5">
+        {/* LIST */}
+        <div className="px-3 py-3 overflow-auto" style={{ flex:1 }}>
+          <div className="space-y-2">
             <AnimatePresence initial={false}>
               {filtered.map(a=>(
                 <motion.div key={a.id} initial={{ opacity:0, y:6 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0, y:-6 }}>
@@ -408,32 +433,33 @@ export default function AssistantRail() {
           </div>
         </div>
 
-        {/* Modals (portaled, above all) */}
+        {/* Modals */}
         <CreateModal open={createOpen} onClose={()=>setCreateOpen(false)} onCreate={addAssistant} />
         <RenameModal open={!!renId} initial={renName} onClose={()=>setRenId(null)} onSave={saveRename} />
         <ConfirmDelete open={!!delId} name={delName} onClose={()=>setDelId(null)} onConfirm={confirmDelete} />
 
-        {/* Rail theme tokens */}
+        {/* Rail theme details */}
         <style jsx>{`
           /* Light */
           :global(:root:not([data-theme="dark"])) .assistant-rail{
-            --rail-avatar-bg: linear-gradient(135deg,#f8fafc 0%,#eef2f7 100%);
-            --rail-chip-bg: #fff;
-            --rail-chip-border: rgba(0,0,0,.12);
-            --sidebar-border: rgba(0,0,0,.12);
+            --sidebar-bg: #fff;
+            --sidebar-text: #0f172a;
+            --sidebar-muted: #64748b;
+            --border: rgba(0,0,0,.12);
+            --panel: #ffffff;
           }
           /* Dark */
           :global([data-theme="dark"]) .assistant-rail{
-            --rail-avatar-bg: linear-gradient(135deg,#0f1214 0%,#11181a 100%);
-            --rail-chip-bg: var(--card);
-            --rail-chip-border: var(--border);
-            --sidebar-border: var(--border);
+            --sidebar-bg: var(--panel);
+            --sidebar-text: var(--text);
+            --sidebar-muted: var(--text-muted);
+            --border: rgba(255,255,255,.10);
+            --panel: var(--panel);
           }
-          .assistant-rail input::placeholder{ color: var(--text-muted); opacity: .9; }
         `}</style>
       </div>
 
-      {/* Full-screen loader — above all content (solid, same tone) */}
+      {/* Full-screen loader (kept; not an overlay style change) */}
       <AnimatePresence>
         {overlay && (
           <motion.div
@@ -441,15 +467,14 @@ export default function AssistantRail() {
             className="fixed inset-0 z-[100002] flex items-center justify-center"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             style={{
-              background:
-                'radial-gradient(1000px 500px at 50% -10%, var(--brand-weak), transparent 60%), var(--bg)'
+              background: 'radial-gradient(1000px 500px at 50% -10%, var(--brand-weak), transparent 60%), var(--bg)'
             }}
           >
             <motion.div
               initial={{ scale: 0.96, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              className="px-6 py-5 rounded-[12px] border"
-              style={{ border: '1px solid var(--border)', background: 'var(--panel)', boxShadow: 'var(--card-shadow)', color:'var(--text)' }}
+              className="px-6 py-5 rounded-[12px]"
+              style={{ border: '1px solid var(--border)', background: 'var(--panel)', boxShadow: '0 22px 44px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px rgba(89,217,179,.20)', color:'var(--text)' }}
             >
               <div className="flex items-center gap-3">
                 <Loader2 className="w-5 h-5 animate-spin" />
