@@ -1,4 +1,3 @@
-// components/voice/AssistantRail.tsx
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
@@ -25,16 +24,16 @@ const FOLDERS_KEY      = 'agentFolders';
 const ACTIVE_KEY       = 'va:activeId';
 const ACTIVE_FOLDERKEY = 'va:activeFolderId';
 
-/* Brand (match VoiceAgentSection) */
+/* Brand */
 const CTA        = '#59d9b3';
 const CTA_HOVER  = '#54cfa9';
-const GREEN_LINE = 'rgba(89,217,179,.20)';    // the green outline you liked
-const OVERLAY_BG = 'rgba(8,10,12,.78)';       // same as overlays
+const GREEN_LINE = 'rgba(89,217,179,.20)';     // green outline like your boxes
+const LIGHT_OVERLAY = 'rgba(0,0,0,0.60)';
 
-/* Shadows to mirror section boxes / overlays */
-const BOX_SHADOW     = '0 22px 44px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px rgba(89,217,179,.20)';
-const ITEM_SHADOW    = '0 12px 28px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px rgba(89,217,179,.20)';
-const HOVER_BOXSHADOW= '0 16px 36px rgba(0,0,0,.36), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px rgba(89,217,179,.26)';
+/* Shadows to mirror “overlay box” feel */
+const BOX_SHADOW      = '0 22px 44px rgba(0,0,0,.18), 0 0 0 1px rgba(255,255,255,.60) inset, 0 0 0 1px rgba(89,217,179,.20)';
+const ITEM_SHADOW     = '0 10px 24px rgba(0,0,0,.08), 0 0 0 1px rgba(255,255,255,.50) inset, 0 0 0 1px rgba(89,217,179,.16)';
+const HOVER_BOXSHADOW = '0 16px 36px rgba(0,0,0,.10), 0 0 0 1px rgba(255,255,255,.55) inset, 0 0 0 1px rgba(89,217,179,.26)';
 
 /* Utils */
 function uid() {
@@ -63,21 +62,19 @@ function writeActive(id:string){
   try { window.dispatchEvent(new CustomEvent('assistant:active', { detail: id })); } catch {}
 }
 
-/* ---------- Modal shells (PORTALED, high z-index, card styling) ---------- */
+/* ---------- Modal shells (PORTALED, light overlay style) ---------- */
 function ModalShell({ children }:{ children:React.ReactNode }) {
   if (typeof document === 'undefined') return null;
   return createPortal(
     <>
-      {/* overlay you loved */}
-      <div className="fixed inset-0 z-[100000] pointer-events-auto" style={{ background: OVERLAY_BG }} />
-      {/* box with the same border/shadow recipe */}
+      <div className="fixed inset-0 z-[100000] pointer-events-auto animate-[fadeIn_140ms_ease]" style={{ background: LIGHT_OVERLAY }} />
       <div className="fixed inset-0 z-[100001] flex items-center justify-center px-4">
         <div
-          className="w-full max-w-[720px] rounded-[12px] overflow-hidden"
+          className="w-full max-w-[720px] rounded-[16px] overflow-hidden animate-[popIn_140ms_ease]"
           style={{
             background: 'var(--panel)',
             color: 'var(--text)',
-            border: `1px solid ${GREEN_LINE}`,           // green border line like boxes
+            border: `1px solid ${GREEN_LINE}`,
             boxShadow: BOX_SHADOW
           }}
         >
@@ -119,12 +116,13 @@ function ModalHeader({ icon, title, subtitle, onClose }:{
   );
 }
 
-/* Create / Rename / Delete modals */
+/* Create Assistant */
 function CreateModal({ open, onClose, onCreate }:{
   open:boolean; onClose:()=>void; onCreate:(name:string)=>void;
 }) {
   const [name,setName] = useState('');
-  useEffect(()=>{ if(open) setName(''); },[open]);
+  const [saving,setSaving] = useState(false);
+  useEffect(()=>{ if(open){ setName(''); setSaving(false); } },[open]);
   if(!open) return null;
   const can = name.trim().length>1;
   return (
@@ -134,31 +132,34 @@ function CreateModal({ open, onClose, onCreate }:{
         <label className="block text-xs mb-1" style={{ color:'var(--text-muted)' }}>Name</label>
         <input
           value={name} onChange={(e)=>setName(e.target.value)}
-          className="w-full h-[44px] rounded-[10px] px-3 text-sm outline-none"
-          style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)', boxShadow:'0 0 0 1px rgba(255,255,255,.06) inset' }}
+          className="w-full h-[44px] rounded-[12px] px-3 text-sm outline-none"
+          style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)', boxShadow:'inset 0 1px 0 rgba(0,0,0,.04)' }}
           placeholder="e.g., Sales Bot" autoFocus
         />
       </div>
       <div className="px-6 pb-6 flex gap-3">
         <button onClick={onClose}
-                className="w-full h-[44px] rounded-[10px] font-semibold"
+                className="w-full h-[44px] rounded-[12px]"
                 style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)' }}>
           Cancel
         </button>
         <button
-          disabled={!can}
-          onClick={()=> can && onCreate(name.trim())}
-          className="w-full h-[44px] rounded-[10px] font-semibold disabled:opacity-60"
-          style={{ background:CTA, color:'#ffffff', fontSize:12.5, boxShadow:'0 10px 22px rgba(0,0,0,.24)' }}
+          disabled={!can||saving}
+          onClick={async()=>{ if(!can) return; setSaving(true); await new Promise(r=>setTimeout(r,420)); onCreate(name.trim()); setSaving(false); }}
+          className="w-full h-[44px] rounded-[12px] font-semibold disabled:opacity-60 flex items-center justify-center gap-2"
+          style={{ background:CTA, color:'#ffffff', boxShadow:'0 10px 22px rgba(0,0,0,.12)', border:`1px solid ${GREEN_LINE}` }}
           onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA_HOVER)}
           onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA)}
         >
+          {saving ? <span className="w-4 h-4 rounded-full border-2 border-white/60 border-t-transparent animate-spin" /> : <Plus className="w-4 h-4" />}
           Create
         </button>
       </div>
     </ModalShell>
   );
 }
+
+/* Rename / Delete */
 function RenameModal({ open, initial, onClose, onSave }:{
   open:boolean; initial:string; onClose:()=>void; onSave:(v:string)=>void;
 }) {
@@ -172,20 +173,20 @@ function RenameModal({ open, initial, onClose, onSave }:{
       <div className="px-6 py-5">
         <label className="block text-xs mb-1" style={{ color:'var(--text-muted)' }}>Name</label>
         <input value={val} onChange={(e)=>setVal(e.target.value)}
-               className="w-full h-[44px] rounded-[10px] px-3 text-sm outline-none"
-               style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)', boxShadow:'0 0 0 1px rgba(255,255,255,.06) inset' }} />
+               className="w-full h-[44px] rounded-[12px] px-3 text-sm outline-none"
+               style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)' }} />
       </div>
       <div className="px-6 pb-6 flex gap-3">
         <button onClick={onClose}
-                className="w-full h-[44px] rounded-[10px] font-semibold"
+                className="w-full h-[44px] rounded-[12px]"
                 style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)' }}>
           Cancel
         </button>
         <button
           disabled={!can}
-          onClick={()=> can && onSave(val.trim())}
-          className="w-full h-[44px] rounded-[10px] font-semibold disabled:opacity-60"
-          style={{ background:CTA, color:'#ffffff', fontSize:12.5, boxShadow:'0 10px 22px rgba(0,0,0,.24)' }}
+          onClick={()=> onSave(val.trim())}
+          className="w-full h-[44px] rounded-[12px] font-semibold disabled:opacity-60"
+          style={{ background:CTA, color:'#ffffff', border:`1px solid ${GREEN_LINE}` }}
           onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA_HOVER)}
           onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA)}
         >
@@ -210,16 +211,59 @@ function ConfirmDelete({ open, name, onClose, onConfirm }:{
       </div>
       <div className="px-6 pb-6 flex gap-3">
         <button onClick={onClose}
-                className="w-full h-[44px] rounded-[10px] font-semibold"
+                className="w-full h-[44px] rounded-[12px]"
                 style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)' }}>
           Cancel
         </button>
         <button onClick={onConfirm}
-                className="w-full h-[44px] rounded-[10px] font-semibold"
-                style={{ background:CTA, color:'#ffffff', fontSize:12.5, boxShadow:'0 10px 22px rgba(0,0,0,.24)' }}
+                className="w-full h-[44px] rounded-[12px] font-semibold"
+                style={{ background:CTA, color:'#ffffff', border:`1px solid ${GREEN_LINE}` }}
                 onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA_HOVER)}
                 onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA)}>
           Delete
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
+/* ---------- Create Folder (OVERLAY) ---------- */
+function CreateFolderModal({
+  open, onClose, onCreate
+}:{ open:boolean; onClose:()=>void; onCreate:(name:string)=>Promise<void>|void }) {
+  const [name,setName]=useState(''); const [saving,setSaving]=useState(false);
+  useEffect(()=>{ if(open){ setName(''); setSaving(false);} },[open]);
+  if(!open) return null;
+  const can = name.trim().length>1;
+  return (
+    <ModalShell>
+      <ModalHeader icon={<FolderPlus className="w-5 h-5" style={{ color:CTA }}/>} title="Create Folder" onClose={onClose}/>
+      <div className="px-6 py-5">
+        <label className="block text-xs mb-1" style={{ color:'var(--text-muted)' }}>Folder name</label>
+        <input
+          value={name} onChange={(e)=>setName(e.target.value)}
+          className="w-full h-[44px] rounded-[12px] px-3 text-sm outline-none"
+          style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)' }}
+          placeholder="e.g., Team A"
+          autoFocus
+        />
+      </div>
+      <div className="px-6 pb-6 flex gap-3">
+        <button onClick={onClose}
+                className="w-full h-[44px] rounded-[12px]"
+                style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)' }}>
+          Cancel
+        </button>
+        <button
+          disabled={!can||saving}
+          onClick={async ()=>{ if(!can) return; setSaving(true); await new Promise(r=>setTimeout(r,420)); await onCreate(name.trim()); setSaving(false); }}
+          className="w-full h-[44px] rounded-[12px] font-semibold disabled:opacity-60 flex items-center justify-center gap-2"
+          style={{ background:CTA, color:'#ffffff', border:`1px solid ${GREEN_LINE}` }}
+          onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA_HOVER)}
+          onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA)}
+        >
+          {saving ? <span className="w-4 h-4 rounded-full border-2 border-white/60 border-t-transparent animate-spin" /> : <FolderPlus className="w-4 h-4" />}
+          Create
         </button>
       </div>
     </ModalShell>
@@ -237,7 +281,7 @@ function Row({
       draggable
       onDragStart={()=>onDragStart(a.id)}
       onClick={onClick}
-      className="rail-row w-full text-left rounded-[12px] px-3 flex items-center gap-2 group transition"
+      className="rail-row w-full text-left rounded-[12px] px-3 flex items-center gap-2 group transition will-change-transform"
       style={{
         minHeight: 60,
         background: 'var(--panel)',
@@ -248,13 +292,12 @@ function Row({
         overflow: 'hidden',
       }}
     >
-      {/* Tile avatar */}
       <div
         className="relative w-10 h-10 rounded-md grid place-items-center shrink-0"
         style={{
-          background:'linear-gradient(135deg,#0f1214 0%,#11181a 100%)',
+          background:'linear-gradient(135deg,#f7fafc 0%,#f1f5f9 100%)',
           border:`1px solid ${GREEN_LINE}`,
-          boxShadow:'0 0 0 1px rgba(255,255,255,.06) inset'
+          boxShadow:'inset 0 1px 0 rgba(255,255,255,.8)'
         }}
       >
         <Bot className="w-4 h-4" style={{ color:CTA }} />
@@ -286,7 +329,6 @@ function Row({
         </button>
       </div>
 
-      {/* Soft hover */}
       <style jsx>{`
         .rail-row:hover{
           box-shadow: ${HOVER_BOXSHADOW};
@@ -299,9 +341,9 @@ function Row({
 
 /* ---------- Folder row (droppable) ---------- */
 function FolderRow({
-  f, isActive, onOpen, onDropIds
+  f, onOpen, onDropIds
 }:{
-  f:FolderLite; isActive:boolean; onOpen:()=>void; onDropIds:(ids:string[])=>void;
+  f:FolderLite; onOpen:()=>void; onDropIds:(ids:string[])=>void;
 }) {
   return (
     <button
@@ -332,17 +374,15 @@ export default function AssistantRail() {
   const [folders,setFolders] = useState<FolderLite[]>([]);
   const [activeId,setActiveId] = useState('');
   const [activeFolderId,setActiveFolderId] = useState<string|''>('');
-  const [overlay,setOverlay] = useState(false); // full-screen loader (switch)
-  const [initialLoading,setInitialLoading] = useState(true); // legit initial load phase
+  const [overlay,setOverlay] = useState(false); // switch overlay
+  const [initialLoading,setInitialLoading] = useState(true);
   const [q,setQ] = useState('');
   const [createOpen,setCreateOpen] = useState(false);
   const [renId,setRenId] = useState<string|null>(null);
   const [delId,setDelId] = useState<string|null>(null);
-  const [newFolderName,setNewFolderName] = useState<string>('');
-  const [creatingFolder,setCreatingFolder] = useState(false);
+  const [showCreateFolder,setShowCreateFolder] = useState(false);
   const [dragIds,setDragIds] = useState<string[]>([]);
 
-  /* initial load + restore selection + folder scope */
   useEffect(()=>{ (async()=>{
     const [list, flds] = await Promise.all([loadAssistants(), loadFolders()]);
     setAssistants(list);
@@ -353,31 +393,22 @@ export default function AssistantRail() {
     setActiveId(firstId);
     if (firstId) writeActive(firstId);
     setActiveFolderId(savedFolder || '');
-    setTimeout(()=>setInitialLoading(false), 420); // tiny delay for skeleton feel
+    setTimeout(()=>setInitialLoading(false), 500);
   })(); },[]);
 
-  /* filter by query + folder scope */
   const filtered = useMemo(()=> {
     const s=q.trim().toLowerCase();
-    const inScope = assistants.filter(a => (activeFolderId ? a.folderId===activeFolderId : !a.folderId));
-    const list = activeFolderId ? assistants.filter(a=>a.folderId===activeFolderId) : assistants;
-    const base = list.filter(a=>{
-      const hay = `${a.name} ${(a.purpose||'')}`.toLowerCase();
-      if (!s) return true;
-      return hay.includes(s);
-    });
-    // In "All", show only those not in any folder, and below that show folders
-    return activeFolderId ? base : base.filter(a=>!a.folderId);
+    const list = activeFolderId ? assistants.filter(a=>a.folderId===activeFolderId) : assistants.filter(a=>!a.folderId);
+    return !s ? list : list.filter(a=>(`${a.name} ${(a.purpose||'')}`.toLowerCase().includes(s)));
   },[assistants,q,activeFolderId]);
 
   function select(id:string){
     setOverlay(true);
     setActiveId(id);
     writeActive(id);
-    window.setTimeout(()=> setOverlay(false), 520);
+    window.setTimeout(()=> setOverlay(false), 620);
   }
 
-  /* CRUD assistants */
   function addAssistant(name:string){
     const a:AssistantLite = { id: uid(), name, createdAt: Date.now(), purpose:'', folderId: activeFolderId||null };
     const next=[a, ...assistants];
@@ -400,43 +431,37 @@ export default function AssistantRail() {
     setDelId(null);
   }
 
-  /* Folders */
   function createFolder(name:string){
     const f:FolderLite = { id: uid(), name, createdAt: Date.now() };
     const next=[f, ...folders];
     setFolders(next); saveFolders(next);
+    setShowCreateFolder(false);
   }
   function moveAssistantsToFolder(ids:string[], folderId:string|null){
     const next = assistants.map(a => ids.includes(a.id) ? { ...a, folderId } : a);
     setAssistants(next); saveAssistants(next);
   }
-
-  /* Drag */
   function onRowDragStart(id:string){
-    // Support multi-select drag later; for now single id
     setDragIds([id]);
     try { (event as DragEvent)?.dataTransfer?.setData('text/plain', [id].join(',')); } catch {}
   }
 
-  /* UI */
   const renName = assistants.find(a=>a.id===renId)?.name || '';
   const delName = assistants.find(a=>a.id===delId)?.name;
-
-  const visibleFolders = folders; // show all folders always
   const inAllScope = !activeFolderId;
 
   return (
     <>
       <div
         className="assistant-rail h-full flex flex-col"
-        /* Sidebar background EXACTLY the overlay bg */
         style={{
-          background: OVERLAY_BG,
+          /* LIGHT MODE — scoped to this rail only */
+          background:'var(--sidebar-bg)',
           borderRight:`1px solid ${GREEN_LINE}`,
           color:'var(--sidebar-text)',
         }}
       >
-        {/* Rail header with gradient + green hairline */}
+        {/* Header */}
         <div
           className="px-3 py-3"
           style={{
@@ -449,31 +474,29 @@ export default function AssistantRail() {
           }}
         >
           <div className="grid grid-cols-2 gap-2">
-            {/* Create (left) — green with WHITE text */}
+            {/* Left: Create (green, white text) */}
             <button
               type="button"
-              className="inline-flex items-center justify-center gap-2 rounded-[10px] font-semibold"
-              style={{ height: 36, background: CTA, color:'#ffffff', boxShadow:'0 10px 22px rgba(0,0,0,.24)', border:`1px solid ${GREEN_LINE}` }}
+              className="inline-flex items-center justify-center gap-2 rounded-[12px] font-semibold"
+              style={{ height: 36, background: CTA, color:'#ffffff', boxShadow:'0 10px 22px rgba(0,0,0,.10)', border:`1px solid ${GREEN_LINE}` }}
               onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA_HOVER)}
               onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=CTA)}
               onClick={()=> setCreateOpen(true)}
             >
               <Plus className="w-4 h-4" />
-              Create Assistant
+              Create
             </button>
 
-            {/* Folder+ (right) */}
-            <div className="flex">
-              <button
-                type="button"
-                className="inline-flex items-center justify-center gap-2 rounded-[10px] font-semibold w-full"
-                style={{ height: 36, background:'var(--panel)', color:'var(--text)', border:`1px solid ${GREEN_LINE}`, boxShadow: ITEM_SHADOW }}
-                onClick={()=>{ setCreatingFolder(true); setNewFolderName(''); }}
-              >
-                <FolderPlus className="w-4 h-4" />
-                New Folder
-              </button>
-            </div>
+            {/* Right: + Folder (opens overlay) */}
+            <button
+              type="button"
+              className="inline-flex items-center justify-center gap-2 rounded-[12px] font-semibold"
+              style={{ height: 36, background:'var(--panel)', color:'var(--text)', border:`1px solid ${GREEN_LINE}`, boxShadow: ITEM_SHADOW }}
+              onClick={()=> setShowCreateFolder(true)}
+            >
+              <FolderPlus className="w-4 h-4" />
+              + Folder
+            </button>
           </div>
 
           {/* Search */}
@@ -482,11 +505,11 @@ export default function AssistantRail() {
               value={q}
               onChange={(e)=>setQ(e.target.value)}
               placeholder="Search assistants"
-              className="w-full h-[34px] rounded-[10px] pl-8 pr-3 text-sm outline-none"
+              className="w-full h-[34px] rounded-[12px] pl-8 pr-3 text-sm outline-none"
               style={{
                 background:'var(--panel)',
                 border: `1px solid ${GREEN_LINE}`,
-                boxShadow: '0 0 0 1px rgba(255,255,255,.06) inset',
+                boxShadow: 'inset 0 1px 0 rgba(0,0,0,.04)',
                 color:'var(--text)'
               }}
             />
@@ -496,7 +519,7 @@ export default function AssistantRail() {
             />
           </div>
 
-          {/* Folder scope / breadcrumb */}
+          {/* Scope crumb */}
           <div className="mt-3 flex items-center justify-between">
             <div className="text-[11px] font-semibold tracking-[.12em]" style={{ color:'var(--sidebar-muted)' }}>
               {inAllScope ? 'ALL' : 'FOLDER'}
@@ -504,7 +527,7 @@ export default function AssistantRail() {
             {!inAllScope && (
               <button
                 onClick={()=>{ setActiveFolderId(''); try{ localStorage.setItem(ACTIVE_FOLDERKEY,''); }catch{} }}
-                className="inline-flex items-center gap-1 px-2 py-1 rounded-[8px]"
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-[10px]"
                 style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)' }}
               >
                 <ArrowLeft className="w-4 h-4" /> Back to All
@@ -515,20 +538,19 @@ export default function AssistantRail() {
 
         {/* LIST */}
         <div className="px-3 py-3 overflow-auto" style={{ flex:1 }}>
-          {/* In ALL scope show folders first */}
+          {/* Folders in All */}
           {inAllScope && (
             <>
-              {visibleFolders.length>0 && (
+              {folders.length>0 && (
                 <div className="mb-2">
                   <div className="mb-2 text-[11px] font-semibold tracking-[.12em]" style={{ color:'var(--sidebar-muted)' }}>
                     FOLDERS
                   </div>
                   <div className="grid gap-2">
-                    {visibleFolders.map(f=>(
+                    {folders.map(f=>(
                       <FolderRow
                         key={f.id}
                         f={f}
-                        isActive={activeFolderId===f.id}
                         onOpen={()=>{
                           setActiveFolderId(f.id);
                           try{ localStorage.setItem(ACTIVE_FOLDERKEY, f.id); }catch{}
@@ -540,8 +562,7 @@ export default function AssistantRail() {
                 </div>
               )}
 
-              {/* Drop to "All" to remove from any folder */}
-              {visibleFolders.length>0 && (
+              {folders.length>0 && (
                 <div
                   className="mb-3 rounded-[12px] px-3 py-2 text-xs"
                   onDragOver={(e)=>e.preventDefault()}
@@ -558,12 +579,12 @@ export default function AssistantRail() {
           )}
 
           <div className="space-y-2">
-            {/* Initial skeletons */}
+            {/* legit skeleton shimmer */}
             {initialLoading && (
               <>
                 {[0,1,2,3].map(i=>(
-                  <div key={i} className="rounded-[12px] h-[60px] w-full animate-pulse"
-                       style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, boxShadow: ITEM_SHADOW, opacity:.65 }} />
+                  <div key={i} className="rounded-[12px] h-[60px] w-full shimmer"
+                       style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, boxShadow: ITEM_SHADOW }} />
                 ))}
               </>
             )}
@@ -593,87 +614,50 @@ export default function AssistantRail() {
           </div>
         </div>
 
-        {/* Create Folder inline sheet */}
-        <AnimatePresence>
-          {creatingFolder && (
-            <motion.div
-              initial={{ opacity:0, scale:.98 }} animate={{ opacity:1, scale:1 }} exit={{ opacity:0, scale:.98 }}
-              className="px-3 pb-3"
-            >
-              <div className="rounded-[12px] p-3"
-                   style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, boxShadow: BOX_SHADOW }}>
-                <div className="text-sm mb-2" style={{ color:'var(--text)' }}>Folder name</div>
-                <input
-                  value={newFolderName}
-                  onChange={(e)=>setNewFolderName(e.target.value)}
-                  className="w-full h-[36px] rounded-[10px] px-3 text-sm outline-none"
-                  style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)' }}
-                  placeholder="e.g., Sales Team"
-                  autoFocus
-                />
-                <div className="mt-2 flex gap-2">
-                  <button
-                    onClick={()=>{
-                      const v=newFolderName.trim();
-                      if(!v) return;
-                      createFolder(v);
-                      setCreatingFolder(false);
-                    }}
-                    className="h-9 px-3 rounded-[10px] font-semibold"
-                    style={{ background:CTA, color:'#ffffff', border:`1px solid ${GREEN_LINE}` }}
-                  >
-                    Create
-                  </button>
-                  <button
-                    onClick={()=>setCreatingFolder(false)}
-                    className="h-9 px-3 rounded-[10px]"
-                    style={{ background:'var(--panel)', color:'var(--text)', border:`1px solid ${GREEN_LINE}` }}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
         {/* Modals */}
         <CreateModal open={createOpen} onClose={()=>setCreateOpen(false)} onCreate={addAssistant} />
         <RenameModal open={!!renId} initial={renName} onClose={()=>setRenId(null)} onSave={saveRename} />
         <ConfirmDelete open={!!delId} name={delName} onClose={()=>setDelId(null)} onConfirm={confirmDelete} />
+        <CreateFolderModal open={showCreateFolder} onClose={()=>setShowCreateFolder(false)} onCreate={async(name)=>createFolder(name)} />
 
-        {/* Rail theme tokens (readable on overlay bg) */}
+        {/* Light theme tokens (scoped!) + shimmer */}
         <style jsx>{`
-          /* Light */
-          :global(:root:not([data-theme="dark"])) .assistant-rail{
-            --sidebar-text: #e6f1ef;
-            --sidebar-muted: #9fb4ad;
-            --panel: #0d0f11;      /* solid boxes on dark overlay */
-            --text: #e6f1ef;
-            --text-muted: #9fb4ad;
+          .assistant-rail{
+            /* Light palette that fits your API Keys page */
+            --sidebar-bg: #f8fafc; /* slate-50-ish */
+            --sidebar-text: #0f172a;
+            --sidebar-muted: #64748b;
+            --panel: #ffffff;
+            --text: #0f172a;
+            --text-muted: #64748b;
           }
-          /* Dark */
-          :global([data-theme="dark"]) .assistant-rail{
-            --sidebar-text: var(--text);
-            --sidebar-muted: var(--text-muted);
-            /* --panel is inherited from app tokens */
+          @keyframes shimmerLine {
+            0%{ background-position:-200% 0; }
+            100%{ background-position:200% 0; }
           }
+          .shimmer{
+            background-image: linear-gradient(90deg, rgba(0,0,0,0.03) 25%, rgba(0,0,0,0.06) 37%, rgba(0,0,0,0.03) 63%);
+            background-size: 200% 100%;
+            animation: shimmerLine 1.2s ease-in-out infinite;
+          }
+          @keyframes fadeIn { from{opacity:0} to{opacity:1} }
+          @keyframes popIn { from{ transform:scale(.98); opacity:0 } to{ transform:scale(1); opacity:1 } }
         `}</style>
       </div>
 
-      {/* Switch loader — full-screen, same overlay bg + box recipe */}
+      {/* Switch loader — overlay with animated dots */}
       <AnimatePresence>
         {overlay && (
           <motion.div
             key="assistant-switch"
             className="fixed inset-0 z-[100002] flex items-center justify-center"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            style={{ background: OVERLAY_BG }}
+            style={{ background: LIGHT_OVERLAY }}
           >
             <motion.div
               initial={{ scale: 0.96, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              className="px-6 py-5 rounded-[12px]"
+              className="px-6 py-5 rounded-[14px]"
               style={{
                 border: `1px solid ${GREEN_LINE}`,
                 background: 'var(--panel)',
@@ -683,9 +667,22 @@ export default function AssistantRail() {
             >
               <div className="flex items-center gap-3">
                 <Loader2 className="w-5 h-5 animate-spin" />
-                <div className="text-sm">Loading assistant…</div>
+                <div className="text-sm">
+                  Loading assistant<span className="inline-block w-6 text-left animate-[dots_1.2s_steps(4,end)_infinite]"></span>
+                </div>
               </div>
             </motion.div>
+
+            <style jsx>{`
+              @keyframes dots {
+                0% { content: ''; }
+                25% { content: '.'; }
+                50% { content: '..'; }
+                75% { content: '...'; }
+                100% { content: ''; }
+              }
+              .animate-[dots_1.2s_steps(4,end)_infinite]::after { content:''; animation:dots 1.2s steps(4,end) infinite; }
+            `}</style>
           </motion.div>
         )}
       </AnimatePresence>
