@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { scopedStorage } from '@/utils/scoped-storage';
 
-/* ───────────────── Assistant rail (fixed to app sidebar) ───────────────── */
+/* ───────────────── Assistant rail (fixed) ───────────────── */
 const AssistantRail = dynamic(
   () =>
     import('@/components/voice/AssistantRail')
@@ -23,29 +23,6 @@ class RailBoundary extends React.Component<{children:React.ReactNode},{hasError:
   constructor(p:any){ super(p); this.state={hasError:false}; }
   static getDerivedStateFromError(){ return {hasError:true}; }
   render(){ return this.state.hasError ? <div className="px-3 py-3 text-xs opacity-70">Rail crashed</div> : this.props.children; }
-}
-
-/** Keep a CSS var in sync with whatever your app uses as the main sidebar element. */
-function useSidebarSync() {
-  useEffect(() => {
-    const candidates = [
-      '[data-app-sidebar]',
-      'aside[aria-label="Sidebar"]',
-      'aside[class*="sidebar"]',
-      '#sidebar'
-    ];
-    const el = document.querySelector<HTMLElement>(candidates.join(', '));
-    const setW = (w:number) =>
-      document.documentElement.style.setProperty('--app-sidebar-w', `${Math.round(w)}px`);
-    if (!el) { setW(240); return; }
-    setW(el.getBoundingClientRect().width);
-    const ro = new ResizeObserver((entries) => {
-      const w = entries[0]?.contentRect?.width ?? el.getBoundingClientRect().width;
-      setW(w);
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
 }
 
 /* ───────────────── Theme tokens (SOLID surfaces, less-rounded) ───────────────── */
@@ -88,10 +65,6 @@ const Tokens = () => (
 
       --band-core: #121919;
       --band-side: #172222;
-
-      /* added for fixed rail */
-      --app-sidebar-w: 240px; /* kept in sync by useSidebarSync() */
-      --rail-w: 260px;
     }
 
     .va-main{ overflow: visible; position: relative; contain: none; }
@@ -145,6 +118,7 @@ const Tokens = () => (
     .va-overlay {
       position: fixed; inset: 0; z-index: 99998;
       background: rgba(8,10,12,.82);  /* solid scrim */
+      /* NO blur here */
     }
     .va-sheet{
       background: var(--menu-bg);
@@ -159,25 +133,6 @@ const Tokens = () => (
       box-shadow: var(--input-shadow);
       color: var(--text);
       border-radius: var(--radius-inner);
-    }
-
-    /* ───── NEW: fixed rail that hugs app sidebar + pushes page content ───── */
-    .va-left-fixed{
-      position: fixed;
-      top: 0; bottom: 0;
-      left: var(--app-sidebar-w);
-      width: var(--rail-w);
-      z-index: 1000;
-      background: var(--panel);
-      border-right: 1px solid rgba(255,255,255,.06);
-      box-shadow: 14px 0 28px rgba(0,0,0,.08);
-      display: flex; flex-direction: column;
-    }
-    .va-left-fixed .rail-scroll{ overflow:auto; flex:1; }
-
-    .va-page{
-      margin-left: calc(var(--app-sidebar-w) + var(--rail-w));
-      transition: margin-left 180ms var(--ease);
     }
   `}</style>
 );
@@ -334,7 +289,7 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
-/* Solid select with inline search; (kept as you had it) */
+/* Solid select with inline search; FIXED portal that tracks scroll/resize and sits OVER cards */
 function StyledSelect({
   value, onChange, options, placeholder, leftIcon, rightAddon
 }:{
@@ -354,6 +309,7 @@ function StyledSelect({
     return q ? options.filter(o => o.label.toLowerCase().includes(q)) : options;
   }, [options, query]);
 
+  // Measure anchor and decide up/down
   const measure = () => {
     const r = btnRef.current?.getBoundingClientRect(); if (!r) return;
     const openUp = r.bottom + 320 > window.innerHeight;
@@ -377,6 +333,7 @@ function StyledSelect({
     window.addEventListener('mousedown', off);
     window.addEventListener('keydown', onEsc);
 
+    // focus search after paint
     const id = requestAnimationFrame(()=>searchRef.current?.focus());
 
     return () => {
@@ -644,8 +601,6 @@ function RightDrawer({
 
 /* ───────────────── Page ───────────────── */
 export default function VoiceAgentSection() {
-  useSidebarSync(); // << keep the rail flush with your app sidebar
-
   const [activeId, setActiveId] = useState<string>(() => {
     try { return localStorage.getItem(ACTIVE_KEY) || ''; } catch { return ''; }
   });
@@ -762,15 +717,14 @@ export default function VoiceAgentSection() {
     <section className="va-scope" style={{ background:'var(--bg)', color:'var(--text)' }}>
       <Tokens />
 
-      {/* Fixed rail that tracks your app sidebar */}
-      <aside className="va-left-fixed">
-        <div className="rail-scroll">
+      {/* rail (260px) + centered content */}
+      <div className="grid w-full" style={{ gridTemplateColumns: '260px 1fr' }}>
+        {/* Rail */}
+        <div className="sticky top-0 h-screen" style={{ borderRight:'1px solid rgba(255,255,255,.06)' }}>
           <RailBoundary><AssistantRail /></RailBoundary>
         </div>
-      </aside>
 
-      {/* Page content pushed by (app sidebar + rail) — keeps your original center layout */}
-      <div className="va-page">
+        {/* Content — centered and wide */}
         <div className="va-main px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w-[1160px]"
              style={{ fontSize:'var(--fz-body)', lineHeight:'var(--lh-body)' }}>
 
