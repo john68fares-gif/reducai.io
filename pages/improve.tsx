@@ -331,6 +331,11 @@ export default function Improve() {
     try { localStorage.setItem(memoryKey(userId, selected.id), mem); } catch {}
   }
 
+  // Current composer attachments (pictures + videos + files)
+const currentAttachments = React.useCallback(() => {
+  return [...pics, ...vids, ...files];
+}, [pics, vids, files]);
+
 // --- Chat send (Support style) ---
 // Send a message to lane A or B (supporting attachments)
 const sendToLane = useCallback(
