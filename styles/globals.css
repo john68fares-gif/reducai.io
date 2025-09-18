@@ -177,7 +177,7 @@ a { color: inherit; text-decoration: none; }
 @keyframes shimmer { from { background-position: -200% 0; } to { background-position: 200% 0; } }
 
 /* =====================================================
-   OVERLAY
+   OVERLAY (generic)
    ===================================================== */
 .backdrop { background: rgba(0,0,0,.55); }
 
@@ -338,24 +338,29 @@ a { color: inherit; text-decoration: none; }
 }
 
 /* =====================================================
-   SOLID DROPDOWNS / POPOVERS (fix transparent menus)
+   SOLID DROPDOWNS / POPOVERS (match boxes exactly)
    ===================================================== */
-/* Your custom menu */
-.va-menu,
-.va-menu * {
-  background-color: var(--panel) !important;       /* same as the box */
+/* Your custom menu (used by the in-file StyledSelect) */
+.va-menu {
+  background-color: var(--card) !important;       /* EXACTLY like .card */
   color: var(--text) !important;
-  border-color: var(--border) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 16px !important;                 /* same radius as .card */
+  box-shadow: var(--shadow-card) !important;      /* same shadow as .card */
   opacity: 1 !important;
   mix-blend-mode: normal !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
   filter: none !important;
-  box-shadow: none !important;
-  isolation: isolate !important;                   /* Safari/WebKit quirk */
+  isolation: isolate !important;
+}
+.va-menu * {
+  background-color: transparent !important;
+  color: inherit !important;
+  border-color: inherit !important;
 }
 
-/* Generic popover/content wrappers used by Radix/shadcn/Headless UI/etc. */
+/* Generic popover/content wrappers (Radix/shadcn/Headless UI/etc.) */
 .DropdownMenuContent,
 .SelectContent,
 .PopoverContent,
@@ -366,17 +371,17 @@ a { color: inherit; text-decoration: none; }
 [data-radix-popper-content-wrapper],
 [data-radix-popper-content-wrapper] > *,
 [data-radix-popper-content-wrapper] > div {
-  background-color: var(--panel) !important;       /* SOLID */
+  background-color: var(--card) !important;       /* like .card */
   color: var(--text) !important;
   border: 1px solid var(--border) !important;
+  border-radius: 16px !important;
+  box-shadow: var(--shadow-card) !important;
   opacity: 1 !important;
   mix-blend-mode: normal !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
   filter: none !important;
-  box-shadow: none !important;
   isolation: isolate !important;
-  border-radius: 12px !important;
   z-index: 1000 !important;
 }
 
@@ -388,23 +393,51 @@ a { color: inherit; text-decoration: none; }
   opacity: 1 !important;
 }
 
-/* Items: keep hover solid (no rgba) */
+/* Items: solid hover (no transparent rgba wash) */
 [role="menuitem"],
 [role="option"],
 .MenuItem,
 .SelectItem,
 .DropdownMenuItem {
-  background: var(--panel) !important;
+  background: transparent !important;
   color: var(--text) !important;
-  border: 1px solid var(--panel) !important;
+  border: 1px solid transparent !important;
 }
-
 [role="menuitem"]:hover,
 [role="option"][data-highlighted],
 .MenuItem:hover,
 .SelectItem[data-highlighted],
 .DropdownMenuItem[data-highlighted],
 .DropdownMenuItem:hover {
-  background: color-mix(in oklab, var(--panel) 88%, white 12%) !important; /* solid shade */
+  background: color-mix(in oklab, var(--card) 88%, white 12%) !important;
   border-color: var(--border) !important;
 }
+
+/* =====================================================
+   “NORMAL” GENERATE OVERLAY + SHEET (matches boxes)
+   ===================================================== */
+.va-modal-wrap { position: fixed; inset: 0; z-index: 9998; }
+.va-modal-center { position: absolute; inset: 0; display: grid; place-items: center; padding: 20px; }
+
+/* Dim + soft blur overlay */
+.va-overlay {
+  position: fixed; inset: 0; z-index: 9996;
+  background: rgba(8, 10, 12, .55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  opacity: 0; pointer-events: none;
+  transition: opacity 200ms var(--ease);
+}
+.va-overlay.open { opacity: 1; pointer-events: auto; }
+
+/* Modal box — same surface as cards */
+.va-sheet {
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-card);
+  border-radius: 16px;
+}
+
+/* Optional: modal header/footer trims */
+.va-sheet .section-bar { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
