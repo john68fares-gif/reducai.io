@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { scopedStorage } from '@/utils/scoped-storage';
 
-/* ───────────────── Assistant rail (unchanged import) ───────────────── */
+/* ───────────────── Assistant rail (fixed) ───────────────── */
 const AssistantRail = dynamic(
   () =>
     import('@/components/voice/AssistantRail')
@@ -25,7 +25,7 @@ class RailBoundary extends React.Component<{children:React.ReactNode},{hasError:
   render(){ return this.state.hasError ? <div className="px-3 py-3 text-xs opacity-70">Rail crashed</div> : this.props.children; }
 }
 
-/* ───────────────── Theme tokens (SOLID menus & overlays) ───────────────── */
+/* ───────────────── Theme tokens (SOLID dropdowns) ───────────────── */
 const ACTIVE_KEY = 'va:activeId';
 const CTA        = '#59d9b3';
 const CTA_HOVER  = '#48c3a0';
@@ -33,40 +33,81 @@ const CTA_HOVER  = '#48c3a0';
 const Tokens = () => (
   <style jsx global>{`
     .va-scope{
-      --bg:#0b0c10; --panel:#0f1214; --card:#101314; --text:#e9f7f2; --text-muted:rgba(233,247,242,.70);
-      --border:rgba(255,255,255,.09); --ring:rgba(0,255,194,.12);
+      --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 20px; --s-6: 24px;
+      --radius-outer: 12px;
+      --radius-inner: 10px;
+      --control-h: 44px;
+      --header-h: 82px;
+      --fz-title: 18px; --fz-sub: 15px; --fz-body: 14px; --fz-label: 12.5px;
+      --lh-body: 1.45; --ease: cubic-bezier(.22,.61,.36,1);
 
-      /* inputs */
-      --input-bg: var(--card);             /* SOLID */
+      /* Dark theme hues */
+      --bg: #0b0e0f;
+      --panel: #101416;   /* page */
+      --card: #0f1516;    /* card */
+      --card-header: #121919;
+      --text: #ecf7f2;
+      --text-muted: rgba(236,247,242,.68);
+
+      --border: rgba(255,255,255,.09);
+      --ring: rgba(0,255,194,.12);
+
+      /* controls */
+      --input-bg: #111719;
       --input-border: rgba(255,255,255,.10);
       --input-shadow: 0 0 0 1px rgba(0,0,0,.38) inset;
 
-      /* dropdown/menu pane — SOLID */
-      --menu-bg: var(--panel);             /* SOLID surface */
+      /* menu / dropdown — **SOLID** */
+      --menu-bg: #101617; /* solid surface */
       --menu-border: rgba(255,255,255,.12);
       --menu-shadow: 0 36px 90px rgba(0,0,0,.55);
 
-      /* overlay behind panels (blur + dark, not transparent) */
-      --overlay-scrim: rgba(8,10,12,.88);  /* SOLID scrim */
-      --overlay-blur: blur(4px);
+      /* card shadows + subtle green bottom glow */
+      --card-shadow: 0 18px 38px rgba(0,0,0,.35);
+      --card-glow-bottom: 0 6px 0 -3px rgba(89,217,179,.22);
+
+      --band-core: #121919;
+      --band-side: #172222;
     }
 
     .va-main{ overflow: visible; position: relative; contain: none; }
 
     .va-card{
+      position: relative; overflow: hidden; isolation: isolate;
       border-radius: 10px;
       border: 1px solid var(--border);
       background: var(--card);
-      box-shadow: 0 18px 38px rgba(0,0,0,.35), 0 6px 0 -3px rgba(89,217,179,.18);
-      overflow: hidden; isolation: isolate;
+      box-shadow: var(--card-shadow), var(--card-glow-bottom);
     }
     .va-card .va-head{
-      min-height: 82px; display: grid; grid-template-columns: 1fr auto; align-items: center;
-      padding: 0 16px; background: linear-gradient(180deg,#121617,var(--card));
-      border-bottom: 1px solid rgba(255,255,255,.06); color: var(--text);
+      min-height: var(--header-h);
+      display: grid; grid-template-columns: 1fr auto; align-items: center;
+      padding: 0 16px;
+      background: linear-gradient(180deg, var(--card-header), var(--card));
+      border-bottom: 1px solid rgba(255,255,255,.06);
+      color: var(--text);
     }
 
-    /* dropdown menu pane — SOLID */
+    .va-card__band{
+      position:absolute; inset:0; z-index:0; pointer-events:none;
+      background:
+        linear-gradient(
+          90deg,
+          var(--band-side) 0%,
+          color-mix(in oklab, var(--band-side) 94%, white 6%) 8%,
+          color-mix(in oklab, var(--band-side) 92%, white 8%) 16%,
+          color-mix(in oklab, var(--band-side) 90%, white 10%) 24%,
+          var(--band-core) 50%,
+          color-mix(in oklab, var(--band-side) 90%, white 10%) 76%,
+          color-mix(in oklab, var(--band-side) 92%, white 8%) 84%,
+          color-mix(in oklab, var(--band-side) 94%, white 6%) 92%,
+          var(--band-side) 100%
+        );
+      opacity:.12;
+    }
+    .va-card > * { position: relative; z-index: 1; }
+
+    /* Dropdown / menus — **SOLID panes** */
     .va-portal{
       background: var(--menu-bg);
       border: 1px solid var(--menu-border);
@@ -74,19 +115,20 @@ const Tokens = () => (
       border-radius: 10px;
     }
 
-    /* page overlay (drawer / generate) — blur + solid scrim */
+    /* Overlay blur (drawer / modals) */
     .va-overlay {
       position: fixed; inset: 0; z-index: 9998;
-      background: var(--overlay-scrim);   /* SOLID */
-      backdrop-filter: var(--overlay-blur);
+      background: transparent;
+      backdrop-filter: blur(6px);
     }
     .va-sheet{
       background: var(--menu-bg);
       border: 1px solid var(--menu-border);
-      box-shadow: 0 28px 80px rgba(0,0,0,.65);
+      box-shadow: 0 28px 80px rgba(0,0,0,.55);
       border-radius: 12px;
     }
 
+    /* Inputs */
     .va-input{
       background: var(--input-bg);
       border: 1px solid var(--input-border);
@@ -98,59 +140,93 @@ const Tokens = () => (
 
 /* ───────────────── Types / storage ───────────────── */
 type ApiKey = { id: string; name: string; key: string };
+
 type AgentData = {
-  name: string; provider: 'openai' | 'anthropic' | 'google'; model: string;
-  firstMode: string; firstMsg: string; systemPrompt: string;
-  ttsProvider: 'openai' | 'elevenlabs'; voiceName: string; apiKeyId?: string;
-  asrProvider: 'deepgram' | 'whisper' | 'assemblyai'; asrModel: string;
+  name: string;
+  provider: 'openai' | 'anthropic' | 'google';
+  model: string;
+  firstMode: string;
+  firstMsg: string;
+  systemPrompt: string;
+
+  ttsProvider: 'openai' | 'elevenlabs';
+  voiceName: string;
+  apiKeyId?: string;
+
+  asrProvider: 'deepgram' | 'whisper' | 'assemblyai';
+  asrModel: string;
 };
 
 const DEFAULT_AGENT: AgentData = {
-  name: 'New Assistant', provider: 'openai', model: 'GPT-4o',
-  firstMode: 'Assistant speaks first', firstMsg: 'Hello.',
+  name: 'New Assistant',
+  provider: 'openai',
+  model: 'GPT-4o',
+  firstMode: 'Assistant speaks first',
+  firstMsg: 'Hello.',
   systemPrompt:
 `[Identity]
-You are a blank template AI assistant with minimal default settings.
+You are a blank template AI assistant with minimal default settings, designed to be easily customizable.
 
 [Style]
 - Neutral, concise, configurable.
+- Adjust tone and formality to instructions.
 
 [Response Guidelines]
 - Keep replies focused and clear.`,
-  ttsProvider: 'openai', voiceName: 'Alloy (American)', apiKeyId: '',
-  asrProvider: 'deepgram', asrModel: 'Nova 2',
+
+  ttsProvider: 'openai',
+  voiceName: 'Alloy (American)',
+  apiKeyId: '',
+  asrProvider: 'deepgram',
+  asrModel: 'Nova 2',
 };
 
 const keyFor = (id: string) => `va:agent:${id}`;
 const loadAgentData = (id: string): AgentData => {
-  try { const raw = localStorage.getItem(keyFor(id)); if (raw) return { ...DEFAULT_AGENT, ...(JSON.parse(raw)||{}) }; } catch {}
+  try { const raw = localStorage.getItem(keyFor(id)); if (raw) return { ...DEFAULT_AGENT, ...(JSON.parse(raw)||{}) }; }
+  catch {}
   return { ...DEFAULT_AGENT };
 };
-const saveAgentData = (id: string, data: AgentData) => { try { localStorage.setItem(keyFor(id), JSON.stringify(data)); } catch {} };
+const saveAgentData = (id: string, data: AgentData) => {
+  try { localStorage.setItem(keyFor(id), JSON.stringify(data)); } catch {}
+};
 
 /* ───────────────── Mock backend ───────────────── */
 async function apiSave(agentId: string, payload: AgentData){
-  const r = await fetch(`/api/voice/agent/${agentId}/save`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) }).catch(()=>null);
-  if (!r?.ok) throw new Error('Save failed'); return r.json();
+  const r = await fetch(`/api/voice/agent/${agentId}/save`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+  }).catch(()=>null);
+  if (!r?.ok) throw new Error('Save failed');
+  return r.json();
 }
 async function apiPublish(agentId: string){
-  const r = await fetch(`/api/voice/agent/${agentId}/publish`, { method:'POST' }).catch(()=>null);
-  if (!r?.ok) throw new Error('Publish failed'); return r.json();
+  const r = await fetch(`/api/voice/agent/${agentId}/publish`, { method: 'POST' }).catch(()=>null);
+  if (!r?.ok) throw new Error('Publish failed');
+  return r.json();
+}
+async function apiCallTest(agentId: string){
+  const r = await fetch(`/api/voice/agent/${agentId}/call-test`, { method: 'POST' }).catch(()=>null);
+  if (!r?.ok) throw new Error('Test call failed');
+  return r.json();
 }
 
 /* ───────────────── Options ───────────────── */
 type Opt = { value: string; label: string; disabled?: boolean; note?: string };
+
 const providerOpts: Opt[] = [
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'anthropic', label: 'Anthropic — coming soon', disabled: true, note: 'soon' },
-  { value: 'google', label: 'Google — coming soon', disabled: true, note: 'soon' },
+  { value: 'openai',     label: 'OpenAI' },
+  { value: 'anthropic',  label: 'Anthropic — coming soon', disabled: true, note: 'soon' },
+  { value: 'google',     label: 'Google — coming soon',    disabled: true, note: 'soon' },
 ];
+
 const modelOptsFor = (provider: string): Opt[] =>
-  provider === 'openai' ? [
-    { value: 'GPT-4o',  label: 'GPT-4o'  },
-    { value: 'GPT-4.1', label: 'GPT-4.1' },
-    { value: 'o4-mini', label: 'o4-mini' },
-  ] : [{ value: 'coming', label: 'Models coming soon', disabled: true }];
+  provider === 'openai'
+    ? [
+        { value: 'GPT-4o',  label: 'GPT-4o' },
+        { value: 'GPT-4.1', label: 'GPT-4.1' },
+        { value: 'o4-mini', label: 'o4-mini' },
+      ]
+    : [{ value: 'coming', label: 'Models coming soon', disabled: true }];
 
 const firstMessageModes: Opt[] = [
   { value: 'Assistant speaks first', label: 'Assistant speaks first' },
@@ -159,23 +235,38 @@ const firstMessageModes: Opt[] = [
 ];
 
 const ttsProviders: Opt[] = [
-  { value: 'openai', label: 'OpenAI' },
+  { value: 'openai',    label: 'OpenAI' },
   { value: 'elevenlabs', label: 'ElevenLabs — coming soon', disabled: true, note: 'soon' },
 ];
+
 const openAiVoices: Opt[] = [
-  { value: 'Alloy (American)',   label: 'Alloy (American)' },
-  { value: 'Verse (American)',   label: 'Verse (American)' },
-  { value: 'Coral (British)',    label: 'Coral (British)' },
-  { value: 'Amber (Australian)', label: 'Amber (Australian)' },
+  { value: 'Alloy (American)',     label: 'Alloy (American)' },
+  { value: 'Verse (American)',     label: 'Verse (American)' },
+  { value: 'Coral (British)',      label: 'Coral (British)' },
+  { value: 'Amber (Australian)',   label: 'Amber (Australian)' },
 ];
+
 const asrProviders: Opt[] = [
-  { value: 'deepgram', label: 'Deepgram' },
-  { value: 'whisper', label: 'Whisper — coming soon', disabled: true, note: 'soon' },
+  { value: 'deepgram',   label: 'Deepgram' },
+  { value: 'whisper',    label: 'Whisper — coming soon', disabled: true, note: 'soon' },
   { value: 'assemblyai', label: 'AssemblyAI — coming soon', disabled: true, note: 'soon' },
 ];
+
 const asrModelsFor = (asr: string): Opt[] =>
-  asr === 'deepgram' ? [{ value: 'Nova 2', label: 'Nova 2' },{ value: 'Nova', label: 'Nova' }] :
-  [{ value: 'coming', label: 'Models coming soon', disabled: true }];
+  asr === 'deepgram'
+    ? [
+        { value: 'Nova 2', label: 'Nova 2' },
+        { value: 'Nova',   label: 'Nova' },
+      ]
+    : [{ value: 'coming', label: 'Models coming soon', disabled: true }];
+
+/* Demo voice previews */
+const VOICE_SAMPLES: Record<string,string> = {
+  'Alloy (American)': '/voices/alloy.mp3',
+  'Verse (American)': '/voices/verse.mp3',
+  'Coral (British)': '/voices/coral.mp3',
+  'Amber (Australian)': '/voices/amber.mp3',
+};
 
 /* ───────────────── UI atoms ───────────────── */
 const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}) => (
@@ -183,9 +274,9 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
     onClick={()=>onChange(!checked)}
     className="inline-flex items-center"
     style={{
-      height:28, width:50, padding:'0 6px', borderRadius:999, justifyContent:'flex-start',
+      height: 28, width: 50, padding: '0 6px', borderRadius: 999, justifyContent: 'flex-start',
       background: checked ? 'color-mix(in oklab, #59d9b3 20%, var(--input-bg))' : 'var(--input-bg)',
-      border:'1px solid var(--input-border)'
+      border: '1px solid var(--input-border)'
     }}
     aria-pressed={checked}
   >
@@ -193,13 +284,13 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
       style={{
         width:18, height:18, borderRadius:999,
         background: checked ? CTA : 'rgba(255,255,255,.18)',
-        transform:`translateX(${checked?22:0}px)`, transition:'transform .18s cubic-bezier(.22,.61,.36,1)'
+        transform:`translateX(${checked?22:0}px)`, transition:'transform .18s var(--ease)'
       }}
     />
   </button>
 );
 
-/* SOLID select (menu & search row) */
+/* Solid select with inline search + (optional) right addon */
 function StyledSelect({
   value, onChange, options, placeholder, leftIcon, rightAddon
 }:{
@@ -264,7 +355,7 @@ function StyledSelect({
         ? createPortal(
             <div
               ref={portalRef}
-              className="va-portal fixed z-[99999] p-3"   /* SOLID pane */
+              className="va-portal fixed z-[99999] p-3"
               style={{
                 top: rect.openUp ? rect.top - 8 : rect.top + 8,
                 left: rect.left,
@@ -275,7 +366,11 @@ function StyledSelect({
               {/* SOLID search row */}
               <div
                 className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[10px]"
-                style={{ background:'var(--menu-bg)', border:'1px solid var(--menu-border)', color:'var(--text)' }}
+                style={{
+                  background:'var(--menu-bg)',           // solid
+                  border:'1px solid var(--menu-border)',
+                  color:'var(--text)'
+                }}
               >
                 <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
                 <input
@@ -295,11 +390,21 @@ function StyledSelect({
                     disabled={o.disabled}
                     onClick={()=>{ if (o.disabled) return; onChange(o.value); setOpen(false); }}
                     className="w-full text-left text-sm px-3 py-2 rounded-[8px] transition flex items-center gap-2 disabled:opacity-60"
-                    style={{ color:'var(--text)', background:'transparent', border:'1px solid transparent', cursor:o.disabled?'not-allowed':'pointer' }}
-                    onMouseEnter={(e)=>{ if (o.disabled) return; const el=e.currentTarget as HTMLButtonElement; el.style.background='rgba(0,255,194,0.10)'; el.style.border='1px solid rgba(0,255,194,.28)'; }}
-                    onMouseLeave={(e)=>{ const el=e.currentTarget as HTMLButtonElement; el.style.background='transparent'; el.style.border='1px solid transparent'; }}
+                    style={{
+                      color:'var(--text)',
+                      background:'transparent',
+                      border:'1px solid transparent',
+                      cursor:o.disabled?'not-allowed':'pointer'
+                    }}
+                    onMouseEnter={(e)=>{ if (o.disabled) return; const el=e.currentTarget as HTMLButtonElement;
+                      el.style.background='rgba(16,22,23,1)';           // solid hover (menu-bg tone)
+                      el.style.border='1px solid var(--menu-border)'; }}
+                    onMouseLeave={(e)=>{ const el=e.currentTarget as HTMLButtonElement;
+                      el.style.background='transparent';
+                      el.style.border='1px solid transparent'; }}
                   >
-                    {o.disabled ? <Lock className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" style={{ opacity: o.value===value ? 1 : 0 }} />}
+                    {o.disabled ? <Lock className="w-3.5 h-3.5" /> :
+                      <Check className="w-3.5 h-3.5" style={{ opacity: o.value===value ? 1 : 0 }} />}
                     <span className="flex-1 truncate">{o.label}</span>
                     {o.note ? <span className="text-[11px]" style={{ color:'var(--text-muted)' }}>{o.note}</span> : null}
                   </button>
@@ -316,10 +421,14 @@ function StyledSelect({
   );
 }
 
-/* ───────────────── Generate overlay (SOLID) ───────────────── */
+/* ───────────────── Generate overlay (solid) ───────────────── */
 function GenerateOverlay({
   onClose, seedPrompt, onAccept
-}:{ onClose: ()=>void; seedPrompt: string; onAccept: (finalText: string) => void; }) {
+}:{
+  onClose: ()=>void;
+  seedPrompt: string;
+  onAccept: (finalText: string) => void;
+}) {
   const [note, setNote] = useState('');
   const [phase, setPhase] = useState<'idle'|'loading'|'diff'>('idle');
   const [diffNodes, setDiffNodes] = useState<React.ReactNode>(null);
@@ -340,8 +449,9 @@ function GenerateOverlay({
     for (let i=0;i<max;i++){
       const a = oldWords[i] ?? '';
       const b = newWords[i] ?? '';
-      if (a === b) out.push(<span key={i}>{b}</span>);
-      else {
+      if (a === b){
+        out.push(<span key={i}>{b}</span>);
+      } else {
         if (a && !b) out.push(<del key={`r${i}`} style={{ background:'rgba(255,99,71,.22)', color:'#ffb3a5', textDecorationColor:'#ffb3a5' }}>{a}</del>);
         if (b && a !== b) out.push(<mark key={`a${i}`} style={{ background:'rgba(89,217,179,.22)', color:'#aef0de' }}>{b}</mark>);
       }
@@ -350,9 +460,12 @@ function GenerateOverlay({
   }
 
   const handleGenerate = async () => {
-    setPhase('loading'); await new Promise(r=>setTimeout(r, 900));
+    setPhase('loading');
+    await new Promise(r=>setTimeout(r, 900));
     const candidate = fauxRewrite(seedPrompt, note);
-    setNextText(candidate); setDiffNodes(buildDiff(seedPrompt, candidate)); setPhase('diff');
+    setNextText(candidate);
+    setDiffNodes(buildDiff(seedPrompt, candidate));
+    setPhase('diff');
   };
 
   const body = (
@@ -365,8 +478,15 @@ function GenerateOverlay({
       </div>
 
       <div className="grid gap-3">
-        <input className="w-full rounded-[10px] px-3 py-2 va-input" placeholder="Add follow-ups or refinements…" value={note} onChange={(e)=>setNote(e.target.value)} />
-        <div className="text-xs" style={{ color:'var(--text-muted)' }}>We’ll blend this into the current prompt and show you a diff before applying.</div>
+        <input
+          placeholder="Add follow-ups or refinements…"
+          className="w-full rounded-[10px] px-3 py-2 va-input"
+          value={note}
+          onChange={(e)=>setNote(e.target.value)}
+        />
+        <div className="text-xs" style={{ color:'var(--text-muted)' }}>
+          We’ll blend this into the current prompt and show you a diff before applying.
+        </div>
 
         <div className="mt-3">
           <button
@@ -392,8 +512,20 @@ function GenerateOverlay({
               <div className="text-[13px]" style={{ lineHeight: '1.55' }}>{diffNodes}</div>
 
               <div className="mt-4 flex items-center gap-2">
-                <button onClick={()=>onAccept(nextText)} className="h-9 px-4 rounded-[10px] font-semibold" style={{ background:CTA, color:'#fff' }}>Accept Changes</button>
-                <button onClick={onClose} className="h-9 px-3 rounded-[10px]" style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}>Discard Changes</button>
+                <button
+                  onClick={()=>onAccept(nextText)}
+                  className="h-9 px-4 rounded-[10px] font-semibold"
+                  style={{ background:CTA, color:'#fff' }}
+                >
+                  Accept Changes
+                </button>
+                <button
+                  onClick={onClose}
+                  className="h-9 px-3 rounded-[10px]"
+                  style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+                >
+                  Discard Changes
+                </button>
               </div>
             </motion.div>
           )}
@@ -404,8 +536,11 @@ function GenerateOverlay({
 
   return createPortal(
     <>
-      <div className="va-overlay" />  {/* SOLID blurred backdrop */}
-      <motion.div initial={{ scale: .98, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="fixed inset-0 z-[9999] grid place-items-center px-4">
+      <div className="va-overlay" />
+      <motion.div
+        initial={{ scale: .98, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+        className="fixed inset-0 z-[9999] grid place-items-center px-4"
+      >
         {body}
       </motion.div>
     </>,
@@ -413,15 +548,19 @@ function GenerateOverlay({
   );
 }
 
-/* ───────────────── Right drawer (chat) — SOLID overlay ───────────────── */
-function RightDrawer({ open, onClose, agentName }:{ open:boolean; onClose:()=>void; agentName:string }) {
+/* ───────────────── Right drawer (chat) ───────────────── */
+function RightDrawer({
+  open, onClose, agentName
+}:{ open:boolean; onClose:()=>void; agentName:string }) {
   return createPortal(
     <AnimatePresence>
       {open && (
         <>
           <div className="va-overlay" onClick={onClose} />
           <motion.aside
-            initial={{ x: 420, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: 420, opacity: 0 }}
+            initial={{ x: 420, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: 420, opacity: 0 }}
             transition={{ type: 'spring', stiffness: 420, damping: 38 }}
             className="fixed top-0 right-0 h-full w-[420px] z-[10000] va-sheet"
             style={{ display:'grid', gridTemplateRows:'auto 1fr auto' }}
@@ -461,7 +600,9 @@ function RightDrawer({ open, onClose, agentName }:{ open:boolean; onClose:()=>vo
 
 /* ───────────────── Page ───────────────── */
 export default function VoiceAgentSection() {
-  const [activeId, setActiveId] = useState<string>(() => { try { return localStorage.getItem(ACTIVE_KEY) || ''; } catch { return ''; } });
+  const [activeId, setActiveId] = useState<string>(() => {
+    try { return localStorage.getItem(ACTIVE_KEY) || ''; } catch { return ''; }
+  });
   const [data, setData] = useState<AgentData>(() => (activeId ? loadAgentData(activeId) : DEFAULT_AGENT));
 
   const [saving, setSaving] = useState(false);
@@ -472,74 +613,139 @@ export default function VoiceAgentSection() {
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
-  /* events */
+  const typeIntoPrompt = (finalText: string) => {
+    const step = 2;
+    let i = 0;
+    const id = setInterval(() => {
+      setData(prev => ({ ...prev, systemPrompt: finalText.slice(0, i) }));
+      i += step;
+      if (i >= finalText.length){ setData(prev => ({ ...prev, systemPrompt: finalText })); clearInterval(id); }
+    }, 8);
+  };
+
+  const audioRef = useRef<HTMLAudioElement|null>(null);
+  const [playing, setPlaying] = useState(false);
+  const togglePreview = () => {
+    const src = VOICE_SAMPLES[data.voiceName];
+    if (!src) return;
+    if (!audioRef.current){ audioRef.current = new Audio(src); }
+    else { audioRef.current.src = src; }
+    if (!playing){ setPlaying(true); audioRef.current.play().catch(()=>setPlaying(false)); }
+    else { audioRef.current.pause(); audioRef.current.currentTime = 0; setPlaying(false); }
+    audioRef.current.onended = () => setPlaying(false);
+  };
+
   useEffect(() => {
     const handler = (e: Event) => setActiveId((e as CustomEvent<string>).detail);
     window.addEventListener('assistant:active', handler as EventListener);
     return () => window.removeEventListener('assistant:active', handler as EventListener);
   }, []);
-  useEffect(() => { if (activeId) { setData(loadAgentData(activeId)); try { localStorage.setItem(ACTIVE_KEY, activeId); } catch {} } }, [activeId]);
+
+  useEffect(() => {
+    if (!activeId) return;
+    setData(loadAgentData(activeId));
+    try { localStorage.setItem(ACTIVE_KEY, activeId); } catch {}
+  }, [activeId]);
+
   useEffect(() => { if (activeId) saveAgentData(activeId, data); }, [activeId, data]);
 
-  // bootstrap keys (unchanged)
-  useEffect(() => { (async () => {
-    try {
-      const store = await scopedStorage(); await store.ensureOwnerGuard();
-      const v1 = await store.getJSON<ApiKey[]>('apiKeys.v1', []); const legacy = await store.getJSON<ApiKey[]>('apiKeys', []);
-      const merged = Array.isArray(v1) && v1.length ? v1 : Array.isArray(legacy) ? legacy : [];
-      const cleaned = merged.filter(Boolean).map((k: any) => ({ id: String(k?.id||''), name: String(k?.name||''), key: String(k?.key||'') }))
-                            .filter((k) => k.id && k.name);
-      setApiKeys(cleaned);
-      const globalSelected = await store.getJSON<string>('apiKeys.selectedId', '');
-      const chosen =
-        (data.apiKeyId && cleaned.some(k => k.id === data.apiKeyId)) ? data.apiKeyId! :
-        (globalSelected && cleaned.some(k => k.id === globalSelected)) ? globalSelected :
-        (cleaned[0]?.id || '');
-      if (chosen && chosen !== data.apiKeyId) { setData(prev => ({ ...prev, apiKeyId: chosen })); await store.setJSON('apiKeys.selectedId', chosen); }
-    } catch {}
-  })(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => {
+    (async () => {
+      try {
+        const store = await scopedStorage();
+        await store.ensureOwnerGuard();
 
-  const set = <K extends keyof AgentData>(k: K) => (v: AgentData[K]) => setData(prev => ({ ...prev, [k]: v }));
+        const v1 = await store.getJSON<ApiKey[]>('apiKeys.v1', []);
+        const legacy = await store.getJSON<ApiKey[]>('apiKeys', []);
+        const merged = Array.isArray(v1) && v1.length ? v1 : Array.isArray(legacy) ? legacy : [];
+        const cleaned = merged
+          .filter(Boolean)
+          .map((k: any) => ({ id: String(k?.id || ''), name: String(k?.name || ''), key: String(k?.key || '') }))
+          .filter((k) => k.id && k.name);
+
+        setApiKeys(cleaned);
+
+        const globalSelected = await store.getJSON<string>('apiKeys.selectedId', '');
+        const chosen =
+          (data.apiKeyId && cleaned.some((k) => k.id === data.apiKeyId)) ? data.apiKeyId! :
+          (globalSelected && cleaned.some((k) => k.id === globalSelected)) ? globalSelected :
+          (cleaned[0]?.id || '');
+
+        if (chosen && chosen !== data.apiKeyId) {
+          setData(prev => ({ ...prev, apiKeyId: chosen }));
+          await store.setJSON('apiKeys.selectedId', chosen);
+        }
+      } catch {}
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const set = <K extends keyof AgentData>(k: K) => (v: AgentData[K]) =>
+    setData(prev => ({ ...prev, [k]: v }));
+
   const modelOpts = useMemo(()=>modelOptsFor(data.provider), [data.provider]);
-  const asrModelOpts = useMemo(()=>asrModelsFor(data.asrProvider), [data.asrProvider]);
 
-  async function doSave(){ if (!activeId) return setToast('Select or create an agent');
-    setSaving(true); setToast(''); try { await apiSave(activeId, data); setToast('Saved'); } catch { setToast('Save failed'); }
-    finally { setSaving(false); setTimeout(()=>setToast(''), 1400); } }
-  async function doPublish(){ if (!activeId) return setToast('Select or create an agent');
-    setPublishing(true); setToast(''); try { await apiPublish(activeId); setToast('Published'); } catch { setToast('Publish failed'); }
-    finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); } }
-  async function doCallTest(){ if (!activeId) return setToast('Select or create an agent');
-    setCalling(true); setToast(''); try { /* your call */ setToast('Calling…'); setDrawerOpen(true); } catch { setToast('Test call failed'); }
-    finally { setCalling(false); setTimeout(()=>setToast(''), 1800); } }
+  async function doSave(){
+    if (!activeId) { setToast('Select or create an agent'); return; }
+    setSaving(true); setToast('');
+    try { await apiSave(activeId, data); setToast('Saved'); }
+    catch { setToast('Save failed'); }
+    finally { setSaving(false); setTimeout(()=>setToast(''), 1400); }
+  }
+  async function doPublish(){
+    if (!activeId) { setToast('Select or create an agent'); return; }
+    setPublishing(true); setToast('');
+    try { await apiPublish(activeId); setToast('Published'); }
+    catch { setToast('Publish failed'); }
+    finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
+  }
+  async function doCallTest(){
+    if (!activeId) { setToast('Select or create an agent'); return; }
+    setCalling(true); setToast('');
+    try { await apiCallTest(activeId); setToast('Calling…'); setDrawerOpen(true); }
+    catch { setToast('Test call failed'); }
+    finally { setCalling(false); setTimeout(()=>setToast(''), 1800); }
+  }
 
   return (
     <section className="va-scope" style={{ background:'var(--bg)', color:'var(--text)' }}>
       <Tokens />
 
       <div className="grid w-full" style={{ gridTemplateColumns: '260px 1fr' }}>
-        {/* left rail */}
+        {/* Fixed rail */}
         <div className="sticky top-0 h-screen" style={{ borderRight:'1px solid rgba(255,255,255,.06)' }}>
           <RailBoundary><AssistantRail /></RailBoundary>
         </div>
 
-        {/* content */}
-        <div className="va-main px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w-[1160px]">
-          {/* actions */}
-          <div className="mb-4 flex flex-wrap items-center justify-end gap-3">
-            <button onClick={doSave} disabled={saving}
-              className="inline-flex items-center gap-2 rounded-[10px] px-4 text-sm disabled:opacity-60"
-              style={{ height:44, background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}>
+        {/* Content */}
+        <div className="va-main px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w-[1160px]"
+             style={{ fontSize:'var(--fz-body)', lineHeight:'var(--lh-body)' }}>
+
+          {/* Actions */}
+          <div className="mb-[var(--s-4)] flex flex-wrap items-center justify-end gap-[var(--s-3)]">
+            <button
+              onClick={doSave}
+              disabled={saving}
+              className="inline-flex items-center gap-2 rounded-[10px] px-4 text-sm transition hover:-translate-y-[1px] disabled:opacity-60"
+              style={{ height:'var(--control-h)', background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+            >
               {saving ? 'Saving…' : 'Save'}
             </button>
-            <button onClick={doPublish} disabled={publishing}
-              className="inline-flex items-center gap-2 rounded-[10px] px-4 text-sm disabled:opacity-60"
-              style={{ height:44, background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}>
+
+            <button
+              onClick={doPublish}
+              disabled={publishing}
+              className="inline-flex items-center gap-2 rounded-[10px] px-4 text-sm transition hover:-translate-y-[1px] disabled:opacity-60"
+              style={{ height:'var(--control-h)', background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+            >
               <Rocket className="w-4 h-4" /> {publishing ? 'Publishing…' : 'Publish'}
             </button>
-            <button onClick={doCallTest} disabled={calling}
+
+            <button
+              onClick={doCallTest}
+              disabled={calling}
               className="inline-flex items-center gap-2 rounded-[10px] font-semibold select-none disabled:opacity-60"
-              style={{ height:44, padding:'0 18px', background:CTA, color:'#fff', boxShadow:'0 10px 22px rgba(89,217,179,.22)' }}
+              style={{ height:'var(--control-h)', padding:'0 18px', background:CTA, color:'#fff', boxShadow:'0 10px 22px rgba(89,217,179,.22)' }}
               onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA_HOVER)}
               onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA)}
             >
@@ -547,69 +753,106 @@ export default function VoiceAgentSection() {
             </button>
           </div>
 
-          {toast && (
-            <div className="mb-4 inline-flex items-center gap-2 px-3 py-1.5 rounded-[10px]"
+          {toast ? (
+            <div className="mb-[var(--s-4)] inline-flex items-center gap-2 px-3 py-1.5 rounded-[10px]"
                  style={{ background:'rgba(89,217,179,.14)', color:'var(--text)', boxShadow:'0 0 0 1px rgba(89,217,179,.22) inset' }}>
               <Check className="w-4 h-4" /> {toast}
             </div>
-          )}
+          ) : null}
 
           {/* KPIs */}
-          <div className="grid gap-3 md:grid-cols-2 mb-3">
-            <div className="va-card p-4"><div className="text-xs mb-1" style={{ color:'var(--text-muted)' }}>Cost</div><div className="font-semibold">~$0.1/min</div></div>
-            <div className="va-card p-4"><div className="text-xs mb-1" style={{ color:'var(--text-muted)' }}>Latency</div><div className="font-semibold">~1050 ms</div></div>
+          <div className="grid gap-[12px] md:grid-cols-2 mb-[12px]">
+            <div className="va-card p-[var(--s-4)]">
+              <div className="va-card__band" />
+              <div className="text-xs mb-[6px]" style={{ color:'var(--text-muted)' }}>Cost</div>
+              <div className="font-semibold" style={{ fontSize:'var(--fz-sub)', color:'var(--text)' }}>~$0.1/min</div>
+            </div>
+            <div className="va-card p-[var(--s-4)]">
+              <div className="va-card__band" />
+              <div className="text-xs mb-[6px]" style={{ color:'var(--text-muted)' }}>Latency</div>
+              <div className="font-semibold" style={{ fontSize:'var(--fz-sub)', color:'var(--text)' }}>~1050 ms</div>
+            </div>
           </div>
 
-          {/* Model */}
-          <Section title="Model" icon={<Gauge className="w-4 h-4" style={{ color: CTA }} />} desc="Configure the assistant’s name, reasoning model, and first message." defaultOpen>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {/* Sections */}
+          <Section
+            title="Model"
+            icon={<Gauge className="w-4 h-4" style={{ color: CTA }} />}
+            desc="Configure the assistant’s name, reasoning model, and first message."
+            defaultOpen={true}
+          >
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px]">
               <div>
-                <div className="mb-2 text-[12.5px]">Name</div>
-                <input className="w-full rounded-[10px] px-3 va-input" style={{ height:44 }}
-                       value={data.name} onChange={(e)=>set('name')(e.target.value)} />
+                <div className="mb-[var(--s-2)] text-[12.5px]">Name</div>
+                <input
+                  className="w-full rounded-[10px] px-3 va-input"
+                  style={{ height:'var(--control-h)' }}
+                  value={data.name}
+                  onChange={(e)=>set('name')(e.target.value)}
+                />
               </div>
+
               <div>
-                <div className="mb-2 text-[12.5px]">Provider</div>
+                <div className="mb-[var(--s-2)] text-[12.5px]">Provider</div>
                 <StyledSelect value={data.provider} onChange={(v)=>set('provider')(v as AgentData['provider'])} options={providerOpts}/>
               </div>
+
               <div>
-                <div className="mb-2 text-[12.5px]">Model</div>
+                <div className="mb-[var(--s-2)] text-[12.5px]">Model</div>
                 <StyledSelect value={data.model} onChange={set('model')} options={modelOpts}/>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt-[var(--s-4)]">
               <div>
-                <div className="mb-2 text-[12.5px]">First Message Mode</div>
+                <div className="mb-[var(--s-2)] text-[12.5px]">First Message Mode</div>
                 <StyledSelect value={data.firstMode} onChange={set('firstMode')} options={firstMessageModes}/>
               </div>
               <div>
-                <div className="mb-2 text-[12.5px]">First Message</div>
-                <input className="w-full rounded-[10px] px-3 va-input" style={{ height:44 }}
-                       value={data.firstMsg} onChange={(e)=>set('firstMsg')(e.target.value)} />
+                <div className="mb-[var(--s-2)] text-[12.5px]">First Message</div>
+                <input
+                  className="w-full rounded-[10px] px-3 va-input"
+                  style={{ height:'var(--control-h)' }}
+                  value={data.firstMsg}
+                  onChange={(e)=>set('firstMsg')(e.target.value)}
+                />
               </div>
             </div>
 
-            <div className="mt-4">
-              <div className="flex items-center justify-between mb-2">
-                <div className="font-medium text-[12.5px]">System Prompt</div>
-                <button className="inline-flex items-center gap-2 rounded-[10px] text-sm"
-                        style={{ height:36, padding:'0 12px', background:CTA, color:'#fff' }}
-                        onClick={()=>setShowGenerate(true)}>
+            <div className="mt-[var(--s-4)]">
+              <div className="flex items-center justify-between mb-[var(--s-2)]">
+                <div className="font-medium" style={{ fontSize:'var(--fz-label)' }}>System Prompt</div>
+                <button
+                  className="inline-flex items-center gap-2 rounded-[10px] text-sm"
+                  style={{ height:36, padding:'0 12px', background:CTA, color:'#fff' }}
+                  onClick={()=>setShowGenerate(true)}
+                >
                   <Wand2 className="w-4 h-4" /> Generate
                 </button>
               </div>
-              <textarea className="w-full rounded-[10px] px-3 py-2 va-input"
-                        style={{ minHeight:220 }} value={data.systemPrompt}
-                        onChange={(e)=>set('systemPrompt')(e.target.value)} />
+              <textarea
+                className="w-full rounded-[10px] px-3 py-[10px] va-input"
+                style={{ minHeight:220, lineHeight:'var(--lh-body)', fontSize:'var(--fz-body)' }}
+                value={data.systemPrompt}
+                onChange={(e)=>set('systemPrompt')(e.target.value)}
+              />
+              <div className="text-xs mt-1" style={{ color:'var(--text-muted)' }}>
+                Generated changes will highlight in green/red here first, then “Accept Changes” types them in.
+              </div>
             </div>
           </Section>
 
-          {/* Voice */}
-          <Section title="Voice" icon={<Volume2 className="w-4 h-4" style={{ color: CTA }} />} desc="Choose the TTS provider, preview a voice, and set your key." defaultOpen>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <Section
+            title="Voice"
+            icon={<Volume2 className="w-4 h-4" style={{ color: CTA }} />}
+            desc="Choose the TTS provider, preview a voice, and set your key."
+            defaultOpen={true}
+          >
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px]">
               <div>
-                <div className="mb-2 text-[12.5px] flex items-center gap-2"><KeyRound className="w-4 h-4 opacity-80" /> OpenAI API Key</div>
+                <div className="mb-[var(--s-2)] text-[12.5px] flex items-center gap-2">
+                  <KeyRound className="w-4 h-4 opacity-80" /> OpenAI API Key
+                </div>
                 <StyledSelect
                   value={data.apiKeyId || ''}
                   onChange={async (val)=>{
@@ -623,46 +866,59 @@ export default function VoiceAgentSection() {
                   leftIcon={<KeyRound className="w-4 h-4" style={{ color: CTA }} />}
                 />
               </div>
+
               <div>
-                <div className="mb-2 text-[12.5px]">Voice Provider</div>
-                <StyledSelect value={data.ttsProvider} onChange={(v)=>set('ttsProvider')(v as AgentData['ttsProvider'])} options={ttsProviders}/>
+                <div className="mb-[var(--s-2)] text-[12.5px]">Voice Provider</div>
+                <StyledSelect
+                  value={data.ttsProvider}
+                  onChange={(v)=>set('ttsProvider')(v as AgentData['ttsProvider'])}
+                  options={ttsProviders}
+                />
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt-[var(--s-4)]">
               <div>
-                <div className="mb-2 text-[12.5px]">Voice</div>
+                <div className="mb-[var(--s-2)] text-[12.5px]">Voice</div>
                 <StyledSelect
                   value={data.voiceName}
                   onChange={set('voiceName')}
                   options={openAiVoices}
                   placeholder="— Choose —"
                   rightAddon={
-                    <button
-                      onClick={(e)=>{ e.stopPropagation(); /* hook up your audio preview here */ }}
-                      className="p-1.5 rounded hover:opacity-90"
-                      aria-label="Preview voice"
-                      style={{ background:'color-mix(in oklab, var(--text) 4%, transparent)' }}
-                    >
-                      <Play className="w-3.5 h-3.5" />
-                    </button>
+                    VOICE_SAMPLES[data.voiceName] ? (
+                      <button
+                        onClick={(e)=>{ e.stopPropagation(); togglePreview(); }}
+                        className="p-1.5 rounded hover:opacity-90"
+                        aria-label="Preview voice"
+                        style={{ background:'color-mix(in oklab, var(--text) 4%, transparent)' }}
+                      >
+                        {playing ? <Pause className="w-3.5 h-3.5"/> : <Play className="w-3.5 h-3.5" />}
+                      </button>
+                    ) : null
                   }
                 />
               </div>
               <div>
-                <div className="mb-2 text-[12.5px]">ASR Provider</div>
+                <div className="mb-[var(--s-2)] text-[12.5px]">ASR Provider</div>
                 <StyledSelect value={data.asrProvider} onChange={(v)=>set('asrProvider')(v as AgentData['asrProvider'])} options={asrProviders}/>
               </div>
+
               <div>
-                <div className="mb-2 text-[12.5px]">ASR Model</div>
-                <StyledSelect value={data.asrModel} onChange={set('asrModel')} options={asrModelOpts}/>
+                <div className="mb-[var(--s-2)] text-[12.5px]">ASR Model</div>
+                <StyledSelect value={data.asrModel} onChange={set('asrModel')} options={asrModelsFor(data.asrProvider)}/>
               </div>
             </div>
           </Section>
 
-          <Section title="Transcriber" icon={<Mic className="w-4 h-4" style={{ color: CTA }} />} desc="Minimal, like your screenshot." defaultOpen>
+          <Section
+            title="Transcriber"
+            icon={<Mic className="w-4 h-4" style={{ color: CTA }} />}
+            desc="Minimal, like your screenshot."
+            defaultOpen={true}
+          >
             <div className="text-sm" style={{ color:'var(--text-muted)' }}>
-              Provider and model are set above.
+              Provider and model are set above. We’ve removed the language/dialect slider clutter.
             </div>
           </Section>
         </div>
@@ -671,34 +927,44 @@ export default function VoiceAgentSection() {
       {/* Right drawer */}
       <RightDrawer open={drawerOpen} onClose={()=>setDrawerOpen(false)} agentName={data.name} />
 
-      {/* Generate (SOLID overlay) */}
+      {/* Generate */}
       {showGenerate && (
         <GenerateOverlay
           seedPrompt={data.systemPrompt}
           onClose={()=>setShowGenerate(false)}
-          onAccept={(finalText)=>{ setShowGenerate(false); set('systemPrompt')(finalText); }}
+          onAccept={(finalText)=>{
+            setShowGenerate(false);
+            typeIntoPrompt(finalText);
+          }}
         />
       )}
     </section>
   );
 }
 
-/* Collapsible section */
+/* ───────────────── Collapsible section ───────────────── */
 function Section({
   title, icon, desc, children, defaultOpen = true
-}:{ title: string; icon: React.ReactNode; desc?: string; children: React.ReactNode; defaultOpen?: boolean; }) {
+}:{
+  title: string; icon: React.ReactNode; desc?: string; children: React.ReactNode; defaultOpen?: boolean;
+}) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="mb-3">
-      <div className="mb-1 text-sm font-medium" style={{ color:'var(--text-muted)' }}>{title}</div>
+    <div className="mb-[12px]">
+      <div className="mb-[6px] text-sm font-medium" style={{ color:'var(--text-muted)' }}>
+        {title}
+      </div>
+
       <div className="va-card">
+        <div className="va-card__band" />
         <button onClick={()=>setOpen(v=>!v)} className="va-head w-full text-left">
           <span className="min-w-0 flex items-center gap-3">
-            <span className="inline-grid place-items-center w-7 h-7 rounded-full" style={{ background:'rgba(89,217,179,.12)' }}>
+            <span className="inline-grid place-items-center w-7 h-7 rounded-full"
+                  style={{ background:'rgba(89,217,179,.12)' }}>
               {icon}
             </span>
             <span className="min-w-0">
-              <span className="block font-semibold truncate" style={{ fontSize:18 }}>{title}</span>
+              <span className="block font-semibold truncate" style={{ fontSize:'var(--fz-title)' }}>{title}</span>
               {desc ? <span className="block text-xs truncate" style={{ color:'var(--text-muted)' }}>{desc}</span> : null}
             </span>
           </span>
@@ -710,9 +976,17 @@ function Section({
 
         <AnimatePresence initial={false}>
           {open && (
-            <motion.div key="body" initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }} transition={{ duration: .22, ease: 'easeInOut' }} style={{ overflow:'hidden' }}>
-              <div className="p-5">{children}</div>
+            <motion.div
+              key="body"
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: .22, ease: 'easeInOut' }}
+              style={{ overflow:'hidden' }}
+            >
+              <div className="p-[var(--s-5)]">
+                {children}
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
