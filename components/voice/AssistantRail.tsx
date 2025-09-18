@@ -43,35 +43,20 @@ function writeActive(id:string){
   try { window.dispatchEvent(new CustomEvent('assistant:active', { detail: id })); } catch {}
 }
 
-/* ---------- Modal shells (PORTALED, high z-index, card styling) ---------- */
-function ModalShell({ children }:{ children:React.ReactNode }) {
+/* ---------- Modal shells (PORTALED + same style as VoiceAgentSection) ---------- */
+/* Matches your .va-modal-wrap/.va-blur-overlay/.va-modal-center/.va-sheet structure and look */
+function RailModal({ children, onClose }:{ children:React.ReactNode; onClose:()=>void }) {
   if (typeof document === 'undefined') return null;
   return createPortal(
-    <>
-      {/* overlay above everything */}
-      <div
-        className="fixed inset-0 z-[100000] pointer-events-auto"
-        style={{
-          background: 'rgba(8,10,12,.55)',
-          backdropFilter: 'blur(6px)',
-          WebkitBackdropFilter: 'blur(6px)'
-        }}
-      />
-      {/* centered sheet with same style as .card */}
-      <div className="fixed inset-0 z-[100001] flex items-center justify-center px-4">
-        <div
-          className="w-full max-w-[720px] rounded-[16px] overflow-hidden"
-          style={{
-            background: 'var(--card)',
-            color: 'var(--text)',
-            border: '1px solid var(--border)',
-            boxShadow: 'var(--shadow-card)'
-          }}
-        >
-          {children}
-        </div>
+    <div className="fixed inset-0 z-[100005]">
+      {/* Overlay (same class + look as page) */}
+      <div className="va-blur-overlay open" onClick={onClose} />
+      {/* Center wrapper (same class) */}
+      <div className="va-modal-center">
+        {/* Sheet (same class + size) */}
+        <div className="va-sheet w-full max-w-[760px] p-4 md:p-6">{children}</div>
       </div>
-    </>,
+    </div>,
     document.body
   );
 }
@@ -80,13 +65,7 @@ function ModalHeader({ icon, title, subtitle, onClose }:{
   icon:React.ReactNode; title:string; subtitle?:string; onClose:()=>void;
 }) {
   return (
-    <div
-      className="flex items-center justify-between px-6 py-5"
-      style={{
-        background: 'var(--panel)',
-        borderBottom: '1px solid var(--border)'
-      }}
-    >
+    <div className="flex items-center justify-between mb-3">
       <div className="flex items-center gap-3">
         <div className="w-10 h-10 rounded-xl grid place-items-center" style={{ background:'var(--brand-weak)' }}>
           {icon}
@@ -96,14 +75,33 @@ function ModalHeader({ icon, title, subtitle, onClose }:{
           {subtitle && <div className="text-xs" style={{ color:'var(--text-muted)' }}>{subtitle}</div>}
         </div>
       </div>
-      <button onClick={onClose} className="p-2 rounded hover:opacity-70" aria-label="Close modal">
-        <X className="w-4 h-4" style={{ color:'var(--text)' }}/>
+      <button onClick={onClose} className="p-1 rounded hover:opacity-80" aria-label="Close">
+        <X className="w-5 h-5" style={{ color:'var(--text-muted)' }} />
       </button>
     </div>
   );
 }
 
-/* Create / Rename / Delete modals */
+function FieldLabel({children}:{children:React.ReactNode}) {
+  return <div className="text-[12.5px] mb-1" style={{ color:'var(--text-muted)' }}>{children}</div>;
+}
+function TextInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <input
+      {...props}
+      className={`w-full h-[44px] rounded-[10px] px-3 text-sm outline-none ${props.className||''}`}
+      style={{
+        background:'var(--input-bg)',
+        border:'1px solid var(--input-border)',
+        boxShadow:'var(--input-shadow)',
+        color:'var(--text)',
+        ...(props.style||{})
+      }}
+    />
+  );
+}
+
+/* Create / Rename / Delete modals — identical surface to sections/boxes */
 function CreateModal({ open, onClose, onCreate }:{
   open:boolean; onClose:()=>void; onCreate:(name:string)=>void;
 }) {
@@ -112,35 +110,32 @@ function CreateModal({ open, onClose, onCreate }:{
   if(!open) return null;
   const can = name.trim().length>1;
   return (
-    <ModalShell>
+    <RailModal onClose={onClose}>
       <ModalHeader icon={<Plus className="w-5 h-5" style={{ color:'var(--brand)' }}/>} title="Create Assistant" onClose={onClose}/>
-      <div className="px-6 py-5">
-        <label className="block text-xs mb-1" style={{ color:'var(--text-muted)' }}>Name</label>
-        <input
-          value={name} onChange={(e)=>setName(e.target.value)}
-          className="w-full h-[44px] rounded-[14px] px-3 text-sm outline-none border"
-          style={{ background:'var(--card)', borderColor:'var(--border)', color:'var(--text)' }}
-          placeholder="e.g., Sales Bot" autoFocus
-        />
+      <div className="grid gap-3">
+        <div>
+          <FieldLabel>Name</FieldLabel>
+          <TextInput placeholder="e.g., Sales Bot" value={name} onChange={(e)=>setName(e.target.value)} autoFocus />
+        </div>
+        <div className="flex items-center justify-end gap-2">
+          <button
+            onClick={onClose}
+            className="h-9 px-3 rounded-[10px]"
+            style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+          >
+            Cancel
+          </button>
+          <button
+            disabled={!can}
+            onClick={()=> can && onCreate(name.trim())}
+            className="h-9 px-4 rounded-[10px] font-semibold disabled:opacity-60"
+            style={{ background:'var(--brand)', color:'#0a0f0d' }}
+          >
+            Create
+          </button>
+        </div>
       </div>
-      <div className="px-6 pb-6 flex gap-3">
-        <button onClick={onClose}
-                className="w-full h-[44px] rounded-[14px] font-semibold border"
-                style={{ background:'var(--card)', borderColor:'var(--border)', color:'var(--text)' }}>
-          Cancel
-        </button>
-        <button
-          disabled={!can}
-          onClick={()=> can && onCreate(name.trim())}
-          className="w-full h-[44px] rounded-[14px] font-semibold disabled:opacity-60"
-          style={{ background:GREEN, color:'#fff', fontSize:12.5 }}
-          onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=GREEN_HOVER)}
-          onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=GREEN)}
-        >
-          Create
-        </button>
-      </div>
-    </ModalShell>
+    </RailModal>
   );
 }
 function RenameModal({ open, initial, onClose, onSave }:{
@@ -151,32 +146,32 @@ function RenameModal({ open, initial, onClose, onSave }:{
   if(!open) return null;
   const can = val.trim().length>1;
   return (
-    <ModalShell>
+    <RailModal onClose={onClose}>
       <ModalHeader icon={<Edit3 className="w-5 h-5" style={{ color:'var(--brand)' }}/>} title="Rename Assistant" onClose={onClose}/>
-      <div className="px-6 py-5">
-        <label className="block text-xs mb-1" style={{ color:'var(--text-muted)' }}>Name</label>
-        <input value={val} onChange={(e)=>setVal(e.target.value)}
-               className="w-full h-[44px] rounded-[14px] px-3 text-sm outline-none border"
-               style={{ background:'var(--card)', borderColor:'var(--border)', color:'var(--text)' }} />
+      <div className="grid gap-3">
+        <div>
+          <FieldLabel>Name</FieldLabel>
+          <TextInput value={val} onChange={(e)=>setVal(e.target.value)} />
+        </div>
+        <div className="flex items-center justify-end gap-2">
+          <button
+            onClick={onClose}
+            className="h-9 px-3 rounded-[10px]"
+            style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+          >
+            Cancel
+          </button>
+          <button
+            disabled={!can}
+            onClick={()=> can && onSave(val.trim())}
+            className="h-9 px-4 rounded-[10px] font-semibold disabled:opacity-60"
+            style={{ background:'var(--brand)', color:'#0a0f0d' }}
+          >
+            Save
+          </button>
+        </div>
       </div>
-      <div className="px-6 pb-6 flex gap-3">
-        <button onClick={onClose}
-                className="w-full h-[44px] rounded-[14px] font-semibold border"
-                style={{ background:'var(--card)', borderColor:'var(--border)', color:'var(--text)' }}>
-          Cancel
-        </button>
-        <button
-          disabled={!can}
-          onClick={()=> can && onSave(val.trim())}
-          className="w-full h-[44px] rounded-[14px] font-semibold disabled:opacity-60"
-          style={{ background:GREEN, color:'#fff', fontSize:12.5 }}
-          onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=GREEN_HOVER)}
-          onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=GREEN)}
-        >
-          Save
-        </button>
-      </div>
-    </ModalShell>
+    </RailModal>
   );
 }
 function ConfirmDelete({ open, name, onClose, onConfirm }:{
@@ -184,29 +179,31 @@ function ConfirmDelete({ open, name, onClose, onConfirm }:{
 }) {
   if(!open) return null;
   return (
-    <ModalShell>
+    <RailModal onClose={onClose}>
       <ModalHeader
         icon={<AlertTriangle className="w-5 h-5" style={{ color:'var(--brand)' }}/>}
         title="Delete Assistant" subtitle="This action cannot be undone." onClose={onClose}
       />
-      <div className="px-6 py-5 text-sm" style={{ color:'var(--text)' }}>
+      <div className="text-sm mb-4" style={{ color:'var(--text)' }}>
         Delete <b>“{name||'assistant'}”</b>?
       </div>
-      <div className="px-6 pb-6 flex gap-3">
-        <button onClick={onClose}
-                className="w-full h-[44px] rounded-[14px] font-semibold border"
-                style={{ background:'var(--card)', borderColor:'var(--border)', color:'var(--text)' }}>
+      <div className="flex items-center justify-end gap-2">
+        <button
+          onClick={onClose}
+          className="h-9 px-3 rounded-[10px]"
+          style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+        >
           Cancel
         </button>
-        <button onClick={onConfirm}
-                className="w-full h-[44px] rounded-[14px] font-semibold"
-                style={{ background:GREEN, color:'#fff', fontSize:12.5 }}
-                onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background=GREEN_HOVER)}
-                onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background=GREEN)}>
+        <button
+          onClick={onConfirm}
+          className="h-9 px-4 rounded-[10px] font-semibold"
+          style={{ background:'var(--brand)', color:'#0a0f0d' }}
+        >
           Delete
         </button>
       </div>
-    </ModalShell>
+    </RailModal>
   );
 }
 
@@ -232,7 +229,6 @@ function Row({
         overflow: 'hidden',
       }}
     >
-      {/* Tile avatar — NO photo, subtle inner brand glow */}
       <div
         className="relative w-10 h-10 rounded-md grid place-items-center shrink-0"
         style={{
@@ -269,7 +265,6 @@ function Row({
         </button>
       </div>
 
-      {/* Hover effect (soft) */}
       <style jsx>{`
         .rail-row:hover{
           background: linear-gradient(0deg, ${GREEN_OL14}, ${GREEN_OL14});
@@ -306,7 +301,7 @@ export default function AssistantRail() {
     return !s?assistants:assistants.filter(a=>a.name.toLowerCase().includes(s) || (a.purpose||'').toLowerCase().includes(s));
   },[assistants,q]);
 
-  /* selection with AccountPage-style full-screen overlay */
+  /* selection with overlay */
   function select(id:string){
     setOverlay(true);
     setActiveId(id);
@@ -362,7 +357,7 @@ export default function AssistantRail() {
           <Plus className="w-4 h-4" /> Create Assistant
         </button>
 
-        {/* Search — ultra-thin hairline */}
+        {/* Search */}
         <div className="relative mb-3">
           <input
             value={q}
@@ -411,7 +406,7 @@ export default function AssistantRail() {
           </div>
         </div>
 
-        {/* Modals (portaled, above all) */}
+        {/* Modals (portaled, same style as page) */}
         <CreateModal open={createOpen} onClose={()=>setCreateOpen(false)} onCreate={addAssistant} />
         <RenameModal open={!!renId} initial={renName} onClose={()=>setRenId(null)} onSave={saveRename} />
         <ConfirmDelete open={!!delId} name={delName} onClose={()=>setDelId(null)} onConfirm={confirmDelete} />
@@ -444,12 +439,12 @@ export default function AssistantRail() {
         `}</style>
       </div>
 
-      {/* Full-screen loader — above all content */}
+      {/* Full-screen loader — keep above everything */}
       <AnimatePresence>
         {overlay && (
           <motion.div
             key="assistant-switch"
-            className="fixed inset-0 z-[100002] flex items-center justify-center"
+            className="fixed inset-0 z-[100004] flex items-center justify-center"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             style={{
               background:
