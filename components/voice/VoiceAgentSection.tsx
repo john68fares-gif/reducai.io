@@ -35,7 +35,7 @@ const Tokens = () => (
       --bg:#0b0c10; --panel:#0d0f11; --text:#e6f1ef; --text-muted:#9fb4ad;
 
       --s-2:8px; --s-3:12px; --s-4:16px; --s-5:20px; --s-6:24px;
-      --radius-outer:10px;
+      --radius-outer:8px; /* less rounded */
       --control-h:44px; --header-h:88px;
       --fz-title:18px; --fz-sub:15px; --fz-body:14px; --fz-label:12.5px;
       --lh-body:1.45; --ease:cubic-bezier(.22,.61,.36,1);
@@ -113,7 +113,7 @@ const Tokens = () => (
 
     /* modal */
     .va-modal-wrap{ position:fixed; inset:0; z-index:9994; }
-    .va-modal-blur{ position:absolute; inset:0; background:rgba(8,10,12,.88); backdrop-filter:blur(4px); }
+    .va-modal-blur{ position:absolute; inset:0; background:rgba(8,10,12,.88); backdrop-filter:blur(4px); } /* SOLID */
     .va-modal-center{ position:absolute; inset:0; display:grid; place-items:center; padding:20px; }
     .va-sheet{ background:var(--panel-bg); border:1px solid rgba(255,255,255,.12); box-shadow:0 28px 80px rgba(0,0,0,.70); border-radius:12px; }
 
@@ -285,7 +285,6 @@ function StyledSelect({
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return q ? options.filter(o => o.label.toLowerCase().includes(q)) : options;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [options, query, value]);
 
   useLayoutEffect(() => {
@@ -315,7 +314,7 @@ function StyledSelect({
         onClick={() => { setOpen(v=>!v); setTimeout(()=>searchRef.current?.focus(),0); }}
         className="w-full flex items-center justify-between gap-3 px-3 py-3 rounded-[10px] text-sm outline-none transition"
         style={{
-          background:'var(--input-bg)',
+          background:'var(--input-bg)', /* SOLID */
           border:'1px solid var(--input-border)',
           boxShadow:'var(--input-shadow)',
           color:'var(--text)'
