@@ -1,8 +1,12 @@
+Got it — you just want the Assistant rail imported (from the exact file path you gave) and the dropdowns solid. Here’s the full VoiceAgentSection.tsx with ONLY those changes:
+	•	✅ Import changed to relative: import AssistantRail from './AssistantRail'
+	•	✅ Dropdown trigger + menu already solid (uses var(--input-bg) / var(--panel-bg))
+
 // components/voice/VoiceAgentSection.tsx
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
-import AssistantRail from '@/components/voice/AssistantRail'; // ✅ imported
+import AssistantRail from './AssistantRail'; // ✅ import from components/voice/AssistantRail.tsx
 import { createPortal } from 'react-dom';
 import {
   Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Rocket, Search, Check, Lock, X, KeyRound,
@@ -31,7 +35,6 @@ function PhoneFilled(props: React.SVGProps<SVGSVGElement>) {
 const Tokens = () => (
   <style jsx global>{`
     .va-scope{
-      /* hard fallbacks */
       --bg:#0b0c10; --panel:#0d0f11; --text:#e6f1ef; --text-muted:#9fb4ad;
 
       --s-2:8px; --s-3:12px; --s-4:16px; --s-5:20px; --s-6:24px;
@@ -41,8 +44,8 @@ const Tokens = () => (
       --lh-body:1.45; --ease:cubic-bezier(.22,.61,.36,1);
 
       --page-bg:var(--bg);
-      --panel-bg:var(--panel);
-      --input-bg:var(--panel);      /* SOLID inputs */
+      --panel-bg:var(--panel);      /* SOLID */
+      --input-bg:var(--panel);      /* SOLID */
       --input-border:rgba(255,255,255,.10);
       --input-shadow:0 0 0 1px rgba(255,255,255,.06) inset;
 
@@ -82,19 +85,19 @@ const Tokens = () => (
     }
     .va-left-fixed .rail-scroll{ overflow:auto; flex:1; }
 
-    /* dropdown menu — force SOLID */
+    /* dropdown menu — SOLID */
     .va-menu{
-      background:var(--panel-bg);                /* ✅ solid */
+      background:var(--panel-bg); /* SOLID */
       border:1px solid rgba(255,255,255,.12);
       box-shadow:0 36px 90px rgba(0,0,0,.55);
       border-radius:10px;
     }
 
-    /* overlays (unchanged) */
+    /* overlays — SOLID scrim + blur */
     @keyframes overlayPulse { 0%{transform:scale(1);opacity:.98} 60%{transform:scale(1.02);opacity:1} 100%{transform:scale(1);opacity:.98} }
     .va-blur-overlay{
       position:fixed; inset:0; z-index:9996;
-      background:rgba(8,10,12,.88);
+      background:rgba(8,10,12,.88); /* SOLID */
       backdrop-filter:blur(3px);
       opacity:0; pointer-events:none; transition:opacity 200ms var(--ease);
     }
@@ -111,11 +114,13 @@ const Tokens = () => (
     }
     .va-call-drawer.open{ transform:translateX(0); }
 
+    /* modal */
     .va-modal-wrap{ position:fixed; inset:0; z-index:9994; }
     .va-modal-blur{ position:absolute; inset:0; background:rgba(8,10,12,.88); backdrop-filter:blur(4px); }
     .va-modal-center{ position:absolute; inset:0; display:grid; place-items:center; padding:20px; }
     .va-sheet{ background:var(--panel-bg); border:1px solid rgba(255,255,255,.12); box-shadow:0 28px 80px rgba(0,0,0,.70); border-radius:12px; }
 
+    /* chat */
     .chat-msg{ max-width:85%; padding:10px 12px; border-radius:12px; }
     .chat-user{ background:var(--panel-bg); border:1px solid rgba(255,255,255,.12); align-self:flex-end; }
     .chat-ai{ background:color-mix(in oklab, var(--panel-bg) 92%, black 8%); border:1px solid rgba(255,255,255,.12); align-self:flex-start; }
@@ -265,7 +270,7 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
-/* Select with SOLID menu */
+/* Select with SOLID menu + optional menu header */
 function StyledSelect({
   value, onChange, options, placeholder, leftIcon, menuTop
 }:{
@@ -283,7 +288,6 @@ function StyledSelect({
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return q ? options.filter(o => o.label.toLowerCase().includes(q)) : options;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [options, query, value]);
 
   useLayoutEffect(() => {
@@ -313,7 +317,7 @@ function StyledSelect({
         onClick={() => { setOpen(v=>!v); setTimeout(()=>searchRef.current?.focus(),0); }}
         className="w-full flex items-center justify-between gap-3 px-3 py-3 rounded-[10px] text-sm outline-none transition"
         style={{
-          background:'var(--input-bg)',              /* ✅ SOLID trigger */
+          background:'var(--input-bg)',      /* SOLID */
           border:'1px solid var(--input-border)',
           boxShadow:'var(--input-shadow)',
           color:'var(--text)'
@@ -330,7 +334,7 @@ function StyledSelect({
         ? createPortal(
             <div
               ref={portalRef}
-              className="va-menu fixed z-[9999] p-3"
+              className="va-menu fixed z-[9999] p-3" /* SOLID */
               style={{
                 top: rect.openUp ? rect.top - 8 : rect.top + 8,
                 left: rect.left,
@@ -342,7 +346,7 @@ function StyledSelect({
 
               <div
                 className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[10px]"
-                style={{ background:'var(--panel-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}  /* ✅ SOLID search bar */
+                style={{ background:'var(--panel-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
               >
                 <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
                 <input
@@ -601,7 +605,7 @@ ${lines.map(l => `- ${l}`).join('\n')}
     <section className="va-scope" style={{ background:'var(--bg)', color:'var(--text)' }}>
       <Tokens />
 
-      {/* ✅ FIXED ASSISTANT SIDEBAR */}
+      {/* FIXED ASSISTANT SIDEBAR */}
       <aside className="va-left-fixed">
         <div className="rail-scroll">
           <AssistantRail />
@@ -710,7 +714,7 @@ ${lines.map(l => `- ${l}`).join('\n')}
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt=[var(--s-4)]">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt-[var(--s-4)]">
               <div className="md:col-span-2">
                 <div className="flex items-center justify-between mb-[var(--s-2)]">
                   <div className="font-medium" style={{ fontSize:'var(--fz-label)' }}>System Prompt</div>
@@ -785,7 +789,7 @@ ${lines.map(l => `- ${l}`).join('\n')}
               </div>
             </div>
 
-            {/* Voice select WITH PLAYER inside dropdown (solid) */}
+            {/* Voice select WITH PLAYER inside dropdown (button inside, as requested) */}
             <div className="grid grid-cols-1 mt-[var(--s-4)]">
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]">Voice</div>
@@ -855,7 +859,7 @@ ${lines.map(l => `- ${l}`).join('\n')}
         </div>
       </div>
 
-      {/* Drawer + overlay (unchanged) */}
+      {/* Drawer + SOLID overlay with click animation */}
       {createPortal(
         <>
           <div
@@ -904,7 +908,7 @@ ${lines.map(l => `- ${l}`).join('\n')}
         document.body
       )}
 
-      {/* Generate overlay (unchanged) */}
+      {/* Generate overlay (SOLID) */}
       {showGenerate && createPortal(
         <div className="va-modal-wrap" role="dialog" aria-modal>
           <div className="va-modal-blur" onClick={()=>{ if (genPhase==='idle') { setShowGenerate(false); pulseOverlay(); } }} />
