@@ -384,9 +384,9 @@ function StyledSelect({
                   el.style.border = '1px solid var(--input-border)';
                 }}
                 onMouseLeave={(e)=>{
-                  const el=e.currentTarget as HTMLButtonElement;
-                  el.style.background = 'var(--panel-bg)';
-                  el.style.border = '1px solid var(--panel-bg)';
+                  const el=e.currentTarget as HTMLButtonButtonElement;
+                  (el as any).style.background = 'var(--panel-bg)';
+                  (el as any).style.border = '1px solid var(--panel-bg)';
                 }}
               >
                 {o.disabled ? <Lock className="w-3.5 h-3.5" /> :
