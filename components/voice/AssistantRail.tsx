@@ -4,6 +4,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Search, Plus, Bot, Trash2, Edit3, X, AlertTriangle, Loader2 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
+import { createPortal } from 'react-dom';
 
 /* Optional scoped storage helper (falls back to localStorage if missing) */
 type Scoped = { getJSON<T>(k:string,f:T):Promise<T>; setJSON(k:string,v:unknown):Promise<void> };
@@ -42,22 +43,50 @@ function writeActive(id:string){
   try { window.dispatchEvent(new CustomEvent('assistant:active', { detail: id })); } catch {}
 }
 
-/* ---------- Modal shells ---------- */
+/* ---------- Modal shells (PORTALED, high z-index, card styling) ---------- */
 function ModalShell({ children }:{ children:React.ReactNode }) {
-  return (
-    <div className="fixed inset-0 z-[9998] flex items-center justify-center px-4" style={{ background:'rgba(0,0,0,.60)' }}>
-      <div className="w-full max-w-[700px] rounded-[20px] overflow-hidden"
-           style={{ background:'var(--panel)', border:'1px solid var(--border)', boxShadow:'var(--shadow-soft)' }}>
-        {children}
+  if (typeof document === 'undefined') return null;
+  return createPortal(
+    <>
+      {/* overlay above everything */}
+      <div
+        className="fixed inset-0 z-[100000] pointer-events-auto"
+        style={{
+          background: 'rgba(8,10,12,.55)',
+          backdropFilter: 'blur(6px)',
+          WebkitBackdropFilter: 'blur(6px)'
+        }}
+      />
+      {/* centered sheet with same style as .card */}
+      <div className="fixed inset-0 z-[100001] flex items-center justify-center px-4">
+        <div
+          className="w-full max-w-[720px] rounded-[16px] overflow-hidden"
+          style={{
+            background: 'var(--card)',
+            color: 'var(--text)',
+            border: '1px solid var(--border)',
+            boxShadow: 'var(--shadow-card)'
+          }}
+        >
+          {children}
+        </div>
       </div>
-    </div>
+    </>,
+    document.body
   );
 }
+
 function ModalHeader({ icon, title, subtitle, onClose }:{
   icon:React.ReactNode; title:string; subtitle?:string; onClose:()=>void;
 }) {
   return (
-    <div className="flex items-center justify-between px-6 py-5" style={{ borderBottom:'1px solid var(--border)' }}>
+    <div
+      className="flex items-center justify-between px-6 py-5"
+      style={{
+        background: 'var(--panel)',
+        borderBottom: '1px solid var(--border)'
+      }}
+    >
       <div className="flex items-center gap-3">
         <div className="w-10 h-10 rounded-xl grid place-items-center" style={{ background:'var(--brand-weak)' }}>
           {icon}
@@ -67,7 +96,9 @@ function ModalHeader({ icon, title, subtitle, onClose }:{
           {subtitle && <div className="text-xs" style={{ color:'var(--text-muted)' }}>{subtitle}</div>}
         </div>
       </div>
-      <button onClick={onClose} className="p-2 rounded hover:opacity-70"><X className="w-4 h-4" style={{ color:'var(--text)' }}/></button>
+      <button onClick={onClose} className="p-2 rounded hover:opacity-70" aria-label="Close modal">
+        <X className="w-4 h-4" style={{ color:'var(--text)' }}/>
+      </button>
     </div>
   );
 }
@@ -280,7 +311,7 @@ export default function AssistantRail() {
     setOverlay(true);
     setActiveId(id);
     writeActive(id);
-    window.setTimeout(()=> setOverlay(false), 520); // same feel as account.tsx booting delay
+    window.setTimeout(()=> setOverlay(false), 520);
   }
 
   /* CRUD */
@@ -380,7 +411,7 @@ export default function AssistantRail() {
           </div>
         </div>
 
-        {/* Modals */}
+        {/* Modals (portaled, above all) */}
         <CreateModal open={createOpen} onClose={()=>setCreateOpen(false)} onCreate={addAssistant} />
         <RenameModal open={!!renId} initial={renName} onClose={()=>setRenId(null)} onSave={saveRename} />
         <ConfirmDelete open={!!delId} name={delName} onClose={()=>setDelId(null)} onConfirm={confirmDelete} />
@@ -413,12 +444,12 @@ export default function AssistantRail() {
         `}</style>
       </div>
 
-      {/* Full-screen loader — same pattern as pages/account.tsx */}
+      {/* Full-screen loader — above all content */}
       <AnimatePresence>
         {overlay && (
           <motion.div
             key="assistant-switch"
-            className="fixed inset-0 z-[9999] flex items-center justify-center"
+            className="fixed inset-0 z-[100002] flex items-center justify-center"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             style={{
               background:
