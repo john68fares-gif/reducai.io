@@ -1,12 +1,4 @@
 // pages/improve.tsx
-// Improve: tune/test/compare agents created in Builder.
-// - Supabase user id scoping everywhere.
-// - Calls /api/assistants/chat for real AI responses (no support.tsx reuse).
-// - "… typing" bounce while the AI responds.
-// - Vapi-like decoder animation for “Show prompt” using sentence-style text
-//   (e.g., “you’re called …, your goal is …”) + “Add rule” that re-animates.
-// - Mobile: Pictures/Videos/Files collapse into a single "+" unified picker.
-
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
@@ -76,95 +68,72 @@ function labelFromChange(prevSys: string, nextSys: string): string {
   return 'Prompt edited';
 }
 
-/* Extract a "goal" & "rules" view from the system text (heuristic) */
+/* Extract Goal + Rules heuristically */
 function parseGoal(system: string, name: string): string {
   const m1 = system.match(/^\s*(?:#+\s*)?(?:goal|mission|purpose)\s*[:\-]\s*(.+)$/im);
   if (m1) return m1[1].trim();
-  return `helping with ${name || 'your tasks'} efficiently and clearly`;
+  return `help the user with ${name || 'their tasks'} efficiently and clearly.`;
 }
 function parseRules(system: string): string[] {
   const rulesBlock = system.match(/^\s*(?:#{2,3}\s*rules|rules\s*:)\s*([\s\S]+?)(?:\n#{1,3}\s|\n{2,}|$)/im)?.[1];
   const lines = (rulesBlock || system)
-    .split('\n').map(l => l.trim())
+    .split('\n')
+    .map(l => l.trim())
     .filter(l => /^[-•*]\s+/.test(l) || /^\d+\)\s+/.test(l))
     .map(l => l.replace(/^[-•*]\s+/, '').replace(/^\d+\)\s+/, '').trim());
   return Array.from(new Set(lines)).slice(0, 12);
 }
 
-/* Prefers-reduced-motion */
-function usePrefersReducedMotion() {
-  const [prefers, setPrefers] = useState(false);
-  useEffect(() => {
-    const mq = window.matchMedia?.('(prefers-reduced-motion: reduce)');
-    const onChange = () => setPrefers(!!mq?.matches);
-    onChange();
-    mq?.addEventListener?.('change', onChange);
-    return () => mq?.removeEventListener?.('change', onChange);
-  }, []);
-  return prefers;
-}
-
-/* Vapi-like decoder text (left→right settle with jitter) */
-function DecoderText({
-  text,
-  trigger = 0,
-  duration = 700,
-  jitterPerChar = 2,
-  charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+-=<>[]{}|/?~'
-}: {
-  text: string; trigger?: number; duration?: number; jitterPerChar?: number; charset?: string;
-}) {
-  const prefersReduced = usePrefersReducedMotion();
+/* Vapi-ish scramble reveal */
+function ScrambleText({ text, fps = 22, jitter = [12, 26] }: { text: string; fps?: number; jitter?: [number, number] }) {
   const [display, setDisplay] = useState(text);
-
   useEffect(() => {
-    if (prefersReduced || !text || text.length > 6000) { setDisplay(text); return; }
-    const start = performance.now();
-    const len = text.length;
-    const isStatic = (ch: string) => /\s/.test(ch);
-    const rand = () => charset[Math.floor(Math.random() * charset.length)];
-
-    let raf = 0;
-    const tick = (t: number) => {
-      const p = Math.min(1, (t - start) / Math.max(1, duration));
-      const resolved = Math.floor(p * len);
-      let out = '';
+    let frame = 0;
+    const chars = '!<>-_\\/[]{}—=+*^?#§$%&@';
+    const from = ''.padEnd(text.length, ' ');
+    const to = text;
+    const len = Math.max(from.length, to.length);
+    const [minJ, maxJ] = jitter;
+    const queue = Array.from({ length: len }, (_, i) => {
+      const start = Math.floor(Math.random() * (minJ));
+      const end = start + Math.floor(Math.random() * (maxJ - minJ) + minJ);
+      return { from: from[i] || ' ', to: to[i] || ' ', start, end, char: '' as string };
+    });
+    let tid = 0 as any;
+    const step = Math.max(18, Math.round(1000 / fps));
+    const tick = () => {
+      let out = ''; let done = 0;
       for (let i = 0; i < len; i++) {
-        const ch = text[i] ?? ' ';
-        if (i < resolved || isStatic(ch)) out += ch;
-        else {
-          let swap = ch;
-          for (let j = 0; j < jitterPerChar; j++) swap = rand();
-          out += swap;
-        }
+        const q = queue[i];
+        if (frame >= q.end) { done++; out += q.to; }
+        else if (frame >= q.start) { q.char = chars[Math.floor(Math.random() * chars.length)]; out += q.char; }
+        else { out += q.from; }
       }
-      setDisplay(out);
-      if (p < 1) raf = requestAnimationFrame(tick);
-      else setDisplay(text);
+      setDisplay(out); frame++;
+      if (done < len) tid = setTimeout(tick, step);
     };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [text, trigger, duration, jitterPerChar, charset, prefersReduced]);
-
+    tid = setTimeout(tick, step);
+    return () => clearTimeout(tid);
+  }, [text, fps, jitter]);
   return <span className="whitespace-pre-wrap">{display}</span>;
 }
 
-/* Typing dots (…) */
+/* Typing dots (lane indicator) */
 function TypingDots({ className = '' }: { className?: string }) {
   return (
     <span className={`${className} inline-flex items-center gap-[2px]`} aria-label="typing">
-      <i className="w-1.5 h-1.5 rounded-full animate-bounceDot" style={{ background: 'var(--text)', animationDelay: '0ms' }} />
-      <i className="w-1.5 h-1.5 rounded-full animate-bounceDot" style={{ background: 'var(--text)', animationDelay: '120ms' }} />
-      <i className="w-1.5 h-1.5 rounded-full animate-bounceDot" style={{ background: 'var(--text)', animationDelay: '240ms' }} />
+      <i className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: 'var(--text)', animationDelay: '0ms' }} />
+      <i className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: 'var(--text)', animationDelay: '120ms' }} />
+      <i className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: 'var(--text)', animationDelay: '240ms' }} />
       <style jsx>{`
-        @keyframes bounceDot { 0%,80%,100% { transform: translateY(0) } 40% { transform: translateY(-3px) } }
-        .animate-bounceDot { animation: bounceDot 1.2s infinite ease-in-out; display:inline-block }
+        @keyframes bounce { 0%,80%,100% { transform: translateY(0) } 40% { transform: translateY(-3px) } }
+        .animate-bounce { animation: bounce 1.2s infinite ease-in-out; display:inline-block }
       `}</style>
     </span>
   );
 }
 
-/* Builder semantics composer */
+/* Compose Builder-style system */
 function composeSystem(base: string, pre: string, post: string, memory: string | null) {
   const blocks: string[] = [];
   if (pre.trim()) blocks.push(`### PRE\n${pre.trim()}`);
@@ -256,6 +225,7 @@ export default function Improve() {
       setList([]); setSelectedId(null);
     }
   }, [selectedId]);
+
   useEffect(() => { if (userId) void fetchBots(userId); }, [userId, fetchBots]);
 
   /* Load selection */
@@ -267,10 +237,14 @@ export default function Improve() {
     setSystem(selected.system || '');
     setPrePrompt(''); setPostPrompt('');
     setMsgsA([]); setMsgsB([]); setLaneB(null); setActiveLane('A'); setInput('');
-    try { const rawV = localStorage.getItem(versionsKey(userId, selected.id)); setVersions(rawV ? JSON.parse(rawV) as Version[] : []); }
-    catch { setVersions([]); }
-    try { const mem = localStorage.getItem(memoryKey(userId, selected.id)); setMemoryText(mem || ''); }
-    catch { setMemoryText(''); }
+    try {
+      const rawV = localStorage.getItem(versionsKey(userId, selected.id));
+      setVersions(rawV ? (JSON.parse(rawV) as Version[]) : []);
+    } catch { setVersions([]); }
+    try {
+      const mem = localStorage.getItem(memoryKey(userId, selected.id));
+      setMemoryText(mem || '');
+    } catch { setMemoryText(''); }
     setDirty(false);
   }, [selectedId, userId, selected]);
 
@@ -310,11 +284,13 @@ export default function Improve() {
     setSaving(true);
     try {
       const prev = list.find(b => b.id === selectedId);
+      // snapshot first (local)
       const v: Version = { id: `v_${Date.now()}`, ts: Date.now(), label: labelFromChange(prev?.system || '', system), name, model, temperature, system };
       const next = [v, ...versions].slice(0, 80);
       setVersions(next);
       try { localStorage.setItem(versionsKey(userId, selectedId), JSON.stringify(next)); } catch {}
 
+      // persist
       await fetch(`/api/chatbots/${selectedId}?ownerId=${encodeURIComponent(userId)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', 'x-owner-id': userId },
@@ -329,9 +305,7 @@ export default function Improve() {
       setDirty(false);
     } catch {
       alert('Failed to save');
-    } finally {
-      setSaving(false);
-    }
+    } finally { setSaving(false); }
   }
 
   async function deleteSelected() {
@@ -345,12 +319,10 @@ export default function Improve() {
       });
       setList(cur => cur.filter(b => b.id !== selectedId));
       setSelectedId(null);
-    } catch {
-      alert('Failed to delete');
-    }
+    } catch { alert('Failed to delete'); }
   }
 
-  /* Memory heuristic from chat → local only for improve (not cross-device) */
+  /* Memory heuristic from chat */
   function updateLocalMemory(history: ChatMsg[]) {
     if (!useMemory || !userId || !selected) return;
     const flat = history.slice(-10)
@@ -361,7 +333,7 @@ export default function Improve() {
     try { localStorage.setItem(memoryKey(userId, selected.id), mem); } catch {}
   }
 
-  /* Files → attachments */
+  /* File helpers */
   function resetPickerValue(inp: HTMLInputElement | null) { try { if (inp) inp.value = ''; } catch {} }
   function fileToAttachment(file: File): Promise<Attachment> {
     return new Promise(resolve => {
@@ -394,15 +366,16 @@ export default function Improve() {
     resetPickerValue(unifiedRef.current);
   }
 
-  /* === AI: Builder-compatible endpoint === (no support.tsx reuse) */
+  /* === AI chat: Builder-compatible endpoint === */
   const sendLane = useCallback(async (which: 'A' | 'B', text: string, atts: Attachment[]) => {
     const laneVersion = which === 'A'
       ? { system, model, temperature }
       : (laneB ? { system: laneB.system, model: laneB.model, temperature: laneB.temperature } : null);
-    if (!laneVersion) return;
+    if (!laneVersion || !selectedId) return;
 
     const sys = composeSystem(laneVersion.system, prePrompt, postPrompt, useMemory ? memoryText : '');
 
+    // optimistic user message
     if (text || atts.length) {
       const msg = text || `(sent ${atts.length} attachment${atts.length > 1 ? 's' : ''})`;
       if (which === 'A') setMsgsA(cur => [...cur, { role: 'user', content: msg }]);
@@ -413,8 +386,12 @@ export default function Improve() {
     try {
       const resp = await fetch('/api/assistants/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(userId ? { 'x-owner-id': userId } : {}),
+        },
         body: JSON.stringify({
+          assistantId: selectedId,     // helps server side if you load by id
           system: sys,
           model: laneVersion.model,
           temperature: laneVersion.temperature,
@@ -423,10 +400,16 @@ export default function Improve() {
         }),
       });
 
-      const data = await resp.json().catch(() => null);
-      const reply = typeof data?.text === 'string'
-        ? sanitize(data.text)
-        : (data?.message ? String(data.message) : (resp.ok ? '[no response]' : 'Request failed.'));
+      const raw = await resp.text();
+      let parsed: any = null; try { parsed = raw ? JSON.parse(raw) : null; } catch {}
+      const reply = resp.ok
+        ? sanitize(typeof parsed?.text === 'string' ? parsed.text :
+                   typeof parsed?.message === 'string' ? parsed.message : (raw || '[no response]'))
+        : `Error ${resp.status}${resp.statusText ? ` ${resp.statusText}` : ''}${
+            parsed?.error ? `: ${parsed.error}` :
+            parsed?.message ? `: ${parsed.message}` :
+            raw ? `: ${raw.slice(0, 400)}` : ''
+          }`;
 
       if (which === 'A') {
         setMsgsA(cur => [...cur, { role: 'assistant', content: reply }]);
@@ -442,7 +425,7 @@ export default function Improve() {
     } finally {
       setLaneTyping(t => ({ ...t, [which]: false }));
     }
-  }, [system, model, temperature, prePrompt, postPrompt, useMemory, memoryText, msgsA, msgsB, laneB]);
+  }, [system, model, temperature, prePrompt, postPrompt, useMemory, memoryText, msgsA, msgsB, laneB, userId, selectedId]);
 
   async function sendPrompt() {
     const text = (input || '').trim();
@@ -457,8 +440,7 @@ export default function Improve() {
     }
   }
 
-  /* Prompt preview content (sentence-style) + “Add rule” re-animates */
-  const [decoderTrigger, setDecoderTrigger] = useState(0);
+  /* Prompt panel helpers (natural sentences + add rule) */
   function insertRuleIntoSystem(rule: string) {
     setSystem((s) => {
       const r = rule.trim();
@@ -470,19 +452,21 @@ export default function Improve() {
       }
       return `${s.trim()}\n\n### RULES\n- ${r}\n`;
     });
-    setDecoderTrigger(t => t + 1);
   }
 
-  const goal   = useMemo(() => parseGoal(system, name), [system, name]);
-  const rules  = useMemo(() => parseRules(system), [system]);
-  const tone   = temperature <= 0.25 ? 'precise' : temperature >= 0.75 ? 'creative' : 'balanced';
-  const promptBody = [
-    `you’re called ${name || 'test'}. your goal is ${goal}.`,
-    `you reply in a ${tone} tone using ${model}.`,
-    rules.length
-      ? `follow these rules:\n${rules.map(r => `• ${r}`).join('\n')}`
-      : `follow the base system instructions and keep responses concise.`,
-  ].join('\n\n');
+  const goal = useMemo(() => parseGoal(system, name), [system, name]);
+  const rules = useMemo(() => parseRules(system), [system]);
+
+  const naturalPrompt = useMemo(() => {
+    const intro = `You’re called ${name || 'test'}. Keep a ${
+      temperature <= 0.25 ? 'precise' : temperature >= 0.75 ? 'creative' : 'balanced'
+    } tone on ${model}.`;
+    const g = `Your goal is to ${goal}`;
+    const rs = (rules.length ? rules : ['follow the base system instructions and be concise.'])
+      .map(r => `• ${r}`)
+      .join('\n');
+    return `${intro}\n${g}\nFollow these rules:\n${rs}`;
+  }, [name, temperature, model, goal, rules]);
 
   /* UI */
   return (
@@ -492,7 +476,7 @@ export default function Improve() {
         style={{ borderColor: 'var(--border)', background: 'color-mix(in oklab, var(--bg) 92%, transparent)' }}>
         <div className="max-w-[1600px] mx-auto flex items-center gap-3">
           <MessageSquare className="w-5 h-5" />
-          <h1 className="text-[18px] font-semibold">{selected ? (selected.name || 'Assistant') : 'Agent Tuning'}</h1>
+          <h1 className="text-[18px] font-semibold">{selected ? (selected.name || 'Assistant') : 'Tuning'}</h1>
 
           <span className="text-xs px-2 py-[2px] rounded-full" style={{ background: 'color-mix(in oklab, var(--text) 8%, transparent)', border: '1px solid var(--border)' }}>
             {saving ? 'Saving…' : dirty ? 'Unsaved changes' : 'Saved ✓'}
@@ -519,7 +503,7 @@ export default function Improve() {
         </div>
       </header>
 
-      {/* 3-column layout */}
+      {/* 3-col layout */}
       <div className="max-w-[1600px] mx-auto px-6 py-5" style={{ height: 'calc(100vh - 62px)' }}>
         <div className="grid gap-3" style={{ gridTemplateColumns: '300px 1fr 300px', height: '100%' }}>
           {/* Left rail */}
@@ -542,9 +526,7 @@ export default function Improve() {
             </div>
             <div className="p-3 overflow-auto" style={{ maxHeight: 'calc(100% - 90px)' }}>
               {!userId ? (
-                <div className="text-sm opacity-80 py-8">
-                  Sign in to load your agents (scoped by your Supabase user id).
-                </div>
+                <div className="text-sm opacity-80 py-8">Sign in to load your agents.</div>
               ) : filtered.length === 0 ? (
                 <div className="text-sm opacity-80 py-8 text-center">
                   No agents for this account.
@@ -637,37 +619,37 @@ export default function Improve() {
                 </button>
               </div>
 
-              {/* Decoder Prompt Preview + Add rule (sentence-style) */}
+              {/* Prompt panel: natural sentences + scramble + add rule */}
               {showPromptPanel && (
                 <div className="mt-3 grid gap-3" style={{ gridTemplateColumns: '1fr 1fr' }}>
                   <div className="col-span-2 p-3 rounded-md" style={CARD}>
+                    <div className="text-sm font-medium mb-2">Prompt preview</div>
                     <div className="text-[13px] leading-6">
-                      <DecoderText text={promptBody} trigger={decoderTrigger} duration={700} jitterPerChar={2} />
+                      <ScrambleText text={naturalPrompt} fps={20} />
                     </div>
                     <div className="mt-3 flex items-center gap-2">
                       <input
-                        placeholder="Add a rule (press Enter)"
+                        placeholder="Add rule (press Enter)"
+                        onKeyDown={(e) => {
+                          const v = (e.currentTarget.value || '').trim();
+                          if (e.key === 'Enter' && v) { insertRuleIntoSystem(v); e.currentTarget.value = ''; }
+                        }}
                         className="px-3 py-2 rounded-md text-sm flex-1"
                         style={CARD}
-                        onKeyDown={(e) => {
-                          const el = e.target as HTMLInputElement;
-                          if (e.key === 'Enter') { insertRuleIntoSystem(el.value); el.value = ''; }
-                        }}
                       />
                       <button
-                        onClick={() => {
-                          const el = (document.activeElement as HTMLInputElement) || null;
-                          const v = el?.value?.trim(); if (v) { insertRuleIntoSystem(v); el.value = ''; }
-                        }}
                         className="px-3 py-2 rounded-md text-sm"
                         style={CARD}
-                      >
-                        Add
-                      </button>
+                        onClick={() => {
+                          const el = (document.activeElement as HTMLInputElement) || null;
+                          const v = (el?.value || '').trim();
+                          if (v) { insertRuleIntoSystem(v); try { el!.value = ''; } catch {} }
+                        }}
+                      >Add</button>
                     </div>
                   </div>
                   <div className="col-span-2 text-[12px] opacity-70">
-                    This preview reads from your saved System prompt — no extra schema needed.
+                    Reads from your saved System prompt. Edits you make here (via “Save + Snapshot”) update this agent and sync across devices.
                   </div>
                 </div>
               )}
@@ -789,72 +771,70 @@ export default function Improve() {
                   </>
                 )}
 
-                {/* Mobile: unified + button */}
+                {/* Mobile: unified + */}
                 {isMobile && (
-                  <>
-                    <div className="flex items-end gap-2">
-                      <textarea
-                        value={input}
-                        onChange={(e) => setInput(e.target.value)}
-                        placeholder="Type a message…"
-                        rows={1}
-                        className="flex-1 px-3 py-2 rounded-md bg-transparent outline-none resize-none text-sm"
-                        style={CARD}
-                        onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendPrompt(); } }}
-                      />
-                      <button
-                        onClick={() => unifiedRef.current?.click()}
-                        className="px-3 py-2 rounded-md text-lg"
-                        style={CARD}
-                        aria-label="Add attachment"
-                        title="Add attachment"
-                      >
-                        +
-                      </button>
-                      <input
-                        ref={unifiedRef}
-                        type="file"
-                        accept="image/*,video/*,*/*"
-                        multiple
-                        className="hidden"
-                        onChange={addUnified}
-                      />
-                      <button
-                        onClick={() => void sendPrompt()}
-                        disabled={laneTyping.A || laneTyping.B || (!input.trim() && currentAttachments().length === 0)}
-                        className="px-3 py-2 rounded-md text-sm disabled:opacity-60 flex items-center gap-1"
-                        style={{ background: 'var(--brand)', color: '#00120a' }}
-                      >
-                        {(laneTyping.A && activeLane === 'A') || (laneTyping.B && activeLane === 'B')
-                          ? <Loader2 className="w-4 h-4 animate-spin" />
-                          : <><Send className="w-4 h-4" /> Send</>}
-                      </button>
-                    </div>
-                  </>
+                  <div className="flex items-end gap-2">
+                    <textarea
+                      value={input}
+                      onChange={(e) => setInput(e.target.value)}
+                      placeholder="Type a message…"
+                      rows={1}
+                      className="flex-1 px-3 py-2 rounded-md bg-transparent outline-none resize-none text-sm"
+                      style={CARD}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendPrompt(); } }}
+                    />
+                    <button
+                      onClick={() => unifiedRef.current?.click()}
+                      className="px-3 py-2 rounded-md text-lg"
+                      style={CARD}
+                      aria-label="Add attachment"
+                      title="Add attachment"
+                    >
+                      +
+                    </button>
+                    <input
+                      ref={unifiedRef}
+                      type="file"
+                      accept="image/*,video/*,*/*"
+                      multiple
+                      className="hidden"
+                      onChange={addUnified}
+                    />
+                    <button
+                      onClick={() => void sendPrompt()}
+                      disabled={laneTyping.A || laneTyping.B || (!input.trim() && currentAttachments().length === 0)}
+                      className="px-3 py-2 rounded-md text-sm disabled:opacity-60 flex items-center gap-1"
+                      style={{ background: 'var(--brand)', color: '#00120a' }}
+                    >
+                      {(laneTyping.A && activeLane === 'A') || (laneTyping.B && activeLane === 'B')
+                        ? <Loader2 className="w-4 h-4 animate-spin" />
+                        : <><Send className="w-4 h-4" /> Send</>}
+                    </button>
+                  </div>
                 )}
 
-                {/* Attachments preview (both desktop & mobile) */}
+                {/* Attachments preview */}
                 {(pics.length + vids.length + files.length > 0) && (
                   <div className="mt-2 space-y-2">
-                    {/* Images */}
                     {pics.length > 0 && (
                       <div>
                         <div className="text-[11px] opacity-60 mb-1">Pictures ({pics.length})</div>
                         <div className="flex flex-wrap gap-2">
                           {pics.map(a => (
                             <div key={a.id} className="relative rounded-md overflow-hidden" style={{ border: '1px solid var(--border)' }}>
-                              {a.url ? <img src={a.url} alt={a.name} className="w-16 h-16 object-cover" /> : <div className="w-16 h-16 grid place-items-center text-xs opacity-60">image</div>}
+                              {a.url ? <img src={a.url} alt={a.name} className="w-16 h-16 object-cover" /> :
+                                <div className="w-16 h-16 grid place-items-center text-xs opacity-60">image</div>}
                               <button
                                 className="absolute -top-2 -right-2 bg-black/70 text-white rounded-full w-5 h-5 text-[11px] leading-5"
                                 onClick={() => setPics(cur => cur.filter(x => x.id !== a.id))}
-                                aria-label="Remove" title="Remove"
+                                aria-label="Remove"
+                                title="Remove"
                               >×</button>
                             </div>
                           ))}
                         </div>
                       </div>
                     )}
-                    {/* Videos */}
                     {vids.length > 0 && (
                       <div>
                         <div className="text-[11px] opacity-60 mb-1">Videos ({vids.length})</div>
@@ -863,13 +843,12 @@ export default function Improve() {
                             <div key={a.id} className="px-2 py-1 rounded-md text-xs" style={CARD}>
                               <Film className="inline w-3.5 h-3.5 mr-1" />
                               {a.name}
-                              <button className="ml-2 opacity-70" onClick={() => setVids(cur => cur.filter(x => x.id !== a.id))} aria-label="Remove" title="Remove">×</button>
+                              <button className="ml-2 opacity-70" onClick={() => setVids(cur => cur.filter(x => x.id !== a.id))}>×</button>
                             </div>
                           ))}
                         </div>
                       </div>
                     )}
-                    {/* Files */}
                     {files.length > 0 && (
                       <div>
                         <div className="text-[11px] opacity-60 mb-1">Files ({files.length})</div>
@@ -878,7 +857,7 @@ export default function Improve() {
                             <div key={a.id} className="px-2 py-1 rounded-md text-xs" style={CARD}>
                               <Paperclip className="inline w-3.5 h-3.5 mr-1" />
                               {a.name}
-                              <button className="ml-2 opacity-70" onClick={() => setFiles(cur => cur.filter(x => x.id !== a.id))} aria-label="Remove" title="Remove">×</button>
+                              <button className="ml-2 opacity-70" onClick={() => setFiles(cur => cur.filter(x => x.id !== a.id))}>×</button>
                             </div>
                           ))}
                         </div>
@@ -887,7 +866,7 @@ export default function Improve() {
                   </div>
                 )}
 
-                {/* Non-text tabs (desktop): allow "Send" for attachments-only */}
+                {/* Non-text tabs (desktop): Send button */}
                 {!isMobile && tab !== 'text' && (
                   <div className="flex items-center justify-end">
                     <button
@@ -915,7 +894,7 @@ export default function Improve() {
             </div>
           </section>
 
-          {/* Right: Versions rail (drag to create Lane B) */}
+          {/* Right: Versions rail */}
           <aside className="h-full flex flex-col overflow-hidden" style={PANEL}>
             <div className="p-3 border-b flex items-center justify-between" style={{ borderColor: 'var(--border)' }}>
               <div className="font-semibold">Versions</div>
