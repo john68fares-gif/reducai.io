@@ -59,20 +59,6 @@ const fmtTime = (ts: number) => new Date(ts).toLocaleString();
 const stripMd = (t: string) => (t || '').replace(/```[\s\S]*?```/g, '').replace(/[*_`>#-]/g, '').replace(/\s+/g, ' ').trim();
 const sanitize = (text: string) => (text || '').replace(/```[\s\S]*?```/g, '[redacted]').replace(/\*\*/g, '').replace(/`([^`]+)`/g, '$1');
 
-/** Ensure a stable owner id across Builder/Improve and expose via cookie too */
-function ensureOwnerId(): string {
-  let id = '';
-  try { id = localStorage.getItem('dev:userId') || ''; } catch {}
-  if (!id) {
-    id = `dev_${Math.random().toString(36).slice(2, 10)}`;
-    try { localStorage.setItem('dev:userId', id); } catch {}
-  }
-  try {
-    document.cookie = `ra_uid=${encodeURIComponent(id)}; path=/; max-age=31536000; samesite=lax`;
-  } catch {}
-  return id;
-}
-
 function SplitIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden>
@@ -167,40 +153,46 @@ export default function Improve() {
   const [dropActive, setDropActive] = useState(false);
   const [testVersion, setTestVersion] = useState<Version | null>(null);
 
-  /* Stable owner id + cookie so API matches (critical) */
+  /* Stable owner id + cookie so API matches */
   useEffect(() => {
-    const id = ensureOwnerId();
-    setUserId(id);
+    let dev = localStorage.getItem('dev:userId');
+    if (!dev) {
+      dev = `dev_${Math.random().toString(36).slice(2, 10)}`;
+      localStorage.setItem('dev:userId', dev);
+    }
+    // ensure the API’s cookie fallback also sees this id
+    try {
+      document.cookie = `ra_uid=${encodeURIComponent(dev)}; path=/; max-age=31536000`;
+    } catch {}
+    setUserId(dev);
   }, []);
 
-  /* Robust agents fetch (accept multiple response shapes + cookie) */
+  /* Load agents (no local fallback, no auto-create) */
   const fetchBots = useCallback(async (uid: string) => {
     try {
       const res = await fetch(`/api/chatbots?ownerId=${encodeURIComponent(uid)}`, {
         headers: { 'x-owner-id': uid },
-        credentials: 'include',
+        credentials: 'include', // ← added
       });
       const json = await res.json().catch(() => null);
 
-      let rows: BotRow[] =
-        Array.isArray(json) ? json :
-        Array.isArray(json?.data) ? json.data :
-        Array.isArray(json?.rows) ? json.rows :
-        (json?.ok && Array.isArray(json?.result)) ? json.result :
-        [];
+      // ← tolerant parsing: accept array OR {data:[]}
+      const rows: BotRow[] = Array.isArray(json)
+        ? json
+        : Array.isArray((json as any)?.data)
+        ? (json as any).data
+        : [];
 
-      // Fallback: try without query param if nothing came back
-      if (rows.length === 0) {
-        const res2 = await fetch(`/api/chatbots`, {
-          headers: { 'x-owner-id': uid },
-          credentials: 'include',
+      // optional tiny debug to see shape/count
+      try {
+        // eslint-disable-next-line no-console
+        console.log('[Improve] /api/chatbots payload', {
+          isArray: Array.isArray(json),
+          hasDataArray: Array.isArray((json as any)?.data),
+          count: rows.length,
+          sample: rows[0],
         });
-        const j2 = await res2.json().catch(() => null);
-        rows =
-          Array.isArray(j2) ? j2 :
-          Array.isArray(j2?.data) ? j2.data :
-          [];
-      }
+      } catch {}
 
       setList(rows);
       if (!selectedId && rows.length) setSelectedId(rows[0].id);
@@ -284,7 +276,7 @@ export default function Improve() {
     try { localStorage.setItem(versionsKey(userId, selectedId), JSON.stringify(next)); } catch {}
   }
 
-  /* Save back to API (send x-owner-id, include credentials) */
+  /* Save back to API (no local mirroring here — Improve is for tuning) */
   async function saveEdits() {
     if (!userId || !selectedId) return;
     try {
@@ -294,7 +286,6 @@ export default function Improve() {
       await fetch(`/api/chatbots/${selectedId}?ownerId=${encodeURIComponent(userId)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', 'x-owner-id': userId },
-        credentials: 'include',
         body: JSON.stringify({ name, model, temperature, system }),
       });
       // refresh display-only fields
@@ -311,11 +302,7 @@ export default function Improve() {
     if (!userId || !selectedId) return;
     if (!confirm('Delete this assistant?')) return;
     try {
-      await fetch(`/api/chatbots/${selectedId}?ownerId=${encodeURIComponent(userId)}`, {
-        method: 'DELETE',
-        headers: { 'x-owner-id': userId },
-        credentials: 'include',
-      });
+      await fetch(`/api/chatbots/${selectedId}?ownerId=${encodeURIComponent(userId)}`, { method: 'DELETE', headers: { 'x-owner-id': userId } });
       setList(cur => cur.filter(b => b.id !== selectedId));
       setSelectedId(null);
     } catch {
@@ -403,7 +390,6 @@ export default function Improve() {
         const res = await fetch('/api/support/ask', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
           body: JSON.stringify({
             message: text || '',
             agentId: selected?.id || null,
@@ -464,7 +450,6 @@ export default function Improve() {
         const res = await fetch('/api/support/ask', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
           body: JSON.stringify({
             message: t || '',
             agentId: selected?.id || null,
@@ -557,6 +542,8 @@ export default function Improve() {
       if (tabOpenNonce.files === 0) openSoon(() => { resetPickerValue(filesRef.current); filesRef.current?.click(); });
       setTabOpenNonce(n => ({...n, files: n.files + 1}));
     }
+    // Reset counters when switching away — no-op; we reset when switching to a tab.
+    return () => {};
   }, [tab, tabOpenNonce.pics, tabOpenNonce.vids, tabOpenNonce.files]);
 
   /* Compiled prompt preview (live) */
@@ -588,13 +575,6 @@ export default function Improve() {
           <span className="text-xs px-2 py-[2px] rounded-full" style={{ background: 'color-mix(in oklab, var(--text) 8%, transparent)', border: '1px solid var(--border)' }}>
             {saving ? 'Saving…' : dirty ? 'Unsaved changes' : 'Saved ✓'}
           </span>
-
-          {/* Debug chip */}
-          {userId && (
-            <span className="text-xs px-2 py-[2px] rounded-md ml-2" style={{ border:'1px solid var(--border)' }}>
-              ownerId: <b>{userId}</b> · agents: {list.length}
-            </span>
-          )}
 
           <label className="ml-2 text-xs inline-flex items-center gap-2 px-2 py-1 rounded-md" style={{ ...CARD }}>
             <input type="checkbox" checked={autoSnapshot} onChange={e=>setAutoSnapshot(e.target.checked)} />
