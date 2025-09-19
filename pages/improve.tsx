@@ -4,8 +4,9 @@
 // - Talks to /api/improve/chat (App Router) for real AI responses (messages[]).
 // - Adds a bouncing "… typing" indicator during requests.
 // - "Show Prompt" = one human sentence (no label blocks) with Vapi-like scramble.
-// - Add Rule inserts into ### RULES and replays the scramble.
-// - On mobile, Pictures/Videos/Files collapse into one "+" unified picker.
+// - "Add Rule" is next to the toggle; Pre/Post prompt live inside the panel.
+// - A single "+" opens an attachments tray (doesn't hide the composer).
+// - Chat areas are fully scrollable; auto-scroll on new messages.
 
 'use client';
 
@@ -15,8 +16,7 @@ import React, {
 import Link from 'next/link';
 import {
   Bot, Search, Loader2, Save, Trash2, RefreshCw, X,
-  MessageSquare, Send, ChevronDown,
-  Image as ImageIcon, Paperclip, Film, FileText
+  MessageSquare, Send, ChevronDown, Film, Paperclip
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase-client';
 
@@ -110,8 +110,7 @@ function VapiScramble({ text, jitter = 900, className = '' }: { text: string; ji
   useEffect(() => {
     const chars = '!<>-_\\/[]{}—=+*^?#%$&|~';
     const src = text ?? '';
-    // Duration scales a bit with length, clamped for comfort.
-    const duration = Math.min(2200, Math.max(700, jitter + src.length * 8));
+    const duration = Math.min(2400, Math.max(900, jitter + src.length * 10)); // slightly slower
     const start = performance.now();
     let raf = 0;
 
@@ -120,15 +119,11 @@ function VapiScramble({ text, jitter = 900, className = '' }: { text: string; ji
       const t = (now - start) / duration;
       if (t >= 1) { setOut(src); return; }
 
-      // Fraction of characters resolved.
-      const resolved = Math.floor(src.length * t);
+      const resolved = Math.floor(src.length * (0.15 + 0.85 * t)); // ease-in-ish
       let s = '';
       for (let i = 0; i < src.length; i++) {
         if (i < resolved) s += src[i];
-        else {
-          // Keep width stable with random glyphs; swap a few per frame.
-          s += chars[Math.floor(Math.random() * chars.length)];
-        }
+        else s += chars[Math.floor(Math.random() * chars.length)];
       }
       setOut(s);
       raf = requestAnimationFrame(step);
@@ -153,6 +148,68 @@ function TypingDots({ className = '' }: { className?: string }) {
         .animate-bounce { animation: bounce 1.2s infinite ease-in-out; display:inline-block }
       `}</style>
     </span>
+  );
+}
+
+/* Click-outside hook */
+function useClickOutside<T extends HTMLElement>(onOutside: () => void): React.RefObject<T> {
+  const ref = useRef<T | null>(null);
+  useEffect(() => {
+    function onDoc(e: MouseEvent) {
+      if (!ref.current) return;
+      if (!ref.current.contains(e.target as Node)) onOutside();
+    }
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [onOutside]);
+  return ref;
+}
+
+/* Attachment Tray (popover) */
+function AttachmentTray({
+  open,
+  onClose,
+  onSelectFiles,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSelectFiles: (files: FileList | null) => void;
+}) {
+  const trayRef = useClickOutside<HTMLDivElement>(onClose);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  if (!open) return null;
+  return (
+    <div
+      ref={trayRef}
+      className="absolute bottom-12 right-0 z-30 w-[320px] rounded-xl border p-3 shadow-xl"
+      style={{ background: 'var(--bg)', borderColor: 'var(--border)' }}
+      role="dialog"
+      aria-label="Add attachments"
+    >
+      <div className="text-sm font-medium mb-2">Attach files</div>
+
+      <label
+        className="block rounded-md border p-3 text-sm cursor-pointer text-center"
+        style={{ borderColor: 'var(--border)' }}
+        onClick={() => inputRef.current?.click()}
+      >
+        Click to choose files
+      </label>
+
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*,video/*,*/*"
+        multiple
+        className="hidden"
+        onChange={(e) => onSelectFiles(e.target.files)}
+      />
+
+      <div className="mt-2 text-xs opacity-70" style={{ userSelect: 'none' }}>
+        Tip: You can also drag & drop files anywhere in the chat.
+      </div>
+    </div>
   );
 }
 
@@ -205,24 +262,16 @@ export default function Improve() {
   const [activeLane, setActiveLane] = useState<'A' | 'B'>('A');
   const [input, setInput] = useState('');
 
-  /* Attachments (desktop tabs; mobile unified "+") */
-  type Tab = 'text' | 'pics' | 'vids' | 'files';
-  const [tab, setTab] = useState<Tab>('text');
-  const [isMobile, setIsMobile] = useState(false);
-  useEffect(() => {
-    const mq = window.matchMedia('(max-width: 680px)');
-    const upd = () => setIsMobile(mq.matches);
-    upd(); mq.addEventListener('change', upd);
-    return () => mq.removeEventListener('change', upd);
-  }, []);
-  const picsRef  = useRef<HTMLInputElement | null>(null);
-  const vidsRef  = useRef<HTMLInputElement | null>(null);
-  const filesRef = useRef<HTMLInputElement | null>(null);
-  const unifiedRef = useRef<HTMLInputElement | null>(null);
+  /* Attachments (tray) */
   const [pics,  setPics]  = useState<Attachment[]>([]);
   const [vids,  setVids]  = useState<Attachment[]>([]);
   const [files, setFiles] = useState<Attachment[]>([]);
+  const [trayOpen, setTrayOpen] = useState(false);
   const currentAttachments = useCallback(() => [...pics, ...vids, ...files], [pics, vids, files]);
+
+  /* Chat scroll refs (auto-scroll) */
+  const laneARef = useRef<HTMLDivElement | null>(null);
+  const laneBRef = useRef<HTMLDivElement | null>(null);
 
   /* Fetch bots for this owner */
   const fetchBots = useCallback(async (uid: string) => {
@@ -274,6 +323,14 @@ export default function Improve() {
       prePrompt !== '' || postPrompt !== '';
     setDirty(d);
   }, [name, model, temperature, system, prePrompt, postPrompt, selected]);
+
+  /* Auto-scroll to bottom on new messages / typing */
+  useEffect(() => {
+    if (laneARef.current) laneARef.current.scrollTop = laneARef.current.scrollHeight;
+  }, [msgsA, laneTyping.A]);
+  useEffect(() => {
+    if (laneBRef.current) laneBRef.current.scrollTop = laneBRef.current.scrollHeight;
+  }, [msgsB, laneTyping.B]);
 
   /* Left rail filter/sort */
   const [query, setQuery] = useState('');
@@ -353,7 +410,6 @@ export default function Improve() {
   }
 
   /* Files → attachments (UI sugar; /api/improve/chat currently ignores media) */
-  function resetPickerValue(inp: HTMLInputElement | null) { try { if (inp) inp.value = ''; } catch {} }
   function fileToAttachment(file: File): Promise<Attachment> {
     return new Promise(resolve => {
       const id = `${file.name}_${file.size}_${crypto.randomUUID?.() || Math.random().toString(36).slice(2)}`;
@@ -365,16 +421,8 @@ export default function Improve() {
       } else resolve(base);
     });
   }
-  async function addFiles(fileList: FileList | null, kind: 'pics' | 'vids' | 'files') {
-    if (!fileList || !fileList.length) return;
-    const arr = Array.from(fileList).slice(0, 16);
-    const atts = await Promise.all(arr.map(fileToAttachment));
-    if (kind === 'pics')  setPics(prev => [...prev, ...atts.filter(a => a.mime.startsWith('image/'))].slice(0, 16));
-    if (kind === 'vids')  setVids(prev => [...prev, ...atts.filter(a => a.mime.startsWith('video/'))].slice(0, 8));
-    if (kind === 'files') setFiles(prev => [...prev, ...atts.filter(a => !a.mime.startsWith('image/') && !a.mime.startsWith('video/'))].slice(0, 16));
-  }
-  async function addUnified(e: React.ChangeEvent<HTMLInputElement>) {
-    const fl = e.target.files; if (!fl || !fl.length) return;
+  async function handleSelectFiles(fl: FileList | null) {
+    if (!fl || !fl.length) return;
     const arr = Array.from(fl).slice(0, 16);
     for (const f of arr) {
       const att = await fileToAttachment(f);
@@ -382,7 +430,7 @@ export default function Improve() {
       else if (att.mime.startsWith('video/')) setVids(prev => [...prev, att].slice(0, 8));
       else setFiles(prev => [...prev, att].slice(0, 16));
     }
-    resetPickerValue(unifiedRef.current);
+    setTrayOpen(false);
   }
 
   /* === AI: /api/improve/chat (messages[]) === */
@@ -456,7 +504,7 @@ export default function Improve() {
     }
   }
 
-  /* Sentence-style prompt preview */
+  /* Prompt preview: one sentence + scramble */
   const goal  = useMemo(() => parseGoal(system, name), [system, name]);
   const rules = useMemo(() => parseRules(system), [system]);
   const previewSentence = useMemo(() => {
@@ -464,11 +512,10 @@ export default function Improve() {
       temperature <= 0.25 ? 'precise' : temperature >= 0.75 ? 'creative' : 'balanced';
     const rulesPhrase =
       (rules.length ? rules : ['keep replies clear and concise']).join('; ');
-    // IMPORTANT: one clean sentence, no labels:
     return `You’re called ${name || 'test'}. Your goal is to ${goal}. You run on ${model} with a ${tone} tone, and you follow these rules: ${rulesPhrase}.`;
   }, [name, model, temperature, goal, rules]);
 
-  /* Insert rule helper (keeps ### RULES if present) */
+  /* Insert rule helper */
   function insertRuleIntoSystem(rule: string) {
     setSystem((s) => {
       const r = rule.trim();
@@ -489,15 +536,32 @@ export default function Improve() {
     if (!r) return;
     insertRuleIntoSystem(r);
     setNewRule('');
-    setScrambleKey(k => k + 1); // replay VapiScramble
+    setScrambleKey(k => k + 1); // replay VapiScramble when rule is added
   }
 
   /* UI */
   return (
-    <div className="h-screen w-full overflow-hidden" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
+    <div
+      className="h-screen w-full overflow-hidden"
+      style={{ background: 'var(--bg)', color: 'var(--text)' }}
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={async (e) => {
+        e.preventDefault();
+        if (!e.dataTransfer?.files?.length) return;
+        const dropped = Array.from(e.dataTransfer.files).slice(0, 16);
+        for (const f of dropped) {
+          const att = await fileToAttachment(f);
+          if (att.mime.startsWith('image/')) setPics((prev) => [...prev, att].slice(0, 16));
+          else if (att.mime.startsWith('video/')) setVids((prev) => [...prev, att].slice(0, 8));
+          else setFiles((prev) => [...prev, att].slice(0, 16));
+        }
+      }}
+    >
       {/* Top bar */}
-      <header className="sticky top-0 z-20 backdrop-blur border-b px-6 py-3"
-        style={{ borderColor: 'var(--border)', background: 'color-mix(in oklab, var(--bg) 92%, transparent)' }}>
+      <header
+        className="sticky top-0 z-20 backdrop-blur border-b px-6 py-3"
+        style={{ borderColor: 'var(--border)', background: 'color-mix(in oklab, var(--bg) 92%, transparent)' }}
+      >
         <div className="max-w-[1600px] mx-auto flex items-center gap-3">
           <MessageSquare className="w-5 h-5" />
           <h1 className="text-[18px] font-semibold">{selected ? (selected.name || 'Assistant') : 'Agent Tuning'}</h1>
@@ -543,52 +607,42 @@ export default function Improve() {
               </div>
               <div className="mt-2">
                 <select value={sort} onChange={(e) => setSort(e.target.value as any)} className="px-2 py-1 rounded-md text-xs" style={CARD}>
-                                   <option value="updated_desc">Recent</option>
+                  <option value="updated_desc">Recent</option>
                   <option value="name_asc">Name</option>
                 </select>
               </div>
             </div>
-
             <div className="p-3 overflow-auto" style={{ maxHeight: 'calc(100% - 90px)' }}>
               {!userId ? (
                 <div className="text-sm opacity-80 py-8">
-                  Sign in to load your agents (scoped by your Supabase user id).
+                  Sign in to load your agents (we scope by your Supabase user id).
                 </div>
               ) : filtered.length === 0 ? (
                 <div className="text-sm opacity-80 py-8 text-center">
                   No agents for this account.
                   <div className="mt-2">
-                    <Link
-                      href="/builder"
-                      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm"
-                      style={{ background: 'var(--brand)', color: '#00120a' }}
-                    >
+                    <Link href="/builder" className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm"
+                      style={{ background: 'var(--brand)', color: '#00120a' }}>
                       Go to Builder
                     </Link>
                   </div>
                 </div>
               ) : (
                 <ul className="space-y-2">
-                  {filtered.map((b) => {
+                  {filtered.map(b => {
                     const active = selectedId === b.id;
                     return (
                       <li key={b.id}>
                         <button
                           onClick={() => setSelectedId(b.id)}
                           className={`w-full text-left px-3 py-2 rounded-lg text-sm flex items-center gap-2 transition ${active ? 'ring-1' : ''}`}
-                          style={{ ...CARD, borderColor: active ? 'var(--brand)' : 'var(--border)' }}
-                        >
-                          <div
-                            className="w-8 h-8 rounded-md grid place-items-center"
-                            style={{ background: 'rgba(0,0,0,.06)', border: '1px solid var(--border)' }}
-                          >
+                          style={{ ...CARD, borderColor: active ? 'var(--brand)' : 'var(--border)' }}>
+                          <div className="w-8 h-8 rounded-md grid place-items-center" style={{ background: 'rgba(0,0,0,.06)', border: '1px solid var(--border)' }}>
                             <Bot className="w-4 h-4" />
                           </div>
                           <div className="flex-1 min-w-0">
                             <div className="truncate">{b.name || 'Untitled'}</div>
-                            <div className="text-[11px] opacity-60 truncate">
-                              {b.model} · {b.id.slice(0, 8)}
-                            </div>
+                            <div className="text-[11px] opacity-60 truncate">{b.model} · {b.id.slice(0, 8)}</div>
                           </div>
                         </button>
                       </li>
@@ -606,22 +660,11 @@ export default function Improve() {
               <div className="grid gap-3" style={{ gridTemplateColumns: '1.1fr 0.9fr 1fr' }}>
                 <div>
                   <div className="text-xs opacity-70 mb-1">Name</div>
-                  <input
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    className="w-full px-3 py-2 rounded-md text-[15px]"
-                    style={CARD}
-                    placeholder="Agent name"
-                  />
+                  <input value={name} onChange={(e) => setName(e.target.value)} className="w-full px-3 py-2 rounded-md text-[15px]" style={CARD} placeholder="Agent name" />
                 </div>
                 <div>
                   <div className="text-xs opacity-70 mb-1">Model</div>
-                  <select
-                    value={model}
-                    onChange={(e) => setModel(e.target.value)}
-                    className="w-full px-3 py-2 rounded-md"
-                    style={CARD}
-                  >
+                  <select value={model} onChange={(e) => setModel(e.target.value)} className="w-full px-3 py-2 rounded-md" style={CARD}>
                     <option value="gpt-4o">gpt-4o</option>
                     <option value="gpt-4o-mini">gpt-4o-mini</option>
                     <option value="gpt-4.1-mini">gpt-4.1-mini</option>
@@ -630,16 +673,13 @@ export default function Improve() {
                 <div>
                   <div className="text-xs opacity-70 mb-1">Temperature</div>
                   <div className="flex items-center gap-2">
-                    {([0.1, 0.5, 0.9] as const).map((val) => {
+                    {([0.1, 0.5, 0.9] as const).map(val => {
                       const lbl = val === 0.1 ? 'Precise' : val === 0.5 ? 'Balanced' : 'Creative';
                       const active = Math.abs(temperature - val) < 0.01;
                       return (
-                        <button
-                          key={val}
-                          onClick={() => setTemperature(val)}
+                        <button key={val} onClick={() => setTemperature(val)}
                           className={`px-3 py-2 rounded-md text-sm ${active ? 'ring-1' : ''}`}
-                          style={{ ...CARD, borderColor: active ? 'var(--brand)' : 'var(--border)' }}
-                        >
+                          style={{ ...CARD, borderColor: active ? 'var(--brand)' : 'var(--border)' }}>
                           {lbl}
                         </button>
                       );
@@ -648,52 +688,52 @@ export default function Improve() {
                 </div>
               </div>
 
-              {/* Pre/Post + Show Prompt */}
-              <div className="mt-3 grid gap-2 items-center" style={{ gridTemplateColumns: '1fr auto auto' }}>
-                <input
-                  value={prePrompt}
-                  onChange={(e) => setPrePrompt(e.target.value)}
-                  placeholder="Pre Prompt (optional)"
-                  className="px-3 py-2 rounded-md text-sm"
-                  style={CARD}
-                />
-                <input
-                  value={postPrompt}
-                  onChange={(e) => setPostPrompt(e.target.value)}
-                  placeholder="Post Prompt (optional)"
-                  className="px-3 py-2 rounded-md text-sm"
-                  style={CARD}
-                />
-                <button
-                  onClick={() => setShowPromptPanel((s) => !s)}
-                  className="px-3 py-2 rounded-md text-sm"
-                  style={{ ...CARD }}
-                >
-                  <ChevronDown className="inline w-4 h-4 mr-1" /> {showPromptPanel ? 'Hide prompt' : 'Show prompt'}
+              {/* Show Prompt row: toggle + Add Rule (short) */}
+              <div className="mt-3 flex items-center gap-2">
+                <button onClick={() => setShowPromptPanel(s => !s)} className="px-3 py-2 rounded-md text-sm flex items-center gap-1" style={{ ...CARD }}>
+                  <ChevronDown className="w-4 h-4" />
+                  {showPromptPanel ? 'Hide prompt' : 'Show prompt'}
                 </button>
+
+                <div className="flex items-center gap-1 ml-auto">
+                  <input
+                    value={newRule}
+                    onChange={(e) => setNewRule(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') addRule(); }}
+                    placeholder="Add a rule…"
+                    className="px-3 py-2 rounded-md text-sm"
+                    style={CARD}
+                  />
+                  <button onClick={addRule} className="px-3 py-2 rounded-md text-sm" style={{ ...CARD }}>＋</button>
+                </div>
               </div>
 
-              {/* Sentence-style Prompt Preview with Vapi-like scramble + Add rule */}
+              {/* Prompt Panel: one sentence + scramble + Pre/Post fields */}
               {showPromptPanel && (
                 <div className="mt-3 grid gap-3" style={{ gridTemplateColumns: '1fr' }}>
-                  <div className="p-3 rounded-md" style={CARD}>
-                    <div className="text-[13px] leading-6">
-                      <VapiScramble key={scrambleKey} text={previewSentence} jitter={900} />
-                    </div>
-                    <div className="mt-3 flex items-center gap-2">
+                  <div className="p-3 rounded-md text-[13px] leading-6" style={CARD}>
+                    <VapiScramble key={scrambleKey} text={previewSentence} />
+                  </div>
+                  <div className="grid gap-2 md:grid-cols-2">
+                    <div>
+                      <div className="text-xs opacity-70 mb-1">Pre Prompt (optional)</div>
                       <input
-                        value={newRule}
-                        onChange={(e) => setNewRule(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') addRule();
-                        }}
-                        placeholder="Add rule (press Enter) → inserts under ### RULES"
-                        className="px-3 py-2 rounded-md text-sm flex-1"
+                        value={prePrompt}
+                        onChange={(e) => setPrePrompt(e.target.value)}
+                        placeholder="Short preface injected before SYSTEM"
+                        className="px-3 py-2 rounded-md text-sm w-full"
                         style={CARD}
                       />
-                      <button onClick={addRule} className="px-3 py-2 rounded-md text-sm" style={CARD}>
-                        Add
-                      </button>
+                    </div>
+                    <div>
+                      <div className="text-xs opacity-70 mb-1">Post Prompt (optional)</div>
+                      <input
+                        value={postPrompt}
+                        onChange={(e) => setPostPrompt(e.target.value)}
+                        placeholder="Short guidance injected after SYSTEM"
+                        className="px-3 py-2 rounded-md text-sm w-full"
+                        style={CARD}
+                      />
                     </div>
                   </div>
                   <div className="text-[12px] opacity-70">
@@ -706,83 +746,55 @@ export default function Improve() {
             {/* Live Test */}
             <div className="p-3 grid gap-3" style={{ ...PANEL, gridTemplateRows: 'auto 1fr auto' }}>
               <div className="flex items-center justify-between">
-                <div className="font-medium flex items-center gap-2">
-                  <MessageSquare className="w-4 h-4" /> Live Test
-                </div>
+                <div className="font-medium flex items-center gap-2"><MessageSquare className="w-4 h-4" /> Live Test</div>
                 <label className="text-sm flex items-center gap-2">
                   <input type="checkbox" checked={sendBoth} onChange={(e) => setSendBoth(e.target.checked)} />
                   Send to both lanes
                 </label>
               </div>
 
-              <div
-                className="grid gap-3"
-                style={{ gridTemplateColumns: laneB ? '1fr 1fr' : '1fr', height: '100%', minHeight: 360 }}
-              >
+              <div className="grid gap-3" style={{ gridTemplateColumns: laneB ? '1fr 1fr' : '1fr', height: '100%', minHeight: 360 }}>
                 {/* Lane A */}
-                <div className="flex flex-col rounded-md border" style={{ ...CARD }}>
-                  <div
-                    className="px-3 py-2 border-b flex items-center justify-between"
-                    style={{ borderColor: 'var(--border)' }}
-                  >
+                <div className="flex flex-col rounded-md border min-h-0" style={{ ...CARD }}>
+                  <div className="px-3 py-2 border-b flex items-center justify-between" style={{ borderColor: 'var(--border)' }}>
                     <div className="text-sm font-medium">Lane A (current)</div>
-                    <button onClick={() => setActiveLane('A')} className="text-xs px-2 py-1 rounded" style={CARD}>
-                      Focus
-                    </button>
+                    <button onClick={() => setActiveLane('A')} className="text-xs px-2 py-1 rounded" style={CARD}>Focus</button>
                   </div>
-                  <div className="flex-1 overflow-auto p-3 text-sm leading-6">
-                    {msgsA.length === 0 ? (
-                      <div className="opacity-50">No messages yet.</div>
-                    ) : (
+                  <div ref={laneARef} className="flex-1 overflow-y-auto p-3 text-sm leading-6">
+                    {msgsA.length === 0 ? <div className="opacity-50">No messages yet.</div> :
                       msgsA.map((m, i) => (
                         <div key={i} className="mb-2">
-                          <b>{m.role === 'user' ? 'You' : 'AI'}:</b> <span>{m.content}</span>
+                          <b>{m.role === 'user' ? 'You' : 'AI'}:</b>{' '}
+                          <span>{m.content}</span>
                         </div>
                       ))
-                    )}
-                    {laneTyping.A && (
-                      <div className="mt-1">
-                        <TypingDots />
-                      </div>
-                    )}
+                    }
+                    {laneTyping.A && <div className="mt-1"><TypingDots /></div>}
                   </div>
                 </div>
 
                 {/* Lane B */}
                 {laneB ? (
-                  <div className="flex flex-col rounded-md border" style={{ ...CARD }}>
-                    <div
-                      className="px-3 py-2 border-b flex items-center justify-between"
-                      style={{ borderColor: 'var(--border)' }}
-                    >
+                  <div className="flex flex-col rounded-md border min-h-0" style={{ ...CARD }}>
+                    <div className="px-3 py-2 border-b flex items-center justify-between" style={{ borderColor: 'var(--border)' }}>
                       <div className="text-sm">
-                        <span className="font-medium">Lane B (version):</span> {laneB.label}{' '}
-                        <span className="opacity-60 text-xs">• {fmtTime(laneB.ts)}</span>
+                        <span className="font-medium">Lane B (version):</span> {laneB.label} <span className="opacity-60 text-xs">• {fmtTime(laneB.ts)}</span>
                       </div>
                       <div className="flex items-center gap-2">
-                        <button onClick={() => setActiveLane('B')} className="text-xs px-2 py-1 rounded" style={CARD}>
-                          Focus
-                        </button>
-                        <button onClick={() => setLaneB(null)} className="text-xs px-2 py-1 rounded" style={CARD}>
-                          <X className="w-3.5 h-3.5" />
-                        </button>
+                        <button onClick={() => setActiveLane('B')} className="text-xs px-2 py-1 rounded" style={CARD}>Focus</button>
+                        <button onClick={() => setLaneB(null)} className="text-xs px-2 py-1 rounded" style={CARD}><X className="w-3.5 h-3.5" /></button>
                       </div>
                     </div>
-                    <div className="flex-1 overflow-auto p-3 text-sm leading-6">
-                      {msgsB.length === 0 ? (
-                        <div className="opacity-50">No messages yet.</div>
-                      ) : (
+                    <div ref={laneBRef} className="flex-1 overflow-y-auto p-3 text-sm leading-6">
+                      {msgsB.length === 0 ? <div className="opacity-50">No messages yet.</div> :
                         msgsB.map((m, i) => (
                           <div key={i} className="mb-2">
-                            <b>{m.role === 'user' ? 'You' : 'AI'}:</b> <span>{m.content}</span>
+                            <b>{m.role === 'user' ? 'You' : 'AI'}:</b>{' '}
+                            <span>{m.content}</span>
                           </div>
                         ))
-                      )}
-                      {laneTyping.B && (
-                        <div className="mt-1">
-                          <TypingDots />
-                        </div>
-                      )}
+                      }
+                      {laneTyping.B && <div className="mt-1"><TypingDots /></div>}
                     </div>
                   </div>
                 ) : (
@@ -793,12 +805,8 @@ export default function Improve() {
                     onDrop={(e) => {
                       e.preventDefault();
                       const id = e.dataTransfer.getData('text/plain');
-                      const v = versions.find((x) => x.id === id);
-                      if (v) {
-                        setLaneB(v);
-                        setActiveLane('A');
-                        setMsgsB([]);
-                      }
+                      const v = versions.find(x => x.id === id);
+                      if (v) { setLaneB(v); setActiveLane('A'); setMsgsB([]); }
                     }}
                   >
                     Drag a version card here to create Lane B
@@ -806,144 +814,72 @@ export default function Improve() {
                 )}
               </div>
 
-              {/* Footer input & attachments */}
-              <div className="space-y-2 rounded-md">
-                {/* Desktop tabs */}
-                {!isMobile && (
-                  <>
-                    <div className="flex items-center gap-2 text-xs">
-                      <button
-                        onClick={() => setTab('text')}
-                        className={`px-2 py-1 rounded ${tab === 'text' ? 'ring-1' : ''}`}
-                        style={{ ...CARD, borderColor: tab === 'text' ? 'var(--brand)' : 'var(--border)' }}
-                      >
-                        Text
-                      </button>
-                      <button
-                        onClick={() => {
-                          resetPickerValue(picsRef.current);
-                          picsRef.current?.click();
-                          setTab('pics');
-                        }}
-                        className={`px-2 py-1 rounded ${tab === 'pics' ? 'ring-1' : ''}`}
-                        style={{ ...CARD, borderColor: tab === 'pics' ? 'var(--brand)' : 'var(--border)' }}
-                      >
-                        <ImageIcon className="inline w-3.5 h-3.5 mr-1" />
-                        Pictures
-                      </button>
-                      <button
-                        onClick={() => {
-                          resetPickerValue(vidsRef.current);
-                          vidsRef.current?.click();
-                          setTab('vids');
-                        }}
-                        className={`px-2 py-1 rounded ${tab === 'vids' ? 'ring-1' : ''}`}
-                        style={{ ...CARD, borderColor: tab === 'vids' ? 'var(--brand)' : 'var(--border)' }}
-                      >
-                        <Film className="inline w-3.5 h-3.5 mr-1" />
-                        Videos
-                      </button>
-                      <button
-                        onClick={() => {
-                          resetPickerValue(filesRef.current);
-                          filesRef.current?.click();
-                          setTab('files');
-                        }}
-                        className={`px-2 py-1 rounded ${tab === 'files' ? 'ring-1' : ''}`}
-                        style={{ ...CARD, borderColor: tab === 'files' ? 'var(--brand)' : 'var(--border)' }}
-                      >
-                        <FileText className="inline w-3.5 h-3.5 mr-1" />
-                        Files
-                      </button>
-                      <div className="ml-auto text-[10px] opacity-50">
-                        Tip: drag a version card into the other column to compare
-                      </div>
-                    </div>
-
-                    {/* Hidden pickers */}
-                    <input
-                      ref={picsRef}
-                      type="file"
-                      accept="image/*"
-                      multiple
-                      className="hidden"
-                      onChange={(e) => addFiles(e.target.files, 'pics')}
-                    />
-                    <input
-                      ref={vidsRef}
-                      type="file"
-                      accept="video/*"
-                      multiple
-                      className="hidden"
-                      onChange={(e) => addFiles(e.target.files, 'vids')}
-                    />
-                    <input
-                      ref={filesRef}
-                      type="file"
-                      multiple
-                      className="hidden"
-                      onChange={(e) => addFiles(e.target.files, 'files')}
-                    />
-
-                    {/* TEXT input */}
-                    {tab === 'text' && (
-                      <div className="flex items-end gap-2">
-                        <textarea
-                          value={input}
-                          onChange={(e) => setInput(e.target.value)}
-                          placeholder="Type a message…"
-                          rows={1}
-                          className="flex-1 px-3 py-2 rounded-md bg-transparent outline-none resize-none text-sm"
-                          style={CARD}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' && !e.shiftKey) {
-                              e.preventDefault();
-                              void sendPrompt();
-                            }
-                          }}
-                        />
+              {/* Footer composer */}
+              <div className="relative">
+                {/* Attachments preview */}
+                {(pics.length + vids.length + files.length > 0) && (
+                  <div className="mb-2 flex flex-wrap gap-2">
+                    {/* Images (thumb) */}
+                    {pics.map(a => (
+                      <div key={a.id} className="relative rounded-md overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+                        {a.url ? (
+                          <img src={a.url} alt={a.name} className="w-16 h-16 object-cover" />
+                        ) : (
+                          <div className="w-16 h-16 grid place-items-center text-xs opacity-60">image</div>
+                        )}
                         <button
-                          onClick={() => void sendPrompt()}
-                          disabled={
-                            laneTyping.A ||
-                            laneTyping.B ||
-                            (!input.trim() && pics.length + vids.length + files.length === 0)
-                          }
-                          className="px-3 py-2 rounded-md text-sm disabled:opacity-60 flex items-center gap-1"
-                          style={{ background: 'var(--brand)', color: '#00120a' }}
+                          className="absolute -top-2 -right-2 bg-black/70 text-white rounded-full w-5 h-5 text-[11px] leading-5"
+                          onClick={() => setPics(cur => cur.filter(x => x.id !== a.id))}
+                          aria-label="Remove"
+                          title="Remove"
                         >
-                          {(laneTyping.A && activeLane === 'A') || (laneTyping.B && activeLane === 'B') ? (
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                          ) : (
-                            <>
-                              <Send className="w-4 h-4" /> Send
-                            </>
-                          )}
+                          ×
                         </button>
                       </div>
-                    )}
-                  </>
+                    ))}
+                    {/* Videos */}
+                    {vids.map(a => (
+                      <div key={a.id} className="px-2 py-1 rounded-md text-xs flex items-center" style={CARD}>
+                        <Film className="inline w-3.5 h-3.5 mr-1" />
+                        <span className="truncate max-w-[160px]">{a.name}</span>
+                        <button
+                          className="ml-2 opacity-70"
+                          onClick={() => setVids(cur => cur.filter(x => x.id !== a.id))}
+                          aria-label="Remove"
+                          title="Remove"
+                        >×</button>
+                      </div>
+                    ))}
+                    {/* Files */}
+                    {files.map(a => (
+                      <div key={a.id} className="px-2 py-1 rounded-md text-xs flex items-center" style={CARD}>
+                        <Paperclip className="inline w-3.5 h-3.5 mr-1" />
+                        <span className="truncate max-w-[160px]">{a.name}</span>
+                        <button
+                          className="ml-2 opacity-70"
+                          onClick={() => setFiles(cur => cur.filter(x => x.id !== a.id))}
+                          aria-label="Remove"
+                          title="Remove"
+                        >×</button>
+                      </div>
+                    ))}
+                  </div>
                 )}
 
-                {/* Mobile: unified "+" */}
-                {isMobile && (
-                  <div className="flex items-end gap-2">
-                    <textarea
-                      value={input}
-                      onChange={(e) => setInput(e.target.value)}
-                      placeholder="Type a message…"
-                      rows={1}
-                      className="flex-1 px-3 py-2 rounded-md bg-transparent outline-none resize-none text-sm"
-                      style={CARD}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                          e.preventDefault();
-                          void sendPrompt();
-                        }
-                      }}
-                    />
+                {/* Composer row */}
+                <div className="flex items-end gap-2">
+                  <textarea
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    placeholder="Type a message…"
+                    rows={1}
+                    className="flex-1 px-3 py-2 rounded-md bg-transparent outline-none resize-none text-sm"
+                    style={CARD}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendPrompt(); } }}
+                  />
+                  <div className="relative">
                     <button
-                      onClick={() => unifiedRef.current?.click()}
+                      onClick={() => setTrayOpen(o => !o)}
                       className="px-3 py-2 rounded-md text-lg"
                       style={CARD}
                       aria-label="Add attachment"
@@ -951,153 +887,37 @@ export default function Improve() {
                     >
                       +
                     </button>
-                    <input
-                      ref={unifiedRef}
-                      type="file"
-                      accept="image/*,video/*,*/*"
-                      multiple
-                      className="hidden"
-                      onChange={addUnified}
+                    <AttachmentTray
+                      open={trayOpen}
+                      onClose={() => setTrayOpen(false)}
+                      onSelectFiles={handleSelectFiles}
                     />
-                    <button
-                      onClick={() => void sendPrompt()}
-                      disabled={
-                        laneTyping.A ||
-                        laneTyping.B ||
-                        (!input.trim() && pics.length + vids.length + files.length === 0)
-                      }
-                      className="px-3 py-2 rounded-md text-sm disabled:opacity-60 flex items-center gap-1"
-                      style={{ background: 'var(--brand)', color: '#00120a' }}
-                    >
-                      {(laneTyping.A && activeLane === 'A') || (laneTyping.B && activeLane === 'B') ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                      ) : (
-                        <>
-                          <Send className="w-4 h-4" /> Send
-                        </>
-                      )}
-                    </button>
                   </div>
-                )}
-
-                {/* Attachments preview (both desktop & mobile) */}
-                {pics.length + vids.length + files.length > 0 && (
-                  <div className="mt-2 space-y-2">
-                    {/* Images */}
-                    {pics.length > 0 && (
-                      <div>
-                        <div className="text-[11px] opacity-60 mb-1">Pictures ({pics.length})</div>
-                        <div className="flex flex-wrap gap-2">
-                          {pics.map((a) => (
-                            <div
-                              key={a.id}
-                              className="relative rounded-md overflow-hidden"
-                              style={{ border: '1px solid var(--border)' }}
-                            >
-                              {a.url ? (
-                                <img src={a.url} alt={a.name} className="w-16 h-16 object-cover" />
-                              ) : (
-                                <div className="w-16 h-16 grid place-items-center text-xs opacity-60">image</div>
-                              )}
-                              <button
-                                className="absolute -top-2 -right-2 bg-black/70 text-white rounded-full w-5 h-5 text-[11px] leading-5"
-                                onClick={() => setPics((cur) => cur.filter((x) => x.id !== a.id))}
-                                aria-label="Remove"
-                                title="Remove"
-                              >
-                                ×
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    {/* Videos */}
-                    {vids.length > 0 && (
-                      <div>
-                        <div className="text-[11px] opacity-60 mb-1">Videos ({vids.length})</div>
-                        <div className="flex flex-wrap gap-2">
-                          {vids.map((a) => (
-                            <div key={a.id} className="px-2 py-1 rounded-md text-xs" style={CARD}>
-                              <Film className="inline w-3.5 h-3.5 mr-1" />
-                              {a.name}
-                              <button
-                                className="ml-2 opacity-70"
-                                onClick={() => setVids((cur) => cur.filter((x) => x.id !== a.id))}
-                                aria-label="Remove"
-                                title="Remove"
-                              >
-                                ×
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    {/* Files */}
-                    {files.length > 0 && (
-                      <div>
-                        <div className="text-[11px] opacity-60 mb-1">Files ({files.length})</div>
-                        <div className="flex flex-wrap gap-2">
-                          {files.map((a) => (
-                            <div key={a.id} className="px-2 py-1 rounded-md text-xs" style={CARD}>
-                              <Paperclip className="inline w-3.5 h-3.5 mr-1" />
-                              {a.name}
-                              <button
-                                className="ml-2 opacity-70"
-                                onClick={() => setFiles((cur) => cur.filter((x) => x.id !== a.id))}
-                                aria-label="Remove"
-                                title="Remove"
-                              >
-                                ×
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Non-text tabs (desktop): show Send even if only attachments are selected */}
-                {!isMobile && tab !== 'text' && (
-                  <div className="flex items-center justify-end">
-                    <button
-                      onClick={() => void sendPrompt()}
-                      disabled={
-                        laneTyping.A ||
-                        laneTyping.B ||
-                        (pics.length + vids.length + files.length === 0 && !input.trim())
-                      }
-                      className="mt-1 px-3 py-2 rounded-md text-sm disabled:opacity-60 flex items-center gap-1"
-                      style={{ background: 'var(--brand)', color: '#00120a' }}
-                    >
-                      {(laneTyping.A && activeLane === 'A') || (laneTyping.B && activeLane === 'B') ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                      ) : (
-                        <>
-                          <Send className="w-4 h-4" /> Send
-                        </>
-                      )}
-                    </button>
-                  </div>
-                )}
+                  <button
+                    onClick={() => void sendPrompt()}
+                    disabled={laneTyping.A || laneTyping.B || (!input.trim() && currentAttachments().length === 0)}
+                    className="px-3 py-2 rounded-md text-sm disabled:opacity-60 flex items-center gap-1"
+                    style={{ background: 'var(--brand)', color: '#00120a' }}
+                  >
+                    {(laneTyping.A && activeLane === 'A') || (laneTyping.B && activeLane === 'B')
+                      ? <Loader2 className="w-4 h-4 animate-spin" />
+                      : <><Send className="w-4 h-4" /> Send</>}
+                  </button>
+                </div>
 
                 {/* Memory toggle */}
-                <div className="flex items-center justify-between text-xs opacity-70 mt-1">
+                <div className="flex items-center justify-between text-xs opacity-70 mt-2">
                   <label className="flex items-center gap-2">
                     <input type="checkbox" checked={useMemory} onChange={(e) => setUseMemory(e.target.checked)} />
                     Session memory for test chats
                   </label>
-                  <span>
-                    Model: {model} · Temp: {temperature.toFixed(2)}
-                  </span>
+                  <span>Model: {model} · Temp: {temperature.toFixed(2)}</span>
                 </div>
               </div>
             </div>
           </section>
 
-          {/* Right: Versions rail (draggable to create Lane B) */}
+          {/* Right: Versions rail (draggable cards to create Lane B) */}
           <aside className="h-full flex flex-col overflow-hidden" style={PANEL}>
             <div className="p-3 border-b flex items-center justify-between" style={{ borderColor: 'var(--border)' }}>
               <div className="font-semibold">Versions</div>
@@ -1108,7 +928,7 @@ export default function Improve() {
                 <div className="text-sm opacity-60">No snapshots yet. Save to create one.</div>
               ) : (
                 <div className="space-y-2">
-                  {versions.map((v) => (
+                  {versions.map(v => (
                     <div
                       key={v.id}
                       className="p-2 rounded-md text-sm border cursor-grab"
@@ -1138,11 +958,7 @@ export default function Improve() {
                         <button
                           className="px-2 py-1 rounded-md text-xs"
                           style={CARD}
-                          onClick={() => {
-                            try {
-                              navigator.clipboard.writeText(v.id);
-                            } catch {}
-                          }}
+                          onClick={() => { try { navigator.clipboard.writeText(v.id); } catch {} }}
                         >
                           Copy ID
                         </button>
@@ -1158,4 +974,3 @@ export default function Improve() {
     </div>
   );
 }
-
