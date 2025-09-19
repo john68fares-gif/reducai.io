@@ -4,7 +4,7 @@
 import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
 import dynamic from 'next/dynamic';
 import { createPortal } from 'react-dom';
-import { AnimatePresence, motion } from 'framer-motion';
+import { motion } from 'framer-motion';
 import {
   Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Rocket, Check, KeyRound,
   Play, Square, Loader2
@@ -97,7 +97,7 @@ const Tokens = () => (
       color:var(--text);
     }
 
-    /* Drawer + modal overlays */
+    /* Drawer + modal overlays (match AssistantRail) */
     .va-blur-layer{
       position:fixed; inset:0; z-index:9996;
       background:rgba(6,8,10,.62);
@@ -107,35 +107,17 @@ const Tokens = () => (
     .va-blur-layer.open{ opacity:1; pointer-events:auto; }
 
     /* Diff colors */
-    .diff-added{ background:rgba(89,217,179,.22); color:var(--text); }
-    .diff-removed{ background:rgba(239,68,68,.22); color:var(--text); text-decoration:line-through; }
+    .diff-added{ background:rgba(89,217,179,.18); color:var(--text); }
+    .diff-removed{ background:rgba(239,68,68,.18); color:var(--text); text-decoration:line-through; }
 
-    /* Typing */
-    @keyframes caret {
-      0%, 49% { border-right-color: rgba(255,255,255,.55); }
-      50%,100% { border-right-color: transparent; }
+    /* Typing “…” animation */
+    @keyframes dots {
+      0% { content:''; }
+      33% { content:'.'; }
+      66% { content:'..'; }
+      100% { content:'...'; }
     }
-    .typing-pre{
-      white-space:pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-      border-right:2px solid rgba(255,255,255,.55); animation: caret 900ms steps(1,end) infinite;
-    }
-
-    /* Popover base (solid) */
-    .va-menu{
-      background:var(--panel-bg);
-      border:1px solid rgba(89,217,179,.20);
-      box-shadow:0 36px 90px rgba(0,0,0,.55);
-      border-radius:10px;
-    }
-
-    /* Force dropdown popovers solid */
-    .va-scope .va-menu, .va-scope .va-menu * {
-      background: var(--panel-bg) !important;
-      color: var(--text) !important;
-      border-color: rgba(89,217,179,.20) !important;
-      box-shadow: none !important;
-      backdrop-filter: none !important;
-    }
+    .typing-dots::after { content:''; animation:dots 900ms infinite steps(3,end); }
   `}</style>
 );
 
@@ -279,16 +261,16 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
-/* ─────────── Dropdown (flat; no section lines; green glow on hover) ─────────── */
+/* ─────────── Dropdown (portaled, flat list; NO sections) ─────────── */
 function StyledSelect({
-  value, onChange, options, placeholder, leftIcon, renderItemTrailing
+  value, onChange, options, placeholder, leftIcon
 }:{
   value: string; onChange: (v: string) => void;
   options: Opt[]; placeholder?: string; leftIcon?: React.ReactNode;
-  renderItemTrailing?: (opt: Opt, isSelected: boolean) => React.ReactNode;
 }) {
   const wrapRef = useRef<HTMLDivElement|null>(null);
   const btnRef  = useRef<HTMLButtonElement|null>(null);
+
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{top:number; left:number; width:number}>({top:0,left:0,width:0});
 
@@ -319,6 +301,7 @@ function StyledSelect({
     window.addEventListener('resize', onResize);
     window.addEventListener('mousedown', offClick);
     window.addEventListener('keydown', onEsc);
+
     return () => {
       window.removeEventListener('scroll', onScroll, true);
       window.removeEventListener('resize', onResize);
@@ -350,7 +333,6 @@ function StyledSelect({
 
       {open && typeof document !== 'undefined' && createPortal(
         <>
-          {/* click-away */}
           <div
             className="fixed inset-0 z-[2147482999]"
             onMouseDown={()=>setOpen(false)}
@@ -370,58 +352,45 @@ function StyledSelect({
               border:'1px solid rgba(89,217,179,.20)',
               borderRadius:10,
               boxShadow:'0 36px 90px rgba(0,0,0,.55)',
-              isolation:'isolate'
+              isolation:'isolate',
+              contain:'paint'
             }}
           >
+            {/* FLAT LIST — no sections, no search, no headers */}
             <div className="max-h-72 overflow-y-auto p-2" style={{ scrollbarWidth:'thin', background:'var(--panel)' }}>
               {options.map(o => {
                 const isSelected = o.value === value;
                 return (
-                  <div
+                  <button
                     key={o.value}
-                    className="va-dd-item w-full text-sm px-2 py-1 rounded-[10px] transition relative"
+                    disabled={o.disabled}
+                    onClick={()=>{ if (o.disabled) return; onChange(o.value); setOpen(false); }}
+                    className="va-dd-item w-full text-left text-sm px-3 py-2 rounded-[10px] transition flex items-center gap-2 disabled:opacity-60 relative"
                     style={{
                       background:'var(--panel)',
                       color:'var(--text)',
                       border:'1px solid transparent',
                       cursor:o.disabled?'not-allowed':'pointer',
-                      display:'grid',
-                      gridTemplateColumns:'1fr auto',
-                      alignItems:'center',
-                      gap:8
+                      position:'relative',
+                      isolation:'isolate'
                     }}
                   >
-                    <button
-                      disabled={o.disabled}
-                      onClick={()=>{ if (o.disabled) return; onChange(o.value); setOpen(false); }}
-                      className="text-left px-2 py-2 rounded-[10px] w-full"
-                      style={{ background:'transparent', outline:'none', border:'none' }}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span
-                          aria-hidden
-                          style={{
-                            width:8, height:8, borderRadius:999,
-                            background: isSelected ? CTA : 'transparent',
-                            display:'inline-block', flex:'0 0 auto'
-                          }}
-                        />
-                        <span className="truncate">{o.label}</span>
-                        {o.note ? <span className="text-[11px]" style={{ color:'var(--text-muted)' }}>{o.note}</span> : null}
-                      </div>
-                    </button>
-
-                    {/* trailing (e.g., voice preview controls PER ITEM) */}
-                    {renderItemTrailing ? (
-                      <div className="pr-1">{renderItemTrailing(o, isSelected)}</div>
-                    ) : null}
-                  </div>
+                    <span
+                      aria-hidden
+                      style={{
+                        width:8, height:8, borderRadius:999,
+                        background: isSelected ? CTA : 'transparent',
+                        display:'inline-block'
+                      }}
+                    />
+                    <span className="flex-1 truncate">{o.label}</span>
+                  </button>
                 );
               })}
             </div>
           </div>
 
-          {/* green hover glow; NO borders between items */}
+          {/* rail-style green hover glow & top highlight (contained) */}
           <style jsx global>{`
             :root { --cta:#59d9b3; --hover-overlay:.20; }
             .va-dd-item::after{
@@ -453,7 +422,7 @@ function StyledSelect({
   );
 }
 
-/* ─────────── Modal bits (for Generate overlay) ─────────── */
+/* ─────────── Modal bits to match AssistantRail exactly ─────────── */
 function RailModalShell({ children }:{ children:React.ReactNode }) {
   if (typeof document === 'undefined') return null;
   return createPortal(
@@ -485,8 +454,8 @@ function RailModalShell({ children }:{ children:React.ReactNode }) {
     document.body
   );
 }
-function RailModalHeader({ icon, title }:{
-  icon:React.ReactNode; title:string;
+function RailModalHeader({ icon, title, subtitle }:{
+  icon:React.ReactNode; title:string; subtitle?:string;
 }) {
   return (
     <div
@@ -504,6 +473,7 @@ function RailModalHeader({ icon, title }:{
         </div>
         <div className="min-w-0">
           <div className="text-lg font-semibold" style={{ color:'var(--text)' }}>{title}</div>
+          {subtitle && <div className="text-xs" style={{ color:'var(--text-muted)' }}>{subtitle}</div>}
         </div>
       </div>
       <span className="w-5 h-5" />
@@ -563,6 +533,7 @@ function Section({
 
 /* ─────────── helpers: rewrite + diff ─────────── */
 function normalizeAIText(s: string){
+  // basic cleanup into “AI language”: bullets with terminal punctuation, sections, etc.
   const lines = s.split(/\n+/).map(x => x.trim()).filter(Boolean).map(x => /[.!?]$/.test(x) ? x : `${x}.`);
   return lines.join('\n');
 }
@@ -579,8 +550,17 @@ ${extras}
 - Keep responses concise and useful.
 - Ask for missing info before acting.`
     : '';
-  return `${base.trim()}${block}`.trim();
+
+  // Optionally tighten headings / structure
+  const tightened = base
+    .replace(/\[Identity\]/g, '[Identity]')
+    .replace(/\[Style\]/g, '[Style]')
+    .replace(/\[Guidelines\]/g, '[Guidelines]')
+    .replace(/\[Fallback\]/g, '[Fallback]');
+
+  return `${tightened}${block}`.trim();
 }
+// tiny word-ish diff to mark additions/removals for user highlight
 function diffHTML(oldText: string, newText: string){
   const a = oldText.split(/(\s+|\b)/);
   const b = newText.split(/(\s+|\b)/);
@@ -590,12 +570,13 @@ function diffHTML(oldText: string, newText: string){
   }
   let i=a.length, j=b.length, outA:string[]=[], outB:string[]=[];
   while(i>0 && j>0){
-    if(a[i-1]===b[j-1]){ outA.unshift(a[i-1]); outB.unshift(b[j-1]); i--; j--; }
+    if(a[i-1]===b[j-1]){ outA.unshift(a[i-1]); outB.unshift(a[j-1]); i--; j--; }
     else if(dp[i-1][j]>=dp[i][j-1]){ outA.unshift(`<span class="diff-removed">${escapeHTML(a[i-1])}</span>`); i--; }
     else { outB.unshift(`<span class="diff-added">${escapeHTML(b[j-1])}</span>`); j--; }
   }
   while(i>0){ outA.unshift(`<span class="diff-removed">${escapeHTML(a[i-1])}</span>`); i--; }
   while(j>0){ outB.unshift(`<span class="diff-added">${escapeHTML(b[j-1])}</span>`); j--; }
+  // Prefer new text with inline additions + carry unchanged tokens
   const merged:string[]=[];
   let ia=0, ib=0;
   while(ia<outA.length || ib<outB.length){
@@ -645,66 +626,14 @@ export default function VoiceAgentSection() {
   ]);
   const [chatInput, setChatInput] = useState('');
 
-  /* Generate overlay states */
   const [showGenerate, setShowGenerate] = useState(false);
   const [composerText, setComposerText] = useState('');
-  const [overlayPhase, setOverlayPhase] = useState<'idle'|'loading'>('idle');
+  const [genPhase, setGenPhase] = useState<'idle'|'loading'|'typing'>('idle');
+  const [diffHTMLState, setDiffHTMLState] = useState<string>('');   // final highlighted html
+  const [typingVisible, setTypingVisible] = useState<boolean>(false);
+  const [pendingPrompt, setPendingPrompt] = useState<string>('');   // accepted preview (outside modal)
 
-  /* Prompt typing + diff states (happen in the main prompt box, after overlay closes) */
-  const [typingPhase, setTypingPhase] = useState<'idle'|'typing'|'diff'>('idle');
-  const [typingText, setTypingText] = useState<string>('');  // animates in prompt box
-  const [diffHTMLState, setDiffHTMLState] = useState<string>(''); // after typing completes
-  const [pendingPrompt, setPendingPrompt] = useState<string>(''); // applied if user accepts
-
-  /* Voices (Web Speech) */
-  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
-  const voicesLoadedOnce = useRef(false);
-  useEffect(() => {
-    const loadVoices = () => {
-      const list = window.speechSynthesis.getVoices();
-      if (list.length && !voicesLoadedOnce.current) {
-        voicesLoadedOnce.current = true;
-        setVoices(list);
-      } else if (!list.length) {
-        // Safari/Chrome lazy-load
-        window.speechSynthesis.onvoiceschanged = () => {
-          const list2 = window.speechSynthesis.getVoices();
-          setVoices(list2);
-          window.speechSynthesis.onvoiceschanged = null as any;
-        };
-      } else {
-        setVoices(list);
-      }
-    };
-    loadVoices();
-  }, []);
-
-  /* listen to rail active changes */
-  useEffect(() => {
-    const handler = (e: Event) => setActiveId((e as CustomEvent<string>).detail);
-    window.addEventListener('assistant:active', handler as EventListener);
-    return () => window.removeEventListener('assistant:active', handler as EventListener);
-  }, []);
-
-  /* when active changes, load and reset preview state */
-  useEffect(() => {
-    if (!activeId) return;
-    setData(loadAgentData(activeId));
-    try { localStorage.setItem(ACTIVE_KEY, activeId); } catch {}
-    setPendingPrompt('');
-    setTypingPhase('idle');
-    setTypingText('');
-    setDiffHTMLState('');
-  }, [activeId]);
-
-  /* persist */
-  useEffect(() => {
-    if (!activeId) return;
-    const payload = pendingPrompt ? { ...data, systemPrompt: pendingPrompt } : data;
-    saveAgentData(activeId, payload);
-  }, [activeId, data, pendingPrompt]);
-
-  /* keep rail name in sync */
+  // propagate assistant name -> AssistantRail list
   useEffect(() => {
     if (!activeId) return;
     try {
@@ -714,12 +643,28 @@ export default function VoiceAgentSection() {
       if (idx >= 0 && list[idx]?.name !== data.name) {
         list[idx] = { ...list[idx], name: data.name };
         localStorage.setItem('agents', JSON.stringify(list));
+        // ping the rail to update
         window.dispatchEvent(new CustomEvent('assistant:rename', { detail: { id: activeId, name: data.name }}));
       }
     } catch {}
   }, [data.name, activeId]);
 
-  /* api keys setup */
+  // listen for active selection from rail
+  useEffect(() => {
+    const handler = (e: Event) => setActiveId((e as CustomEvent<string>).detail);
+    window.addEventListener('assistant:active', handler as EventListener);
+    return () => window.removeEventListener('assistant:active', handler as EventListener);
+  }, []);
+
+  useEffect(() => {
+    if (!activeId) return;
+    setData(loadAgentData(activeId));
+    try { localStorage.setItem(ACTIVE_KEY, activeId); } catch {}
+    setPendingPrompt('');
+  }, [activeId]);
+
+  useEffect(() => { if (activeId) saveAgentData(activeId, pendingPrompt ? { ...data, systemPrompt: pendingPrompt } : data); }, [activeId, data, pendingPrompt]);
+
   useEffect(() => {
     (async () => {
       try {
@@ -772,57 +717,35 @@ export default function VoiceAgentSection() {
     finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
   }
 
-  /* ── GENERATE: overlay -> (1s) -> typing in box -> diff -> accept/discard above box ── */
-  function openGenerate(){
-    setComposerText('');
-    setOverlayPhase('idle');
-    setShowGenerate(true);
-  }
-  function startGenerate(){
-    setOverlayPhase('loading');
-    // after ~1s, close overlay and begin typing in prompt box
+  /* ── Generate modal logic ── */
+  function startGenerate() {
+    setGenPhase('loading');
+    setDiffHTMLState('');
+    setTypingVisible(true);
+
+    // fake “generation” + typing phase
     setTimeout(() => {
       const newPrompt = buildAIStylePrompt(data.systemPrompt, composerText);
-      setShowGenerate(false);
-
-      // typing animation in prompt textarea area
-      setTypingPhase('typing');
-      setTypingText('');
-      const chars = Array.from(newPrompt);
-      let idx = 0;
-      const step = () => {
-        idx += Math.max(1, Math.ceil(chars.length / 60)); // ~60 frames
-        setTypingText(chars.slice(0, Math.min(idx, chars.length)).join(''));
-        if (idx < chars.length) {
-          requestAnimationFrame(step);
-        } else {
-          // show diff
-          setTypingPhase('diff');
-          setDiffHTMLState(diffHTML(data.systemPrompt, newPrompt));
-          setPendingPrompt(newPrompt);
-        }
-      };
-      requestAnimationFrame(step);
-    }, 1000);
+      const html = diffHTML(data.systemPrompt, newPrompt);
+      // show typing animation placeholder briefly, then reveal highlighted diff
+      setGenPhase('typing');
+      setTimeout(() => {
+        setDiffHTMLState(html);
+        setTypingVisible(false);
+        setGenPhase('idle');
+      }, 900);
+    }, 700);
   }
-  function acceptDiff(){
-    if (!pendingPrompt) return;
-    setData(p => ({ ...p, systemPrompt: pendingPrompt }));
-    setTypingPhase('idle');
-    setTypingText('');
+  const acceptFromModal = () => {
+    const tmp = stripTags(diffHTMLState || '');
+    setPendingPrompt(tmp);
+    setShowGenerate(false);
+  };
+  const declineFromModal = () => {
     setDiffHTMLState('');
-    setPendingPrompt('');
-    setToast('Applied');
-    setTimeout(()=>setToast(''), 1200);
-  }
-  function discardDiff(){
-    setTypingPhase('idle');
-    setTypingText('');
-    setDiffHTMLState('');
-    setPendingPrompt('');
-  }
+    setShowGenerate(false);
+  };
 
-  /* chat mock */
   function sendChat() {
     const txt = chatInput.trim();
     if (!txt) return;
@@ -832,28 +755,16 @@ export default function VoiceAgentSection() {
     setTimeout(() => setMessages(m => [...m, { role: 'assistant', text: reply }]), 350);
   }
 
-  function speakPreviewFor(voiceName: string){
-    const u = new SpeechSynthesisUtterance(`This is ${voiceName}.`);
-    const list = window.speechSynthesis.getVoices();
-    const exact = list.find(v => v.name === voiceName);
-    const fallback = list.find(v => v.lang?.startsWith('en'));
-    if (exact) u.voice = exact; else if (fallback) u.voice = fallback;
+  function speakPreview(line?: string){
+    const u = new SpeechSynthesisUtterance(line || `Hi, I'm ${data.name || 'your assistant'}. This is a preview.`);
+    const voices = window.speechSynthesis.getVoices();
+    const byName = voices.find(v => v.name.toLowerCase().includes((data.voiceName || '').split(' ')[0]?.toLowerCase() || ''));
+    const en = voices.find(v => v.lang?.startsWith('en'));
+    if (byName) u.voice = byName; else if (en) u.voice = en;
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(u);
   }
   const stopPreview = () => window.speechSynthesis.cancel();
-
-  /* Build a combined voice list: WebSpeech + OpenAI labels */
-  const voiceOptions: Opt[] = useMemo(() => {
-    const ws = voices.map(v => ({ value: v.name, label: v.name }));
-    const openaiLabeled = openAiVoices.filter(o => !ws.some(w => w.value === o.value));
-    return [...ws, ...openaiLabeled];
-  }, [voices]);
-
-  /* ----- RENDER ----- */
-
-  // Prevent TS generic confusion before JSX:
-  void 0;
 
   return (
     <section className="va-scope" style={{ background:'var(--bg)', color:'var(--text)' }}>
@@ -925,7 +836,6 @@ export default function VoiceAgentSection() {
             </div>
           </div>
 
-          {/* MODEL */}
           <Section
             title="Model"
             icon={<Gauge className="w-4 h-4" style={{ color: CTA }} />}
@@ -964,7 +874,6 @@ export default function VoiceAgentSection() {
               </div>
             </div>
 
-            {/* SYSTEM PROMPT with typing + diff + controls ABOVE box */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt-[var(--s-4)]">
               <div className="md:col-span-2">
                 <div className="flex items-center justify-between mb-[var(--s-2)]">
@@ -973,14 +882,14 @@ export default function VoiceAgentSection() {
                     {pendingPrompt && (
                       <>
                         <button
-                          onClick={acceptDiff}
+                          onClick={()=>{ setData(p => ({ ...p, systemPrompt: pendingPrompt })); setPendingPrompt(''); setToast('Applied'); setTimeout(()=>setToast(''), 1200); }}
                           className="h-9 px-3 rounded-[10px] font-semibold"
                           style={{ background:CTA, color:'#0a0f0d' }}
                         >
-                          Accept Changes
+                          Apply
                         </button>
                         <button
-                          onClick={discardDiff}
+                          onClick={()=> setPendingPrompt('')}
                           className="h-9 px-3 rounded-[10px]"
                           style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
                         >
@@ -991,7 +900,7 @@ export default function VoiceAgentSection() {
                     <button
                       className="inline-flex items-center gap-2 rounded-[10px] text-sm"
                       style={{ height:36, padding:'0 12px', background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                      onClick={openGenerate}
+                      onClick={()=>{ setComposerText(''); setShowGenerate(true); setGenPhase('idle'); setDiffHTMLState(''); setTypingVisible(false); }}
                     >
                       <Wand2 className="w-4 h-4" /> Generate
                     </button>
@@ -999,45 +908,24 @@ export default function VoiceAgentSection() {
                 </div>
 
                 <div style={{ position:'relative' }}>
-                  {/* Base textarea (hidden while typing or diff overlay visible) */}
                   <textarea
                     className="w-full bg-transparent outline-none rounded-[12px] px-3 py-[12px]"
-                    style={{ minHeight: 360, background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)', visibility: (typingPhase==='typing' || (typingPhase==='diff' && diffHTMLState)) ? 'hidden' : 'visible' }}
+                    style={{ minHeight: 360, background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
                     value={pendingPrompt || data.systemPrompt}
                     onChange={(e)=>{
                       if (pendingPrompt) setPendingPrompt(e.target.value);
                       else setField('systemPrompt')(e.target.value);
                     }}
                   />
-
-                  {/* Typing overlay */}
-                  {typingPhase==='typing' && (
-                    <div
-                      className="absolute inset-0 rounded-[12px] p-3"
-                      style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)', overflow:'auto' }}
-                    >
-                      <pre className="typing-pre text-sm" style={{ margin:0 }}>{typingText}</pre>
-                    </div>
-                  )}
-
-                  {/* Diff overlay */}
-                  {typingPhase==='diff' && diffHTMLState && (
-                    <div
-                      className="absolute inset-0 rounded-[12px] p-3 text-sm leading-6"
-                      style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)', overflow:'auto' }}
-                      dangerouslySetInnerHTML={{ __html: diffHTMLState }}
-                    />
-                  )}
                 </div>
               </div>
             </div>
           </Section>
 
-          {/* VOICE */}
           <Section
             title="Voice"
             icon={<Volume2 className="w-4 h-4" style={{ color: CTA }} />}
-            desc="Choose TTS and preview the voice (preview controls inside the dropdown)."
+            desc="Choose TTS and preview the voice."
             defaultOpen={true}
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px]">
@@ -1069,41 +957,35 @@ export default function VoiceAgentSection() {
             </div>
 
             <div className="grid grid-cols-1 mt-[var(--s-4)]">
-              <div>
-                <div className="mb-[var(--s-2)] text-[12.5px]">Voice</div>
-                <StyledSelect
-                  value={data.voiceName}
-                  onChange={setField('voiceName')}
-                  options={voiceOptions}
-                  placeholder="— Choose —"
-                  renderItemTrailing={(opt, isSelected) => (
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={(e)=>{ e.stopPropagation(); speakPreviewFor(opt.label); }}
-                        className="w-8 h-8 rounded-full grid place-items-center"
-                        aria-label={`Preview ${opt.label}`}
-                        style={{ background: CTA, color:'#0a0f0d' }}
-                      >
-                        <Play className="w-4 h-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e)=>{ e.stopPropagation(); stopPreview(); }}
-                        className="w-8 h-8 rounded-full grid place-items-center border"
-                        aria-label="Stop preview"
-                        style={{ background: 'var(--panel-bg)', color:'var(--text)', borderColor:'var(--input-border)' }}
-                      >
-                        <Square className="w-4 h-4" />
-                      </button>
-                    </div>
-                  )}
-                />
+              <div className="flex items-center gap-2">
+                <div className="flex-1">
+                  <div className="mb-[var(--s-2)] text-[12.5px]">Voice</div>
+                  <StyledSelect value={data.voiceName} onChange={setField('voiceName')} options={openAiVoices} placeholder="— Choose —" />
+                </div>
+                <div className="pt-6 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={()=>speakPreview(`This is ${data.voiceName || 'the selected'} voice preview.`)}
+                    className="w-9 h-9 rounded-full grid place-items-center"
+                    aria-label="Play voice"
+                    style={{ background: CTA, color:'#0a0f0d' }}
+                  >
+                    <Play className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={stopPreview}
+                    className="w-9 h-9 rounded-full grid place-items-center border"
+                    aria-label="Stop preview"
+                    style={{ background: 'var(--panel-bg)', color:'var(--text)', borderColor:'var(--input-border)' }}
+                  >
+                    <Square className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             </div>
           </Section>
 
-          {/* TRANSCRIBER */}
           <Section
             title="Transcriber"
             icon={<Mic className="w-4 h-4" style={{ color: CTA }} />}
@@ -1134,48 +1016,69 @@ export default function VoiceAgentSection() {
         </div>
       </div>
 
-      {/* Generate overlay (compose only; accept/discard live above the prompt box) */}
-      <AnimatePresence>
-        {showGenerate && (
-          <RailModalShell>
-            <RailModalHeader title="Compose Prompt" icon={<Wand2 className="w-5 h-5" />} />
-            <div className="px-6 py-5 grid gap-3">
-              <label className="text-xs" style={{ color:'var(--text-muted)' }}>
-                Add extra instructions (we’ll translate them into clear, AI-ready rules):
-              </label>
-              <textarea
-                value={composerText}
-                onChange={(e)=>setComposerText(e.target.value)}
-                className="w-full bg-transparent outline-none rounded-[10px] px-3 py-2"
-                placeholder="e.g., Friendly, crisp answers. Confirm account ID before actions."
-                style={{ minHeight: 180, background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                autoFocus
-              />
-            </div>
+      {/* Generate overlay — same shell as AssistantRail, with typing + diff */}
+      {showGenerate && (
+        <RailModalShell>
+          <RailModalHeader title="Compose Prompt" icon={<Wand2 className="w-5 h-5" />} />
+          <div className="px-6 py-5 grid gap-3">
+            <label className="text-xs" style={{ color:'var(--text-muted)' }}>
+              Add instructions in plain language (we’ll translate to AI-friendly format):
+            </label>
+            <textarea
+              value={composerText}
+              onChange={(e)=>setComposerText(e.target.value)}
+              className="w-full rounded-[10px] px-3 py-2 outline-none"
+              style={{ minHeight: 120, background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+              placeholder="e.g., Friendly tone, crisp answers. Confirm account ID before actions."
+              autoFocus
+            />
 
-            <div className="px-6 pb-6 flex gap-3">
-              <button
-                onClick={()=>setShowGenerate(false)}
-                disabled={overlayPhase==='loading'}
-                className="w-full h-[44px] rounded-[10px]"
-                style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.9)', color:'var(--text)' }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={startGenerate}
-                disabled={overlayPhase==='loading'}
-                className="w-full h-[44px] rounded-[10px] font-semibold inline-flex items-center justify-center gap-2"
-                style={{ background:CTA, color:'#fff' }}
-              >
-                {overlayPhase==='loading' ? (<><Loader2 className="w-4 h-4 animate-spin" /> Generating</>) : 'Generate'}
-              </button>
+            {/* Result box */}
+            <div className="rounded-[10px] p-3"
+                 style={{ minHeight: 180, background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}>
+              {genPhase !== 'idle' && typingVisible && (
+                <div className="text-sm typing-dots" style={{ color:'var(--text-muted)' }}>
+                  generating
+                </div>
+              )}
+              {!typingVisible && diffHTMLState && (
+                <div className="text-sm leading-6" dangerouslySetInnerHTML={{ __html: diffHTMLState }} />
+              )}
             </div>
-          </RailModalShell>
-        )}
-      </AnimatePresence>
+          </div>
 
-      {/* Call drawer */}
+          <div className="px-6 pb-6 flex gap-3">
+            <button
+              onClick={declineFromModal}
+              disabled={genPhase!=='idle' && genPhase!=='typing'}
+              className="w-full h-[44px] rounded-[10px]"
+              style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.9)', color:'var(--text)' }}
+            >
+              {diffHTMLState ? 'Decline' : 'Cancel'}
+            </button>
+            <button
+              onClick={startGenerate}
+              disabled={genPhase==='loading' || genPhase==='typing'}
+              className="w-full h-[44px] rounded-[10px] font-semibold inline-flex items-center justify-center gap-2"
+              style={{ background:CTA, color:'#fff' }}
+            >
+              {genPhase==='loading' ? (<><Loader2 className="w-4 h-4 animate-spin" /> Generating</>) :
+               genPhase==='typing' ? (<><Loader2 className="w-4 h-4 animate-spin" /> Formatting</>) :
+               'Generate'}
+            </button>
+            <button
+              onClick={acceptFromModal}
+              disabled={!diffHTMLState || genPhase!=='idle'}
+              className="w-full h-[44px] rounded-[10px] font-semibold"
+              style={{ background:'#0ea5e9', color:'#fff' }}
+            >
+              Accept Changes
+            </button>
+          </div>
+        </RailModalShell>
+      )}
+
+      {/* Call drawer (unchanged) */}
       {createPortal(
         <>
           <div
