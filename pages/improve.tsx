@@ -307,44 +307,65 @@ export default function Improve() {
     return rows;
   }, [list, query, sort]);
 
-  /* Save → PATCH chatbots/[id] */
-  async function saveEdits() {
-    if (!userId || !selectedId) return;
-    setSaving(true);
-    try {
-      const prev = list.find(b => b.id === selectedId) || { system, model, temperature };
-      // snapshot first
-      const v: Version = {
-        id: `v_${Date.now()}`, ts: Date.now(),
-        label: snapshotLabel(
-          { system: prev.system, model: prev.model, temperature: prev.temperature },
-          { system, model, temperature }
-        ),
-        name, model, temperature, system
-      };
-      const next = [v, ...versions].slice(0, 80);
-      setVersions(next);
-      try { localStorage.setItem(versionsKey(userId, selectedId), JSON.stringify(next)); } catch {}
+ async function saveEdits() {
+  if (!userId || !selectedId) return;
+  setSaving(true);
+  const keepSelected = selectedId;
 
-      // persist
-      await fetch(`/api/chatbots/${selectedId}?ownerId=${encodeURIComponent(userId)}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', 'x-owner-id': userId },
-        credentials: 'include',
-        body: JSON.stringify({ name, model, temperature, system }),
-      });
+  try {
+    // Snapshot first (unchanged)
+    const prev = list.find(b => b.id === selectedId);
+    const v: Version = {
+      id: `v_${Date.now()}`,
+      ts: Date.now(),
+      label: labelFromChange(prev?.system || '', system),
+      name, model, temperature, system
+    };
+    const next = [v, ...versions].slice(0, 80);
+    setVersions(next);
+    try { localStorage.setItem(versionsKey(userId, selectedId), JSON.stringify(next)); } catch {}
 
-      setList(cur => cur.map(b => b.id === selectedId
-        ? { ...b, name, model, temperature, system, updatedAt: new Date().toISOString() }
-        : b
-      ));
-      setDirty(false);
-    } catch (e) {
-      alert('Failed to save');
-    } finally {
-      setSaving(false);
+    // 🔁 Use the same endpoint as Builder so persistence is consistent
+    const resp = await fetch(`/api/chatbots/save?ownerId=${encodeURIComponent(userId)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-owner-id': userId },
+      credentials: 'include',
+      body: JSON.stringify({ id: selectedId, name, model, temperature, system }),
+    });
+
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '');
+      throw new Error(text || `Save failed (${resp.status})`);
     }
+
+    const json = await resp.json().catch(() => null);
+    const saved: BotRow = (json?.data as BotRow) ?? {
+      id: selectedId, ownerId: userId, name, model, temperature, system,
+      updatedAt: new Date().toISOString(),
+    };
+
+    // Optimistic local update
+    setList(cur => {
+      const exists = cur.some(b => b.id === saved.id);
+      const merged = exists
+        ? cur.map(b => (b.id === saved.id ? { ...b, ...saved, updatedAt: new Date().toISOString() } : b))
+        : [{ ...saved, updatedAt: new Date().toISOString() }, ...cur];
+      return merged;
+    });
+
+    setDirty(false);
+
+    // 🔄 Hard refresh from API to defeat cross-instance drift
+    await fetchBots(userId);
+    setSelectedId(keepSelected);
+  } catch (e: any) {
+    console.error('[Improve] save failed:', e?.message || e);
+    alert(`Save failed: ${e?.message || 'unknown error'}`);
+  } finally {
+    setSaving(false);
   }
+}
+
 
   async function deleteSelected() {
     if (!userId || !selectedId) return;
