@@ -6,7 +6,7 @@ import dynamic from 'next/dynamic';
 import { createPortal } from 'react-dom';
 import {
   Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Rocket, Search, Check, Lock,
-  KeyRound, Play, Square, Pause, X, Loader2
+  KeyRound, Play, Pause, X, Loader2
 } from 'lucide-react';
 import { scopedStorage } from '@/utils/scoped-storage';
 
@@ -29,11 +29,11 @@ class RailBoundary extends React.Component<{children:React.ReactNode},{hasError:
 const CTA = '#59d9b3';
 const CTA_HOVER = '#54cfa9';
 const GREEN_LINE = 'rgba(89,217,179,.20)';
-const GREEN_GLOW = '0 10px 26px rgba(89,217,179,.28)';
+const GREEN_GLOW = '0 10px 26px rgba(89,217,179,.28)'; // dropdown hover glow
 const ACTIVE_KEY = 'va:activeId';
 const Z_OVERLAY = 100000;
 const Z_MODAL   = 100001;
-const Z_MENU    = 100010;
+const Z_MENU    = 100010; // dropdown above everything
 
 /* phone icon */
 function PhoneFilled(props: React.SVGProps<SVGSVGElement>) {
@@ -79,26 +79,17 @@ const Tokens = () => (
       --red-strong: rgba(239,68,68,.26);
     }
 
-    .va-card{
-      border-radius:var(--radius-outer);
-      border:1px solid var(--border-weak);
-      background:var(--panel-bg);
-      box-shadow:var(--card-shadow);
-      overflow:hidden; isolation:isolate;
-    }
-
+    .va-card{ border-radius:var(--radius-outer); border:1px solid var(--border-weak); background:var(--panel-bg); box-shadow:var(--card-shadow); overflow:hidden; isolation:isolate; }
     .va-head{
       min-height:var(--header-h);
       display:grid; grid-template-columns:1fr auto; align-items:center;
       padding:0 16px;
-      background:linear-gradient(90deg,
-        var(--panel-bg) 0%,
-        color-mix(in oklab, var(--panel-bg) 97%, white 3%) 50%,
-        var(--panel-bg) 100%);
+      background:linear-gradient(90deg,var(--panel-bg) 0%,color-mix(in oklab, var(--panel-bg) 97%, white 3%) 50%,var(--panel-bg) 100%);
       border-bottom:1px solid rgba(255,255,255,.08);
       color:var(--text);
     }
 
+    /* Dropdown menu base (no sections, no per-item borders) */
     .va-menu{
       position:absolute;
       top:calc(100% + 8px);
@@ -112,12 +103,13 @@ const Tokens = () => (
       overflow:hidden;
     }
 
-    @keyframes va-blink { 0%,49%{opacity:1} 50%,100%{opacity:0} }
-    .va-caret::after{
-      content:''; display:inline-block; width:8px; height:18px; margin-left:2px;
-      background: currentColor; opacity:.9; border-radius:1px; animation: va-blink 1s step-end infinite;
-      transform: translateY(3px);
-    }
+    /* Typing caret animation */
+    @keyframes va-blink { 0%,49%{opacity:1;} 50%,100%{opacity:0;} }
+    .va-caret::after{ content:''; display:inline-block; width:8px; height:18px; margin-left:2px; background: currentColor; opacity:.9; border-radius:1px; animation: va-blink 1s step-end infinite; transform: translateY(3px); }
+
+    /* Diff colors inside prompt area */
+    .va-diff-add { background: var(--green-weak); border-left: 3px solid ${CTA}; padding: 2px 6px; border-radius: 6px; }
+    .va-diff-rem { background: var(--red-weak); border-left: 3px solid #ef4444; padding: 2px 6px; border-radius: 6px; text-decoration: line-through; opacity: .9; }
   `}</style>
 );
 
@@ -152,17 +144,30 @@ const DEFAULT_AGENT: AgentData = {
   firstMsg: 'Hello.',
   systemPrompt:
 `[Identity]
-You are a blank template AI assistant with minimal default settings.
+You are an adaptable AI Assistant designed to support various tasks and scenarios.
 
 [Style]
-- Neutral, concise, helpful.
+- Maintain a neutral and adaptable tone, adjusting as necessary to fit different contexts.
+- Avoid additional embellishments; keep interactions straightforward and clear.
 
-[Guidelines]
-- Avoid unnecessary jargon.
-- Keep responses focused.
+[Response Guidelines]
+- Ensure responses are concise and relevant to the task at hand.
+- Maintain a balance between informative and concise, ensuring clarity for the user.
 
-[Fallback]
-- Ask for clarification when needed.`,
+[Task & Goals]
+1. Welcome the user and gauge the context or task they need assistance with.
+2. Gather necessary details or instructions from the user to perform the task.
+3. Execute any task-specific actions or queries as required.
+4. Confirm successful completion of tasks with the user or provide an update on progress.
+5. Follow through with any additional user inquiries or tasks to be addressed.
+
+[Error Handling / Fallback]
+- If the user's input is unclear, politely ask clarifying questions to better understand their request.
+- If a task cannot be completed, inform the user of the issue and suggest alternative steps if possible.
+
+[Behavior]
+- Ask for missing info before acting.
+- Keep replies direct and useful.`,
   ttsProvider: 'openai',
   voiceName: 'Alloy (American)',
   apiKeyId: '',
@@ -181,9 +186,7 @@ const loadAgentData = (id: string): AgentData => {
   catch {}
   return { ...DEFAULT_AGENT };
 };
-const saveAgentData = (id: string, data: AgentData) => {
-  try { localStorage.setItem(keyFor(id), JSON.stringify(data)); } catch {}
-};
+const saveAgentData = (id: string, data: AgentData) => { try { localStorage.setItem(keyFor(id), JSON.stringify(data)); } catch {} };
 const pushVersion = (id:string, snapshot:any) => {
   try {
     const raw = localStorage.getItem(versKeyFor(id));
@@ -238,11 +241,45 @@ const asrProviders: Opt[] = [
 
 const asrModelsFor = (asr: string): Opt[] =>
   asr === 'deepgram'
-    ? [
-        { value: 'Nova 2', label: 'Nova 2' },
-        { value: 'Nova',   label: 'Nova' },
-      ]
+    ? [{ value: 'Nova 2', label: 'Nova 2' }, { value: 'Nova',   label: 'Nova' }]
     : [{ value: 'coming', label: 'Models coming soon', disabled: true }];
+
+/* ─────────── Diff helpers ─────────── */
+function diffLines(base:string, next:string){
+  const a = base.split('\n');
+  const b = next.split('\n');
+
+  const setA = new Set(a);
+  const setB = new Set(b);
+
+  const items: Array<{type:'same'|'add'|'remove', text:string}> = [];
+  const max = Math.max(a.length, b.length);
+
+  for (let i=0;i<max;i++){
+    const la = a[i]; const lb = b[i];
+    if (la === lb && la !== undefined){ items.push({ type:'same', text: la! }); continue; }
+    if (lb !== undefined && !setA.has(lb)) items.push({ type:'add', text: lb });
+    if (la !== undefined && !setB.has(la)) items.push({ type:'remove', text: la });
+  }
+  for (let j=a.length;j<b.length;j++){
+    const lb=b[j]; if (lb!==undefined && !setA.has(lb)) items.push({ type:'add', text: lb });
+  }
+  return items;
+}
+
+function DiffView({ base, next }:{ base:string; next:string }){
+  const rows = diffLines(base, next);
+  return (
+    <div className="rounded-[10px] p-3 text-sm"
+         style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)', lineHeight:'1.55' }}>
+      {rows.map((r, i) => {
+        if (r.type === 'same') return <div key={i} style={{ whiteSpace:'pre-wrap' }}>{r.text || ' '}</div>;
+        if (r.type === 'add') return <div key={i} className="va-diff-add" style={{ whiteSpace:'pre-wrap', margin:'2px 0' }}>{r.text || ' '}</div>;
+        return <div key={i} className="va-diff-rem" style={{ whiteSpace:'pre-wrap', margin:'2px 0' }}>{r.text || ' '}</div>;
+      })}
+    </div>
+  );
+}
 
 /* ─────────── UI atoms ─────────── */
 const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}) => (
@@ -266,7 +303,7 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
-/* ─────────── Non-sectioned Select (solid) ─────────── */
+/* ─────────── Non-sectioned Select (green glow hover) ─────────── */
 function StyledSelect({
   value, onChange, options, placeholder, leftIcon, menuTop,
   onPreview, isPreviewing
@@ -291,10 +328,7 @@ function StyledSelect({
 
   useEffect(() => {
     if (!open) return;
-    const off = (e: MouseEvent) => {
-      if (wrapRef.current?.contains(e.target as Node)) return;
-      setOpen(false);
-    };
+    const off = (e: MouseEvent) => { if (wrapRef.current?.contains(e.target as Node)) return; setOpen(false); };
     const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
     const onResize = () => {
       if (!btnRef.current) return;
@@ -341,18 +375,13 @@ function StyledSelect({
             left: (menuPos?.left ?? 0),
             top: (btnRef.current?.getBoundingClientRect().bottom ?? 0) + 8,
             width: (menuPos?.width ?? (btnRef.current?.getBoundingClientRect().width ?? 280)),
-            background:'var(--panel)',
-            border:`1px solid ${GREEN_LINE}`,
-            borderRadius:10,
-            boxShadow:'0 36px 90px rgba(0,0,0,.55)'
+            background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, borderRadius:10, boxShadow:'0 36px 90px rgba(0,0,0,.55)'
           }}
         >
           {menuTop ? <div className="mb-2">{menuTop}</div> : null}
 
-          <div
-            className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[10px]"
-            style={{ background:'var(--panel)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-          >
+          <div className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[10px]"
+               style={{ background:'var(--panel)', border:'1px solid var(--input-border)', color:'var(--text)' }}>
             <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
             <input
               ref={searchRef}
@@ -382,11 +411,7 @@ function StyledSelect({
                 onMouseEnter={(e)=>{ if (o.disabled) return; const el=e.currentTarget as HTMLButtonElement; el.style.boxShadow = `${GREEN_GLOW}`; el.style.transform = 'translateY(-1px)'; }}
                 onMouseLeave={(e)=>{ const el=e.currentTarget as HTMLButtonElement; el.style.boxShadow = 'none'; el.style.transform = 'translateY(0)'; }}
               >
-                {o.disabled ? (
-                  <Lock className="w-3.5 h-3.5" />
-                ) : (
-                  <Check className="w-3.5 h-3.5" style={{ opacity: o.value===value ? 1 : 0 }} />
-                )}
+                {o.disabled ? <Lock className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" style={{ opacity: o.value===value ? 1 : 0 }} />}
                 <span className="truncate">{o.label}</span>
                 {onPreview ? (
                   <button
@@ -402,9 +427,7 @@ function StyledSelect({
                 ) : <span />}
               </button>
             ))}
-            {filtered.length===0 && (
-              <div className="px-3 py-6 text-sm" style={{ color:'var(--text-muted)' }}>No matches.</div>
-            )}
+            {filtered.length===0 && <div className="px-3 py-6 text-sm" style={{ color:'var(--text-muted)' }}>No matches.</div>}
           </div>
         </div>,
         document.body
@@ -463,106 +486,6 @@ function Section({
   );
 }
 
-/* ─────────── Diff utilities ─────────── */
-type DiffRow = { type:'same'|'add'|'remove', text:string };
-
-function diffLines(base:string, next:string): DiffRow[]{
-  const a = base.split('\n');
-  const b = next.split('\n');
-  const setA = new Set(a);
-  const setB = new Set(b);
-  const items: DiffRow[] = [];
-  const max = Math.max(a.length, b.length);
-  for (let i=0;i<max;i++){
-    const la = a[i]; const lb = b[i];
-    if (la === lb && la !== undefined){ items.push({ type:'same', text: la! }); continue; }
-    if (lb !== undefined && !setA.has(lb)) items.push({ type:'add', text: lb });
-    if (la !== undefined && !setB.has(la)) items.push({ type:'remove', text: la });
-  }
-  for (let j=a.length;j<b.length;j++){
-    const lb=b[j]; if (lb!==undefined && !setA.has(lb)) items.push({ type:'add', text: lb });
-  }
-  return items;
-}
-
-/* Diff block (modal) */
-function DiffView({ base, next }:{ base:string; next:string }){
-  const rows = diffLines(base, next);
-  return (
-    <div className="rounded-[10px] p-3 text-sm"
-         style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)', lineHeight:'1.55' }}>
-      {rows.map((r, i) => {
-        if (r.type === 'same') return <div key={i} style={{ whiteSpace:'pre-wrap' }}>{r.text || ' '}</div>;
-        if (r.type === 'add') return (
-          <div key={i} style={{
-            whiteSpace:'pre-wrap',
-            background:'var(--green-weak)',
-            borderLeft:'3px solid ' + CTA,
-            padding:'2px 6px',
-            borderRadius:6,
-            margin:'2px 0'
-          }}>
-            {r.text || ' '}
-          </div>
-        );
-        return (
-          <div key={i} style={{
-            whiteSpace:'pre-wrap',
-            background:'var(--red-weak)',
-            borderLeft:'3px solid #ef4444',
-            padding:'2px 6px',
-            borderRadius:6,
-            margin:'2px 0',
-            textDecoration:'line-through',
-            opacity:.9
-          }}>
-            {r.text || ' '}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-/* Inline highlighter that renders inside the prompt box */
-function PromptInlineDiff({ base, next, typing }:{ base:string; next:string; typing:boolean }){
-  const rows = diffLines(base, next);
-  return (
-    <pre
-      style={{
-        whiteSpace:'pre-wrap',
-        margin:0,
-        color:'var(--text)',
-        lineHeight:'1.55',
-        fontFamily:'inherit',
-      }}
-      className={typing ? 'va-caret' : ''}
-    >
-      {rows.map((r,i)=>{
-        if (r.type==='same') return <span key={i}>{(r.text || ' ') + '\n'}</span>;
-        if (r.type==='add') return (
-          <span key={i}
-                style={{ background:'var(--green-weak)', borderLeft:`3px solid ${CTA}`, padding:'2px 4px', borderRadius:6, display:'block' }}>
-            {(r.text || ' ') + '\n'}
-          </span>
-        );
-        return (
-          <span key={i}
-                style={{ background:'var(--red-weak)', borderLeft:'3px solid #ef4444', padding:'2px 4px', borderRadius:6, display:'block', textDecoration:'line-through', opacity:.9 }}>
-            {(r.text || ' ') + '\n'}
-          </span>
-        );
-      })}
-    </pre>
-  );
-}
-
-/* Strip an existing [Behavior] section from a prompt to avoid duplicates */
-function stripSection(prompt:string, section:string){
-  const pattern = new RegExp(`\\n?\$begin:math:display$${section}\\$end:math:display$[\\s\\S]*?(?=\\n\$begin:math:display$[^\\$end:math:display$]+\\]|$)`, 'i');
-  return prompt.replace(pattern, '');
-}
-
 /* ─────────── Page ─────────── */
 export default function VoiceAgentSection() {
   /* measure sidebar so rail aligns */
@@ -580,9 +503,7 @@ export default function VoiceAgentSection() {
     return () => ro.disconnect();
   }, []);
 
-  const [activeId, setActiveId] = useState<string>(() => {
-    try { return localStorage.getItem(ACTIVE_KEY) || ''; } catch { return ''; }
-  });
+  const [activeId, setActiveId] = useState<string>(() => { try { return localStorage.getItem(ACTIVE_KEY) || ''; } catch { return ''; } });
   const [data, setData] = useState<AgentData>(() => (activeId ? loadAgentData(activeId) : DEFAULT_AGENT));
 
   const [saving, setSaving] = useState(false);
@@ -592,34 +513,42 @@ export default function VoiceAgentSection() {
 
   const [showCall, setShowCall] = useState(false);
 
+  // Generate flow
   const [showGenerate, setShowGenerate] = useState(false);
   const [composerText, setComposerText] = useState('');
   const [autoTranslate, setAutoTranslate] = useState(true);
-  const [genPhase, setGenPhase] = useState<'idle'|'loading'|'review'|'editing'>('idle');
+  const [overlayPhase, setOverlayPhase] = useState<'editing'|'loading'>('editing');
 
-  // prompt typing & review
+  // Review/typing in main prompt area
   const basePromptRef = useRef<string>('');
-  const [typingPreview, setTypingPreview] = useState('');       // live typed merged prompt
-  const [proposedPrompt, setProposedPrompt] = useState<string>(''); // full merged prompt when ready
-  const [changesSummary, setChangesSummary] = useState<string>('');
+  const [proposedPrompt, setProposedPrompt] = useState<string>('');
+  const [typingPreview, setTypingPreview] = useState(''); // what types into the prompt container
+  const [isTyping, setIsTyping] = useState(false);
+  const [showPromptReview, setShowPromptReview] = useState(false);
+  const [promptExpanded, setPromptExpanded] = useState(false);
 
-  // voice preview
+  // voices (Web Speech API)
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [previewingVoice, setPreviewingVoice] = useState<string|null>(null);
   useEffect(() => {
     const load = () => setVoices(window.speechSynthesis.getVoices());
     load();
     (window.speechSynthesis as any).onvoiceschanged = load;
     return () => { (window.speechSynthesis as any).onvoiceschanged = null; };
   }, []);
-  function speakPreview(line?: string){
-    const u = new SpeechSynthesisUtterance(line || `Hi, I'm ${data.name || 'your assistant'}. This is a preview.`);
-    const byName = voices.find(v => v.name.toLowerCase().includes((data.voiceName || '').split(' ')[0]?.toLowerCase() || ''));
-    const en = voices.find(v => v.lang?.startsWith('en'));
-    if (byName) u.voice = byName; else if (en) u.voice = en;
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(u);
-  }
-  const stopPreview = () => window.speechSynthesis.cancel();
+  const speakPreview = async (selection: string) => {
+    try {
+      const u = new SpeechSynthesisUtterance(`This is ${selection} voice preview.`);
+      const byName = voices.find(v => v.name.toLowerCase().includes(selection.split(' ')[0]?.toLowerCase() || ''));
+      const anyEn = voices.find(v => v.lang?.startsWith('en'));
+      if (byName) u.voice = byName; else if (anyEn) u.voice = anyEn;
+      setPreviewingVoice(selection);
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(u);
+      u.onend = () => setPreviewingVoice(null);
+    } catch { setPreviewingVoice(null); }
+  };
+  const stopPreview = () => { window.speechSynthesis.cancel(); setPreviewingVoice(null); };
 
   /* listen for active rail id */
   useEffect(() => {
@@ -627,13 +556,11 @@ export default function VoiceAgentSection() {
     window.addEventListener('assistant:active', handler as EventListener);
     return () => window.removeEventListener('assistant:active', handler as EventListener);
   }, []);
-
   useEffect(() => {
     if (!activeId) return;
     setData(loadAgentData(activeId));
     try { localStorage.setItem(ACTIVE_KEY, activeId); } catch {}
   }, [activeId]);
-
   useEffect(() => { if (activeId) saveAgentData(activeId, data); }, [activeId, data]);
 
   useEffect(() => {
@@ -697,35 +624,34 @@ export default function VoiceAgentSection() {
     finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
   }
 
-  /* ── Generate overlay logic ── */
+  /* ── Generate overlay logic -> typing inside prompt box ── */
+  const detectLanguage = () => data.language || 'English';
 
-  const detectLanguage = (prompt:string):string => data.language || 'English';
-
-  // Build merged prompt (strip old [Behavior], then append one)
   const buildAIFormatted = (userText:string, targetLang:string, base:string) => {
     const cleaned = userText
-      .split('\n').map(s => s.trim()).filter(Boolean)
+      .split('\n')
+      .map(s => s.trim())
+      .filter(Boolean)
       .map(s => /[.!?]$/.test(s) ? s : `${s}.`);
 
-    const baseNoBehavior = stripSection(base, 'Behavior');
-
     const merged =
-`${baseNoBehavior}
-
-[Behavior]
-- Always respect the Extra Instructions below.
-- Keep replies concise and useful.
-- Ask for missing info before acting.
+`${base}
 
 [Extra Instructions]
-${cleaned.map(l => `- ${l}`).join('\n')}`;
+${cleaned.map(l => `- ${l}`).join('\n')}
 
-    const summary = `Added ${cleaned.length} instruction${cleaned.length===1?'':'s'}; unified single [Behavior] section.`;
+[Behavior]
+- Always respect the Extra Instructions above.
+- Keep replies concise and useful.
+- Ask for missing info before acting.`;
+
+    const summary = `Added ${cleaned.length} instruction${cleaned.length===1?'':'s'}; tightened behavior; preserved safety.`;
     return { merged, summary };
   };
 
-  // typing animation -> writes into main prompt box
-  const runTyping = (full:string) => {
+  // type into the prompt container (not the overlay)
+  const runTypingIntoPrompt = (full: string) => {
+    setIsTyping(true);
     setTypingPreview('');
     let i = 0;
     const step = () => {
@@ -733,66 +659,54 @@ ${cleaned.map(l => `- ${l}`).join('\n')}`;
       const slice = full.slice(0, Math.min(i, full.length));
       setTypingPreview(slice);
       if (i < full.length) requestAnimationFrame(step);
+      else setIsTyping(false);
     };
     requestAnimationFrame(step);
   };
 
   const onOpenGenerate = () => {
     setComposerText('');
+    setAutoTranslate(true);
     setProposedPrompt('');
     setTypingPreview('');
-    setChangesSummary('');
-    setGenPhase('editing');
+    setOverlayPhase('editing');
     setShowGenerate(true);
   };
 
-  const onGenerate = async () => {
-    setGenPhase('loading');
+  const onOverlayGenerate = async () => {
+    setOverlayPhase('loading');
     basePromptRef.current = data.systemPrompt;
-    const lang = detectLanguage(basePromptRef.current);
-    // simulate API build → then animate into prompt box
+    const lang = detectLanguage();
     setTimeout(() => {
-      const { merged, summary } = buildAIFormatted(composerText || 'No changes provided', lang, basePromptRef.current);
+      const { merged } = buildAIFormatted(composerText || 'No changes provided', lang, basePromptRef.current);
       setProposedPrompt(merged);
-      setChangesSummary(summary);
-      // expand + type inside the prompt box
-      setGenPhase('review');
-      runTyping(merged);
-    }, 420);
+      // Close overlay and enter review on prompt box
+      setShowGenerate(false);
+      setShowPromptReview(true);
+      setPromptExpanded(true);
+      // start typing inside the prompt box (read-only layer)
+      runTypingIntoPrompt(merged);
+    }, 1000);
   };
 
-  const onAccept = async () => {
-    if (!activeId) return;
-    const snapshot = {
-      prompt: proposedPrompt || typingPreview,
-      model: data.model,
-      temp: 0,
-      name: data.name,
-      summary: changesSummary
-    };
-    pushVersion(activeId, snapshot);
-    setData(p => ({ ...p, systemPrompt: proposedPrompt || typingPreview }));
-    // close + reset typing & shrink
-    setShowGenerate(false);
-    setProposedPrompt('');
+  const onAcceptChanges = () => {
+    if (!proposedPrompt) return;
+    pushVersion(activeId || 'local', { prompt: proposedPrompt, model: data.model, name: data.name });
+    setData(p => ({ ...p, systemPrompt: proposedPrompt }));
+    setShowPromptReview(false);
+    setPromptExpanded(false);
     setTypingPreview('');
-    setChangesSummary('');
-    setGenPhase('idle');
+    setProposedPrompt('');
     setToast('Prompt updated');
   };
-
-  const onDecline = () => {
-    // keep overlay open, shrink prompt, reset typing
-    setProposedPrompt('');
+  const onDeclineChanges = () => {
+    setShowPromptReview(false);
+    setPromptExpanded(false);
     setTypingPreview('');
-    setChangesSummary('');
-    setGenPhase('editing');
+    setProposedPrompt('');
   };
 
   /* ─────────── UI ─────────── */
-  const isReview = genPhase === 'review';
-  const showInlineTyping = isReview && (typingPreview.length > 0);
-
   return (
     <section className="va-scope" style={{ background:'var(--bg)', color:'var(--text)' }}>
       <Tokens />
@@ -824,7 +738,7 @@ ${cleaned.map(l => `- ${l}`).join('\n')}`;
             </button>
 
             <button
-              onClick={()=>{ setShowCall(true); }}
+              onClick={()=> setShowCall(true)}
               className="inline-flex items-center gap-2 rounded-[10px] select-none"
               style={{ height:'var(--control-h)', padding:'0 18px', background:CTA, color:'#ffffff', fontWeight:700, boxShadow:'0 10px 22px rgba(89,217,179,.20)' }}
               onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA_HOVER)}
@@ -838,28 +752,9 @@ ${cleaned.map(l => `- ${l}`).join('\n')}`;
           {toast ? (
             <div className="mb-[var(--s-4)] inline-flex items-center gap-2 px-3 py-1.5 rounded-[10px]"
                  style={{ background:'rgba(89,217,179,.10)', color:'var(--text)', boxShadow:'0 0 0 1px rgba(89,217,179,.16) inset' }}>
-              <Check className="w-4 h-4" /> {toast}
+              {toast}
             </div>
           ) : null}
-
-          <div className="grid gap-[12px] md:grid-cols-2 mb-[12px]">
-            <div className="va-card">
-              <div className="va-head" style={{ minHeight: 56 }}>
-                <div className="text-xs" style={{ color:'var(--text-muted)' }}>Cost</div><div />
-              </div>
-              <div className="p-[var(--s-4)]">
-                <div className="font-semibold" style={{ fontSize:'var(--fz-sub)' }}>~$0.1/min</div>
-              </div>
-            </div>
-            <div className="va-card">
-              <div className="va-head" style={{ minHeight: 56 }}>
-                <div className="text-xs" style={{ color:'var(--text-muted)' }}>Latency</div><div />
-              </div>
-              <div className="p-[var(--s-4)]">
-                <div className="font-semibold" style={{ fontSize:'var(--fz-sub)' }}>~1050 ms</div>
-              </div>
-            </div>
-          </div>
 
           <Section
             title="Model"
@@ -899,55 +794,79 @@ ${cleaned.map(l => `- ${l}`).join('\n')}`;
               </div>
             </div>
 
-            {/* System Prompt */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt-[var(--s-4)]">
               <div className="md:col-span-2">
                 <div className="flex items-center justify-between mb-[var(--s-2)]">
                   <div className="font-medium" style={{ fontSize:'var(--fz-label)' }}>System Prompt</div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      className="inline-flex items-center gap-2 rounded-[10px] text-sm"
-                      style={{ height:36, padding:'0 12px', background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                      onClick={onOpenGenerate}
-                    >
-                      <Wand2 className="w-4 h-4" /> Generate
-                    </button>
-                  </div>
+
+                  {/* Generate button */}
+                  <button
+                    className="inline-flex items-center gap-2 rounded-[10px] text-sm"
+                    style={{ height:36, padding:'0 12px', background:CTA, color:'#fff', border:'1px solid transparent' }}
+                    onClick={onOpenGenerate}
+                  >
+                    <Wand2 className="w-4 h-4" /> Generate
+                  </button>
                 </div>
 
-                {/* Editable textarea OR Inline diff review */}
-                <div
-                  className="rounded-[12px] px-3 py-[12px]"
-                  style={{
-                    background:'var(--input-bg)',
-                    border:'1px solid var(--input-border)',
-                    color:'var(--text)',
-                    overflow:'hidden',
-                    transition:'max-height 280ms var(--ease)',
-                    maxHeight: isReview ? '70vh' : '360px'
-                  }}
-                >
-                  {showInlineTyping ? (
-                    <PromptInlineDiff
-                      base={basePromptRef.current || data.systemPrompt}
-                      next={typingPreview || proposedPrompt || data.systemPrompt}
-                      typing={typingPreview.length < (proposedPrompt || typingPreview).length}
-                    />
-                  ) : (
-                    <textarea
-                      className="w-full bg-transparent outline-none"
-                      style={{ minHeight: 320, color:'var(--text)', resize:'vertical' as const }}
-                      value={data.systemPrompt}
-                      onChange={(e)=> setField('systemPrompt')(e.target.value)}
-                    />
+                {/* Prompt container (textarea + review overlay + actions) */}
+                <div style={{ position:'relative' }}>
+                  {/* Accept/Decline toolbar above the prompt, only during review */}
+                  {showPromptReview && (
+                    <div className="absolute -top-11 right-0 flex gap-2">
+                      <button
+                        onClick={onDeclineChanges}
+                        className="h-9 px-3 rounded-[10px]"
+                        style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.9)', color:'var(--text)', fontWeight:600 }}
+                      >
+                        Decline
+                      </button>
+                      <button
+                        onClick={onAcceptChanges}
+                        className="h-9 px-3 rounded-[10px] font-semibold"
+                        style={{ background:CTA, color:'#0a0f0d' }}
+                      >
+                        Accept Changes
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Textarea (real value). Hidden visually during typing preview to avoid flicker */}
+                  <textarea
+                    className="w-full bg-transparent outline-none rounded-[12px] px-3 py-[12px]"
+                    style={{
+                      minHeight: promptExpanded ? 560 : 360,
+                      background:'var(--input-bg)',
+                      border:'1px solid var(--input-border)',
+                      color:'var(--text)',
+                      opacity: (showPromptReview ? 0.2 : 1),
+                      transition:'min-height .25s var(--ease), opacity .2s var(--ease)'
+                    }}
+                    value={data.systemPrompt}
+                    onChange={(e)=> setField('systemPrompt')(e.target.value)}
+                    readOnly={showPromptReview} // lock during review
+                  />
+
+                  {/* Review overlay: typing preview + diff */}
+                  {showPromptReview && (
+                    <div className="absolute inset-0 overflow-auto p-3 pointer-events-none" style={{ color:'var(--text)' }}>
+                      {/* Typing effect text */}
+                      <div
+                        className={`rounded-[8px] p-3 text-sm ${isTyping ? 'va-caret' : ''}`}
+                        style={{ background:'transparent', border:'1px dashed rgba(255,255,255,.12)' }}
+                      >
+                        <pre style={{ whiteSpace:'pre-wrap', margin:0 }}>{typingPreview || ' '}</pre>
+                      </div>
+
+                      {/* Diff below once typing completes */}
+                      {!isTyping && proposedPrompt && (
+                        <div className="mt-3">
+                          <DiffView base={basePromptRef.current} next={proposedPrompt}/>
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
-                {/* helper text */}
-                {isReview && (
-                  <div className="mt-2 text-xs" style={{ color:'var(--text-muted)' }}>
-                    Reviewing changes — additions are green, removals are red. Use the modal controls to Accept or Decline.
-                  </div>
-                )}
               </div>
             </div>
           </Section>
@@ -955,7 +874,7 @@ ${cleaned.map(l => `- ${l}`).join('\n')}`;
           <Section
             title="Voice"
             icon={<Volume2 className="w-4 h-4" style={{ color: CTA }} />}
-            desc="Choose TTS and preview the voice."
+            desc="Choose TTS and preview the voice (preview is inside the dropdown)."
             defaultOpen={true}
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px]">
@@ -992,32 +911,9 @@ ${cleaned.map(l => `- ${l}`).join('\n')}`;
                     { value: 'Amber (Australian)', label: 'Amber (Australian)' },
                   ]}
                   placeholder="— Choose —"
-                  menuTop={
-                    <div className="flex items-center justify-between px-3 py-2 rounded-[10px]"
-                         style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}>
-                      <div className="text-xs" style={{ color:'var(--text-muted)' }}>Preview</div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={()=>speakPreview(`This is ${data.voiceName || 'the selected'} voice preview.`)}
-                          className="w-8 h-8 rounded-full grid place-items-center"
-                          aria-label="Play voice"
-                          style={{ background: CTA, color:'#0a0f0d' }}
-                        >
-                          <Play className="w-4 h-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={stopPreview}
-                          className="w-8 h-8 rounded-full grid place-items-center border"
-                          aria-label="Stop preview"
-                          style={{ background: 'var(--panel-bg)', color:'var(--text)', borderColor:'var(--input-border)' }}
-                        >
-                          <Square className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  }
+                  menuTop={null}
+                  onPreview={async (v)=>{ if (previewingVoice) stopPreview(); else await speakPreview(v); }}
+                  isPreviewing={previewingVoice}
                 />
               </div>
             </div>
@@ -1053,13 +949,13 @@ ${cleaned.map(l => `- ${l}`).join('\n')}`;
         </div>
       </div>
 
-      {/* ─────────── Generate overlay ─────────── */}
+      {/* ─────────── Generate overlay (Compose only) ─────────── */}
       {showGenerate && (
         <>
           <div
             className="fixed inset-0"
             style={{ zIndex: Z_OVERLAY, background:'rgba(6,8,10,.62)', backdropFilter:'blur(6px)' }}
-            onClick={()=>{ if (genPhase!=='loading') setShowGenerate(false); }}
+            onClick={()=>{ if (overlayPhase!=='loading') setShowGenerate(false); }}
           />
           <div className="fixed inset-0 grid place-items-center px-4" style={{ zIndex: Z_MODAL }}>
             <div
@@ -1081,7 +977,7 @@ ${cleaned.map(l => `- ${l}`).join('\n')}`;
                 }}
               >
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl grid place-items-center" style={{ background:'var(--brand-weak)' }}>
+                  <div className="w-10 h-10 rounded-xl grid place-items-center" style={{ background:'rgba(89,217,179,.10)' }}>
                     <span style={{ color: CTA, filter:'drop-shadow(0 0 8px rgba(89,217,179,.35))' }}>
                       <Wand2 className="w-5 h-5" />
                     </span>
@@ -1089,7 +985,7 @@ ${cleaned.map(l => `- ${l}`).join('\n')}`;
                   <div className="text-lg font-semibold">Generate Prompt Changes</div>
                 </div>
                 <button
-                  onClick={()=> genPhase!=='loading' && setShowGenerate(false)}
+                  onClick={()=> overlayPhase!=='loading' && setShowGenerate(false)}
                   className="w-8 h-8 rounded-[8px] grid place-items-center"
                   style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}` }}
                   aria-label="Close"
@@ -1106,83 +1002,50 @@ ${cleaned.map(l => `- ${l}`).join('\n')}`;
                     value={composerText}
                     onChange={(e)=>setComposerText(e.target.value)}
                     className="w-full bg-transparent outline-none rounded-[10px] px-3 py-2"
-                    placeholder="e.g., Friendlier tone, add human handoff after 3 fails, collect name+email up front."
+                    placeholder="e.g., Friendlier tone, handoff to human after 3 failures, collect name + email up front."
                     style={{ minHeight: 160, maxHeight: '40vh', background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
                   />
                 </div>
 
-                {genPhase==='review' && proposedPrompt && (
-                  <>
-                    <div className="text-xs font-semibold" style={{ color:'var(--text-muted)' }}>Review changes</div>
-                    <DiffView base={basePromptRef.current} next={proposedPrompt}/>
-                    {!!changesSummary && (
-                      <div className="text-xs" style={{ color:'var(--text-muted)' }}>
-                        Summary: <span style={{ color:'var(--text)' }}>{changesSummary}</span>
-                      </div>
-                    )}
-                    <div className="text-xs" style={{ color:'var(--text-muted)' }}>
-                      Live typing preview is shown inside the System Prompt box.
-                    </div>
-                  </>
-                )}
+                <div className="flex items-center justify-between px-3 py-2 rounded-[10px]"
+                     style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}>
+                  <div className="text-xs" style={{ color:'var(--text-muted)' }}>
+                    Agent language: <b style={{ color:'var(--text)' }}>{data.language || 'English'}</b> · Auto-translate to agent language
+                  </div>
+                  <Toggle checked={autoTranslate} onChange={setAutoTranslate}/>
+                </div>
               </div>
 
               {/* Footer */}
               <div className="px-6 pb-6 flex gap-3">
-                {genPhase==='review' ? (
-                  <>
-                    <button
-                      onClick={onDecline}
-                      className="w-full h-[44px] rounded-[10px]"
-                      style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.9)', color:'var(--text)', fontWeight:600 }}
-                    >
-                      Decline
-                    </button>
-                    <button
-                      onClick={onAccept}
-                      className="w-full h-[44px] rounded-[10px] font-semibold"
-                      style={{ background:CTA, color:'#fff' /* white text as requested */ }}
-                    >
-                      Accept Changes
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button
-                      onClick={()=> genPhase!=='loading' && setShowGenerate(false)}
-                      disabled={genPhase==='loading'}
-                      className="w-full h-[44px] rounded-[10px]"
-                      style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.9)', color:'var(--text)', fontWeight:600 }}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={onGenerate}
-                      disabled={genPhase==='loading' || !composerText.trim()}
-                      className="w-full h-[44px] rounded-[10px] font-semibold inline-flex items-center justify-center gap-2"
-                      style={{ background:CTA, color:'#fff', opacity: (!composerText.trim() ? .6 : 1) }}
-                    >
-                      {genPhase==='loading' ? (<><Loader2 className="w-4 h-4 animate-spin" /> Generating…</>) : 'Generate'}
-                    </button>
-                  </>
-                )}
+                <button
+                  onClick={()=> overlayPhase!=='loading' && setShowGenerate(false)}
+                  disabled={overlayPhase==='loading'}
+                  className="w-full h-[44px] rounded-[10px]"
+                  style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.9)', color:'var(--text)', fontWeight:600 }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={onOverlayGenerate}
+                  disabled={overlayPhase==='loading' || !composerText.trim()}
+                  className="w-full h-[44px] rounded-[10px] font-semibold inline-flex items-center justify-center gap-2"
+                  style={{ background:CTA, color:'#fff', opacity: (!composerText.trim() ? .6 : 1) }}
+                >
+                  {overlayPhase==='loading' ? (<><Loader2 className="w-4 h-4 animate-spin" /> Generating…</>) : 'Generate'}
+                </button>
               </div>
             </div>
           </div>
         </>
       )}
 
-      {/* Call drawer (solid) */}
+      {/* Call drawer */}
       {createPortal(
         <>
           <div
             className={`fixed inset-0 ${showCall ? '' : 'pointer-events-none'}`}
-            style={{
-              zIndex: 9996,
-              background: showCall ? 'rgba(8,10,12,.78)' : 'transparent',
-              opacity: showCall ? 1 : 0,
-              transition: 'opacity .2s var(--ease)'
-            }}
+            style={{ zIndex: 9996, background: showCall ? 'rgba(8,10,12,.78)' : 'transparent', opacity: showCall ? 1 : 0, transition: 'opacity .2s var(--ease)' }}
             onClick={()=> setShowCall(false)}
           />
           <aside
