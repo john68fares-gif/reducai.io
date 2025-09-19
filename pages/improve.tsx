@@ -1,12 +1,7 @@
 // pages/improve.tsx
-// Improve = fine-tune, test, compare existing agents (no create/import/delete here).
-// Features:
-// - API-only agent list (optional x-owner-id), no local seeding.
-// - Save + Snapshot (PATCH existing agent).
-// - Quick Rule merges into System (optionally snapshot).
-// - Lanes A/B, send-to-both, drag version to Lane B or to footer for one-shot test.
-// - Attachments (pics/vids/files), auto-open pickers, drag-drop.
-// - Local Memory (per-agent) + Version snapshots (per-agent) in localStorage only.
+// Live Test that behaves like Support. Split lanes, send-to-both, version drag, local previews.
+// Clear Pre/System/Post vs Quick Rule. Auto-naming snapshots. Fixed-page scrolling.
+// Scope: test/tune/compare **existing** agents only (no create/import/export/delete).
 
 'use client';
 
@@ -18,9 +13,10 @@ import {
   Image as ImageIcon, Paperclip, Film, FileText, Info
 } from 'lucide-react';
 
+/* ---------- Types ---------- */
 type BotRow = {
   id: string;
-  ownerId: string;
+  ownerId?: string;
   name: string;
   model: string;
   temperature: number;
@@ -28,7 +24,6 @@ type BotRow = {
   createdAt?: string;
   updatedAt?: string;
 };
-
 type Version = {
   id: string;
   ts: number;
@@ -38,10 +33,10 @@ type Version = {
   temperature: number;
   system: string;
 };
-
 type ChatMsg = { role: 'user' | 'assistant' | 'system'; content: string };
 type Attachment = { id: string; name: string; mime: string; url?: string; size?: number };
 
+/* ---------- Styles ---------- */
 const PANEL: React.CSSProperties = {
   background: 'color-mix(in oklab, var(--bg) 96%, transparent)',
   border: '1px solid color-mix(in oklab, var(--border) 92%, transparent)',
@@ -54,8 +49,9 @@ const CARD: React.CSSProperties = {
   borderRadius: 10,
 };
 
-const versionsKey = (o: string, a: string) => `versions:${o || 'anon'}:${a}`;
-const memoryKey = (o: string, a: string) => `memory:${o || 'anon'}:${a}`;
+/* ---------- Local keys (per agent) ---------- */
+const versionsKey = (agentId: string) => `versions:${agentId}`;
+const memoryKey = (agentId: string) => `memory:${agentId}`;
 const fmtTime = (ts: number) => new Date(ts).toLocaleString();
 
 const stripMd = (t: string) =>
@@ -72,7 +68,7 @@ function SplitIcon() {
   );
 }
 
-// Snapshot label heuristic
+/* ---------- Snapshot label ---------- */
 function autoLabel(prevSys: string, nextSys: string): string {
   const before = stripMd(prevSys || '');
   const after = stripMd(nextSys || '');
@@ -88,7 +84,7 @@ function autoLabel(prevSys: string, nextSys: string): string {
   return (added || 'Prompt edited').slice(0, 48);
 }
 
-// Compose effective system from pieces
+/* ---------- Compose effective system ---------- */
 function composeSystem(base: string, quickRules: string, pre: string, post: string, memory: string | null) {
   const blocks: string[] = [];
   if (pre.trim()) blocks.push(`### PRE\n${pre.trim()}\n\n> Runs before the main system. Use for role/goals.`);
@@ -103,15 +99,14 @@ function composeSystem(base: string, quickRules: string, pre: string, post: stri
   return blocks.join('\n\n').trim();
 }
 
+/* ---------- Component ---------- */
 export default function Improve() {
-  // If you have auth, set this to the current user/account id; else leave null to fetch all
-  const [userId, setUserId] = useState<string | null>(null);
-
+  /* Agents list + selection */
   const [list, setList] = useState<BotRow[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = useMemo(() => list.find(b => b.id === selectedId) || null, [list, selectedId]);
 
-  // Editor state
+  /* Editor */
   const [name, setName] = useState('');
   const [model, setModel] = useState('gpt-4o');
   const [temperature, setTemperature] = useState(0.5);
@@ -121,18 +116,22 @@ export default function Improve() {
   const [quickRule, setQuickRule] = useState('');
   const [showPromptBlock, setShowPromptBlock] = useState(false);
 
-  // Memory (local, optional)
+  /* Memory */
   const [useMemory, setUseMemory] = useState(true);
   const [memoryText, setMemoryText] = useState('');
 
-  // Versions
+  /* Versions (local) */
   const [versions, setVersions] = useState<Version[]>([]);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [copied, setCopied] = useState(false);
   const [autoSnapshot, setAutoSnapshot] = useState(true);
+  const [copied, setCopied] = useState(false);
 
-  // Lanes
+  /* Assistants rail UI */
+  const [query, setQuery] = useState('');
+  const [sort, setSort] = useState<'pinned_first' | 'name_asc' | 'updated_desc'>('pinned_first');
+
+  /* Live test */
   const [laneB, setLaneB] = useState<Version | null>(null);
   const [sendBoth, setSendBoth] = useState(false);
   const [activeLane, setActiveLane] = useState<'A' | 'B'>('A');
@@ -141,7 +140,7 @@ export default function Improve() {
   const [busy, setBusy] = useState(false);
   const [input, setInput] = useState('');
 
-  // Composer tabs
+  /* Attachments */
   type Tab = 'text' | 'pics' | 'vids' | 'files';
   const [tab, setTab] = useState<Tab>('text');
   const [pics, setPics] = useState<Attachment[]>([]);
@@ -151,34 +150,27 @@ export default function Improve() {
   const vidsRef = useRef<HTMLInputElement | null>(null);
   const filesRef = useRef<HTMLInputElement | null>(null);
 
-  // Footer drag
+  /* Footer drag area */
   const [dropActive, setDropActive] = useState(false);
   const [testVersion, setTestVersion] = useState<Version | null>(null);
 
-  // If you have auth/session, populate userId here
-  useEffect(() => {
-    setUserId(null); // leave null to fetch all agents returned by API
-  }, []);
-
-  // Fetch agents from API (no local fallback/seed)
+  /* ---------- Fetch existing agents from API (no local seeding) ---------- */
   const fetchBots = useCallback(async () => {
     try {
-      const headers: Record<string, string> = {};
-      if (userId) headers['x-owner-id'] = userId;
-      const res = await fetch('/api/chatbots', { headers });
+      const res = await fetch('/api/chatbots');
       const json = await res.json().catch(() => null);
       const rows: BotRow[] = Array.isArray(json?.data) ? json.data : [];
       setList(rows);
       if (!selectedId && rows.length) setSelectedId(rows[0].id);
     } catch (e) {
       console.error('[Improve] fetchBots failed:', e);
-      setList([]);
+      setList([]); // show empty state
     }
-  }, [userId, selectedId]);
+  }, [selectedId]);
 
   useEffect(() => { void fetchBots(); }, [fetchBots]);
 
-  // Load selection (versions + memory)
+  /* ---------- Load selection (versions + memory) ---------- */
   useEffect(() => {
     if (!selected) return;
     setName(selected.name || '');
@@ -188,24 +180,24 @@ export default function Improve() {
     setPrePrompt(''); setPostPrompt(''); setQuickRule('');
     setLaneB(null); setMsgsA([]); setMsgsB([]); setInput('');
     try {
-      const rawV = localStorage.getItem(versionsKey(userId || 'all', selected.id));
+      const rawV = localStorage.getItem(versionsKey(selected.id));
       setVersions(rawV ? (JSON.parse(rawV) as Version[]) : []);
     } catch { setVersions([]); }
     try {
-      const mem = localStorage.getItem(memoryKey(userId || 'all', selected.id));
+      const mem = localStorage.getItem(memoryKey(selected.id));
       setMemoryText(mem || '');
     } catch { setMemoryText(''); }
     setDirty(false);
-  }, [selectedId, userId, selected]);
+  }, [selectedId, selected]);
 
-  // Unsaved guard
+  /* ---------- Unsaved guard ---------- */
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => { if (!dirty) return; e.preventDefault(); e.returnValue = ''; };
     window.addEventListener('beforeunload', handler);
     return () => window.removeEventListener('beforeunload', handler);
   }, [dirty]);
 
-  // Dirty tracking
+  /* ---------- Dirty tracking ---------- */
   useEffect(() => {
     if (!selected) return;
     const d =
@@ -217,9 +209,7 @@ export default function Improve() {
     setDirty(d);
   }, [name, model, temperature, system, prePrompt, postPrompt, quickRule, selected]);
 
-  // Filter/sort
-  const [query, setQuery] = useState('');
-  const [sort, setSort] = useState<'pinned_first' | 'name_asc' | 'updated_desc'>('pinned_first');
+  /* ---------- Filter/sort list ---------- */
   const filtered = useMemo(() => {
     let rows = [...list];
     if (query.trim()) {
@@ -235,41 +225,49 @@ export default function Improve() {
     return rows;
   }, [list, query, sort]);
 
-  // Helpers
-  const copyId = async () => { if (!selected) return; await navigator.clipboard.writeText(selected.id); setCopied(true); setTimeout(() => setCopied(false), 900); };
+  /* ---------- Helpers ---------- */
+  const copyId = async () => {
+    if (!selected) return;
+    await navigator.clipboard.writeText(selected.id);
+    setCopied(true); setTimeout(() => setCopied(false), 900);
+  };
   const fmtTok = (s: string) => Math.max(1, Math.round((s || '').length / 4));
 
-  // Snapshots
+  /* ---------- Snapshots (local) ---------- */
   function makeSnapshot(prev?: BotRow) {
-    if (!selectedId) return;
+    if (!selectedId || !selected) return;
     const label = autoLabel(prev?.system || '', system);
     const v: Version = { id: `v_${Date.now()}`, ts: Date.now(), label, name, model, temperature, system };
     const next = [v, ...versions].slice(0, 80);
     setVersions(next);
-    try { localStorage.setItem(versionsKey(userId || 'all', selectedId), JSON.stringify(next)); } catch {}
+    try { localStorage.setItem(versionsKey(selectedId), JSON.stringify(next)); } catch {}
   }
 
-  // Save (PATCH existing)
   async function saveEdits() {
-    if (!selected || !selectedId) return;
+    if (!selectedId || !selected) return;
     try {
       setSaving(true);
       const prev = list.find(b => b.id === selectedId);
+
+      // local snapshot
       makeSnapshot(prev);
 
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (userId) headers['x-owner-id'] = userId;
+      // best-effort PATCH
+      try {
+        await fetch(`/api/chatbots/${selectedId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, model, temperature, system }),
+        });
+      } catch {}
 
-      await fetch(`/api/chatbots/${selectedId}`, {
-        method: 'PATCH',
-        headers,
-        body: JSON.stringify({ name, model, temperature, system }),
-      }).catch(() => { /* swallow network error; Improve is editor only */ });
-
-      // Shallow refresh in UI
-      setList(cur => cur.map(b => b.id === selectedId ? {
-        ...b, name, model, temperature, system, updatedAt: new Date().toISOString()
-      } : b));
+      // reflect updated fields in list
+      setList(cur =>
+        cur.map(b => b.id === selectedId
+          ? { ...b, name, model, temperature, system, updatedAt: new Date().toISOString() }
+          : b
+        )
+      );
       setDirty(false);
     } catch {
       alert('Failed to save.');
@@ -278,7 +276,7 @@ export default function Improve() {
     }
   }
 
-  // Quick Rule → merge into System
+  /* ---------- Quick Rule merge ---------- */
   function applyQuickRule() {
     if (!quickRule.trim()) return;
     const merged = composeSystem(system, quickRule, '', '', null);
@@ -291,19 +289,18 @@ export default function Improve() {
     }
   }
 
-  // Memory: keep last ~1000 chars of conversation gist
+  /* ---------- Local memory (very light heuristic) ---------- */
   function updateLocalMemory(from: ChatMsg[]) {
     if (!useMemory || !selected) return;
     const last = from.slice(-12).map(m => `${m.role === 'user' ? 'User' : 'AI'}: ${stripMd(m.content)}`).join(' | ');
     const mem = `User prefs & style (heuristic): ${last}`.slice(0, 1000);
     setMemoryText(mem);
-    try { localStorage.setItem(memoryKey(userId || 'all', selected.id), mem); } catch {}
+    try { localStorage.setItem(memoryKey(selected.id), mem); } catch {}
   }
 
-  // Composer attachments
+  /* ---------- Attachments helpers ---------- */
   const currentAttachments = useCallback(() => [...pics, ...vids, ...files], [pics, vids, files]);
 
-  // File helpers
   function fileToAttachment(file: File): Promise<Attachment> {
     return new Promise(resolve => {
       const id = `${file.name}_${file.size}_${crypto.randomUUID?.() || Math.random().toString(36).slice(2)}`;
@@ -312,7 +309,9 @@ export default function Improve() {
         const fr = new FileReader();
         fr.onload = () => resolve({ ...base, url: String(fr.result || '') });
         fr.readAsDataURL(file);
-      } else resolve(base);
+      } else {
+        resolve(base);
+      }
     });
   }
   async function addFiles(fileList: FileList | null, kind: 'pics' | 'vids' | 'files') {
@@ -324,7 +323,7 @@ export default function Improve() {
     if (kind === 'files') setFiles(prev => [...prev, ...atts.filter(a => !a.mime.startsWith('image/') && !a.mime.startsWith('video/'))].slice(0, 16));
   }
 
-  // API ask → lane
+  /* ---------- Chat send ---------- */
   const sendToLane = useCallback(
     async (which: 'A' | 'B', text: string, attachments: Attachment[]) => {
       const laneVersion =
@@ -333,12 +332,13 @@ export default function Improve() {
           : laneB
           ? { system: laneB.system, model: laneB.model, temperature: laneB.temperature, versionId: laneB.id }
           : null;
+
       if (!laneVersion) return;
 
       const memory = useMemory ? memoryText : '';
       const effectiveSystem = composeSystem(laneVersion.system, '', prePrompt, postPrompt, memory);
 
-      // optimistic user bubble
+      // optimistic add
       const userMsg =
         (text && text.trim()) ||
         (attachments.length ? `(sent ${attachments.length} attachment${attachments.length > 1 ? 's' : ''})` : '');
@@ -359,7 +359,9 @@ export default function Improve() {
             system: effectiveSystem,
             model: laneVersion.model,
             temperature: laneVersion.temperature,
-            attachments: attachments.map(a => ({ id: a.id, name: a.name, mime: a.mime, url: a.url, size: a.size })),
+            attachments: attachments.map(a => ({
+              id: a.id, name: a.name, mime: a.mime, url: a.url, size: a.size,
+            })),
           }),
         });
 
@@ -389,9 +391,9 @@ export default function Improve() {
     [selected, laneB, system, model, temperature, prePrompt, postPrompt, useMemory, memoryText, msgsA, msgsB]
   );
 
-  // Master send
   async function sendPrompt() {
     if (busy) return;
+
     const t = (input || '').trim();
     const atts = currentAttachments();
     if (!t && atts.length === 0) return;
@@ -400,15 +402,17 @@ export default function Improve() {
     setInput('');
     setPics([]); setVids([]); setFiles([]);
 
-    // one-shot test with chosen version
+    // One-shot test version on focused lane
     if (testVersion) {
       const lane = activeLane;
       const memory = useMemory ? memoryText : '';
       const effectiveSystem = composeSystem(testVersion.system, '', prePrompt, postPrompt, memory);
 
       const userMsg = t || (atts.length ? `(sent ${atts.length} attachment${atts.length > 1 ? 's' : ''})` : '');
-      if (lane === 'A') setMsgsA(cur => [...cur, { role: 'user', content: userMsg }]);
-      else setMsgsB(cur => [...cur, { role: 'user', content: userMsg }]);
+      if (userMsg) {
+        if (lane === 'A') setMsgsA(cur => [...cur, { role: 'user', content: userMsg }]);
+        else setMsgsB(cur => [...cur, { role: 'user', content: userMsg }]);
+      }
 
       setBusy(true);
       try {
@@ -425,6 +429,7 @@ export default function Improve() {
             attachments: atts.map(a => ({ id: a.id, name: a.name, mime: a.mime, url: a.url, size: a.size })),
           }),
         });
+
         const data = await res.json().catch(() => null);
         const reply =
           data?.ok && typeof data?.message === 'string'
@@ -451,7 +456,7 @@ export default function Improve() {
       return;
     }
 
-    // normal routing
+    // Normal routing
     if (sendBoth && laneB) {
       await Promise.all([sendToLane('A', t, atts), sendToLane('B', t, atts)]);
     } else {
@@ -459,7 +464,7 @@ export default function Improve() {
     }
   }
 
-  // Footer drag: set testVersion
+  /* ---------- Footer drag & drop ---------- */
   const footerDragOver: React.DragEventHandler = (e) => {
     if (!versions.length) return;
     if (!e.dataTransfer) return;
@@ -497,7 +502,7 @@ export default function Improve() {
     }
   };
 
-  // Auto-open pickers
+  /* ---------- Auto-open pickers on tab switch ---------- */
   useEffect(() => {
     const openSoon = (fn: () => void) => setTimeout(fn, 10);
     if (tab === 'pics') openSoon(() => picsRef.current?.click());
@@ -505,7 +510,7 @@ export default function Improve() {
     if (tab === 'files') openSoon(() => filesRef.current?.click());
   }, [tab]);
 
-  // UI
+  /* ---------- UI ---------- */
   return (
     <div className="h-screen w-full overflow-hidden" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
       {/* Top bar */}
@@ -523,7 +528,7 @@ export default function Improve() {
           <label className="ml-2 text-xs inline-flex items-center gap-2 px-2 py-1 rounded-md" style={{ ...CARD }}>
             <input type="checkbox" checked={autoSnapshot} onChange={e=>setAutoSnapshot(e.target.checked)} />
             Auto-snapshot on Quick Rule
-            <Info className="w-3.5 h-3.5 opacity-60" title="When ON, applying a Quick Rule also creates a version snapshot." />
+            <Info className="w-3.5 h-3.5 opacity-60" title="When ON, applying a Quick Rule also creates a snapshot." />
           </label>
 
           <div className="ml-auto flex items-center gap-2">
@@ -531,14 +536,12 @@ export default function Improve() {
               <RefreshCw className="inline w-4 h-4 mr-1" /> Refresh
             </button>
 
-            {/* Copy ID of current */}
             {selected && (
               <button onClick={copyId} className="px-3 py-1.5 rounded-md text-sm" style={{ ...CARD }}>
                 {copied ? <><Check className="inline w-4 h-4 mr-1" /> Copied</> : <><Copy className="inline w-4 h-4 mr-1" /> Copy ID</>}
               </button>
             )}
 
-            {/* Save + Snapshot */}
             <button
               onClick={() => !saving && dirty && saveEdits()}
               disabled={!dirty || saving}
@@ -599,7 +602,7 @@ export default function Improve() {
                           </div>
                           <div className="flex-1 min-w-0">
                             <div className="truncate">{b.name || 'Untitled'}</div>
-                            <div className="text-[11px] opacity-60 truncate">{b.model} · {b.id.slice(0,8)}</div>
+                            <div className="text-[11px] opacity-60 truncate">{b.model} · {b.id.slice(0, 8)}</div>
                           </div>
                         </button>
                       </li>
@@ -767,6 +770,7 @@ export default function Improve() {
                 onDrop={(e)=>{footerDrop(e); onFooterFileDrop(e as any);}}
                 style={{ border: dropActive ? '1px dashed var(--brand)' : '1px dashed transparent', padding: 8 }}
               >
+                {/* One-shot test pill */}
                 {testVersion && (
                   <div className="flex items-center gap-2 text-xs mb-1">
                     <span className="px-2 py-1 rounded-md" style={{ ...CARD, borderColor: 'var(--brand)' }}>
