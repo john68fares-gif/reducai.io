@@ -6,8 +6,8 @@ import dynamic from 'next/dynamic';
 import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import {
-  Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Rocket, Search, Check, Lock, X, KeyRound,
-  Play, Square
+  Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Rocket, Check, X, KeyRound,
+  Loader2, Play, Square
 } from 'lucide-react';
 import { scopedStorage } from '@/utils/scoped-storage';
 
@@ -15,8 +15,7 @@ import { scopedStorage } from '@/utils/scoped-storage';
 const AssistantRail = dynamic(
   () =>
     import('@/components/voice/AssistantRail')
-      .then(m => m.default ?? m)
-      .catch(() => () => <div className="px-3 py-3 text-xs opacity-70">Rail unavailable</div>),
+      .then(m => m.default ?? m),
   { ssr: false, loading: () => <div className="px-3 py-3 text-xs opacity-70">Loading…</div> }
 );
 
@@ -50,8 +49,8 @@ const Tokens = () => (
       --bg:#0b0c10; --panel:#0d0f11; --text:#e6f1ef; --text-muted:#9fb4ad;
 
       --s-2:8px; --s-3:12px; --s-4:16px; --s-5:20px; --s-6:24px;
-      --radius-outer:8px;
-      --control-h:44px; --header-h:88px;
+      --radius-outer:10px;
+      --control-h:44px; --header-h:72px;
       --fz-title:18px; --fz-sub:15px; --fz-body:14px; --fz-label:12.5px;
       --lh-body:1.45; --ease:cubic-bezier(.22,.61,.36,1);
 
@@ -65,17 +64,17 @@ const Tokens = () => (
       --input-shadow:0 0 0 1px rgba(255,255,255,.06) inset;
 
       --border-weak:rgba(255,255,255,.10);
+      --green-line:rgba(89,217,179,.20);
       --card-shadow:0 22px 44px rgba(0,0,0,.28),
                     0 0 0 1px rgba(255,255,255,.06) inset,
-                    0 0 0 1px rgba(89,217,179,.20);
+                    0 0 0 1px var(--green-line);
     }
-    /* Light theme tokens, same feel as AssistantRail */
     :root:not([data-theme="dark"]) .va-scope{
       --bg:#f6f7f9; --panel:#ffffff; --text:#0f172a; --text-muted:#64748b;
       --input-border:rgba(15,23,42,.12);
       --border-weak:rgba(15,23,42,.12);
       --card-shadow:0 12px 28px rgba(10,12,14,.10),
-                    0 0 0 1px rgba(89,217,179,.20);
+                    0 0 0 1px var(--green-line);
     }
 
     .va-card{
@@ -94,26 +93,14 @@ const Tokens = () => (
         var(--panel-bg) 0%,
         color-mix(in oklab, var(--panel-bg) 97%, white 3%) 50%,
         var(--panel-bg) 100%);
-      border-bottom:1px solid rgba(89,217,179,.20);
+      border-bottom:1px solid var(--green-line);
       color:var(--text);
     }
 
-    .va-left-fixed{
-      position:fixed; top:0; bottom:0;
-      left:var(--app-sidebar-w); width:var(--rail-w);
-      z-index:12; background:var(--panel-bg);
-      border-right:1px solid rgba(255,255,255,.06);
-      box-shadow:14px 0 28px rgba(0,0,0,.08);
-      display:flex; flex-direction:column;
-    }
-    .va-left-fixed .rail-scroll{ overflow:auto; flex:1; }
-
-    .va-page{ margin-left: calc(var(--app-sidebar-w) + var(--rail-w)); transition: margin-left 180ms var(--ease); }
-
-    /* Menu base (solid) */
+    /* menu base */
     .va-menu{
       background:var(--panel-bg);
-      border:1px solid rgba(89,217,179,.20);
+      border:1px solid var(--green-line);
       box-shadow:0 36px 90px rgba(0,0,0,.55);
       border-radius:10px;
     }
@@ -131,25 +118,25 @@ const Tokens = () => (
       position:fixed; inset:0 0 0 auto; width:min(540px,92vw); z-index:9997;
       display:grid; grid-template-rows:auto 1fr auto;
       background:var(--panel-bg);
-      border-left:1px solid rgba(89,217,179,.20);
+      border-left:1px solid var(--green-line);
       box-shadow:-28px 0 80px rgba(0,0,0,.55);
       transform:translateX(100%); transition:transform 280ms var(--ease);
     }
     .va-call-drawer.open{ transform:translateX(0); }
 
     .chat-msg{ max-width:85%; padding:10px 12px; border-radius:12px; }
-    .chat-user{ background:var(--panel-bg); border:1px solid rgba(89,217,179,.20); align-self:flex-end; }
-    .chat-ai{ background:color-mix(in oklab, var(--panel-bg) 92%, black 8%); border:1px solid rgba(89,217,179,.20); align-self:flex-start; }
+    .chat-user{ background:var(--panel-bg); border:1px solid var(--green-line); align-self:flex-end; }
+    .chat-ai{ background:color-mix(in oklab, var(--panel-bg) 92%, black 8%); border:1px solid var(--green-line); align-self:flex-start; }
 
-    /* Force every dropdown popover and children solid (no backdrop blur anywhere) */
-    .va-scope .va-menu,
-    .va-scope .va-menu * {
-      background: var(--panel-bg) !important;
-      color: var(--text) !important;
-      border-color: rgba(89,217,179,.20) !important;
-      box-shadow: none !important;
-      backdrop-filter: none !important;
+    /* Diff colors for prompt preview */
+    .diff-added{ background:rgba(89,217,179,.18); }
+    .diff-removed{ background:rgba(239,68,68,.18); text-decoration:line-through; }
+
+    /* typing effect in overlay result box */
+    @keyframes caret {
+      0% { opacity: 0; } 50% { opacity: 1; } 100% { opacity: 0; }
     }
+    .caret::after{ content: "▍"; margin-left:2px; animation: caret 1s infinite; }
   `}</style>
 );
 
@@ -232,8 +219,8 @@ type Opt = { value: string; label: string; disabled?: boolean; note?: string };
 
 const providerOpts: Opt[] = [
   { value: 'openai',     label: 'OpenAI' },
-  { value: 'anthropic',  label: 'Anthropic — coming soon', disabled: true, note: 'soon' },
-  { value: 'google',     label: 'Google — coming soon',    disabled: true, note: 'soon' },
+  { value: 'anthropic',  label: 'Anthropic — coming soon', disabled: true },
+  { value: 'google',     label: 'Google — coming soon',    disabled: true },
 ];
 
 const modelOptsFor = (provider: string): Opt[] =>
@@ -247,7 +234,7 @@ const modelOptsFor = (provider: string): Opt[] =>
 
 const ttsProviders: Opt[] = [
   { value: 'openai',    label: 'OpenAI' },
-  { value: 'elevenlabs', label: 'ElevenLabs — coming soon', disabled: true, note: 'soon' },
+  { value: 'elevenlabs', label: 'ElevenLabs — coming soon', disabled: true },
 ];
 
 const openAiVoices: Opt[] = [
@@ -259,8 +246,8 @@ const openAiVoices: Opt[] = [
 
 const asrProviders: Opt[] = [
   { value: 'deepgram',   label: 'Deepgram' },
-  { value: 'whisper',    label: 'Whisper — coming soon', disabled: true, note: 'soon' },
-  { value: 'assemblyai', label: 'AssemblyAI — coming soon', disabled: true, note: 'soon' },
+  { value: 'whisper',    label: 'Whisper — coming soon', disabled: true },
+  { value: 'assemblyai', label: 'AssemblyAI — coming soon', disabled: true },
 ];
 
 const asrModelsFor = (asr: string): Opt[] =>
@@ -293,35 +280,31 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
-/* ─────────── Dropdown (portaled, on-top, rail-style green hover overlay) ─────────── */
+/* ─────────── Dropdown (flat, NO dividers; green hover glow only) ─────────── */
 function StyledSelect({
-  value, onChange, options, placeholder, leftIcon, menuTop
+  value, onChange, options, placeholder, leftIcon, renderMenuTop, enableSearch = false
 }:{
   value: string; onChange: (v: string) => void;
-  options: Opt[]; placeholder?: string; leftIcon?: React.ReactNode; menuTop?: React.ReactNode;
+  options: Opt[]; placeholder?: string; leftIcon?: React.ReactNode;
+  renderMenuTop?: () => React.ReactNode; enableSearch?: boolean;
 }) {
   const wrapRef = useRef<HTMLDivElement|null>(null);
   const btnRef  = useRef<HTMLButtonElement|null>(null);
-  const searchRef = useRef<HTMLInputElement|null>(null);
 
   const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState('');
+  const [q, setQ] = useState('');
   const [pos, setPos] = useState<{top:number; left:number; width:number}>({top:0,left:0,width:0});
 
   const current = options.find(o => o.value === value) || null;
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return q ? options.filter(o => o.label.toLowerCase().includes(q)) : options;
-  }, [options, query, value]);
+  const filtered = useMemo(()=>{
+    const s = q.trim().toLowerCase();
+    return s ? options.filter(o=>o.label.toLowerCase().includes(s)) : options;
+  },[options,q]);
 
   const measure = () => {
     if (!btnRef.current) return;
     const r = btnRef.current.getBoundingClientRect();
-    setPos({
-      top: Math.round(r.bottom + window.scrollY + 8),
-      left: Math.round(r.left + window.scrollX),
-      width: Math.round(r.width),
-    });
+    setPos({ top: Math.round(r.bottom + window.scrollY + 8), left: Math.round(r.left + window.scrollX), width: Math.round(r.width) });
   };
 
   useEffect(() => {
@@ -339,8 +322,6 @@ function StyledSelect({
     window.addEventListener('resize', onResize);
     window.addEventListener('mousedown', offClick);
     window.addEventListener('keydown', onEsc);
-
-    setTimeout(() => searchRef.current?.focus(), 0);
 
     return () => {
       window.removeEventListener('scroll', onScroll, true);
@@ -374,60 +355,66 @@ function StyledSelect({
       {open && typeof document !== 'undefined' && createPortal(
         <>
           <div
+            className="fixed inset-0 z-[2147482999]"
+            onMouseDown={()=>setOpen(false)}
+            style={{ background:'transparent' }}
+          />
+
+          <div
             className="va-menu"
             style={{
               position:'absolute',
-              top: pos.top,
-              left: pos.left,
-              width: pos.width,
-              zIndex: 2147483000,
-              overflow:'hidden'
+              top: pos.top, left: pos.left, width: pos.width,
+              zIndex: 2147483000, overflow:'hidden',
+              background:'var(--panel)', border:'1px solid var(--green-line)',
+              borderRadius:10, boxShadow:'0 36px 90px rgba(0,0,0,.55)'
             }}
           >
-            {menuTop ? <div className="px-3 pt-3">{menuTop}</div> : null}
+            {renderMenuTop ? <div className="px-3 pt-3 pb-2">{renderMenuTop()}</div> : null}
 
-            <div className="px-3 pb-2">
-              <div
-                className="flex items-center gap-2 px-2 py-2 rounded-[10px]"
-                style={{ background:'var(--panel)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-              >
-                <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
+            {enableSearch && (
+              <div className="px-3 pb-2">
                 <input
-                  ref={searchRef}
-                  value={query}
-                  onChange={(e)=>setQuery(e.target.value)}
-                  placeholder="Type to filter…"
-                  className="w-full bg-transparent outline-none text-sm"
-                  style={{ color:'var(--text)' }}
+                  value={q} onChange={(e)=>setQ(e.target.value)}
+                  className="w-full px-3 py-2 rounded-[10px] outline-none text-sm"
+                  placeholder="Filter…"
+                  style={{ background:'var(--panel)', border:'1px solid var(--input-border)', color:'var(--text)' }}
                 />
               </div>
-            </div>
+            )}
 
-            <div className="max-h-72 overflow-y-auto px-3 pb-3" style={{ scrollbarWidth:'thin', background:'var(--panel)' }}>
-              {filtered.length === 0 && (
+            <div className="max-h-72 overflow-y-auto p-2" style={{ scrollbarWidth:'thin', background:'var(--panel)' }}>
+              {filtered.length===0 && (
                 <div className="px-2 py-6 text-sm" style={{ color:'var(--text-muted)' }}>No matches.</div>
               )}
+
+              {/* FLAT LIST (no item borders) */}
               <div className="grid gap-1">
                 {filtered.map(o => {
-                  const isSelected = o.value === value;
+                  const isSel = o.value === value;
                   return (
                     <button
                       key={o.value}
                       disabled={o.disabled}
-                      onClick={()=>{ if (o.disabled) return; onChange(o.value); setOpen(false); }}
+                      onClick={()=>{ if(o.disabled) return; onChange(o.value); setOpen(false); }}
                       className="va-dd-item w-full text-left text-sm px-3 py-2 rounded-[10px] transition flex items-center gap-2 disabled:opacity-60 relative"
                       style={{
                         background:'var(--panel)',
                         color:'var(--text)',
-                        border:'1px solid transparent',
+                        border:'none',
                         cursor:o.disabled?'not-allowed':'pointer',
                         isolation:'isolate'
                       }}
                     >
-                      {o.disabled ? <Lock className="w-3.5 h-3.5" /> :
-                        <Check className="w-3.5 h-3.5" style={{ opacity: isSelected ? 1 : 0 }} />}
+                      <span
+                        aria-hidden
+                        style={{
+                          width:8, height:8, borderRadius:999,
+                          background: isSel ? CTA : 'transparent',
+                          display:'inline-block', flex:'0 0 auto'
+                        }}
+                      />
                       <span className="flex-1 truncate">{o.label}</span>
-                      {o.note ? <span className="text-[11px]" style={{ color:'var(--text-muted)' }}>{o.note}</span> : null}
                     </button>
                   );
                 })}
@@ -435,7 +422,7 @@ function StyledSelect({
             </div>
           </div>
 
-          {/* rail-style green hover glow & top highlight */}
+          {/* Green hover effect only (no separators) */}
           <style jsx global>{`
             :root { --cta:#59d9b3; --hover-overlay:.20; }
             .va-dd-item::after{
@@ -446,7 +433,6 @@ function StyledSelect({
               opacity:0; pointer-events:none;
               transition: opacity .18s ease, transform .18s ease;
               mix-blend-mode:screen;
-              z-index:-1;
             }
             .va-dd-item::before{
               content:'';
@@ -454,8 +440,7 @@ function StyledSelect({
               height:16px; border-radius:12px;
               background:radial-gradient(60% 80% at 50% 100%, rgba(89,217,179,.45) 0%, rgba(89,217,179,0) 100%);
               opacity:0; pointer-events:none;
-              transition:opacity .18s ease;
-              filter:blur(6px); z-index:-1;
+              transition:opacity .18s ease; filter:blur(6px);
             }
             .va-dd-item:hover::after{ opacity:var(--hover-overlay); }
             .va-dd-item:hover::before{ opacity:.75; }
@@ -468,7 +453,63 @@ function StyledSelect({
   );
 }
 
-/* ─────────── Section (expand anim) ─────────── */
+/* ─────────── Modal shell that matches AssistantRail ─────────── */
+function RailModalShell({ children }:{ children:React.ReactNode }) {
+  if (typeof document === 'undefined') return null;
+  return createPortal(
+    <>
+      <motion.div
+        className="fixed inset-0 z-[100000]"
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        style={{ background:'rgba(6,8,10,.62)', backdropFilter:'blur(6px)' }}
+      />
+      <div className="fixed inset-0 z-[100001] flex items-center justify-center px-4">
+        <motion.div
+          initial={{ opacity: 0, y: 10, scale: 0.98 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: 8, scale: 0.98 }}
+          transition={{ duration: .18, ease: 'easeOut' }}
+          className="w-full max-w-[760px] rounded-[10px] overflow-hidden"
+          style={{
+            background: 'var(--panel)',
+            color: 'var(--text)',
+            border: '1px solid var(--green-line)',
+            maxHeight: '86vh',
+            boxShadow:'0 28px 80px rgba(0,0,0,.70)'
+          }}
+        >
+          {children}
+        </motion.div>
+      </div>
+    </>,
+    document.body
+  );
+}
+function RailModalHeader({ icon, title }:{
+  icon:React.ReactNode; title:string;
+}) {
+  return (
+    <div
+      className="flex items-center justify-between px-6 py-4"
+      style={{
+        background:`linear-gradient(90deg,var(--panel) 0%,color-mix(in oklab,var(--panel) 97%, white 3%) 50%,var(--panel) 100%)`,
+        borderBottom:`1px solid var(--green-line)`
+      }}
+    >
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-xl grid place-items-center" style={{ background:'var(--brand-weak)' }}>
+          <span style={{ color: CTA, filter:'drop-shadow(0 0 8px rgba(89,217,179,.35))' }}>
+            {icon}
+          </span>
+        </div>
+        <div className="text-lg font-semibold" style={{ color:'var(--text)' }}>{title}</div>
+      </div>
+      <span className="w-5 h-5" />
+    </div>
+  );
+}
+
+/* ─────────── Section (no weird bottom artifacts) ─────────── */
 function Section({
   title, icon, desc, children, defaultOpen = true
 }:{
@@ -484,7 +525,7 @@ function Section({
     <div className="mb-[12px]">
       <div className="mb-[6px] text-sm font-medium" style={{ color:'var(--text-muted)' }}>{title}</div>
 
-      <div className="va-card">
+      <div className="va-card" style={{ overflow:'hidden' }}>
         <button onClick={()=>setOpen(v=>!v)} className="va-head w-full text-left" style={{ color:'var(--text)' }}>
           <span className="min-w-0 flex items-center gap-3">
             <span className="inline-grid place-items-center w-7 h-7 rounded-full" style={{ background:'rgba(89,217,179,.10)' }}>
@@ -518,13 +559,57 @@ function Section({
   );
 }
 
+/* ─────────── helpers: “AI language” prompt + diff + typing ─────────── */
+function toAIStyleBlock(extraRaw: string){
+  // normalize into strong, model-friendly structure
+  const lines = (extraRaw||'')
+    .split(/\n+/).map(s=>s.trim()).filter(Boolean)
+    .map(s=> /[.!?]$/.test(s) ? s : `${s}.`);
+
+  if (!lines.length) return '';
+
+  return `
+[Extra Instructions]
+${lines.map(l=>`- ${l}`).join('\n')}
+
+[Behavior]
+- Always apply “Extra Instructions” when relevant.
+- Confirm missing info before acting.
+- Be concise and practical.
+- Prefer step-by-step reasoning only when user asks.`;
+}
+
+function buildPrompt(base: string, extraRaw: string) {
+  const block = toAIStyleBlock(extraRaw);
+  return block ? `${base.trim()}\n\n${block.trim()}` : base.trim();
+}
+
+// rough token diff → HTML with spans
+function diffHTML(oldText: string, newText: string){
+  const a = oldText.split(/(\s+|\b)/);
+  const b = newText.split(/(\s+|\b)/);
+  const dp: number[][] = Array(a.length+1).fill(0).map(()=>Array(b.length+1).fill(0));
+  for(let i=1;i<=a.length;i++) for(let j=1;j<=b.length;j++)
+    dp[i][j] = a[i-1]===b[j-1] ? dp[i-1][j-1]+1 : Math.max(dp[i-1][j], dp[i][j-1]);
+
+  let i=a.length, j=b.length, out:string[]=[];
+  while(i>0 && j>0){
+    if(a[i-1]===b[j-1]){ out.unshift(escapeHTML(b[j-1])); i--; j--; }
+    else if(dp[i-1][j]>=dp[i][j-1]){ out.unshift(`<span class="diff-removed">${escapeHTML(a[i-1])}</span>`); i--; }
+    else { out.unshift(`<span class="diff-added">${escapeHTML(b[j-1])}</span>`); j--; }
+  }
+  while(i>0){ out.unshift(`<span class="diff-removed">${escapeHTML(a[i-1])}</span>`); i--; }
+  while(j>0){ out.unshift(`<span class="diff-added">${escapeHTML(b[j-1])}</span>`); j--; }
+  return out.join('');
+}
+function escapeHTML(s:string){ return s.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m] as string)); }
+function stripTags(s:string){ return s.replace(/<\/?[^>]+(>|$)/g, ''); }
+
 /* ─────────── Page ─────────── */
 export default function VoiceAgentSection() {
-  /* Snap to global sidebar width so the rail aligns */
+  // keep rail aligned with external sidebar
   useEffect(() => {
-    const candidates = [
-      '[data-app-sidebar]','aside[aria-label="Sidebar"]','aside[class*="sidebar"]','#sidebar'
-    ];
+    const candidates = ['[data-app-sidebar]','aside[aria-label="Sidebar"]','aside[class*="sidebar"]','#sidebar'];
     const el = document.querySelector<HTMLElement>(candidates.join(', '));
     const setW = (w:number) => document.documentElement.style.setProperty('--app-sidebar-w', `${Math.round(w)}px`);
     if (!el) { setW(240); return; }
@@ -553,12 +638,17 @@ export default function VoiceAgentSection() {
   ]);
   const [chatInput, setChatInput] = useState('');
 
+  // Generate overlay states
   const [showGenerate, setShowGenerate] = useState(false);
   const [composerText, setComposerText] = useState('');
-  const [genPhase, setGenPhase] = useState<'idle'|'loading'>('idle');
-  const basePromptRef = useRef<string>('');
-  const [pendingPrompt, setPendingPrompt] = useState<string>('');
+  const [overlayPhase, setOverlayPhase] = useState<'idle'|'loading'|'typing'>('idle');
+  const [overlayTyped, setOverlayTyped] = useState(''); // live typing text
 
+  // Main prompt diff (shown above textarea) + staged prompt to Apply/Discard
+  const [pendingPrompt, setPendingPrompt] = useState<string>('');      // full new prompt
+  const [pendingDiffHTML, setPendingDiffHTML] = useState<string>('');  // highlighted HTML
+
+  // voices (preview inside dropdown uses speechSynthesis)
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   useEffect(() => {
     const load = () => setVoices(window.speechSynthesis.getVoices());
@@ -567,6 +657,7 @@ export default function VoiceAgentSection() {
     return () => { (window.speechSynthesis as any).onvoiceschanged = null; };
   }, []);
 
+  // listen for rail active change
   useEffect(() => {
     const handler = (e: Event) => setActiveId((e as CustomEvent<string>).detail);
     window.addEventListener('assistant:active', handler as EventListener);
@@ -577,10 +668,30 @@ export default function VoiceAgentSection() {
     if (!activeId) return;
     setData(loadAgentData(activeId));
     try { localStorage.setItem(ACTIVE_KEY, activeId); } catch {}
+    // clear pending when switching agents
+    setPendingPrompt('');
+    setPendingDiffHTML('');
   }, [activeId]);
 
-  useEffect(() => { if (activeId) saveAgentData(activeId, data); }, [activeId, data]);
+  // persist to storage
+  useEffect(() => { if (activeId) saveAgentData(activeId, pendingPrompt ? { ...data, systemPrompt: pendingPrompt } : data); }, [activeId, data, pendingPrompt]);
 
+  // also sync name into left rail list immediately
+  useEffect(() => {
+    if (!activeId) return;
+    try {
+      const raw = localStorage.getItem('agents');
+      const list = raw ? JSON.parse(raw) : [];
+      const idx = Array.isArray(list) ? list.findIndex((a:any)=>a?.id===activeId) : -1;
+      if (idx >= 0 && list[idx]?.name !== data.name) {
+        list[idx] = { ...list[idx], name: data.name };
+        localStorage.setItem('agents', JSON.stringify(list));
+        window.dispatchEvent(new CustomEvent('assistant:rename', { detail: { id: activeId, name: data.name }}));
+      }
+    } catch {}
+  }, [data.name, activeId]);
+
+  // load API keys + select default
   useEffect(() => {
     (async () => {
       try {
@@ -621,7 +732,7 @@ export default function VoiceAgentSection() {
   async function doSave(){
     if (!activeId) { setToast('Select or create an agent'); return; }
     setSaving(true); setToast('');
-    try { await apiSave(activeId, data); setToast('Saved'); }
+    try { await apiSave(activeId, pendingPrompt ? { ...data, systemPrompt: pendingPrompt } : data); setToast('Saved'); }
     catch { setToast('Save failed'); }
     finally { setSaving(false); setTimeout(()=>setToast(''), 1400); }
   }
@@ -633,35 +744,42 @@ export default function VoiceAgentSection() {
     finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
   }
 
-  function buildPrompt(base: string, extraRaw: string) {
-    const extra = (extraRaw || '').trim();
-    if (!extra) return base;
-    const lines = extra.split(/\n+/).map(s => s.trim()).filter(Boolean).map(s => /[.!?]$/.test(s) ? s : `${s}.`);
-    const block = `
-
-[Extra Instructions]
-${lines.map(l => `- ${l}`).join('\n')}
-
-[Behavior]
-- Always respect the Extra Instructions above.
-- Keep replies concise and useful.
-- Ask for missing info before acting.`;
-    return `${base}${block}`;
-  }
-
+  /* ───── Generate overlay flow ─────
+     1) click Generate => 1s spinner
+     2) overlay types full new prompt
+     3) overlay closes, diff appears above textarea with Accept / Discard
+  */
   function startGenerate() {
-    basePromptRef.current = data.systemPrompt;
-    setGenPhase('loading');
+    setOverlayPhase('loading');
+    setOverlayTyped('');
     setTimeout(() => {
-      const merged = buildPrompt(basePromptRef.current, composerText);
-      setPendingPrompt(merged);
-      setShowGenerate(false);
-      setGenPhase('idle');
-      setToast('Preview generated – click Apply to save');
-    }, 500);
+      const newPrompt = buildPrompt(data.systemPrompt, composerText);
+      // typing animation in overlay
+      setOverlayPhase('typing');
+      const chars = newPrompt.split('');
+      let i = 0;
+      const step = () => {
+        i += Math.max(1, Math.round(chars.length / 180)); // ~fast-ish
+        setOverlayTyped(chars.slice(0, i).join(''));
+        if (i < chars.length) {
+          requestAnimationFrame(step);
+        } else {
+          // finish typing -> close overlay and surface diff
+          const html = diffHTML(data.systemPrompt, newPrompt);
+          setPendingPrompt(newPrompt);
+          setPendingDiffHTML(html);
+          setOverlayPhase('idle');
+          setShowGenerate(false);
+          setToast('Preview ready — review changes above the prompt.');
+          setTimeout(()=>setToast(''), 1600);
+        }
+      };
+      requestAnimationFrame(step);
+    }, 1000);
   }
-  const acceptDiff = () => { setData(p => ({ ...p, systemPrompt: pendingPrompt })); setPendingPrompt(''); };
-  const declineDiff = () => { setPendingPrompt(''); };
+
+  const acceptDiff = () => { if (!pendingPrompt) return; setData(p => ({ ...p, systemPrompt: pendingPrompt })); setPendingPrompt(''); setPendingDiffHTML(''); setToast('Applied'); setTimeout(()=>setToast(''),1200); };
+  const declineDiff = () => { setPendingPrompt(''); setPendingDiffHTML(''); };
 
   function sendChat() {
     const txt = chatInput.trim();
@@ -674,8 +792,9 @@ ${lines.map(l => `- ${l}`).join('\n')}
 
   function speakPreview(line?: string){
     const u = new SpeechSynthesisUtterance(line || `Hi, I'm ${data.name || 'your assistant'}. This is a preview.`);
-    const byName = voices.find(v => v.name.toLowerCase().includes((data.voiceName || '').split(' ')[0]?.toLowerCase() || ''));
-    const en = voices.find(v => v.lang?.startsWith('en'));
+    const vlist = window.speechSynthesis.getVoices();
+    const byName = vlist.find(v => v.name.toLowerCase().includes((data.voiceName || '').split(' ')[0]?.toLowerCase() || ''));
+    const en = vlist.find(v => v.lang?.startsWith('en'));
     if (byName) u.voice = byName; else if (en) u.voice = en;
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(u);
@@ -686,14 +805,13 @@ ${lines.map(l => `- ${l}`).join('\n')}
     <section className="va-scope" style={{ background:'var(--bg)', color:'var(--text)' }}>
       <Tokens />
 
-      {/* rail (260px) + centered content */}
       <div className="grid w-full" style={{ gridTemplateColumns: '260px 1fr' }}>
         {/* Rail */}
-        <div className="sticky top-0 h-screen" style={{ borderRight:'1px solid rgba(89,217,179,.20)' }}>
+        <div className="sticky top-0 h-screen" style={{ borderRight:'1px solid var(--green-line)' }}>
           <RailBoundary><AssistantRail /></RailBoundary>
         </div>
 
-        {/* Content column */}
+        {/* Content */}
         <div className="px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w-[1160px]" style={{ fontSize:'var(--fz-body)', lineHeight:'var(--lh-body)' }}>
           <div className="mb-[var(--s-4)] flex flex-wrap items-center justify-end gap-[var(--s-3)]">
             <button
@@ -715,7 +833,7 @@ ${lines.map(l => `- ${l}`).join('\n')}
             </button>
 
             <button
-              onClick={()=>{ setShowCall(true); }}
+              onClick={()=> setShowCall(true)}
               className="inline-flex items-center gap-2 rounded-[10px] select-none"
               style={{ height:'var(--control-h)', padding:'0 18px', background:CTA, color:'#ffffff', fontWeight:700, boxShadow:'0 10px 22px rgba(89,217,179,.20)' }}
               onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA_HOVER)}
@@ -756,7 +874,6 @@ ${lines.map(l => `- ${l}`).join('\n')}
             title="Model"
             icon={<Gauge className="w-4 h-4" style={{ color: CTA }} />}
             desc="Configure the model, assistant name, and first message."
-            defaultOpen={true}
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px]">
               <div>
@@ -782,27 +899,34 @@ ${lines.map(l => `- ${l}`).join('\n')}
               </div>
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]">First Message Mode</div>
-                <StyledSelect value={data.firstMode} onChange={setField('firstMode')} options={[
-                  { value: 'Assistant speaks first', label: 'Assistant speaks first' },
-                  { value: 'User speaks first', label: 'User speaks first' },
-                  { value: 'Silent until tool required', label: 'Silent until tool required' },
-                ]}/>
+                <StyledSelect
+                  value={data.firstMode}
+                  onChange={setField('firstMode')}
+                  options={[
+                    { value: 'Assistant speaks first', label: 'Assistant speaks first' },
+                    { value: 'User speaks first', label: 'User speaks first' },
+                    { value: 'Silent until tool required', label: 'Silent until tool required' },
+                  ]}
+                />
               </div>
             </div>
 
+            {/* Prompt editor */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt-[var(--s-4)]">
               <div className="md:col-span-2">
                 <div className="flex items-center justify-between mb-[var(--s-2)]">
                   <div className="font-medium" style={{ fontSize:'var(--fz-label)' }}>System Prompt</div>
+
                   <div className="flex items-center gap-2">
-                    {pendingPrompt && (
+                    {/* When we have a staged change, place Accept/Discard HERE */}
+                    {pendingDiffHTML && pendingPrompt ? (
                       <>
                         <button
                           onClick={acceptDiff}
                           className="h-9 px-3 rounded-[10px] font-semibold"
                           style={{ background:CTA, color:'#0a0f0d' }}
                         >
-                          Apply
+                          Accept Changes
                         </button>
                         <button
                           onClick={declineDiff}
@@ -812,257 +936,26 @@ ${lines.map(l => `- ${l}`).join('\n')}
                           Discard
                         </button>
                       </>
-                    )}
+                    ) : null}
                     <button
                       className="inline-flex items-center gap-2 rounded-[10px] text-sm"
                       style={{ height:36, padding:'0 12px', background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                      onClick={()=>{ setComposerText(''); setShowGenerate(true); setGenPhase('idle'); }}
+                      onClick={()=>{ setComposerText(''); setShowGenerate(true); setOverlayPhase('idle'); setOverlayTyped(''); }}
                     >
                       <Wand2 className="w-4 h-4" /> Generate
                     </button>
                   </div>
                 </div>
 
-                <div style={{ position:'relative' }}>
-                  <textarea
-                    className="w-full bg-transparent outline-none rounded-[12px] px-3 py-[12px]"
-                    style={{ minHeight: 360, background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                    value={pendingPrompt || data.systemPrompt}
-                    onChange={(e)=>{
-                      if (pendingPrompt) setPendingPrompt(e.target.value);
-                      else setField('systemPrompt')(e.target.value);
-                    }}
+                {/* Diff preview (above textarea) */}
+                {pendingDiffHTML ? (
+                  <div
+                    className="mb-2 text-sm leading-6 rounded-[10px] p-3"
+                    style={{ background:'color-mix(in oklab, var(--panel-bg) 96%, black 4%)', border:'1px solid var(--green-line)' }}
+                    dangerouslySetInnerHTML={{ __html: pendingDiffHTML }}
                   />
-                </div>
-              </div>
-            </div>
-          </Section>
+                ) : null}
 
-          <Section
-            title="Voice"
-            icon={<Volume2 className="w-4 h-4" style={{ color: CTA }} />}
-            desc="Choose TTS and preview the voice."
-            defaultOpen={true}
-          >
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px]">
-              <div>
-                <div className="mb-[var(--s-2)] text-[12.5px] flex items-center gap-2">
-                  <KeyRound className="w-4 h-4 opacity-80" /> OpenAI API Key
-                </div>
-                <StyledSelect
-                  value={data.apiKeyId || ''}
-                  onChange={async (val)=>{
-                    setField('apiKeyId')(val);
-                    try { const store = await scopedStorage(); await store.ensureOwnerGuard(); await store.setJSON('apiKeys.selectedId', val); } catch {}
-                  }}
-                  options={[
-                    { value: '', label: 'Select an API key…' },
-                    ...apiKeys.map(k=>({ value: k.id, label: `${k.name} ••••${(k.key||'').slice(-4).toUpperCase()}` }))
-                  ]}
-                  leftIcon={<KeyRound className="w-4 h-4" style={{ color: CTA }} />}
-                />
-                <div className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
-                  Keys are stored per-account via scoped storage. Manage them in the API Keys page.
-                </div>
-              </div>
-
-              <div>
-                <div className="mb-[var(--s-2)] text-[12.5px]">Voice Provider</div>
-                <StyledSelect value={data.ttsProvider} onChange={(v)=>setField('ttsProvider')(v as AgentData['ttsProvider'])} options={ttsProviders}/>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 mt-[var(--s-4)]">
-              <div>
-                <div className="mb-[var(--s-2)] text-[12.5px]">Voice</div>
-                <StyledSelect
-                  value={data.voiceName}
-                  onChange={setField('voiceName')}
-                  options={openAiVoices}
-                  placeholder="— Choose —"
-                  menuTop={
-                    <div className="flex items-center justify-between px-3 py-2 rounded-[10px]"
-                         style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}>
-                      <div className="text-xs" style={{ color:'var(--text-muted)' }}>Preview</div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={()=>speakPreview(`This is ${data.voiceName || 'the selected'} voice preview.`)}
-                          className="w-8 h-8 rounded-full grid place-items-center"
-                          aria-label="Play voice"
-                          style={{ background: CTA, color:'#0a0f0d' }}
-                        >
-                          <Play className="w-4 h-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={stopPreview}
-                          className="w-8 h-8 rounded-full grid place-items-center border"
-                          aria-label="Stop preview"
-                          style={{ background: 'var(--panel-bg)', color:'var(--text)', borderColor:'var(--input-border)' }}
-                        >
-                          <Square className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  }
-                />
-              </div>
-            </div>
-          </Section>
-
-          <Section
-            title="Transcriber"
-            icon={<Mic className="w-4 h-4" style={{ color: CTA }} />}
-            desc="Transcription settings"
-            defaultOpen={true}
-          >
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px]">
-              <div>
-                <div className="mb-[var(--s-2)] text-[12.5px]">Provider</div>
-                <StyledSelect value={data.asrProvider} onChange={(v)=>setField('asrProvider')(v as AgentData['asrProvider'])} options={asrProviders}/>
-              </div>
-              <div>
-                <div className="mb-[var(--s-2)] text-[12.5px]">Model</div>
-                <StyledSelect value={data.asrModel} onChange={setField('asrModel')} options={asrModelsFor(data.asrProvider)}/>
-              </div>
-            </div>
-            <div className="mt-[var(--s-4)] grid sm:grid-cols-2 gap-[12px]">
-              <div className="flex items-center justify-between p-3 rounded-[10px]" style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}>
-                <span className="text-sm">Background Denoising Enabled</span>
-                <Toggle checked={data.denoise} onChange={setField('denoise')} />
-              </div>
-              <div className="flex items-center justify-between p-3 rounded-[10px]" style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}>
-                <span className="text-sm">Use Numerals</span>
-                <Toggle checked={data.numerals} onChange={setField('numerals')} />
-              </div>
-            </div>
-          </Section>
-        </div>
-      </div>
-
-      {/* Generate overlay — EXACT same style as AssistantRail modals */}
-      {showGenerate && typeof document !== 'undefined' && createPortal(
-        <>
-          <motion.div
-            className="va-blur-layer open"
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            onClick={()=> genPhase==='idle' && setShowGenerate(false)}
-          />
-          <div className="fixed inset-0 z-[100001] flex items-center justify-center px-4">
-            <motion.div
-              initial={{ opacity: 0, y: 10, scale: 0.98 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 8, scale: 0.98 }}
-              transition={{ duration: .18, ease: 'easeOut' }}
-              className="w-full max-w-[760px] rounded-[10px] overflow-hidden"
-              style={{
-                background: 'var(--panel)',
-                color: 'var(--text)',
-                border: '1px solid rgba(89,217,179,.20)',
-                boxShadow:'0 28px 80px rgba(0,0,0,.70)',
-                maxHeight: '86vh'
-              }}
-              onClick={(e)=>e.stopPropagation()}
-              role="dialog" aria-modal
-            >
-              <div
-                className="flex items-center justify-between px-6 py-4"
-                style={{
-                  background:`linear-gradient(90deg,var(--panel) 0%,color-mix(in oklab,var(--panel) 97%, white 3%) 50%,var(--panel) 100%)`,
-                  borderBottom:`1px solid rgba(89,217,179,.20)`
-                }}
-              >
-                <div className="text-lg font-semibold">Compose Prompt</div>
-                <button onClick={()=> genPhase==='idle' && setShowGenerate(false)} className="p-1 rounded hover:opacity-80" aria-label="Close">
-                  <X className="w-5 h-5" style={{ color:'var(--text-muted)' }} />
-                </button>
-              </div>
-
-              <div className="p-4 md:p-6 grid gap-3">
-                <label className="text-xs" style={{ color:'var(--text-muted)' }}>
-                  Add extra instructions (persona, tone, rules, tools):
-                </label>
                 <textarea
-                  value={composerText}
-                  onChange={(e)=>setComposerText(e.target.value)}
-                  className="w-full bg-transparent outline-none rounded-[10px] px-3 py-2"
-                  placeholder="e.g., Friendly, crisp answers. Confirm account ID before actions."
-                  style={{ minHeight: 180, background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                />
-                <div className="flex items-center justify-end gap-2">
-                  <button
-                    onClick={()=>setShowGenerate(false)}
-                    disabled={genPhase==='loading'}
-                    className="h-9 px-3 rounded-[10px]"
-                    style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={startGenerate}
-                    disabled={genPhase==='loading'}
-                    className="h-9 px-4 rounded-[10px] font-semibold"
-                    style={{ background:CTA, color:'#0a0f0d' }}
-                  >
-                    {genPhase==='loading' ? 'Generating…' : 'Generate'}
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        </>,
-        document.body
-      )}
-
-      {/* Call drawer */}
-      {createPortal(
-        <>
-          <div
-            className={`va-blur-layer ${showCall ? 'open' : ''}`}
-            onClick={()=> setShowCall(false)}
-          />
-          <aside className={`va-call-drawer ${showCall ? 'open' : ''}`} aria-hidden={!showCall}>
-            <div className="flex items-center justify-between px-4 h-[64px]"
-                 style={{ background:'var(--panel-bg)', borderBottom:'1px solid rgba(89,217,179,.20)' }}>
-              <div className="font-semibold">Chat with {data.name || 'Assistant'}</div>
-              <button onClick={()=>setShowCall(false)} className="px-2 py-1 rounded border"
-                      style={{ color:'var(--text)', borderColor:'var(--input-border)', background:'var(--panel-bg)' }}>
-                Close
-              </button>
-            </div>
-
-            <div className="p-4 overflow-y-auto flex flex-col gap-3">
-              {messages.map((m, i) => (
-                <div key={i} className="flex flex-col" style={{ alignItems: m.role==='user' ? 'flex-end' : 'flex-start' }}>
-                  <div className="text-[11px]" style={{ color:'var(--text-muted)' }}>
-                    {m.role==='user' ? 'You' : (data.name || 'Assistant')}
-                  </div>
-                  <div className={`chat-msg ${m.role==='user' ? 'chat-user' : 'chat-ai'}`} style={{ color:'var(--text)' }}>
-                    {m.text}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="p-3" style={{ borderTop:'1px solid rgba(89,217,179,.20)' }}>
-              <form onSubmit={(e)=>{ e.preventDefault(); sendChat(); }} className="flex items-center gap-2">
-                <input
-                  value={chatInput}
-                  onChange={(e)=>setChatInput(e.target.value)}
-                  placeholder={`Message ${data.name || 'Assistant'}…`}
-                  className="flex-1 rounded-md px-3 py-2 outline-none"
-                  style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                />
-                <button type="submit" className="h-10 px-4 rounded-md font-semibold" style={{ background:CTA, color:'#fff' }}>
-                  Send
-                </button>
-              </form>
-            </div>
-          </aside>
-        </>,
-        document.body
-      )}
-    </section>
-  );
-}
+                  className="w-full bg-transparent outline-none rounded-[12px] px-3 py-[12px]"
+                  style={{ minHeight: 360, background:'var(--input-bg)', border:'1px solid
