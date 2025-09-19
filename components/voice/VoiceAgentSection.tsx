@@ -390,7 +390,7 @@ function StyledSelect({
             </div>
           </div>
 
-          {/* rail-style green hover glow & top highlight (contained) */}
+          {/* rail-style green hover glow (contained) */}
           <style jsx global>{`
             :root { --cta:#59d9b3; --hover-overlay:.20; }
             .va-dd-item::after{
@@ -402,17 +402,7 @@ function StyledSelect({
               transition: opacity .18s ease, transform .18s ease;
               mix-blend-mode:screen;
             }
-            .va-dd-item::before{
-              content:'';
-              position:absolute; left:8px; right:8px; top:-6px;
-              height:16px; border-radius:12px;
-              background:radial-gradient(60% 80% at 50% 100%, rgba(89,217,179,.45) 0%, rgba(89,217,179,0) 100%);
-              opacity:0; pointer-events:none;
-              transition:opacity .18s ease;
-              filter:blur(6px);
-            }
             .va-dd-item:hover::after{ opacity:var(--hover-overlay); }
-            .va-dd-item:hover::before{ opacity:.75; }
             .va-dd-item:hover{ transform: translateY(-1px); }
           `}</style>
         </>,
@@ -422,7 +412,7 @@ function StyledSelect({
   );
 }
 
-/* ─────────── Modal bits to match AssistantRail exactly ─────────── */
+/* ─────────── Modal shell (matches AssistantRail) ─────────── */
 function RailModalShell({ children }:{ children:React.ReactNode }) {
   if (typeof document === 'undefined') return null;
   return createPortal(
@@ -533,7 +523,7 @@ function Section({
 
 /* ─────────── helpers: rewrite + diff ─────────── */
 function normalizeAIText(s: string){
-  // basic cleanup into “AI language”: bullets with terminal punctuation, sections, etc.
+  // Turn freeform text into directive-y bullets/sentences with terminal punctuation
   const lines = s.split(/\n+/).map(x => x.trim()).filter(Boolean).map(x => /[.!?]$/.test(x) ? x : `${x}.`);
   return lines.join('\n');
 }
@@ -547,20 +537,13 @@ ${extras}
 
 [Behavior]
 - Always apply Extra Instructions when relevant.
-- Keep responses concise and useful.
+- Keep replies concise and useful.
 - Ask for missing info before acting.`
     : '';
 
-  // Optionally tighten headings / structure
-  const tightened = base
-    .replace(/\[Identity\]/g, '[Identity]')
-    .replace(/\[Style\]/g, '[Style]')
-    .replace(/\[Guidelines\]/g, '[Guidelines]')
-    .replace(/\[Fallback\]/g, '[Fallback]');
-
-  return `${tightened}${block}`.trim();
+  return `${base.trim()}${block}`.trim();
 }
-// tiny word-ish diff to mark additions/removals for user highlight
+// simple token diff to mark additions/removals for highlight
 function diffHTML(oldText: string, newText: string){
   const a = oldText.split(/(\s+|\b)/);
   const b = newText.split(/(\s+|\b)/);
@@ -568,25 +551,15 @@ function diffHTML(oldText: string, newText: string){
   for (let i=1;i<=a.length;i++) for (let j=1;j<=b.length;j++){
     dp[i][j] = a[i-1]===b[j-1] ? dp[i-1][j-1]+1 : Math.max(dp[i-1][j], dp[i][j-1]);
   }
-  let i=a.length, j=b.length, outA:string[]=[], outB:string[]=[];
+  let i=a.length, j=b.length, out:string[]=[];
   while(i>0 && j>0){
-    if(a[i-1]===b[j-1]){ outA.unshift(a[i-1]); outB.unshift(a[j-1]); i--; j--; }
-    else if(dp[i-1][j]>=dp[i][j-1]){ outA.unshift(`<span class="diff-removed">${escapeHTML(a[i-1])}</span>`); i--; }
-    else { outB.unshift(`<span class="diff-added">${escapeHTML(b[j-1])}</span>`); j--; }
+    if(a[i-1]===b[j-1]){ out.unshift(escapeHTML(a[i-1])); i--; j--; }
+    else if(dp[i-1][j]>=dp[i][j-1]){ out.unshift(`<span class="diff-removed">${escapeHTML(a[i-1])}</span>`); i--; }
+    else { out.unshift(`<span class="diff-added">${escapeHTML(b[j-1])}</span>`); j--; }
   }
-  while(i>0){ outA.unshift(`<span class="diff-removed">${escapeHTML(a[i-1])}</span>`); i--; }
-  while(j>0){ outB.unshift(`<span class="diff-added">${escapeHTML(b[j-1])}</span>`); j--; }
-  // Prefer new text with inline additions + carry unchanged tokens
-  const merged:string[]=[];
-  let ia=0, ib=0;
-  while(ia<outA.length || ib<outB.length){
-    const ta = outA[ia] ?? '';
-    const tb = outB[ib] ?? '';
-    if (ta && tb && stripTags(ta)===stripTags(tb)){ merged.push(stripTags(tb)); ia++; ib++; }
-    else if (tb){ merged.push(tb); ib++; }
-    else { merged.push(ta); ia++; }
-  }
-  return merged.join('');
+  while(i>0){ out.unshift(`<span class="diff-removed">${escapeHTML(a[i-1])}</span>`); i--; }
+  while(j>0){ out.unshift(`<span class="diff-added">${escapeHTML(b[j-1])}</span>`); j--; }
+  return out.join('');
 }
 function escapeHTML(s:string){ return s.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m] as string)); }
 function stripTags(s:string){ return s.replace(/<\/?[^>]+(>|$)/g, ''); }
@@ -629,11 +602,11 @@ export default function VoiceAgentSection() {
   const [showGenerate, setShowGenerate] = useState(false);
   const [composerText, setComposerText] = useState('');
   const [genPhase, setGenPhase] = useState<'idle'|'loading'|'typing'>('idle');
-  const [diffHTMLState, setDiffHTMLState] = useState<string>('');   // final highlighted html
+  const [diffHTMLState, setDiffHTMLState] = useState<string>('');   // highlighted html
   const [typingVisible, setTypingVisible] = useState<boolean>(false);
-  const [pendingPrompt, setPendingPrompt] = useState<string>('');   // accepted preview (outside modal)
+  const [pendingPrompt, setPendingPrompt] = useState<string>('');   // preview text before Apply
 
-  // propagate assistant name -> AssistantRail list
+  // live-sync assistant name to the rail
   useEffect(() => {
     if (!activeId) return;
     try {
@@ -643,13 +616,12 @@ export default function VoiceAgentSection() {
       if (idx >= 0 && list[idx]?.name !== data.name) {
         list[idx] = { ...list[idx], name: data.name };
         localStorage.setItem('agents', JSON.stringify(list));
-        // ping the rail to update
         window.dispatchEvent(new CustomEvent('assistant:rename', { detail: { id: activeId, name: data.name }}));
       }
     } catch {}
   }, [data.name, activeId]);
 
-  // listen for active selection from rail
+  // react to rail switching the active assistant
   useEffect(() => {
     const handler = (e: Event) => setActiveId((e as CustomEvent<string>).detail);
     window.addEventListener('assistant:active', handler as EventListener);
@@ -681,15 +653,9 @@ export default function VoiceAgentSection() {
 
         setApiKeys(cleaned);
 
-        const globalSelected = await store.getJSON<string>('apiKeys.selectedId', '');
-        const chosen =
-          (data.apiKeyId && cleaned.some((k) => k.id === data.apiKeyId)) ? data.apiKeyId! :
-          (globalSelected && cleaned.some((k) => k.id === globalSelected)) ? globalSelected :
-          (cleaned[0]?.id || '');
-
+        const chosen = cleaned[0]?.id || '';
         if (chosen && chosen !== data.apiKeyId) {
           setData(prev => ({ ...prev, apiKeyId: chosen }));
-          await store.setJSON('apiKeys.selectedId', chosen);
         }
       } catch {}
     })();
@@ -723,11 +689,10 @@ export default function VoiceAgentSection() {
     setDiffHTMLState('');
     setTypingVisible(true);
 
-    // fake “generation” + typing phase
+    // simulate generation -> formatting phases for UX
     setTimeout(() => {
       const newPrompt = buildAIStylePrompt(data.systemPrompt, composerText);
       const html = diffHTML(data.systemPrompt, newPrompt);
-      // show typing animation placeholder briefly, then reveal highlighted diff
       setGenPhase('typing');
       setTimeout(() => {
         setDiffHTMLState(html);
@@ -1016,7 +981,7 @@ export default function VoiceAgentSection() {
         </div>
       </div>
 
-      {/* Generate overlay — same shell as AssistantRail, with typing + diff */}
+      {/* Generate overlay — input box + spinner + typing + diff + Accept/Decline */}
       {showGenerate && (
         <RailModalShell>
           <RailModalHeader title="Compose Prompt" icon={<Wand2 className="w-5 h-5" />} />
@@ -1078,7 +1043,7 @@ export default function VoiceAgentSection() {
         </RailModalShell>
       )}
 
-      {/* Call drawer (unchanged) */}
+      {/* Call drawer */}
       {createPortal(
         <>
           <div
