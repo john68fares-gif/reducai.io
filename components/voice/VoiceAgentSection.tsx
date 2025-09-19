@@ -4,6 +4,7 @@
 import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
 import dynamic from 'next/dynamic';
 import { createPortal } from 'react-dom';
+import { motion } from 'framer-motion';
 import {
   Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Rocket, Search, Check, Lock, X, KeyRound,
   Play, Square
@@ -54,8 +55,7 @@ const Tokens = () => (
       --fz-title:18px; --fz-sub:15px; --fz-body:14px; --fz-label:12.5px;
       --lh-body:1.45; --ease:cubic-bezier(.22,.61,.36,1);
 
-      /* Layout: measured at runtime */
-      --app-sidebar-w: 240px; /* updated by ResizeObserver */
+      --app-sidebar-w: 240px;
       --rail-w: 260px;
 
       --page-bg:var(--bg);
@@ -69,13 +69,21 @@ const Tokens = () => (
                     0 0 0 1px rgba(255,255,255,.06) inset,
                     0 0 0 1px rgba(89,217,179,.20);
     }
+    /* Light theme tokens, same feel as AssistantRail */
+    :root:not([data-theme="dark"]) .va-scope{
+      --bg:#f6f7f9; --panel:#ffffff; --text:#0f172a; --text-muted:#64748b;
+      --input-border:rgba(15,23,42,.12);
+      --border-weak:rgba(15,23,42,.12);
+      --card-shadow:0 12px 28px rgba(10,12,14,.10),
+                    0 0 0 1px rgba(89,217,179,.20);
+    }
 
     .va-card{
       border-radius:var(--radius-outer);
       border:1px solid var(--border-weak);
       background:var(--panel-bg);
       box-shadow:var(--card-shadow);
-      overflow:visible; isolation:isolate;
+      overflow:hidden; isolation:isolate;
     }
 
     .va-head{
@@ -86,78 +94,61 @@ const Tokens = () => (
         var(--panel-bg) 0%,
         color-mix(in oklab, var(--panel-bg) 97%, white 3%) 50%,
         var(--panel-bg) 100%);
-      border-bottom:1px solid rgba(255,255,255,.08);
+      border-bottom:1px solid rgba(89,217,179,.20);
       color:var(--text);
     }
 
-    /* AssistantRail pinned */
     .va-left-fixed{
-      position:fixed;
-      top:0; bottom:0;
-      left:var(--app-sidebar-w);
-      width:var(--rail-w);
-      z-index:12;
-      background:var(--panel-bg);
+      position:fixed; top:0; bottom:0;
+      left:var(--app-sidebar-w); width:var(--rail-w);
+      z-index:12; background:var(--panel-bg);
       border-right:1px solid rgba(255,255,255,.06);
       box-shadow:14px 0 28px rgba(0,0,0,.08);
       display:flex; flex-direction:column;
     }
     .va-left-fixed .rail-scroll{ overflow:auto; flex:1; }
 
-    .va-page{
-      margin-left: calc(var(--app-sidebar-w) + var(--rail-w));
-      transition: margin-left 180ms var(--ease);
-    }
+    .va-page{ margin-left: calc(var(--app-sidebar-w) + var(--rail-w)); transition: margin-left 180ms var(--ease); }
 
-    /* dropdown menu panel (solid) */
+    /* Menu base (solid) */
     .va-menu{
       background:var(--panel-bg);
-      border:1px solid rgba(255,255,255,.12);
+      border:1px solid rgba(89,217,179,.20);
       box-shadow:0 36px 90px rgba(0,0,0,.55);
       border-radius:10px;
     }
 
-    /* Overlays now BLUR (match AssistantRail) */
-    .va-blur-overlay{
+    /* Drawer + modal overlays */
+    .va-blur-layer{
       position:fixed; inset:0; z-index:9996;
       background:rgba(6,8,10,.62);
-      backdrop-filter: blur(6px);
-      opacity:0; pointer-events:none; transition:opacity 180ms var(--ease);
+      backdrop-filter:blur(6px);
+      opacity:0; pointer-events:none; transition:opacity 200ms var(--ease);
     }
-    .va-blur-overlay.open{ opacity:1; pointer-events:auto; }
+    .va-blur-layer.open{ opacity:1; pointer-events:auto; }
 
     .va-call-drawer{
       position:fixed; inset:0 0 0 auto; width:min(540px,92vw); z-index:9997;
       display:grid; grid-template-rows:auto 1fr auto;
-      background:var(--panel-bg); /* panel SOLID */
-      border-left:1px solid rgba(255,255,255,.10);
+      background:var(--panel-bg);
+      border-left:1px solid rgba(89,217,179,.20);
       box-shadow:-28px 0 80px rgba(0,0,0,.55);
       transform:translateX(100%); transition:transform 280ms var(--ease);
     }
     .va-call-drawer.open{ transform:translateX(0); }
 
-    .va-modal-wrap{ position:fixed; inset:0; z-index:9998; }
-    .va-modal-center{ position:absolute; inset:0; display:grid; place-items:center; padding:20px; }
-    .va-sheet{ background:var(--panel-bg); border:1px solid rgba(255,255,255,.12); box-shadow:0 28px 80px rgba(0,0,0,.70); border-radius:12px; }
-
     .chat-msg{ max-width:85%; padding:10px 12px; border-radius:12px; }
-    .chat-user{ background:var(--panel-bg); border:1px solid rgba(255,255,255,.12); align-self:flex-end; }
-    .chat-ai{ background:color-mix(in oklab, var(--panel-bg) 92%, black 8%); border:1px solid rgba(255,255,255,.12); align-self:flex-start; }
+    .chat-user{ background:var(--panel-bg); border:1px solid rgba(89,217,179,.20); align-self:flex-end; }
+    .chat-ai{ background:color-mix(in oklab, var(--panel-bg) 92%, black 8%); border:1px solid rgba(89,217,179,.20); align-self:flex-start; }
 
-    /* Force dropdown popovers solid */
+    /* Force every dropdown popover and children solid (no backdrop blur anywhere) */
     .va-scope .va-menu,
     .va-scope .va-menu * {
       background: var(--panel-bg) !important;
       color: var(--text) !important;
-      border-color: var(--input-border) !important;
+      border-color: rgba(89,217,179,.20) !important;
       box-shadow: none !important;
       backdrop-filter: none !important;
-    }
-
-    /* Dropdown opening animation */
-    @keyframes va-menu-in {
-      from { opacity: 0; transform: translateY(-6px) scale(.98); }
-      to   { opacity: 1; transform: translateY(0) scale(1); }
     }
   `}</style>
 );
@@ -302,7 +293,7 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
-/* ─────────── Select (portal + fixed + top shadow hover) ─────────── */
+/* ─────────── Dropdown (portaled, on-top, rail-style green hover overlay) ─────────── */
 function StyledSelect({
   value, onChange, options, placeholder, leftIcon, menuTop
 }:{
@@ -310,11 +301,12 @@ function StyledSelect({
   options: Opt[]; placeholder?: string; leftIcon?: React.ReactNode; menuTop?: React.ReactNode;
 }) {
   const wrapRef = useRef<HTMLDivElement|null>(null);
-  const btnRef = useRef<HTMLButtonElement|null>(null);
+  const btnRef  = useRef<HTMLButtonElement|null>(null);
   const searchRef = useRef<HTMLInputElement|null>(null);
+
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const [menuRect, setMenuRect] = useState<DOMRect|null>(null);
+  const [pos, setPos] = useState<{top:number; left:number; width:number}>({top:0,left:0,width:0});
 
   const current = options.find(o => o.value === value) || null;
   const filtered = useMemo(() => {
@@ -322,30 +314,39 @@ function StyledSelect({
     return q ? options.filter(o => o.label.toLowerCase().includes(q)) : options;
   }, [options, query, value]);
 
+  const measure = () => {
+    if (!btnRef.current) return;
+    const r = btnRef.current.getBoundingClientRect();
+    setPos({
+      top: Math.round(r.bottom + window.scrollY + 8),
+      left: Math.round(r.left + window.scrollX),
+      width: Math.round(r.width),
+    });
+  };
+
   useEffect(() => {
-    const recalc = () => {
-      if (!btnRef.current) return;
-      const r = btnRef.current.getBoundingClientRect();
-      setMenuRect(new DOMRect(r.left, r.bottom + 8, r.width, 0));
-    };
-    recalc();
     if (!open) return;
-    const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
-    const off = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (wrapRef.current?.contains(t)) return;
+    measure();
+    const onScroll = () => measure();
+    const onResize = () => measure();
+    const offClick = (e: MouseEvent) => {
+      if (wrapRef.current?.contains(e.target as Node)) return;
       setOpen(false);
     };
-    const scrollRecalc = () => recalc();
+    const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', onResize);
+    window.addEventListener('mousedown', offClick);
     window.addEventListener('keydown', onEsc);
-    window.addEventListener('mousedown', off);
-    window.addEventListener('scroll', scrollRecalc, true);
-    window.addEventListener('resize', recalc);
+
+    setTimeout(() => searchRef.current?.focus(), 0);
+
     return () => {
+      window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('mousedown', offClick);
       window.removeEventListener('keydown', onEsc);
-      window.removeEventListener('mousedown', off);
-      window.removeEventListener('scroll', scrollRecalc, true);
-      window.removeEventListener('resize', recalc);
     };
   }, [open]);
 
@@ -354,7 +355,7 @@ function StyledSelect({
       <button
         ref={btnRef}
         type="button"
-        onClick={() => { setOpen(v=>!v); setTimeout(()=>searchRef.current?.focus(),0); }}
+        onClick={() => setOpen(v => !v)}
         className="w-full flex items-center justify-between gap-3 px-3 py-3 rounded-[10px] text-sm outline-none transition"
         style={{
           background:'var(--input-bg)',
@@ -370,91 +371,97 @@ function StyledSelect({
         <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)' }} />
       </button>
 
-      {open && menuRect && typeof document !== 'undefined' && createPortal(
-        <div
-          style={{
-            position:'fixed',
-            top: menuRect.top, left: menuRect.left,
-            width: btnRef.current?.getBoundingClientRect().width || 'auto',
-            zIndex: 100002,
-            animation: 'va-menu-in .16s ease-out'
-          }}
-          onMouseDown={(e)=>e.stopPropagation()}
-        >
+      {open && typeof document !== 'undefined' && createPortal(
+        <>
           <div
-            className="va-menu rounded-[10px] p-3"
+            className="va-menu"
             style={{
-              background:'var(--panel-bg)',
-              color:'var(--text)',
-              border:'1px solid var(--input-border)',
-              boxShadow:'0 36px 90px rgba(0,0,0,.55)'
+              position:'absolute',
+              top: pos.top,
+              left: pos.left,
+              width: pos.width,
+              zIndex: 2147483000,
+              overflow:'hidden'
             }}
           >
-            {menuTop ? <div className="mb-2">{menuTop}</div> : null}
+            {menuTop ? <div className="px-3 pt-3">{menuTop}</div> : null}
 
-            <div
-              className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[10px]"
-              style={{ background:'var(--panel-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-            >
-              <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
-              <input
-                ref={searchRef}
-                value={query}
-                onChange={(e)=>setQuery(e.target.value)}
-                placeholder="Type to filter…"
-                className="w-full bg-transparent outline-none text-sm"
-                style={{ color:'var(--text)' }}
-              />
+            <div className="px-3 pb-2">
+              <div
+                className="flex items-center gap-2 px-2 py-2 rounded-[10px]"
+                style={{ background:'var(--panel)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+              >
+                <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
+                <input
+                  ref={searchRef}
+                  value={query}
+                  onChange={(e)=>setQuery(e.target.value)}
+                  placeholder="Type to filter…"
+                  className="w-full bg-transparent outline-none text-sm"
+                  style={{ color:'var(--text)' }}
+                />
+              </div>
             </div>
 
-            <div className="max-h-72 overflow-y-auto pr-1" style={{ scrollbarWidth:'thin' }}>
-              {filtered.map(o => (
-                <div key={o.value} className="relative">
-                  {/* top green strip on hover */}
-                  <span
-                    aria-hidden
-                    style={{
-                      position:'absolute', left:8, right:8, top:-6, height:16, borderRadius:12,
-                      background:'radial-gradient(60% 80% at 50% 100%, rgba(89,217,179,.45) 0%, rgba(89,217,179,0) 100%)',
-                      opacity:0, filter:'blur(6px)', transition:'opacity .18s ease', pointerEvents:'none'
-                    }}
-                  />
-                  <button
-                    disabled={o.disabled}
-                    onClick={()=>{ if (o.disabled) return; onChange(o.value); setOpen(false); }}
-                    className="w-full text-left text-sm px-3 py-2 rounded-[8px] transition flex items-center gap-2 disabled:opacity-60"
-                    style={{
-                      color:'var(--text)',
-                      background:'var(--panel-bg)',
-                      border:'1px solid var(--panel-bg)',
-                      cursor:o.disabled?'not-allowed':'pointer'
-                    }}
-                    onMouseEnter={(e)=>{ if (o.disabled) return;
-                      const el=e.currentTarget as HTMLButtonElement;
-                      (el.previousElementSibling as HTMLElement).style.opacity='0.75';
-                      el.style.background = 'color-mix(in oklab, var(--panel-bg) 88%, white 12%)';
-                      el.style.border = '1px solid var(--input-border)';
-                    }}
-                    onMouseLeave={(e)=>{
-                      const el=e.currentTarget as HTMLButtonElement;
-                      (el.previousElementSibling as HTMLElement).style.opacity='0';
-                      el.style.background = 'var(--panel-bg)';
-                      el.style.border = '1px solid var(--panel-bg)';
-                    }}
-                  >
-                    {o.disabled ? <Lock className="w-3.5 h-3.5" /> :
-                      <Check className="w-3.5 h-3.5" style={{ opacity: o.value===value ? 1 : 0 }} />}
-                    <span className="flex-1 truncate">{o.label}</span>
-                    {o.note ? <span className="text-[11px]" style={{ color:'var(--text-muted)' }}>{o.note}</span> : null}
-                  </button>
-                </div>
-              ))}
-              {filtered.length===0 && (
-                <div className="px-3 py-6 text-sm" style={{ color:'var(--text-muted)' }}>No matches.</div>
+            <div className="max-h-72 overflow-y-auto px-3 pb-3" style={{ scrollbarWidth:'thin', background:'var(--panel)' }}>
+              {filtered.length === 0 && (
+                <div className="px-2 py-6 text-sm" style={{ color:'var(--text-muted)' }}>No matches.</div>
               )}
+              <div className="grid gap-1">
+                {filtered.map(o => {
+                  const isSelected = o.value === value;
+                  return (
+                    <button
+                      key={o.value}
+                      disabled={o.disabled}
+                      onClick={()=>{ if (o.disabled) return; onChange(o.value); setOpen(false); }}
+                      className="va-dd-item w-full text-left text-sm px-3 py-2 rounded-[10px] transition flex items-center gap-2 disabled:opacity-60 relative"
+                      style={{
+                        background:'var(--panel)',
+                        color:'var(--text)',
+                        border:'1px solid transparent',
+                        cursor:o.disabled?'not-allowed':'pointer',
+                        isolation:'isolate'
+                      }}
+                    >
+                      {o.disabled ? <Lock className="w-3.5 h-3.5" /> :
+                        <Check className="w-3.5 h-3.5" style={{ opacity: isSelected ? 1 : 0 }} />}
+                      <span className="flex-1 truncate">{o.label}</span>
+                      {o.note ? <span className="text-[11px]" style={{ color:'var(--text-muted)' }}>{o.note}</span> : null}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
-        </div>,
+
+          {/* rail-style green hover glow & top highlight */}
+          <style jsx global>{`
+            :root { --cta:#59d9b3; --hover-overlay:.20; }
+            .va-dd-item::after{
+              content:'';
+              position:absolute; inset:0;
+              border-radius:10px;
+              background:var(--cta);
+              opacity:0; pointer-events:none;
+              transition: opacity .18s ease, transform .18s ease;
+              mix-blend-mode:screen;
+              z-index:-1;
+            }
+            .va-dd-item::before{
+              content:'';
+              position:absolute; left:8px; right:8px; top:-6px;
+              height:16px; border-radius:12px;
+              background:radial-gradient(60% 80% at 50% 100%, rgba(89,217,179,.45) 0%, rgba(89,217,179,0) 100%);
+              opacity:0; pointer-events:none;
+              transition:opacity .18s ease;
+              filter:blur(6px); z-index:-1;
+            }
+            .va-dd-item:hover::after{ opacity:var(--hover-overlay); }
+            .va-dd-item:hover::before{ opacity:.75; }
+            .va-dd-item:hover{ transform: translateY(-1px); }
+          `}</style>
+        </>,
         document.body
       )}
     </div>
@@ -513,13 +520,10 @@ function Section({
 
 /* ─────────── Page ─────────── */
 export default function VoiceAgentSection() {
-  /* Measure the real app sidebar so our rail "touches" it and moves with collapse */
+  /* Snap to global sidebar width so the rail aligns */
   useEffect(() => {
     const candidates = [
-      '[data-app-sidebar]',
-      'aside[aria-label="Sidebar"]',
-      'aside[class*="sidebar"]',
-      '#sidebar'
+      '[data-app-sidebar]','aside[aria-label="Sidebar"]','aside[class*="sidebar"]','#sidebar'
     ];
     const el = document.querySelector<HTMLElement>(candidates.join(', '));
     const setW = (w:number) => document.documentElement.style.setProperty('--app-sidebar-w', `${Math.round(w)}px`);
@@ -685,7 +689,7 @@ ${lines.map(l => `- ${l}`).join('\n')}
       {/* rail (260px) + centered content */}
       <div className="grid w-full" style={{ gridTemplateColumns: '260px 1fr' }}>
         {/* Rail */}
-        <div className="sticky top-0 h-screen" style={{ borderRight:'1px solid rgba(255,255,255,.06)' }}>
+        <div className="sticky top-0 h-screen" style={{ borderRight:'1px solid rgba(89,217,179,.20)' }}>
           <RailBoundary><AssistantRail /></RailBoundary>
         </div>
 
@@ -937,19 +941,45 @@ ${lines.map(l => `- ${l}`).join('\n')}
         </div>
       </div>
 
-      {/* Generate overlay — BLUR veil, SOLID sheet */}
-      {showGenerate && (
-        <div className="va-modal-wrap" role="dialog" aria-modal>
-          <div className="va-blur-overlay open" onClick={()=>{ if (genPhase==='idle') setShowGenerate(false); }} />
-          <div className="va-modal-center">
-            <div className="va-sheet w-full max-w-[760px] p-4 md:p-6">
-              <div className="flex items-center justify-between mb-3">
+      {/* Generate overlay — EXACT same style as AssistantRail modals */}
+      {showGenerate && typeof document !== 'undefined' && createPortal(
+        <>
+          <motion.div
+            className="va-blur-layer open"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            onClick={()=> genPhase==='idle' && setShowGenerate(false)}
+          />
+          <div className="fixed inset-0 z-[100001] flex items-center justify-center px-4">
+            <motion.div
+              initial={{ opacity: 0, y: 10, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 8, scale: 0.98 }}
+              transition={{ duration: .18, ease: 'easeOut' }}
+              className="w-full max-w-[760px] rounded-[10px] overflow-hidden"
+              style={{
+                background: 'var(--panel)',
+                color: 'var(--text)',
+                border: '1px solid rgba(89,217,179,.20)',
+                boxShadow:'0 28px 80px rgba(0,0,0,.70)',
+                maxHeight: '86vh'
+              }}
+              onClick={(e)=>e.stopPropagation()}
+              role="dialog" aria-modal
+            >
+              <div
+                className="flex items-center justify-between px-6 py-4"
+                style={{
+                  background:`linear-gradient(90deg,var(--panel) 0%,color-mix(in oklab,var(--panel) 97%, white 3%) 50%,var(--panel) 100%)`,
+                  borderBottom:`1px solid rgba(89,217,179,.20)`
+                }}
+              >
                 <div className="text-lg font-semibold">Compose Prompt</div>
-                <button onClick={()=>{ if (genPhase==='idle') setShowGenerate(false); }} className="p-1 rounded hover:opacity-80" aria-label="Close">
+                <button onClick={()=> genPhase==='idle' && setShowGenerate(false)} className="p-1 rounded hover:opacity-80" aria-label="Close">
                   <X className="w-5 h-5" style={{ color:'var(--text-muted)' }} />
                 </button>
               </div>
-              <div className="grid gap-3">
+
+              <div className="p-4 md:p-6 grid gap-3">
                 <label className="text-xs" style={{ color:'var(--text-muted)' }}>
                   Add extra instructions (persona, tone, rules, tools):
                 </label>
@@ -973,27 +1003,28 @@ ${lines.map(l => `- ${l}`).join('\n')}
                     onClick={startGenerate}
                     disabled={genPhase==='loading'}
                     className="h-9 px-4 rounded-[10px] font-semibold"
-                    style={{ background:CTA, color:'#ffffff', border:'1px solid rgba(255,255,255,.12)' }}
+                    style={{ background:CTA, color:'#0a0f0d' }}
                   >
                     {genPhase==='loading' ? 'Generating…' : 'Generate'}
                   </button>
                 </div>
               </div>
-            </div>
+            </motion.div>
           </div>
-        </div>
+        </>,
+        document.body
       )}
 
-      {/* Call drawer — BLUR left veil, SOLID drawer */}
+      {/* Call drawer */}
       {createPortal(
         <>
           <div
-            className={`va-blur-overlay ${showCall ? 'open' : ''}`}
+            className={`va-blur-layer ${showCall ? 'open' : ''}`}
             onClick={()=> setShowCall(false)}
           />
           <aside className={`va-call-drawer ${showCall ? 'open' : ''}`} aria-hidden={!showCall}>
             <div className="flex items-center justify-between px-4 h-[64px]"
-                 style={{ background:'var(--panel-bg)', borderBottom:'1px solid rgba(255,255,255,.1)' }}>
+                 style={{ background:'var(--panel-bg)', borderBottom:'1px solid rgba(89,217,179,.20)' }}>
               <div className="font-semibold">Chat with {data.name || 'Assistant'}</div>
               <button onClick={()=>setShowCall(false)} className="px-2 py-1 rounded border"
                       style={{ color:'var(--text)', borderColor:'var(--input-border)', background:'var(--panel-bg)' }}>
@@ -1014,7 +1045,7 @@ ${lines.map(l => `- ${l}`).join('\n')}
               ))}
             </div>
 
-            <div className="p-3" style={{ borderTop:'1px solid rgba(255,255,255,.10)' }}>
+            <div className="p-3" style={{ borderTop:'1px solid rgba(89,217,179,.20)' }}>
               <form onSubmit={(e)=>{ e.preventDefault(); sendChat(); }} className="flex items-center gap-2">
                 <input
                   value={chatInput}
