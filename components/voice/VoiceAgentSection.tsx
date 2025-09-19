@@ -1,8 +1,6 @@
 'use client';
 
-import React, {
-  useEffect, useMemo, useRef, useState, useLayoutEffect
-} from 'react';
+import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
 import dynamic from 'next/dynamic';
 import { createPortal } from 'react-dom';
 import {
@@ -11,7 +9,7 @@ import {
 } from 'lucide-react';
 import { scopedStorage } from '@/utils/scoped-storage';
 
-/* ───────────────── Assistant rail (fixed) ───────────────── */
+/* Assistant rail (unchanged) */
 const AssistantRail = dynamic(
   () =>
     import('@/components/voice/AssistantRail')
@@ -32,31 +30,20 @@ const CTA_HOVER = '#54cfa9';
 const GREEN_LINE = 'rgba(89,217,179,.20)';
 const ACTIVE_KEY = 'va:activeId';
 
-/* phone icon */
-function PhoneFilled(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" width="16" height="16" {...props} aria-hidden>
-      <path
-        d="M6.62 10.79a15.053 15.053 0 006.59 6.59l2.2-2.2a1 1 0 011.03-.24c1.12.37 2.33.57 3.56.57a1 1 0 011 1v3.5a1 1 0 01-1 1C11.3 22 2 12.7 2 2.99a1 1 0 011-1H6.5a1 1 0 011 1c0 1.23.2 2.44.57 3.56a1 1 0 01-.24 1.03l-2.2 2.2z"
-        fill="currentColor"
-      />
-    </svg>
-  );
-}
-
-/* ─────────── SOLID theme + layout vars ─────────── */
+/* ─────────── tokens + light/dark themes ─────────── */
 const Tokens = () => (
   <style jsx global>{`
+    /* Default = dark */
     .va-scope{
       --bg:#0b0c10; --panel:#0d0f11; --text:#e6f1ef; --text-muted:#9fb4ad;
 
       --s-2:8px; --s-3:12px; --s-4:16px; --s-5:20px; --s-6:24px;
-      --radius-outer:8px;
+      --radius-outer:10px;
       --control-h:44px; --header-h:88px;
       --fz-title:18px; --fz-sub:15px; --fz-body:14px; --fz-label:12.5px;
       --lh-body:1.45; --ease:cubic-bezier(.22,.61,.36,1);
 
-      --app-sidebar-w: 240px; /* updated by ResizeObserver */
+      --app-sidebar-w: 240px;
       --rail-w: 260px;
 
       --page-bg:var(--bg);
@@ -70,6 +57,21 @@ const Tokens = () => (
                     0 0 0 1px rgba(255,255,255,.06) inset,
                     0 0 0 1px ${GREEN_LINE};
     }
+    /* Light mode – match AssistantRail look */
+    :root:not([data-theme="dark"]) .va-scope{
+      --bg:#f8fafc; --panel:#ffffff; --text:#0f172a; --text-muted:#64748b;
+
+      --page-bg:var(--bg);
+      --panel-bg:#ffffff;
+      --input-bg:#ffffff;
+      --input-border:rgba(15,23,42,.10);
+      --input-shadow:0 0 0 1px rgba(15,23,42,.06) inset;
+
+      --border-weak:rgba(15,23,42,.10);
+      --card-shadow:0 22px 44px rgba(2,6,23,.08),
+                    0 0 0 1px rgba(15,23,42,.06) inset,
+                    0 0 0 1px ${GREEN_LINE};
+    }
 
     .va-card{
       border-radius:var(--radius-outer);
@@ -79,7 +81,6 @@ const Tokens = () => (
       /* IMPORTANT: allow dropdowns to escape the card */
       overflow:visible; isolation:isolate;
     }
-
     .va-head{
       min-height:var(--header-h);
       display:grid; grid-template-columns:1fr auto; align-items:center;
@@ -91,11 +92,12 @@ const Tokens = () => (
       border-bottom:1px solid rgba(255,255,255,.08);
       color:var(--text);
     }
+    :root:not([data-theme="dark"]) .va-head{
+      border-bottom:1px solid rgba(15,23,42,.08);
+    }
 
-    /* Left rail shell */
     .va-left-fixed{
-      position:fixed;
-      top:0; bottom:0;
+      position:fixed; top:0; bottom:0;
       left:var(--app-sidebar-w);
       width:var(--rail-w);
       z-index:12;
@@ -104,36 +106,28 @@ const Tokens = () => (
       box-shadow:14px 0 28px rgba(0,0,0,.08);
       display:flex; flex-direction:column;
     }
-    .va-left-fixed .rail-scroll{ overflow:auto; flex:1; }
+    :root:not([data-theme="dark"]) .va-left-fixed{
+      border-right:1px solid rgba(15,23,42,.08);
+    }
 
     .va-page{
       margin-left: calc(var(--app-sidebar-w) + var(--rail-w));
       transition: margin-left 180ms var(--ease);
     }
 
-    /* dropdown menu base (solid) */
-    .va-menu{
-      background:var(--panel-bg);
-      border:1px solid rgba(255,255,255,.12);
-      box-shadow:0 36px 90px rgba(0,0,0,.55);
-      border-radius:10px;
-      z-index:60;
-    }
-
-    /* Solid overlays (blurred dim backdrop + thin green border on the sheet) */
+    /* Overlays: same as AssistantRail (blur veil, thin green border on sheet) */
     .va-overlay{
-      position:fixed; inset:0; z-index:9996;
-      background:rgba(6,8,10,.62);
-      backdrop-filter:blur(6px);
+      position:fixed; inset:0; z-index:100000; /* match rail */
+      background:rgba(6,8,10,.62); backdrop-filter:blur(6px);
       opacity:0; pointer-events:none; transition:opacity 180ms var(--ease);
     }
     .va-overlay.open{ opacity:1; pointer-events:auto; }
 
-    .va-modal-wrap{ position:fixed; inset:0; z-index:9998; }
+    .va-modal-wrap{ position:fixed; inset:0; z-index:100001; }
     .va-modal-center{ position:absolute; inset:0; display:grid; place-items:center; padding:20px; }
     .va-sheet{
       background:var(--panel-bg);
-      border:1px solid ${GREEN_LINE}; /* thinner hairline */
+      border:1px solid ${GREEN_LINE};
       box-shadow:0 28px 80px rgba(0,0,0,.70);
       border-radius:10px;
     }
@@ -141,11 +135,16 @@ const Tokens = () => (
     .chat-msg{ max-width:85%; padding:10px 12px; border-radius:12px; }
     .chat-user{ background:var(--panel-bg); border:1px solid rgba(255,255,255,.12); align-self:flex-end; }
     .chat-ai{ background:color-mix(in oklab, var(--panel-bg) 92%, black 8%); border:1px solid rgba(255,255,255,.12); align-self:flex-start; }
+
+    /* Typing highlights */
+    .va-add{ background:rgba(89,217,179,.22); border-radius:4px; padding:0 2px; }
+    .va-del{ background:rgba(239,68,68,.22); border-radius:4px; padding:0 2px; text-decoration:line-through; }
   `}</style>
 );
 
-/* ─────────── types / storage ─────────── */
+/* types */
 type ApiKey = { id: string; name: string; key: string };
+type VoiceMeta = { id: string; name: string };
 
 type AgentData = {
   name: string;
@@ -156,8 +155,8 @@ type AgentData = {
   systemPrompt: string;
 
   ttsProvider: 'openai' | 'elevenlabs';
-  voiceId?: string;      // <— store OpenAI voice id
-  voiceName: string;     // display label
+  voiceId?: string;
+  voiceName: string;
   apiKeyId?: string;
 
   asrProvider: 'deepgram' | 'whisper' | 'assemblyai';
@@ -187,7 +186,7 @@ You are a blank template AI assistant with minimal default settings.
 [Fallback]
 - Ask for clarification when needed.`,
   ttsProvider: 'openai',
-  voiceId: 'alloy',            // default id if your backend returns it
+  voiceId: 'alloy',
   voiceName: 'Alloy (American)',
   apiKeyId: '',
   asrProvider: 'deepgram',
@@ -196,6 +195,7 @@ You are a blank template AI assistant with minimal default settings.
   numerals: false,
 };
 
+/* storage helpers */
 const keyFor = (id: string) => `va:agent:${id}`;
 const loadAgentData = (id: string): AgentData => {
   try { const raw = localStorage.getItem(keyFor(id)); if (raw) return { ...DEFAULT_AGENT, ...(JSON.parse(raw)||{}) }; }
@@ -206,7 +206,7 @@ const saveAgentData = (id: string, data: AgentData) => {
   try { localStorage.setItem(keyFor(id), JSON.stringify(data)); } catch {}
 };
 
-/* ─────────── mock backend ─────────── */
+/* backend mocks */
 async function apiSave(agentId: string, payload: AgentData){
   const r = await fetch(`/api/voice/agent/${agentId}/save`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
@@ -220,44 +220,15 @@ async function apiPublish(agentId: string){
   return r.json();
 }
 
-/* ─────────── options ─────────── */
-type Opt = { value: string; label: string; disabled?: boolean; note?: string };
+/* fetch voices */
+async function fetchVoices(): Promise<VoiceMeta[]> {
+  const r = await fetch('/api/openai/voices').catch(()=>null);
+  if (!r?.ok) return [];
+  const list = await r.json().catch(()=>[]);
+  return (Array.isArray(list) ? list : []).filter(v => v && v.id && v.name);
+}
 
-const providerOpts: Opt[] = [
-  { value: 'openai',     label: 'OpenAI' },
-  { value: 'anthropic',  label: 'Anthropic — coming soon', disabled: true, note: 'soon' },
-  { value: 'google',     label: 'Google — coming soon',    disabled: true, note: 'soon' },
-];
-
-const modelOptsFor = (provider: string): Opt[] =>
-  provider === 'openai'
-    ? [
-        { value: 'GPT-4o',  label: 'GPT-4o' },
-        { value: 'GPT-4.1', label: 'GPT-4.1' },
-        { value: 'o4-mini', label: 'o4-mini' },
-      ]
-    : [{ value: 'coming', label: 'Models coming soon', disabled: true }];
-
-const ttsProviders: Opt[] = [
-  { value: 'openai',    label: 'OpenAI' },
-  { value: 'elevenlabs', label: 'ElevenLabs — coming soon', disabled: true, note: 'soon' },
-];
-
-const asrProviders: Opt[] = [
-  { value: 'deepgram',   label: 'Deepgram' },
-  { value: 'whisper',    label: 'Whisper — coming soon', disabled: true, note: 'soon' },
-  { value: 'assemblyai', label: 'AssemblyAI — coming soon', disabled: true, note: 'soon' },
-];
-
-const asrModelsFor = (asr: string): Opt[] =>
-  asr === 'deepgram'
-    ? [
-        { value: 'Nova 2', label: 'Nova 2' },
-        { value: 'Nova',   label: 'Nova' },
-      ]
-    : [{ value: 'coming', label: 'Models coming soon', disabled: true }];
-
-/* ─────────── UI atoms ─────────── */
+/* Toggle */
 const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}) => (
   <button
     onClick={()=>onChange(!checked)}
@@ -279,32 +250,27 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
-/* ─────────── Voice catalog + preview (frontend) ─────────── */
-type VoiceMeta = { id: string; name: string };
-/** Voices fetched from your backend */
-async function fetchVoices(): Promise<VoiceMeta[]> {
-  const r = await fetch('/api/openai/voices').catch(()=>null);
-  if (!r?.ok) return [];
-  const list = await r.json().catch(()=>[]);
-  return (Array.isArray(list) ? list : []).filter(v => v && v.id && v.name);
-}
+/* ─────────── StyledSelect with PORTALED MENU (fixed) ─────────── */
+type Opt = { value: string; label: string; disabled?: boolean; note?: string };
 
-/* Select with solid menu, green top-glow hover, and inline play/stop per option */
 function StyledSelect({
-  value, onChange, options, placeholder,
-  leftIcon, menuTop,
+  value, onChange, options, placeholder, leftIcon,
   onPreview, isPreviewing
 }:{
-  value: string; onChange: (v: string) => void;
-  options: Opt[]; placeholder?: string;
-  leftIcon?: React.ReactNode; menuTop?: React.ReactNode;
-  onPreview?: (v:string)=>void;         // optional inline preview handler
-  isPreviewing?: string|null;           // voice id currently previewing
+  value: string;
+  onChange: (v: string) => void;
+  options: Opt[];
+  placeholder?: string;
+  leftIcon?: React.ReactNode;
+
+  onPreview?: (v:string)=>void;     // optional inline preview handler
+  isPreviewing?: string|null;       // id that is currently previewing
 }) {
   const wrapRef = useRef<HTMLDivElement|null>(null);
   const searchRef = useRef<HTMLInputElement|null>(null);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
+  const [menuRect, setMenuRect] = useState<{top:number;left:number;width:number} | null>(null);
 
   const current = options.find(o => o.value === value) || null;
   const filtered = useMemo(() => {
@@ -312,23 +278,42 @@ function StyledSelect({
     return q ? options.filter(o => o.label.toLowerCase().includes(q)) : options;
   }, [options, query, value]);
 
+  // compute viewport position for PORTALED fixed menu
+  const positionMenu = () => {
+    const btn = wrapRef.current?.querySelector('button[data-trigger="true"]') as HTMLButtonElement | null;
+    if (!btn) return;
+    const r = btn.getBoundingClientRect();
+    setMenuRect({ top: r.bottom + 8, left: r.left, width: r.width });
+  };
+
   useEffect(() => {
     if (!open) return;
-    const off = (e: MouseEvent) => {
+    positionMenu();
+    const onScroll = () => positionMenu();
+    const onResize = () => positionMenu();
+    const onClickAway = (e: MouseEvent) => {
       if (wrapRef.current?.contains(e.target as Node)) return;
       setOpen(false);
     };
     const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
-    window.addEventListener('mousedown', off);
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', onResize);
+    window.addEventListener('mousedown', onClickAway);
     window.addEventListener('keydown', onEsc);
-    return () => { window.removeEventListener('mousedown', off); window.removeEventListener('keydown', onEsc); };
+    return () => {
+      window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('mousedown', onClickAway);
+      window.removeEventListener('keydown', onEsc);
+    };
   }, [open]);
 
   return (
-    <div ref={wrapRef} className="relative" style={{ zIndex: 2 }}>
+    <div ref={wrapRef} className="relative">
       <button
+        data-trigger="true"
         type="button"
-        onClick={() => { setOpen(v=>!v); setTimeout(()=>searchRef.current?.focus(),0); }}
+        onClick={() => { setOpen(v=>!v); setTimeout(()=>{ searchRef.current?.focus(); positionMenu(); },0); }}
         className="w-full flex items-center justify-between gap-3 px-3 py-3 rounded-[10px] text-sm outline-none transition"
         style={{
           background:'var(--input-bg)',
@@ -344,20 +329,21 @@ function StyledSelect({
         <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)' }} />
       </button>
 
-      {open && (
+      {open && menuRect && typeof document !== 'undefined' && createPortal(
         <div
-          className="va-menu absolute p-3"
+          className="p-3"
           style={{
-            top: 'calc(100% + 8px)',
-            left: 0,
-            width: '100%',
-            background: 'var(--panel-bg)',
-            border: '1px solid var(--input-border)',
-            borderRadius: 10 as any
+            position:'fixed',
+            top: menuRect.top,
+            left: menuRect.left,
+            width: menuRect.width,
+            zIndex: 100002, /* above overlays & cards */
+            background:'var(--panel-bg)',
+            border:'1px solid var(--input-border)',
+            borderRadius:10,
+            boxShadow:'0 36px 90px rgba(0,0,0,.55)'
           }}
         >
-          {menuTop ? <div className="mb-2">{menuTop}</div> : null}
-
           <div
             className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[10px]"
             style={{ background:'var(--panel-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
@@ -376,7 +362,7 @@ function StyledSelect({
           <div className="max-h-72 overflow-y-auto pr-1" style={{ scrollbarWidth:'thin' }}>
             {filtered.map(o => (
               <div key={o.value} className="relative">
-                {/* top green glow on hover / active */}
+                {/* top green glow on hover / selected */}
                 <span
                   className="pointer-events-none"
                   style={{
@@ -408,14 +394,11 @@ function StyledSelect({
                     el.style.border = '1px solid var(--panel-bg)';
                   }}
                 >
-                  {o.disabled ? (
-                    <Lock className="w-3.5 h-3.5" />
-                  ) : (
-                    <Check className="w-3.5 h-3.5" style={{ opacity: o.value===value ? 1 : 0 }} />
-                  )}
+                  {o.disabled ? <Lock className="w-3.5 h-3.5" /> :
+                    <Check className="w-3.5 h-3.5" style={{ opacity: o.value===value ? 1 : 0 }} />}
                   <span className="flex-1 truncate">{o.label}</span>
 
-                  {/* Inline preview pill (play/stop) only if handler provided */}
+                  {/* Inline play/stop inside item */}
                   {onPreview && !o.disabled ? (
                     (isPreviewing === o.value) ? (
                       <button
@@ -446,13 +429,14 @@ function StyledSelect({
               <div className="px-3 py-6 text-sm" style={{ color:'var(--text-muted)' }}>No matches.</div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
 }
 
-/* ─────────── Section (expand anim) ─────────── */
+/* Section */
 function Section({
   title, icon, desc, children, defaultOpen = true
 }:{
@@ -502,16 +486,11 @@ function Section({
   );
 }
 
-/* ─────────── Page ─────────── */
+/* Page */
 export default function VoiceAgentSection() {
-  /* Measure the real app sidebar so our rail "touches" it and moves with collapse */
+  /* measure sidebar */
   useEffect(() => {
-    const candidates = [
-      '[data-app-sidebar]',
-      'aside[aria-label="Sidebar"]',
-      'aside[class*="sidebar"]',
-      '#sidebar'
-    ];
+    const candidates = ['[data-app-sidebar]','aside[aria-label="Sidebar"]','aside[class*="sidebar"]','#sidebar'];
     const el = document.querySelector<HTMLElement>(candidates.join(', '));
     const setW = (w:number) => document.documentElement.style.setProperty('--app-sidebar-w', `${Math.round(w)}px`);
     if (!el) { setW(240); return; }
@@ -534,38 +513,27 @@ export default function VoiceAgentSection() {
   const [toast, setToast] = useState<string>('');
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
 
-  const [showCall, setShowCall] = useState(false);
-  const [messages, setMessages] = useState<Array<{role:'user'|'assistant'; text:string}>>([
-    { role: 'assistant', text: 'Hi! Ready when you are.' }
-  ]);
-  const [chatInput, setChatInput] = useState('');
-
-  /* Generate overlay */
+  /* generate overlay */
   const [showGenerate, setShowGenerate] = useState(false);
   const [composerText, setComposerText] = useState('');
   const [genPhase, setGenPhase] = useState<'idle'|'typing'>('idle');
   const [pendingPrompt, setPendingPrompt] = useState<string>('');
-  const [diffHtml, setDiffHtml] = useState<string>('');   // highlighted HTML
-  const [typedIndex, setTypedIndex] = useState(0);
-
-  /* Voices: fetched from backend */
+  const [typedHtml, setTypedHtml] = useState<string>(''); // inside prompt box
   const [voicesApi, setVoicesApi] = useState<VoiceMeta[]>([]);
   const voiceOptions = useMemo<Opt[]>(
     () => voicesApi.map(v => ({ value: v.id, label: v.name })),
     [voicesApi]
   );
 
-  /* Audio preview */
+  /* preview audio */
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [previewingVoice, setPreviewingVoice] = useState<string|null>(null);
   const [previewAbort, setPreviewAbort] = useState<AbortController | null>(null);
   const PREVIEW_TEXT = "This is a short voice preview for testing. One, two, three.";
 
-  useEffect(() => {
-    (async () => { setVoicesApi(await fetchVoices()); })();
-  }, []);
+  useEffect(() => { (async () => setVoicesApi(await fetchVoices()))(); }, []);
 
-  /* API keys bootstrap */
+  /* api keys bootstrap */
   useEffect(() => {
     (async () => {
       try {
@@ -611,10 +579,12 @@ export default function VoiceAgentSection() {
 
   useEffect(() => { if (activeId) saveAgentData(activeId, data); }, [activeId, data]);
 
-  function setField<K extends keyof AgentData>(k: K) {
-    return (v: AgentData[K]) => setData(prev => ({ ...prev, [k]: v }));
-  }
-  const modelOpts = useMemo(()=>modelOptsFor(data.provider), [data.provider]);
+  function setField<K extends keyof AgentData>(k: K) { return (v: AgentData[K]) => setData(prev => ({ ...prev, [k]: v })); }
+  const modelOpts = useMemo(()=>[
+    { value: 'GPT-4o',  label: 'GPT-4o' },
+    { value: 'GPT-4.1', label: 'GPT-4.1' },
+    { value: 'o4-mini', label: 'o4-mini' },
+  ],[]);
 
   async function doSave(){
     if (!activeId) { setToast('Select or create an agent'); return; }
@@ -647,66 +617,48 @@ ${lines.map(l => `- ${l}`).join('\n')}
     return `${base}${block}`;
   }
 
-  /* diff helpers (very simple word diff) */
-  function diffWords(oldStr: string, newStr: string){
+  /* simple word diff -> span with classes */
+  function diffWordsToHtml(oldStr: string, newStr: string){
     const o = oldStr.split(/\s+/), n = newStr.split(/\s+/);
     const table:number[][] = Array(o.length+1).fill(0).map(()=>Array(n.length+1).fill(0));
     for (let i=1;i<=o.length;i++) for (let j=1;j<=n.length;j++)
       table[i][j] = o[i-1] === n[j-1] ? table[i-1][j-1]+1 : Math.max(table[i-1][j], table[i][j-1]);
-    let i=o.length, j=n.length, os:string[]=[], ns:string[]=[];
+    let i=o.length, j=n.length;
+    const out:string[]=[];
     while(i>0 && j>0){
-      if (o[i-1] === n[j-1]) { os.unshift(o[i-1]); ns.unshift(o[i-1]); i--; j--; }
-      else if (table[i-1][j] >= table[i][j-1]) { os.unshift(`~~${o[i-1]}~~`); i--; }
-      else { ns.unshift(`++${n[j-1]}++`); j--; }
+      if (o[i-1] === n[j-1]) { out.unshift(o[i-1]); i--; j--; }
+      else if (table[i-1][j] >= table[i][j-1]) { out.unshift(`<span class="va-del">${o[i-1]}</span>`); i--; }
+      else { out.unshift(`<span class="va-add">${n[j-1]}</span>`); j--; }
     }
-    while(i>0){ os.unshift(`~~${o[i-1]}~~`); i--; }
-    while(j>0){ ns.unshift(`++${n[j-1]}++`); j--; }
-    // Build merged with marks
-    const merged:string[] = [];
-    let oi=0, ni=0;
-    while(oi<os.length || ni<ns.length){
-      if (oi<os.length && os[oi].startsWith('~~')) { merged.push(os[oi++]); continue; }
-      if (ni<ns.length && ns[ni].startsWith('++')) { merged.push(ns[ni++]); continue; }
-      if (oi<os.length && ni<ns.length && os[oi]===ns[ni]) { merged.push(os[oi]); oi++; ni++; continue; }
-      if (oi<os.length){ merged.push(os[oi++]); }
-      if (ni<ns.length){ merged.push(ns[ni++]); }
-    }
-    return merged.join(' ');
-  }
-  function markToHtml(marked: string){
-    return marked
-      .replace(/\+\+(.+?)\+\+/g, '<span style="background:rgba(89,217,179,.22);padding:0 2px;border-radius:4px">$1</span>')
-      .replace(/~~(.+?)~~/g, '<span style="background:rgba(239,68,68,.22);padding:0 2px;border-radius:4px;text-decoration:line-through">$1</span>');
+    while(i>0){ out.unshift(`<span class="va-del">${o[i-1]}</span>`); i--; }
+    while(j>0){ out.unshift(`<span class="va-add">${n[j-1]}</span>`); j--; }
+    return out.join(' ');
   }
 
+  /* typing effect inside prompt textarea area */
   function startGenerate() {
     const base = data.systemPrompt;
     const next = buildPrompt(base, composerText);
-    const marked = diffWords(base, next);
-    const html = markToHtml(marked);
+    const html = diffWordsToHtml(base, next);
 
     setPendingPrompt(next);
-    setDiffHtml('');         // will be typed in
     setGenPhase('typing');
-    setTypedIndex(0);
+    setTypedHtml('');
 
-    // typing animation over the HTML string
     const total = html.length;
+    let idx = 0;
     const tick = () => {
-      setTypedIndex(prev => {
-        const n = Math.min(total, prev + 2); // speed
-        setDiffHtml(html.slice(0, n));
-        if (n < total) requestAnimationFrame(tick);
-        else setGenPhase('idle');
-        return n;
-      });
+      idx = Math.min(total, idx + 2);
+      setTypedHtml(html.slice(0, idx));
+      if (idx < total) requestAnimationFrame(tick);
+      else setGenPhase('idle');
     };
     requestAnimationFrame(tick);
   }
-  const acceptDiff = () => { setData(p => ({ ...p, systemPrompt: pendingPrompt })); setPendingPrompt(''); setDiffHtml(''); setComposerText(''); };
-  const declineDiff = () => { setPendingPrompt(''); setDiffHtml(''); };
+  const acceptDiff = () => { setData(p => ({ ...p, systemPrompt: pendingPrompt })); setPendingPrompt(''); setTypedHtml(''); setComposerText(''); };
+  const declineDiff = () => { setPendingPrompt(''); setTypedHtml(''); };
 
-  /* Voice preview (fetch audio; fallback to WebSpeech if needed) */
+  /* voice preview */
   async function playVoicePreview(voiceId: string) {
     try {
       if (previewAbort) { previewAbort.abort(); setPreviewAbort(null); }
@@ -731,48 +683,28 @@ ${lines.map(l => `- ${l}`).join('\n')}
       audioRef.current.src = url;
       await audioRef.current.play();
     } catch {
-      // fallback: Web Speech (will sound like the default browser voice)
       try { window.speechSynthesis.cancel(); } catch {}
-      const meta = voicesApi.find(v => v.id === voiceId);
       const u = new SpeechSynthesisUtterance(PREVIEW_TEXT);
-      const list = window.speechSynthesis.getVoices();
-      const byName = meta ? list.find(v => v.name.toLowerCase().includes((meta.name.split(' ')[0]||'').toLowerCase())) : null;
-      const en = list.find(v => v.lang?.startsWith('en'));
-      if (byName) u.voice = byName; else if (en) u.voice = en;
       window.speechSynthesis.speak(u);
     }
   }
   function stopVoicePreview() {
     if (previewAbort) { previewAbort.abort(); setPreviewAbort(null); }
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.currentTime = 0;
-    }
+    if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; }
     try { window.speechSynthesis.cancel(); } catch {}
     setPreviewingVoice(null);
-  }
-
-  function sendChat() {
-    const txt = chatInput.trim();
-    if (!txt) return;
-    setMessages(m => [...m, { role: 'user', text: txt }]);
-    setChatInput('');
-    const reply = `${data.name || 'Assistant'}: "${txt}" received. How can I help further?`;
-    setTimeout(() => setMessages(m => [...m, { role: 'assistant', text: reply }]), 350);
   }
 
   return (
     <section className="va-scope" style={{ background:'var(--bg)', color:'var(--text)' }}>
       <Tokens />
 
-      {/* rail (260px) + centered content */}
       <div className="grid w-full" style={{ gridTemplateColumns: '260px 1fr' }}>
-        {/* Rail */}
         <div className="sticky top-0 h-screen" style={{ borderRight:'1px solid rgba(255,255,255,.06)' }}>
           <RailBoundary><AssistantRail /></RailBoundary>
         </div>
 
-        {/* Content column */}
+        {/* Content */}
         <div className="px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w-[1160px]" style={{ fontSize:'var(--fz-body)', lineHeight:'var(--lh-body)' }}>
           <div className="mb-[var(--s-4)] flex flex-wrap items-center justify-end gap-[var(--s-3)]">
             <button
@@ -791,17 +723,6 @@ ${lines.map(l => `- ${l}`).join('\n')}
               style={{ height:'var(--control-h)', background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)' }}
             >
               <Rocket className="w-4 h-4" /> {publishing ? 'Publishing…' : 'Publish'}
-            </button>
-
-            <button
-              onClick={()=>{ setShowCall(true); }}
-              className="inline-flex items-center gap-2 rounded-[10px] select-none"
-              style={{ height:'var(--control-h)', padding:'0 18px', background:CTA, color:'#ffffff', fontWeight:700, boxShadow:'0 10px 22px rgba(89,217,179,.20)' }}
-              onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA_HOVER)}
-              onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA)}
-            >
-              <PhoneFilled style={{ color:'#ffffff' }} />
-              <span style={{ color:'#ffffff' }}>Talk to Assistant</span>
             </button>
           </div>
 
@@ -850,7 +771,15 @@ ${lines.map(l => `- ${l}`).join('\n')}
               </div>
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]">Provider</div>
-                <StyledSelect value={data.provider} onChange={(v)=>setField('provider')(v as AgentData['provider'])} options={providerOpts}/>
+                <StyledSelect
+                  value={data.provider}
+                  onChange={(v)=>setField('provider')(v as AgentData['provider'])}
+                  options={[
+                    { value: 'openai',     label: 'OpenAI' },
+                    { value: 'anthropic',  label: 'Anthropic — coming soon', disabled: true },
+                    { value: 'google',     label: 'Google — coming soon', disabled: true },
+                  ]}
+                />
               </div>
             </div>
 
@@ -902,13 +831,13 @@ ${lines.map(l => `- ${l}`).join('\n')}
                   </div>
                 </div>
 
+                {/* Prompt area: shows typing diff INSIDE box when generating */}
                 <div style={{ position:'relative' }}>
-                  {/* Show diffHtml while pending; else show actual text */}
-                  {diffHtml ? (
+                  {typedHtml ? (
                     <div
                       className="w-full rounded-[12px] px-3 py-[12px] text-sm"
                       style={{ minHeight: 360, background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                      dangerouslySetInnerHTML={{ __html: diffHtml }}
+                      dangerouslySetInnerHTML={{ __html: typedHtml }}
                     />
                   ) : (
                     <textarea
@@ -949,9 +878,6 @@ ${lines.map(l => `- ${l}`).join('\n')}
                   ]}
                   leftIcon={<KeyRound className="w-4 h-4" style={{ color: CTA }} />}
                 />
-                <div className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
-                  Keys are stored per-account via scoped storage. Manage them in the API Keys page.
-                </div>
               </div>
 
               <div>
@@ -965,7 +891,7 @@ ${lines.map(l => `- ${l}`).join('\n')}
                   options={voiceOptions}
                   placeholder="— Choose —"
                   onPreview={(val)=>{
-                    if (previewingVoice === val) stopVoicePreview();
+                    if (previewingVoice === val) { stopVoicePreview(); }
                     else { setPreviewingVoice(val); playVoicePreview(val).finally(()=>setPreviewingVoice(val)); }
                   }}
                   isPreviewing={previewingVoice}
@@ -983,11 +909,18 @@ ${lines.map(l => `- ${l}`).join('\n')}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px]">
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]">Provider</div>
-                <StyledSelect value={data.asrProvider} onChange={(v)=>setField('asrProvider')(v as AgentData['asrProvider'])} options={asrProviders}/>
+                <StyledSelect value={data.asrProvider} onChange={(v)=>setField('asrProvider')(v as AgentData['asrProvider'])} options={[
+                  { value: 'deepgram',   label: 'Deepgram' },
+                  { value: 'whisper',    label: 'Whisper — coming soon', disabled: true },
+                  { value: 'assemblyai', label: 'AssemblyAI — coming soon', disabled: true },
+                ]}/>
               </div>
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]">Model</div>
-                <StyledSelect value={data.asrModel} onChange={setField('asrModel')} options={asrModelsFor(data.asrProvider)}/>
+                <StyledSelect value={data.asrModel} onChange={setField('asrModel')} options={[
+                  { value: 'Nova 2', label: 'Nova 2' },
+                  { value: 'Nova',   label: 'Nova' },
+                ]}/>
               </div>
             </div>
             <div className="mt-[var(--s-4)] grid sm:grid-cols-2 gap-[12px]">
@@ -1004,13 +937,13 @@ ${lines.map(l => `- ${l}`).join('\n')}
         </div>
       </div>
 
-      {/* Generate overlay — same style as rail, thinner border, typing + diff highlights */}
+      {/* Generate Overlay (same style as rail; typing happens inside prompt box already) */}
       {showGenerate && createPortal(
         <>
           <div className="va-overlay open" onClick={()=>{ if (genPhase==='idle') setShowGenerate(false); }} />
           <div className="va-modal-wrap" role="dialog" aria-modal>
             <div className="va-modal-center">
-              <div className="va-sheet w-full max-w-[780px] p-4 md:p-6" style={{ overflow:'hidden' }}>
+              <div className="va-sheet w-full max-w-[780px] p-4 md:p-6">
                 <div className="flex items-center justify-between mb-3">
                   <div className="text-lg font-semibold">Compose Prompt</div>
                   <button onClick={()=>{ if (genPhase==='idle') setShowGenerate(false); }} className="p-1 rounded hover:opacity-80" aria-label="Close">
@@ -1049,88 +982,13 @@ ${lines.map(l => `- ${l}`).join('\n')}
                     </button>
                   </div>
 
-                  {/* Live typing / diff result box */}
-                  {(diffHtml || genPhase==='typing') && (
-                    <div
-                      className="mt-2 rounded-[10px] p-3 text-sm"
-                      style={{ minHeight: 120, background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                    >
-                      <div
-                        dangerouslySetInnerHTML={{ __html: diffHtml || '<span style="opacity:.6">Typing…</span>' }}
-                      />
-                      {genPhase==='idle' && diffHtml && (
-                        <div className="mt-3 flex items-center justify-end gap-2">
-                          <button
-                            onClick={acceptDiff}
-                            className="h-9 px-3 rounded-[10px] font-semibold"
-                            style={{ background:CTA, color:'#0a0f0d' }}
-                          >
-                            Accept changes
-                          </button>
-                          <button
-                            onClick={declineDiff}
-                            className="h-9 px-3 rounded-[10px]"
-                            style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                          >
-                            Decline
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
+                  <div className="text-xs" style={{ color:'var(--text-muted)' }}>
+                    After you click Generate, the prompt box in the main section will replay with highlights.
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-        </>,
-        document.body
-      )}
-
-      {/* Call drawer */}
-      {createPortal(
-        <>
-          <div
-            className={`va-overlay ${showCall ? 'open' : ''}`}
-            onClick={()=> setShowCall(false)}
-          />
-          <aside className={`va-call-drawer ${showCall ? 'open' : ''}`} aria-hidden={!showCall}>
-            <div className="flex items-center justify-between px-4 h-[64px]"
-                 style={{ background:'var(--panel-bg)', borderBottom:'1px solid rgba(255,255,255,.1)' }}>
-              <div className="font-semibold">Chat with {data.name || 'Assistant'}</div>
-              <button onClick={()=>setShowCall(false)} className="px-2 py-1 rounded border"
-                      style={{ color:'var(--text)', borderColor:'var(--input-border)', background:'var(--panel-bg)' }}>
-                Close
-              </button>
-            </div>
-
-            <div className="p-4 overflow-y-auto flex flex-col gap-3">
-              {messages.map((m, i) => (
-                <div key={i} className="flex flex-col" style={{ alignItems: m.role==='user' ? 'flex-end' : 'flex-start' }}>
-                  <div className="text-[11px]" style={{ color:'var(--text-muted)' }}>
-                    {m.role==='user' ? 'You' : (data.name || 'Assistant')}
-                  </div>
-                  <div className={`chat-msg ${m.role==='user' ? 'chat-user' : 'chat-ai'}`} style={{ color:'var(--text)' }}>
-                    {m.text}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="p-3" style={{ borderTop:'1px solid rgba(255,255,255,.10)' }}>
-              <form onSubmit={(e)=>{ e.preventDefault(); sendChat(); }} className="flex items-center gap-2">
-                <input
-                  value={chatInput}
-                  onChange={(e)=>setChatInput(e.target.value)}
-                  placeholder={`Message ${data.name || 'Assistant'}…`}
-                  className="flex-1 rounded-md px-3 py-2 outline-none"
-                  style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                />
-                <button type="submit" className="h-10 px-4 rounded-md font-semibold" style={{ background:CTA, color:'#fff' }}>
-                  Send
-                </button>
-              </form>
-            </div>
-          </aside>
         </>,
         document.body
       )}
