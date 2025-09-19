@@ -1,12 +1,13 @@
-// components/voice/VoiceAgentSection.tsx
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
+import React, {
+  useEffect, useMemo, useRef, useState, useLayoutEffect
+} from 'react';
 import dynamic from 'next/dynamic';
 import { createPortal } from 'react-dom';
 import {
-  Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Rocket, Search, Check, Lock, X, KeyRound,
-  Play, Square
+  Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Rocket, Search,
+  Check, Lock, X, KeyRound, Play, Square
 } from 'lucide-react';
 import { scopedStorage } from '@/utils/scoped-storage';
 
@@ -55,7 +56,7 @@ const Tokens = () => (
       --fz-title:18px; --fz-sub:15px; --fz-body:14px; --fz-label:12.5px;
       --lh-body:1.45; --ease:cubic-bezier(.22,.61,.36,1);
 
-      --app-sidebar-w: 240px;
+      --app-sidebar-w: 240px; /* updated by ResizeObserver */
       --rail-w: 260px;
 
       --page-bg:var(--bg);
@@ -67,7 +68,7 @@ const Tokens = () => (
       --border-weak:rgba(255,255,255,.10);
       --card-shadow:0 22px 44px rgba(0,0,0,.28),
                     0 0 0 1px rgba(255,255,255,.06) inset,
-                    0 0 0 1px rgba(89,217,179,.20);
+                    0 0 0 1px ${GREEN_LINE};
     }
 
     .va-card{
@@ -75,7 +76,8 @@ const Tokens = () => (
       border:1px solid var(--border-weak);
       background:var(--panel-bg);
       box-shadow:var(--card-shadow);
-      overflow:hidden; isolation:isolate;
+      /* IMPORTANT: allow dropdowns to escape the card */
+      overflow:visible; isolation:isolate;
     }
 
     .va-head{
@@ -90,27 +92,51 @@ const Tokens = () => (
       color:var(--text);
     }
 
+    /* Left rail shell */
     .va-left-fixed{
-      position:fixed; top:0; bottom:0; left:var(--app-sidebar-w); width:var(--rail-w);
-      z-index:12; background:var(--panel-bg);
+      position:fixed;
+      top:0; bottom:0;
+      left:var(--app-sidebar-w);
+      width:var(--rail-w);
+      z-index:12;
+      background:var(--panel-bg);
       border-right:1px solid rgba(255,255,255,.06);
       box-shadow:14px 0 28px rgba(0,0,0,.08);
       display:flex; flex-direction:column;
     }
     .va-left-fixed .rail-scroll{ overflow:auto; flex:1; }
 
-    .va-page{ margin-left: calc(var(--app-sidebar-w) + var(--rail-w)); transition: margin-left 180ms var(--ease); }
+    .va-page{
+      margin-left: calc(var(--app-sidebar-w) + var(--rail-w));
+      transition: margin-left 180ms var(--ease);
+    }
 
+    /* dropdown menu base (solid) */
     .va-menu{
       background:var(--panel-bg);
       border:1px solid rgba(255,255,255,.12);
-      box-shadow:0 36px 90px rgba(0,0,0,.65);
+      box-shadow:0 36px 90px rgba(0,0,0,.55);
       border-radius:10px;
+      z-index:60;
     }
 
-    .va-overlay{ position:fixed; inset:0; z-index:100000; background:rgba(6,8,10,.62); backdrop-filter:blur(6px); }
-    .va-modal-wrap{ position:fixed; inset:0; z-index:100001; display:grid; place-items:center; padding:18px; }
-    .va-sheet{ background:var(--panel-bg); border:1px solid rgba(255,255,255,.10); box-shadow:0 28px 80px rgba(0,0,0,.70); border-radius:10px; }
+    /* Solid overlays (blurred dim backdrop + thin green border on the sheet) */
+    .va-overlay{
+      position:fixed; inset:0; z-index:9996;
+      background:rgba(6,8,10,.62);
+      backdrop-filter:blur(6px);
+      opacity:0; pointer-events:none; transition:opacity 180ms var(--ease);
+    }
+    .va-overlay.open{ opacity:1; pointer-events:auto; }
+
+    .va-modal-wrap{ position:fixed; inset:0; z-index:9998; }
+    .va-modal-center{ position:absolute; inset:0; display:grid; place-items:center; padding:20px; }
+    .va-sheet{
+      background:var(--panel-bg);
+      border:1px solid ${GREEN_LINE}; /* thinner hairline */
+      box-shadow:0 28px 80px rgba(0,0,0,.70);
+      border-radius:10px;
+    }
 
     .chat-msg{ max-width:85%; padding:10px 12px; border-radius:12px; }
     .chat-user{ background:var(--panel-bg); border:1px solid rgba(255,255,255,.12); align-self:flex-end; }
@@ -120,7 +146,6 @@ const Tokens = () => (
 
 /* ─────────── types / storage ─────────── */
 type ApiKey = { id: string; name: string; key: string };
-type VoiceMeta = { id: string; name: string };
 
 type AgentData = {
   name: string;
@@ -131,9 +156,8 @@ type AgentData = {
   systemPrompt: string;
 
   ttsProvider: 'openai' | 'elevenlabs';
-  voiceId?: string;     // <— store voice id from API
-  voiceName: string;
-
+  voiceId?: string;      // <— store OpenAI voice id
+  voiceName: string;     // display label
   apiKeyId?: string;
 
   asrProvider: 'deepgram' | 'whisper' | 'assemblyai';
@@ -163,7 +187,7 @@ You are a blank template AI assistant with minimal default settings.
 [Fallback]
 - Ask for clarification when needed.`,
   ttsProvider: 'openai',
-  voiceId: 'alloy',
+  voiceId: 'alloy',            // default id if your backend returns it
   voiceName: 'Alloy (American)',
   apiKeyId: '',
   asrProvider: 'deepgram',
@@ -255,79 +279,56 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
-/* ─────────── SOLID, PORTALED SELECT (fixes: outside-click, hover glow, scroll/resize anchoring) ─────────── */
+/* ─────────── Voice catalog + preview (frontend) ─────────── */
+type VoiceMeta = { id: string; name: string };
+/** Voices fetched from your backend */
+async function fetchVoices(): Promise<VoiceMeta[]> {
+  const r = await fetch('/api/openai/voices').catch(()=>null);
+  if (!r?.ok) return [];
+  const list = await r.json().catch(()=>[]);
+  return (Array.isArray(list) ? list : []).filter(v => v && v.id && v.name);
+}
+
+/* Select with solid menu, green top-glow hover, and inline play/stop per option */
 function StyledSelect({
-  value, onChange, options, placeholder, leftIcon, menuTop,
+  value, onChange, options, placeholder,
+  leftIcon, menuTop,
   onPreview, isPreviewing
 }:{
   value: string; onChange: (v: string) => void;
-  options: Opt[]; placeholder?: string; leftIcon?: React.ReactNode; menuTop?: React.ReactNode;
-  onPreview?: (value: string) => void;     // optional inline preview action per item
-  isPreviewing?: string | null;            // item currently previewing
+  options: Opt[]; placeholder?: string;
+  leftIcon?: React.ReactNode; menuTop?: React.ReactNode;
+  onPreview?: (v:string)=>void;         // optional inline preview handler
+  isPreviewing?: string|null;           // voice id currently previewing
 }) {
   const wrapRef = useRef<HTMLDivElement|null>(null);
-  const btnRef = useRef<HTMLButtonElement|null>(null);
-  const menuRef = useRef<HTMLDivElement|null>(null);
   const searchRef = useRef<HTMLInputElement|null>(null);
-
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const [rect, setRect] = useState<{top:number; left:number; width:number; placement:'above'|'below'}|null>(null);
 
   const current = options.find(o => o.value === value) || null;
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return q ? options.filter(o => o.label.toLowerCase().includes(q)) : options;
-  }, [options, query]);
-
-  const placeMenu = () => {
-    const el = btnRef.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    const maxBelow = window.innerHeight - (r.bottom + 8);
-    const estHeight = Math.min(320, 44 + (filtered.length * 38) + (menuTop ? 52 : 0));
-    const placement: 'above'|'below' = maxBelow >= estHeight ? 'below' : 'above';
-    const top = placement==='below' ? r.bottom + 8 : r.top - 8;
-    setRect({ top, left: r.left, width: r.width, placement });
-  };
+  }, [options, query, value]);
 
   useEffect(() => {
     if (!open) return;
-    placeMenu();
-
-    const onDown = (e: MouseEvent) => {
-      const t = e.target as Node;
-      const insideBtn = !!wrapRef.current?.contains(t);
-      const insideMenu = !!menuRef.current?.contains(t);
-      if (!insideBtn && !insideMenu) setOpen(false);
+    const off = (e: MouseEvent) => {
+      if (wrapRef.current?.contains(e.target as Node)) return;
+      setOpen(false);
     };
     const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
-    const onRelayout = () => placeMenu();
-
-    window.addEventListener('mousedown', onDown);
+    window.addEventListener('mousedown', off);
     window.addEventListener('keydown', onEsc);
-    window.addEventListener('scroll', onRelayout, true);
-    window.addEventListener('resize', onRelayout);
-
-    return () => {
-      window.removeEventListener('mousedown', onDown);
-      window.removeEventListener('keydown', onEsc);
-      window.removeEventListener('scroll', onRelayout, true);
-      window.removeEventListener('resize', onRelayout);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, filtered.length]);
+    return () => { window.removeEventListener('mousedown', off); window.removeEventListener('keydown', onEsc); };
+  }, [open]);
 
   return (
-    <div ref={wrapRef} className="relative">
+    <div ref={wrapRef} className="relative" style={{ zIndex: 2 }}>
       <button
-        ref={btnRef}
         type="button"
-        onClick={() => {
-          setOpen(v=>!v);
-          // reset search every time it opens
-          setTimeout(() => { setQuery(''); searchRef.current?.focus(); }, 0);
-        }}
+        onClick={() => { setOpen(v=>!v); setTimeout(()=>searchRef.current?.focus(),0); }}
         className="w-full flex items-center justify-between gap-3 px-3 py-3 rounded-[10px] text-sm outline-none transition"
         style={{
           background:'var(--input-bg)',
@@ -343,106 +344,109 @@ function StyledSelect({
         <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)' }} />
       </button>
 
-      {open && rect && typeof document !== 'undefined' && createPortal(
+      {open && (
         <div
-          ref={menuRef}
-          className="va-menu"
+          className="va-menu absolute p-3"
           style={{
-            position:'fixed',
-            zIndex: 2147480000,
-            top: rect.placement==='below' ? rect.top : undefined,
-            bottom: rect.placement==='above' ? (window.innerHeight - rect.top) : undefined,
-            left: rect.left,
-            width: rect.width,
-            border:`1px solid ${GREEN_LINE}`,
-            borderRadius:10,
-            overflow:'hidden',
-            background:'var(--panel-bg)'
+            top: 'calc(100% + 8px)',
+            left: 0,
+            width: '100%',
+            background: 'var(--panel-bg)',
+            border: '1px solid var(--input-border)',
+            borderRadius: 10 as any
           }}
-          onMouseDown={()=>{/* keep focus */}}
         >
-          <div className="p-3" style={{ background:'var(--panel-bg)', color:'var(--text)' }}>
-            {menuTop ? <div className="mb-2">{menuTop}</div> : null}
+          {menuTop ? <div className="mb-2">{menuTop}</div> : null}
 
-            <div
-              className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[10px]"
-              style={{ background:'var(--panel-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-            >
-              <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
-              <input
-                ref={searchRef}
-                value={query}
-                onChange={(e)=>setQuery(e.target.value)}
-                placeholder="Type to filter…"
-                className="w-full bg-transparent outline-none text-sm"
-                style={{ color:'var(--text)' }}
-              />
-            </div>
+          <div
+            className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[10px]"
+            style={{ background:'var(--panel-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+          >
+            <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
+            <input
+              ref={searchRef}
+              value={query}
+              onChange={(e)=>setQuery(e.target.value)}
+              placeholder="Type to filter…"
+              className="w-full bg-transparent outline-none text-sm"
+              style={{ color:'var(--text)' }}
+            />
+          </div>
 
-            <div className="max-h-72 overflow-y-auto pr-1" style={{ scrollbarWidth:'thin' }}>
-              {filtered.map(o => (
-                <div key={o.value} className="relative group">
-                  <button
-                    disabled={o.disabled}
-                    onClick={()=>{
-                      if (o.disabled) return;
-                      onChange(o.value);
-                      setOpen(false);
-                    }}
-                    className="w-full text-left text-sm px-3 py-2 rounded-[8px] transition flex items-center gap-2 disabled:opacity-60 relative"
-                    style={{
-                      color:'var(--text)',
-                      background:'var(--panel-bg)',
-                      border:'1px solid var(--panel-bg)',
-                      cursor:o.disabled?'not-allowed':'pointer'
-                    }}
-                    onMouseEnter={(e)=>{ if (o.disabled) return;
-                      const el=e.currentTarget as HTMLButtonElement;
-                      el.style.background = 'color-mix(in oklab, var(--panel-bg) 88%, white 12%)';
-                      el.style.border = `1px solid ${GREEN_LINE}`;
-                    }}
-                    onMouseLeave={(e)=>{
-                      const el=e.currentTarget as HTMLButtonElement;
-                      el.style.background = 'var(--panel-bg)';
-                      el.style.border = '1px solid var(--panel-bg)';
-                    }}
-                  >
-                    {/* green top glow on hover */}
-                    <span
-                      className="pointer-events-none"
-                      style={{
-                        position:'absolute', left:8, right:8, top:-6, height:16, borderRadius:12,
-                        background:'radial-gradient(60% 80% at 50% 100%, rgba(89,217,179,.45) 0%, rgba(89,217,179,0) 100%)',
-                        opacity:0, filter:'blur(6px)', transition:'opacity .18s ease'
-                      }}
-                    />
-                    <span className="flex-1 truncate">{o.label}</span>
+          <div className="max-h-72 overflow-y-auto pr-1" style={{ scrollbarWidth:'thin' }}>
+            {filtered.map(o => (
+              <div key={o.value} className="relative">
+                {/* top green glow on hover / active */}
+                <span
+                  className="pointer-events-none"
+                  style={{
+                    position:'absolute', left:8, right:8, top:-6, height:16, borderRadius:12,
+                    background:'radial-gradient(60% 80% at 50% 100%, rgba(89,217,179,.45) 0%, rgba(89,217,179,0) 100%)',
+                    opacity:0, filter:'blur(6px)', transition:'opacity .18s ease'
+                  }}
+                />
+                <button
+                  disabled={o.disabled}
+                  onClick={()=>{ if (o.disabled) return; onChange(o.value); setOpen(false); }}
+                  className="w-full text-left text-sm px-3 py-2 rounded-[8px] transition flex items-center gap-2 disabled:opacity-60"
+                  style={{
+                    color:'var(--text)',
+                    background:'var(--panel-bg)',
+                    border:'1px solid var(--panel-bg)',
+                    cursor:o.disabled?'not-allowed':'pointer'
+                  }}
+                  onMouseEnter={(e)=>{ if (o.disabled) return;
+                    const el=e.currentTarget as HTMLButtonElement;
+                    el.previousElementSibling && ((el.previousElementSibling as HTMLElement).style.opacity='0.75');
+                    el.style.background = 'color-mix(in oklab, var(--panel-bg) 88%, white 12%)';
+                    el.style.border = `1px solid ${GREEN_LINE}`;
+                  }}
+                  onMouseLeave={(e)=>{
+                    const el=e.currentTarget as HTMLButtonElement;
+                    el.previousElementSibling && ((el.previousElementSibling as HTMLElement).style.opacity='0');
+                    el.style.background = 'var(--panel-bg)';
+                    el.style.border = '1px solid var(--panel-bg)';
+                  }}
+                >
+                  {o.disabled ? (
+                    <Lock className="w-3.5 h-3.5" />
+                  ) : (
+                    <Check className="w-3.5 h-3.5" style={{ opacity: o.value===value ? 1 : 0 }} />
+                  )}
+                  <span className="flex-1 truncate">{o.label}</span>
 
-                    {/* Inline preview control (optional) */}
-                    {onPreview && (
+                  {/* Inline preview pill (play/stop) only if handler provided */}
+                  {onPreview && !o.disabled ? (
+                    (isPreviewing === o.value) ? (
                       <button
                         type="button"
-                        onClick={(ev)=>{ ev.stopPropagation(); onPreview(o.value); }}
+                        onClick={(e)=>{ e.stopPropagation(); onPreview(o.value); }}
                         className="w-7 h-7 rounded-full grid place-items-center"
-                        style={{ background:'rgba(89,217,179,.18)', border:`1px solid ${GREEN_LINE}`, color:'#0a0f0d' }}
-                        aria-label={isPreviewing===o.value ? 'Stop preview' : 'Play preview'}
+                        aria-label="Stop preview"
+                        style={{ background: 'var(--panel-bg)', color:'var(--text)', border:'1px solid var(--input-border)' }}
                       >
-                        {isPreviewing===o.value ? <Square className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+                        <Square className="w-3.5 h-3.5" />
                       </button>
-                    )}
-                  </button>
-                  <style jsx>{`
-                    .group:hover > button > span:first-child { opacity:.75; }
-                  `}</style>
-                </div>
-              ))}
-              {filtered.length===0 && (
-                <div className="px-3 py-6 text-sm" style={{ color:'var(--text-muted)' }}>No matches.</div>
-              )}
-            </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={(e)=>{ e.stopPropagation(); onPreview(o.value); }}
+                        className="w-7 h-7 rounded-full grid place-items-center"
+                        aria-label="Play preview"
+                        style={{ background: CTA, color:'#0a0f0d' }}
+                      >
+                        <Play className="w-3.5 h-3.5" />
+                      </button>
+                    )
+                  ) : null}
+                </button>
+              </div>
+            ))}
+            {filtered.length===0 && (
+              <div className="px-3 py-6 text-sm" style={{ color:'var(--text-muted)' }}>No matches.</div>
+            )}
           </div>
-        </div>,
-        document.body
+        </div>
       )}
     </div>
   );
@@ -500,7 +504,7 @@ function Section({
 
 /* ─────────── Page ─────────── */
 export default function VoiceAgentSection() {
-  // measure app sidebar for proper left rail offset
+  /* Measure the real app sidebar so our rail "touches" it and moves with collapse */
   useEffect(() => {
     const candidates = [
       '[data-app-sidebar]',
@@ -530,61 +534,38 @@ export default function VoiceAgentSection() {
   const [toast, setToast] = useState<string>('');
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
 
-  // voices from API (with fallback)
-  const [voicesApi, setVoicesApi] = useState<VoiceMeta[]>([]);
-  const voiceOptions: Opt[] = useMemo(
-    () => voicesApi.map(v => ({ value: v.id, label: v.name })),
-    [voicesApi]
-  );
-  const [previewingVoice, setPreviewingVoice] = useState<string|null>(null);
-
-  // chat mock
   const [showCall, setShowCall] = useState(false);
   const [messages, setMessages] = useState<Array<{role:'user'|'assistant'; text:string}>>([
     { role: 'assistant', text: 'Hi! Ready when you are.' }
   ]);
   const [chatInput, setChatInput] = useState('');
 
-  // generate modal
+  /* Generate overlay */
   const [showGenerate, setShowGenerate] = useState(false);
   const [composerText, setComposerText] = useState('');
-  const [genPhase, setGenPhase] = useState<'idle'|'loading'>('idle');
-  const basePromptRef = useRef<string>('');
+  const [genPhase, setGenPhase] = useState<'idle'|'typing'>('idle');
   const [pendingPrompt, setPendingPrompt] = useState<string>('');
+  const [diffHtml, setDiffHtml] = useState<string>('');   // highlighted HTML
+  const [typedIndex, setTypedIndex] = useState(0);
 
-  // WebSpeech for quick client preview (keeps menu open)
-  const [wsVoices, setWsVoices] = useState<SpeechSynthesisVoice[]>([]);
+  /* Voices: fetched from backend */
+  const [voicesApi, setVoicesApi] = useState<VoiceMeta[]>([]);
+  const voiceOptions = useMemo<Opt[]>(
+    () => voicesApi.map(v => ({ value: v.id, label: v.name })),
+    [voicesApi]
+  );
+
+  /* Audio preview */
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [previewingVoice, setPreviewingVoice] = useState<string|null>(null);
+  const [previewAbort, setPreviewAbort] = useState<AbortController | null>(null);
+  const PREVIEW_TEXT = "This is a short voice preview for testing. One, two, three.";
+
   useEffect(() => {
-    const load = () => setWsVoices(window.speechSynthesis.getVoices());
-    load();
-    (window.speechSynthesis as any).onvoiceschanged = load;
-    return () => { (window.speechSynthesis as any).onvoiceschanged = null; };
+    (async () => { setVoicesApi(await fetchVoices()); })();
   }, []);
-  const speakPreview = (id: string) => {
-    try { window.speechSynthesis.cancel(); } catch {}
-    const voiceName = voicesApi.find(v => v.id === id)?.name || id;
-    const u = new SpeechSynthesisUtterance(`This is a preview of ${voiceName}.`);
-    const byName = wsVoices.find(v => v.name.toLowerCase().includes((voiceName.split(' ')[0]||'').toLowerCase()));
-    const en = wsVoices.find(v => v.lang?.startsWith('en'));
-    if (byName) u.voice = byName; else if (en) u.voice = en;
-    try { window.speechSynthesis.speak(u); } catch {}
-  };
-  const stopPreview = () => { try { window.speechSynthesis.cancel(); } catch {} };
 
-  // active id sync
-  useEffect(() => {
-    const handler = (e: Event) => setActiveId((e as CustomEvent<string>).detail);
-    window.addEventListener('assistant:active', handler as EventListener);
-    return () => window.removeEventListener('assistant:active', handler as EventListener);
-  }, []);
-  useEffect(() => {
-    if (!activeId) return;
-    setData(loadAgentData(activeId));
-    try { localStorage.setItem(ACTIVE_KEY, activeId); } catch {}
-  }, [activeId]);
-  useEffect(() => { if (activeId) saveAgentData(activeId, data); }, [activeId, data]);
-
-  // API keys & select remembered id
+  /* API keys bootstrap */
   useEffect(() => {
     (async () => {
       try {
@@ -616,46 +597,23 @@ export default function VoiceAgentSection() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Voices from backend (with fallback)
   useEffect(() => {
-    (async () => {
-      try {
-        const r = await fetch('/api/openai/voices');
-        if (r.ok) {
-          const arr = await r.json() as VoiceMeta[];
-          if (Array.isArray(arr) && arr.length) {
-            setVoicesApi(arr);
-            // if current voiceId missing, select first
-            if (!arr.some(v => v.id === data.voiceId)) {
-              const first = arr[0];
-              setData(p => ({ ...p, voiceId: first.id, voiceName: first.name }));
-            }
-            return;
-          }
-        }
-      } catch {}
-      // Fallback if API fails/empty
-      const fallback: VoiceMeta[] = [
-        { id: 'alloy',  name: 'Alloy (American)' },
-        { id: 'verse',  name: 'Verse (American)' },
-        { id: 'coral',  name: 'Coral (British)' },
-        { id: 'amber',  name: 'Amber (Australian)' },
-        { id: 'sage',   name: 'Sage (Neutral)' },
-        { id: 'ember',  name: 'Ember (Warm)' }
-      ];
-      setVoicesApi(fallback);
-      if (!fallback.some(v => v.id === data.voiceId)) {
-        const first = fallback[0];
-        setData(p => ({ ...p, voiceId: first.id, voiceName: first.name }));
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const handler = (e: Event) => setActiveId((e as CustomEvent<string>).detail);
+    window.addEventListener('assistant:active', handler as EventListener);
+    return () => window.removeEventListener('assistant:active', handler as EventListener);
   }, []);
+
+  useEffect(() => {
+    if (!activeId) return;
+    setData(loadAgentData(activeId));
+    try { localStorage.setItem(ACTIVE_KEY, activeId); } catch {}
+  }, [activeId]);
+
+  useEffect(() => { if (activeId) saveAgentData(activeId, data); }, [activeId, data]);
 
   function setField<K extends keyof AgentData>(k: K) {
     return (v: AgentData[K]) => setData(prev => ({ ...prev, [k]: v }));
   }
-
   const modelOpts = useMemo(()=>modelOptsFor(data.provider), [data.provider]);
 
   async function doSave(){
@@ -689,18 +647,110 @@ ${lines.map(l => `- ${l}`).join('\n')}
     return `${base}${block}`;
   }
 
-  function startGenerate() {
-    basePromptRef.current = data.systemPrompt;
-    setGenPhase('loading');
-    setTimeout(() => {
-      const merged = buildPrompt(basePromptRef.current, composerText);
-      setPendingPrompt(merged);
-      setGenPhase('idle');
-      // keep modal open; user decides cancel or generate
-    }, 500);
+  /* diff helpers (very simple word diff) */
+  function diffWords(oldStr: string, newStr: string){
+    const o = oldStr.split(/\s+/), n = newStr.split(/\s+/);
+    const table:number[][] = Array(o.length+1).fill(0).map(()=>Array(n.length+1).fill(0));
+    for (let i=1;i<=o.length;i++) for (let j=1;j<=n.length;j++)
+      table[i][j] = o[i-1] === n[j-1] ? table[i-1][j-1]+1 : Math.max(table[i-1][j], table[i][j-1]);
+    let i=o.length, j=n.length, os:string[]=[], ns:string[]=[];
+    while(i>0 && j>0){
+      if (o[i-1] === n[j-1]) { os.unshift(o[i-1]); ns.unshift(o[i-1]); i--; j--; }
+      else if (table[i-1][j] >= table[i][j-1]) { os.unshift(`~~${o[i-1]}~~`); i--; }
+      else { ns.unshift(`++${n[j-1]}++`); j--; }
+    }
+    while(i>0){ os.unshift(`~~${o[i-1]}~~`); i--; }
+    while(j>0){ ns.unshift(`++${n[j-1]}++`); j--; }
+    // Build merged with marks
+    const merged:string[] = [];
+    let oi=0, ni=0;
+    while(oi<os.length || ni<ns.length){
+      if (oi<os.length && os[oi].startsWith('~~')) { merged.push(os[oi++]); continue; }
+      if (ni<ns.length && ns[ni].startsWith('++')) { merged.push(ns[ni++]); continue; }
+      if (oi<os.length && ni<ns.length && os[oi]===ns[ni]) { merged.push(os[oi]); oi++; ni++; continue; }
+      if (oi<os.length){ merged.push(os[oi++]); }
+      if (ni<ns.length){ merged.push(ns[ni++]); }
+    }
+    return merged.join(' ');
   }
-  const acceptDiff = () => { setData(p => ({ ...p, systemPrompt: pendingPrompt })); setPendingPrompt(''); setShowGenerate(false); };
-  const declineDiff = () => { setPendingPrompt(''); setShowGenerate(false); };
+  function markToHtml(marked: string){
+    return marked
+      .replace(/\+\+(.+?)\+\+/g, '<span style="background:rgba(89,217,179,.22);padding:0 2px;border-radius:4px">$1</span>')
+      .replace(/~~(.+?)~~/g, '<span style="background:rgba(239,68,68,.22);padding:0 2px;border-radius:4px;text-decoration:line-through">$1</span>');
+  }
+
+  function startGenerate() {
+    const base = data.systemPrompt;
+    const next = buildPrompt(base, composerText);
+    const marked = diffWords(base, next);
+    const html = markToHtml(marked);
+
+    setPendingPrompt(next);
+    setDiffHtml('');         // will be typed in
+    setGenPhase('typing');
+    setTypedIndex(0);
+
+    // typing animation over the HTML string
+    const total = html.length;
+    const tick = () => {
+      setTypedIndex(prev => {
+        const n = Math.min(total, prev + 2); // speed
+        setDiffHtml(html.slice(0, n));
+        if (n < total) requestAnimationFrame(tick);
+        else setGenPhase('idle');
+        return n;
+      });
+    };
+    requestAnimationFrame(tick);
+  }
+  const acceptDiff = () => { setData(p => ({ ...p, systemPrompt: pendingPrompt })); setPendingPrompt(''); setDiffHtml(''); setComposerText(''); };
+  const declineDiff = () => { setPendingPrompt(''); setDiffHtml(''); };
+
+  /* Voice preview (fetch audio; fallback to WebSpeech if needed) */
+  async function playVoicePreview(voiceId: string) {
+    try {
+      if (previewAbort) { previewAbort.abort(); setPreviewAbort(null); }
+      if (!audioRef.current) audioRef.current = new Audio();
+
+      setPreviewingVoice(voiceId);
+
+      const ac = new AbortController();
+      setPreviewAbort(ac);
+
+      const r = await fetch(`/api/openai/tts/preview?voice=${encodeURIComponent(voiceId)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: PREVIEW_TEXT }),
+        signal: ac.signal
+      });
+
+      if (!r.ok) throw new Error('tts preview failed');
+
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      audioRef.current.src = url;
+      await audioRef.current.play();
+    } catch {
+      // fallback: Web Speech (will sound like the default browser voice)
+      try { window.speechSynthesis.cancel(); } catch {}
+      const meta = voicesApi.find(v => v.id === voiceId);
+      const u = new SpeechSynthesisUtterance(PREVIEW_TEXT);
+      const list = window.speechSynthesis.getVoices();
+      const byName = meta ? list.find(v => v.name.toLowerCase().includes((meta.name.split(' ')[0]||'').toLowerCase())) : null;
+      const en = list.find(v => v.lang?.startsWith('en'));
+      if (byName) u.voice = byName; else if (en) u.voice = en;
+      window.speechSynthesis.speak(u);
+    }
+  }
+  function stopVoicePreview() {
+    if (previewAbort) { previewAbort.abort(); setPreviewAbort(null); }
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
+    try { window.speechSynthesis.cancel(); } catch {}
+    setPreviewingVoice(null);
+  }
 
   function sendChat() {
     const txt = chatInput.trim();
@@ -831,37 +881,46 @@ ${lines.map(l => `- ${l}`).join('\n')}
                           className="h-9 px-3 rounded-[10px] font-semibold"
                           style={{ background:CTA, color:'#0a0f0d' }}
                         >
-                          Apply
+                          Accept changes
                         </button>
                         <button
                           onClick={declineDiff}
                           className="h-9 px-3 rounded-[10px]"
                           style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
                         >
-                          Discard
+                          Decline
                         </button>
                       </>
                     )}
                     <button
                       className="inline-flex items-center gap-2 rounded-[10px] text-sm"
-                      style={{ height:36, padding:'0 12px', background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+                      style={{ height:36, padding:'0 12px', background:CTA, color:'#fff', border:`1px solid ${GREEN_LINE}` }}
                       onClick={()=>{ setComposerText(''); setShowGenerate(true); setGenPhase('idle'); }}
                     >
-                      <Wand2 className="w-4 h-4" /> Generate
+                      <Wand2 className="w-4 h-4" /> <span style={{ color:'#fff' }}>Generate</span>
                     </button>
                   </div>
                 </div>
 
                 <div style={{ position:'relative' }}>
-                  <textarea
-                    className="w-full bg-transparent outline-none rounded-[12px] px-3 py-[12px]"
-                    style={{ minHeight: 360, background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                    value={pendingPrompt || data.systemPrompt}
-                    onChange={(e)=>{
-                      if (pendingPrompt) setPendingPrompt(e.target.value);
-                      else setField('systemPrompt')(e.target.value);
-                    }}
-                  />
+                  {/* Show diffHtml while pending; else show actual text */}
+                  {diffHtml ? (
+                    <div
+                      className="w-full rounded-[12px] px-3 py-[12px] text-sm"
+                      style={{ minHeight: 360, background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+                      dangerouslySetInnerHTML={{ __html: diffHtml }}
+                    />
+                  ) : (
+                    <textarea
+                      className="w-full bg-transparent outline-none rounded-[12px] px-3 py-[12px]"
+                      style={{ minHeight: 360, background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+                      value={pendingPrompt || data.systemPrompt}
+                      onChange={(e)=>{
+                        if (pendingPrompt) setPendingPrompt(e.target.value);
+                        else setField('systemPrompt')(e.target.value);
+                      }}
+                    />
+                  )}
                 </div>
               </div>
             </div>
@@ -906,13 +965,8 @@ ${lines.map(l => `- ${l}`).join('\n')}
                   options={voiceOptions}
                   placeholder="— Choose —"
                   onPreview={(val)=>{
-                    if (previewingVoice === val) {
-                      stopPreview();
-                      setPreviewingVoice(null);
-                    } else {
-                      setPreviewingVoice(val);
-                      speakPreview(val);
-                    }
+                    if (previewingVoice === val) stopVoicePreview();
+                    else { setPreviewingVoice(val); playVoicePreview(val).finally(()=>setPreviewingVoice(val)); }
                   }}
                   isPreviewing={previewingVoice}
                 />
@@ -950,80 +1004,96 @@ ${lines.map(l => `- ${l}`).join('\n')}
         </div>
       </div>
 
-      {/* Generate overlay — same style as rail modals (blur + solid sheet, thinner border, white "Generate") */}
-      {showGenerate && (
+      {/* Generate overlay — same style as rail, thinner border, typing + diff highlights */}
+      {showGenerate && createPortal(
         <>
-          <div className="va-overlay" onClick={()=>{ if (genPhase==='idle') setShowGenerate(false); }} />
+          <div className="va-overlay open" onClick={()=>{ if (genPhase==='idle') setShowGenerate(false); }} />
           <div className="va-modal-wrap" role="dialog" aria-modal>
-            <div className="va-sheet w-full max-w-[760px] p-4 md:p-6">
-              <div className="flex items-center justify-between mb-3">
-                <div className="text-lg font-semibold">Compose Prompt</div>
-                <button
-                  onClick={()=>{ if (genPhase==='idle') setShowGenerate(false); }}
-                  className="p-1 rounded hover:opacity-80"
-                  aria-label="Close"
-                >
-                  <X className="w-5 h-5" style={{ color:'var(--text-muted)' }} />
-                </button>
-              </div>
-
-              <div className="grid gap-3">
-                <label className="text-xs" style={{ color:'var(--text-muted)' }}>
-                  Add extra instructions (persona, tone, rules, tools):
-                </label>
-                <textarea
-                  value={composerText}
-                  onChange={(e)=>setComposerText(e.target.value)}
-                  className="w-full bg-transparent outline-none rounded-[10px] px-3 py-2"
-                  placeholder="e.g., Friendly, crisp answers. Confirm account ID before actions."
-                  style={{ minHeight: 180, background:'var(--input-bg)', border:'1px solid rgba(255,255,255,.10)', color:'var(--text)' }}
-                />
-                {/* Diff / typing simulated */}
-                {genPhase==='loading' && (
-                  <div className="text-sm px-3 py-2 rounded-[10px]" style={{ background:'rgba(255,255,255,.04)', border:'1px solid rgba(255,255,255,.08)', color:'var(--text-muted)' }}>
-                    Generating…
-                  </div>
-                )}
-                {pendingPrompt && genPhase==='idle' && (
-                  <div className="text-xs" style={{ color:'var(--text-muted)' }}>
-                    Review changes, then Apply or Discard from the System Prompt header.
-                  </div>
-                )}
-
-                <div className="flex items-center justify-end gap-2">
-                  <button
-                    onClick={()=>setShowGenerate(false)}
-                    disabled={genPhase==='loading'}
-                    className="h-9 px-3 rounded-[10px]"
-                    style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                  >
-                    Cancel
+            <div className="va-modal-center">
+              <div className="va-sheet w-full max-w-[780px] p-4 md:p-6" style={{ overflow:'hidden' }}>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="text-lg font-semibold">Compose Prompt</div>
+                  <button onClick={()=>{ if (genPhase==='idle') setShowGenerate(false); }} className="p-1 rounded hover:opacity-80" aria-label="Close">
+                    <X className="w-5 h-5" style={{ color:'var(--text-muted)' }} />
                   </button>
-                  <button
-                    onClick={startGenerate}
-                    disabled={genPhase==='loading'}
-                    className="h-9 px-4 rounded-[10px] font-semibold"
-                    style={{ background:CTA, color:'#ffffff' }}
-                  >
-                    {genPhase==='loading' ? 'Generating…' : 'Generate'}
-                  </button>
+                </div>
+
+                <div className="grid gap-3">
+                  <label className="text-xs" style={{ color:'var(--text-muted)' }}>
+                    Add extra instructions (persona, tone, rules, tools):
+                  </label>
+                  <textarea
+                    value={composerText}
+                    onChange={(e)=>setComposerText(e.target.value)}
+                    className="w-full bg-transparent outline-none rounded-[10px] px-3 py-2"
+                    placeholder="e.g., Friendly, crisp answers. Confirm account ID before actions."
+                    style={{ minHeight: 140, background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+                  />
+
+                  <div className="flex items-center justify-end gap-2">
+                    <button
+                      onClick={()=>setShowGenerate(false)}
+                      disabled={genPhase==='typing'}
+                      className="h-9 px-3 rounded-[10px]"
+                      style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={startGenerate}
+                      disabled={genPhase==='typing'}
+                      className="h-9 px-4 rounded-[10px] font-semibold"
+                      style={{ background:CTA, color:'#fff', border:`1px solid ${GREEN_LINE}` }}
+                    >
+                      Generate
+                    </button>
+                  </div>
+
+                  {/* Live typing / diff result box */}
+                  {(diffHtml || genPhase==='typing') && (
+                    <div
+                      className="mt-2 rounded-[10px] p-3 text-sm"
+                      style={{ minHeight: 120, background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+                    >
+                      <div
+                        dangerouslySetInnerHTML={{ __html: diffHtml || '<span style="opacity:.6">Typing…</span>' }}
+                      />
+                      {genPhase==='idle' && diffHtml && (
+                        <div className="mt-3 flex items-center justify-end gap-2">
+                          <button
+                            onClick={acceptDiff}
+                            className="h-9 px-3 rounded-[10px] font-semibold"
+                            style={{ background:CTA, color:'#0a0f0d' }}
+                          >
+                            Accept changes
+                          </button>
+                          <button
+                            onClick={declineDiff}
+                            className="h-9 px-3 rounded-[10px]"
+                            style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+                          >
+                            Decline
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
           </div>
-        </>
+        </>,
+        document.body
       )}
 
       {/* Call drawer */}
       {createPortal(
         <>
           <div
-            className={`va-overlay`}
-            style={{ opacity: showCall ? 1 : 0, pointerEvents: showCall ? 'auto' : 'none', transition:'opacity 200ms var(--ease)' }}
+            className={`va-overlay ${showCall ? 'open' : ''}`}
             onClick={()=> setShowCall(false)}
           />
-          <aside className="va-call-drawer" aria-hidden={!showCall}
-                 style={{ transform: showCall ? 'translateX(0)' : 'translateX(100%)', transition:'transform 280ms var(--ease)' }}>
+          <aside className={`va-call-drawer ${showCall ? 'open' : ''}`} aria-hidden={!showCall}>
             <div className="flex items-center justify-between px-4 h-[64px]"
                  style={{ background:'var(--panel-bg)', borderBottom:'1px solid rgba(255,255,255,.1)' }}>
               <div className="font-semibold">Chat with {data.name || 'Assistant'}</div>
