@@ -6,8 +6,8 @@ import dynamic from 'next/dynamic';
 import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import {
-  Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Rocket, Check, KeyRound,
-  Play, Square, Loader2
+  Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Rocket, Search, Check, Lock, X, KeyRound,
+  Play, Square
 } from 'lucide-react';
 import { scopedStorage } from '@/utils/scoped-storage';
 
@@ -69,6 +69,7 @@ const Tokens = () => (
                     0 0 0 1px rgba(255,255,255,.06) inset,
                     0 0 0 1px rgba(89,217,179,.20);
     }
+    /* Light theme tokens, same feel as AssistantRail */
     :root:not([data-theme="dark"]) .va-scope{
       --bg:#f6f7f9; --panel:#ffffff; --text:#0f172a; --text-muted:#64748b;
       --input-border:rgba(15,23,42,.12);
@@ -97,7 +98,27 @@ const Tokens = () => (
       color:var(--text);
     }
 
-    /* Drawer + modal overlays (match AssistantRail) */
+    .va-left-fixed{
+      position:fixed; top:0; bottom:0;
+      left:var(--app-sidebar-w); width:var(--rail-w);
+      z-index:12; background:var(--panel-bg);
+      border-right:1px solid rgba(255,255,255,.06);
+      box-shadow:14px 0 28px rgba(0,0,0,.08);
+      display:flex; flex-direction:column;
+    }
+    .va-left-fixed .rail-scroll{ overflow:auto; flex:1; }
+
+    .va-page{ margin-left: calc(var(--app-sidebar-w) + var(--rail-w)); transition: margin-left 180ms var(--ease); }
+
+    /* Menu base (solid) */
+    .va-menu{
+      background:var(--panel-bg);
+      border:1px solid rgba(89,217,179,.20);
+      box-shadow:0 36px 90px rgba(0,0,0,.55);
+      border-radius:10px;
+    }
+
+    /* Drawer + modal overlays */
     .va-blur-layer{
       position:fixed; inset:0; z-index:9996;
       background:rgba(6,8,10,.62);
@@ -106,18 +127,29 @@ const Tokens = () => (
     }
     .va-blur-layer.open{ opacity:1; pointer-events:auto; }
 
-    /* Diff colors */
-    .diff-added{ background:rgba(89,217,179,.18); color:var(--text); }
-    .diff-removed{ background:rgba(239,68,68,.18); color:var(--text); text-decoration:line-through; }
-
-    /* Typing “…” animation */
-    @keyframes dots {
-      0% { content:''; }
-      33% { content:'.'; }
-      66% { content:'..'; }
-      100% { content:'...'; }
+    .va-call-drawer{
+      position:fixed; inset:0 0 0 auto; width:min(540px,92vw); z-index:9997;
+      display:grid; grid-template-rows:auto 1fr auto;
+      background:var(--panel-bg);
+      border-left:1px solid rgba(89,217,179,.20);
+      box-shadow:-28px 0 80px rgba(0,0,0,.55);
+      transform:translateX(100%); transition:transform 280ms var(--ease);
     }
-    .typing-dots::after { content:''; animation:dots 900ms infinite steps(3,end); }
+    .va-call-drawer.open{ transform:translateX(0); }
+
+    .chat-msg{ max-width:85%; padding:10px 12px; border-radius:12px; }
+    .chat-user{ background:var(--panel-bg); border:1px solid rgba(89,217,179,.20); align-self:flex-end; }
+    .chat-ai{ background:color-mix(in oklab, var(--panel-bg) 92%, black 8%); border:1px solid rgba(89,217,179,.20); align-self:flex-start; }
+
+    /* Force every dropdown popover and children solid (no backdrop blur anywhere) */
+    .va-scope .va-menu,
+    .va-scope .va-menu * {
+      background: var(--panel-bg) !important;
+      color: var(--text) !important;
+      border-color: rgba(89,217,179,.20) !important;
+      box-shadow: none !important;
+      backdrop-filter: none !important;
+    }
   `}</style>
 );
 
@@ -200,8 +232,8 @@ type Opt = { value: string; label: string; disabled?: boolean; note?: string };
 
 const providerOpts: Opt[] = [
   { value: 'openai',     label: 'OpenAI' },
-  { value: 'anthropic',  label: 'Anthropic — coming soon', disabled: true },
-  { value: 'google',     label: 'Google — coming soon',    disabled: true },
+  { value: 'anthropic',  label: 'Anthropic — coming soon', disabled: true, note: 'soon' },
+  { value: 'google',     label: 'Google — coming soon',    disabled: true, note: 'soon' },
 ];
 
 const modelOptsFor = (provider: string): Opt[] =>
@@ -215,7 +247,7 @@ const modelOptsFor = (provider: string): Opt[] =>
 
 const ttsProviders: Opt[] = [
   { value: 'openai',    label: 'OpenAI' },
-  { value: 'elevenlabs', label: 'ElevenLabs — coming soon', disabled: true },
+  { value: 'elevenlabs', label: 'ElevenLabs — coming soon', disabled: true, note: 'soon' },
 ];
 
 const openAiVoices: Opt[] = [
@@ -227,8 +259,8 @@ const openAiVoices: Opt[] = [
 
 const asrProviders: Opt[] = [
   { value: 'deepgram',   label: 'Deepgram' },
-  { value: 'whisper',    label: 'Whisper — coming soon', disabled: true },
-  { value: 'assemblyai', label: 'AssemblyAI — coming soon', disabled: true },
+  { value: 'whisper',    label: 'Whisper — coming soon', disabled: true, note: 'soon' },
+  { value: 'assemblyai', label: 'AssemblyAI — coming soon', disabled: true, note: 'soon' },
 ];
 
 const asrModelsFor = (asr: string): Opt[] =>
@@ -261,20 +293,26 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
-/* ─────────── Dropdown (portaled, flat list; NO sections) ─────────── */
+/* ─────────── Dropdown (portaled, on-top, rail-style green hover overlay) ─────────── */
 function StyledSelect({
-  value, onChange, options, placeholder, leftIcon
+  value, onChange, options, placeholder, leftIcon, menuTop
 }:{
   value: string; onChange: (v: string) => void;
-  options: Opt[]; placeholder?: string; leftIcon?: React.ReactNode;
+  options: Opt[]; placeholder?: string; leftIcon?: React.ReactNode; menuTop?: React.ReactNode;
 }) {
   const wrapRef = useRef<HTMLDivElement|null>(null);
   const btnRef  = useRef<HTMLButtonElement|null>(null);
+  const searchRef = useRef<HTMLInputElement|null>(null);
 
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
   const [pos, setPos] = useState<{top:number; left:number; width:number}>({top:0,left:0,width:0});
 
   const current = options.find(o => o.value === value) || null;
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return q ? options.filter(o => o.label.toLowerCase().includes(q)) : options;
+  }, [options, query, value]);
 
   const measure = () => {
     if (!btnRef.current) return;
@@ -301,6 +339,8 @@ function StyledSelect({
     window.addEventListener('resize', onResize);
     window.addEventListener('mousedown', offClick);
     window.addEventListener('keydown', onEsc);
+
+    setTimeout(() => searchRef.current?.focus(), 0);
 
     return () => {
       window.removeEventListener('scroll', onScroll, true);
@@ -333,6 +373,7 @@ function StyledSelect({
 
       {open && typeof document !== 'undefined' && createPortal(
         <>
+          {/* click-catcher so nothing underneath can be hovered/clicked */}
           <div
             className="fixed inset-0 z-[2147482999]"
             onMouseDown={()=>setOpen(false)}
@@ -348,49 +389,67 @@ function StyledSelect({
               width: pos.width,
               zIndex: 2147483000,
               overflow:'hidden',
-              background:'var(--panel)',
+              background:'var(--panel)',          // ensure opaque
               border:'1px solid rgba(89,217,179,.20)',
               borderRadius:10,
               boxShadow:'0 36px 90px rgba(0,0,0,.55)',
-              isolation:'isolate',
+              isolation:'isolate',                // confine blending to menu
               contain:'paint'
             }}
           >
-            {/* FLAT LIST — no sections, no search, no headers */}
-            <div className="max-h-72 overflow-y-auto p-2" style={{ scrollbarWidth:'thin', background:'var(--panel)' }}>
-              {options.map(o => {
-                const isSelected = o.value === value;
-                return (
-                  <button
-                    key={o.value}
-                    disabled={o.disabled}
-                    onClick={()=>{ if (o.disabled) return; onChange(o.value); setOpen(false); }}
-                    className="va-dd-item w-full text-left text-sm px-3 py-2 rounded-[10px] transition flex items-center gap-2 disabled:opacity-60 relative"
-                    style={{
-                      background:'var(--panel)',
-                      color:'var(--text)',
-                      border:'1px solid transparent',
-                      cursor:o.disabled?'not-allowed':'pointer',
-                      position:'relative',
-                      isolation:'isolate'
-                    }}
-                  >
-                    <span
-                      aria-hidden
+            {menuTop ? <div className="px-3 pt-3">{menuTop}</div> : null}
+
+            <div className="px-3 pb-2">
+              <div
+                className="flex items-center gap-2 px-2 py-2 rounded-[10px]"
+                style={{ background:'var(--panel)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+              >
+                <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
+                <input
+                  ref={searchRef}
+                  value={query}
+                  onChange={(e)=>setQuery(e.target.value)}
+                  placeholder="Type to filter…"
+                  className="w-full bg-transparent outline-none text-sm"
+                  style={{ color:'var(--text)' }}
+                />
+              </div>
+            </div>
+
+            <div className="max-h-72 overflow-y-auto px-3 pb-3" style={{ scrollbarWidth:'thin', background:'var(--panel)' }}>
+              {filtered.length === 0 && (
+                <div className="px-2 py-6 text-sm" style={{ color:'var(--text-muted)' }}>No matches.</div>
+              )}
+              <div className="grid gap-1">
+                {filtered.map(o => {
+                  const isSelected = o.value === value;
+                  return (
+                    <button
+                      key={o.value}
+                      disabled={o.disabled}
+                      onClick={()=>{ if (o.disabled) return; onChange(o.value); setOpen(false); }}
+                      className="va-dd-item w-full text-left text-sm px-3 py-2 rounded-[10px] transition flex items-center gap-2 disabled:opacity-60 relative"
                       style={{
-                        width:8, height:8, borderRadius:999,
-                        background: isSelected ? CTA : 'transparent',
-                        display:'inline-block'
+                        background:'var(--panel)',
+                        color:'var(--text)',
+                        border:'1px solid transparent',
+                        cursor:o.disabled?'not-allowed':'pointer',
+                        position:'relative',
+                        isolation:'isolate'        // confine the green overlay to the row
                       }}
-                    />
-                    <span className="flex-1 truncate">{o.label}</span>
-                  </button>
-                );
-              })}
+                    >
+                      {o.disabled ? <Lock className="w-3.5 h-3.5" /> :
+                        <Check className="w-3.5 h-3.5" style={{ opacity: isSelected ? 1 : 0 }} />}
+                      <span className="flex-1 truncate">{o.label}</span>
+                      {o.note ? <span className="text-[11px]" style={{ color:'var(--text-muted)' }}>{o.note}</span> : null}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
 
-          {/* rail-style green hover glow & top highlight (contained) */}
+          {/* rail-style green hover glow & top highlight */}
           <style jsx global>{`
             :root { --cta:#59d9b3; --hover-overlay:.20; }
             .va-dd-item::after{
@@ -401,6 +460,7 @@ function StyledSelect({
               opacity:0; pointer-events:none;
               transition: opacity .18s ease, transform .18s ease;
               mix-blend-mode:screen;
+              z-index:auto;
             }
             .va-dd-item::before{
               content:'';
@@ -410,6 +470,7 @@ function StyledSelect({
               opacity:0; pointer-events:none;
               transition:opacity .18s ease;
               filter:blur(6px);
+              z-index:auto;
             }
             .va-dd-item:hover::after{ opacity:var(--hover-overlay); }
             .va-dd-item:hover::before{ opacity:.75; }
@@ -438,13 +499,12 @@ function RailModalShell({ children }:{ children:React.ReactNode }) {
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: 8, scale: 0.98 }}
           transition={{ duration: .18, ease: 'easeOut' }}
-          className="w-full max-w-[760px] rounded-[10px] overflow-hidden"
+          className="w-full max-w-[560px] rounded-[10px] overflow-hidden"
           style={{
             background: 'var(--panel)',
             color: 'var(--text)',
             border: '1px solid rgba(89,217,179,.20)',
-            maxHeight: '86vh',
-            boxShadow:'0 28px 80px rgba(0,0,0,.70)'
+            maxHeight: '86vh'
           }}
         >
           {children}
@@ -467,7 +527,7 @@ function RailModalHeader({ icon, title, subtitle }:{
     >
       <div className="flex items-center gap-3">
         <div className="w-10 h-10 rounded-xl grid place-items-center" style={{ background:'var(--brand-weak)' }}>
-          <span style={{ color: CTA, filter:'drop-shadow(0 0 8px rgba(89,217,179,.35))' }}>
+          <span style={{ color: '#59d9b3', filter:'drop-shadow(0 0 8px rgba(89,217,179,.35))' }}>
             {icon}
           </span>
         </div>
@@ -476,6 +536,7 @@ function RailModalHeader({ icon, title, subtitle }:{
           {subtitle && <div className="text-xs" style={{ color:'var(--text-muted)' }}>{subtitle}</div>}
         </div>
       </div>
+      {/* no X */}
       <span className="w-5 h-5" />
     </div>
   );
@@ -531,66 +592,6 @@ function Section({
   );
 }
 
-/* ─────────── helpers: rewrite + diff ─────────── */
-function normalizeAIText(s: string){
-  // basic cleanup into “AI language”: bullets with terminal punctuation, sections, etc.
-  const lines = s.split(/\n+/).map(x => x.trim()).filter(Boolean).map(x => /[.!?]$/.test(x) ? x : `${x}.`);
-  return lines.join('\n');
-}
-function buildAIStylePrompt(base: string, extra: string){
-  const extras = normalizeAIText(extra || '');
-  const block = extras
-    ? `
-
-[Extra Instructions]
-${extras}
-
-[Behavior]
-- Always apply Extra Instructions when relevant.
-- Keep responses concise and useful.
-- Ask for missing info before acting.`
-    : '';
-
-  // Optionally tighten headings / structure
-  const tightened = base
-    .replace(/\[Identity\]/g, '[Identity]')
-    .replace(/\[Style\]/g, '[Style]')
-    .replace(/\[Guidelines\]/g, '[Guidelines]')
-    .replace(/\[Fallback\]/g, '[Fallback]');
-
-  return `${tightened}${block}`.trim();
-}
-// tiny word-ish diff to mark additions/removals for user highlight
-function diffHTML(oldText: string, newText: string){
-  const a = oldText.split(/(\s+|\b)/);
-  const b = newText.split(/(\s+|\b)/);
-  const dp: number[][] = Array(a.length+1).fill(0).map(()=>Array(b.length+1).fill(0));
-  for (let i=1;i<=a.length;i++) for (let j=1;j<=b.length;j++){
-    dp[i][j] = a[i-1]===b[j-1] ? dp[i-1][j-1]+1 : Math.max(dp[i-1][j], dp[i][j-1]);
-  }
-  let i=a.length, j=b.length, outA:string[]=[], outB:string[]=[];
-  while(i>0 && j>0){
-    if(a[i-1]===b[j-1]){ outA.unshift(a[i-1]); outB.unshift(a[j-1]); i--; j--; }
-    else if(dp[i-1][j]>=dp[i][j-1]){ outA.unshift(`<span class="diff-removed">${escapeHTML(a[i-1])}</span>`); i--; }
-    else { outB.unshift(`<span class="diff-added">${escapeHTML(b[j-1])}</span>`); j--; }
-  }
-  while(i>0){ outA.unshift(`<span class="diff-removed">${escapeHTML(a[i-1])}</span>`); i--; }
-  while(j>0){ outB.unshift(`<span class="diff-added">${escapeHTML(b[j-1])}</span>`); j--; }
-  // Prefer new text with inline additions + carry unchanged tokens
-  const merged:string[]=[];
-  let ia=0, ib=0;
-  while(ia<outA.length || ib<outB.length){
-    const ta = outA[ia] ?? '';
-    const tb = outB[ib] ?? '';
-    if (ta && tb && stripTags(ta)===stripTags(tb)){ merged.push(stripTags(tb)); ia++; ib++; }
-    else if (tb){ merged.push(tb); ib++; }
-    else { merged.push(ta); ia++; }
-  }
-  return merged.join('');
-}
-function escapeHTML(s:string){ return s.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m] as string)); }
-function stripTags(s:string){ return s.replace(/<\/?[^>]+(>|$)/g, ''); }
-
 /* ─────────── Page ─────────── */
 export default function VoiceAgentSection() {
   /* Snap to global sidebar width so the rail aligns */
@@ -628,28 +629,18 @@ export default function VoiceAgentSection() {
 
   const [showGenerate, setShowGenerate] = useState(false);
   const [composerText, setComposerText] = useState('');
-  const [genPhase, setGenPhase] = useState<'idle'|'loading'|'typing'>('idle');
-  const [diffHTMLState, setDiffHTMLState] = useState<string>('');   // final highlighted html
-  const [typingVisible, setTypingVisible] = useState<boolean>(false);
-  const [pendingPrompt, setPendingPrompt] = useState<string>('');   // accepted preview (outside modal)
+  const [genPhase, setGenPhase] = useState<'idle'|'loading'>('idle');
+  const basePromptRef = useRef<string>('');
+  const [pendingPrompt, setPendingPrompt] = useState<string>('');
 
-  // propagate assistant name -> AssistantRail list
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   useEffect(() => {
-    if (!activeId) return;
-    try {
-      const raw = localStorage.getItem('agents');
-      const list = raw ? JSON.parse(raw) : [];
-      const idx = Array.isArray(list) ? list.findIndex((a:any)=>a?.id===activeId) : -1;
-      if (idx >= 0 && list[idx]?.name !== data.name) {
-        list[idx] = { ...list[idx], name: data.name };
-        localStorage.setItem('agents', JSON.stringify(list));
-        // ping the rail to update
-        window.dispatchEvent(new CustomEvent('assistant:rename', { detail: { id: activeId, name: data.name }}));
-      }
-    } catch {}
-  }, [data.name, activeId]);
+    const load = () => setVoices(window.speechSynthesis.getVoices());
+    load();
+    (window.speechSynthesis as any).onvoiceschanged = load;
+    return () => { (window.speechSynthesis as any).onvoiceschanged = null; };
+  }, []);
 
-  // listen for active selection from rail
   useEffect(() => {
     const handler = (e: Event) => setActiveId((e as CustomEvent<string>).detail);
     window.addEventListener('assistant:active', handler as EventListener);
@@ -660,10 +651,9 @@ export default function VoiceAgentSection() {
     if (!activeId) return;
     setData(loadAgentData(activeId));
     try { localStorage.setItem(ACTIVE_KEY, activeId); } catch {}
-    setPendingPrompt('');
   }, [activeId]);
 
-  useEffect(() => { if (activeId) saveAgentData(activeId, pendingPrompt ? { ...data, systemPrompt: pendingPrompt } : data); }, [activeId, data, pendingPrompt]);
+  useEffect(() => { if (activeId) saveAgentData(activeId, data); }, [activeId, data]);
 
   useEffect(() => {
     (async () => {
@@ -705,7 +695,7 @@ export default function VoiceAgentSection() {
   async function doSave(){
     if (!activeId) { setToast('Select or create an agent'); return; }
     setSaving(true); setToast('');
-    try { await apiSave(activeId, pendingPrompt ? { ...data, systemPrompt: pendingPrompt } : data); setToast('Saved'); }
+    try { await apiSave(activeId, data); setToast('Saved'); }
     catch { setToast('Save failed'); }
     finally { setSaving(false); setTimeout(()=>setToast(''), 1400); }
   }
@@ -717,34 +707,35 @@ export default function VoiceAgentSection() {
     finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
   }
 
-  /* ── Generate modal logic ── */
-  function startGenerate() {
-    setGenPhase('loading');
-    setDiffHTMLState('');
-    setTypingVisible(true);
+  function buildPrompt(base: string, extraRaw: string) {
+    const extra = (extraRaw || '').trim();
+    if (!extra) return base;
+    const lines = extra.split(/\n+/).map(s => s.trim()).filter(Boolean).map(s => /[.!?]$/.test(s) ? s : `${s}.`);
+    const block = `
 
-    // fake “generation” + typing phase
-    setTimeout(() => {
-      const newPrompt = buildAIStylePrompt(data.systemPrompt, composerText);
-      const html = diffHTML(data.systemPrompt, newPrompt);
-      // show typing animation placeholder briefly, then reveal highlighted diff
-      setGenPhase('typing');
-      setTimeout(() => {
-        setDiffHTMLState(html);
-        setTypingVisible(false);
-        setGenPhase('idle');
-      }, 900);
-    }, 700);
+[Extra Instructions]
+${lines.map(l => `- ${l}`).join('\n')}
+
+[Behavior]
+- Always respect the Extra Instructions above.
+- Keep replies concise and useful.
+- Ask for missing info before acting.`;
+    return `${base}${block}`;
   }
-  const acceptFromModal = () => {
-    const tmp = stripTags(diffHTMLState || '');
-    setPendingPrompt(tmp);
-    setShowGenerate(false);
-  };
-  const declineFromModal = () => {
-    setDiffHTMLState('');
-    setShowGenerate(false);
-  };
+
+  function startGenerate() {
+    basePromptRef.current = data.systemPrompt;
+    setGenPhase('loading');
+    setTimeout(() => {
+      const merged = buildPrompt(basePromptRef.current, composerText);
+      setPendingPrompt(merged);
+      setShowGenerate(false);
+      setGenPhase('idle');
+      setToast('Preview generated – click Apply to save');
+    }, 500);
+  }
+  const acceptDiff = () => { setData(p => ({ ...p, systemPrompt: pendingPrompt })); setPendingPrompt(''); };
+  const declineDiff = () => { setPendingPrompt(''); };
 
   function sendChat() {
     const txt = chatInput.trim();
@@ -757,7 +748,6 @@ export default function VoiceAgentSection() {
 
   function speakPreview(line?: string){
     const u = new SpeechSynthesisUtterance(line || `Hi, I'm ${data.name || 'your assistant'}. This is a preview.`);
-    const voices = window.speechSynthesis.getVoices();
     const byName = voices.find(v => v.name.toLowerCase().includes((data.voiceName || '').split(' ')[0]?.toLowerCase() || ''));
     const en = voices.find(v => v.lang?.startsWith('en'));
     if (byName) u.voice = byName; else if (en) u.voice = en;
@@ -882,14 +872,14 @@ export default function VoiceAgentSection() {
                     {pendingPrompt && (
                       <>
                         <button
-                          onClick={()=>{ setData(p => ({ ...p, systemPrompt: pendingPrompt })); setPendingPrompt(''); setToast('Applied'); setTimeout(()=>setToast(''), 1200); }}
+                          onClick={acceptDiff}
                           className="h-9 px-3 rounded-[10px] font-semibold"
                           style={{ background:CTA, color:'#0a0f0d' }}
                         >
                           Apply
                         </button>
                         <button
-                          onClick={()=> setPendingPrompt('')}
+                          onClick={declineDiff}
                           className="h-9 px-3 rounded-[10px]"
                           style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
                         >
@@ -900,7 +890,7 @@ export default function VoiceAgentSection() {
                     <button
                       className="inline-flex items-center gap-2 rounded-[10px] text-sm"
                       style={{ height:36, padding:'0 12px', background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                      onClick={()=>{ setComposerText(''); setShowGenerate(true); setGenPhase('idle'); setDiffHTMLState(''); setTypingVisible(false); }}
+                      onClick={()=>{ setComposerText(''); setShowGenerate(true); setGenPhase('idle'); }}
                     >
                       <Wand2 className="w-4 h-4" /> Generate
                     </button>
@@ -957,31 +947,40 @@ export default function VoiceAgentSection() {
             </div>
 
             <div className="grid grid-cols-1 mt-[var(--s-4)]">
-              <div className="flex items-center gap-2">
-                <div className="flex-1">
-                  <div className="mb-[var(--s-2)] text-[12.5px]">Voice</div>
-                  <StyledSelect value={data.voiceName} onChange={setField('voiceName')} options={openAiVoices} placeholder="— Choose —" />
-                </div>
-                <div className="pt-6 flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={()=>speakPreview(`This is ${data.voiceName || 'the selected'} voice preview.`)}
-                    className="w-9 h-9 rounded-full grid place-items-center"
-                    aria-label="Play voice"
-                    style={{ background: CTA, color:'#0a0f0d' }}
-                  >
-                    <Play className="w-4 h-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={stopPreview}
-                    className="w-9 h-9 rounded-full grid place-items-center border"
-                    aria-label="Stop preview"
-                    style={{ background: 'var(--panel-bg)', color:'var(--text)', borderColor:'var(--input-border)' }}
-                  >
-                    <Square className="w-4 h-4" />
-                  </button>
-                </div>
+              <div>
+                <div className="mb-[var(--s-2)] text-[12.5px]">Voice</div>
+                <StyledSelect
+                  value={data.voiceName}
+                  onChange={setField('voiceName')}
+                  options={openAiVoices}
+                  placeholder="— Choose —"
+                  menuTop={
+                    <div className="flex items-center justify-between px-3 py-2 rounded-[10px]"
+                         style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}>
+                      <div className="text-xs" style={{ color:'var(--text-muted)' }}>Preview</div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={()=>speakPreview(`This is ${data.voiceName || 'the selected'} voice preview.`)}
+                          className="w-8 h-8 rounded-full grid place-items-center"
+                          aria-label="Play voice"
+                          style={{ background: CTA, color:'#0a0f0d' }}
+                        >
+                          <Play className="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={stopPreview}
+                          className="w-8 h-8 rounded-full grid place-items-center border"
+                          aria-label="Stop preview"
+                          style={{ background: 'var(--panel-bg)', color:'var(--text)', borderColor:'var(--input-border)' }}
+                        >
+                          <Square className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  }
+                />
               </div>
             </div>
           </Section>
@@ -1016,69 +1015,45 @@ export default function VoiceAgentSection() {
         </div>
       </div>
 
-      {/* Generate overlay — same shell as AssistantRail, with typing + diff */}
+      {/* Generate overlay — EXACT same style as AssistantRail modals */}
       {showGenerate && (
         <RailModalShell>
           <RailModalHeader title="Compose Prompt" icon={<Wand2 className="w-5 h-5" />} />
-          <div className="px-6 py-5 grid gap-3">
-            <label className="text-xs" style={{ color:'var(--text-muted)' }}>
-              Add instructions in plain language (we’ll translate to AI-friendly format):
+          <div className="px-6 py-5">
+            <label className="block text-xs mb-1" style={{ color:'var(--text-muted)' }}>
+              Add extra instructions (persona, tone, rules, tools)
             </label>
             <textarea
               value={composerText}
               onChange={(e)=>setComposerText(e.target.value)}
               className="w-full rounded-[10px] px-3 py-2 outline-none"
-              style={{ minHeight: 120, background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-              placeholder="e.g., Friendly tone, crisp answers. Confirm account ID before actions."
+              style={{ minHeight: 180, background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+              placeholder="e.g., Friendly, crisp answers. Confirm account ID before actions."
               autoFocus
             />
-
-            {/* Result box */}
-            <div className="rounded-[10px] p-3"
-                 style={{ minHeight: 180, background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}>
-              {genPhase !== 'idle' && typingVisible && (
-                <div className="text-sm typing-dots" style={{ color:'var(--text-muted)' }}>
-                  generating
-                </div>
-              )}
-              {!typingVisible && diffHTMLState && (
-                <div className="text-sm leading-6" dangerouslySetInnerHTML={{ __html: diffHTMLState }} />
-              )}
-            </div>
           </div>
-
           <div className="px-6 pb-6 flex gap-3">
             <button
-              onClick={declineFromModal}
-              disabled={genPhase!=='idle' && genPhase!=='typing'}
-              className="w-full h-[44px] rounded-[10px]"
+              onClick={()=> setShowGenerate(false)}
+              disabled={genPhase==='loading'}
+              className="w-full h-[44px] rounded-[10px] font-semibold"
               style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.9)', color:'var(--text)' }}
             >
-              {diffHTMLState ? 'Decline' : 'Cancel'}
+              Cancel
             </button>
             <button
               onClick={startGenerate}
-              disabled={genPhase==='loading' || genPhase==='typing'}
-              className="w-full h-[44px] rounded-[10px] font-semibold inline-flex items-center justify-center gap-2"
-              style={{ background:CTA, color:'#fff' }}
-            >
-              {genPhase==='loading' ? (<><Loader2 className="w-4 h-4 animate-spin" /> Generating</>) :
-               genPhase==='typing' ? (<><Loader2 className="w-4 h-4 animate-spin" /> Formatting</>) :
-               'Generate'}
-            </button>
-            <button
-              onClick={acceptFromModal}
-              disabled={!diffHTMLState || genPhase!=='idle'}
+              disabled={genPhase==='loading'}
               className="w-full h-[44px] rounded-[10px] font-semibold"
-              style={{ background:'#0ea5e9', color:'#fff' }}
+              style={{ background:'#59d9b3', color:'#fff' }}
             >
-              Accept Changes
+              {genPhase==='loading' ? 'Generating…' : 'Generate'}
             </button>
           </div>
         </RailModalShell>
       )}
 
-      {/* Call drawer (unchanged) */}
+      {/* Call drawer */}
       {createPortal(
         <>
           <div
