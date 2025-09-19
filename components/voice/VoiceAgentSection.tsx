@@ -373,6 +373,13 @@ function StyledSelect({
 
       {open && typeof document !== 'undefined' && createPortal(
         <>
+          {/* click-catcher so nothing underneath can be hovered/clicked */}
+          <div
+            className="fixed inset-0 z-[2147482999]"
+            onMouseDown={()=>setOpen(false)}
+            style={{ background:'transparent' }}
+          />
+
           <div
             className="va-menu"
             style={{
@@ -381,7 +388,13 @@ function StyledSelect({
               left: pos.left,
               width: pos.width,
               zIndex: 2147483000,
-              overflow:'hidden'
+              overflow:'hidden',
+              background:'var(--panel)',          // ensure opaque
+              border:'1px solid rgba(89,217,179,.20)',
+              borderRadius:10,
+              boxShadow:'0 36px 90px rgba(0,0,0,.55)',
+              isolation:'isolate',                // confine blending to menu
+              contain:'paint'
             }}
           >
             {menuTop ? <div className="px-3 pt-3">{menuTop}</div> : null}
@@ -421,7 +434,8 @@ function StyledSelect({
                         color:'var(--text)',
                         border:'1px solid transparent',
                         cursor:o.disabled?'not-allowed':'pointer',
-                        isolation:'isolate'
+                        position:'relative',
+                        isolation:'isolate'        // confine the green overlay to the row
                       }}
                     >
                       {o.disabled ? <Lock className="w-3.5 h-3.5" /> :
@@ -446,7 +460,7 @@ function StyledSelect({
               opacity:0; pointer-events:none;
               transition: opacity .18s ease, transform .18s ease;
               mix-blend-mode:screen;
-              z-index:-1;
+              z-index:auto;
             }
             .va-dd-item::before{
               content:'';
@@ -455,7 +469,8 @@ function StyledSelect({
               background:radial-gradient(60% 80% at 50% 100%, rgba(89,217,179,.45) 0%, rgba(89,217,179,0) 100%);
               opacity:0; pointer-events:none;
               transition:opacity .18s ease;
-              filter:blur(6px); z-index:-1;
+              filter:blur(6px);
+              z-index:auto;
             }
             .va-dd-item:hover::after{ opacity:var(--hover-overlay); }
             .va-dd-item:hover::before{ opacity:.75; }
@@ -464,6 +479,65 @@ function StyledSelect({
         </>,
         document.body
       )}
+    </div>
+  );
+}
+
+/* ─────────── Modal bits to match AssistantRail exactly ─────────── */
+function RailModalShell({ children }:{ children:React.ReactNode }) {
+  if (typeof document === 'undefined') return null;
+  return createPortal(
+    <>
+      <motion.div
+        className="fixed inset-0 z-[100000]"
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        style={{ background:'rgba(6,8,10,.62)', backdropFilter:'blur(6px)' }}
+      />
+      <div className="fixed inset-0 z-[100001] flex items-center justify-center px-4">
+        <motion.div
+          initial={{ opacity: 0, y: 10, scale: 0.98 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: 8, scale: 0.98 }}
+          transition={{ duration: .18, ease: 'easeOut' }}
+          className="w-full max-w-[560px] rounded-[10px] overflow-hidden"
+          style={{
+            background: 'var(--panel)',
+            color: 'var(--text)',
+            border: '1px solid rgba(89,217,179,.20)',
+            maxHeight: '86vh'
+          }}
+        >
+          {children}
+        </motion.div>
+      </div>
+    </>,
+    document.body
+  );
+}
+function RailModalHeader({ icon, title, subtitle }:{
+  icon:React.ReactNode; title:string; subtitle?:string;
+}) {
+  return (
+    <div
+      className="flex items-center justify-between px-6 py-4"
+      style={{
+        background:`linear-gradient(90deg,var(--panel) 0%,color-mix(in oklab,var(--panel) 97%, white 3%) 50%,var(--panel) 100%)`,
+        borderBottom:`1px solid rgba(89,217,179,.20)`
+      }}
+    >
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-xl grid place-items-center" style={{ background:'var(--brand-weak)' }}>
+          <span style={{ color: '#59d9b3', filter:'drop-shadow(0 0 8px rgba(89,217,179,.35))' }}>
+            {icon}
+          </span>
+        </div>
+        <div className="min-w-0">
+          <div className="text-lg font-semibold" style={{ color:'var(--text)' }}>{title}</div>
+          {subtitle && <div className="text-xs" style={{ color:'var(--text-muted)' }}>{subtitle}</div>}
+        </div>
+      </div>
+      {/* no X */}
+      <span className="w-5 h-5" />
     </div>
   );
 }
@@ -942,77 +1016,41 @@ ${lines.map(l => `- ${l}`).join('\n')}
       </div>
 
       {/* Generate overlay — EXACT same style as AssistantRail modals */}
-      {showGenerate && typeof document !== 'undefined' && createPortal(
-        <>
-          <motion.div
-            className="va-blur-layer open"
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            onClick={()=> genPhase==='idle' && setShowGenerate(false)}
-          />
-          <div className="fixed inset-0 z-[100001] flex items-center justify-center px-4">
-            <motion.div
-              initial={{ opacity: 0, y: 10, scale: 0.98 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 8, scale: 0.98 }}
-              transition={{ duration: .18, ease: 'easeOut' }}
-              className="w-full max-w-[760px] rounded-[10px] overflow-hidden"
-              style={{
-                background: 'var(--panel)',
-                color: 'var(--text)',
-                border: '1px solid rgba(89,217,179,.20)',
-                boxShadow:'0 28px 80px rgba(0,0,0,.70)',
-                maxHeight: '86vh'
-              }}
-              onClick={(e)=>e.stopPropagation()}
-              role="dialog" aria-modal
-            >
-              <div
-                className="flex items-center justify-between px-6 py-4"
-                style={{
-                  background:`linear-gradient(90deg,var(--panel) 0%,color-mix(in oklab,var(--panel) 97%, white 3%) 50%,var(--panel) 100%)`,
-                  borderBottom:`1px solid rgba(89,217,179,.20)`
-                }}
-              >
-                <div className="text-lg font-semibold">Compose Prompt</div>
-                <button onClick={()=> genPhase==='idle' && setShowGenerate(false)} className="p-1 rounded hover:opacity-80" aria-label="Close">
-                  <X className="w-5 h-5" style={{ color:'var(--text-muted)' }} />
-                </button>
-              </div>
-
-              <div className="p-4 md:p-6 grid gap-3">
-                <label className="text-xs" style={{ color:'var(--text-muted)' }}>
-                  Add extra instructions (persona, tone, rules, tools):
-                </label>
-                <textarea
-                  value={composerText}
-                  onChange={(e)=>setComposerText(e.target.value)}
-                  className="w-full bg-transparent outline-none rounded-[10px] px-3 py-2"
-                  placeholder="e.g., Friendly, crisp answers. Confirm account ID before actions."
-                  style={{ minHeight: 180, background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                />
-                <div className="flex items-center justify-end gap-2">
-                  <button
-                    onClick={()=>setShowGenerate(false)}
-                    disabled={genPhase==='loading'}
-                    className="h-9 px-3 rounded-[10px]"
-                    style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={startGenerate}
-                    disabled={genPhase==='loading'}
-                    className="h-9 px-4 rounded-[10px] font-semibold"
-                    style={{ background:CTA, color:'#0a0f0d' }}
-                  >
-                    {genPhase==='loading' ? 'Generating…' : 'Generate'}
-                  </button>
-                </div>
-              </div>
-            </motion.div>
+      {showGenerate && (
+        <RailModalShell>
+          <RailModalHeader title="Compose Prompt" icon={<Wand2 className="w-5 h-5" />} />
+          <div className="px-6 py-5">
+            <label className="block text-xs mb-1" style={{ color:'var(--text-muted)' }}>
+              Add extra instructions (persona, tone, rules, tools)
+            </label>
+            <textarea
+              value={composerText}
+              onChange={(e)=>setComposerText(e.target.value)}
+              className="w-full rounded-[10px] px-3 py-2 outline-none"
+              style={{ minHeight: 180, background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+              placeholder="e.g., Friendly, crisp answers. Confirm account ID before actions."
+              autoFocus
+            />
           </div>
-        </>,
-        document.body
+          <div className="px-6 pb-6 flex gap-3">
+            <button
+              onClick={()=> setShowGenerate(false)}
+              disabled={genPhase==='loading'}
+              className="w-full h-[44px] rounded-[10px] font-semibold"
+              style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.9)', color:'var(--text)' }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={startGenerate}
+              disabled={genPhase==='loading'}
+              className="w-full h-[44px] rounded-[10px] font-semibold"
+              style={{ background:'#59d9b3', color:'#fff' }}
+            >
+              {genPhase==='loading' ? 'Generating…' : 'Generate'}
+            </button>
+          </div>
+        </RailModalShell>
       )}
 
       {/* Call drawer */}
