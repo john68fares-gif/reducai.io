@@ -1,7 +1,17 @@
 // pages/improve.tsx
+// Improve: tune/test/compare Builder agents (model/temp/system) with live chat.
+// - Uses Supabase user id everywhere for ownership scoping.
+// - Talks to /api/improve/chat (App Router) for real AI responses (messages[]).
+// - Adds a bouncing "… typing" indicator during requests.
+// - "Show Prompt" = one human sentence (no label blocks) with Vapi-like scramble.
+// - Add Rule inserts into ### RULES and replays the scramble.
+// - On mobile, Pictures/Videos/Files collapse into one "+" unified picker.
+
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import React, {
+  useEffect, useMemo, useRef, useState, useCallback
+} from 'react';
 import Link from 'next/link';
 import {
   Bot, Search, Loader2, Save, Trash2, RefreshCw, X,
@@ -30,7 +40,7 @@ type Version = {
   temperature: number;
   system: string;
 };
-type ChatMsg = { role: 'user' | 'assistant' | 'system'; content: string };
+type ChatMsg = { role: 'user' | 'assistant'; content: string };
 type Attachment = { id: string; name: string; mime: string; url?: string; size?: number };
 
 /* ───────── Styles ───────── */
@@ -68,11 +78,11 @@ function labelFromChange(prevSys: string, nextSys: string): string {
   return 'Prompt edited';
 }
 
-/* Extract Goal + Rules heuristically */
+/* Extract "goal" & "rules" from system (heuristic, non-destructive) */
 function parseGoal(system: string, name: string): string {
   const m1 = system.match(/^\s*(?:#+\s*)?(?:goal|mission|purpose)\s*[:\-]\s*(.+)$/im);
   if (m1) return m1[1].trim();
-  return `help the user with ${name || 'their tasks'} efficiently and clearly.`;
+  return `help the user with ${name || 'their tasks'} clearly and efficiently`;
 }
 function parseRules(system: string): string[] {
   const rulesBlock = system.match(/^\s*(?:#{2,3}\s*rules|rules\s*:)\s*([\s\S]+?)(?:\n#{1,3}\s|\n{2,}|$)/im)?.[1];
@@ -81,59 +91,10 @@ function parseRules(system: string): string[] {
     .map(l => l.trim())
     .filter(l => /^[-•*]\s+/.test(l) || /^\d+\)\s+/.test(l))
     .map(l => l.replace(/^[-•*]\s+/, '').replace(/^\d+\)\s+/, '').trim());
-  return Array.from(new Set(lines)).slice(0, 12);
+  return Array.from(new Set(lines)).slice(0, 10);
 }
 
-/* Vapi-ish scramble reveal */
-function ScrambleText({ text, fps = 22, jitter = [12, 26] }: { text: string; fps?: number; jitter?: [number, number] }) {
-  const [display, setDisplay] = useState(text);
-  useEffect(() => {
-    let frame = 0;
-    const chars = '!<>-_\\/[]{}—=+*^?#§$%&@';
-    const from = ''.padEnd(text.length, ' ');
-    const to = text;
-    const len = Math.max(from.length, to.length);
-    const [minJ, maxJ] = jitter;
-    const queue = Array.from({ length: len }, (_, i) => {
-      const start = Math.floor(Math.random() * (minJ));
-      const end = start + Math.floor(Math.random() * (maxJ - minJ) + minJ);
-      return { from: from[i] || ' ', to: to[i] || ' ', start, end, char: '' as string };
-    });
-    let tid = 0 as any;
-    const step = Math.max(18, Math.round(1000 / fps));
-    const tick = () => {
-      let out = ''; let done = 0;
-      for (let i = 0; i < len; i++) {
-        const q = queue[i];
-        if (frame >= q.end) { done++; out += q.to; }
-        else if (frame >= q.start) { q.char = chars[Math.floor(Math.random() * chars.length)]; out += q.char; }
-        else { out += q.from; }
-      }
-      setDisplay(out); frame++;
-      if (done < len) tid = setTimeout(tick, step);
-    };
-    tid = setTimeout(tick, step);
-    return () => clearTimeout(tid);
-  }, [text, fps, jitter]);
-  return <span className="whitespace-pre-wrap">{display}</span>;
-}
-
-/* Typing dots (lane indicator) */
-function TypingDots({ className = '' }: { className?: string }) {
-  return (
-    <span className={`${className} inline-flex items-center gap-[2px]`} aria-label="typing">
-      <i className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: 'var(--text)', animationDelay: '0ms' }} />
-      <i className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: 'var(--text)', animationDelay: '120ms' }} />
-      <i className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: 'var(--text)', animationDelay: '240ms' }} />
-      <style jsx>{`
-        @keyframes bounce { 0%,80%,100% { transform: translateY(0) } 40% { transform: translateY(-3px) } }
-        .animate-bounce { animation: bounce 1.2s infinite ease-in-out; display:inline-block }
-      `}</style>
-    </span>
-  );
-}
-
-/* Compose Builder-style system */
+/* Compose Builder-style SYSTEM with optional local memory */
 function composeSystem(base: string, pre: string, post: string, memory: string | null) {
   const blocks: string[] = [];
   if (pre.trim()) blocks.push(`### PRE\n${pre.trim()}`);
@@ -141,6 +102,58 @@ function composeSystem(base: string, pre: string, post: string, memory: string |
   blocks.push(`### SYSTEM\n${(base || '').trim()}`);
   if (post.trim()) blocks.push(`### POST\n${post.trim()}`);
   return blocks.join('\n\n').trim();
+}
+
+/* Vapi-like scramble text (slower, readable) */
+function VapiScramble({ text, jitter = 900, className = '' }: { text: string; jitter?: number; className?: string }) {
+  const [out, setOut] = useState(text);
+  useEffect(() => {
+    const chars = '!<>-_\\/[]{}—=+*^?#%$&|~';
+    const src = text ?? '';
+    // Duration scales a bit with length, clamped for comfort.
+    const duration = Math.min(2200, Math.max(700, jitter + src.length * 8));
+    const start = performance.now();
+    let raf = 0;
+
+    const step = () => {
+      const now = performance.now();
+      const t = (now - start) / duration;
+      if (t >= 1) { setOut(src); return; }
+
+      // Fraction of characters resolved.
+      const resolved = Math.floor(src.length * t);
+      let s = '';
+      for (let i = 0; i < src.length; i++) {
+        if (i < resolved) s += src[i];
+        else {
+          // Keep width stable with random glyphs; swap a few per frame.
+          s += chars[Math.floor(Math.random() * chars.length)];
+        }
+      }
+      setOut(s);
+      raf = requestAnimationFrame(step);
+    };
+    setOut(src.replace(/./g, () => chars[Math.floor(Math.random() * chars.length)])); // not blank
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [text, jitter]);
+
+  return <span className={className} style={{ whiteSpace: 'pre-wrap' }}>{out}</span>;
+}
+
+/* Typing dots (…) */
+function TypingDots({ className = '' }: { className?: string }) {
+  return (
+    <span className={`${className} inline-flex items-center gap-[3px]`} aria-label="typing">
+      <i className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: 'var(--text)', animationDelay: '0ms' }} />
+      <i className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: 'var(--text)', animationDelay: '140ms' }} />
+      <i className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: 'var(--text)', animationDelay: '280ms' }} />
+      <style jsx>{`
+        @keyframes bounce { 0%,80%,100% { transform: translateY(0) } 40% { transform: translateY(-3px) } }
+        .animate-bounce { animation: bounce 1.2s infinite ease-in-out; display:inline-block }
+      `}</style>
+    </span>
+  );
 }
 
 /* ───────── Component ───────── */
@@ -153,7 +166,9 @@ export default function Improve() {
       const id = data?.user?.id || null;
       setUserId(id);
       if (id) {
-        try { document.cookie = `ra_uid=${encodeURIComponent(id)}; Path=/; Max-Age=31536000`; } catch {}
+        try {
+          document.cookie = `ra_uid=${encodeURIComponent(id)}; Path=/; Max-Age=31536000`;
+        } catch {}
       }
     })();
   }, []);
@@ -284,7 +299,7 @@ export default function Improve() {
     setSaving(true);
     try {
       const prev = list.find(b => b.id === selectedId);
-      // snapshot first (local)
+      // snapshot first
       const v: Version = { id: `v_${Date.now()}`, ts: Date.now(), label: labelFromChange(prev?.system || '', system), name, model, temperature, system };
       const next = [v, ...versions].slice(0, 80);
       setVersions(next);
@@ -303,9 +318,11 @@ export default function Improve() {
         : b
       ));
       setDirty(false);
-    } catch {
+    } catch (e) {
       alert('Failed to save');
-    } finally { setSaving(false); }
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function deleteSelected() {
@@ -319,7 +336,9 @@ export default function Improve() {
       });
       setList(cur => cur.filter(b => b.id !== selectedId));
       setSelectedId(null);
-    } catch { alert('Failed to delete'); }
+    } catch {
+      alert('Failed to delete');
+    }
   }
 
   /* Memory heuristic from chat */
@@ -333,7 +352,7 @@ export default function Improve() {
     try { localStorage.setItem(memoryKey(userId, selected.id), mem); } catch {}
   }
 
-  /* File helpers */
+  /* Files → attachments (UI sugar; /api/improve/chat currently ignores media) */
   function resetPickerValue(inp: HTMLInputElement | null) { try { if (inp) inp.value = ''; } catch {} }
   function fileToAttachment(file: File): Promise<Attachment> {
     return new Promise(resolve => {
@@ -366,81 +385,90 @@ export default function Improve() {
     resetPickerValue(unifiedRef.current);
   }
 
-  /* === AI chat: Builder-compatible endpoint === */
-  const sendLane = useCallback(async (which: 'A' | 'B', text: string, atts: Attachment[]) => {
+  /* === AI: /api/improve/chat (messages[]) === */
+  const sendLane = useCallback(async (which: 'A' | 'B', text: string) => {
     const laneVersion = which === 'A'
       ? { system, model, temperature }
       : (laneB ? { system: laneB.system, model: laneB.model, temperature: laneB.temperature } : null);
-    if (!laneVersion || !selectedId) return;
+    if (!laneVersion) return;
 
     const sys = composeSystem(laneVersion.system, prePrompt, postPrompt, useMemory ? memoryText : '');
 
-    // optimistic user message
-    if (text || atts.length) {
-      const msg = text || `(sent ${atts.length} attachment${atts.length > 1 ? 's' : ''})`;
-      if (which === 'A') setMsgsA(cur => [...cur, { role: 'user', content: msg }]);
-      else setMsgsB(cur => [...cur, { role: 'user', content: msg }]);
+    // Build chat history (state does NOT yet include this new user msg)
+    const base = which === 'A' ? msgsA : msgsB;
+    const history: ChatMsg[] = [
+      ...base,
+      ...(text ? [{ role: 'user' as const, content: text }] : []),
+    ].slice(-16); // keep it light
+
+    // optimistic add user
+    if (text) {
+      if (which === 'A') setMsgsA(cur => [...cur, { role: 'user', content: text }]);
+      else setMsgsB(cur => [...cur, { role: 'user', content: text }]);
     }
     setLaneTyping(t => ({ ...t, [which]: true }));
 
     try {
-      const resp = await fetch('/api/assistants/chat', {
+      const resp = await fetch('/api/improve/chat', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(userId ? { 'x-owner-id': userId } : {}),
-        },
+        headers: { 'Content-Type': 'application/json' },
+        cache: 'no-store',
         body: JSON.stringify({
-          assistantId: selectedId,     // helps server side if you load by id
-          system: sys,
+          agentId: selectedId,          // parity with route (not required)
           model: laneVersion.model,
           temperature: laneVersion.temperature,
-          input: text || '',
-          attachments: atts.map(a => ({ name: a.name, mime: a.mime, url: a.url, size: a.size })),
+          system: sys,
+          messages: history,
+          guardLevel: 'provider-only',
         }),
       });
 
-      const raw = await resp.text();
-      let parsed: any = null; try { parsed = raw ? JSON.parse(raw) : null; } catch {}
-      const reply = resp.ok
-        ? sanitize(typeof parsed?.text === 'string' ? parsed.text :
-                   typeof parsed?.message === 'string' ? parsed.message : (raw || '[no response]'))
-        : `Error ${resp.status}${resp.statusText ? ` ${resp.statusText}` : ''}${
-            parsed?.error ? `: ${parsed.error}` :
-            parsed?.message ? `: ${parsed.message}` :
-            raw ? `: ${raw.slice(0, 400)}` : ''
-          }`;
+      const data = await resp.json().catch(() => null);
+      const reply = typeof data?.content === 'string'
+        ? sanitize(data.content)
+        : (data?.message ? String(data.message) : (resp.ok ? '[no response]' : 'Request failed.'));
 
       if (which === 'A') {
         setMsgsA(cur => [...cur, { role: 'assistant', content: reply }]);
-        updateLocalMemory([...msgsA, { role: 'user', content: text }, { role: 'assistant', content: reply }]);
+        updateLocalMemory([...history, { role: 'assistant', content: reply }]);
       } else {
         setMsgsB(cur => [...cur, { role: 'assistant', content: reply }]);
-        updateLocalMemory([...msgsB, { role: 'user', content: text }, { role: 'assistant', content: reply }]);
+        updateLocalMemory([...history, { role: 'assistant', content: reply }]);
       }
-    } catch {
-      const fallback = 'Could not reach /api/assistants/chat.';
+    } catch (e) {
+      const fallback = 'Could not reach /api/improve/chat.';
       if (which === 'A') setMsgsA(cur => [...cur, { role: 'assistant', content: fallback }]);
       else setMsgsB(cur => [...cur, { role: 'assistant', content: fallback }]);
     } finally {
       setLaneTyping(t => ({ ...t, [which]: false }));
     }
-  }, [system, model, temperature, prePrompt, postPrompt, useMemory, memoryText, msgsA, msgsB, laneB, userId, selectedId]);
+  }, [system, model, temperature, prePrompt, postPrompt, useMemory, memoryText, msgsA, msgsB, laneB, selectedId]);
 
   async function sendPrompt() {
     const text = (input || '').trim();
-    const atts = currentAttachments();
-    if (!text && atts.length === 0) return;
-
-    setInput(''); setPics([]); setVids([]); setFiles([]);
+    if (!text && currentAttachments().length === 0) return; // attachments currently visual-only
+    setInput('');
+    setPics([]); setVids([]); setFiles([]);
     if (sendBoth && laneB) {
-      await Promise.all([sendLane('A', text, atts), sendLane('B', text, atts)]);
+      await Promise.all([sendLane('A', text), sendLane('B', text)]);
     } else {
-      await sendLane(activeLane, text, atts);
+      await sendLane(activeLane, text);
     }
   }
 
-  /* Prompt panel helpers (natural sentences + add rule) */
+  /* Sentence-style prompt preview */
+  const goal  = useMemo(() => parseGoal(system, name), [system, name]);
+  const rules = useMemo(() => parseRules(system), [system]);
+  const previewSentence = useMemo(() => {
+    const tone =
+      temperature <= 0.25 ? 'precise' : temperature >= 0.75 ? 'creative' : 'balanced';
+    const rulesPhrase =
+      (rules.length ? rules : ['keep replies clear and concise']).join('; ');
+    // IMPORTANT: one clean sentence, no labels:
+    return `You’re called ${name || 'test'}. Your goal is to ${goal}. You run on ${model} with a ${tone} tone, and you follow these rules: ${rulesPhrase}.`;
+  }, [name, model, temperature, goal, rules]);
+
+  /* Insert rule helper (keeps ### RULES if present) */
   function insertRuleIntoSystem(rule: string) {
     setSystem((s) => {
       const r = rule.trim();
@@ -454,19 +482,15 @@ export default function Improve() {
     });
   }
 
-  const goal = useMemo(() => parseGoal(system, name), [system, name]);
-  const rules = useMemo(() => parseRules(system), [system]);
-
-  const naturalPrompt = useMemo(() => {
-    const intro = `You’re called ${name || 'test'}. Keep a ${
-      temperature <= 0.25 ? 'precise' : temperature >= 0.75 ? 'creative' : 'balanced'
-    } tone on ${model}.`;
-    const g = `Your goal is to ${goal}`;
-    const rs = (rules.length ? rules : ['follow the base system instructions and be concise.'])
-      .map(r => `• ${r}`)
-      .join('\n');
-    return `${intro}\n${g}\nFollow these rules:\n${rs}`;
-  }, [name, temperature, model, goal, rules]);
+  const [newRule, setNewRule] = useState('');
+  const [scrambleKey, setScrambleKey] = useState(0);
+  function addRule() {
+    const r = newRule.trim();
+    if (!r) return;
+    insertRuleIntoSystem(r);
+    setNewRule('');
+    setScrambleKey(k => k + 1); // replay VapiScramble
+  }
 
   /* UI */
   return (
@@ -476,7 +500,7 @@ export default function Improve() {
         style={{ borderColor: 'var(--border)', background: 'color-mix(in oklab, var(--bg) 92%, transparent)' }}>
         <div className="max-w-[1600px] mx-auto flex items-center gap-3">
           <MessageSquare className="w-5 h-5" />
-          <h1 className="text-[18px] font-semibold">{selected ? (selected.name || 'Assistant') : 'Tuning'}</h1>
+          <h1 className="text-[18px] font-semibold">{selected ? (selected.name || 'Assistant') : 'Agent Tuning'}</h1>
 
           <span className="text-xs px-2 py-[2px] rounded-full" style={{ background: 'color-mix(in oklab, var(--text) 8%, transparent)', border: '1px solid var(--border)' }}>
             {saving ? 'Saving…' : dirty ? 'Unsaved changes' : 'Saved ✓'}
@@ -503,7 +527,7 @@ export default function Improve() {
         </div>
       </header>
 
-      {/* 3-col layout */}
+      {/* 3-column layout */}
       <div className="max-w-[1600px] mx-auto px-6 py-5" style={{ height: 'calc(100vh - 62px)' }}>
         <div className="grid gap-3" style={{ gridTemplateColumns: '300px 1fr 300px', height: '100%' }}>
           {/* Left rail */}
@@ -519,40 +543,52 @@ export default function Improve() {
               </div>
               <div className="mt-2">
                 <select value={sort} onChange={(e) => setSort(e.target.value as any)} className="px-2 py-1 rounded-md text-xs" style={CARD}>
-                  <option value="updated_desc">Recent</option>
+                                   <option value="updated_desc">Recent</option>
                   <option value="name_asc">Name</option>
                 </select>
               </div>
             </div>
+
             <div className="p-3 overflow-auto" style={{ maxHeight: 'calc(100% - 90px)' }}>
               {!userId ? (
-                <div className="text-sm opacity-80 py-8">Sign in to load your agents.</div>
+                <div className="text-sm opacity-80 py-8">
+                  Sign in to load your agents (scoped by your Supabase user id).
+                </div>
               ) : filtered.length === 0 ? (
                 <div className="text-sm opacity-80 py-8 text-center">
                   No agents for this account.
                   <div className="mt-2">
-                    <Link href="/builder" className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm"
-                      style={{ background: 'var(--brand)', color: '#00120a' }}>
+                    <Link
+                      href="/builder"
+                      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm"
+                      style={{ background: 'var(--brand)', color: '#00120a' }}
+                    >
                       Go to Builder
                     </Link>
                   </div>
                 </div>
               ) : (
                 <ul className="space-y-2">
-                  {filtered.map(b => {
+                  {filtered.map((b) => {
                     const active = selectedId === b.id;
                     return (
                       <li key={b.id}>
                         <button
                           onClick={() => setSelectedId(b.id)}
                           className={`w-full text-left px-3 py-2 rounded-lg text-sm flex items-center gap-2 transition ${active ? 'ring-1' : ''}`}
-                          style={{ ...CARD, borderColor: active ? 'var(--brand)' : 'var(--border)' }}>
-                          <div className="w-8 h-8 rounded-md grid place-items-center" style={{ background: 'rgba(0,0,0,.06)', border: '1px solid var(--border)' }}>
+                          style={{ ...CARD, borderColor: active ? 'var(--brand)' : 'var(--border)' }}
+                        >
+                          <div
+                            className="w-8 h-8 rounded-md grid place-items-center"
+                            style={{ background: 'rgba(0,0,0,.06)', border: '1px solid var(--border)' }}
+                          >
                             <Bot className="w-4 h-4" />
                           </div>
                           <div className="flex-1 min-w-0">
                             <div className="truncate">{b.name || 'Untitled'}</div>
-                            <div className="text-[11px] opacity-60 truncate">{b.model} · {b.id.slice(0, 8)}</div>
+                            <div className="text-[11px] opacity-60 truncate">
+                              {b.model} · {b.id.slice(0, 8)}
+                            </div>
                           </div>
                         </button>
                       </li>
@@ -570,11 +606,22 @@ export default function Improve() {
               <div className="grid gap-3" style={{ gridTemplateColumns: '1.1fr 0.9fr 1fr' }}>
                 <div>
                   <div className="text-xs opacity-70 mb-1">Name</div>
-                  <input value={name} onChange={(e) => setName(e.target.value)} className="w-full px-3 py-2 rounded-md text-[15px]" style={CARD} placeholder="Agent name" />
+                  <input
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    className="w-full px-3 py-2 rounded-md text-[15px]"
+                    style={CARD}
+                    placeholder="Agent name"
+                  />
                 </div>
                 <div>
                   <div className="text-xs opacity-70 mb-1">Model</div>
-                  <select value={model} onChange={(e) => setModel(e.target.value)} className="w-full px-3 py-2 rounded-md" style={CARD}>
+                  <select
+                    value={model}
+                    onChange={(e) => setModel(e.target.value)}
+                    className="w-full px-3 py-2 rounded-md"
+                    style={CARD}
+                  >
                     <option value="gpt-4o">gpt-4o</option>
                     <option value="gpt-4o-mini">gpt-4o-mini</option>
                     <option value="gpt-4.1-mini">gpt-4.1-mini</option>
@@ -583,13 +630,16 @@ export default function Improve() {
                 <div>
                   <div className="text-xs opacity-70 mb-1">Temperature</div>
                   <div className="flex items-center gap-2">
-                    {([0.1, 0.5, 0.9] as const).map(val => {
+                    {([0.1, 0.5, 0.9] as const).map((val) => {
                       const lbl = val === 0.1 ? 'Precise' : val === 0.5 ? 'Balanced' : 'Creative';
                       const active = Math.abs(temperature - val) < 0.01;
                       return (
-                        <button key={val} onClick={() => setTemperature(val)}
+                        <button
+                          key={val}
+                          onClick={() => setTemperature(val)}
                           className={`px-3 py-2 rounded-md text-sm ${active ? 'ring-1' : ''}`}
-                          style={{ ...CARD, borderColor: active ? 'var(--brand)' : 'var(--border)' }}>
+                          style={{ ...CARD, borderColor: active ? 'var(--brand)' : 'var(--border)' }}
+                        >
                           {lbl}
                         </button>
                       );
@@ -614,42 +664,40 @@ export default function Improve() {
                   className="px-3 py-2 rounded-md text-sm"
                   style={CARD}
                 />
-                <button onClick={() => setShowPromptPanel(s => !s)} className="px-3 py-2 rounded-md text-sm" style={{ ...CARD }}>
+                <button
+                  onClick={() => setShowPromptPanel((s) => !s)}
+                  className="px-3 py-2 rounded-md text-sm"
+                  style={{ ...CARD }}
+                >
                   <ChevronDown className="inline w-4 h-4 mr-1" /> {showPromptPanel ? 'Hide prompt' : 'Show prompt'}
                 </button>
               </div>
 
-              {/* Prompt panel: natural sentences + scramble + add rule */}
+              {/* Sentence-style Prompt Preview with Vapi-like scramble + Add rule */}
               {showPromptPanel && (
-                <div className="mt-3 grid gap-3" style={{ gridTemplateColumns: '1fr 1fr' }}>
-                  <div className="col-span-2 p-3 rounded-md" style={CARD}>
-                    <div className="text-sm font-medium mb-2">Prompt preview</div>
+                <div className="mt-3 grid gap-3" style={{ gridTemplateColumns: '1fr' }}>
+                  <div className="p-3 rounded-md" style={CARD}>
                     <div className="text-[13px] leading-6">
-                      <ScrambleText text={naturalPrompt} fps={20} />
+                      <VapiScramble key={scrambleKey} text={previewSentence} jitter={900} />
                     </div>
                     <div className="mt-3 flex items-center gap-2">
                       <input
-                        placeholder="Add rule (press Enter)"
+                        value={newRule}
+                        onChange={(e) => setNewRule(e.target.value)}
                         onKeyDown={(e) => {
-                          const v = (e.currentTarget.value || '').trim();
-                          if (e.key === 'Enter' && v) { insertRuleIntoSystem(v); e.currentTarget.value = ''; }
+                          if (e.key === 'Enter') addRule();
                         }}
+                        placeholder="Add rule (press Enter) → inserts under ### RULES"
                         className="px-3 py-2 rounded-md text-sm flex-1"
                         style={CARD}
                       />
-                      <button
-                        className="px-3 py-2 rounded-md text-sm"
-                        style={CARD}
-                        onClick={() => {
-                          const el = (document.activeElement as HTMLInputElement) || null;
-                          const v = (el?.value || '').trim();
-                          if (v) { insertRuleIntoSystem(v); try { el!.value = ''; } catch {} }
-                        }}
-                      >Add</button>
+                      <button onClick={addRule} className="px-3 py-2 rounded-md text-sm" style={CARD}>
+                        Add
+                      </button>
                     </div>
                   </div>
-                  <div className="col-span-2 text-[12px] opacity-70">
-                    Reads from your saved System prompt. Edits you make here (via “Save + Snapshot”) update this agent and sync across devices.
+                  <div className="text-[12px] opacity-70">
+                    This preview reads from your saved System prompt — no extra schema needed.
                   </div>
                 </div>
               )}
@@ -658,55 +706,83 @@ export default function Improve() {
             {/* Live Test */}
             <div className="p-3 grid gap-3" style={{ ...PANEL, gridTemplateRows: 'auto 1fr auto' }}>
               <div className="flex items-center justify-between">
-                <div className="font-medium flex items-center gap-2"><MessageSquare className="w-4 h-4" /> Live Test</div>
+                <div className="font-medium flex items-center gap-2">
+                  <MessageSquare className="w-4 h-4" /> Live Test
+                </div>
                 <label className="text-sm flex items-center gap-2">
                   <input type="checkbox" checked={sendBoth} onChange={(e) => setSendBoth(e.target.checked)} />
                   Send to both lanes
                 </label>
               </div>
 
-              <div className="grid gap-3" style={{ gridTemplateColumns: laneB ? '1fr 1fr' : '1fr', height: '100%', minHeight: 360 }}>
+              <div
+                className="grid gap-3"
+                style={{ gridTemplateColumns: laneB ? '1fr 1fr' : '1fr', height: '100%', minHeight: 360 }}
+              >
                 {/* Lane A */}
                 <div className="flex flex-col rounded-md border" style={{ ...CARD }}>
-                  <div className="px-3 py-2 border-b flex items-center justify-between" style={{ borderColor: 'var(--border)' }}>
+                  <div
+                    className="px-3 py-2 border-b flex items-center justify-between"
+                    style={{ borderColor: 'var(--border)' }}
+                  >
                     <div className="text-sm font-medium">Lane A (current)</div>
-                    <button onClick={() => setActiveLane('A')} className="text-xs px-2 py-1 rounded" style={CARD}>Focus</button>
+                    <button onClick={() => setActiveLane('A')} className="text-xs px-2 py-1 rounded" style={CARD}>
+                      Focus
+                    </button>
                   </div>
                   <div className="flex-1 overflow-auto p-3 text-sm leading-6">
-                    {msgsA.length === 0 ? <div className="opacity-50">No messages yet.</div> :
+                    {msgsA.length === 0 ? (
+                      <div className="opacity-50">No messages yet.</div>
+                    ) : (
                       msgsA.map((m, i) => (
                         <div key={i} className="mb-2">
-                          <b>{m.role === 'user' ? 'You' : m.role === 'assistant' ? 'AI' : 'Sys'}:</b>{' '}
-                          <span>{m.content}</span>
+                          <b>{m.role === 'user' ? 'You' : 'AI'}:</b> <span>{m.content}</span>
                         </div>
                       ))
-                    }
-                    {laneTyping.A && <div className="mt-1"><TypingDots /></div>}
+                    )}
+                    {laneTyping.A && (
+                      <div className="mt-1">
+                        <TypingDots />
+                      </div>
+                    )}
                   </div>
                 </div>
 
                 {/* Lane B */}
                 {laneB ? (
                   <div className="flex flex-col rounded-md border" style={{ ...CARD }}>
-                    <div className="px-3 py-2 border-b flex items-center justify-between" style={{ borderColor: 'var(--border)' }}>
+                    <div
+                      className="px-3 py-2 border-b flex items-center justify-between"
+                      style={{ borderColor: 'var(--border)' }}
+                    >
                       <div className="text-sm">
-                        <span className="font-medium">Lane B (version):</span> {laneB.label} <span className="opacity-60 text-xs">• {fmtTime(laneB.ts)}</span>
+                        <span className="font-medium">Lane B (version):</span> {laneB.label}{' '}
+                        <span className="opacity-60 text-xs">• {fmtTime(laneB.ts)}</span>
                       </div>
                       <div className="flex items-center gap-2">
-                        <button onClick={() => setActiveLane('B')} className="text-xs px-2 py-1 rounded" style={CARD}>Focus</button>
-                        <button onClick={() => setLaneB(null)} className="text-xs px-2 py-1 rounded" style={CARD}><X className="w-3.5 h-3.5" /></button>
+                        <button onClick={() => setActiveLane('B')} className="text-xs px-2 py-1 rounded" style={CARD}>
+                          Focus
+                        </button>
+                        <button onClick={() => setLaneB(null)} className="text-xs px-2 py-1 rounded" style={CARD}>
+                          <X className="w-3.5 h-3.5" />
+                        </button>
                       </div>
                     </div>
                     <div className="flex-1 overflow-auto p-3 text-sm leading-6">
-                      {msgsB.length === 0 ? <div className="opacity-50">No messages yet.</div> :
+                      {msgsB.length === 0 ? (
+                        <div className="opacity-50">No messages yet.</div>
+                      ) : (
                         msgsB.map((m, i) => (
                           <div key={i} className="mb-2">
-                            <b>{m.role === 'user' ? 'You' : m.role === 'assistant' ? 'AI' : 'Sys'}:</b>{' '}
-                            <span>{m.content}</span>
+                            <b>{m.role === 'user' ? 'You' : 'AI'}:</b> <span>{m.content}</span>
                           </div>
                         ))
-                      }
-                      {laneTyping.B && <div className="mt-1"><TypingDots /></div>}
+                      )}
+                      {laneTyping.B && (
+                        <div className="mt-1">
+                          <TypingDots />
+                        </div>
+                      )}
                     </div>
                   </div>
                 ) : (
@@ -717,8 +793,12 @@ export default function Improve() {
                     onDrop={(e) => {
                       e.preventDefault();
                       const id = e.dataTransfer.getData('text/plain');
-                      const v = versions.find(x => x.id === id);
-                      if (v) { setLaneB(v); setActiveLane('A'); setMsgsB([]); }
+                      const v = versions.find((x) => x.id === id);
+                      if (v) {
+                        setLaneB(v);
+                        setActiveLane('A');
+                        setMsgsB([]);
+                      }
                     }}
                   >
                     Drag a version card here to create Lane B
@@ -732,17 +812,78 @@ export default function Improve() {
                 {!isMobile && (
                   <>
                     <div className="flex items-center gap-2 text-xs">
-                      <button onClick={() => setTab('text')} className={`px-2 py-1 rounded ${tab === 'text' ? 'ring-1' : ''}`} style={{ ...CARD, borderColor: tab === 'text' ? 'var(--brand)' : 'var(--border)' }}>Text</button>
-                      <button onClick={() => { resetPickerValue(picsRef.current); picsRef.current?.click(); setTab('pics'); }} className={`px-2 py-1 rounded ${tab === 'pics' ? 'ring-1' : ''}`} style={{ ...CARD, borderColor: tab === 'pics' ? 'var(--brand)' : 'var(--border)' }}><ImageIcon className="inline w-3.5 h-3.5 mr-1" />Pictures</button>
-                      <button onClick={() => { resetPickerValue(vidsRef.current); vidsRef.current?.click(); setTab('vids'); }} className={`px-2 py-1 rounded ${tab === 'vids' ? 'ring-1' : ''}`} style={{ ...CARD, borderColor: tab === 'vids' ? 'var(--brand)' : 'var(--border)' }}><Film className="inline w-3.5 h-3.5 mr-1" />Videos</button>
-                      <button onClick={() => { resetPickerValue(filesRef.current); filesRef.current?.click(); setTab('files'); }} className={`px-2 py-1 rounded ${tab === 'files' ? 'ring-1' : ''}`} style={{ ...CARD, borderColor: tab === 'files' ? 'var(--brand)' : 'var(--border)' }}><FileText className="inline w-3.5 h-3.5 mr-1" />Files</button>
-                      <div className="ml-auto text-[10px] opacity-50">Tip: drop a version card into the other column to compare</div>
+                      <button
+                        onClick={() => setTab('text')}
+                        className={`px-2 py-1 rounded ${tab === 'text' ? 'ring-1' : ''}`}
+                        style={{ ...CARD, borderColor: tab === 'text' ? 'var(--brand)' : 'var(--border)' }}
+                      >
+                        Text
+                      </button>
+                      <button
+                        onClick={() => {
+                          resetPickerValue(picsRef.current);
+                          picsRef.current?.click();
+                          setTab('pics');
+                        }}
+                        className={`px-2 py-1 rounded ${tab === 'pics' ? 'ring-1' : ''}`}
+                        style={{ ...CARD, borderColor: tab === 'pics' ? 'var(--brand)' : 'var(--border)' }}
+                      >
+                        <ImageIcon className="inline w-3.5 h-3.5 mr-1" />
+                        Pictures
+                      </button>
+                      <button
+                        onClick={() => {
+                          resetPickerValue(vidsRef.current);
+                          vidsRef.current?.click();
+                          setTab('vids');
+                        }}
+                        className={`px-2 py-1 rounded ${tab === 'vids' ? 'ring-1' : ''}`}
+                        style={{ ...CARD, borderColor: tab === 'vids' ? 'var(--brand)' : 'var(--border)' }}
+                      >
+                        <Film className="inline w-3.5 h-3.5 mr-1" />
+                        Videos
+                      </button>
+                      <button
+                        onClick={() => {
+                          resetPickerValue(filesRef.current);
+                          filesRef.current?.click();
+                          setTab('files');
+                        }}
+                        className={`px-2 py-1 rounded ${tab === 'files' ? 'ring-1' : ''}`}
+                        style={{ ...CARD, borderColor: tab === 'files' ? 'var(--brand)' : 'var(--border)' }}
+                      >
+                        <FileText className="inline w-3.5 h-3.5 mr-1" />
+                        Files
+                      </button>
+                      <div className="ml-auto text-[10px] opacity-50">
+                        Tip: drag a version card into the other column to compare
+                      </div>
                     </div>
 
                     {/* Hidden pickers */}
-                    <input ref={picsRef}  type="file" accept="image/*" multiple className="hidden" onChange={(e) => addFiles(e.target.files, 'pics')} />
-                    <input ref={vidsRef}  type="file" accept="video/*" multiple className="hidden" onChange={(e) => addFiles(e.target.files, 'vids')} />
-                    <input ref={filesRef} type="file" multiple className="hidden" onChange={(e) => addFiles(e.target.files, 'files')} />
+                    <input
+                      ref={picsRef}
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      className="hidden"
+                      onChange={(e) => addFiles(e.target.files, 'pics')}
+                    />
+                    <input
+                      ref={vidsRef}
+                      type="file"
+                      accept="video/*"
+                      multiple
+                      className="hidden"
+                      onChange={(e) => addFiles(e.target.files, 'vids')}
+                    />
+                    <input
+                      ref={filesRef}
+                      type="file"
+                      multiple
+                      className="hidden"
+                      onChange={(e) => addFiles(e.target.files, 'files')}
+                    />
 
                     {/* TEXT input */}
                     {tab === 'text' && (
@@ -754,24 +895,37 @@ export default function Improve() {
                           rows={1}
                           className="flex-1 px-3 py-2 rounded-md bg-transparent outline-none resize-none text-sm"
                           style={CARD}
-                          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendPrompt(); } }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && !e.shiftKey) {
+                              e.preventDefault();
+                              void sendPrompt();
+                            }
+                          }}
                         />
                         <button
                           onClick={() => void sendPrompt()}
-                          disabled={laneTyping.A || laneTyping.B || (!input.trim() && currentAttachments().length === 0)}
+                          disabled={
+                            laneTyping.A ||
+                            laneTyping.B ||
+                            (!input.trim() && pics.length + vids.length + files.length === 0)
+                          }
                           className="px-3 py-2 rounded-md text-sm disabled:opacity-60 flex items-center gap-1"
                           style={{ background: 'var(--brand)', color: '#00120a' }}
                         >
-                          {(laneTyping.A && activeLane === 'A') || (laneTyping.B && activeLane === 'B')
-                            ? <Loader2 className="w-4 h-4 animate-spin" />
-                            : <><Send className="w-4 h-4" /> Send</>}
+                          {(laneTyping.A && activeLane === 'A') || (laneTyping.B && activeLane === 'B') ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <>
+                              <Send className="w-4 h-4" /> Send
+                            </>
+                          )}
                         </button>
                       </div>
                     )}
                   </>
                 )}
 
-                {/* Mobile: unified + */}
+                {/* Mobile: unified "+" */}
                 {isMobile && (
                   <div className="flex items-end gap-2">
                     <textarea
@@ -781,7 +935,12 @@ export default function Improve() {
                       rows={1}
                       className="flex-1 px-3 py-2 rounded-md bg-transparent outline-none resize-none text-sm"
                       style={CARD}
-                      onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendPrompt(); } }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          void sendPrompt();
+                        }
+                      }}
                     />
                     <button
                       onClick={() => unifiedRef.current?.click()}
@@ -802,62 +961,96 @@ export default function Improve() {
                     />
                     <button
                       onClick={() => void sendPrompt()}
-                      disabled={laneTyping.A || laneTyping.B || (!input.trim() && currentAttachments().length === 0)}
+                      disabled={
+                        laneTyping.A ||
+                        laneTyping.B ||
+                        (!input.trim() && pics.length + vids.length + files.length === 0)
+                      }
                       className="px-3 py-2 rounded-md text-sm disabled:opacity-60 flex items-center gap-1"
                       style={{ background: 'var(--brand)', color: '#00120a' }}
                     >
-                      {(laneTyping.A && activeLane === 'A') || (laneTyping.B && activeLane === 'B')
-                        ? <Loader2 className="w-4 h-4 animate-spin" />
-                        : <><Send className="w-4 h-4" /> Send</>}
+                      {(laneTyping.A && activeLane === 'A') || (laneTyping.B && activeLane === 'B') ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <>
+                          <Send className="w-4 h-4" /> Send
+                        </>
+                      )}
                     </button>
                   </div>
                 )}
 
-                {/* Attachments preview */}
-                {(pics.length + vids.length + files.length > 0) && (
+                {/* Attachments preview (both desktop & mobile) */}
+                {pics.length + vids.length + files.length > 0 && (
                   <div className="mt-2 space-y-2">
+                    {/* Images */}
                     {pics.length > 0 && (
                       <div>
                         <div className="text-[11px] opacity-60 mb-1">Pictures ({pics.length})</div>
                         <div className="flex flex-wrap gap-2">
-                          {pics.map(a => (
-                            <div key={a.id} className="relative rounded-md overflow-hidden" style={{ border: '1px solid var(--border)' }}>
-                              {a.url ? <img src={a.url} alt={a.name} className="w-16 h-16 object-cover" /> :
-                                <div className="w-16 h-16 grid place-items-center text-xs opacity-60">image</div>}
+                          {pics.map((a) => (
+                            <div
+                              key={a.id}
+                              className="relative rounded-md overflow-hidden"
+                              style={{ border: '1px solid var(--border)' }}
+                            >
+                              {a.url ? (
+                                <img src={a.url} alt={a.name} className="w-16 h-16 object-cover" />
+                              ) : (
+                                <div className="w-16 h-16 grid place-items-center text-xs opacity-60">image</div>
+                              )}
                               <button
                                 className="absolute -top-2 -right-2 bg-black/70 text-white rounded-full w-5 h-5 text-[11px] leading-5"
-                                onClick={() => setPics(cur => cur.filter(x => x.id !== a.id))}
+                                onClick={() => setPics((cur) => cur.filter((x) => x.id !== a.id))}
                                 aria-label="Remove"
                                 title="Remove"
-                              >×</button>
+                              >
+                                ×
+                              </button>
                             </div>
                           ))}
                         </div>
                       </div>
                     )}
+                    {/* Videos */}
                     {vids.length > 0 && (
                       <div>
                         <div className="text-[11px] opacity-60 mb-1">Videos ({vids.length})</div>
                         <div className="flex flex-wrap gap-2">
-                          {vids.map(a => (
+                          {vids.map((a) => (
                             <div key={a.id} className="px-2 py-1 rounded-md text-xs" style={CARD}>
                               <Film className="inline w-3.5 h-3.5 mr-1" />
                               {a.name}
-                              <button className="ml-2 opacity-70" onClick={() => setVids(cur => cur.filter(x => x.id !== a.id))}>×</button>
+                              <button
+                                className="ml-2 opacity-70"
+                                onClick={() => setVids((cur) => cur.filter((x) => x.id !== a.id))}
+                                aria-label="Remove"
+                                title="Remove"
+                              >
+                                ×
+                              </button>
                             </div>
                           ))}
                         </div>
                       </div>
                     )}
+                    {/* Files */}
                     {files.length > 0 && (
                       <div>
                         <div className="text-[11px] opacity-60 mb-1">Files ({files.length})</div>
                         <div className="flex flex-wrap gap-2">
-                          {files.map(a => (
+                          {files.map((a) => (
                             <div key={a.id} className="px-2 py-1 rounded-md text-xs" style={CARD}>
                               <Paperclip className="inline w-3.5 h-3.5 mr-1" />
                               {a.name}
-                              <button className="ml-2 opacity-70" onClick={() => setFiles(cur => cur.filter(x => x.id !== a.id))}>×</button>
+                              <button
+                                className="ml-2 opacity-70"
+                                onClick={() => setFiles((cur) => cur.filter((x) => x.id !== a.id))}
+                                aria-label="Remove"
+                                title="Remove"
+                              >
+                                ×
+                              </button>
                             </div>
                           ))}
                         </div>
@@ -866,18 +1059,26 @@ export default function Improve() {
                   </div>
                 )}
 
-                {/* Non-text tabs (desktop): Send button */}
+                {/* Non-text tabs (desktop): show Send even if only attachments are selected */}
                 {!isMobile && tab !== 'text' && (
                   <div className="flex items-center justify-end">
                     <button
                       onClick={() => void sendPrompt()}
-                      disabled={laneTyping.A || laneTyping.B || (currentAttachments().length === 0 && !input.trim())}
+                      disabled={
+                        laneTyping.A ||
+                        laneTyping.B ||
+                        (pics.length + vids.length + files.length === 0 && !input.trim())
+                      }
                       className="mt-1 px-3 py-2 rounded-md text-sm disabled:opacity-60 flex items-center gap-1"
                       style={{ background: 'var(--brand)', color: '#00120a' }}
                     >
-                      {(laneTyping.A && activeLane === 'A') || (laneTyping.B && activeLane === 'B')
-                        ? <Loader2 className="w-4 h-4 animate-spin" />
-                        : <><Send className="w-4 h-4" /> Send</>}
+                      {(laneTyping.A && activeLane === 'A') || (laneTyping.B && activeLane === 'B') ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <>
+                          <Send className="w-4 h-4" /> Send
+                        </>
+                      )}
                     </button>
                   </div>
                 )}
@@ -888,13 +1089,15 @@ export default function Improve() {
                     <input type="checkbox" checked={useMemory} onChange={(e) => setUseMemory(e.target.checked)} />
                     Session memory for test chats
                   </label>
-                  <span>Model: {model} · Temp: {temperature.toFixed(2)}</span>
+                  <span>
+                    Model: {model} · Temp: {temperature.toFixed(2)}
+                  </span>
                 </div>
               </div>
             </div>
           </section>
 
-          {/* Right: Versions rail */}
+          {/* Right: Versions rail (draggable to create Lane B) */}
           <aside className="h-full flex flex-col overflow-hidden" style={PANEL}>
             <div className="p-3 border-b flex items-center justify-between" style={{ borderColor: 'var(--border)' }}>
               <div className="font-semibold">Versions</div>
@@ -905,7 +1108,7 @@ export default function Improve() {
                 <div className="text-sm opacity-60">No snapshots yet. Save to create one.</div>
               ) : (
                 <div className="space-y-2">
-                  {versions.map(v => (
+                  {versions.map((v) => (
                     <div
                       key={v.id}
                       className="p-2 rounded-md text-sm border cursor-grab"
@@ -935,7 +1138,11 @@ export default function Improve() {
                         <button
                           className="px-2 py-1 rounded-md text-xs"
                           style={CARD}
-                          onClick={() => { try { navigator.clipboard.writeText(v.id); } catch {} }}
+                          onClick={() => {
+                            try {
+                              navigator.clipboard.writeText(v.id);
+                            } catch {}
+                          }}
                         >
                           Copy ID
                         </button>
@@ -951,3 +1158,4 @@ export default function Improve() {
     </div>
   );
 }
+
