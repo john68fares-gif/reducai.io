@@ -1,9 +1,7 @@
 // components/voice/VoiceAgentSection.tsx
 'use client';
 
-import React, {
-  useEffect, useMemo, useRef, useState, useLayoutEffect
-} from 'react';
+import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
 import dynamic from 'next/dynamic';
 import { createPortal } from 'react-dom';
 import {
@@ -30,8 +28,8 @@ class RailBoundary extends React.Component<{children:React.ReactNode},{hasError:
 /* ─────────── constants ─────────── */
 const CTA = '#59d9b3';
 const CTA_HOVER = '#54cfa9';
+const GREEN_LINE = 'rgba(89,217,179,.20)';
 const ACTIVE_KEY = 'va:activeId';
-const GREEN_LINE = 'rgba(89,217,179,.20)'; // keep consistent with rail
 
 /* phone icon */
 function PhoneFilled(props: React.SVGProps<SVGSVGElement>) {
@@ -57,8 +55,7 @@ const Tokens = () => (
       --fz-title:18px; --fz-sub:15px; --fz-body:14px; --fz-label:12.5px;
       --lh-body:1.45; --ease:cubic-bezier(.22,.61,.36,1);
 
-      /* Layout: measured at runtime */
-      --app-sidebar-w: 240px; /* updated by ResizeObserver */
+      --app-sidebar-w: 240px;
       --rail-w: 260px;
 
       --page-bg:var(--bg);
@@ -93,61 +90,27 @@ const Tokens = () => (
       color:var(--text);
     }
 
-    /* AssistantRail is pinned immediately to the right of your global sidebar */
     .va-left-fixed{
-      position:fixed;
-      top:0; bottom:0;
-      left:var(--app-sidebar-w);
-      width:var(--rail-w);
-      z-index:12;
-      background:var(--panel-bg);
+      position:fixed; top:0; bottom:0; left:var(--app-sidebar-w); width:var(--rail-w);
+      z-index:12; background:var(--panel-bg);
       border-right:1px solid rgba(255,255,255,.06);
       box-shadow:14px 0 28px rgba(0,0,0,.08);
       display:flex; flex-direction:column;
     }
     .va-left-fixed .rail-scroll{ overflow:auto; flex:1; }
 
-    /* Page content shifts by (app sidebar + rail) so it never drifts */
-    .va-page{
-      margin-left: calc(var(--app-sidebar-w) + var(--rail-w));
-      transition: margin-left 180ms var(--ease);
-    }
+    .va-page{ margin-left: calc(var(--app-sidebar-w) + var(--rail-w)); transition: margin-left 180ms var(--ease); }
 
-    /* Dropdown menu base (solid) */
     .va-menu{
       background:var(--panel-bg);
       border:1px solid rgba(255,255,255,.12);
-      box-shadow:0 36px 90px rgba(0,0,0,.55);
+      box-shadow:0 36px 90px rgba(0,0,0,.65);
       border-radius:10px;
     }
 
-    /* Drawer + modal overlays (solid + blur LIKE AssistantRail) */
-    .va-overlay{
-      position:fixed; inset:0; z-index:9996;
-      background:rgba(6,8,10,.62);
-      backdrop-filter:blur(6px);
-      opacity:0; pointer-events:none; transition:opacity 200ms var(--ease);
-    }
-    .va-overlay.open{ opacity:1; pointer-events:auto; }
-
-    .va-call-drawer{
-      position:fixed; inset:0 0 0 auto; width:min(540px,92vw); z-index:9997;
-      display:grid; grid-template-rows:auto 1fr auto;
-      background:var(--panel-bg);
-      border-left:1px solid rgba(255,255,255,.10);
-      box-shadow:-28px 0 80px rgba(0,0,0,.55);
-      transform:translateX(100%); transition:transform 280ms var(--ease);
-    }
-    .va-call-drawer.open{ transform:translateX(0); }
-
-    .va-modal-wrap{ position:fixed; inset:0; z-index:9998; }
-    .va-modal-center{ position:absolute; inset:0; display:grid; place-items:center; padding:20px; }
-    .va-sheet{
-      background:var(--panel-bg);
-      border:1px solid ${GREEN_LINE};           /* thinner feel but same token */
-      box-shadow:0 28px 80px rgba(0,0,0,.70);
-      border-radius:10px;
-    }
+    .va-overlay{ position:fixed; inset:0; z-index:100000; background:rgba(6,8,10,.62); backdrop-filter:blur(6px); }
+    .va-modal-wrap{ position:fixed; inset:0; z-index:100001; display:grid; place-items:center; padding:18px; }
+    .va-sheet{ background:var(--panel-bg); border:1px solid rgba(255,255,255,.10); box-shadow:0 28px 80px rgba(0,0,0,.70); border-radius:10px; }
 
     .chat-msg{ max-width:85%; padding:10px 12px; border-radius:12px; }
     .chat-user{ background:var(--panel-bg); border:1px solid rgba(255,255,255,.12); align-self:flex-end; }
@@ -157,6 +120,7 @@ const Tokens = () => (
 
 /* ─────────── types / storage ─────────── */
 type ApiKey = { id: string; name: string; key: string };
+type VoiceMeta = { id: string; name: string };
 
 type AgentData = {
   name: string;
@@ -167,8 +131,9 @@ type AgentData = {
   systemPrompt: string;
 
   ttsProvider: 'openai' | 'elevenlabs';
-  voiceId?: string;        // use ID for actual selection
-  voiceName: string;       // label for display
+  voiceId?: string;     // <— store voice id from API
+  voiceName: string;
+
   apiKeyId?: string;
 
   asrProvider: 'deepgram' | 'whisper' | 'assemblyai';
@@ -198,6 +163,7 @@ You are a blank template AI assistant with minimal default settings.
 [Fallback]
 - Ask for clarification when needed.`,
   ttsProvider: 'openai',
+  voiceId: 'alloy',
   voiceName: 'Alloy (American)',
   apiKeyId: '',
   asrProvider: 'deepgram',
@@ -267,31 +233,6 @@ const asrModelsFor = (asr: string): Opt[] =>
       ]
     : [{ value: 'coming', label: 'Models coming soon', disabled: true }];
 
-/* ─────────── tiny diff helper (word-level with additions/removals) ─────────── */
-function diffWords(oldStr: string, newStr: string){
-  const a = oldStr.split(/\s+/), b = newStr.split(/\s+/);
-  const m = a.length, n = b.length;
-  const dp: number[][] = Array.from({length:m+1},()=>Array(n+1).fill(0));
-  for(let i=1;i<=m;i++) for(let j=1;j<=n;j++) dp[i][j]=a[i-1]===b[j-1]?dp[i-1][j-1]+1:Math.max(dp[i-1][j],dp[i][j-1]);
-  const ops: Array<{type:'eq'|'add'|'rem'; text:string}> = [];
-  let i=m, j=n, bufAdd:string[]=[], bufRem:string[]=[];
-  const flush=(kind:'add'|'rem')=>{
-    const buf = kind==='add'?bufAdd:bufRem;
-    if (buf.length) {
-      const text = buf.reverse().join(' ');
-      ops.unshift({ type: kind, text });
-      if (kind==='add') bufAdd=[]; else bufRem=[];
-    }
-  };
-  while(i>0 || j>0){
-    if(i>0 && j>0 && a[i-1]===b[j-1]){ flush('add'); flush('rem'); ops.unshift({ type:'eq', text:a[i-1]}); i--; j--; }
-    else if(j>0 && (i===0 || dp[i][j-1] >= dp[i-1][j])){ bufAdd.push(b[j-1]); j--; }
-    else { bufRem.push(a[i-1]); i--; }
-  }
-  flush('add'); flush('rem');
-  return ops;
-}
-
 /* ─────────── UI atoms ─────────── */
 const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}) => (
   <button
@@ -314,21 +255,21 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
-/* Select: portaled, solid, glow-on-hover, inline preview per item */
+/* ─────────── SOLID, PORTALED SELECT (fixes: outside-click, hover glow, scroll/resize anchoring) ─────────── */
 function StyledSelect({
-  value, onChange, options, placeholder, leftIcon,
-  menuTop,
-  onPreview,
-  isPreviewing
+  value, onChange, options, placeholder, leftIcon, menuTop,
+  onPreview, isPreviewing
 }:{
   value: string; onChange: (v: string) => void;
   options: Opt[]; placeholder?: string; leftIcon?: React.ReactNode; menuTop?: React.ReactNode;
-  onPreview?: (value: string) => void;
-  isPreviewing?: string | null;
+  onPreview?: (value: string) => void;     // optional inline preview action per item
+  isPreviewing?: string | null;            // item currently previewing
 }) {
   const wrapRef = useRef<HTMLDivElement|null>(null);
   const btnRef = useRef<HTMLButtonElement|null>(null);
+  const menuRef = useRef<HTMLDivElement|null>(null);
   const searchRef = useRef<HTMLInputElement|null>(null);
+
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [rect, setRect] = useState<{top:number; left:number; width:number; placement:'above'|'below'}|null>(null);
@@ -337,34 +278,39 @@ function StyledSelect({
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return q ? options.filter(o => o.label.toLowerCase().includes(q)) : options;
-  }, [options, query, value]);
+  }, [options, query]);
 
   const placeMenu = () => {
     const el = btnRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
     const maxBelow = window.innerHeight - (r.bottom + 8);
-    const estHeight = Math.min(320, 44 + (filtered.length * 36) + (menuTop ? 48 : 0));
+    const estHeight = Math.min(320, 44 + (filtered.length * 38) + (menuTop ? 52 : 0));
     const placement: 'above'|'below' = maxBelow >= estHeight ? 'below' : 'above';
-    const top = placement==='below' ? r.bottom + 8 : r.top - 8; // we will anchor via top or bottom using placement
+    const top = placement==='below' ? r.bottom + 8 : r.top - 8;
     setRect({ top, left: r.left, width: r.width, placement });
   };
 
   useEffect(() => {
     if (!open) return;
     placeMenu();
-    const off = (e: MouseEvent) => {
-      if (wrapRef.current?.contains(e.target as Node)) return;
-      setOpen(false);
+
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      const insideBtn = !!wrapRef.current?.contains(t);
+      const insideMenu = !!menuRef.current?.contains(t);
+      if (!insideBtn && !insideMenu) setOpen(false);
     };
     const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
     const onRelayout = () => placeMenu();
-    window.addEventListener('mousedown', off);
+
+    window.addEventListener('mousedown', onDown);
     window.addEventListener('keydown', onEsc);
     window.addEventListener('scroll', onRelayout, true);
     window.addEventListener('resize', onRelayout);
+
     return () => {
-      window.removeEventListener('mousedown', off);
+      window.removeEventListener('mousedown', onDown);
       window.removeEventListener('keydown', onEsc);
       window.removeEventListener('scroll', onRelayout, true);
       window.removeEventListener('resize', onRelayout);
@@ -377,7 +323,11 @@ function StyledSelect({
       <button
         ref={btnRef}
         type="button"
-        onClick={() => { setOpen(v=>!v); setTimeout(()=>searchRef.current?.focus(),0); }}
+        onClick={() => {
+          setOpen(v=>!v);
+          // reset search every time it opens
+          setTimeout(() => { setQuery(''); searchRef.current?.focus(); }, 0);
+        }}
         className="w-full flex items-center justify-between gap-3 px-3 py-3 rounded-[10px] text-sm outline-none transition"
         style={{
           background:'var(--input-bg)',
@@ -395,6 +345,7 @@ function StyledSelect({
 
       {open && rect && typeof document !== 'undefined' && createPortal(
         <div
+          ref={menuRef}
           className="va-menu"
           style={{
             position:'fixed',
@@ -405,8 +356,10 @@ function StyledSelect({
             width: rect.width,
             border:`1px solid ${GREEN_LINE}`,
             borderRadius:10,
-            overflow:'hidden'
+            overflow:'hidden',
+            background:'var(--panel-bg)'
           }}
+          onMouseDown={()=>{/* keep focus */}}
         >
           <div className="p-3" style={{ background:'var(--panel-bg)', color:'var(--text)' }}>
             {menuTop ? <div className="mb-2">{menuTop}</div> : null}
@@ -428,10 +381,14 @@ function StyledSelect({
 
             <div className="max-h-72 overflow-y-auto pr-1" style={{ scrollbarWidth:'thin' }}>
               {filtered.map(o => (
-                <div key={o.value} className="relative">
+                <div key={o.value} className="relative group">
                   <button
                     disabled={o.disabled}
-                    onClick={()=>{ if (o.disabled) return; onChange(o.value); }}
+                    onClick={()=>{
+                      if (o.disabled) return;
+                      onChange(o.value);
+                      setOpen(false);
+                    }}
                     className="w-full text-left text-sm px-3 py-2 rounded-[8px] transition flex items-center gap-2 disabled:opacity-60 relative"
                     style={{
                       color:'var(--text)',
@@ -441,8 +398,8 @@ function StyledSelect({
                     }}
                     onMouseEnter={(e)=>{ if (o.disabled) return;
                       const el=e.currentTarget as HTMLButtonElement;
-                      el.style.background = 'var(--panel-bg)';
-                      el.style.border = '1px solid var(--input-border)';
+                      el.style.background = 'color-mix(in oklab, var(--panel-bg) 88%, white 12%)';
+                      el.style.border = `1px solid ${GREEN_LINE}`;
                     }}
                     onMouseLeave={(e)=>{
                       const el=e.currentTarget as HTMLButtonElement;
@@ -450,7 +407,7 @@ function StyledSelect({
                       el.style.border = '1px solid var(--panel-bg)';
                     }}
                   >
-                    {/* green overlay glow on hover (top highlight) */}
+                    {/* green top glow on hover */}
                     <span
                       className="pointer-events-none"
                       style={{
@@ -461,7 +418,7 @@ function StyledSelect({
                     />
                     <span className="flex-1 truncate">{o.label}</span>
 
-                    {/* Inline preview control */}
+                    {/* Inline preview control (optional) */}
                     {onPreview && (
                       <button
                         type="button"
@@ -475,7 +432,7 @@ function StyledSelect({
                     )}
                   </button>
                   <style jsx>{`
-                    div:hover > button > span:first-child { opacity:.75; }
+                    .group:hover > button > span:first-child { opacity:.75; }
                   `}</style>
                 </div>
               ))}
@@ -543,7 +500,7 @@ function Section({
 
 /* ─────────── Page ─────────── */
 export default function VoiceAgentSection() {
-  /* Measure the real app sidebar so our rail "touches" it and moves with collapse */
+  // measure app sidebar for proper left rail offset
   useEffect(() => {
     const candidates = [
       '[data-app-sidebar]',
@@ -573,39 +530,61 @@ export default function VoiceAgentSection() {
   const [toast, setToast] = useState<string>('');
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
 
+  // voices from API (with fallback)
+  const [voicesApi, setVoicesApi] = useState<VoiceMeta[]>([]);
+  const voiceOptions: Opt[] = useMemo(
+    () => voicesApi.map(v => ({ value: v.id, label: v.name })),
+    [voicesApi]
+  );
+  const [previewingVoice, setPreviewingVoice] = useState<string|null>(null);
+
+  // chat mock
   const [showCall, setShowCall] = useState(false);
   const [messages, setMessages] = useState<Array<{role:'user'|'assistant'; text:string}>>([
     { role: 'assistant', text: 'Hi! Ready when you are.' }
   ]);
   const [chatInput, setChatInput] = useState('');
 
-  /* Generate overlay */
+  // generate modal
   const [showGenerate, setShowGenerate] = useState(false);
   const [composerText, setComposerText] = useState('');
-  const [genPhase, setGenPhase] = useState<'idle'|'typing'>('idle');
+  const [genPhase, setGenPhase] = useState<'idle'|'loading'>('idle');
   const basePromptRef = useRef<string>('');
-  const [diffHtml, setDiffHtml] = useState<string>(''); // highlighted diff HTML, typed progressively
-  const [pendingMerged, setPendingMerged] = useState<string>(''); // raw merged value
+  const [pendingPrompt, setPendingPrompt] = useState<string>('');
 
-  /* Voices (API + inline previews) */
-  const [voicesApi, setVoicesApi] = useState<Array<{id:string; name:string}>>([]);
-  const [previewing, setPreviewing] = useState<string | null>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  // WebSpeech for quick client preview (keeps menu open)
+  const [wsVoices, setWsVoices] = useState<SpeechSynthesisVoice[]>([]);
+  useEffect(() => {
+    const load = () => setWsVoices(window.speechSynthesis.getVoices());
+    load();
+    (window.speechSynthesis as any).onvoiceschanged = load;
+    return () => { (window.speechSynthesis as any).onvoiceschanged = null; };
+  }, []);
+  const speakPreview = (id: string) => {
+    try { window.speechSynthesis.cancel(); } catch {}
+    const voiceName = voicesApi.find(v => v.id === id)?.name || id;
+    const u = new SpeechSynthesisUtterance(`This is a preview of ${voiceName}.`);
+    const byName = wsVoices.find(v => v.name.toLowerCase().includes((voiceName.split(' ')[0]||'').toLowerCase()));
+    const en = wsVoices.find(v => v.lang?.startsWith('en'));
+    if (byName) u.voice = byName; else if (en) u.voice = en;
+    try { window.speechSynthesis.speak(u); } catch {}
+  };
+  const stopPreview = () => { try { window.speechSynthesis.cancel(); } catch {} };
 
+  // active id sync
   useEffect(() => {
     const handler = (e: Event) => setActiveId((e as CustomEvent<string>).detail);
     window.addEventListener('assistant:active', handler as EventListener);
     return () => window.removeEventListener('assistant:active', handler as EventListener);
   }, []);
-
   useEffect(() => {
     if (!activeId) return;
     setData(loadAgentData(activeId));
     try { localStorage.setItem(ACTIVE_KEY, activeId); } catch {}
   }, [activeId]);
-
   useEffect(() => { if (activeId) saveAgentData(activeId, data); }, [activeId, data]);
 
+  // API keys & select remembered id
   useEffect(() => {
     (async () => {
       try {
@@ -637,16 +616,40 @@ export default function VoiceAgentSection() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* Load voices from your API (by ID) */
+  // Voices from backend (with fallback)
   useEffect(() => {
     (async () => {
       try {
         const r = await fetch('/api/openai/voices');
-        if (!r.ok) return;
-        const arr = await r.json(); // [{id,name}]
-        if (Array.isArray(arr) && arr.length) setVoicesApi(arr);
+        if (r.ok) {
+          const arr = await r.json() as VoiceMeta[];
+          if (Array.isArray(arr) && arr.length) {
+            setVoicesApi(arr);
+            // if current voiceId missing, select first
+            if (!arr.some(v => v.id === data.voiceId)) {
+              const first = arr[0];
+              setData(p => ({ ...p, voiceId: first.id, voiceName: first.name }));
+            }
+            return;
+          }
+        }
       } catch {}
+      // Fallback if API fails/empty
+      const fallback: VoiceMeta[] = [
+        { id: 'alloy',  name: 'Alloy (American)' },
+        { id: 'verse',  name: 'Verse (American)' },
+        { id: 'coral',  name: 'Coral (British)' },
+        { id: 'amber',  name: 'Amber (Australian)' },
+        { id: 'sage',   name: 'Sage (Neutral)' },
+        { id: 'ember',  name: 'Ember (Warm)' }
+      ];
+      setVoicesApi(fallback);
+      if (!fallback.some(v => v.id === data.voiceId)) {
+        const first = fallback[0];
+        setData(p => ({ ...p, voiceId: first.id, voiceName: first.name }));
+      }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function setField<K extends keyof AgentData>(k: K) {
@@ -686,77 +689,27 @@ ${lines.map(l => `- ${l}`).join('\n')}
     return `${base}${block}`;
   }
 
-  /* Generate → keep overlay, type diff with highlights, accept/decline */
-  async function startGenerate() {
+  function startGenerate() {
     basePromptRef.current = data.systemPrompt;
-    const merged = buildPrompt(basePromptRef.current, composerText);
-    setPendingMerged(merged);
-
-    // Build highlighted diff HTML
-    const ops = diffWords(basePromptRef.current, merged);
-    const html = ops.map(op => {
-      if (op.type==='eq') return op.text;
-      if (op.type==='add') return `<span style="background:rgba(89,217,179,.25)">${op.text}</span>`;
-      return `<span style="background:rgba(239,68,68,.25); text-decoration:line-through">${op.text}</span>`;
-    }).join(' ');
-
-    // Type it in
-    setGenPhase('typing');
-    setDiffHtml(''); // start empty
-    let i=0;
-    const interval = 8; // ms per char
-    const timer = window.setInterval(()=>{
-      i++;
-      setDiffHtml(html.slice(0, i));
-      if (i >= html.length) { window.clearInterval(timer); setGenPhase('idle'); }
-    }, interval);
+    setGenPhase('loading');
+    setTimeout(() => {
+      const merged = buildPrompt(basePromptRef.current, composerText);
+      setPendingPrompt(merged);
+      setGenPhase('idle');
+      // keep modal open; user decides cancel or generate
+    }, 500);
   }
-  const acceptDiff = () => {
-    if (pendingMerged) setData(p => ({ ...p, systemPrompt: pendingMerged }));
-    setPendingMerged('');
-    setDiffHtml('');
-    setShowGenerate(false);
-  };
-  const declineDiff = () => {
-    setPendingMerged('');
-    setDiffHtml('');
-    setShowGenerate(false);
-  };
+  const acceptDiff = () => { setData(p => ({ ...p, systemPrompt: pendingPrompt })); setPendingPrompt(''); setShowGenerate(false); };
+  const declineDiff = () => { setPendingPrompt(''); setShowGenerate(false); };
 
-  /* Inline voice preview inside dropdown */
-  async function previewVoice(voiceId: string) {
-    try {
-      if (previewing === voiceId) {
-        setPreviewing(null);
-        if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; }
-        return;
-      }
-      setPreviewing(voiceId);
-      if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; }
-      const url = `/api/voice/preview?voiceId=${encodeURIComponent(voiceId)}`;
-      const a = new Audio(url);
-      audioRef.current = a;
-      a.onended = () => setPreviewing(null);
-      await a.play();
-    } catch {
-      setPreviewing(null);
-    }
+  function sendChat() {
+    const txt = chatInput.trim();
+    if (!txt) return;
+    setMessages(m => [...m, { role: 'user', text: txt }]);
+    setChatInput('');
+    const reply = `${data.name || 'Assistant'}: "${txt}" received. How can I help further?`;
+    setTimeout(() => setMessages(m => [...m, { role: 'assistant', text: reply }]), 350);
   }
-
-  const voiceOptions: Opt[] = useMemo(
-    () => voicesApi.map(v => ({ value: v.id, label: v.name })),
-    [voicesApi]
-  );
-
-  const currentVoiceLabel =
-    voicesApi.find(v => v.id === data.voiceId)?.name || data.voiceName || '— Choose —';
-
-  const stopPreview = () => {
-    try {
-      setPreviewing(null);
-      if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; }
-    } catch {}
-  };
 
   return (
     <section className="va-scope" style={{ background:'var(--bg)', color:'var(--text)' }}>
@@ -871,28 +824,28 @@ ${lines.map(l => `- ${l}`).join('\n')}
                 <div className="flex items-center justify-between mb-[var(--s-2)]">
                   <div className="font-medium" style={{ fontSize:'var(--fz-label)' }}>System Prompt</div>
                   <div className="flex items-center gap-2">
-                    {pendingMerged && (
+                    {pendingPrompt && (
                       <>
                         <button
                           onClick={acceptDiff}
                           className="h-9 px-3 rounded-[10px] font-semibold"
                           style={{ background:CTA, color:'#0a0f0d' }}
                         >
-                          Accept changes
+                          Apply
                         </button>
                         <button
                           onClick={declineDiff}
                           className="h-9 px-3 rounded-[10px]"
                           style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
                         >
-                          Decline
+                          Discard
                         </button>
                       </>
                     )}
                     <button
                       className="inline-flex items-center gap-2 rounded-[10px] text-sm"
-                      style={{ height:36, padding:'0 12px', background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'#fff' }}
-                      onClick={()=>{ setComposerText(''); setShowGenerate(true); setGenPhase('idle'); setDiffHtml(''); setPendingMerged(''); }}
+                      style={{ height:36, padding:'0 12px', background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+                      onClick={()=>{ setComposerText(''); setShowGenerate(true); setGenPhase('idle'); }}
                     >
                       <Wand2 className="w-4 h-4" /> Generate
                     </button>
@@ -903,9 +856,9 @@ ${lines.map(l => `- ${l}`).join('\n')}
                   <textarea
                     className="w-full bg-transparent outline-none rounded-[12px] px-3 py-[12px]"
                     style={{ minHeight: 360, background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                    value={pendingMerged || data.systemPrompt}
+                    value={pendingPrompt || data.systemPrompt}
                     onChange={(e)=>{
-                      if (pendingMerged) setPendingMerged(e.target.value);
+                      if (pendingPrompt) setPendingPrompt(e.target.value);
                       else setField('systemPrompt')(e.target.value);
                     }}
                   />
@@ -946,15 +899,22 @@ ${lines.map(l => `- ${l}`).join('\n')}
                 <div className="mb-[var(--s-2)] text-[12.5px]">Voice</div>
                 <StyledSelect
                   value={data.voiceId || ''}
-                  onChange={(id)=>{
-                    const v = voicesApi.find(x => x.id === id);
-                    setData(p => ({ ...p, voiceId: id, voiceName: v?.name || p.voiceName }));
-                    stopPreview();
+                  onChange={(val)=>{
+                    const meta = voicesApi.find(v => v.id === val);
+                    setData(p => ({ ...p, voiceId: val, voiceName: meta?.name || val }));
                   }}
                   options={voiceOptions}
-                  placeholder={currentVoiceLabel}
-                  onPreview={previewVoice}
-                  isPreviewing={previewing}
+                  placeholder="— Choose —"
+                  onPreview={(val)=>{
+                    if (previewingVoice === val) {
+                      stopPreview();
+                      setPreviewingVoice(null);
+                    } else {
+                      setPreviewingVoice(val);
+                      speakPreview(val);
+                    }
+                  }}
+                  isPreviewing={previewingVoice}
                 />
               </div>
             </div>
@@ -990,21 +950,24 @@ ${lines.map(l => `- ${l}`).join('\n')}
         </div>
       </div>
 
-      {/* Generate Overlay — matches AssistantRail style, stays until Accept/Decline */}
+      {/* Generate overlay — same style as rail modals (blur + solid sheet, thinner border, white "Generate") */}
       {showGenerate && (
-        <div className="va-modal-wrap" role="dialog" aria-modal>
-          <div className={`va-overlay open`} onClick={()=>{ if (genPhase==='idle') declineDiff(); }} />
-          <div className="va-modal-center">
-            <div className="va-sheet w-full max-w-[860px] p-5 md:p-6">
-              <div className="flex items-center justify-between mb-4">
-                <div className="text-lg font-semibold" style={{ color:'#fff' }}>Compose Prompt</div>
-                <button onClick={()=>{ if (genPhase==='idle') declineDiff(); }} className="p-1 rounded hover:opacity-80" aria-label="Close">
+        <>
+          <div className="va-overlay" onClick={()=>{ if (genPhase==='idle') setShowGenerate(false); }} />
+          <div className="va-modal-wrap" role="dialog" aria-modal>
+            <div className="va-sheet w-full max-w-[760px] p-4 md:p-6">
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-lg font-semibold">Compose Prompt</div>
+                <button
+                  onClick={()=>{ if (genPhase==='idle') setShowGenerate(false); }}
+                  className="p-1 rounded hover:opacity-80"
+                  aria-label="Close"
+                >
                   <X className="w-5 h-5" style={{ color:'var(--text-muted)' }} />
                 </button>
               </div>
 
-              {/* Composer */}
-              <div className="grid gap-3 mb-4">
+              <div className="grid gap-3">
                 <label className="text-xs" style={{ color:'var(--text-muted)' }}>
                   Add extra instructions (persona, tone, rules, tools):
                 </label>
@@ -1013,78 +976,54 @@ ${lines.map(l => `- ${l}`).join('\n')}
                   onChange={(e)=>setComposerText(e.target.value)}
                   className="w-full bg-transparent outline-none rounded-[10px] px-3 py-2"
                   placeholder="e.g., Friendly, crisp answers. Confirm account ID before actions."
-                  style={{ minHeight: 120, background:'var(--input-bg)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)' }}
-                  disabled={genPhase==='typing'}
+                  style={{ minHeight: 180, background:'var(--input-bg)', border:'1px solid rgba(255,255,255,.10)', color:'var(--text)' }}
                 />
+                {/* Diff / typing simulated */}
+                {genPhase==='loading' && (
+                  <div className="text-sm px-3 py-2 rounded-[10px]" style={{ background:'rgba(255,255,255,.04)', border:'1px solid rgba(255,255,255,.08)', color:'var(--text-muted)' }}>
+                    Generating…
+                  </div>
+                )}
+                {pendingPrompt && genPhase==='idle' && (
+                  <div className="text-xs" style={{ color:'var(--text-muted)' }}>
+                    Review changes, then Apply or Discard from the System Prompt header.
+                  </div>
+                )}
+
                 <div className="flex items-center justify-end gap-2">
                   <button
-                    onClick={declineDiff}
-                    disabled={genPhase==='typing'}
+                    onClick={()=>setShowGenerate(false)}
+                    disabled={genPhase==='loading'}
                     className="h-9 px-3 rounded-[10px]"
-                    style={{ background:'var(--input-bg)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)' }}
+                    style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
                   >
                     Cancel
                   </button>
                   <button
                     onClick={startGenerate}
-                    disabled={genPhase==='typing'}
+                    disabled={genPhase==='loading'}
                     className="h-9 px-4 rounded-[10px] font-semibold"
-                    style={{ background:CTA, color:'#fff' }}
+                    style={{ background:CTA, color:'#ffffff' }}
                   >
-                    Generate
+                    {genPhase==='loading' ? 'Generating…' : 'Generate'}
                   </button>
                 </div>
               </div>
-
-              {/* Typing / Diff pane */}
-              {(genPhase==='typing' || diffHtml || pendingMerged) && (
-                <div>
-                  <div className="mb-2 text-xs" style={{ color:'var(--text-muted)' }}>
-                    Preview (additions = green, removals = red)
-                  </div>
-                  <div
-                    className="rounded-[10px] p-3"
-                    style={{ background:'var(--input-bg)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)', minHeight:160 }}
-                  >
-                    <pre
-                      style={{ whiteSpace:'pre-wrap', wordBreak:'break-word', fontFamily:'inherit', fontSize:13.5, lineHeight:1.5 }}
-                      dangerouslySetInnerHTML={{ __html: diffHtml || '' }}
-                    />
-                  </div>
-
-                  <div className="mt-3 flex items-center justify-end gap-2">
-                    <button
-                      onClick={declineDiff}
-                      disabled={genPhase==='typing'}
-                      className="h-9 px-3 rounded-[10px]"
-                      style={{ background:'var(--input-bg)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)' }}
-                    >
-                      Decline
-                    </button>
-                    <button
-                      onClick={acceptDiff}
-                      disabled={genPhase==='typing' || !pendingMerged}
-                      className="h-9 px-3 rounded-[10px] font-semibold"
-                      style={{ background:CTA, color:'#0a0f0d' }}
-                    >
-                      Accept changes
-                    </button>
-                  </div>
-                </div>
-              )}
             </div>
           </div>
-        </div>
+        </>
       )}
 
       {/* Call drawer */}
       {createPortal(
         <>
           <div
-            className={`va-overlay ${showCall ? 'open' : ''}`}
+            className={`va-overlay`}
+            style={{ opacity: showCall ? 1 : 0, pointerEvents: showCall ? 'auto' : 'none', transition:'opacity 200ms var(--ease)' }}
             onClick={()=> setShowCall(false)}
           />
-          <aside className={`va-call-drawer ${showCall ? 'open' : ''}`} aria-hidden={!showCall}>
+          <aside className="va-call-drawer" aria-hidden={!showCall}
+                 style={{ transform: showCall ? 'translateX(0)' : 'translateX(100%)', transition:'transform 280ms var(--ease)' }}>
             <div className="flex items-center justify-between px-4 h-[64px]"
                  style={{ background:'var(--panel-bg)', borderBottom:'1px solid rgba(255,255,255,.1)' }}>
               <div className="font-semibold">Chat with {data.name || 'Assistant'}</div>
@@ -1108,7 +1047,7 @@ ${lines.map(l => `- ${l}`).join('\n')}
             </div>
 
             <div className="p-3" style={{ borderTop:'1px solid rgba(255,255,255,.10)' }}>
-              <form onSubmit={(e)=>{ e.preventDefault(); setMessages(m=>[...m,{role:'user',text:chatInput.trim()}]); setChatInput(''); }} className="flex items-center gap-2">
+              <form onSubmit={(e)=>{ e.preventDefault(); sendChat(); }} className="flex items-center gap-2">
                 <input
                   value={chatInput}
                   onChange={(e)=>setChatInput(e.target.value)}
