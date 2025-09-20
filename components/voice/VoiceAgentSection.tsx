@@ -769,7 +769,7 @@ export default function VoiceAgentSection() {
   }
   async function doPublish(){
     if (!activeId) { setToast('Select or create an agent'); return; }
-    setPublishing=true; setToast('');
+    setPublishing(true); setToast('');
     try { await apiPublish(activeId); setToast('Published'); }
     catch { setToast('Publish failed'); }
     finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
