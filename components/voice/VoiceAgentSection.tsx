@@ -10,12 +10,12 @@ import {
 } from 'lucide-react';
 import { scopedStorage } from '@/utils/scoped-storage';
 
-// ⬇️ Prompt engine (v2)
+// Try to import prompt-engine, but we'll guard every call.
 import {
-  applyInstructions,
-  DEFAULT_PROMPT,
-  looksLikeFullPrompt,
-  normalizeFullPrompt,
+  applyInstructions as _applyInstructions,
+  DEFAULT_PROMPT as _DEFAULT_PROMPT,
+  looksLikeFullPrompt as _looksLikeFullPrompt,
+  normalizeFullPrompt as _normalizeFullPrompt,
 } from '@/lib/prompt-engine';
 
 /* ───────────────── Assistant rail (fixed) ───────────────── */
@@ -57,6 +57,13 @@ function PhoneFilled(props: React.SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+/* ─────────── little safety helpers ─────────── */
+const isFn = (f: any): f is Function => typeof f === 'function';
+const isStr = (v: any): v is string => typeof v === 'string';
+const nonEmpty = (v: any): v is string => isStr(v) && v.trim().length > 0;
+const coerceStr = (v: any): string => (isStr(v) ? v : '');
+const safeTrim = (v: any): string => (nonEmpty(v) ? v.trim() : '');
 
 /* ─────────── theme tokens ─────────── */
 const Tokens = () => (
@@ -176,6 +183,129 @@ const PROMPT_SKELETON =
 
 [Error Handling / Fallback]`;
 
+/* ─────────── local safe shims (used if prompt-engine fns are missing) ─────────── */
+const looksLikeFullPromptSafe = (raw: string) => {
+  const t = (raw || '').toLowerCase();
+  return ['[identity]', '[style]', '[response guidelines]', '[task & goals]', '[error handling', '[notes]'].some(h => t.includes(h));
+};
+
+const normalizeFullPromptSafe = (raw: string) => {
+  // Ensure all 5 core sections exist, keep order
+  const sections = {
+    identity: '',
+    style: '',
+    guidelines: '',
+    tasks: '',
+    errors: '',
+    notes: ''
+  };
+  const add = (k: keyof typeof sections, v: string) => { sections[k] = safeTrim(v); };
+  const capture = (label: string) => {
+    const rx = new RegExp(`\$begin:math:display$${label}\\$end:math:display$\\s*([\\s\\S]*?)(?=\\n\\s*\\[|$)`, 'i');
+    const m = raw.match(rx);
+    return m ? m[1] : '';
+  };
+  add('identity', capture('Identity'));
+  add('style', capture('Style'));
+  add('guidelines', capture('Response Guidelines'));
+  add('tasks', capture('Task & Goals'));
+  add('errors', capture('Error Handling / Fallback'));
+  add('notes', capture('Notes'));
+
+  const out =
+`[Identity]
+${sections.identity || '- You are a helpful, professional AI assistant for this business.'}
+
+[Style]
+${sections.style || '- Clear, concise, friendly.'}
+
+[Response Guidelines]
+${sections.guidelines || '- Ask one clarifying question when essential info is missing.'}
+
+[Task & Goals]
+${sections.tasks || '- Guide users to their next best action (booking, purchase, or escalation).'}
+
+[Error Handling / Fallback]
+${sections.errors || '- If unsure, ask a specific clarifying question first.'}
+
+${sections.notes ? `[Notes]\n${sections.notes}\n` : ''}`;
+
+  return out.trim();
+};
+
+// Very small industry-aware builder that maps a natural sentence into the 5 sections.
+const applyInstructionsSafe = (base: string, raw: string) => {
+  const text = (raw || '').trim();
+
+  // heuristics
+  const industryMatch = text.match(/assistant\s+for\s+(a|an|the)?\s*([^.;:,]+?)(\s+clinic|\s+store|\s+company|\s+business)?(\.|;|,|$)/i);
+  const industry = industryMatch ? industryMatch[2].trim() : '';
+
+  const toneMatch = text.match(/tone\s*[:=]\s*([a-z,\s-]+)/i) || text.match(/\b(friendly|formal|casual|professional|empathetic|playful)\b/i);
+  const tone = toneMatch ? toneMatch[1]?.trim?.() || toneMatch[0] : '';
+
+  const tasksMatch = text.match(/tasks?\s*[:=]\s*([a-z0-9_,\-\s]+)/i);
+  const tasksRaw = tasksMatch ? tasksMatch[1] : '';
+  const tasks = tasksRaw
+    ? tasksRaw.split(/[,\s]+/).filter(Boolean)
+    : (text.includes('booking') || text.includes('schedule')) ? ['lead_qualification','booking','faq'] : [];
+
+  const channels = /voice|call|phone/i.test(text) && /chat|website|web/i.test(text) ? 'voice & chat'
+                  : /voice|call|phone/i.test(text) ? 'voice'
+                  : /chat|website|web/i.test(text) ? 'chat'
+                  : '';
+
+  const identity =
+`- You are a versatile AI assistant${industry ? ` for a ${industry}` : ''}. Represent the brand professionally and help users achieve their goals.`;
+
+  const style =
+`- ${tone ? `${tone[0].toUpperCase()}${tone.slice(1)}` : 'Clear, concise, friendly'}. Prefer 2–4 short sentences per turn.
+- Confirm understanding with a brief paraphrase when the request is complex.`;
+
+  const guidelines =
+`- Ask a clarifying question when essential info is missing.
+- Do not fabricate; say when you don’t know or need to check.
+- Summarize next steps when the user has a multi-step task.`;
+
+  const goals =
+`- Qualify the user’s need, answer relevant FAQs, and guide to scheduling, purchase, or escalation.${channels ? ` (${channels})` : ''}
+- Offer to collect structured info (name, contact, preferred time) when booking or follow-up is needed.${tasks.length ? ` Focus on: ${tasks.join(', ')}.` : ''}`;
+
+  const errors =
+`- If uncertain, ask a specific clarifying question.
+- If a tool/endpoint fails, apologize briefly and offer an alternative or human handoff.`;
+
+  const merged =
+`[Identity]
+${identity}
+
+[Style]
+${style}
+
+[Response Guidelines]
+${guidelines}
+
+[Task & Goals]
+${goals}
+
+[Error Handling / Fallback]
+${errors}`;
+
+  return { merged, summary: `Applied ${industry ? `industry=${industry}; ` : ''}${tone ? `tone=${tone}; ` : ''}${tasks.length ? `tasks=${tasks.join(',')}; ` : ''}`.trim() || 'Updated.' };
+};
+
+/* ─────────── choose real engine or shims at runtime ─────────── */
+const looksLikeFullPromptRT = (raw: string) =>
+  isFn(_looksLikeFullPrompt) ? !!_looksLikeFullPrompt(raw) : looksLikeFullPromptSafe(raw);
+
+const normalizeFullPromptRT = (raw: string) =>
+  isFn(_normalizeFullPrompt) ? coerceStr(_normalizeFullPrompt(raw)) : normalizeFullPromptSafe(raw);
+
+const applyInstructionsRT = (base: string, raw: string) =>
+  isFn(_applyInstructions) ? (_applyInstructions as any)(base, raw) : applyInstructionsSafe(base, raw);
+
+const DEFAULT_PROMPT_RT = nonEmpty(_DEFAULT_PROMPT) ? _DEFAULT_PROMPT! : PROMPT_SKELETON;
+
 /* ─────────── defaults ─────────── */
 const DEFAULT_AGENT: AgentData = {
   name: 'Assistant',
@@ -183,8 +313,7 @@ const DEFAULT_AGENT: AgentData = {
   model: 'GPT-4o',
   firstMode: 'Assistant speaks first',
   firstMsg: 'Hello.',
-  // Show a helpful note until user generates; Normalize into a safe 5-section layout.
-  systemPrompt: normalizeFullPrompt(`
+  systemPrompt: normalizeFullPromptRT(`
 [Identity]
 - You are a helpful, professional AI assistant for this business.
 
@@ -199,7 +328,6 @@ const DEFAULT_AGENT: AgentData = {
 
 [Error Handling / Fallback]
 - If unsure, ask a specific clarifying question first.
-
 `).trim() + '\n\n' + `# ${BLANK_TEMPLATE_NOTE}\n`,
   ttsProvider: 'openai',
   voiceName: 'Alloy (American)',
@@ -504,8 +632,8 @@ function Section({
 
 /* ─────────── Diff helpers ─────────── */
 function computeDiff(base:string, next:string){
-  const a = base.split('\n');
-  const b = next.split('\n');
+  const a = (base || '').split('\n');
+  const b = (next || '').split('\n');
   const setA = new Set(a);
   const setB = new Set(b);
   const rows: Array<{t:'same'|'add'|'rem', text:string}> = [];
@@ -713,58 +841,56 @@ export default function VoiceAgentSection() {
 
   // Replace if full prompt pasted, otherwise auto-detect and merge
   const onGenerate = () => {
-    const raw = (composerText || '').trim();
+    const raw = safeTrim(composerText);
     if (!raw) return;
 
     setGenPhase('loading');
 
     try {
-      const base = (data.systemPrompt && data.systemPrompt.trim().length > 0)
-        ? data.systemPrompt
-        : (DEFAULT_PROMPT || PROMPT_SKELETON);
-
+      const base = nonEmpty(data.systemPrompt) ? data.systemPrompt : DEFAULT_PROMPT_RT;
       basePromptRef.current = base;
 
       let merged = '';
       let summary = '';
 
-      if (looksLikeFullPrompt(raw)) {
-        merged = normalizeFullPrompt(raw);
+      if (looksLikeFullPromptRT(raw)) {
+        const norm = normalizeFullPromptRT(raw);
+        merged = nonEmpty(norm) ? norm : base;
         summary = 'Replaced prompt (manual paste).';
       } else {
-        // v2: applyInstructions detects industries & routes lines automatically
-        const out = applyInstructions(base, raw);
-        merged = out.merged || base; // guard
-        summary = out.summary || 'Updated.';
+        const out = applyInstructionsRT(base, raw) || {};
+        merged = nonEmpty(out.merged) ? out.merged : base;
+        summary = nonEmpty(out.summary) ? out.summary : 'Updated.';
       }
 
-      // If user left the # note from the blank template, drop it after first generate
+      // Drop the blank template note after first generation
       merged = merged.replace(/^\s*#\s*This is a blank template[\s\S]*?$/im, '').trim() + '\n';
 
       setShowGenerate(false);
       setProposedPrompt(merged);
       setGenPhase('review');
       runTypingIntoBox(merged);
-      setChangesSummary(summary || 'Updated.');
+      setChangesSummary(summary);
     } catch (err) {
       console.error('Generate failed:', err);
       setGenPhase('editing');
-      setToast('Generate failed — please tweak your input and try again.');
+      setToast('Generate failed — parser fallback used. Try simpler wording.');
       setTimeout(() => setToast(''), 2400);
     }
   };
 
   const onAccept = async () => {
     if (!activeId) return;
+    const nextPrompt = nonEmpty(proposedPrompt) ? proposedPrompt : data.systemPrompt;
     const snapshot = {
-      prompt: proposedPrompt || data.systemPrompt,
+      prompt: nextPrompt,
       model: data.model,
       temp: 0,
       name: data.name,
       summary: changesSummary
     };
     pushVersion(activeId, snapshot);
-    setData(p => ({ ...p, systemPrompt: proposedPrompt || p.systemPrompt }));
+    setData(p => ({ ...p, systemPrompt: nextPrompt }));
     setProposedPrompt('');
     setTypingPreview('');
     setChangesSummary('');
@@ -781,7 +907,7 @@ export default function VoiceAgentSection() {
 
   /* ─────────── UI ─────────── */
   const inInlineReview = genPhase === 'review' && !showGenerate;
-  const typingDone = Boolean(proposedPrompt) && typingPreview.length >= (proposedPrompt?.length || 0);
+  const typingDone = nonEmpty(proposedPrompt) && (typingPreview.length >= (proposedPrompt?.length || 0));
 
   return (
     <section className="va-scope" style={{ background:'var(--bg)', color:'var(--text)' }}>
@@ -1113,8 +1239,8 @@ export default function VoiceAgentSection() {
               {/* Body */}
               <div className="px-6 py-5 space-y-3">
                 <div className="text-xs" style={{ color:'var(--text-muted)' }}>
-                  Tip: you can be natural (e.g., “assistant for a dental clinic; tone friendly; handle booking & FAQs”).
-                  You don’t need to use headers — the generator auto-detects and routes each instruction.
+                  Tip: just type something like “assistant for a dental clinic; tone friendly; handle booking and FAQs”.  
+                  You don’t need headers — the generator auto-detects and routes it.
                 </div>
                 <div
                   className="rounded-[10px]"
