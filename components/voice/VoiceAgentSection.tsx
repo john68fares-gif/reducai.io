@@ -10,6 +10,9 @@ import {
 } from 'lucide-react';
 import { scopedStorage } from '@/utils/scoped-storage';
 
+/* ⬇️ NEW: bring in your prompt engine */
+import { applyInstructions, DEFAULT_PROMPT } from '@/lib/prompt-engine';
+
 /* ───────────────── Assistant rail (fixed) ───────────────── */
 const AssistantRail = dynamic(
   () =>
@@ -150,354 +153,7 @@ type AgentData = {
   numerals: boolean;
 };
 
-/* ─────────── canonical blocks ─────────── */
-const PROMPT_SKELETON =
-`[Identity]
-
-[Style]
-
-[Response Guidelines]
-
-[Task & Goals]
-
-[Error Handling / Fallback]`;
-
-/* ─────────── your main default prompt ─────────── */
-const DEFAULT_PROMPT =
-`[Identity]
-You are a versatile AI assistant capable of adapting to a wide range of tasks and user needs. Your role is to efficiently assist users by providing accurate information, helpful guidance, and relevant suggestions.
-
-[Style]
-- Use a clear and formal tone to ensure understanding.
-- Be friendly and approachable without being overly casual.
-- Customize the language to suit the context and user preferences when possible.
-
-[Response Guidelines]
-- Strive for brevity and clarity in all responses.
-- Limit technical jargon unless necessary for comprehension.
-- Use straightforward language and avoid ambiguous terms.
-
-[Task & Goals]
-1. Welcome the user to the system and inquire about their needs.
-2. Adaptively interpret the user's instructions or questions.
-3. Provide accurate answers and solutions based on available information or tools.
-4. Guide the user through complex processes step-by-step if needed.
-5. Ask for confirmation if you're unsure about user intent or details. < wait for user response >
-
-[Error Handling / Fallback]
-- If user input is unclear, ask clarifying questions to gain better understanding.
-- In the event of a misunderstanding, apologize and provide alternative solutions or suggestions.
-- If the system experiences an error, notify the user calmly and offer to retry or provide additional assistance as needed.`;
-
-/* ─────────── defaults ─────────── */
-const DEFAULT_AGENT: AgentData = {
-  name: 'Assistant',
-  provider: 'openai',
-  model: 'GPT-4o',
-  firstMode: 'Assistant speaks first',
-  firstMsg: 'Hello.',
-  systemPrompt: DEFAULT_PROMPT,
-  ttsProvider: 'openai',
-  voiceName: 'Alloy (American)',
-  apiKeyId: '',
-  asrProvider: 'deepgram',
-  asrModel: 'Nova 2',
-  denoise: false,
-  numerals: false,
-  language: 'English'
-};
-
-const keyFor = (id: string) => `va:agent:${id}`;
-const versKeyFor = (id: string) => `va:versions:${id}`;
-
-const loadAgentData = (id: string): AgentData => {
-  try { const raw = localStorage.getItem(keyFor(id)); if (raw) return { ...DEFAULT_AGENT, ...(JSON.parse(raw)||{}) }; }
-  catch {}
-  return { ...DEFAULT_AGENT };
-};
-const saveAgentData = (id: string, data: AgentData) => {
-  try { localStorage.setItem(keyFor(id), JSON.stringify(data)); } catch {}
-};
-const pushVersion = (id:string, snapshot:any) => {
-  try {
-    const raw = localStorage.getItem(versKeyFor(id));
-    const arr = raw ? JSON.parse(raw) : [];
-    arr.unshift({ id: `v_${Date.now()}`, ts: Date.now(), ...snapshot });
-    localStorage.setItem(versKeyFor(id), JSON.stringify(arr.slice(0, 50)));
-  } catch {}
-};
-
-/* ─────────── mock backend ─────────── */
-async function apiSave(agentId: string, payload: AgentData){
-  const r = await fetch(`/api/voice/agent/${agentId}/save`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
-  }).catch(()=>null);
-  if (!r?.ok) throw new Error('Save failed');
-  return r.json();
-}
-async function apiPublish(agentId: string){
-  const r = await fetch(`/api/voice/agent/${agentId}/publish`, { method: 'POST' }).catch(()=>null);
-  if (!r?.ok) throw new Error('Publish failed');
-  return r.json();
-}
-
-/* ─────────── option helpers ─────────── */
-type Opt = { value: string; label: string; disabled?: boolean; note?: string };
-
-const providerOpts: Opt[] = [
-  { value: 'openai',     label: 'OpenAI' },
-  { value: 'anthropic',  label: 'Anthropic — coming soon', disabled: true, note: 'soon' },
-  { value: 'google',     label: 'Google — coming soon',    disabled: true, note: 'soon' },
-];
-
-const modelOptsFor = (provider: string): Opt[] =>
-  provider === 'openai'
-    ? [
-        { value: 'GPT-4o',  label: 'GPT-4o' },
-        { value: 'GPT-4.1', label: 'GPT-4.1' },
-        { value: 'o4-mini', label: 'o4-mini' },
-      ]
-    : [{ value: 'coming', label: 'Models coming soon', disabled: true }];
-
-const ttsProviders: Opt[] = [
-  { value: 'openai',    label: 'OpenAI' },
-  { value: 'elevenlabs', label: 'ElevenLabs — coming soon', disabled: true, note: 'soon' },
-];
-
-const asrProviders: Opt[] = [
-  { value: 'deepgram',   label: 'Deepgram' },
-  { value: 'whisper',    label: 'Whisper — coming soon', disabled: true, note: 'soon' },
-  { value: 'assemblyai', label: 'AssemblyAI — coming soon', disabled: true, note: 'soon' },
-];
-
-const asrModelsFor = (asr: string): Opt[] =>
-  asr === 'deepgram'
-    ? [
-        { value: 'Nova 2', label: 'Nova 2' },
-        { value: 'Nova',   label: 'Nova' },
-      ]
-    : [{ value: 'coming', label: 'Models coming soon', disabled: true }];
-
-/* ─────────── UI atoms ─────────── */
-const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}) => (
-  <button
-    onClick={()=>onChange(!checked)}
-    className="inline-flex items-center"
-    style={{
-      height:28, width:50, padding:'0 6px', borderRadius:999, justifyContent:'flex-start',
-      background: checked ? 'color-mix(in oklab, #59d9b3 18%, var(--input-bg))' : 'var(--input-bg)',
-      border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)'
-    }}
-    aria-pressed={checked}
-  >
-    <span
-      style={{
-        width:18, height:18, borderRadius:999,
-        background: checked ? CTA : 'rgba(255,255,255,.12)',
-        transform:`translateX(${checked?22:0}px)`, transition:'transform .18s var(--ease)'
-      }}
-    />
-  </button>
-);
-
-/* ─────────── Non-sectioned Select ─────────── */
-function StyledSelect({
-  value, onChange, options, placeholder, leftIcon, menuTop,
-  onPreview, isPreviewing
-}:{
-  value: string; onChange: (v: string) => void;
-  options: Opt[]; placeholder?: string; leftIcon?: React.ReactNode; menuTop?: React.ReactNode;
-  onPreview?: (v: string) => Promise<void>;
-  isPreviewing?: string | null;
-}) {
-  const wrapRef = useRef<HTMLDivElement|null>(null);
-  const btnRef = useRef<HTMLButtonElement|null>(null);
-  const searchRef = useRef<HTMLInputElement|null>(null);
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState('');
-  const [menuPos, setMenuPos] = useState<{left:number; width:number} | null>(null);
-
-  const current = options.find(o => o.value === value) || null;
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return q ? options.filter(o => o.label.toLowerCase().includes(q)) : options;
-  }, [options, query, value]);
-
-  useEffect(() => {
-    if (!open) return;
-    const off = (e: MouseEvent) => {
-      if (wrapRef.current?.contains(e.target as Node)) return;
-      setOpen(false);
-    };
-    const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
-    const onResize = () => {
-      if (!btnRef.current) return;
-      const r = btnRef.current.getBoundingClientRect();
-      setMenuPos({ left: r.left, width: r.width });
-    };
-    onResize();
-    window.addEventListener('mousedown', off);
-    window.addEventListener('keydown', onEsc);
-    window.addEventListener('resize', onResize);
-    return () => {
-      window.removeEventListener('mousedown', off);
-      window.removeEventListener('keydown', onEsc);
-      window.removeEventListener('resize', onResize);
-    };
-  }, [open]);
-
-  return (
-    <div ref={wrapRef} className="relative">
-      <button
-        ref={btnRef}
-        type="button"
-        onClick={() => { setOpen(v=>!v); setTimeout(()=>searchRef.current?.focus(),0); }}
-        className="w-full flex items-center justify-between gap-3 px-3 py-3 rounded-[10px] text-sm outline-none transition"
-        style={{
-          background:'var(--input-bg)',
-          border:'1px solid var(--input-border)',
-          boxShadow:'var(--input-shadow)',
-          color:'var(--text)'
-        }}
-      >
-        <span className="flex items-center gap-2 truncate">
-          {leftIcon}
-          <span className="truncate">{current ? current.label : (placeholder || '— Choose —')}</span>
-        </span>
-        <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)', transform: open ? 'rotate(180deg)' : 'rotate(0)', transition:'transform .18s var(--ease)' }} />
-      </button>
-
-      {open && createPortal(
-        <div
-          className="va-menu p-3"
-          style={{
-            position:'fixed',
-            left: (menuPos?.left ?? 0),
-            top: (btnRef.current?.getBoundingClientRect().bottom ?? 0) + 8,
-            width: (menuPos?.width ?? (btnRef.current?.getBoundingClientRect().width ?? 280)),
-            background:'var(--panel)',
-            border:`1px solid ${GREEN_LINE}`,
-            borderRadius:10,
-            boxShadow:'0 36px 90px rgba(0,0,0,.55)'
-          }}
-        >
-          {menuTop ? <div className="mb-2">{menuTop}</div> : null}
-
-          <div
-            className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[10px]"
-            style={{ background:'var(--panel)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-          >
-            <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
-            <input
-              ref={searchRef}
-              value={query}
-              onChange={(e)=>setQuery(e.target.value)}
-              placeholder="Type to filter…"
-              className="w-full bg-transparent outline-none text-sm"
-              style={{ color:'var(--text)' }}
-            />
-          </div>
-
-          <div className="max-h-72 overflow-y-auto pr-1" style={{ scrollbarWidth:'thin' }}>
-            {filtered.map(o => (
-              <button
-                key={o.value}
-                disabled={o.disabled}
-                onClick={()=>{ if (o.disabled) return; onChange(o.value); setOpen(false); }}
-                className="w-full text-left text-sm px-3 py-2 rounded-[10px] transition grid grid-cols-[18px_1fr_auto] items-center gap-2 disabled:opacity-60"
-                style={{
-                  color: o.disabled ? 'var(--text-muted)' : 'var(--text)',
-                  background:'transparent',
-                  border:'none',
-                  boxShadow:'none',
-                  cursor:o.disabled?'not-allowed':'pointer',
-                  position:'relative'
-                }}
-                onMouseEnter={(e)=>{ if (o.disabled) return; const el=e.currentTarget as HTMLButtonElement; el.style.boxShadow = `${GREEN_GLOW}`; el.style.transform = 'translateY(-1px)'; }}
-                onMouseLeave={(e)=>{ const el=e.currentTarget as HTMLButtonElement; el.style.boxShadow = 'none'; el.style.transform = 'translateY(0)'; }}
-              >
-                {o.disabled ? (
-                  <Lock className="w-3.5 h-3.5" />
-                ) : (
-                  <Check className="w-3.5 h-3.5" style={{ opacity: o.value===value ? 1 : 0 }} />
-                )}
-                <span className="truncate">{o.label}</span>
-                {onPreview ? (
-                  <button
-                    type="button"
-                    onClick={async (e)=>{ e.stopPropagation(); await onPreview(o.value); }}
-                    className="w-7 h-7 rounded-full grid place-items-center"
-                    style={{ border:'1px solid var(--input-border)', background:'var(--panel)' }}
-                    aria-label={isPreviewing === o.value ? 'Stop preview' : 'Play preview'}
-                    title={isPreviewing === o.value ? 'Stop' : 'Play'}
-                  >
-                    {isPreviewing === o.value ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-                  </button>
-                ) : <span />}
-              </button>
-            ))}
-            {filtered.length===0 && (
-              <div className="px-3 py-6 text-sm" style={{ color:'var(--text-muted)' }}>No matches.</div>
-            )}
-          </div>
-        </div>,
-        document.body
-      )}
-    </div>
-  );
-}
-
-/* ─────────── Section (expand anim) ─────────── */
-function Section({
-  title, icon, desc, children, defaultOpen = true
-}:{
-  title: string; icon: React.ReactNode; desc?: string; children: React.ReactNode; defaultOpen?: boolean;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  const innerRef = useRef<HTMLDivElement|null>(null);
-  const [h, setH] = useState<number>(0);
-  const measure = () => { if (innerRef.current) setH(innerRef.current.offsetHeight); };
-  useLayoutEffect(() => { measure(); }, [children, open]);
-
-  return (
-    <div className="mb-[12px]">
-      <div className="mb-[6px] text-sm font-medium" style={{ color:'var(--text-muted)' }}>{title}</div>
-
-      <div className="va-card">
-        <button onClick={()=>setOpen(v=>!v)} className="va-head w-full text-left" style={{ color:'var(--text)' }}>
-          <span className="min-w-0 flex items-center gap-3">
-            <span className="inline-grid place-items-center w-7 h-7 rounded-full" style={{ background:'rgba(89,217,179,.10)' }}>
-              {icon}
-            </span>
-            <span className="min-w-0">
-              <span className="block font-semibold truncate" style={{ fontSize:'var(--fz-title)' }}>{title}</span>
-              {desc ? <span className="block text-xs truncate" style={{ color:'var(--text-muted)' }}>{desc}</span> : null}
-            </span>
-          </span>
-          <span className="justify-self-end">
-            {open ? <ChevronUp className="w-4 h-4" style={{ color:'var(--text-muted)' }}/> :
-                    <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)' }}/>}
-          </span>
-        </button>
-
-        <div
-          style={{
-            height: open ? h : 0,
-            opacity: open ? 1 : 0,
-            transform: open ? 'translateY(0)' : 'translateY(-4px)',
-            transition: 'height 260ms var(--ease), opacity 230ms var(--ease), transform 260ms var(--ease)',
-            overflow:'hidden'
-          }}
-          onTransitionEnd={() => { if (open) measure(); }}
-        >
-          <div ref={innerRef} className="p-[var(--s-5)]">{children}</div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ─────────── Diff helpers ─────────── */
+/* ─────────── Diff helpers (kept for UI) ─────────── */
 function computeDiff(base:string, next:string){
   const a = base.split('\n');
   const b = next.split('\n');
@@ -563,7 +219,22 @@ export default function VoiceAgentSection() {
   const [activeId, setActiveId] = useState<string>(() => {
     try { return localStorage.getItem(ACTIVE_KEY) || ''; } catch { return ''; }
   });
-  const [data, setData] = useState<AgentData>(() => (activeId ? loadAgentData(activeId) : DEFAULT_AGENT));
+  const [data, setData] = useState<AgentData>(() => (activeId ? loadAgentData(activeId) : {
+    name: 'Assistant',
+    provider: 'openai',
+    model: 'GPT-4o',
+    firstMode: 'Assistant speaks first',
+    firstMsg: 'Hello.',
+    systemPrompt: DEFAULT_PROMPT,   // ⬅️ use prompt-engine default
+    ttsProvider: 'openai',
+    voiceName: 'Alloy (American)',
+    apiKeyId: '',
+    asrProvider: 'deepgram',
+    asrModel: 'Nova 2',
+    denoise: false,
+    numerals: false,
+    language: 'English'
+  }));
 
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
@@ -671,14 +342,13 @@ export default function VoiceAgentSection() {
   }
   async function doPublish(){
     if (!activeId) { setToast('Select or create an agent'); return; }
-    setPublishing(true);
-    setToast('');
+    setPublishing(true); setToast('');
     try { await apiPublish(activeId); setToast('Published'); }
     catch { setToast('Publish failed'); }
     finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
   }
 
-  /* ── Generate overlay logic (VERBATIM REPLACEMENT) ── */
+  /* ── Generate overlay logic (UPDATED to use prompt-engine) ── */
 
   const runTypingIntoBox = (full:string) => {
     setTypingPreview('');
@@ -700,18 +370,34 @@ export default function VoiceAgentSection() {
     setShowGenerate(true);
   };
 
-  // Replace the entire prompt with exactly what the user typed
+  // detect if user pasted a whole 5-section prompt
+  const looksStructuredPrompt = (s: string) =>
+    /\[Identity\][\s\S]*\[Style\][\s\S]*\[Response Guidelines\][\s\S]*\[Task & Goals\][\s\S]*\[Error Handling\s*\/\s*Fallback\]/i.test(s);
+
+  // Close overlay immediately, then stream typing into prompt area with review actions
   const onGenerate = () => {
     if (!composerText.trim()) return;
     setGenPhase('loading');
 
-    const base = (data.systemPrompt && data.systemPrompt.length > 0)
+    const base = (data.systemPrompt && data.systemPrompt.trim().length > 0)
       ? data.systemPrompt
       : DEFAULT_PROMPT;
 
     basePromptRef.current = base;
 
-    const merged = composerText; // VERBATIM, no routing/edits/normalization
+    // NEW: Replace wholesale if it looks like a fully-structured prompt,
+    // else merge free-text with applyInstructions()
+    let merged = '';
+    let summary = '';
+
+    if (looksStructuredPrompt(composerText)) {
+      merged = composerText.trim();
+      summary = 'Replaced with structured prompt';
+    } else {
+      const out = applyInstructions(base, composerText);
+      merged = out.merged;
+      summary = out.summary;
+    }
 
     // Close overlay now
     setShowGenerate(false);
@@ -721,8 +407,11 @@ export default function VoiceAgentSection() {
     setGenPhase('review');
     runTypingIntoBox(merged);
 
-    // Plain summary
-    setChangesSummary('Prompt replaced.');
+    // Summary badge
+    const d = computeDiff(base, merged);
+    const addedCount = d.filter(r=>r.t==='add').length;
+    const removedCount = d.filter(r=>r.t==='rem').length;
+    setChangesSummary(summary || `Applied edits. +${addedCount} / -${removedCount} lines.`);
   };
 
   const onAccept = async () => {
@@ -1086,12 +775,12 @@ export default function VoiceAgentSection() {
               {/* Body */}
               <div className="px-6 py-5 space-y-4">
                 <div className="space-y-2">
-                  <label className="block text-xs" style={{ color:'var(--text-muted)' }}>Paste the full prompt you want to use:</label>
+                  <label className="block text-xs" style={{ color:'var(--text-muted)' }}>Describe what you want to change…</label>
                   <textarea
                     value={composerText}
                     onChange={(e)=>setComposerText(e.target.value)}
                     className="w-full bg-transparent outline-none rounded-[10px] px-3 py-2"
-                    placeholder="[Identity]\n...\n[Style]\n..."
+                    placeholder="e.g., Friendlier tone, add handoff after 3 failed tries, confirm user email first."
                     style={{ minHeight: 160, maxHeight: '40vh', background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
                   />
                 </div>
@@ -1182,4 +871,275 @@ export default function VoiceAgentSection() {
       )}
     </section>
   );
+}
+
+/* ─────────── option helpers (left at bottom to keep original structure) ─────────── */
+type Opt = { value: string; label: string; disabled?: boolean; note?: string };
+
+const providerOpts: Opt[] = [
+  { value: 'openai',     label: 'OpenAI' },
+  { value: 'anthropic',  label: 'Anthropic — coming soon', disabled: true, note: 'soon' },
+  { value: 'google',     label: 'Google — coming soon',    disabled: true, note: 'soon' },
+];
+
+const modelOptsFor = (provider: string): Opt[] =>
+  provider === 'openai'
+    ? [
+        { value: 'GPT-4o',  label: 'GPT-4o' },
+        { value: 'GPT-4.1', label: 'GPT-4.1' },
+        { value: 'o4-mini', label: 'o4-mini' },
+      ]
+    : [{ value: 'coming', label: 'Models coming soon', disabled: true }];
+
+const ttsProviders: Opt[] = [
+  { value: 'openai',    label: 'OpenAI' },
+  { value: 'elevenlabs', label: 'ElevenLabs — coming soon', disabled: true, note: 'soon' },
+];
+
+const asrProviders: Opt[] = [
+  { value: 'deepgram',   label: 'Deepgram' },
+  { value: 'whisper',    label: 'Whisper — coming soon', disabled: true, note: 'soon' },
+  { value: 'assemblyai', label: 'AssemblyAI — coming soon', disabled: true, note: 'soon' },
+];
+
+const asrModelsFor = (asr: string): Opt[] =>
+  asr === 'deepgram'
+    ? [
+        { value: 'Nova 2', label: 'Nova 2' },
+        { value: 'Nova',   label: 'Nova' },
+      ]
+    : [{ value: 'coming', label: 'Models coming soon', disabled: true }];
+
+/* ─────────── UI atoms (unchanged) ─────────── */
+const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}) => (
+  <button
+    onClick={()=>onChange(!checked)}
+    className="inline-flex items-center"
+    style={{
+      height:28, width:50, padding:'0 6px', borderRadius:999, justifyContent:'flex-start',
+      background: checked ? 'color-mix(in oklab, #59d9b3 18%, var(--input-bg))' : 'var(--input-bg)',
+      border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)'
+    }}
+    aria-pressed={checked}
+  >
+    <span
+      style={{
+        width:18, height:18, borderRadius:999,
+        background: checked ? CTA : 'rgba(255,255,255,.12)',
+        transform:`translateX(${checked?22:0}px)`, transition:'transform .18s var(--ease)'
+      }}
+    />
+  </button>
+);
+
+/* ─────────── Non-sectioned Select (unchanged) ─────────── */
+function StyledSelect({
+  value, onChange, options, placeholder, leftIcon, menuTop,
+  onPreview, isPreviewing
+}:{
+  value: string; onChange: (v: string) => void;
+  options: Opt[]; placeholder?: string; leftIcon?: React.ReactNode; menuTop?: React.ReactNode;
+  onPreview?: (v: string) => Promise<void>;
+  isPreviewing?: string | null;
+}) {
+  const wrapRef = useRef<HTMLDivElement|null>(null);
+  const btnRef = useRef<HTMLButtonElement|null>(null);
+  const searchRef = useRef<HTMLInputElement|null>(null);
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [menuPos, setMenuPos] = useState<{left:number; width:number} | null>(null);
+
+  const current = options.find(o => o.value === value) || null;
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return q ? options.filter(o => o.label.toLowerCase().includes(q)) : options;
+  }, [options, query, value]);
+
+  useEffect(() => {
+    if (!open) return;
+    const off = (e: MouseEvent) => {
+      if (wrapRef.current?.contains(e.target as Node)) return;
+      setOpen(false);
+    };
+    const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    const onResize = () => {
+      if (!btnRef.current) return;
+      const r = btnRef.current.getBoundingClientRect();
+      setMenuPos({ left: r.left, width: r.width });
+    };
+    onResize();
+    window.addEventListener('mousedown', off);
+    window.addEventListener('keydown', onEsc);
+    window.addEventListener('resize', onResize);
+    return () => {
+      window.removeEventListener('mousedown', off);
+      window.removeEventListener('keydown', onEsc);
+      window.removeEventListener('resize', onResize);
+    };
+  }, [open]);
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={() => { setOpen(v=>!v); setTimeout(()=>searchRef.current?.focus(),0); }}
+        className="w-full flex items-center justify-between gap-3 px-3 py-3 rounded-[10px] text-sm outline-none transition"
+        style={{
+          background:'var(--input-bg)',
+          border:'1px solid var(--input-border)',
+          boxShadow:'var(--input-shadow)',
+          color:'var(--text)'
+        }}
+      >
+        <span className="flex items-center gap-2 truncate">
+          {leftIcon}
+          <span className="truncate">{current ? current.label : (placeholder || '— Choose —')}</span>
+        </span>
+        <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)', transform: open ? 'rotate(180deg)' : 'rotate(0)', transition:'transform .18s var(--ease)' }} />
+      </button>
+
+      {open && createPortal(
+        <div
+          className="va-menu p-3"
+          style={{
+            position:'fixed',
+            left: (menuPos?.left ?? 0),
+            top: (btnRef.current?.getBoundingClientRect().bottom ?? 0) + 8,
+            width: (menuPos?.width ?? (btnRef.current?.getBoundingClientRect().width ?? 280)),
+            background:'var(--panel)',
+            border:`1px solid ${GREEN_LINE}`,
+            borderRadius:10,
+            boxShadow:'0 36px 90px rgba(0,0,0,.55)'
+          }}
+        >
+          {menuTop ? <div className="mb-2">{menuTop}</div> : null}
+
+          <div
+            className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[10px]"
+            style={{ background:'var(--panel)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+          >
+            <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
+            <input
+              ref={searchRef}
+              value={query}
+              onChange={(e)=>setQuery(e.target.value)}
+              placeholder="Type to filter…"
+              className="w-full bg-transparent outline-none text-sm"
+              style={{ color:'var(--text)' }}
+            />
+          </div>
+
+          <div className="max-h-72 overflow-y-auto pr-1" style={{ scrollbarWidth:'thin' }}>
+            {filtered.map(o => (
+              <button
+                key={o.value}
+                disabled={o.disabled}
+                onClick={()=>{ if (o.disabled) return; onChange(o.value); setOpen(false); }}
+                className="w-full text-left text-sm px-3 py-2 rounded-[10px] transition grid grid-cols-[18px_1fr_auto] items-center gap-2 disabled:opacity-60"
+                style={{
+                  color: o.disabled ? 'var(--text-muted)' : 'var(--text)',
+                  background:'transparent',
+                  border:'none',
+                  boxShadow:'none',
+                  cursor:o.disabled?'not-allowed':'pointer',
+                  position:'relative'
+                }}
+                onMouseEnter={(e)=>{ if (o.disabled) return; const el=e.currentTarget as HTMLButtonElement; el.style.boxShadow = `${GREEN_GLOW}`; el.style.transform = 'translateY(-1px)'; }}
+                onMouseLeave={(e)=>{ const el=e.currentTarget as HTMLButtonElement; el.style.boxShadow = 'none'; el.style.transform = 'translateY(0)'; }}
+              >
+                {o.disabled ? (
+                  <Lock className="w-3.5 h-3.5" />
+                ) : (
+                  <Check className="w-3.5 h-3.5" style={{ opacity: o.value===value ? 1 : 0 }} />
+                )}
+                <span className="truncate">{o.label}</span>
+                {onPreview ? (
+                  <button
+                    type="button"
+                    onClick={async (e)=>{ e.stopPropagation(); await onPreview(o.value); }}
+                    className="w-7 h-7 rounded-full grid place-items-center"
+                    style={{ border:'1px solid var(--input-border)', background:'var(--panel)' }}
+                    aria-label={isPreviewing === o.value ? 'Stop preview' : 'Play preview'}
+                    title={isPreviewing === o.value ? 'Stop' : 'Play'}
+                  >
+                    {isPreviewing === o.value ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+                  </button>
+                ) : <span />}
+              </button>
+            ))}
+            {filtered.length===0 && (
+              <div className="px-3 py-6 text-sm" style={{ color:'var(--text-muted)' }}>No matches.</div>
+            )}
+          </div>
+        </div>,
+        document.body
+      )}
+    </div>
+  );
+}
+
+/* ─────────── mock backend & storage helpers (unchanged) ─────────── */
+const keyFor = (id: string) => `va:agent:${id}`;
+const versKeyFor = (id: string) => `va:versions:${id}`;
+
+const loadAgentData = (id: string): AgentData => {
+  try { const raw = localStorage.getItem(keyFor(id)); if (raw) return { 
+    name: 'Assistant',
+    provider: 'openai',
+    model: 'GPT-4o',
+    firstMode: 'Assistant speaks first',
+    firstMsg: 'Hello.',
+    systemPrompt: DEFAULT_PROMPT,
+    ttsProvider: 'openai',
+    voiceName: 'Alloy (American)',
+    apiKeyId: '',
+    asrProvider: 'deepgram',
+    asrModel: 'Nova 2',
+    denoise: false,
+    numerals: false,
+    language: 'English',
+    ...(JSON.parse(raw)||{})
+  }; }
+  catch {}
+  return { 
+    name: 'Assistant',
+    provider: 'openai',
+    model: 'GPT-4o',
+    firstMode: 'Assistant speaks first',
+    firstMsg: 'Hello.',
+    systemPrompt: DEFAULT_PROMPT,
+    ttsProvider: 'openai',
+    voiceName: 'Alloy (American)',
+    apiKeyId: '',
+    asrProvider: 'deepgram',
+    asrModel: 'Nova 2',
+    denoise: false,
+    numerals: false,
+    language: 'English'
+  };
+};
+const saveAgentData = (id: string, data: AgentData) => {
+  try { localStorage.setItem(keyFor(id), JSON.stringify(data)); } catch {}
+};
+const pushVersion = (id:string, snapshot:any) => {
+  try {
+    const raw = localStorage.getItem(versKeyFor(id));
+    const arr = raw ? JSON.parse(raw) : [];
+    arr.unshift({ id: `v_${Date.now()}`, ts: Date.now(), ...snapshot });
+    localStorage.setItem(versKeyFor(id), JSON.stringify(arr.slice(0, 50)));
+  } catch {}
+};
+
+async function apiSave(agentId: string, payload: AgentData){
+  const r = await fetch(`/api/voice/agent/${agentId}/save`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+  }).catch(()=>null);
+  if (!r?.ok) throw new Error('Save failed');
+  return r.json();
+}
+async function apiPublish(agentId: string){
+  const r = await fetch(`/api/voice/agent/${agentId}/publish`, { method: 'POST' }).catch(()=>null);
+  if (!r?.ok) throw new Error('Publish failed');
+  return r.json();
 }
