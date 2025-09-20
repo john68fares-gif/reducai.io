@@ -1,18 +1,14 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 
 /**
- * Google Maps (Place) → Facts
+ * OpenStreetMap (Nominatim) → Facts
  * POST /api/connectors/maps-import
  * body: { query: string }
  *
- * Accepts:
- *  - a full Google Maps URL, or
- *  - plain text like "BrightSmile Dental Austin"
+ * No API key required. Works on Vercel or any Node host.
+ * Respect Nominatim usage policy (set a descriptive User-Agent; avoid spamming).
  *
- * Requires: process.env.GOOGLE_MAPS_API_KEY
- *
- * Returns { ok: true, facts: string[], placeId: string }
- * Facts are short bullets usable in your prompt’s [Business Facts] section.
+ * Returns: { ok: true, facts: string[], placeId: string, lat:number, lng:number }
  */
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -22,93 +18,116 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   const { query } = (req.body || {}) as { query?: string };
-  const key = process.env.GOOGLE_MAPS_API_KEY;
-  if (!key) return res.status(400).json({ error: 'Server missing GOOGLE_MAPS_API_KEY' });
-  if (!query || !query.trim()) return res.status(400).json({ error: 'Provide { query } (maps link or name + city)' });
+  if (!query || !query.trim()) return res.status(400).json({ error: 'Provide { query } (business name + city or a maps link)' });
 
   try {
-    const normalized = extractQueryFromMapsUrl(query.trim());
+    const q = normalizeQuery(query.trim());
 
-    // 1) Find place
-    const findURL = new URL('https://maps.googleapis.com/maps/api/place/findplacefromtext/json');
-    findURL.searchParams.set('input', normalized);
-    findURL.searchParams.set('inputtype', 'textquery');
-    findURL.searchParams.set('fields', 'place_id,name,formatted_address');
-    findURL.searchParams.set('key', key);
+    // 1) Search Nominatim
+    const url = new URL('https://nominatim.openstreetmap.org/search');
+    url.searchParams.set('q', q);
+    url.searchParams.set('format', 'json');
+    url.searchParams.set('addressdetails', '1');
+    url.searchParams.set('extratags', '1');
+    url.searchParams.set('limit', '1');
 
-    const findRes = await fetch(findURL.toString());
-    const findJson = await findRes.json();
-    const placeId: string | undefined = findJson?.candidates?.[0]?.place_id;
-    if (!placeId) return res.status(404).json({ error: 'Place not found' });
+    const headers: Record<string, string> = {
+      // Add a descriptive UA for politeness & policy compliance.
+      'User-Agent': `YourApp/1.0 (${process.env.VERCEL_URL || 'no-host'}; contact: support@yourapp.invalid)`,
+      'Accept': 'application/json'
+    };
 
-    // 2) Details
-    const detailsURL = new URL('https://maps.googleapis.com/maps/api/place/details/json');
-    detailsURL.searchParams.set('place_id', placeId);
-    detailsURL.searchParams.set(
-      'fields',
-      [
-        'name',
-        'formatted_phone_number',
-        'formatted_address',
-        'website',
-        'opening_hours',
-        'types',
-        'geometry/location',
-        'rating',
-        'user_ratings_total',
-      ].join(',')
-    );
-    detailsURL.searchParams.set('key', key);
+    const r = await fetch(url.toString(), { headers, cache: 'no-store' });
+    if (!r.ok) return res.status(400).json({ error: `Search failed (${r.status})` });
+    const list = await r.json();
 
-    const detailsRes = await fetch(detailsURL.toString());
-    const detailsJson = await detailsRes.json();
-    const p = detailsJson?.result;
-    if (!p) return res.status(404).json({ error: 'No details for place' });
+    const hit = Array.isArray(list) && list[0];
+    if (!hit) return res.status(404).json({ error: 'Place not found' });
 
+    const lat = Number(hit.lat);
+    const lng = Number(hit.lon);
+    const placeId = String(hit.place_id);
+    const name = extractName(hit);
+    const address = formatAddress(hit?.address);
+    const website = hit?.extratags?.website || hit?.extratags?.contact_website || '';
+    const phone =
+      hit?.extratags?.phone ||
+      hit?.extratags?.contact_phone ||
+      hit?.extratags?.contact_mobile ||
+      '';
+    const opening = hit?.extratags?.opening_hours || '';
+    const categories = [
+      hit?.class,
+      hit?.type,
+      hit?.category,
+      ...(hit?.extratags?.cuisine ? [hit.extratags.cuisine] : []),
+    ]
+      .filter(Boolean)
+      .map(String);
+
+    // 2) Build prompt-friendly facts
     const facts: string[] = [];
-    push(facts, 'Official Name', p.name);
-    push(facts, 'Address', p.formatted_address);
-    push(facts, 'Phone', p.formatted_phone_number);
-    push(facts, 'Website', p.website);
+    push(facts, 'Official Name', name);
+    push(facts, 'Address', address);
+    push(facts, 'Phone', normalizePhone(phone));
+    push(facts, 'Website', website);
+    if (opening) facts.push(`Hours (OSM): ${opening}`);
+    if (categories.length) facts.push(`Categories: ${dedupe(categories).join(', ')}`);
+    facts.push(`Geo: ${lat},${lng}`);
 
-    if (p?.opening_hours?.weekday_text?.length) {
-      facts.push(`Hours: ${p.opening_hours.weekday_text.join('; ')}`);
-    }
-    if (typeof p.rating === 'number') {
-      facts.push(`Google Rating: ${p.rating} (${p.user_ratings_total || 0} reviews)`);
-    }
-    if (Array.isArray(p.types) && p.types.length) {
-      facts.push(`Categories: ${p.types.join(', ')}`);
-    }
-    if (p?.geometry?.location?.lat && p?.geometry?.location?.lng) {
-      facts.push(`Geo: ${p.geometry.location.lat},${p.geometry.location.lng}`);
-    }
+    // 3) Clean/dedupe
+    const cleaned = dedupe(facts).map(s => s.replace(/\s+/g, ' ').trim());
 
-    // de-dupe & trim
-    const deduped = dedupe(facts).map((s) => s.replace(/\s+/g, ' ').trim());
-
-    return res.status(200).json({ ok: true, facts: deduped, placeId });
+    return res.status(200).json({ ok: true, facts: cleaned, placeId, lat, lng });
   } catch (e: any) {
-    return res.status(500).json({ error: e?.message || 'Maps lookup failed' });
+    return res.status(500).json({ error: e?.message || 'Lookup failed' });
   }
 }
 
 /* ---------------- helpers ---------------- */
 
-function extractQueryFromMapsUrl(q: string) {
+function normalizeQuery(input: string) {
+  // If they pasted some map URL, try to salvage the text query part;
+  // otherwise just pass through (Nominatim handles free text well).
   try {
-    const u = new URL(q);
-    if (!/google\.[^/]+\/maps/i.test(u.hostname + u.pathname)) return q;
-    // Prefer the "q" param, else fall back to the whole URL text (Google handles it)
-    const qp = u.searchParams.get('q');
-    if (qp) return qp;
-    return decodeURIComponent(q.href);
+    const u = new URL(input);
+    const q = u.searchParams.get('q') || u.searchParams.get('query') || '';
+    return q || decodeURIComponent(u.pathname.replace(/\/+/g, ' ').trim());
   } catch {
-    return q;
+    return input;
   }
 }
 
-function push(arr: string[], label: string, val?: string | null) {
+function extractName(hit: any): string {
+  // Prefer a display_name first part; else namedetails if present.
+  const dn: string = hit?.display_name || '';
+  const firstComma = dn.indexOf(',');
+  const head = firstComma > 0 ? dn.slice(0, firstComma) : dn;
+  const namedetails = hit?.namedetails?.name || '';
+  return (namedetails || head || '').trim();
+}
+
+function formatAddress(addr: any) {
+  if (!addr) return '';
+  const parts = [
+    addr.house_number && addr.road ? `${addr.house_number} ${addr.road}` : (addr.road || ''),
+    addr.neighbourhood || addr.suburb || '',
+    addr.city || addr.town || addr.village || addr.county || '',
+    addr.state || '',
+    addr.postcode || '',
+    addr.country || '',
+  ]
+    .map((s: string) => (s || '').trim())
+    .filter(Boolean);
+  return dedupe(parts).join(', ');
+}
+
+function normalizePhone(p?: string) {
+  if (!p) return '';
+  return p.replace(/[^\d+]/g, '').replace(/^\+?/, '+');
+}
+
+function push(arr: string[], label: string, val?: string) {
   const v = (val || '').toString().trim();
   if (v) arr.push(`${label}: ${v}`);
 }
