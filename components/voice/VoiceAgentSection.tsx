@@ -1,4 +1,3 @@
-// components/voice/VoiceAgentSection.tsx
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
@@ -6,10 +5,11 @@ import dynamic from 'next/dynamic';
 import { createPortal } from 'react-dom';
 import {
   Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Rocket, Search, Check, Lock,
-  KeyRound, Play, Square, Pause, X
+  KeyRound, Play, Square, Pause, X, History, Save, Undo2
 } from 'lucide-react';
 import { scopedStorage } from '@/utils/scoped-storage';
 import WebCallButton from '@/components/voice/WebCallButton';
+import SheetsConnect from '@/components/voice/SheetsConnect'; // ⬅️ link Google Sheets card
 
 import {
   applyInstructions as _applyInstructions,
@@ -39,11 +39,10 @@ class RailBoundary extends React.Component<{children:React.ReactNode},{hasError:
 const CTA = '#59d9b3';
 const CTA_HOVER = '#54cfa9';
 const GREEN_LINE = 'rgba(89,217,179,.20)';
-const GREEN_GLOW = '0 10px 26px rgba(89,217,179,.28)';
 const ACTIVE_KEY = 'va:activeId';
 const Z_OVERLAY = 100000;
 const Z_MODAL   = 100001;
-const Z_MENU    = 100020;       // above panels
+const Z_MENU    = 100020;
 const IS_CLIENT = typeof window !== 'undefined' && typeof document !== 'undefined';
 
 /* phone icon */
@@ -58,7 +57,7 @@ function PhoneFilled(props: React.SVGProps<SVGSVGElement>) {
   );
 }
 
-/* ─────────── little safety helpers ─────────── */
+/* ─────────── helpers ─────────── */
 const isFn = (f: any): f is Function => typeof f === 'function';
 const isStr = (v: any): v is string => typeof v === 'string';
 const nonEmpty = (v: any): v is string => isStr(v) && v.trim().length > 0;
@@ -92,11 +91,8 @@ const Tokens = () => (
                     0 0 0 1px ${GREEN_LINE};
 
       --green-weak: rgba(89,217,179,.12);
-      --green-strong: rgba(89,217,179,.22);
       --red-weak: rgba(239,68,68,.14);
-      --red-strong: rgba(239,68,68,.26);
 
-      /* also used by dropdown triggers (with fallbacks in code) */
       --vs-input-bg:#101314;
       --vs-input-border:rgba(255,255,255,.14);
       --vs-input-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 12px 30px rgba(0,0,0,.38);
@@ -105,7 +101,6 @@ const Tokens = () => (
       --vs-menu-border:rgba(255,255,255,.16);
     }
 
-    /* NEW: variables for content rendered in a portal (outside .va-scope) */
     .va-portal{
       --vs-menu-bg:#101314;
       --vs-menu-border:rgba(255,255,255,.16);
@@ -128,22 +123,9 @@ const Tokens = () => (
       min-height:var(--header-h);
       display:grid; grid-template-columns:1fr auto; align-items:center;
       padding:0 16px;
-      background:linear-gradient(90deg,
-        var(--panel-bg) 0%,
-        color-mix(in oklab, var(--panel-bg) 97%, white 3%) 50%,
-        var(--panel-bg) 100%);
+      background:linear-gradient(90deg,var(--panel-bg) 0%,color-mix(in oklab,var(--panel-bg) 97%, white 3%) 50%,var(--panel-bg) 100%);
       border-bottom:1px solid rgba(255,255,255,.08);
       color:var(--text);
-    }
-
-    @keyframes va-blink { 0%, 49% {opacity:1;} 50%, 100% {opacity:0;} }
-    .va-caret::after{
-      content:'';
-      display:inline-block;
-      width:8px; height:18px; margin-left:2px;
-      background: currentColor; opacity:.9; border-radius:1px;
-      animation: va-blink 1s step-end infinite;
-      transform: translateY(3px);
     }
   `}</style>
 );
@@ -169,10 +151,11 @@ type AgentData = {
 
   denoise: boolean;
   numerals: boolean;
-};
 
-const BLANK_TEMPLATE_NOTE =
-  'This is a blank template with minimal defaults. You can change the model and messages, or click Generate to tailor the prompt to your business.';
+  // optional: sheets binding (saved client side from SheetsConnect)
+  sheetId?: string;
+  sheetName?: string;
+};
 
 const PROMPT_SKELETON =
 `[Identity]
@@ -185,7 +168,6 @@ const PROMPT_SKELETON =
 
 [Error Handling / Fallback]`;
 
-/* ─────────── prompt-engine shims ─────────── */
 const looksLikeFullPromptSafe = (raw: string) => {
   const t = (raw || '').toLowerCase();
   return ['[identity]', '[style]', '[response guidelines]', '[task & goals]', '[error handling', '[notes]'].some(h => t.includes(h));
@@ -236,19 +218,15 @@ ${sections.notes ? `[Notes]\n${sections.notes}\n` : ''}`;
 
 const applyInstructionsSafe = (base: string, raw: string) => {
   const text = (raw || '').trim();
-
-  const industryMatch = text.match(/assistant\s+for\s+(a|an|the)?\s*([^.;:,]+?)(\s+(clinic|store|company|business))?(\.|;|,|$)/i);
-  const industry = industryMatch ? industryMatch[2].trim() : '';
-
+  const industryMatch = text.match(/assistant\s+for\s+(?:a|an|the)?\s*([^.;:,]+?)(?:\s+(?:clinic|store|company|business))?(?:[.;,]|$)/i);
+  const industry = industryMatch ? industryMatch[1].trim() : '';
   const toneMatch = text.match(/tone\s*[:=]\s*([a-z,\s-]+)/i) || text.match(/\b(friendly|formal|casual|professional|empathetic|playful)\b/i);
   const tone = toneMatch ? (toneMatch as any)[1]?.trim?.() || (toneMatch as any)[0] : '';
-
   const tasksMatch = text.match(/tasks?\s*[:=]\s*([a-z0-9_,\-\s]+)/i);
   const tasksRaw = tasksMatch ? (tasksMatch as any)[1] : '';
   const tasks = tasksRaw
     ? tasksRaw.split(/[,\s]+/).filter(Boolean)
     : (text.includes('booking') || text.includes('schedule')) ? ['lead_qualification','booking','faq'] : [];
-
   const channels = /voice|call|phone/i.test(text) && /chat|website|web/i.test(text) ? 'voice & chat'
                   : /voice|call|phone/i.test(text) ? 'voice'
                   : /chat|website|web/i.test(text) ? 'chat'
@@ -295,13 +273,10 @@ ${errors}`;
 
 const looksLikeFullPromptRT = (raw: string) =>
   isFn(_looksLikeFullPrompt) ? !!_looksLikeFullPrompt(raw) : looksLikeFullPromptSafe(raw);
-
 const normalizeFullPromptRT = (raw: string) =>
   isFn(_normalizeFullPrompt) ? coerceStr(_normalizeFullPrompt(raw)) : normalizeFullPromptSafe(raw);
-
 const applyInstructionsRT = (base: string, raw: string) =>
   isFn(_applyInstructions) ? (_applyInstructions as any)(base, raw) : applyInstructionsSafe(base, raw);
-
 const DEFAULT_PROMPT_RT = nonEmpty(_DEFAULT_PROMPT) ? _DEFAULT_PROMPT! : PROMPT_SKELETON;
 
 /* ─────────── defaults ─────────── */
@@ -326,7 +301,7 @@ const DEFAULT_AGENT: AgentData = {
 
 [Error Handling / Fallback]
 - If unsure, ask a specific clarifying question first.
-`).trim() + '\n\n' + `# ${BLANK_TEMPLATE_NOTE}\n`,
+`).trim(),
   ttsProvider: 'openai',
   voiceName: 'Alloy (American)',
   apiKeyId: '',
@@ -431,7 +406,7 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
-/* ─────────── Styled select with portal (StepV2 look) ─────────── */
+/* ─────────── Styled select (with portal) ─────────── */
 function StyledSelect({
   value, onChange, options, placeholder, leftIcon, menuTop,
   onPreview, isPreviewing
@@ -443,7 +418,7 @@ function StyledSelect({
 }) {
   const wrapRef = useRef<HTMLDivElement|null>(null);
   const btnRef = useRef<HTMLButtonElement|null>(null);
-  const menuRef = useRef<HTMLDivElement|null>(null);       // NEW: track portal to allow clicks
+  const menuRef = useRef<HTMLDivElement|null>(null);
   const searchRef = useRef<HTMLInputElement|null>(null);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -455,20 +430,18 @@ function StyledSelect({
     return q ? options.filter(o => o.label.toLowerCase().includes(q)) : options;
   }, [options, query, value]);
 
-  // position menu
   useLayoutEffect(() => {
     if (!open || !btnRef.current) return;
     const r = btnRef.current.getBoundingClientRect();
     setMenuPos({ left: r.left, top: r.bottom + 8, width: r.width });
   }, [open]);
 
-  // close on outside click — but keep it open when clicking inside portal menu
   useEffect(() => {
     if (!open || !IS_CLIENT) return;
     const off = (e: MouseEvent) => {
       const t = e.target as Node;
       if (wrapRef.current?.contains(t)) return;
-      if (menuRef.current?.contains(t)) return;  // key fix
+      if (menuRef.current?.contains(t)) return;
       setOpen(false);
     };
     const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
@@ -568,7 +541,7 @@ function StyledSelect({
                     onClick={async (e)=>{ e.stopPropagation(); await onPreview(o.value); }}
                     className="w-7 h-7 rounded-full grid place-items-center"
                     style={{ border:'1px solid var(--vs-input-border, rgba(255,255,255,.14))', background:'var(--vs-input-bg, #101314)' }}
-                    aria-label={isPreviewing === o.value ? 'Stop preview' : 'Play preview'}
+                    aria-label={isPreviewing === o.value ? 'Stop preview' : 'Play'}
                     title={isPreviewing === o.value ? 'Stop' : 'Play'}
                   >
                     {isPreviewing === o.value ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
@@ -583,56 +556,6 @@ function StyledSelect({
         </div>,
         document.body
       ) : null}
-    </div>
-  );
-}
-
-/* ─────────── Section (expand anim) ─────────── */
-function Section({
-  title, icon, desc, children, defaultOpen = true
-}:{
-  title: string; icon: React.ReactNode; desc?: string; children: React.ReactNode; defaultOpen?: boolean;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  const innerRef = useRef<HTMLDivElement|null>(null);
-  const [h, setH] = useState<number>(0);
-  const measure = () => { if (innerRef.current) setH(innerRef.current.offsetHeight); };
-  useLayoutEffect(() => { measure(); }, [children, open]);
-
-  return (
-    <div className="mb-[12px]">
-      <div className="mb-[6px] text-sm font-medium" style={{ color:'var(--text-muted)' }}>{title}</div>
-
-      <div className="va-card">
-        <button onClick={()=>setOpen(v=>!v)} className="va-head w-full text-left" style={{ color:'var(--text)' }}>
-          <span className="min-w-0 flex items-center gap-3">
-            <span className="inline-grid place-items-center w-7 h-7 rounded-full" style={{ background:'rgba(89,217,179,.10)' }}>
-              {icon}
-            </span>
-            <span className="min-w-0">
-              <span className="block font-semibold truncate" style={{ fontSize:'var(--fz-title)' }}>{title}</span>
-              {desc ? <span className="block text-xs truncate" style={{ color:'var(--text-muted)' }}>{desc}</span> : null}
-            </span>
-          </span>
-          <span className="justify-self-end">
-            {open ? <ChevronUp className="w-4 h-4" style={{ color:'var(--text-muted)' }}/> :
-                    <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)' }}/>}
-          </span>
-        </button>
-
-        <div
-          style={{
-            height: open ? h : 0,
-            opacity: open ? 1 : 0,
-            transform: open ? 'translateY(0)' : 'translateY(-4px)',
-            transition: 'height 260ms var(--ease), opacity 230ms var(--ease), transform 260ms var(--ease)',
-            overflow:'hidden'
-          }}
-          onTransitionEnd={() => { if (open) measure(); }}
-        >
-          <div ref={innerRef} className="p-[var(--s-5)]">{children}</div>
-        </div>
-      </div>
     </div>
   );
 }
@@ -655,7 +578,7 @@ function computeDiff(base:string, next:string){
     const la=a[j]; if (la!==undefined && !setB.has(la)) rows.push({ t:'rem', text: la });
   }
   for (let j=a.length;j<b.length;j++){
-    const lb=b[j]; if (lb!==undefined && !setA.has(lb)) rows.push({ t:'add', text: lb });
+    const lb=b[j]; if (lb!==undefined && !setA.has(la)) rows.push({ t:'add', text: lb });
   }
   return rows;
 }
@@ -714,28 +637,19 @@ export default function VoiceAgentSection() {
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [toast, setToast] = useState<string>('');
-  const [toastKind, setToastKind] = useState<'info'|'error'>('info');  // NEW: colorize toast
+  const [toastKind, setToastKind] = useState<'info'|'error'|'success'>('info');
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
-
   const [showCall, setShowCall] = useState(false);
 
-  // Generate overlay
+  // Generate flow
   const [showGenerate, setShowGenerate] = useState(false);
   const [composerText, setComposerText] = useState('');
-  const [genPhase, setGenPhase] = useState<'idle'|'editing'|'loading'|'review'>('idle');
-
-  // typing inside prompt box
+  const [genPhase, setGenPhase] = useState<'idle'|'editing'|'review'>('idle');
   const basePromptRef = useRef<string>('');
   const [proposedPrompt, setProposedPrompt] = useState('');
   const [changesSummary, setChangesSummary] = useState('');
 
-  // chat state used for inline chat view (optional)
-  const [msgs, setMsgs] = useState<ChatMsg[]>(() => [
-    { id: 'sys', role: 'system', text: (DEFAULT_AGENT.systemPrompt || '').trim() },
-    { id: 'hello', role: 'assistant', text: 'Hi! Ready when you are.' }
-  ]);
-
-  // voice preview + TTS (browser speech synthesis for quick previews)
+  // voice preview
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   useEffect(() => {
     if (!IS_CLIENT || !('speechSynthesis' in window)) return;
@@ -797,6 +711,10 @@ export default function VoiceAgentSection() {
           setData(prev => ({ ...prev, apiKeyId: chosen }));
           await store.setJSON('apiKeys.selectedId', chosen);
         }
+
+        // also hydrate any stored Sheets binding (so the UI shows "Connected")
+        const bind = await store.getJSON<{url:string; sheetId:string; sheetName?:string}>(`sheets.binding:${activeId || 'default'}`, null);
+        if (bind) setData(prev => ({ ...prev, sheetId: bind.sheetId, sheetName: bind.sheetName }));
       } catch {}
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -820,19 +738,19 @@ export default function VoiceAgentSection() {
   async function doSave(){
     if (!activeId) { setToastKind('error'); setToast('Select or create an agent'); return; }
     setSaving(true); setToast('');
-    try { await apiSave(activeId, data); setToastKind('info'); setToast('Saved'); }
+    try { await apiSave(activeId, data); setToastKind('success'); setToast('Saved'); }
     catch { setToastKind('error'); setToast('Save failed'); }
     finally { setSaving(false); setTimeout(()=>setToast(''), 1400); }
   }
   async function doPublish(){
     if (!activeId) { setToastKind('error'); setToast('Select or create an agent'); return; }
     setPublishing(true); setToast('');
-    try { await apiPublish(activeId); setToastKind('info'); setToast('Published'); }
+    try { await apiPublish(activeId); setToastKind('success'); setToast('Published'); }
     catch { setToastKind('error'); setToast('Publish failed'); }
     finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
   }
 
-  /* ─────────── REALTIME CALL LAUNCH ─────────── */
+  /* ─────────── REALTIME CALL LAUNCH (kept as your working version) ─────────── */
   const openCall = () => {
     const key = apiKeys.find(k => k.id === data.apiKeyId)?.key || '';
     if (!key) {
@@ -844,7 +762,62 @@ export default function VoiceAgentSection() {
     setShowCall(true);
   };
 
-  /* ─────────── UI ─────────── */
+  /* ─────────── Prompt Generate actions ─────────── */
+  const startGenerate = () => {
+    setComposerText('');
+    setProposedPrompt('');
+    setChangesSummary('');
+    setGenPhase('editing');
+    setShowGenerate(true);
+  };
+
+  const runGenerate = () => {
+    const raw = safeTrim(composerText);
+    if (!raw) return;
+    try {
+      const base = nonEmpty(data.systemPrompt) ? data.systemPrompt : DEFAULT_PROMPT_RT;
+      (basePromptRef as any).current = base;
+      let merged = '';
+      let summary = '';
+      if (looksLikeFullPromptRT(raw)) {
+        const norm = normalizeFullPromptRT(raw);
+        merged = nonEmpty(norm) ? norm : base;
+        summary = 'Replaced prompt (manual paste).';
+      } else {
+        const out = applyInstructionsRT(base, raw) || {};
+        merged = nonEmpty(out.merged) ? out.merged : base;
+        summary = nonEmpty(out.summary) ? out.summary : 'Updated.';
+      }
+      setProposedPrompt(merged.trim());
+      setChangesSummary(summary);
+      setGenPhase('review');
+    } catch {
+      setToastKind('error');
+      setToast('Generate failed — try simpler wording.');
+      setTimeout(()=>setToast(''), 2200);
+    }
+  };
+
+  const acceptChanges = () => {
+    const before = (basePromptRef.current || '').trim();
+    const after  = (proposedPrompt || '').trim();
+    if (!after) { setShowGenerate(false); setGenPhase('idle'); return; }
+    if (activeId && before && before !== after) pushVersion(activeId, { kind:'prompt', before, after, summary: changesSummary });
+    setField('systemPrompt')(after);
+    setShowGenerate(false);
+    setGenPhase('idle');
+    setToastKind('success');
+    setToast('Prompt updated');
+    setTimeout(()=>setToast(''), 1600);
+  };
+
+  const discardChanges = () => {
+    setShowGenerate(false);
+    setGenPhase('idle');
+    setProposedPrompt('');
+    setChangesSummary('');
+  };
+
   const inInlineReview = genPhase === 'review' && !showGenerate;
 
   return (
@@ -858,21 +831,21 @@ export default function VoiceAgentSection() {
         </div>
 
         <div className="px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w-[1160px]" style={{ fontSize:'var(--fz-body)', lineHeight:'var(--lh-body)' }}>
-          <div className="mb-[var(--s-4)] flex flex-wrap items-center justify-end gap-[var(--s-3)]">
+          <div className="mb-[12px] flex flex-wrap items-center justify-end gap-2">
             <button
               onClick={doSave}
               disabled={saving}
               className="inline-flex items-center gap-2 rounded-[10px] px-4 text-sm transition hover:-translate-y-[1px] disabled:opacity-60"
-              style={{ height:'var(--control-h)', background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)' }}
+              style={{ height:'var(--control-h)', background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
             >
-              {saving ? 'Saving…' : 'Save'}
+              <Save className="w-4 h-4" /> {saving ? 'Saving…' : 'Save'}
             </button>
 
             <button
               onClick={doPublish}
               disabled={publishing}
               className="inline-flex items-center gap-2 rounded-[10px] px-4 text-sm transition hover:-translate-y-[1px] disabled:opacity-60"
-              style={{ height:'var(--control-h)', background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)' }}
+              style={{ height:'var(--control-h)', background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
             >
               <Rocket className="w-4 h-4" /> {publishing ? 'Publishing…' : 'Publish'}
             </button>
@@ -891,19 +864,21 @@ export default function VoiceAgentSection() {
 
           {toast ? (
             <div
-              className="mb-[var(--s-4)] inline-flex items-center gap-2 px-3 py-1.5 rounded-[10px]"
+              className="mb-[12px] inline-flex items-center gap-2 px-3 py-1.5 rounded-[10px]"
               style={{
-                background: toastKind === 'error' ? 'rgba(239,68,68,.12)' : 'rgba(89,217,179,.10)',
+                background:
+                  toastKind === 'error' ? 'rgba(239,68,68,.14)' :
+                  toastKind === 'success' ? 'rgba(89,217,179,.12)' :
+                  'rgba(255,255,255,.08)',
                 color: 'var(--text)',
-                boxShadow: toastKind === 'error'
-                  ? '0 0 0 1px rgba(239,68,68,.25) inset'
-                  : '0 0 0 1px rgba(89,217,179,.16) inset'
+                border:'1px solid rgba(255,255,255,.10)'
               }}
             >
               <Check className="w-4 h-4" /> {toast}
             </div>
           ) : null}
 
+          {/* quick stats */}
           <div className="grid gap-[12px] md:grid-cols-2 mb-[12px]">
             <div className="va-card">
               <div className="va-head" style={{ minHeight: 56 }}>
@@ -923,6 +898,7 @@ export default function VoiceAgentSection() {
             </div>
           </div>
 
+          {/* MODEL */}
           <Section
             title="Model"
             icon={<Gauge className="w-4 h-4" style={{ color: CTA }} />}
@@ -931,7 +907,7 @@ export default function VoiceAgentSection() {
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px]">
               <div>
-                <div className="mb-[var(--s-2)] text-[12.5px]">Assistant Name</div>
+                <div className="mb-[8px] text-[12.5px]">Assistant Name</div>
                 <input
                   value={data.name}
                   onChange={(e)=>setField('name')(e.target.value)}
@@ -941,18 +917,18 @@ export default function VoiceAgentSection() {
                 />
               </div>
               <div>
-                <div className="mb-[var(--s-2)] text-[12.5px]">Provider</div>
+                <div className="mb-[8px] text-[12.5px]">Provider</div>
                 <StyledSelect value={data.provider} onChange={(v)=>setField('provider')(v as AgentData['provider'])} options={providerOpts}/>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt-[var(--s-4)]">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt-[12px]">
               <div>
-                <div className="mb-[var(--s-2)] text-[12.5px]">Model</div>
+                <div className="mb-[8px] text-[12.5px]">Model</div>
                 <StyledSelect value={data.model} onChange={setField('model')} options={modelOpts}/>
               </div>
               <div>
-                <div className="mb-[var(--s-2)] text-[12.5px]">First Message Mode</div>
+                <div className="mb-[8px] text-[12.5px]">First Message Mode</div>
                 <StyledSelect value={data.firstMode} onChange={setField('firstMode')} options={[
                   { value: 'Assistant speaks first', label: 'Assistant speaks first' },
                   { value: 'User speaks first', label: 'User speaks first' },
@@ -961,48 +937,85 @@ export default function VoiceAgentSection() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt-[var(--s-4)]">
-              <div className="md:col-span-2">
-                <div className="flex items-center justify-between mb-[var(--s-2)]">
-                  <div className="font-medium" style={{ fontSize:'var(--fz-label)' }}>System Prompt</div>
-                  <div className="flex items-center gap-2">
+            {/* Prompt editor with Accept/Discard review */}
+            <div className="mt-[12px]">
+              <div className="flex items-center justify-between mb-[8px]">
+                <div className="font-medium" style={{ fontSize:'var(--fz-label)' }}>System Prompt</div>
+                <div className="flex items-center gap-2">
+                  <button
+                    className="inline-flex items-center gap-2 rounded-[10px] text-sm"
+                    style={{ height:36, padding:'0 12px', background:CTA, color:'#fff', border:'1px solid rgba(255,255,255,.08)' }}
+                    onClick={startGenerate}
+                  >
+                    <Wand2 className="w-4 h-4" /> Generate
+                  </button>
+                  <button
+                    className="inline-flex items-center gap-2 rounded-[10px] text-sm"
+                    style={{ height:36, padding:'0 12px', background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+                    onClick={()=>{
+                      const v = JSON.parse(localStorage.getItem(versKeyFor(activeId)) || '[]') as any[];
+                      if (!Array.isArray(v) || !v.length) { setToastKind('info'); setToast('No previous versions'); setTimeout(()=>setToast(''),1200); return; }
+                      const last = v[0]; setField('systemPrompt')(String(last.before||'')); setToastKind('success'); setToast('Reverted to previous'); setTimeout(()=>setToast(''),1200);
+                    }}
+                  >
+                    <History className="w-4 h-4" /> Revert
+                  </button>
+                </div>
+              </div>
+
+              {!inInlineReview ? (
+                <textarea
+                  className="w-full bg-transparent outline-none rounded-[12px] px-3 py-[12px]"
+                  style={{ minHeight: 360, background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+                  value={data.systemPrompt}
+                  onChange={(e)=> setField('systemPrompt')(e.target.value)}
+                />
+              ) : (
+                <div className="rounded-[12px]" style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}>
+                  <div className="p-3 border-b border-[rgba(255,255,255,.08)] text-xs" style={{ color:'var(--text-muted)' }}>
+                    Review changes — {changesSummary || 'diff'}
+                  </div>
+                  <div className="p-3">
+                    <DiffInline base={basePromptRef.current} next={proposedPrompt}/>
+                  </div>
+                  <div className="p-3 flex gap-2 border-t border-[rgba(255,255,255,.08)]">
                     <button
-                      className="inline-flex items-center gap-2 rounded-[10px] text-sm"
-                      style={{ height:36, padding:'0 12px', background:CTA, color:'#fff', border:'1px solid rgba(255,255,255,.08)' }}
-                      onClick={()=>{ setComposerText(''); setProposedPrompt(''); setChangesSummary(''); setGenPhase('editing'); setShowGenerate(true); }}
+                      onClick={discardChanges}
+                      className="h-10 px-3 rounded-[10px] inline-flex items-center gap-2"
+                      style={{ background:'var(--panel)', border:'1px solid var(--input-border)', color:'var(--text)' }}
                     >
-                      <Wand2 className="w-4 h-4" /> Generate
+                      <Undo2 className="w-4 h-4" /> Discard
+                    </button>
+                    <button
+                      onClick={acceptChanges}
+                      className="h-10 px-3 rounded-[10px] inline-flex items-center gap-2"
+                      style={{ background:CTA, color:'#051412', fontWeight:700 }}
+                    >
+                      <Check className="w-4 h-4" /> Accept Changes
                     </button>
                   </div>
                 </div>
-
-                <div style={{ position:'relative' }}>
-                  {!inInlineReview ? (
-                    <textarea
-                      className="w-full bg-transparent outline-none rounded-[12px] px-3 py-[12px]"
-                      style={{ minHeight: 360, background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                      value={data.systemPrompt}
-                      onChange={(e)=> setField('systemPrompt')(e.target.value)}
-                    />
-                  ) : (
-                    <div
-                      className={`rounded-[12px]`}
-                      style={{
-                        background:'var(--input-bg)',
-                        border:'1px solid var(--input-border)',
-                        color:'var(--text)',
-                        padding:'12px',
-                        maxHeight:'unset'
-                      }}
-                    >
-                      <DiffInline base={basePromptRef.current} next={proposedPrompt}/>
-                    </div>
-                  )}
-                </div>
-              </div>
+              )}
             </div>
           </Section>
 
+          {/* DATA & INTEGRATIONS */}
+          <Section
+            title="Data Integrations"
+            icon={<Gauge className="w-4 h-4" style={{ color: CTA }} />}
+            desc="Connect sources your assistant can read/write."
+            defaultOpen={true}
+          >
+            <div className="grid gap-[12px]">
+              <SheetsConnect
+                agentId={activeId || 'default'}
+                onConnected={(b)=>{ setData(prev=>({ ...prev, sheetId:b.sheetId, sheetName:b.sheetName })); }}
+                onPromptMerge={(chunk)=> setField('systemPrompt')((data.systemPrompt ? data.systemPrompt+'\n\n' : '') + chunk)}
+              />
+            </div>
+          </Section>
+
+          {/* VOICE */}
           <Section
             title="Voice"
             icon={<Volume2 className="w-4 h-4" style={{ color: CTA }} />}
@@ -1011,7 +1024,7 @@ export default function VoiceAgentSection() {
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px]">
               <div>
-                <div className="mb-[var(--s-2)] text-[12.5px] flex items-center gap-2">
+                <div className="mb-[8px] text-[12.5px] flex items-center gap-2">
                   <KeyRound className="w-4 h-4 opacity-80" /> OpenAI API Key
                 </div>
                 <StyledSelect
@@ -1032,7 +1045,7 @@ export default function VoiceAgentSection() {
               </div>
 
               <div>
-                <div className="mb-[var(--s-2)] text-[12.5px]">Voice</div>
+                <div className="mb-[8px] text-[12.5px]">Voice</div>
                 <StyledSelect
                   value={data.voiceName}
                   onChange={(v)=>setField('voiceName')(v)}
@@ -1075,6 +1088,7 @@ export default function VoiceAgentSection() {
             </div>
           </Section>
 
+          {/* TRANSCRIBER */}
           <Section
             title="Transcriber"
             icon={<Mic className="w-4 h-4" style={{ color: CTA }} />}
@@ -1083,15 +1097,15 @@ export default function VoiceAgentSection() {
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px]">
               <div>
-                <div className="mb-[var(--s-2)] text-[12.5px]">Provider</div>
+                <div className="mb-[8px] text-[12.5px]">Provider</div>
                 <StyledSelect value={data.asrProvider} onChange={(v)=>setField('asrProvider')(v as AgentData['asrProvider'])} options={asrProviders}/>
               </div>
               <div>
-                <div className="mb-[var(--s-2)] text-[12.5px]">Model</div>
+                <div className="mb-[8px] text-[12.5px]">Model</div>
                 <StyledSelect value={data.asrModel} onChange={setField('asrModel')} options={asrModelsFor(data.asrProvider)}/>
               </div>
             </div>
-            <div className="mt-[var(--s-4)] grid sm:grid-cols-2 gap-[12px]">
+            <div className="mt-[12px] grid sm:grid-cols-2 gap-[12px]">
               <div className="flex items-center justify-between p-3 rounded-[10px]" style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}>
                 <span className="text-sm">Background Denoising</span>
                 <Toggle checked={data.denoise} onChange={setField('denoise')} />
@@ -1105,17 +1119,17 @@ export default function VoiceAgentSection() {
         </div>
       </div>
 
-      {/* ─────────── Generate overlay (instructions / presets / configs) ─────────── */}
+      {/* ─────────── Generate overlay ─────────── */}
       {showGenerate && IS_CLIENT ? createPortal(
         <>
           <div
             className="fixed inset-0"
             style={{ zIndex: Z_OVERLAY, background:'rgba(6,8,10,.62)', backdropFilter:'blur(6px)' }}
-            onClick={()=>{ if (genPhase!=='loading') { setShowGenerate(false); setGenPhase('idle'); } }}
+            onClick={()=>{ setShowGenerate(false); setGenPhase('idle'); }}
           />
           <div className="fixed inset-0 grid place-items-center px-4" style={{ zIndex: Z_MODAL }}>
             <div
-              className="w-full max-w-[640px] rounded-[12px] overflow-hidden"
+              className="w-full max-w-[720px] rounded-[12px] overflow-hidden"
               style={{
                 background: 'var(--panel)',
                 color: 'var(--text)',
@@ -1123,27 +1137,22 @@ export default function VoiceAgentSection() {
                 maxHeight: '86vh',
                 boxShadow:'0 22px 44px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px rgba(89,217,179,.20)'
               }}
+              onClick={(e)=>e.stopPropagation()}
             >
-              {/* Header */}
               <div
                 className="flex items-center justify-between px-6 py-4"
-                style={{
-                  background:`linear-gradient(90deg,var(--panel) 0%,color-mix(in oklab,var(--panel) 97%, white 3%) 50%,var(--panel) 100%)`,
-                  borderBottom:`1px solid ${GREEN_LINE}`
-                }}
+                style={{ borderBottom:`1px solid ${GREEN_LINE}` }}
               >
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl grid place-items-center" style={{ background:'var(--green-weak)' }}>
-                    <span style={{ color: CTA }}>
-                      <Wand2 className="w-5 h-5" />
-                    </span>
+                  <div className="w-10 h-10 rounded-xl grid place-items-center" style={{ background:'rgba(89,217,179,.12)' }}>
+                    <Wand2 className="w-5 h-5" style={{ color: CTA }} />
                   </div>
                   <div className="text-lg font-semibold">Generate Prompt</div>
                 </div>
                 <button
-                  onClick={()=> genPhase!=='loading' && setShowGenerate(false)}
+                  onClick={()=>{ setShowGenerate(false); setGenPhase('idle'); }}
                   className="w-8 h-8 rounded-[8px] grid place-items-center"
-                  style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}` }}
+                  style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)' }}
                   aria-label="Close"
                 >
                   <X className="w-4 h-4" />
@@ -1151,76 +1160,116 @@ export default function VoiceAgentSection() {
               </div>
 
               {/* Body */}
-              <div className="px-6 py-5 space-y-3">
-                <div className="text-xs" style={{ color:'var(--text-muted)' }}>
-                  Tip: type something like “assistant for a dental clinic; tone friendly; handle booking and FAQs”.
-                </div>
-                <div
-                  className="rounded-[10px]"
-                  style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}
-                >
-                  <textarea
-                    value={composerText}
-                    onChange={(e)=>setComposerText(e.target.value)}
-                    className="w-full bg-transparent outline-none rounded-[10px] px-3 py-2"
-                    placeholder="Describe your business and how the assistant should behave…"
-                    style={{ minHeight: 160, maxHeight: '40vh', color:'var(--text)', resize:'vertical' }}
-                  />
-                </div>
-              </div>
+              {genPhase === 'editing' ? (
+                <div className="px-6 py-5 space-y-3">
+                  <div className="text-xs" style={{ color:'var(--text-muted)' }}>
+                    Tip: “assistant for a dental clinic; tone friendly; tasks=booking,faq”.<br/>
+                    If your Google Sheet is connected I’ll include booking rules automatically.
+                  </div>
 
-              {/* Footer */}
-              <div className="px-6 pb-6 flex gap-3">
-                <button
-                  onClick={()=> genPhase!=='loading' && setShowGenerate(false)}
-                  className="w-full h-[44px] rounded-[10px]"
-                  style={{ background:'var(--panel)', border:'1px solid var(--input-border)', color:'var(--text)', fontWeight:600 }}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={()=>{
-                    const raw = safeTrim(composerText);
-                    if (!raw) return;
-                    try {
-                      const base = nonEmpty(data.systemPrompt) ? data.systemPrompt : DEFAULT_PROMPT_RT;
-                      (basePromptRef as any).current = base;
-                      let merged = '';
-                      let summary = '';
-                      if (looksLikeFullPromptRT(raw)) {
-                        const norm = normalizeFullPromptRT(raw);
-                        merged = nonEmpty(norm) ? norm : base;
-                        summary = 'Replaced prompt (manual paste).';
-                      } else {
-                        const out = applyInstructionsRT(base, raw) || {};
-                        merged = nonEmpty(out.merged) ? out.merged : base;
-                        summary = nonEmpty(out.summary) ? out.summary : 'Updated.';
-                      }
-                      merged = merged.replace(/^\s*#\s*This is a blank template[\s\S]*?$/im, '').trim() + '\n';
-                      setShowGenerate(false);
-                      setProposedPrompt(merged);
-                      setChangesSummary(summary);
-                      setGenPhase('review');
-                    } catch {
-                      setToastKind('error');
-                      setToast('Generate failed — try simpler wording.');
-                      setTimeout(()=>setToast(''), 2200);
-                    }
-                  }}
-                  disabled={!composerText.trim()}
-                  className="w-full h-[44px] rounded-[10px] font-semibold inline-flex items-center justify-center gap-2"
-                  style={{ background:CTA, color:'#0a0f0d', opacity: (!composerText.trim() ? .6 : 1) }}
-                >
-                  <Wand2 className="w-4 h-4" /> Generate
-                </button>
-              </div>
+                  <div className="rounded-[10px]" style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}>
+                    <textarea
+                      value={composerText}
+                      onChange={(e)=>setComposerText(e.target.value)}
+                      className="w-full bg-transparent outline-none rounded-[10px] px-3 py-2"
+                      placeholder="Describe your business and how the assistant should behave…"
+                      style={{ minHeight: 160, maxHeight: '40vh', color:'var(--text)', resize:'vertical' }}
+                    />
+                  </div>
+
+                  {/* Optional: inject Sheets booking chunk if already connected */}
+                  {data.sheetId ? (
+                    <div className="text-xs" style={{ color:'var(--text-muted)' }}>
+                      Connected to Google Sheet <b>{data.sheetName || 'Sheet1'}</b>. I’ll append booking rules to the generated prompt.
+                    </div>
+                  ) : null}
+
+                  <div className="pt-2 flex gap-3">
+                    <button
+                      onClick={()=>{ setShowGenerate(false); setGenPhase('idle'); }}
+                      className="h-[44px] px-3 rounded-[10px]"
+                      style={{ background:'var(--panel)', border:'1px solid var(--input-border)', color:'var(--text)', fontWeight:600 }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={runGenerate}
+                      disabled={!composerText.trim()}
+                      className="h-[44px] px-4 rounded-[10px] font-semibold inline-flex items-center justify-center gap-2"
+                      style={{ background:CTA, color:'#0a0f0d', opacity: (!composerText.trim() ? .6 : 1) }}
+                    >
+                      <Wand2 className="w-4 h-4" /> Generate
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="px-6 py-5">
+                  <div className="text-xs mb-2" style={{ color:'var(--text-muted)' }}>
+                    Review & confirm — {changesSummary || 'diff'}
+                  </div>
+                  <div className="rounded-[12px] mb-3" style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}>
+                    <DiffInline base={basePromptRef.current} next={
+                      // if Sheets connected, append notes once here so the accepted prompt has it
+                      data.sheetId
+                        ? (proposedPrompt + `
+
+[Notes]
+Google Sheets connected for appointments.
+- Spreadsheet ID: ${data.sheetId}
+- Sheet (tab): ${data.sheetName || 'Sheet1'}
+- Schema: Date | Start Time | End Time | Client Name | Phone | Email | Notes | Status
+- Rules: check overlaps where Status != "Cancelled"; on success append with Status="Booked".
+`).trim()
+                        : proposedPrompt
+                    }/>
+                  </div>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={()=>{ setGenPhase('editing'); }}
+                      className="h-[40px] px-3 rounded-[10px]"
+                      style={{ background:'var(--panel)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+                    >
+                      Back
+                    </button>
+                    <button
+                      onClick={discardChanges}
+                      className="h-[40px] px-3 rounded-[10px]"
+                      style={{ background:'var(--panel)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+                    >
+                      Discard
+                    </button>
+                    <button
+                      onClick={()=>{
+                        // finalize the same content shown in the diff (including Sheets note if any)
+                        const finalText = (data.sheetId
+                          ? (proposedPrompt + `
+
+[Notes]
+Google Sheets connected for appointments.
+- Spreadsheet ID: ${data.sheetId}
+- Sheet (tab): ${data.sheetName || 'Sheet1'}
+- Schema: Date | Start Time | End Time | Client Name | Phone | Email | Notes | Status
+- Rules: check overlaps where Status != "Cancelled"; on success append with Status="Booked".
+`).trim()
+                          : proposedPrompt).trim();
+                        setProposedPrompt(finalText);
+                        acceptChanges();
+                      }}
+                      className="h-[40px] px-4 rounded-[10px] inline-flex items-center gap-2"
+                      style={{ background:CTA, color:'#051412', fontWeight:700 }}
+                    >
+                      <Check className="w-4 h-4" /> Accept Changes
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </>,
         document.body
       ) : null}
 
-      {/* ─────────── Voice/Call panel (WebRTC) ─────────── */}
+      {/* ─────────── Voice/Call panel (WebRTC) — unchanged working config ─────────── */}
       {IS_CLIENT ? createPortal(
         <>
           <div
@@ -1229,13 +1278,12 @@ export default function VoiceAgentSection() {
               zIndex: 9996,
               background: showCall ? 'rgba(8,10,12,.78)' : 'transparent',
               opacity: showCall ? 1 : 0,
-              transition: 'opacity .2s var(--ease)'
+              transition: 'opacity .2s cubic-bezier(.22,.61,.36,1)'
             }}
             onClick={()=> setShowCall(false)}
           />
           {showCall && (
             <WebCallButton
-              // force a realtime-capable model for the call
               model={'gpt-4o-realtime-preview'}
               systemPrompt={data.systemPrompt}
               voiceName={data.voiceName}
@@ -1250,3 +1298,42 @@ export default function VoiceAgentSection() {
     </section>
   );
 }
+
+/* ─────────── Collapsible Section ─────────── */
+function Section({
+  title, icon, desc, children, defaultOpen = true
+}:{
+  title: string; icon: React.ReactNode; desc?: string; children: React.ReactNode; defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const innerRef = useRef<HTMLDivElement|null>(null);
+  const [h, setH] = useState<number>(0);
+  const measure = () => { if (innerRef.current) setH(innerRef.current.offsetHeight); };
+  useLayoutEffect(() => { measure(); }, [children, open]);
+
+  return (
+    <div className="mb-[12px]">
+      <div className="mb-[6px] text-sm font-medium" style={{ color:'var(--text-muted)' }}>{title}</div>
+
+      <div className="va-card">
+        <button onClick={()=>setOpen(v=>!v)} className="va-head w-full text-left" style={{ color:'var(--text)' }}>
+          <span className="min-w-0 flex items-center gap-3">
+            <span className="inline-grid place-items-center w-7 h-7 rounded-full" style={{ background:'rgba(89,217,179,.10)' }}>
+              {icon}
+            </span>
+            <span className="min-w-0">
+              <span className="block font-semibold truncate" style={{ fontSize:'var(--fz-title)' }}>{title}</span>
+              {desc ? <span className="block text-xs truncate" style={{ color:'var(--text-muted)' }}>{desc}</span> : null}
+            </span>
+          </span>
+          <span className="justify-self-end">
+            {open ? <ChevronUp className="w-4 h-4" style={{ color:'var(--text-muted)' }}/> :
+                    <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)' }}/>}
+          </span>
+        </button>
+
+        <div
+          style={{
+            height: open ? h : 0,
+            opacity: open ? 1 : 0,
+            transform: open ? 'translateY(0)' : 'translateY
