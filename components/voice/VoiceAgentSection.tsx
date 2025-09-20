@@ -9,7 +9,6 @@ import {
   KeyRound, Play, Square, Pause, X
 } from 'lucide-react';
 import { scopedStorage } from '@/utils/scoped-storage';
-import { DEFAULT_PROMPT as ENGINE_DEFAULT_PROMPT, applyInstructions } from '@/lib/prompt-engine';
 
 /* ───────────────── Assistant rail (fixed) ───────────────── */
 const AssistantRail = dynamic(
@@ -151,7 +150,7 @@ type AgentData = {
   numerals: boolean;
 };
 
-/* ─────────── canonical blocks (kept local for UI fallbacks) ─────────── */
+/* ─────────── canonical blocks ─────────── */
 const PROMPT_SKELETON =
 `[Identity]
 
@@ -163,8 +162,32 @@ const PROMPT_SKELETON =
 
 [Error Handling / Fallback]`;
 
-/* ─────────── your main default prompt (now from prompt-engine) ─────────── */
-const DEFAULT_PROMPT = ENGINE_DEFAULT_PROMPT;
+/* ─────────── your main default prompt ─────────── */
+const DEFAULT_PROMPT =
+`[Identity]
+You are a versatile AI assistant capable of adapting to a wide range of tasks and user needs. Your role is to efficiently assist users by providing accurate information, helpful guidance, and relevant suggestions.
+
+[Style]
+- Use a clear and formal tone to ensure understanding.
+- Be friendly and approachable without being overly casual.
+- Customize the language to suit the context and user preferences when possible.
+
+[Response Guidelines]
+- Strive for brevity and clarity in all responses.
+- Limit technical jargon unless necessary for comprehension.
+- Use straightforward language and avoid ambiguous terms.
+
+[Task & Goals]
+1. Welcome the user to the system and inquire about their needs.
+2. Adaptively interpret the user's instructions or questions.
+3. Provide accurate answers and solutions based on available information or tools.
+4. Guide the user through complex processes step-by-step if needed.
+5. Ask for confirmation if you're unsure about user intent or details. < wait for user response >
+
+[Error Handling / Fallback]
+- If user input is unclear, ask clarifying questions to gain better understanding.
+- In the event of a misunderstanding, apologize and provide alternative solutions or suggestions.
+- If the system experiences an error, notify the user calmly and offer to retry or provide additional assistance as needed.`;
 
 /* ─────────── defaults ─────────── */
 const DEFAULT_AGENT: AgentData = {
@@ -520,18 +543,6 @@ function DiffInline({ base, next }:{ base:string; next:string }){
   );
 }
 
-/* ─────────── Instruction routing + edits (delegated to prompt-engine) ─────────── */
-/** Keep the same signature the UI expects; delegate to applyInstructions. */
-function applyEdits(base: string, instructions: string) {
-  const safeBase =
-    base && base.includes('[Identity]') ? base : (DEFAULT_PROMPT || PROMPT_SKELETON);
-  const { merged, summary } = applyInstructions(safeBase, instructions);
-  // Return both the merged text and the summary via a tiny wrapper object-like tuple
-  // (we only used the string before; now we’ll read the summary in onGenerate).
-  (applyEdits as any)._lastSummary = summary;
-  return merged;
-}
-
 /* ─────────── Page ─────────── */
 export default function VoiceAgentSection() {
   /* align rail to app sidebar */
@@ -660,13 +671,14 @@ export default function VoiceAgentSection() {
   }
   async function doPublish(){
     if (!activeId) { setToast('Select or create an agent'); return; }
-    setPublishing(true); setToast('');
+    setPublishing(true);
+    setToast('');
     try { await apiPublish(activeId); setToast('Published'); }
     catch { setToast('Publish failed'); }
     finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
   }
 
-  /* ── Generate overlay logic ── */
+  /* ── Generate overlay logic (VERBATIM REPLACEMENT) ── */
 
   const runTypingIntoBox = (full:string) => {
     setTypingPreview('');
@@ -688,19 +700,18 @@ export default function VoiceAgentSection() {
     setShowGenerate(true);
   };
 
-  // Close overlay immediately, then stream typing into prompt area with review actions
+  // Replace the entire prompt with exactly what the user typed
   const onGenerate = () => {
     if (!composerText.trim()) return;
     setGenPhase('loading');
 
-    const base = (data.systemPrompt && data.systemPrompt.trim().length > 0)
+    const base = (data.systemPrompt && data.systemPrompt.length > 0)
       ? data.systemPrompt
       : DEFAULT_PROMPT;
 
     basePromptRef.current = base;
 
-    // Delegate merging to the shared prompt-engine
-    const merged = applyEdits(base, composerText);
+    const merged = composerText; // VERBATIM, no routing/edits/normalization
 
     // Close overlay now
     setShowGenerate(false);
@@ -710,9 +721,8 @@ export default function VoiceAgentSection() {
     setGenPhase('review');
     runTypingIntoBox(merged);
 
-    // Summary badge (from prompt-engine)
-    const summary = (applyEdits as any)._lastSummary || '';
-    setChangesSummary(summary || 'Applied edits.');
+    // Plain summary
+    setChangesSummary('Prompt replaced.');
   };
 
   const onAccept = async () => {
@@ -1076,12 +1086,12 @@ export default function VoiceAgentSection() {
               {/* Body */}
               <div className="px-6 py-5 space-y-4">
                 <div className="space-y-2">
-                  <label className="block text-xs" style={{ color:'var(--text-muted)' }}>Describe what you want to change…</label>
+                  <label className="block text-xs" style={{ color:'var(--text-muted)' }}>Paste the full prompt you want to use:</label>
                   <textarea
                     value={composerText}
                     onChange={(e)=>setComposerText(e.target.value)}
                     className="w-full bg-transparent outline-none rounded-[10px] px-3 py-2"
-                    placeholder="e.g., Friendlier tone, add handoff after 3 failed tries, confirm user email first."
+                    placeholder="[Identity]\n...\n[Style]\n..."
                     style={{ minHeight: 160, maxHeight: '40vh', background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
                   />
                 </div>
