@@ -1,27 +1,36 @@
 // lib/prompt-engine.ts
 // Frontend-safe prompt engine (no fs). Designed for Next.js.
-// Recognizes presets, key=value configs, and free-form bullets.
-// Maps "assistant for a dental clinic" (and similar) into Identity/Style/Guidelines,
-// not Notes.
+// Recognizes presets, key=value configs, free-form bullets, and now
+// supports a dedicated [Business Facts] section for uploads.
 
 type ApplyOut = { merged: string; summary: string };
 
-const SECTION_ORDER = [
+// ─────────────────────────────────────────────────────────────
+// Sections (order matters for rendering)
+// ─────────────────────────────────────────────────────────────
+export const SECTION_ORDER = [
   'Identity',
   'Style',
   'Response Guidelines',
   'Task & Goals',
   'Error Handling / Fallback',
-];
+  'Business Facts', // ← new (optional)
+] as const;
 
-const EMPTY_SECTION_BLOCKS: Record<string, string[]> = {
-  'Identity': [],
-  'Style': [],
+type SectionName = (typeof SECTION_ORDER)[number];
+
+const EMPTY_SECTION_BLOCKS: Record<SectionName, string[]> = {
+  Identity: [],
+  Style: [],
   'Response Guidelines': [],
   'Task & Goals': [],
   'Error Handling / Fallback': [],
+  'Business Facts': [],
 };
 
+// ─────────────────────────────────────────────────────────────
+// Default prompt (kept compatible)
+// ─────────────────────────────────────────────────────────────
 export const DEFAULT_PROMPT = normalizeFullPrompt(`
 [Identity]
 - You are a helpful, professional AI assistant for this business.
@@ -45,6 +54,9 @@ export const DEFAULT_PROMPT = normalizeFullPrompt(`
 [Error Handling / Fallback]
 - If uncertain, ask a specific clarifying question before proceeding.
 - If a tool/endpoint fails, apologize briefly and offer an alternative or a human handoff.
+
+[Business Facts]
+- (Add hours, services, pricing ranges, policies, links, phone, address here — auto-filled from uploads.)
 `.trim());
 
 // -----------------------------
@@ -53,20 +65,21 @@ export const DEFAULT_PROMPT = normalizeFullPrompt(`
 export function looksLikeFullPrompt(text: string): boolean {
   if (!text) return false;
   const t = text.toLowerCase();
-  // Consider "full" if it has at least two known sections.
-  const count = SECTION_ORDER.reduce(
-    (acc, s) => acc + (t.includes(`[${s.toLowerCase()}]`) ? 1 : 0),
-    0
-  );
+  // Count any two known section headers (case/spacing tolerant)
+  let count = 0;
+  for (const s of SECTION_ORDER) {
+    const key = `[${s.toLowerCase()}]`;
+    if (t.includes(key)) count++;
+  }
   return count >= 2;
 }
 
 export function normalizeFullPrompt(text: string): string {
   const parsed = parsePromptIntoSections(text);
-  const normalized: Record<string, string[]> = { ...EMPTY_SECTION_BLOCKS };
-  for (const key of Object.keys(parsed)) {
-    if (key in normalized) normalized[key] = sanitizeBullets(parsed[key]);
-  }
+  const normalized: Record<SectionName, string[]> = { ...EMPTY_SECTION_BLOCKS };
+  (Object.keys(parsed) as SectionName[]).forEach((k) => {
+    normalized[k] = sanitizeBullets(parsed[k]);
+  });
   return renderSections(normalized);
 }
 
@@ -86,11 +99,11 @@ export function applyInstructions(basePrompt: string, instructions: string): App
   const cfg = extractConfig(raw);
   const freeform = cfg.freeformLines;
 
-  // 4) Start with current sections as working copy
+  // 4) Working copy
   const working = cloneSections(baseSections);
 
-  // 5) Apply preset/industry if present
-  let summaryParts: string[] = [];
+  // 5) Apply preset/industry
+  const summaryParts: string[] = [];
   if (cfg.preset || cfg.industry) {
     const presetKey = (cfg.preset || cfg.industry || '').toLowerCase().trim();
     const preset = resolvePreset(presetKey);
@@ -100,7 +113,7 @@ export function applyInstructions(basePrompt: string, instructions: string): App
     }
   }
 
-  // 6) Apply style/tone/persona if specified in config
+  // 6) Style/tone/persona
   if (cfg.tone) {
     pushUnique(working['Style'], `- Tone: ${toTitle(cfg.tone)}.`);
     summaryParts.push(`tone=${cfg.tone}`);
@@ -110,7 +123,7 @@ export function applyInstructions(basePrompt: string, instructions: string): App
     summaryParts.push(`persona=${cfg.persona}`);
   }
 
-  // 7) Tasks/channels from config
+  // 7) Tasks/channels
   if (cfg.tasks?.length) {
     pushUnique(
       working['Task & Goals'],
@@ -126,10 +139,7 @@ export function applyInstructions(basePrompt: string, instructions: string): App
     summaryParts.push(`channels=${cfg.channels.join(',')}`);
   }
 
-  // 8) Freeform lines: route smartly
-  //    - If line hints "assistant for X" or "industry: X" => Identity specialization
-  //    - If line looks like a rule (starts with '-') => try to infer the target section
-  //    - Else: treat as clarifying instruction and place into the most relevant section
+  // 8) Route freeform
   const routedSummary: string[] = [];
   const identityLines: string[] = [];
   const styleLines: string[] = [];
@@ -143,75 +153,56 @@ export function applyInstructions(basePrompt: string, instructions: string): App
 
     const lower = line.toLowerCase();
 
-    // Detect industry specialization sentences
+    // Industry / specialization
     if (
       /assistant\s+for\s+a?n?\s+.+/.test(lower) ||
       /industry\s*:/.test(lower) ||
       /business\s*:/.test(lower)
     ) {
-      const specialization = cleanTrailingPunctuation(line);
-      identityLines.push(`- ${capitalize(specialization)}`);
+      identityLines.push(`- ${capitalize(cleanTrailingPunctuation(line))}`);
       routedSummary.push(`specialization→Identity`);
       continue;
     }
 
-    // If user mistakenly wrote "assistant for a dental clinic" under Response Guidelines,
-    // this will still be pulled to Identity by the previous rule.
-
-    // If starts with dash, infer target
+    // Bullet rules
     if (line.startsWith('-')) {
       const content = line.replace(/^\-\s*/, '').trim();
-
-      // quick heuristics by keyword
       if (/(tone|friendly|formal|concise|emoji|sentence)/i.test(content)) {
-        styleLines.push(`- ${content}`);
-        routedSummary.push('style bullet');
+        styleLines.push(`- ${content}`); routedSummary.push('style bullet');
       } else if (/(ask|clarify|avoid|do not|cite|source|hallucinat)/i.test(content)) {
-        guideLines.push(`- ${content}`);
-        routedSummary.push('guidelines bullet');
+        guideLines.push(`- ${content}`); routedSummary.push('guidelines bullet');
       } else if (/(book|schedule|collect|lead|faq|escalat|purchase|checkout|conversion|call)/i.test(content)) {
-        taskLines.push(`- ${content}`);
-        routedSummary.push('task bullet');
+        taskLines.push(`- ${content}`); routedSummary.push('task bullet');
       } else if (/(error|fallback|fail|retry|handoff|apolog)/i.test(content)) {
-        fallbackLines.push(`- ${content}`);
-        routedSummary.push('fallback bullet');
+        fallbackLines.push(`- ${content}`); routedSummary.push('fallback bullet');
       } else if (/(assistant|represent|brand|voice|persona)/i.test(content)) {
-        identityLines.push(`- ${content}`);
-        routedSummary.push('identity bullet');
+        identityLines.push(`- ${content}`); routedSummary.push('identity bullet');
       } else {
-        // default to Response Guidelines if ambiguous
-        guideLines.push(`- ${content}`);
-        routedSummary.push('guidelines bullet (default)');
+        guideLines.push(`- ${content}`); routedSummary.push('guidelines bullet (default)');
       }
-
       continue;
     }
 
-    // Otherwise: sentence heuristics
+    // Sentence heuristics
     if (/(tone|write|style|voice)/i.test(lower)) {
-      styleLines.push(`- ${line}`);
-      routedSummary.push('style sentence');
+      styleLines.push(`- ${line}`); routedSummary.push('style sentence');
     } else if (/(faq|booking|schedule|collect|lead|purchase|escalat)/i.test(lower)) {
-      taskLines.push(`- ${line}`);
-      routedSummary.push('task sentence');
+      taskLines.push(`- ${line}`); routedSummary.push('task sentence');
     } else if (/(clarify|ask|do not|avoid|cite|source|summarize|steps)/i.test(lower)) {
-      guideLines.push(`- ${line}`);
-      routedSummary.push('guidelines sentence');
+      guideLines.push(`- ${line}`); routedSummary.push('guidelines sentence');
     } else if (/(error|fallback|tool|endpoint|fail|handoff|apolog)/i.test(lower)) {
-      fallbackLines.push(`- ${line}`);
-      routedSummary.push('fallback sentence');
+      fallbackLines.push(`- ${line}`); routedSummary.push('fallback sentence');
     } else {
-      identityLines.push(`- ${line}`);
-      routedSummary.push('identity sentence (default)');
+      identityLines.push(`- ${line}`); routedSummary.push('identity sentence (default)');
     }
   }
 
   // Merge routed lines, de-duplicated
-  for (const l of identityLines) pushUnique(working['Identity'], l);
-  for (const l of styleLines) pushUnique(working['Style'], l);
-  for (const l of guideLines) pushUnique(working['Response Guidelines'], l);
-  for (const l of taskLines) pushUnique(working['Task & Goals'], l);
-  for (const l of fallbackLines) pushUnique(working['Error Handling / Fallback'], l);
+  identityLines.forEach(l => pushUnique(working['Identity'], l));
+  styleLines.forEach(l => pushUnique(working['Style'], l));
+  guideLines.forEach(l => pushUnique(working['Response Guidelines'], l));
+  taskLines.forEach(l => pushUnique(working['Task & Goals'], l));
+  fallbackLines.forEach(l => pushUnique(working['Error Handling / Fallback'], l));
 
   // 9) Finalize
   const merged = renderSections(working);
@@ -223,21 +214,123 @@ export function applyInstructions(basePrompt: string, instructions: string): App
   return { merged, summary };
 }
 
-// -----------------------------
-// Internal utilities
-// -----------------------------
+// ─────────────────────────────────────────────────────────────
+// NEW: Business Facts ingestion for uploaded files
+// ─────────────────────────────────────────────────────────────
 
-function parsePromptIntoSections(text: string): Record<string, string[]> {
-  const out: Record<string, string[]> = { ...EMPTY_SECTION_BLOCKS };
+export type UploadedDoc = { name?: string; text: string } | string;
+
+/**
+ * Extract clean bullets (hours, contact, services, pricing, policies, URLs, etc.)
+ * from one or more uploaded docs. Client-safe; no external calls.
+ */
+export function extractBusinessFacts(docs: UploadedDoc | UploadedDoc[], opts?: {
+  maxFacts?: number;              // default 24
+  includeDocTags?: boolean;       // default true (prefix bullets with [Doc] when helpful)
+}): string[] {
+  const list = Array.isArray(docs) ? docs : [docs];
+  const maxFacts = opts?.maxFacts ?? 24;
+  const includeDocTags = opts?.includeDocTags ?? true;
+
+  const facts: string[] = [];
+
+  for (const d of list) {
+    const name = (typeof d === 'string' ? '' : (d.name || '')).trim();
+    const text = (typeof d === 'string' ? d : d.text || '').replace(/\r/g, '\n');
+    if (!text) continue;
+
+    // 1) Pull structured lines
+    const lines = text.split('\n').map(s => s.trim()).filter(Boolean);
+
+    // 2) Heuristics for common business info
+    const push = (s: string) => { if (s) facts.push(s.trim()); };
+
+    // Hours
+    const hourRx = /\b(mon(day)?|tue(s(day)?)?|wed(nesday)?|thu(rs(day)?)?|fri(day)?|sat(urday)?|sun(day)?)\b[^\n]*\b(\d{1,2}(:\d{2})?\s*(am|pm)?\s*[-–]\s*\d{1,2}(:\d{2})?\s*(am|pm)?|\bclosed\b)/ig;
+    const hoursFound = Array.from(text.matchAll(hourRx)).map(m => cleanSpaces(m[0]));
+    if (hoursFound.length) push(`${nameTag(name, includeDocTags)}Hours: ${dedupeStrings(hoursFound).join('; ')}`);
+
+    // Phones / email / address / url
+    const phones = dedupeStrings([
+      ...Array.from(text.matchAll(/\+?\d[\d\-\s().]{6,}\d/g)).map(m => cleanPhone(m[0]))
+    ]).filter(Boolean);
+    if (phones.length) push(`${nameTag(name, includeDocTags)}Phone: ${phones.join(', ')}`);
+
+    const emails = dedupeStrings([
+      ...Array.from(text.matchAll(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/ig)).map(m => m[0].toLowerCase())
+    ]);
+    if (emails.length) push(`${nameTag(name, includeDocTags)}Email: ${emails.join(', ')}`);
+
+    const urls = dedupeStrings([
+      ...Array.from(text.matchAll(/\bhttps?:\/\/[^\s)]+/ig)).map(m => stripTrailingPunct(m[0]))
+    ]);
+    if (urls.length) push(`${nameTag(name, includeDocTags)}Links: ${urls.join(', ')}`);
+
+    const addressLine = lines.find(l => /(suite|ste\.|fl|floor|ave|avenue|st\.|street|rd\.|road|blvd|drive|dr\.|zip|postal)/i.test(l));
+    if (addressLine) push(`${nameTag(name, includeDocTags)}Address: ${addressLine}`);
+
+    // Services (bullet-ish)
+    const serviceCandidates = lines.filter(l =>
+      /^[-•*]\s*/.test(l) &&
+      /(service|clean|whiten|implant|menu|cut|color|repair|oil|spa|pricing|plan|package|tier|basic|premium)/i.test(l)
+    ).map(l => l.replace(/^[-•*]\s*/, '').trim());
+    if (serviceCandidates.length) {
+      const top = topN(dedupeStrings(serviceCandidates), 8);
+      push(`${nameTag(name, includeDocTags)}Services: ${top.join('; ')}`);
+    }
+
+    // Pricing
+    const prices = lines.filter(l => /(\$|£|€)\s?\d/.test(l) || /\b(from|starting at)\b/i.test(l));
+    if (prices.length) push(`${nameTag(name, includeDocTags)}Pricing: ${topN(dedupeStrings(prices.map(cleanSpaces)), 6).join('; ')}`);
+
+    // Policies
+    const policies = lines.filter(l => /(cancel|cancellation|reschedule|refund|deposit|no[-\s]?show|late fee|warranty|guarantee|returns?)/i.test(l));
+    if (policies.length) push(`${nameTag(name, includeDocTags)}Policies: ${topN(dedupeStrings(policies.map(cleanSpaces)), 6).join('; ')}`);
+  }
+
+  // Final pass: dedupe & limit
+  return topN(dedupeStrings(facts), Math.max(4, maxFacts));
+}
+
+/**
+ * Merge the extracted facts into a prompt under [Business Facts].
+ */
+export function mergeBusinessFacts(basePrompt: string, facts: string[] | UploadedDoc | UploadedDoc[], opts?: {
+  heading?: string;   // default 'Business Facts'
+}): ApplyOut {
+  const bullets = Array.isArray(facts) ? facts : extractBusinessFacts(facts);
+  const cleanBullets = sanitizeBullets(bullets.map(b => `- ${b.replace(/^\-\s*/, '')}`));
+  const sections = parsePromptIntoSections(
+    basePrompt && looksLikeFullPrompt(basePrompt) ? basePrompt : DEFAULT_PROMPT
+  );
+
+  const label = normalizeSectionName(opts?.heading || 'Business Facts') as SectionName;
+  ensureSection(sections, label);
+  cleanBullets.forEach(b => pushUnique(sections[label], b));
+
+  const merged = renderSections(sections);
+  const summary = cleanBullets.length
+    ? `Merged ${cleanBullets.length} business fact(s) into [${label}].`
+    : 'No new facts merged.';
+
+  return { merged, summary };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Internal utilities
+// ─────────────────────────────────────────────────────────────
+
+function parsePromptIntoSections(text: string): Record<SectionName, string[]> {
+  const out: Record<SectionName, string[]> = { ...EMPTY_SECTION_BLOCKS };
   if (!text) return out;
 
-  // Split by [Section]
-  const regex = /\[([^\]]+)\]\s*([\s\S]*?)(?=\n\[[^\]]+\]|\s*$)/g;
+  // Split by [Section] (case-insensitive)
+  const regex = /\[([^\]]+)\]\s*([\s\S]*?)(?=\n\[[^\]]+\]|\s*$)/gi;
   let m: RegExpExecArray | null;
   while ((m = regex.exec(text)) !== null) {
-    const section = normalizeSectionName(m[1]);
+    const section = normalizeSectionName(m[1]) as SectionName;
     const body = (m[2] || '').trim();
-    if (!SECTION_ORDER.includes(section)) continue;
+    if (!(SECTION_ORDER as readonly string[]).includes(section)) continue;
 
     // Turn paragraphs into bullets if needed
     const bullets = body
@@ -254,13 +347,11 @@ function parsePromptIntoSections(text: string): Record<string, string[]> {
   }
 
   // Ensure all expected sections exist
-  for (const s of SECTION_ORDER) {
-    if (!out[s]) out[s] = [];
-  }
+  SECTION_ORDER.forEach((s) => { if (!out[s]) out[s] = []; });
   return out;
 }
 
-function renderSections(sections: Record<string, string[]>): string {
+function renderSections(sections: Record<SectionName, string[]>): string {
   const parts: string[] = [];
   for (const s of SECTION_ORDER) {
     const lines = (sections[s] || []).filter(Boolean);
@@ -275,20 +366,25 @@ function renderSections(sections: Record<string, string[]>): string {
   return parts.join('\n').trim() + '\n';
 }
 
-function normalizeSectionName(name: string): string {
+function normalizeSectionName(name: string): SectionName {
   const n = (name || '').trim().toLowerCase();
-  const map: Record<string, string> = {
+  const map: Record<string, SectionName> = {
     'identity': 'Identity',
     'style': 'Style',
     'response guidelines': 'Response Guidelines',
+    'guidelines': 'Response Guidelines',
     'task & goals': 'Task & Goals',
     'tasks & goals': 'Task & Goals',
     'task and goals': 'Task & Goals',
     'error handling / fallback': 'Error Handling / Fallback',
     'error handling': 'Error Handling / Fallback',
     'fallback': 'Error Handling / Fallback',
+    'business facts': 'Business Facts',
+    'facts': 'Business Facts',
+    'knowledge': 'Business Facts',
+    'kb': 'Business Facts',
   };
-  return map[n] || toTitle(name.trim());
+  return map[n] || (toTitle(name.trim()) as SectionName);
 }
 
 function sanitizeBullets(lines: string[]): string[] {
@@ -298,27 +394,34 @@ function sanitizeBullets(lines: string[]): string[] {
     const s = raw.replace(/\s+/g, ' ').trim();
     if (!s) continue;
     const bullet = s.startsWith('-') ? s : `- ${s}`;
-    if (!seen.has(bullet.toLowerCase())) {
-      seen.add(bullet.toLowerCase());
+    const key = normalizeKey(bullet);
+    if (!seen.has(key)) {
+      seen.add(key);
       out.push(bullet);
     }
   }
   return out;
 }
 
-function cloneSections(src: Record<string, string[]>): Record<string, string[]> {
-  const out: Record<string, string[]> = {};
-  for (const s of SECTION_ORDER) out[s] = [...(src[s] || [])];
+function cloneSections(src: Record<SectionName, string[]>): Record<SectionName, string[]> {
+  const out = {} as Record<SectionName, string[]>;
+  SECTION_ORDER.forEach((s) => { out[s] = [...(src[s] || [])]; });
   return out;
 }
 
 function pushUnique(arr: string[], bullet: string) {
   const b = bullet.trim();
   if (!b) return;
-  if (!arr.some(x => normalize(x) === normalize(b))) arr.push(b);
+  if (!arr.some(x => normalizeKey(x) === normalizeKey(b))) arr.push(b);
 }
 
-function normalize(s: string) { return s.replace(/\s+/g, ' ').trim().toLowerCase(); }
+function ensureSection(obj: Record<SectionName, string[]>, name: SectionName) {
+  if (!obj[name]) obj[name] = [];
+}
+
+function normalizeKey(s: string) {
+  return s.replace(/\s+/g, ' ').trim().toLowerCase().replace(/[.;:,]+$/g, '');
+}
 
 function toTitle(s: string) {
   return s.replace(/\w\S*/g, (t) => t.charAt(0).toUpperCase() + t.slice(1).toLowerCase());
@@ -327,7 +430,23 @@ function formatKey(s: string) { return s.trim().replace(/[_\-]+/g, ' '); }
 function cleanTrailingPunctuation(s: string) { return s.replace(/[.?!\s]+$/g, ''); }
 function capitalize(s: string) {
   const t = s.trim();
-  return t.charAt(0).toUpperCase() + t.slice(1);
+  return t ? t.charAt(0).toUpperCase() + t.slice(1) : t;
+}
+function cleanSpaces(s: string) { return s.replace(/\s+/g, ' ').trim(); }
+function stripTrailingPunct(s: string) { return s.replace(/[),.;:!?]+$/g, ''); }
+function nameTag(name: string, enabled: boolean) { return enabled && name ? `[${name}] ` : ''; }
+function topN<T>(arr: T[], n = 8): T[] { return arr.slice(0, Math.max(0, n)); }
+function dedupeStrings(arr: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const s of arr) {
+    const k = s.toLowerCase().replace(/\s+/g, ' ').trim();
+    if (!seen.has(k)) { seen.add(k); out.push(s.trim()); }
+  }
+  return out;
+}
+function cleanPhone(s: string) {
+  return s.replace(/[^\d+]/g, '').replace(/^\+?/, '+');
 }
 
 // -----------------------------
@@ -353,7 +472,7 @@ function extractConfig(raw: string): Config {
   for (const line of lines) {
     // key=value; key=value; ...
     if (/[:=]/.test(line) && !line.startsWith('-')) {
-      const pairs = line.split(/[;,\n]+/).map(s => s.trim()).filter(Boolean);
+      const pairs = line.split(/[;]\s*/).map(s => s.trim()).filter(Boolean);
       for (const p of pairs) {
         const [k0, v0] = p.split(/[:=]/).map(s => (s || '').trim());
         const k = (k0 || '').toLowerCase();
@@ -385,7 +504,7 @@ function extractConfig(raw: string): Config {
 }
 
 // -----------------------------
-// Presets
+// Presets (kept minimal and editable)
 // -----------------------------
 type Preset = {
   name: string;
@@ -399,13 +518,15 @@ type Preset = {
 function resolvePreset(key: string): Preset | null {
   const k = key.trim().toLowerCase();
 
-  // map aliases
+  // aliases you can expand later
   const alias: Record<string, string> = {
     'dentist': 'dental_clinic',
     'dental': 'dental_clinic',
     'dental clinic': 'dental_clinic',
     'dental practice': 'dental_clinic',
     'dentistry': 'dental_clinic',
+    'restaurant': 'restaurant',
+    'salon': 'salon',
   };
   const canon = alias[k] || k;
 
@@ -437,34 +558,33 @@ function resolvePreset(key: string): Preset | null {
           'If scheduling API fails, offer to take contact info for a callback.',
         ],
       };
+    case 'restaurant':
+      return {
+        name: 'Restaurant',
+        identity: ['You are a courteous host for a busy restaurant.'],
+        style: ['Friendly, fast, to the point.'],
+        guidelines: ['Collect date/time/party size/name/phone. Mention policies when relevant.'],
+        tasks: ['Table reservations', 'Menu & dietary questions', 'Wait times & directions'],
+        fallback: ['Offer nearest two time slots if preferred slot is unavailable.'],
+      };
+    case 'salon':
+      return {
+        name: 'Salon',
+        identity: ['You are a chic salon’s virtual coordinator.'],
+        style: ['Trendy but clear. Confirm duration and stylist match.'],
+        guidelines: ['Collect service, stylist preference, date/time, name, phone.'],
+        tasks: ['Service selection', 'Stylist matching', 'Appointment booking'],
+        fallback: ['If a stylist is unavailable, offer next two times or alternatives.'],
+      };
     default:
       return null;
   }
 }
 
-function applyPreset(target: Record<string, string[]>, preset: Preset) {
-  if (preset.identity?.length) {
-    ensureHeader(target['Identity']);
-    for (const s of preset.identity) pushUnique(target['Identity'], `- ${s}`);
-  }
-  if (preset.style?.length) {
-    ensureHeader(target['Style']);
-    for (const s of preset.style) pushUnique(target['Style'], `- ${s}`);
-  }
-  if (preset.guidelines?.length) {
-    ensureHeader(target['Response Guidelines']);
-    for (const s of preset.guidelines) pushUnique(target['Response Guidelines'], `- ${s}`);
-  }
-  if (preset.tasks?.length) {
-    ensureHeader(target['Task & Goals']);
-    for (const s of preset.tasks) pushUnique(target['Task & Goals'], `- ${s}`);
-  }
-  if (preset.fallback?.length) {
-    ensureHeader(target['Error Handling / Fallback']);
-    for (const s of preset.fallback) pushUnique(target['Error Handling / Fallback'], `- ${s}`);
-  }
-}
-
-function ensureHeader(_arr: string[]) {
-  // currently a no-op; placeholder if you later want to insert a separating header bullet
+function applyPreset(target: Record<SectionName, string[]>, preset: Preset) {
+  if (preset.identity?.length) preset.identity.forEach(s => pushUnique(target['Identity'], `- ${s}`));
+  if (preset.style?.length) preset.style.forEach(s => pushUnique(target['Style'], `- ${s}`));
+  if (preset.guidelines?.length) preset.guidelines.forEach(s => pushUnique(target['Response Guidelines'], `- ${s}`));
+  if (preset.tasks?.length) preset.tasks.forEach(s => pushUnique(target['Task & Goals'], `- ${s}`));
+  if (preset.fallback?.length) preset.fallback.forEach(s => pushUnique(target['Error Handling / Fallback'], `- ${s}`));
 }
