@@ -150,7 +150,7 @@ type AgentData = {
   numerals: boolean;
 };
 
-/* ─────────── minimal skeleton (no hard-coded text prompts) ─────────── */
+/* ─────────── Canonical block skeleton ─────────── */
 const PROMPT_SKELETON =
 `[Identity]
 
@@ -162,6 +162,34 @@ const PROMPT_SKELETON =
 
 [Error Handling / Fallback]`;
 
+/* ─────────── Your default prompt (polished slightly) ─────────── */
+const DEFAULT_PROMPT =
+`[Identity]
+You are a versatile AI assistant capable of adapting to a wide range of tasks and user needs. Your role is to efficiently assist users by providing accurate information, helpful guidance, and relevant suggestions.
+
+[Style]
+- Use a clear and formal tone to ensure understanding.
+- Be friendly and approachable without being overly casual.
+- Adjust language and detail level to suit the context and user preferences where possible.
+
+[Response Guidelines]
+- Keep responses brief and clear.
+- Limit technical jargon unless necessary for comprehension.
+- Use straightforward language and avoid ambiguity.
+- When listing steps or options, format them cleanly.
+
+[Task & Goals]
+1. Welcome the user and ask about their needs.
+2. Interpret the user’s instructions or questions accurately.
+3. Provide correct, actionable answers or solutions using available tools.
+4. Guide the user through complex processes step-by-step when needed.
+5. Ask for confirmation if intent or details are unclear. < wait for user response >
+
+[Error Handling / Fallback]
+- If input is unclear, ask clarifying questions to gain understanding.
+- If there is a misunderstanding, apologize and offer alternative solutions or suggestions.
+- If the system encounters an error, notify the user calmly and offer to retry or provide additional assistance.`;
+
 /* ─────────── defaults ─────────── */
 const DEFAULT_AGENT: AgentData = {
   name: 'Assistant',
@@ -169,7 +197,7 @@ const DEFAULT_AGENT: AgentData = {
   model: 'GPT-4o',
   firstMode: 'Assistant speaks first',
   firstMsg: 'Hello.',
-  systemPrompt: PROMPT_SKELETON,
+  systemPrompt: DEFAULT_PROMPT,
   ttsProvider: 'openai',
   voiceName: 'Alloy (American)',
   apiKeyId: '',
@@ -516,6 +544,128 @@ function DiffInline({ base, next }:{ base:string; next:string }){
   );
 }
 
+/* ─────────── Language + rewrite utilities (light, local stubs) ─────────── */
+function detectLangOfText(s: string): 'Dutch' | 'English' | 'Other' {
+  const lower = s.toLowerCase();
+  // extremely light Dutch heuristics
+  if (/\b(jij|je|jullie|bent|ben|een|dom|echt|alsjeblieft|hoi|hallo)\b/.test(lower)) return 'Dutch';
+  if (/[\u00C0-\u017F]/.test(s) && /\bde\b|\ben\b|\bhet\b/.test(lower)) return 'Dutch';
+  // crude English hint
+  if (/[a-z]/i.test(s) && /\bthe\b|\band\b|\bto\b|\byou\b/.test(lower)) return 'English';
+  return 'Other';
+}
+
+// Small phrase-level Dutch -> English mapping; expand as needed
+function tinyDutchToEnglish(s: string): string {
+  return s
+    .replace(/\bjij\b/gi, 'you')
+    .replace(/\bje\b/gi, 'you')
+    .replace(/\bbent\b/gi, 'are')
+    .replace(/\been\b/gi, 'a')
+    .replace(/\becht\b/gi, 'really')
+    .replace(/\bdom\b/gi, 'dumb');
+}
+
+// Turn toxic/offensive input into a professional instruction
+function sanitizeToGuideline(text: string, targetLang: string) {
+  const t = text.toLowerCase();
+  const isInsult =
+    /\b(dom|stupid|dumb|idiot|suck|hate|trash|useless)\b/.test(t) ||
+    /\byou are really dumb\b/.test(t) ||
+    /\bjij.*dom\b/.test(t);
+
+  if (!isInsult) return null;
+
+  const enRule =
+    '- If a user expresses frustration or uses insults, respond calmly, remain professional, and redirect the conversation toward the user’s goal.';
+
+  // If you add more target languages later, branch here.
+  return targetLang.startsWith('English') ? enRule : enRule; // fallback same rule
+}
+
+function translateToTargetLanguage(text: string, targetLang: string): string {
+  // Local-only stub. When you wire your LLM later, replace this.
+  const srcLang = detectLangOfText(text);
+  if (targetLang.startsWith('English')) {
+    if (srcLang === 'Dutch') {
+      return tinyDutchToEnglish(text);
+    }
+    return text;
+  }
+  // For non-English targets you could pass-through for now
+  return text;
+}
+
+/* ─────────── Edit application (keeps canonical blocks) ─────────── */
+function routeBullets(instructions: string, targetLang: string) {
+  const lines = instructions.split('\n').map(s=>s.trim()).filter(Boolean);
+  const toStyle: string[] = [];
+  const toGuides: string[] = [];
+  const toTasks: string[] = [];
+  const toIdentity: string[] = [];
+  const toFallback: string[] = [];
+
+  for (let raw of lines) {
+    let line = raw;
+
+    // translate per-line if needed
+    line = translateToTargetLanguage(line, targetLang).trim();
+
+    // turn toxic text into a polite rule
+    const safe = sanitizeToGuideline(line, targetLang);
+    if (safe) { toFallback.push(safe); continue; }
+
+    // normalize punctuation + bullet
+    const bullet = `- ${/[.!?]$/.test(line) ? line : line + '.'}`;
+
+    if (/tone|formal|friendly|concise|style|voice|approachable/i.test(line)) toStyle.push(bullet);
+    else if (/guideline|response|answer|jargon|clarity|concise|format|steps|list/i.test(line)) toGuides.push(bullet);
+    else if (/collect|ask|step|goal|task|flow|handoff|handover|escalate|confirm/i.test(line)) toTasks.push(bullet);
+    else if (/identity|role|act as|behave|persona/i.test(line)) toIdentity.push(bullet);
+    else if (/error|fallback|fail|misunderstanding|retry/i.test(line)) toFallback.push(bullet);
+    else toGuides.push(bullet);
+  }
+
+  return { toStyle, toGuides, toTasks, toIdentity, toFallback };
+}
+
+function ensureBlocks(base: string) {
+  if (
+    base.includes('[Identity]') &&
+    base.includes('[Style]') &&
+    base.includes('[Response Guidelines]') &&
+    base.includes('[Task & Goals]') &&
+    base.includes('[Error Handling / Fallback]')
+  ) return base;
+  return PROMPT_SKELETON;
+}
+
+function applyEdits(base: string, instructions: string, targetLang: string) {
+  const blocks = ['[Identity]','[Style]','[Response Guidelines]','[Task & Goals]','[Error Handling / Fallback]'];
+  base = ensureBlocks(base);
+
+  const parts: Record<string,string[]> = {};
+  let current = '';
+  base.split('\n').forEach(line => {
+    const t = line.trim();
+    if (blocks.includes(t)) { current = t; parts[current] = parts[current] || []; return; }
+    if (current) parts[current].push(line);
+  });
+
+  const { toStyle, toGuides, toTasks, toIdentity, toFallback } = routeBullets(instructions, targetLang);
+
+  if (toIdentity.length) parts['[Identity]'] = [...(parts['[Identity]']||[]), ...toIdentity];
+  if (toStyle.length) parts['[Style]'] = [...(parts['[Style]']||[]), ...toStyle];
+  if (toGuides.length) parts['[Response Guidelines]'] = [...(parts['[Response Guidelines]']||[]), ...toGuides];
+  if (toTasks.length) parts['[Task & Goals]'] = [...(parts['[Task & Goals]']||[]), ...toTasks];
+  if (toFallback.length) parts['[Error Handling / Fallback]'] = [...(parts['[Error Handling / Fallback]']||[]), ...toFallback];
+
+  const rebuilt =
+    blocks.map(h => `${h}\n${(parts[h]||[]).join('\n')}`.trim()).join('\n\n');
+
+  return rebuilt || base;
+}
+
 /* ─────────── Page ─────────── */
 export default function VoiceAgentSection() {
   /* align rail to app sidebar */
@@ -651,50 +801,8 @@ export default function VoiceAgentSection() {
     finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
   }
 
-  /* ── Generate overlay logic (injects into canonical sections only) ── */
+  /* ── Generate overlay logic ── */
   const detectLanguage = () => data.language || 'English';
-
-  const applyEdits = (base: string, instructions: string) => {
-    const blocks = ['[Identity]','[Style]','[Response Guidelines]','[Task & Goals]','[Error Handling / Fallback]'];
-    // Ensure base has all blocks
-    if (!blocks.every(b => base.includes(b))) base = PROMPT_SKELETON;
-
-    const parts: Record<string,string[]> = {};
-    let current = '';
-    base.split('\n').forEach(line => {
-      const t = line.trim();
-      if (blocks.includes(t)) { current = t; parts[current] = parts[current] || []; return; }
-      if (current) parts[current].push(line);
-    });
-
-    const lines = instructions.split('\n').map(s=>s.trim()).filter(Boolean);
-
-    const toStyle: string[] = [];
-    const toGuides: string[] = [];
-    const toTasks: string[] = [];
-    const toIdentity: string[] = [];
-    const toFallback: string[] = [];
-
-    for (const l of lines) {
-      const bullet = `- ${/[.!?]$/.test(l) ? l : l + '.'}`;
-      if (/tone|formal|friendly|concise|style/i.test(l)) toStyle.push(bullet);
-      else if (/guideline|response|answer|jargon|clarity|concise/i.test(l)) toGuides.push(bullet);
-      else if (/collect|ask|step|goal|task|flow|handoff|handover|escalate/i.test(l)) toTasks.push(bullet);
-      else if (/identity|role|act as|behave/i.test(l)) toIdentity.push(bullet);
-      else toGuides.push(bullet);
-    }
-
-    if (toIdentity.length) parts['[Identity]'] = [...(parts['[Identity]']||[]), ...toIdentity];
-    if (toStyle.length) parts['[Style]'] = [...(parts['[Style]']||[]), ...toStyle];
-    if (toGuides.length) parts['[Response Guidelines]'] = [...(parts['[Response Guidelines]']||[]), ...toGuides];
-    if (toTasks.length) parts['[Task & Goals]'] = [...(parts['[Task & Goals]']||[]), ...toTasks];
-    if (toFallback.length) parts['[Error Handling / Fallback]'] = [...(parts['[Error Handling / Fallback]']||[]), ...toFallback];
-
-    const rebuilt =
-      blocks.map(h => `${h}\n${(parts[h]||[]).join('\n')}`.trim()).join('\n\n');
-
-    return rebuilt || base;
-  };
 
   const runTypingIntoBox = (full:string) => {
     setTypingPreview('');
@@ -717,32 +825,30 @@ export default function VoiceAgentSection() {
     setShowGenerate(true);
   };
 
-  // >>> The key change: close overlay immediately when starting generation
-  const onGenerate = async () => {
-    if (!composerText.trim()) return; // keep disabled if empty
+  // Close overlay immediately, then stream typing into prompt area with review actions
+  const onGenerate = () => {
+    if (!composerText.trim()) return;
     setGenPhase('loading');
 
-    // Capture the base prompt and precompute merged text
-    const base = data.systemPrompt || PROMPT_SKELETON;
+    const base = data.systemPrompt || DEFAULT_PROMPT || PROMPT_SKELETON;
     basePromptRef.current = base;
-    const _lang = detectLanguage();
 
-    // Create merged text (sync or later: replace with API call)
-    const merged = applyEdits(base, composerText);
+    const targetLang = detectLanguage();
+    const merged = applyEdits(base, composerText, targetLang);
 
-    // Close overlay *now*
+    // Close overlay now
     setShowGenerate(false);
 
-    // Switch page into review mode and start typing into the prompt box
+    // Enter review and type into box
     setProposedPrompt(merged);
     setGenPhase('review');
     runTypingIntoBox(merged);
 
-    // Optional little summary
+    // Summary badge
     const d = computeDiff(base, merged);
     const addedCount = d.filter(r=>r.t==='add').length;
     const removedCount = d.filter(r=>r.t==='rem').length;
-    setChangesSummary(`Applied edits (${_lang}). +${addedCount} / -${removedCount} lines.`);
+    setChangesSummary(`Applied edits (${targetLang}). +${addedCount} / -${removedCount} lines.`);
   };
 
   const onAccept = async () => {
@@ -773,7 +879,6 @@ export default function VoiceAgentSection() {
   };
 
   /* ─────────── UI ─────────── */
-  // In review when the overlay is closed and genPhase is 'review'
   const inInlineReview = genPhase === 'review' && !showGenerate;
   const typingDone = proposedPrompt && typingPreview.length >= proposedPrompt.length;
 
@@ -868,13 +973,13 @@ export default function VoiceAgentSection() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt-[var(--s-4)]">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap={[12]} mt-[var(--s-4)]">
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]">Model</div>
                 <StyledSelect value={data.model} onChange={setField('model')} options={modelOpts}/>
               </div>
               <div>
-                <div className="mb-[var(--s-2)] text-[12.5px]">First Message Mode</div>
+                <div className="mb-[var(--s-2)] text={[12.5] as any}>First Message Mode</div>
                 <StyledSelect value={data.firstMode} onChange={setField('firstMode')} options={[
                   { value: 'Assistant speaks first', label: 'Assistant speaks first' },
                   { value: 'User speaks first', label: 'User speaks first' },
@@ -1064,7 +1169,7 @@ export default function VoiceAgentSection() {
         </div>
       </div>
 
-      {/* ─────────── Generate overlay (only for collecting instructions) ─────────── */}
+      {/* ─────────── Generate overlay (collects instructions only) ─────────── */}
       {showGenerate && (
         <>
           <div
@@ -1117,7 +1222,7 @@ export default function VoiceAgentSection() {
                     value={composerText}
                     onChange={(e)=>setComposerText(e.target.value)}
                     className="w-full bg-transparent outline-none rounded-[10px] px-3 py-2"
-                    placeholder="e.g., Friendlier tone, add human handoff after 3 failed tries, collect name+email first."
+                    placeholder="e.g., Friendlier tone, add handoff after 3 failed tries, confirm user email before proceeding."
                     style={{ minHeight: 160, maxHeight: '40vh', background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
                   />
                 </div>
