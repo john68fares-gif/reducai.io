@@ -162,32 +162,29 @@ const PROMPT_SKELETON =
 
 [Error Handling / Fallback]`;
 
-/* ─────────── your main default prompt ─────────── */
-const DEFAULT_PROMPT =
-`[Identity]
-You are a versatile AI assistant capable of adapting to a wide range of tasks and user needs. Your role is to efficiently assist users by providing accurate information, helpful guidance, and relevant suggestions.
+/* ─────────── NEW DEFAULT PROMPT (PASTE YOUR NEW PROMPT BELOW) ─────────── */
+/** 
+ * Replace the content inside the template string with the new prompt we made.
+ * Everything else in the file is unchanged.
+ */
+const NEW_PROMPT = `[Identity]
+<<< PASTE YOUR NEW PROMPT CONTENT HERE >>>
 
 [Style]
-- Use a clear and formal tone to ensure understanding.
-- Be friendly and approachable without being overly casual.
-- Customize the language to suit the context and user preferences when possible.
+<<< KEEP YOUR NEW PROMPT'S STYLE SECTION HERE >>>
 
 [Response Guidelines]
-- Strive for brevity and clarity in all responses.
-- Limit technical jargon unless necessary for comprehension.
-- Use straightforward language and avoid ambiguous terms.
+<<< KEEP YOUR NEW PROMPT'S GUIDELINES HERE >>>
 
 [Task & Goals]
-1. Welcome the user to the system and inquire about their needs.
-2. Adaptively interpret the user's instructions or questions.
-3. Provide accurate answers and solutions based on available information or tools.
-4. Guide the user through complex processes step-by-step if needed.
-5. Ask for confirmation if you're unsure about user intent or details. < wait for user response >
+<<< KEEP YOUR NEW PROMPT'S TASKS/G OALS HERE >>>
 
 [Error Handling / Fallback]
-- If user input is unclear, ask clarifying questions to gain better understanding.
-- In the event of a misunderstanding, apologize and provide alternative solutions or suggestions.
-- If the system experiences an error, notify the user calmly and offer to retry or provide additional assistance as needed.`;
+<<< KEEP YOUR NEW PROMPT'S FALLBACK SECTION HERE >>>`;
+
+/* ─────────── your main default prompt ─────────── */
+/* The app now uses NEW_PROMPT instead of the old DEFAULT_PROMPT text */
+const DEFAULT_PROMPT = NEW_PROMPT;
 
 /* ─────────── defaults ─────────── */
 const DEFAULT_AGENT: AgentData = {
@@ -772,7 +769,7 @@ export default function VoiceAgentSection() {
   }
   async function doPublish(){
     if (!activeId) { setToast('Select or create an agent'); return; }
-    setPublishing(true); setToast('');
+    setPublishing=true; setToast('');
     try { await apiPublish(activeId); setToast('Published'); }
     catch { setToast('Publish failed'); }
     finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
