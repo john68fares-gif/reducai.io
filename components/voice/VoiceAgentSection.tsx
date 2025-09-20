@@ -6,7 +6,7 @@ import dynamic from 'next/dynamic';
 import { createPortal } from 'react-dom';
 import {
   Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Rocket, Search, Check, Lock,
-  KeyRound, Play, Square, Pause, X, Loader2
+  KeyRound, Play, Square, Pause, X
 } from 'lucide-react';
 import { scopedStorage } from '@/utils/scoped-storage';
 
@@ -150,7 +150,7 @@ type AgentData = {
   numerals: boolean;
 };
 
-/* ─────────── Canonical block skeleton ─────────── */
+/* ─────────── canonical blocks ─────────── */
 const PROMPT_SKELETON =
 `[Identity]
 
@@ -162,7 +162,7 @@ const PROMPT_SKELETON =
 
 [Error Handling / Fallback]`;
 
-/* ─────────── Your default prompt (polished slightly) ─────────── */
+/* ─────────── your main default prompt ─────────── */
 const DEFAULT_PROMPT =
 `[Identity]
 You are a versatile AI assistant capable of adapting to a wide range of tasks and user needs. Your role is to efficiently assist users by providing accurate information, helpful guidance, and relevant suggestions.
@@ -170,25 +170,24 @@ You are a versatile AI assistant capable of adapting to a wide range of tasks an
 [Style]
 - Use a clear and formal tone to ensure understanding.
 - Be friendly and approachable without being overly casual.
-- Adjust language and detail level to suit the context and user preferences where possible.
+- Customize the language to suit the context and user preferences when possible.
 
 [Response Guidelines]
-- Keep responses brief and clear.
+- Strive for brevity and clarity in all responses.
 - Limit technical jargon unless necessary for comprehension.
-- Use straightforward language and avoid ambiguity.
-- When listing steps or options, format them cleanly.
+- Use straightforward language and avoid ambiguous terms.
 
 [Task & Goals]
-1. Welcome the user and ask about their needs.
-2. Interpret the user’s instructions or questions accurately.
-3. Provide correct, actionable answers or solutions using available tools.
-4. Guide the user through complex processes step-by-step when needed.
-5. Ask for confirmation if intent or details are unclear. < wait for user response >
+1. Welcome the user to the system and inquire about their needs.
+2. Adaptively interpret the user's instructions or questions.
+3. Provide accurate answers and solutions based on available information or tools.
+4. Guide the user through complex processes step-by-step if needed.
+5. Ask for confirmation if you're unsure about user intent or details. < wait for user response >
 
 [Error Handling / Fallback]
-- If input is unclear, ask clarifying questions to gain understanding.
-- If there is a misunderstanding, apologize and offer alternative solutions or suggestions.
-- If the system encounters an error, notify the user calmly and offer to retry or provide additional assistance.`;
+- If user input is unclear, ask clarifying questions to gain better understanding.
+- In the event of a misunderstanding, apologize and provide alternative solutions or suggestions.
+- If the system experiences an error, notify the user calmly and offer to retry or provide additional assistance as needed.`;
 
 /* ─────────── defaults ─────────── */
 const DEFAULT_AGENT: AgentData = {
@@ -544,89 +543,61 @@ function DiffInline({ base, next }:{ base:string; next:string }){
   );
 }
 
-/* ─────────── Language + rewrite utilities (light, local stubs) ─────────── */
-function detectLangOfText(s: string): 'Dutch' | 'English' | 'Other' {
-  const lower = s.toLowerCase();
-  // extremely light Dutch heuristics
-  if (/\b(jij|je|jullie|bent|ben|een|dom|echt|alsjeblieft|hoi|hallo)\b/.test(lower)) return 'Dutch';
-  if (/[\u00C0-\u017F]/.test(s) && /\bde\b|\ben\b|\bhet\b/.test(lower)) return 'Dutch';
-  // crude English hint
-  if (/[a-z]/i.test(s) && /\bthe\b|\band\b|\bto\b|\byou\b/.test(lower)) return 'English';
-  return 'Other';
-}
+/* ─────────── Instruction routing + edits ─────────── */
+const STOPWORDS = new Set([
+  'assistant','ai','bot','ok','okay','yes','no','yup','nope','uh','um','thanks','thank you'
+]);
 
-// Small phrase-level Dutch -> English mapping; expand as needed
-function tinyDutchToEnglish(s: string): string {
-  return s
-    .replace(/\bjij\b/gi, 'you')
-    .replace(/\bje\b/gi, 'you')
-    .replace(/\bbent\b/gi, 'are')
-    .replace(/\been\b/gi, 'a')
-    .replace(/\becht\b/gi, 'really')
-    .replace(/\bdom\b/gi, 'dumb');
-}
+function normalizeLine(raw: string): string | null {
+  const l = raw.trim();
+  if (!l) return null;
+  // discard single short tokens and stopwords
+  const words = l.replace(/[^\w\s-]/g,'').split(/\s+/).filter(Boolean);
+  if (words.length === 0) return null;
+  if (words.length === 1 && (words[0].length < 4 || STOPWORDS.has(words[0].toLowerCase()))) return null;
 
-// Turn toxic/offensive input into a professional instruction
-function sanitizeToGuideline(text: string, targetLang: string) {
-  const t = text.toLowerCase();
-  const isInsult =
-    /\b(dom|stupid|dumb|idiot|suck|hate|trash|useless)\b/.test(t) ||
-    /\byou are really dumb\b/.test(t) ||
-    /\bjij.*dom\b/.test(t);
-
-  if (!isInsult) return null;
-
-  const enRule =
-    '- If a user expresses frustration or uses insults, respond calmly, remain professional, and redirect the conversation toward the user’s goal.';
-
-  // If you add more target languages later, branch here.
-  return targetLang.startsWith('English') ? enRule : enRule; // fallback same rule
-}
-
-function translateToTargetLanguage(text: string, targetLang: string): string {
-  // Local-only stub. When you wire your LLM later, replace this.
-  const srcLang = detectLangOfText(text);
-  if (targetLang.startsWith('English')) {
-    if (srcLang === 'Dutch') {
-      return tinyDutchToEnglish(text);
-    }
-    return text;
+  // special handling: Dutch insult → policy rule
+  const low = l.toLowerCase();
+  if ((/\bjij\b|\bje\b/.test(low)) && /\bdom\b/.test(low)) {
+    return 'If a user expresses frustration or uses insults (e.g., calling the assistant dumb), stay calm, be professional, and redirect toward solving their problem.';
   }
-  // For non-English targets you could pass-through for now
-  return text;
+
+  return l;
 }
 
-/* ─────────── Edit application (keeps canonical blocks) ─────────── */
-function routeBullets(instructions: string, targetLang: string) {
-  const lines = instructions.split('\n').map(s=>s.trim()).filter(Boolean);
+function routeBullets(instructions: string) {
+  const lines = instructions
+    .split('\n')
+    .map(s => normalizeLine(s))
+    .filter(Boolean) as string[];
+
   const toStyle: string[] = [];
   const toGuides: string[] = [];
   const toTasks: string[] = [];
   const toIdentity: string[] = [];
   const toFallback: string[] = [];
 
-  for (let raw of lines) {
-    let line = raw;
-
-    // translate per-line if needed
-    line = translateToTargetLanguage(line, targetLang).trim();
-
-    // turn toxic text into a polite rule
-    const safe = sanitizeToGuideline(line, targetLang);
-    if (safe) { toFallback.push(safe); continue; }
-
-    // normalize punctuation + bullet
+  for (const raw of lines) {
+    const line = raw.trim();
     const bullet = `- ${/[.!?]$/.test(line) ? line : line + '.'}`;
 
-    if (/tone|formal|friendly|concise|style|voice|approachable/i.test(line)) toStyle.push(bullet);
-    else if (/guideline|response|answer|jargon|clarity|concise|format|steps|list/i.test(line)) toGuides.push(bullet);
-    else if (/collect|ask|step|goal|task|flow|handoff|handover|escalate|confirm/i.test(line)) toTasks.push(bullet);
-    else if (/identity|role|act as|behave|persona/i.test(line)) toIdentity.push(bullet);
-    else if (/error|fallback|fail|misunderstanding|retry/i.test(line)) toFallback.push(bullet);
+    if (/identity|role|act as|persona|behave/i.test(line)) toIdentity.push(bullet);
+    else if (/tone|formal|friendly|concise|style|voice|approachable/i.test(line)) toStyle.push(bullet);
+    else if (/error|fallback|fail|misunderstanding|retry|insult|abuse|frustrat/i.test(line)) toFallback.push(bullet);
+    else if (/collect|ask|step|goal|task|flow|handoff|handover|escalate|confirm|welcome|guide|walkthrough/i.test(line)) toTasks.push(bullet);
+    else if (/guideline|response|answer|jargon|clarity|concise|format|steps|list|examples?/i.test(line)) toGuides.push(bullet);
     else toGuides.push(bullet);
   }
 
-  return { toStyle, toGuides, toTasks, toIdentity, toFallback };
+  // Deduplicate within each block
+  const dedupe = (arr:string[]) => Array.from(new Set(arr));
+  return {
+    toStyle: dedupe(toStyle),
+    toGuides: dedupe(toGuides),
+    toTasks: dedupe(toTasks),
+    toIdentity: dedupe(toIdentity),
+    toFallback: dedupe(toFallback),
+  };
 }
 
 function ensureBlocks(base: string) {
@@ -640,10 +611,11 @@ function ensureBlocks(base: string) {
   return PROMPT_SKELETON;
 }
 
-function applyEdits(base: string, instructions: string, targetLang: string) {
+function applyEdits(base: string, instructions: string) {
   const blocks = ['[Identity]','[Style]','[Response Guidelines]','[Task & Goals]','[Error Handling / Fallback]'];
   base = ensureBlocks(base);
 
+  // parse existing blocks
   const parts: Record<string,string[]> = {};
   let current = '';
   base.split('\n').forEach(line => {
@@ -652,13 +624,19 @@ function applyEdits(base: string, instructions: string, targetLang: string) {
     if (current) parts[current].push(line);
   });
 
-  const { toStyle, toGuides, toTasks, toIdentity, toFallback } = routeBullets(instructions, targetLang);
+  const { toStyle, toGuides, toTasks, toIdentity, toFallback } = routeBullets(instructions);
 
   if (toIdentity.length) parts['[Identity]'] = [...(parts['[Identity]']||[]), ...toIdentity];
   if (toStyle.length) parts['[Style]'] = [...(parts['[Style]']||[]), ...toStyle];
   if (toGuides.length) parts['[Response Guidelines]'] = [...(parts['[Response Guidelines]']||[]), ...toGuides];
   if (toTasks.length) parts['[Task & Goals]'] = [...(parts['[Task & Goals]']||[]), ...toTasks];
   if (toFallback.length) parts['[Error Handling / Fallback]'] = [...(parts['[Error Handling / Fallback]']||[]), ...toFallback];
+
+  // final cleanup: trim trailing blank lines and collapse multiples
+  for (const h of blocks) {
+    const arr = (parts[h]||[]).map(s => s.replace(/\s+$/,''));
+    parts[h] = arr.filter((v,i,a)=> i===0 || v!=='' || (i>0 && a[i-1] !== ''));
+  }
 
   const rebuilt =
     blocks.map(h => `${h}\n${(parts[h]||[]).join('\n')}`.trim()).join('\n\n');
@@ -698,7 +676,6 @@ export default function VoiceAgentSection() {
   // Generate overlay
   const [showGenerate, setShowGenerate] = useState(false);
   const [composerText, setComposerText] = useState('');
-  const [autoTranslate, setAutoTranslate] = useState(true);
   const [genPhase, setGenPhase] = useState<'idle'|'editing'|'loading'|'review'>('idle');
 
   // typing inside prompt box
@@ -802,7 +779,6 @@ export default function VoiceAgentSection() {
   }
 
   /* ── Generate overlay logic ── */
-  const detectLanguage = () => data.language || 'English';
 
   const runTypingIntoBox = (full:string) => {
     setTypingPreview('');
@@ -817,7 +793,6 @@ export default function VoiceAgentSection() {
 
   const onOpenGenerate = () => {
     setComposerText('');
-    setAutoTranslate(true);
     setProposedPrompt('');
     setTypingPreview('');
     setChangesSummary('');
@@ -830,11 +805,13 @@ export default function VoiceAgentSection() {
     if (!composerText.trim()) return;
     setGenPhase('loading');
 
-    const base = data.systemPrompt || DEFAULT_PROMPT || PROMPT_SKELETON;
+    const base = (data.systemPrompt && data.systemPrompt.trim().length > 0)
+      ? data.systemPrompt
+      : DEFAULT_PROMPT;
+
     basePromptRef.current = base;
 
-    const targetLang = detectLanguage();
-    const merged = applyEdits(base, composerText, targetLang);
+    const merged = applyEdits(base, composerText);
 
     // Close overlay now
     setShowGenerate(false);
@@ -848,7 +825,7 @@ export default function VoiceAgentSection() {
     const d = computeDiff(base, merged);
     const addedCount = d.filter(r=>r.t==='add').length;
     const removedCount = d.filter(r=>r.t==='rem').length;
-    setChangesSummary(`Applied edits (${targetLang}). +${addedCount} / -${removedCount} lines.`);
+    setChangesSummary(`Applied edits. +${addedCount} / -${removedCount} lines.`);
   };
 
   const onAccept = async () => {
@@ -880,7 +857,7 @@ export default function VoiceAgentSection() {
 
   /* ─────────── UI ─────────── */
   const inInlineReview = genPhase === 'review' && !showGenerate;
-  const typingDone = Boolean(proposedPrompt) && typingPreview.length >= (proposedPrompt?.length || 0);
+  const typingDone = Boolean(proposedPrompt) && typingPreview.length >= proposedPrompt.length;
 
   return (
     <section className="va-scope" style={{ background:'var(--bg)', color:'var(--text)' }}>
@@ -1004,7 +981,6 @@ export default function VoiceAgentSection() {
                 </div>
 
                 <div style={{ position:'relative' }}>
-                  {/* Editable textarea when NOT in review */}
                   {!inInlineReview ? (
                     <textarea
                       className="w-full bg-transparent outline-none rounded-[12px] px-3 py-[12px]"
@@ -1013,7 +989,6 @@ export default function VoiceAgentSection() {
                       onChange={(e)=> setField('systemPrompt')(e.target.value)}
                     />
                   ) : (
-                    // Review mode: auto-expanded, typing + inline diff
                     <div
                       className={`rounded-[12px] ${typingPreview.length < (proposedPrompt?.length||0) ? 'va-caret' : ''}`}
                       style={{
@@ -1024,18 +999,15 @@ export default function VoiceAgentSection() {
                         maxHeight:'unset'
                       }}
                     >
-                      {/* Typing stream (plain) while it types */}
                       {typingPreview && typingPreview.length < (proposedPrompt?.length||0) ? (
                         <pre style={{ whiteSpace:'pre-wrap', margin:0 }}>{typingPreview}</pre>
                       ) : (
-                        // Once finished, render colored diff inline
                         <DiffInline base={basePromptRef.current} next={proposedPrompt}/>
                       )}
                     </div>
                   )}
                 </div>
 
-                {/* Inline review action bar */}
                 {inInlineReview && (
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     {changesSummary ? (
@@ -1222,17 +1194,9 @@ export default function VoiceAgentSection() {
                     value={composerText}
                     onChange={(e)=>setComposerText(e.target.value)}
                     className="w-full bg-transparent outline-none rounded-[10px] px-3 py-2"
-                    placeholder="e.g., Friendlier tone, add handoff after 3 failed tries, confirm user email before proceeding."
+                    placeholder="e.g., Friendlier tone, add handoff after 3 failed tries, confirm user email first."
                     style={{ minHeight: 160, maxHeight: '40vh', background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
                   />
-                </div>
-
-                <div className="flex items-center justify-between px-3 py-2 rounded-[10px]"
-                     style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}>
-                  <div className="text-xs" style={{ color:'var(--text-muted)' }}>
-                    Agent language: <b style={{ color:'var(--text)' }}>{data.language || 'English'}</b> · Auto-translate to agent language
-                  </div>
-                  <Toggle checked={autoTranslate} onChange={setAutoTranslate}/>
                 </div>
               </div>
 
