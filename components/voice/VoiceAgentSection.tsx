@@ -1051,7 +1051,7 @@ export default function VoiceAgentSection() {
                 <StyledSelect value={data.asrModel} onChange={setField('asrModel')} options={asrModelsFor(data.asrProvider)}/>
               </div>
             </div>
-            <div className="mt-[var(--s-4)] grid sm:grid-cols-2 gap={[12]}>
+            <div className="mt-[var(--s-4)] grid sm:grid-cols-2 gap-[12px]">
               <div className="flex items-center justify-between p-3 rounded-[10px]" style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}>
                 <span className="text-sm">Background Denoising Enabled</span>
                 <Toggle checked={data.denoise} onChange={setField('denoise')} />
