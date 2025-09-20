@@ -1,3 +1,4 @@
+// components/voice/VoiceAgentSection.tsx
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
@@ -11,11 +12,16 @@ import { scopedStorage } from '@/utils/scoped-storage';
 
 // ⬇️ Prompt engine (v2)
 import {
-  applyInstructions,
   DEFAULT_PROMPT,
   looksLikeFullPrompt,
   normalizeFullPrompt,
 } from '@/lib/prompt-engine';
+
+// Integration helpers (assemble presets, apply user instructions)
+import {
+  buildPresetPrompt,
+  applyUserInstructions
+} from '@/lib/prompt-engine.integration';
 
 /* ───────────────── Assistant rail (fixed) ───────────────── */
 const AssistantRail = dynamic(
@@ -668,7 +674,7 @@ export default function VoiceAgentSection() {
     finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
   }
 
-  /* ── Generate overlay logic ── */
+  /* ── Generate overlay logic ───────── */
 
   const runTypingIntoBox = (full:string) => {
     setTypingPreview('');
@@ -690,7 +696,60 @@ export default function VoiceAgentSection() {
     setShowGenerate(true);
   };
 
-  // Replace if full prompt pasted, otherwise merge/config-build
+  // helper: parse config/key=value lines to preset params used by buildPresetPrompt
+  function parseConfigToPreset(raw: string) {
+    // Accept ; or newline separated key=value pairs and also allow "preset: <name>" or "industry=<x>"
+    const segments = raw.split(/[\n;]+/).map(s => s.trim()).filter(Boolean);
+    const out: any = {};
+    for (const seg of segments) {
+      // support "preset: dentist" style too
+      const mPreset = seg.match(/^preset\s*:\s*(.+)$/i);
+      if (mPreset) { out.industry = mPreset[1].trim().toLowerCase(); continue; }
+
+      const kv = seg.split('=');
+      if (kv.length >= 2) {
+        const k = kv[0].trim().toLowerCase();
+        const v = kv.slice(1).join('=').trim();
+        if (!v) continue;
+        if (k === 'services' || k === 'tasks' || k === 'channels') {
+          out.services = v.split(',').map(s => s.trim()).filter(Boolean);
+        } else if (k === 'industry' || k === 'brand' || k === 'tone' || k === 'inlocation' || k === 'location') {
+          // unify location key names
+          if (k === 'inlocation' || k === 'location') out.inLocation = v;
+          else out[k] = v;
+        } else if (k === 'booking') {
+          // booking=online|phone|url or booking_url=...
+          out.booking = out.booking || {};
+          if (v.startsWith('http')) out.booking.url = v;
+          else if (/phone/i.test(v)) out.booking.type = 'phone';
+          else out.booking.type = v;
+        } else if (k === 'booking_url' || k === 'booking_url') {
+          out.booking = out.booking || {};
+          out.booking.url = v;
+        } else {
+          out[k] = v;
+        }
+      } else {
+        // fallback: single token could be preset name
+        const token = seg.trim();
+        if (/^[a-z0-9\-_\s]+$/i.test(token) && !out.industry) out.industry = token;
+      }
+    }
+
+    // normalize to the buildPresetPrompt contract: industry, brand?, inLocation?, tone?, services[], booking|null
+    const presetParams: any = {
+      industry: (out.industry || '').toString(),
+      brand: out.brand || '',
+      inLocation: out.inLocation || out.location || '',
+      tone: out.tone || '',
+      services: Array.isArray(out.services) ? out.services : (out.services ? [out.services] : []),
+      booking: out.booking || null,
+      basePrompt: '',
+    };
+    return presetParams;
+  }
+
+  // Replace if full prompt pasted, otherwise support presets / configs / merging
   const onGenerate = () => {
     const raw = composerText.trim();
     if (!raw) return;
@@ -707,16 +766,34 @@ export default function VoiceAgentSection() {
       let merged = '';
       let summary = '';
 
+      // 1) If user pasted a full prompt — normalize and replace
       if (looksLikeFullPrompt(raw)) {
         merged = normalizeFullPrompt(raw);
         summary = 'Replaced prompt (manual paste).';
       } else {
-        // v2: applyInstructions detects "preset:" or key=value configs and builds full prompts.
-        const out = applyInstructions(base, raw);
-        merged = out.merged;
-        summary = out.summary || 'Updated.';
+        // 2) If it looks like a kv/config or preset (contains "preset:" or "industry=" or "tone="), build a preset prompt
+        const looksLikeKV = /(^preset\s*:)|(^\s*industry\s*=)|(^\s*tone\s*=)|(;)/i.test(raw);
+        if (looksLikeKV) {
+          const presetParams = parseConfigToPreset(raw);
+          // If no industry handle gracefully by merging instead
+          if (presetParams.industry) {
+            merged = buildPresetPrompt(presetParams);
+            summary = `Built prompt from preset/config: ${presetParams.industry || 'custom'}`;
+          } else {
+            // fallback to merging instructions
+            const out = applyUserInstructions(base, raw);
+            merged = out.merged;
+            summary = out.summary || 'Merged instructions.';
+          }
+        } else {
+          // 3) Free text instructions: use applyUserInstructions (merges + bucketizes)
+          const out = applyUserInstructions(base, raw);
+          merged = out.merged;
+          summary = out.summary || 'Updated.';
+        }
       }
 
+      // Close overlay, enter review, type it in
       setShowGenerate(false);
       setProposedPrompt(merged);
       setGenPhase('review');
@@ -807,6 +884,7 @@ export default function VoiceAgentSection() {
             </div>
           ) : null}
 
+          {/* Rest of UI unchanged */}
           <div className="grid gap-[12px] md:grid-cols-2 mb-[12px]">
             <div className="va-card">
               <div className="va-head" style={{ minHeight: 56 }}>
@@ -826,12 +904,14 @@ export default function VoiceAgentSection() {
             </div>
           </div>
 
+          {/* Sections (unchanged) */}
           <Section
             title="Model"
             icon={<Gauge className="w-4 h-4" style={{ color: CTA }} />}
             desc="Configure the model, assistant name, and first message."
             defaultOpen={true}
           >
+            {/* ...existing content unchanged (omitted here only for brevity in this snippet) */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px]">
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]">Assistant Name</div>
@@ -849,6 +929,7 @@ export default function VoiceAgentSection() {
               </div>
             </div>
 
+            {/* (keep remaining form controls and the prompt textarea as in your original file) */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt-[var(--s-4)]">
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]">Model</div>
@@ -939,6 +1020,7 @@ export default function VoiceAgentSection() {
             </div>
           </Section>
 
+          {/* Remaining sections (Voice, Transcriber) are unchanged — keep rest of your original code */}
           <Section
             title="Voice"
             icon={<Volume2 className="w-4 h-4" style={{ color: CTA }} />}
