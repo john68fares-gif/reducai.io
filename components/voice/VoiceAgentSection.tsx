@@ -139,10 +139,10 @@ type AgentData = {
   firstMode: string;
   firstMsg: string;
   systemPrompt: string;
-  language?: string; // NEW: agent language hint
+  language?: string;
 
   ttsProvider: 'openai' | 'elevenlabs';
-  voiceName: string; // store a user-facing name
+  voiceName: string;
   apiKeyId?: string;
 
   asrProvider: 'deepgram' | 'whisper' | 'assemblyai';
@@ -159,18 +159,27 @@ const DEFAULT_AGENT: AgentData = {
   firstMode: 'Assistant speaks first',
   firstMsg: 'Hello.',
   systemPrompt:
-`[Identity]
-You are a blank template AI assistant with minimal default settings.
+`[Identity]  
+You are an adaptable AI Assistant designed to support various tasks and scenarios.  
 
-[Style]
-- Neutral, concise, helpful.
+[Style]  
+- Maintain a neutral and adaptable tone, adjusting as necessary to fit different contexts.  
+- Avoid additional embellishments; keep interactions straightforward and clear.  
 
-[Guidelines]
-- Avoid unnecessary jargon.
-- Keep responses focused.
+[Response Guidelines]  
+- Ensure responses are concise and relevant to the task at hand.  
+- Maintain a balance between informative and concise, ensuring clarity for the user.  
 
-[Fallback]
-- Ask for clarification when needed.`,
+[Task & Goals]  
+1. Welcome the user and gauge the context or task they need assistance with.  
+2. Gather necessary details or instructions from the user to perform the task.  
+3. Execute any task-specific actions or queries as required.  
+4. Confirm successful completion of tasks with the user or provide an update on progress.  
+5. Follow through with any additional user inquiries or tasks to be addressed.  
+
+[Error Handling / Fallback]  
+- If the user's input is unclear, politely ask clarifying questions to better understand their request.  
+- If a task cannot be completed, inform the user of the issue and suggest alternative steps if possible.`,
   ttsProvider: 'openai',
   voiceName: 'Alloy (American)',
   apiKeyId: '',
@@ -421,56 +430,6 @@ function StyledSelect({
   );
 }
 
-/* ─────────── Section (expand anim) ─────────── */
-function Section({
-  title, icon, desc, children, defaultOpen = true
-}:{
-  title: string; icon: React.ReactNode; desc?: string; children: React.ReactNode; defaultOpen?: boolean;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  const innerRef = useRef<HTMLDivElement|null>(null);
-  const [h, setH] = useState<number>(0);
-  const measure = () => { if (innerRef.current) setH(innerRef.current.offsetHeight); };
-  useLayoutEffect(() => { measure(); }, [children, open]);
-
-  return (
-    <div className="mb-[12px]">
-      <div className="mb-[6px] text-sm font-medium" style={{ color:'var(--text-muted)' }}>{title}</div>
-
-      <div className="va-card">
-        <button onClick={()=>setOpen(v=>!v)} className="va-head w-full text-left" style={{ color:'var(--text)' }}>
-          <span className="min-w-0 flex items-center gap-3">
-            <span className="inline-grid place-items-center w-7 h-7 rounded-full" style={{ background:'rgba(89,217,179,.10)' }}>
-              {icon}
-            </span>
-            <span className="min-w-0">
-              <span className="block font-semibold truncate" style={{ fontSize:'var(--fz-title)' }}>{title}</span>
-              {desc ? <span className="block text-xs truncate" style={{ color:'var(--text-muted)' }}>{desc}</span> : null}
-            </span>
-          </span>
-          <span className="justify-self-end">
-            {open ? <ChevronUp className="w-4 h-4" style={{ color:'var(--text-muted)' }}/> :
-                    <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)' }}/>}
-          </span>
-        </button>
-
-        <div
-          style={{
-            height: open ? h : 0,
-            opacity: open ? 1 : 0,
-            transform: open ? 'translateY(0)' : 'translateY(-4px)',
-            transition: 'height 260ms var(--ease), opacity 230ms var(--ease), transform 260ms var(--ease)',
-            overflow:'hidden'
-          }}
-          onTransitionEnd={() => { if (open) measure(); }}
-        >
-          <div ref={innerRef} className="p-[var(--s-5)]">{children}</div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 /* ─────────── Diff helpers ─────────── */
 function diffLines(base:string, next:string){
   const a = base.split('\n');
@@ -481,7 +440,6 @@ function diffLines(base:string, next:string){
 
   const items: Array<{type:'same'|'add'|'remove', text:string}> = [];
 
-  // naive linear pass to keep order feel
   const max = Math.max(a.length, b.length);
   for (let i=0;i<max;i++){
     const la = a[i]; const lb = b[i];
@@ -489,37 +447,29 @@ function diffLines(base:string, next:string){
     if (lb !== undefined && !setA.has(lb)) items.push({ type:'add', text: lb });
     if (la !== undefined && !setB.has(la)) items.push({ type:'remove', text: la });
   }
-
-  // add any extra lines existing only in b beyond a's length
   for (let j=a.length;j<b.length;j++){
     const lb=b[j]; if (lb!==undefined && !setA.has(lb)) items.push({ type:'add', text: lb });
   }
   return items;
 }
 
-function DiffView({ base, next }:{ base:string; next:string }){
+function InlineDiff({ base, next }:{ base:string; next:string }){
   const rows = diffLines(base, next);
   return (
-    <div className="rounded-[10px] p-3 text-sm"
-         style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)', lineHeight:'1.55' }}>
+    <div style={{ whiteSpace:'pre-wrap', lineHeight:'1.55' }}>
       {rows.map((r, i) => {
-        if (r.type === 'same') return <div key={i} style={{ whiteSpace:'pre-wrap' }}>{r.text || ' '}</div>;
+        if (r.type === 'same') return <div key={i}>{r.text || ' '}</div>;
         if (r.type === 'add') return (
           <div key={i} style={{
-            whiteSpace:'pre-wrap',
             background:'var(--green-weak)',
             borderLeft:'3px solid ' + CTA,
             padding:'2px 6px',
             borderRadius:6,
             margin:'2px 0'
-          }}>
-            {r.text || ' '}
-          </div>
+          }}>{r.text || ' '}</div>
         );
-        // remove
         return (
           <div key={i} style={{
-            whiteSpace:'pre-wrap',
             background:'var(--red-weak)',
             borderLeft:'3px solid #ef4444',
             padding:'2px 6px',
@@ -527,9 +477,7 @@ function DiffView({ base, next }:{ base:string; next:string }){
             margin:'2px 0',
             textDecoration:'line-through',
             opacity:.9
-          }}>
-            {r.text || ' '}
-          </div>
+          }}>{r.text || ' '}</div>
         );
       })}
     </div>
@@ -568,10 +516,15 @@ export default function VoiceAgentSection() {
   const [showGenerate, setShowGenerate] = useState(false);
   const [composerText, setComposerText] = useState('');
   const [autoTranslate, setAutoTranslate] = useState(true);
-  const [genPhase, setGenPhase] = useState<'idle'|'loading'|'review'>('idle');
-  const [typingPreview, setTypingPreview] = useState(''); // typing animation
+  const [genPhase, setGenPhase] = useState<'idle'|'editing'|'loading'|'review'>('idle');
+
+  // expanded prompt box during review
+  const [reviewExpanded, setReviewExpanded] = useState(false);
+
+  // typing preview into the prompt box
   const basePromptRef = useRef<string>('');
   const [proposedPrompt, setProposedPrompt] = useState<string>('');
+  const [typingPreview, setTypingPreview] = useState(''); // “type into box”
   const [changesSummary, setChangesSummary] = useState<string>('');
 
   // voice preview quick
@@ -642,7 +595,6 @@ export default function VoiceAgentSection() {
     return (v: AgentData[K]) => {
       setData(prev => {
         const next = { ...prev, [k]: v };
-        // live-update rail name
         if (k === 'name' && activeId) {
           try {
             localStorage.setItem(keyFor(activeId), JSON.stringify(next));
@@ -673,55 +625,44 @@ export default function VoiceAgentSection() {
     finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
   }
 
-  /* ── Generate overlay logic with AI-language transform + typing ── */
-  const detectLanguage = (prompt:string):string => {
-    // very naive: use configured language else default
-    return data.language || 'English';
+  /* ── Prompt builder helpers (no duplicate [Behavior]) ── */
+  const sanitizeSections = (txt:string) => {
+    // drop duplicate [Behavior] block if present, keep first occurrence
+    // but our structure doesn't use [Behavior]; we ensure core sections exist
+    return txt
+      .replace(/\r/g,'')
+      .replace(/\n{3,}/g, '\n\n');
   };
 
+  const detectLanguage = (prompt:string):string => data.language || 'English';
+
   const buildAIFormatted = (userText:string, targetLang:string, base:string) => {
-    // format the user's intent into “prompt language” (light transform)
-    // You can replace with your API; this is deterministic for UI wiring:
-    const cleaned = userText
+    const cleanedList = userText
       .split('\n')
       .map(s => s.trim())
       .filter(Boolean)
       .map(s => /[.!?]$/.test(s) ? s : `${s}.`);
 
-    const header = `[Changes — ${targetLang}]`;
-    const mapped =
-`[Intent]
-${cleaned.map(l => `- ${l}`).join('\n')}
+    // ensure base has the canonical sections only once
+    const baseSan = sanitizeSections(base);
 
-[Apply To Sections]
-- Identity / Style / Rules & Guidelines / Question Flow / FAQ as relevant.
+    const adjustments =
+`[Adjustments]
+${cleanedList.map(l => `- ${l}`).join('\n')}`;
 
-[Constraints]
-- Be precise, concise, and consistent with existing policy.
-- Do not contradict safety or fallback rules.`;
+    // merged keeps original sections and appends Adjustments
+    const merged = `${baseSan}\n\n${adjustments}`;
 
-    // merge proposal into base for preview
-    const merged =
-`${base}
-
-[Extra Instructions]
-${cleaned.map(l => `- ${l}`).join('\n')}
-
-[Behavior]
-- Always respect the Extra Instructions above.
-- Keep replies concise and useful.
-- Ask for missing info before acting.`;
-
-    const summary = `Added ${cleaned.length} instruction${cleaned.length===1?'':'s'}; tightened behavior; preserved safety.`;
-    return { header, mapped, merged, summary };
+    const summary = `Added ${cleanedList.length} adjustment${cleanedList.length===1?'':'s'}; preserved section order; removed duplicate headers.`;
+    return { merged, summary };
   };
 
-  // typing animation for proposed prompt
+  // typing animation for proposed prompt (rendered inside the prompt box)
   const runTyping = (full:string) => {
     setTypingPreview('');
     let i = 0;
     const step = () => {
-      i += Math.max(1, Math.floor(full.length / 120)); // ~120 frames
+      i += Math.max(1, Math.floor(full.length / 120));
       setTypingPreview(full.slice(0, Math.min(i, full.length)));
       if (i < full.length) requestAnimationFrame(step);
     };
@@ -736,21 +677,23 @@ ${cleaned.map(l => `- ${l}`).join('\n')}
     setChangesSummary('');
     setGenPhase('editing');
     setShowGenerate(true);
+    setReviewExpanded(false);
   };
 
   const onGenerate = async () => {
     setGenPhase('loading');
     basePromptRef.current = data.systemPrompt;
     const lang = detectLanguage(basePromptRef.current);
-    // simulate API
+
     setTimeout(() => {
       const t = autoTranslate ? lang : 'Original';
       const { merged, summary } = buildAIFormatted(composerText || 'No changes provided', t, basePromptRef.current);
       setProposedPrompt(merged);
-      runTyping(merged);
       setChangesSummary(summary);
       setGenPhase('review');
-    }, 420);
+      setReviewExpanded(true);
+      runTyping(merged);
+    }, 320);
   };
 
   const onAccept = async () => {
@@ -758,7 +701,7 @@ ${cleaned.map(l => `- ${l}`).join('\n')}
     const snapshot = {
       prompt: proposedPrompt,
       model: data.model,
-      temp: 0, // if you want, add temp later
+      temp: 0,
       name: data.name,
       summary: changesSummary
     };
@@ -769,15 +712,17 @@ ${cleaned.map(l => `- ${l}`).join('\n')}
     setTypingPreview('');
     setChangesSummary('');
     setGenPhase('idle');
+    setReviewExpanded(false);
     setToast('Prompt updated');
   };
 
   const onDecline = () => {
-    setShowGenerate(true); // keep overlay open to tweak text again
+    // keep modal open for edits; collapse prompt box back
     setProposedPrompt('');
     setTypingPreview('');
     setChangesSummary('');
     setGenPhase('editing');
+    setReviewExpanded(false);
   };
 
   /* ─────────── UI ─────────── */
@@ -894,7 +839,7 @@ ${cleaned.map(l => `- ${l}`).join('\n')}
                   <div className="flex items-center gap-2">
                     <button
                       className="inline-flex items-center gap-2 rounded-[10px] text-sm"
-                      style={{ height:36, padding:'0 12px', background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+                      style={{ height:36, padding:'0 12px', background:CTA, color:'#fff' }}  // WHITE TEXT
                       onClick={onOpenGenerate}
                     >
                       <Wand2 className="w-4 h-4" /> Generate
@@ -902,14 +847,51 @@ ${cleaned.map(l => `- ${l}`).join('\n')}
                   </div>
                 </div>
 
-                <div style={{ position:'relative' }}>
+                {/* Prompt box with inline typing/diff overlay */}
+                <div style={{ position:'relative', transition:'min-height 260ms var(--ease)' }}>
                   <textarea
                     className="w-full bg-transparent outline-none rounded-[12px] px-3 py-[12px]"
-                    style={{ minHeight: 360, background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+                    style={{
+                      minHeight: reviewExpanded ? '72vh' : 360,
+                      background:'var(--input-bg)',
+                      border:'1px solid var(--input-border)',
+                      color:'var(--text)',
+                      transition:'min-height 260ms var(--ease)'
+                    }}
                     value={data.systemPrompt}
                     onChange={(e)=> setField('systemPrompt')(e.target.value)}
+                    readOnly={genPhase==='loading' || genPhase==='review'}
                   />
+
+                  {/* Overlay content only during loading/review */}
+                  {(genPhase==='loading' || genPhase==='review') && (
+                    <div
+                      className={`absolute inset-0 rounded-[12px] px-3 py-[12px] overflow-auto ${genPhase==='review' && typingPreview.length<proposedPrompt.length ? 'va-caret' : ''}`}
+                      style={{
+                        pointerEvents:'none',
+                        color:'var(--text)',
+                        background:'transparent'
+                      }}
+                    >
+                      {/* During loading: show typed preview text */}
+                      {genPhase==='loading' && (
+                        <pre style={{ whiteSpace:'pre-wrap', margin:0 }}>{typingPreview || ' '}</pre>
+                      )}
+
+                      {/* During review: show inline diff inside the box */}
+                      {genPhase==='review' && proposedPrompt && (
+                        <InlineDiff base={basePromptRef.current} next={proposedPrompt} />
+                      )}
+                    </div>
+                  )}
                 </div>
+
+                {/* Optional tiny summary below box during review */}
+                {(genPhase==='review' && !!changesSummary) && (
+                  <div className="mt-2 text-xs" style={{ color:'var(--text-muted)' }}>
+                    Summary: <span style={{ color:'var(--text)' }}>{changesSummary}</span>
+                  </div>
+                )}
               </div>
             </div>
           </Section>
@@ -1015,7 +997,7 @@ ${cleaned.map(l => `- ${l}`).join('\n')}
         </div>
       </div>
 
-      {/* ─────────── Generate overlay (Create modal style) ─────────── */}
+      {/* ─────────── Generate overlay (solid) ─────────── */}
       {showGenerate && (
         <>
           <div
@@ -1081,29 +1063,15 @@ ${cleaned.map(l => `- ${l}`).join('\n')}
                   <Toggle checked={autoTranslate} onChange={setAutoTranslate}/>
                 </div>
 
-                {/* Preview + Diff */}
-                {genPhase!=='editing' && (
-                  <div className="space-y-3">
-                    <div className="text-xs font-semibold" style={{ color:'var(--text-muted)' }}>Draft (AI-formatted)</div>
-                    <div
-                      className={`rounded-[10px] p-3 text-sm ${genPhase==='review' && typingPreview.length<proposedPrompt.length ? 'va-caret' : ''}`}
-                      style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)', minHeight: 120 }}
-                    >
-                      <pre style={{ whiteSpace:'pre-wrap', margin:0 }}>{typingPreview || ' '}</pre>
-                    </div>
-
-                    {proposedPrompt && (
-                      <>
-                        <div className="text-xs font-semibold" style={{ color:'var(--text-muted)' }}>Review changes</div>
-                        <DiffView base={basePromptRef.current} next={proposedPrompt}/>
-                      </>
-                    )}
-
-                    {!!changesSummary && (
-                      <div className="text-xs" style={{ color:'var(--text-muted)' }}>
-                        Summary: <span style={{ color:'var(--text)' }}>{changesSummary}</span>
-                      </div>
-                    )}
+                {/* NOTE: Preview now lives inside the prompt box. We keep the modal clean. */}
+                {genPhase==='loading' && (
+                  <div className="flex items-center gap-2 text-sm" style={{ color:'var(--text-muted)' }}>
+                    <Loader2 className="w-4 h-4 animate-spin" /> Generating preview in the prompt…
+                  </div>
+                )}
+                {genPhase==='review' && (
+                  <div className="text-xs" style={{ color:'var(--text-muted)' }}>
+                    Review the highlighted changes directly in the System Prompt box.
                   </div>
                 )}
               </div>
@@ -1122,7 +1090,7 @@ ${cleaned.map(l => `- ${l}`).join('\n')}
                     <button
                       onClick={onAccept}
                       className="w-full h-[44px] rounded-[10px] font-semibold"
-                      style={{ background:CTA, color:'#0a0f0d' }}
+                      style={{ background:CTA, color:'#ffffff' }}
                     >
                       Accept Changes
                     </button>
@@ -1141,7 +1109,7 @@ ${cleaned.map(l => `- ${l}`).join('\n')}
                       onClick={onGenerate}
                       disabled={genPhase==='loading' || !composerText.trim()}
                       className="w-full h-[44px] rounded-[10px] font-semibold inline-flex items-center justify-center gap-2"
-                      style={{ background:CTA, color:'#0a0f0d', opacity: (!composerText.trim() ? .6 : 1) }}
+                      style={{ background:CTA, color:'#ffffff', opacity: (!composerText.trim() ? .6 : 1) }}
                     >
                       {genPhase==='loading' ? (<><Loader2 className="w-4 h-4 animate-spin" /> Generating…</>) : 'Generate'}
                     </button>
@@ -1214,5 +1182,55 @@ ${cleaned.map(l => `- ${l}`).join('\n')}
         document.body
       )}
     </section>
+  );
+}
+
+/* ─────────── Section (expand anim) ─────────── */
+function Section({
+  title, icon, desc, children, defaultOpen = true
+}:{
+  title: string; icon: React.ReactNode; desc?: string; children: React.ReactNode; defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const innerRef = useRef<HTMLDivElement|null>(null);
+  const [h, setH] = useState<number>(0);
+  const measure = () => { if (innerRef.current) setH(innerRef.current.offsetHeight); };
+  useLayoutEffect(() => { measure(); }, [children, open]);
+
+  return (
+    <div className="mb-[12px]">
+      <div className="mb-[6px] text-sm font-medium" style={{ color:'var(--text-muted)' }}>{title}</div>
+
+      <div className="va-card">
+        <button onClick={()=>setOpen(v=>!v)} className="va-head w-full text-left" style={{ color:'var(--text)' }}>
+          <span className="min-w-0 flex items-center gap-3">
+            <span className="inline-grid place-items-center w-7 h-7 rounded-full" style={{ background:'rgba(89,217,179,.10)' }}>
+              {icon}
+            </span>
+            <span className="min-w-0">
+              <span className="block font-semibold truncate" style={{ fontSize:'var(--fz-title)' }}>{title}</span>
+              {desc ? <span className="block text-xs truncate" style={{ color:'var(--text-muted)' }}>{desc}</span> : null}
+            </span>
+          </span>
+          <span className="justify-self-end">
+            {open ? <ChevronUp className="w-4 h-4" style={{ color:'var(--text-muted)' }}/> :
+                    <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)' }}/>}
+          </span>
+        </button>
+
+        <div
+          style={{
+            height: open ? h : 0,
+            opacity: open ? 1 : 0,
+            transform: open ? 'translateY(0)' : 'translateY(-4px)',
+            transition: 'height 260ms var(--ease), opacity 230ms var(--ease), transform 260ms var(--ease)',
+            overflow:'hidden'
+          }}
+          onTransitionEnd={() => { if (open) measure(); }}
+        >
+          <div ref={innerRef} className="p-[var(--s-5)]">{children}</div>
+        </div>
+      </div>
+    </div>
   );
 }
