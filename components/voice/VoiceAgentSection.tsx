@@ -43,7 +43,7 @@ const GREEN_GLOW = '0 10px 26px rgba(89,217,179,.28)';
 const ACTIVE_KEY = 'va:activeId';
 const Z_OVERLAY = 100000;
 const Z_MODAL   = 100001;
-const Z_MENU    = 100020; // bumped for safety
+const Z_MENU    = 100020;       // above panels
 const IS_CLIENT = typeof window !== 'undefined' && typeof document !== 'undefined';
 
 /* phone icon */
@@ -96,12 +96,24 @@ const Tokens = () => (
       --red-weak: rgba(239,68,68,.14);
       --red-strong: rgba(239,68,68,.26);
 
-      /* StepV2-style surfaces for menus */
+      /* also used by dropdown triggers (with fallbacks in code) */
+      --vs-input-bg:#101314;
+      --vs-input-border:rgba(255,255,255,.14);
+      --vs-input-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 12px 30px rgba(0,0,0,.38);
+
+      --vs-menu-bg:#101314;
+      --vs-menu-border:rgba(255,255,255,.16);
+    }
+
+    /* NEW: variables for content rendered in a portal (outside .va-scope) */
+    .va-portal{
       --vs-menu-bg:#101314;
       --vs-menu-border:rgba(255,255,255,.16);
       --vs-input-bg:#101314;
       --vs-input-border:rgba(255,255,255,.14);
       --vs-input-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 12px 30px rgba(0,0,0,.38);
+      --text:#e6f1ef;
+      --text-muted:#9fb4ad;
     }
 
     .va-card{
@@ -124,23 +136,7 @@ const Tokens = () => (
       color:var(--text);
     }
 
-    .va-menu{
-      position:absolute;
-      top:calc(100% + 8px);
-      left:0;
-      width:100%;
-      z-index:${Z_MENU};
-      background:var(--panel-bg);
-      border:1px solid ${GREEN_LINE};
-      box-shadow:0 36px 90px rgba(0,0,0,.55);
-      border-radius:10px;
-      overflow:hidden;
-    }
-
-    @keyframes va-blink {
-      0%, 49% { opacity: 1; }
-      50%, 100% { opacity: 0; }
-    }
+    @keyframes va-blink { 0%, 49% {opacity:1;} 50%, 100% {opacity:0;} }
     .va-caret::after{
       content:'';
       display:inline-block;
@@ -435,7 +431,7 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
-/* ─────────── Styled Select (StepV2 look & fixed portal clicks) ─────────── */
+/* ─────────── Styled select with portal (StepV2 look) ─────────── */
 function StyledSelect({
   value, onChange, options, placeholder, leftIcon, menuTop,
   onPreview, isPreviewing
@@ -447,14 +443,11 @@ function StyledSelect({
 }) {
   const wrapRef = useRef<HTMLDivElement|null>(null);
   const btnRef = useRef<HTMLButtonElement|null>(null);
+  const menuRef = useRef<HTMLDivElement|null>(null);       // NEW: track portal to allow clicks
   const searchRef = useRef<HTMLInputElement|null>(null);
-
-  // NEW: portal menu ref so outside-click handler ignores inside clicks
-  const menuRef = useRef<HTMLDivElement|null>(null);
-
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const [menuPos, setMenuPos] = useState<{left:number; width:number; top:number} | null>(null);
+  const [menuPos, setMenuPos] = useState<{left:number; top:number; width:number} | null>(null);
 
   const current = options.find(o => o.value === value) || null;
   const filtered = useMemo(() => {
@@ -462,25 +455,27 @@ function StyledSelect({
     return q ? options.filter(o => o.label.toLowerCase().includes(q)) : options;
   }, [options, query, value]);
 
+  // position menu
   useLayoutEffect(() => {
     if (!open || !btnRef.current) return;
     const r = btnRef.current.getBoundingClientRect();
-    setMenuPos({ left: r.left, width: r.width, top: r.bottom + 8 });
+    setMenuPos({ left: r.left, top: r.bottom + 8, width: r.width });
   }, [open]);
 
+  // close on outside click — but keep it open when clicking inside portal menu
   useEffect(() => {
     if (!open || !IS_CLIENT) return;
     const off = (e: MouseEvent) => {
       const t = e.target as Node;
       if (wrapRef.current?.contains(t)) return;
-      if (menuRef.current?.contains(t)) return; // ✅ keep open on inside clicks
+      if (menuRef.current?.contains(t)) return;  // key fix
       setOpen(false);
     };
     const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
     const onResize = () => {
       if (!btnRef.current) return;
       const r = btnRef.current.getBoundingClientRect();
-      setMenuPos({ left: r.left, width: r.width, top: r.bottom + 8 });
+      setMenuPos({ left: r.left, top: r.bottom + 8, width: r.width });
     };
     window.addEventListener('mousedown', off);
     window.addEventListener('keydown', onEsc);
@@ -498,11 +493,11 @@ function StyledSelect({
         ref={btnRef}
         type="button"
         onClick={() => { setOpen(v=>!v); setTimeout(()=>searchRef.current?.focus(),0); }}
-        className="w-full flex items-center justify-between gap-3 px-4 py-3.5 rounded-[14px] text-sm outline-none transition"
+        className="w-full flex items-center justify-between gap-3 px-3 py-3 rounded-[14px] text-sm outline-none transition"
         style={{
-          background:'var(--vs-input-bg)',
-          border:'1px solid var(--vs-input-border)',
-          boxShadow:'var(--vs-input-shadow)',
+          background:'var(--vs-input-bg, #101314)',
+          border:'1px solid var(--vs-input-border, rgba(255,255,255,.14))',
+          boxShadow:'var(--vs-input-shadow, none)',
           color:'var(--text)'
         }}
       >
@@ -510,28 +505,29 @@ function StyledSelect({
           {leftIcon}
           <span className="truncate">{current ? current.label : (placeholder || '— Choose —')}</span>
         </span>
-        <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)', transform: open ? 'rotate(180deg)' : 'rotate(0)', transition:'transform .18s var(--ease)' }} />
+        <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)' }} />
       </button>
 
       {open && IS_CLIENT ? createPortal(
         <div
           ref={menuRef}
-          className="fixed z-[100020] p-3"
+          className="fixed z-[100020] p-3 va-portal"
           style={{
+            position:'fixed',
             left: (menuPos?.left ?? 0),
             top: (menuPos?.top ?? 0),
-            width: (menuPos?.width ?? 280),
-            background:'var(--vs-menu-bg)',
-            border:'1px solid var(--vs-menu-border)',
+            width: (menuPos?.width ?? (btnRef.current?.getBoundingClientRect().width ?? 280)),
+            background:'var(--vs-menu-bg, #101314)',
+            border:'1px solid var(--vs-menu-border, rgba(255,255,255,.16))',
             borderRadius:20,
-            boxShadow:'0 28px 70px rgba(0,0,0,.12), 0 10px 26px rgba(0,0,0,.08), 0 0 0 1px rgba(0,0,0,.02)'
+            boxShadow:'0 28px 70px rgba(0,0,0,.60), 0 10px 26px rgba(0,0,0,.45), 0 0 0 1px rgba(0,255,194,.10)'
           }}
         >
           {menuTop ? <div className="mb-2">{menuTop}</div> : null}
 
           <div
             className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[12px]"
-            style={{ background:'var(--vs-input-bg)', border:'1px solid var(--vs-input-border)', boxShadow:'var(--vs-input-shadow)', color:'var(--text)' }}
+            style={{ background:'var(--vs-input-bg, #101314)', border:'1px solid var(--vs-input-border, rgba(255,255,255,.14))', boxShadow:'var(--vs-input-shadow, none)', color:'var(--text)' }}
           >
             <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
             <input
@@ -548,7 +544,7 @@ function StyledSelect({
             {filtered.map(o => (
               <button
                 key={o.value}
-                disabled={o.disabled}
+                disabled={!!o.disabled}
                 onClick={()=>{ if (o.disabled) return; onChange(o.value); setOpen(false); }}
                 className="w-full text-left text-sm px-3 py-2 rounded-[10px] transition grid grid-cols-[18px_1fr_auto] items-center gap-2 disabled:opacity-60"
                 style={{
@@ -571,7 +567,7 @@ function StyledSelect({
                     type="button"
                     onClick={async (e)=>{ e.stopPropagation(); await onPreview(o.value); }}
                     className="w-7 h-7 rounded-full grid place-items-center"
-                    style={{ border:'1px solid var(--vs-input-border)', background:'var(--vs-input-bg)' }}
+                    style={{ border:'1px solid var(--vs-input-border, rgba(255,255,255,.14))', background:'var(--vs-input-bg, #101314)' }}
                     aria-label={isPreviewing === o.value ? 'Stop preview' : 'Play preview'}
                     title={isPreviewing === o.value ? 'Stop' : 'Play'}
                   >
@@ -658,7 +654,7 @@ function computeDiff(base:string, next:string){
   for (let j=a.length;j>b.length;j++){
     const la=a[j]; if (la!==undefined && !setB.has(la)) rows.push({ t:'rem', text: la });
   }
-  for (let j=a.length;j>b.length;j++){
+  for (let j=a.length;j<b.length;j++){
     const lb=b[j]; if (lb!==undefined && !setA.has(lb)) rows.push({ t:'add', text: lb });
   }
   return rows;
@@ -717,11 +713,8 @@ export default function VoiceAgentSection() {
 
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
-
-  // toast + kind
   const [toast, setToast] = useState<string>('');
-  const [toastKind, setToastKind] = useState<'ok'|'error'>('ok');
-
+  const [toastKind, setToastKind] = useState<'info'|'error'>('info');  // NEW: colorize toast
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
 
   const [showCall, setShowCall] = useState(false);
@@ -736,7 +729,13 @@ export default function VoiceAgentSection() {
   const [proposedPrompt, setProposedPrompt] = useState('');
   const [changesSummary, setChangesSummary] = useState('');
 
-  // voice preview + TTS (browser)
+  // chat state used for inline chat view (optional)
+  const [msgs, setMsgs] = useState<ChatMsg[]>(() => [
+    { id: 'sys', role: 'system', text: (DEFAULT_AGENT.systemPrompt || '').trim() },
+    { id: 'hello', role: 'assistant', text: 'Hi! Ready when you are.' }
+  ]);
+
+  // voice preview + TTS (browser speech synthesis for quick previews)
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   useEffect(() => {
     if (!IS_CLIENT || !('speechSynthesis' in window)) return;
@@ -819,39 +818,26 @@ export default function VoiceAgentSection() {
   const modelOpts = useMemo(()=>modelOptsFor(data.provider), [data.provider]);
 
   async function doSave(){
-    if (!activeId) { setToastKind('error'); setToast('Select or create an agent'); setTimeout(()=>setToast(''), 1400); return; }
+    if (!activeId) { setToastKind('error'); setToast('Select or create an agent'); return; }
     setSaving(true); setToast('');
-    try { await apiSave(activeId, data); setToastKind('ok'); setToast('Saved'); }
+    try { await apiSave(activeId, data); setToastKind('info'); setToast('Saved'); }
     catch { setToastKind('error'); setToast('Save failed'); }
     finally { setSaving(false); setTimeout(()=>setToast(''), 1400); }
   }
   async function doPublish(){
-    if (!activeId) { setToastKind('error'); setToast('Select or create an agent'); setTimeout(()=>setToast(''), 1400); return; }
+    if (!activeId) { setToastKind('error'); setToast('Select or create an agent'); return; }
     setPublishing(true); setToast('');
-    try { await apiPublish(activeId); setToastKind('ok'); setToast('Published'); }
+    try { await apiPublish(activeId); setToastKind('info'); setToast('Published'); }
     catch { setToastKind('error'); setToast('Publish failed'); }
     finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
   }
 
   /* ─────────── REALTIME CALL LAUNCH ─────────── */
   const openCall = () => {
-    if (data.provider !== 'openai') {
-      setToastKind('error');
-      setToast('Voice calls require OpenAI provider.');
-      setTimeout(()=>setToast(''), 2200);
-      return;
-    }
     const key = apiKeys.find(k => k.id === data.apiKeyId)?.key || '';
     if (!key) {
       setToastKind('error');
       setToast('Select an OpenAI API key first.');
-      setTimeout(()=>setToast(''), 2200);
-      return;
-    }
-    // basic sanity check to fail fast before hitting /api/voice/ephemeral
-    if (!/^sk-[A-Za-z0-9]{20,}$/.test(key)) {
-      setToastKind('error');
-      setToast('The selected OpenAI API key looks invalid.');
       setTimeout(()=>setToast(''), 2200);
       return;
     }
@@ -906,13 +892,15 @@ export default function VoiceAgentSection() {
           {toast ? (
             <div
               className="mb-[var(--s-4)] inline-flex items-center gap-2 px-3 py-1.5 rounded-[10px]"
-              style={
-                toastKind === 'error'
-                  ? { background:'rgba(239,68,68,.14)', color:'#ffd7d7', boxShadow:'0 0 0 1px rgba(239,68,68,.35) inset' }
-                  : { background:'rgba(89,217,179,.10)', color:'var(--text)', boxShadow:'0 0 0 1px rgba(89,217,179,.16) inset' }
-              }
+              style={{
+                background: toastKind === 'error' ? 'rgba(239,68,68,.12)' : 'rgba(89,217,179,.10)',
+                color: 'var(--text)',
+                boxShadow: toastKind === 'error'
+                  ? '0 0 0 1px rgba(239,68,68,.25) inset'
+                  : '0 0 0 1px rgba(89,217,179,.16) inset'
+              }}
             >
-              {toastKind === 'error' ? null : <Check className="w-4 h-4" />} {toast}
+              <Check className="w-4 h-4" /> {toast}
             </div>
           ) : null}
 
@@ -964,7 +952,7 @@ export default function VoiceAgentSection() {
                 <StyledSelect value={data.model} onChange={setField('model')} options={modelOpts}/>
               </div>
               <div>
-                <div className="mb-[var(--s-2)] text:[12.5px] text-[12.5px]">First Message Mode</div>
+                <div className="mb-[var(--s-2)] text-[12.5px]">First Message Mode</div>
                 <StyledSelect value={data.firstMode} onChange={setField('firstMode')} options={[
                   { value: 'Assistant speaks first', label: 'Assistant speaks first' },
                   { value: 'User speaks first', label: 'User speaks first' },
@@ -1057,7 +1045,7 @@ export default function VoiceAgentSection() {
                   placeholder="— Choose —"
                   menuTop={
                     <div className="flex items-center justify-between px-3 py-2 rounded-[10px]"
-                         style={{ background:'var(--vs-input-bg)', border:'1px solid var(--vs-input-border)', boxShadow:'var(--vs-input-shadow)' }}
+                         style={{ background:'var(--vs-input-bg, #101314)', border:'1px solid var(--vs-input-border, rgba(255,255,255,.14))' }}
                     >
                       <div className="text-xs" style={{ color:'var(--text-muted)' }}>Preview</div>
                       <div className="flex items-center gap-2">
@@ -1117,7 +1105,7 @@ export default function VoiceAgentSection() {
         </div>
       </div>
 
-      {/* ─────────── Generate overlay ─────────── */}
+      {/* ─────────── Generate overlay (instructions / presets / configs) ─────────── */}
       {showGenerate && IS_CLIENT ? createPortal(
         <>
           <div
@@ -1247,6 +1235,7 @@ export default function VoiceAgentSection() {
           />
           {showCall && (
             <WebCallButton
+              // force a realtime-capable model for the call
               model={'gpt-4o-realtime-preview'}
               systemPrompt={data.systemPrompt}
               voiceName={data.voiceName}
