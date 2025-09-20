@@ -6,7 +6,7 @@ import dynamic from 'next/dynamic';
 import { createPortal } from 'react-dom';
 import {
   Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Rocket, Search, Check, Lock,
-  KeyRound, Play, Square, Pause, X
+  KeyRound, Play, Square, Pause, X, Phone, PhoneOff, Send
 } from 'lucide-react';
 import { scopedStorage } from '@/utils/scoped-storage';
 
@@ -77,8 +77,8 @@ const Tokens = () => (
       --fz-title:18px; --fz-sub:15px; --fz-body:14px; --fz-label:12.5px;
       --lh-body:1.45; --ease:cubic-bezier(.22,.61,.36,1);
 
-      --app-sidebar-w: 240px;
-      --rail-w: 260px;
+      --app-sidebar-w:240px;
+      --rail-w:260px;
 
       --page-bg:var(--bg);
       --panel-bg:var(--panel);
@@ -120,8 +120,7 @@ const Tokens = () => (
     .va-menu{
       position:absolute;
       top:calc(100% + 8px);
-      left:0;
-      width:100%;
+      left:0; width:100%;
       z-index:${Z_MENU};
       background:var(--panel-bg);
       border:1px solid ${GREEN_LINE};
@@ -130,17 +129,11 @@ const Tokens = () => (
       overflow:hidden;
     }
 
-    @keyframes va-blink {
-      0%, 49% { opacity: 1; }
-      50%, 100% { opacity: 0; }
-    }
+    @keyframes va-blink { 0%,49%{opacity:1} 50%,100%{opacity:0} }
     .va-caret::after{
-      content:'';
-      display:inline-block;
-      width:8px; height:18px; margin-left:2px;
+      content:''; display:inline-block; width:8px; height:18px; margin-left:2px;
       background: currentColor; opacity:.9; border-radius:1px;
-      animation: va-blink 1s step-end infinite;
-      transform: translateY(3px);
+      animation: va-blink 1s step-end infinite; transform: translateY(3px);
     }
   `}</style>
 );
@@ -168,7 +161,7 @@ type AgentData = {
   numerals: boolean;
 };
 
-/* ─────────── UX: blank template for new assistants ─────────── */
+/* ─────────── UX: blank template ─────────── */
 const BLANK_TEMPLATE_NOTE =
   'This is a blank template with minimal defaults. You can change the model and messages, or click Generate to tailor the prompt to your business.';
 
@@ -183,118 +176,59 @@ const PROMPT_SKELETON =
 
 [Error Handling / Fallback]`;
 
-/* ─────────── local safe shims (used if prompt-engine fns are missing) ─────────── */
+/* ─────────── local shims if prompt-engine is missing ─────────── */
 const looksLikeFullPromptSafe = (raw: string) => {
   const t = (raw || '').toLowerCase();
   return ['[identity]', '[style]', '[response guidelines]', '[task & goals]', '[error handling', '[notes]'].some(h => t.includes(h));
 };
 
 const normalizeFullPromptSafe = (raw: string) => {
-  // Ensure all 5 core sections exist, keep order
-  const sections = {
-    identity: '',
-    style: '',
-    guidelines: '',
-    tasks: '',
-    errors: '',
-    notes: ''
-  };
-  const add = (k: keyof typeof sections, v: string) => { sections[k] = safeTrim(v); };
   const capture = (label: string) => {
     const rx = new RegExp(`\$begin:math:display$${label}\\$end:math:display$\\s*([\\s\\S]*?)(?=\\n\\s*\\[|$)`, 'i');
     const m = raw.match(rx);
-    return m ? m[1] : '';
+    return m ? m[1].trim() : '';
   };
-  add('identity', capture('Identity'));
-  add('style', capture('Style'));
-  add('guidelines', capture('Response Guidelines'));
-  add('tasks', capture('Task & Goals'));
-  add('errors', capture('Error Handling / Fallback'));
-  add('notes', capture('Notes'));
+  const id   = capture('Identity')   || '- You are a helpful, professional AI assistant for this business.';
+  const st   = capture('Style')      || '- Clear, concise, friendly.';
+  const rg   = capture('Response Guidelines') || '- Ask one clarifying question when essential info is missing.';
+  const tg   = capture('Task & Goals') || '- Guide users to their next best action (booking, purchase, or escalation).';
+  const err  = capture('Error Handling / Fallback') || '- If unsure, ask a specific clarifying question first.';
+  const notes= capture('Notes');
 
-  const out =
-`[Identity]
-${sections.identity || '- You are a helpful, professional AI assistant for this business.'}
-
-[Style]
-${sections.style || '- Clear, concise, friendly.'}
-
-[Response Guidelines]
-${sections.guidelines || '- Ask one clarifying question when essential info is missing.'}
-
-[Task & Goals]
-${sections.tasks || '- Guide users to their next best action (booking, purchase, or escalation).'}
-
-[Error Handling / Fallback]
-${sections.errors || '- If unsure, ask a specific clarifying question first.'}
-
-${sections.notes ? `[Notes]\n${sections.notes}\n` : ''}`;
-
-  return out.trim();
+  return (`[Identity]\n${id}\n\n[Style]\n${st}\n\n[Response Guidelines]\n${rg}\n\n[Task & Goals]\n${tg}\n\n[Error Handling / Fallback]\n${err}${notes?`\n\n[Notes]\n${notes}`:''}`).trim();
 };
 
-// Very small industry-aware builder that maps a natural sentence into the 5 sections.
 const applyInstructionsSafe = (base: string, raw: string) => {
   const text = (raw || '').trim();
-
-  // heuristics
-  const industryMatch = text.match(/assistant\s+for\s+(a|an|the)?\s*([^.;:,]+?)(\s+clinic|\s+store|\s+company|\s+business)?(\.|;|,|$)/i);
-  const industry = industryMatch ? industryMatch[2].trim() : '';
-
+  const industryMatch = text.match(/assistant\s+for\s+(?:a|an|the)?\s*([^.;:,]+?)(?:\s+(?:clinic|store|company|business))?(\.|;|,|$)/i);
+  const industry = industryMatch ? industryMatch[1].trim() : '';
   const toneMatch = text.match(/tone\s*[:=]\s*([a-z,\s-]+)/i) || text.match(/\b(friendly|formal|casual|professional|empathetic|playful)\b/i);
-  const tone = toneMatch ? toneMatch[1]?.trim?.() || toneMatch[0] : '';
-
-  const tasksMatch = text.match(/tasks?\s*[:=]\s*([a-z0-9_,\-\s]+)/i);
-  const tasksRaw = tasksMatch ? tasksMatch[1] : '';
-  const tasks = tasksRaw
-    ? tasksRaw.split(/[,\s]+/).filter(Boolean)
-    : (text.includes('booking') || text.includes('schedule')) ? ['lead_qualification','booking','faq'] : [];
-
-  const channels = /voice|call|phone/i.test(text) && /chat|website|web/i.test(text) ? 'voice & chat'
-                  : /voice|call|phone/i.test(text) ? 'voice'
-                  : /chat|website|web/i.test(text) ? 'chat'
-                  : '';
-
-  const identity =
-`- You are a versatile AI assistant${industry ? ` for a ${industry}` : ''}. Represent the brand professionally and help users achieve their goals.`;
-
-  const style =
-`- ${tone ? `${tone[0].toUpperCase()}${tone.slice(1)}` : 'Clear, concise, friendly'}. Prefer 2–4 short sentences per turn.
-- Confirm understanding with a brief paraphrase when the request is complex.`;
-
-  const guidelines =
-`- Ask a clarifying question when essential info is missing.
-- Do not fabricate; say when you don’t know or need to check.
-- Summarize next steps when the user has a multi-step task.`;
-
-  const goals =
-`- Qualify the user’s need, answer relevant FAQs, and guide to scheduling, purchase, or escalation.${channels ? ` (${channels})` : ''}
-- Offer to collect structured info (name, contact, preferred time) when booking or follow-up is needed.${tasks.length ? ` Focus on: ${tasks.join(', ')}.` : ''}`;
-
-  const errors =
-`- If uncertain, ask a specific clarifying question.
-- If a tool/endpoint fails, apologize briefly and offer an alternative or human handoff.`;
+  const tone = toneMatch ? (toneMatch[1]?.trim?.() || toneMatch[0]) : '';
 
   const merged =
 `[Identity]
-${identity}
+- You are a versatile AI assistant${industry ? ` for a ${industry}` : ''}. Represent the brand professionally and help users achieve their goals.
 
 [Style]
-${style}
+- ${tone ? `${tone[0].toUpperCase()}${tone.slice(1)}` : 'Clear, concise, friendly'}. Prefer 2–4 short sentences per turn.
+- Confirm understanding with a brief paraphrase when the request is complex.
 
 [Response Guidelines]
-${guidelines}
+- Ask a clarifying question when essential info is missing.
+- Do not fabricate; say when you don’t know or need to check.
+- Summarize next steps when the user has a multi-step task.
 
 [Task & Goals]
-${goals}
+- Qualify the user’s need, answer relevant FAQs, and guide to scheduling, purchase, or escalation.
+- Offer to collect structured info (name, contact, preferred time) when booking or follow-up is needed.
 
 [Error Handling / Fallback]
-${errors}`;
+- If uncertain, ask a specific clarifying question.
+- If a tool/endpoint fails, apologize briefly and offer an alternative or human handoff.`;
 
-  return { merged, summary: `Applied ${industry ? `industry=${industry}; ` : ''}${tone ? `tone=${tone}; ` : ''}${tasks.length ? `tasks=${tasks.join(',')}; ` : ''}`.trim() || 'Updated.' };
+  return { merged, summary: `Applied ${industry?`industry=${industry}; `:''}${tone?`tone=${tone}; `:''}`.trim() || 'Updated.' };
 };
 
-/* ─────────── choose real engine or shims at runtime ─────────── */
 const looksLikeFullPromptRT = (raw: string) =>
   isFn(_looksLikeFullPrompt) ? !!_looksLikeFullPrompt(raw) : looksLikeFullPromptSafe(raw);
 
@@ -310,7 +244,7 @@ const DEFAULT_PROMPT_RT = nonEmpty(_DEFAULT_PROMPT) ? _DEFAULT_PROMPT! : PROMPT_
 const DEFAULT_AGENT: AgentData = {
   name: 'Assistant',
   provider: 'openai',
-  model: 'GPT-4o',
+  model: 'gpt-4o-mini', // better price/latency for chat
   firstMode: 'Assistant speaks first',
   firstMsg: 'Hello.',
   systemPrompt: normalizeFullPromptRT(`
@@ -360,7 +294,7 @@ const pushVersion = (id:string, snapshot:any) => {
   } catch {}
 };
 
-/* ─────────── mock backend ─────────── */
+/* ─────────── mock backend (save/publish) ─────────── */
 async function apiSave(agentId: string, payload: AgentData){
   const r = await fetch(`/api/voice/agent/${agentId}/save`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
@@ -386,9 +320,10 @@ const providerOpts: Opt[] = [
 const modelOptsFor = (provider: string): Opt[] =>
   provider === 'openai'
     ? [
-        { value: 'GPT-4o',  label: 'GPT-4o' },
-        { value: 'GPT-4.1', label: 'GPT-4.1' },
-        { value: 'o4-mini', label: 'o4-mini' },
+        { value: 'gpt-4o-mini', label: 'gpt-4o-mini' },
+        { value: 'gpt-4o',      label: 'gpt-4o' },
+        { value: 'gpt-4.1',     label: 'gpt-4.1' },
+        { value: 'o4-mini',     label: 'o4-mini' },
       ]
     : [{ value: 'coming', label: 'Models coming soon', disabled: true }];
 
@@ -458,10 +393,7 @@ function StyledSelect({
 
   useEffect(() => {
     if (!open || !IS_CLIENT) return;
-    const off = (e: MouseEvent) => {
-      if (wrapRef.current?.contains(e.target as Node)) return;
-      setOpen(false);
-    };
+    const off = (e: MouseEvent) => { if (wrapRef.current?.contains(e.target as Node)) return; setOpen(false); };
     const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
     const onResize = () => {
       if (!btnRef.current) return;
@@ -644,12 +576,8 @@ function computeDiff(base:string, next:string){
     if (lb !== undefined && !setA.has(lb)) rows.push({ t:'add', text: lb });
     if (la !== undefined && !setB.has(la)) rows.push({ t:'rem', text: la });
   }
-  for (let j=a.length;j>b.length;j++){
-    const la=a[j]; if (la!==undefined && !setB.has(la)) rows.push({ t:'rem', text: la });
-  }
-  for (let j=a.length;j<b.length;j++){
-    const lb=b[j]; if (lb!==undefined && !setA.has(lb)) rows.push({ t:'add', text: lb });
-  }
+  for (let j=a.length;j>b.length;j++){ const la=a[j]; if (la!==undefined && !setB.has(la)) rows.push({ t:'rem', text: la }); }
+  for (let j=a.length;j<b.length;j++){ const lb=b[j]; if (lb!==undefined && !setA.has(lb)) rows.push({ t:'add', text: lb }); }
   return rows;
 }
 
@@ -720,7 +648,7 @@ export default function VoiceAgentSection() {
   const [proposedPrompt, setProposedPrompt] = useState('');
   const [changesSummary, setChangesSummary] = useState('');
 
-  // voice preview
+  // voice preview (TTS)
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   useEffect(() => {
     if (!IS_CLIENT || !('speechSynthesis' in window)) return;
@@ -735,9 +663,9 @@ export default function VoiceAgentSection() {
     const byName = voices.find(v => v.name.toLowerCase().includes((data.voiceName || '').split(' ')[0]?.toLowerCase() || ''));
     const en = voices.find(v => v.lang?.startsWith('en'));
     if (byName) u.voice = byName; else if (en) u.voice = en;
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(u);
+    window.speechSynthesis.cancel(); window.speechSynthesis.speak(u);
   }
+  const speak = (text:string) => speakPreview(text);
   const stopPreview = () => { if (IS_CLIENT && 'speechSynthesis' in window) window.speechSynthesis.cancel(); };
 
   /* listen for active rail id */
@@ -818,12 +746,11 @@ export default function VoiceAgentSection() {
   }
 
   /* ── Generate overlay logic ── */
-
   const runTypingIntoBox = (full:string) => {
     setTypingPreview('');
     let i = 0;
     const step = () => {
-      i += Math.max(1, Math.floor((full.length || 0) / 120)); // ~120 frames
+      i += Math.max(1, Math.floor((full.length || 0) / 120));
       setTypingPreview(full.slice(0, Math.min(i, full.length)));
       if (i < full.length && IS_CLIENT) requestAnimationFrame(step);
     };
@@ -839,7 +766,6 @@ export default function VoiceAgentSection() {
     setShowGenerate(true);
   };
 
-  // Replace if full prompt pasted, otherwise auto-detect and merge
   const onGenerate = () => {
     const raw = safeTrim(composerText);
     if (!raw) return;
@@ -863,7 +789,6 @@ export default function VoiceAgentSection() {
         summary = nonEmpty(out.summary) ? out.summary : 'Updated.';
       }
 
-      // Drop the blank template note after first generation
       merged = merged.replace(/^\s*#\s*This is a blank template[\s\S]*?$/im, '').trim() + '\n';
 
       setShowGenerate(false);
@@ -883,26 +808,117 @@ export default function VoiceAgentSection() {
     if (!activeId) return;
     const nextPrompt = nonEmpty(proposedPrompt) ? proposedPrompt : data.systemPrompt;
     const snapshot = {
-      prompt: nextPrompt,
-      model: data.model,
-      temp: 0,
-      name: data.name,
-      summary: changesSummary
+      prompt: nextPrompt, model: data.model, temp: 0, name: data.name, summary: changesSummary
     };
     pushVersion(activeId, snapshot);
     setData(p => ({ ...p, systemPrompt: nextPrompt }));
-    setProposedPrompt('');
-    setTypingPreview('');
-    setChangesSummary('');
-    setGenPhase('idle');
+    setProposedPrompt(''); setTypingPreview(''); setChangesSummary(''); setGenPhase('idle');
     setToast('Prompt updated');
   };
 
   const onDecline = () => {
-    setProposedPrompt('');
-    setTypingPreview('');
-    setChangesSummary('');
-    setGenPhase('idle');
+    setProposedPrompt(''); setTypingPreview(''); setChangesSummary(''); setGenPhase('idle');
+  };
+
+  /* ─────────── “Talk to Assistant” drawer (chat + mic + TTS) ─────────── */
+  type Turn = { role:'user'|'assistant', text:string };
+  const [chat, setChat] = useState<Turn[]>([{ role:'assistant', text:'Hi! Ready when you are.' }]);
+  const [input, setInput] = useState('');
+  const [sending, setSending] = useState(false);
+  const [callActive, setCallActive] = useState(false);
+  const [recognizing, setRecognizing] = useState(false);
+  const recRef = useRef<any>(null);
+
+  const pushChat = (role:'user'|'assistant', text:string) =>
+    setChat(c => [...c, { role, text }]);
+
+  const sendToModel = async (userText: string) => {
+    const payload = {
+      model: data.model,
+      systemPrompt: data.systemPrompt,
+      user: userText,
+      apiKeyId: data.apiKeyId || ''
+    };
+    const res = await fetch('/api/voice/chat', {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) throw new Error('chat failed');
+    const json = await res.json();
+    return String(json.text || '');
+  };
+
+  const onSubmitChat = async () => {
+    const userText = input.trim();
+    if (!userText || sending) return;
+    setSending(true);
+    setInput('');
+    pushChat('user', userText);
+    try {
+      const reply = await sendToModel(userText);
+      pushChat('assistant', reply || '(no reply)');
+      speak(reply);
+    } catch {
+      pushChat('assistant', 'Sorry — I had trouble responding.');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  // Mic: Web Speech API (browser STT). Fallback: disabled if unavailable.
+  const canSTT = IS_CLIENT && ('webkitSpeechRecognition' in (window as any) || 'SpeechRecognition' in (window as any));
+  const toggleMic = () => {
+    if (!canSTT) return;
+    if (recognizing) {
+      try { recRef.current?.stop?.(); } catch {}
+      setRecognizing(false);
+      return;
+    }
+    const SR: any = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
+    const rec = new SR();
+    rec.lang = (data.language || 'en-US');
+    rec.continuous = false;
+    rec.interimResults = true;
+    let finalText = '';
+    rec.onresult = (e: any) => {
+      let interim = '';
+      for (let i= e.resultIndex; i < e.results.length; i++){
+        const t = e.results[i][0].transcript;
+        if (e.results[i].isFinal) finalText += t;
+        else interim += t;
+      }
+      setInput(finalText || interim);
+    };
+    rec.onerror = () => { setRecognizing(false); };
+    rec.onend = async () => {
+      setRecognizing(false);
+      if ((finalText || '').trim()) {
+        const say = finalText.trim();
+        setInput('');
+        pushChat('user', say);
+        setSending(true);
+        try {
+          const reply = await sendToModel(say);
+          pushChat('assistant', reply || '(no reply)');
+          speak(reply);
+        } catch {
+          pushChat('assistant', 'Sorry — I had trouble responding.');
+        } finally {
+          setSending(false);
+        }
+      }
+    };
+    recRef.current = rec;
+    setRecognizing(true);
+    rec.start();
+  };
+
+  const startCall = () => { setShowCall(true); setCallActive(true); };
+  const endCall = () => {
+    setCallActive(false);
+    if (recognizing) { try { recRef.current?.stop?.(); } catch {} setRecognizing(false); }
+    stopPreview();
   };
 
   /* ─────────── UI ─────────── */
@@ -919,7 +935,7 @@ export default function VoiceAgentSection() {
           <RailBoundary><AssistantRail /></RailBoundary>
         </div>
 
-        <div className="px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w-[1160px]" style={{ fontSize:'var(--fz-body)', lineHeight:'var(--lh-body)' }}>
+        <div className="px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w=[1160px]" style={{ fontSize:'var(--fz-body)', lineHeight:'var(--lh-body)' }}>
           <div className="mb-[var(--s-4)] flex flex-wrap items-center justify-end gap-[var(--s-3)]">
             <button
               onClick={doSave}
@@ -939,16 +955,28 @@ export default function VoiceAgentSection() {
               <Rocket className="w-4 h-4" /> {publishing ? 'Publishing…' : 'Publish'}
             </button>
 
-            <button
-              onClick={()=>{ setShowCall(true); }}
-              className="inline-flex items-center gap-2 rounded-[10px] select-none"
-              style={{ height:'var(--control-h)', padding:'0 18px', background:CTA, color:'#ffffff', fontWeight:700, boxShadow:'0 10px 22px rgba(89,217,179,.20)' }}
-              onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA_HOVER)}
-              onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA)}
-            >
-              <PhoneFilled style={{ color:'#ffffff' }} />
-              <span style={{ color:'#ffffff' }}>Talk to Assistant</span>
-            </button>
+            {!callActive ? (
+              <button
+                onClick={startCall}
+                className="inline-flex items-center gap-2 rounded-[10px] select-none"
+                style={{ height:'var(--control-h)', padding:'0 18px', background:CTA, color:'#ffffff', fontWeight:700, boxShadow:'0 10px 22px rgba(89,217,179,.20)' }}
+                onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA_HOVER)}
+                onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA)}
+              >
+                <PhoneFilled style={{ color:'#ffffff' }} />
+                <span style={{ color:'#ffffff' }}>Talk to Assistant</span>
+              </button>
+            ) : (
+              <button
+                onClick={endCall}
+                className="inline-flex items-center gap-2 rounded-[10px] select-none"
+                style={{ height:'var(--control-h)', padding:'0 18px', background:'#ef4444', color:'#ffffff', fontWeight:700 }}
+                title="Hang up"
+              >
+                <PhoneOff className="w-4 h-4" />
+                End Call
+              </button>
+            )}
           </div>
 
           {toast ? (
@@ -958,6 +986,7 @@ export default function VoiceAgentSection() {
             </div>
           ) : null}
 
+          {/* small stat cards */}
           <div className="grid gap-[12px] md:grid-cols-2 mb-[12px]">
             <div className="va-card">
               <div className="va-head" style={{ minHeight: 56 }}>
@@ -977,6 +1006,7 @@ export default function VoiceAgentSection() {
             </div>
           </div>
 
+          {/* ========== Model / Voice / Transcriber sections (unchanged UI) ========== */}
           <Section
             title="Model"
             icon={<Gauge className="w-4 h-4" style={{ color: CTA }} />}
@@ -1031,7 +1061,7 @@ export default function VoiceAgentSection() {
                 </div>
 
                 <div style={{ position:'relative' }}>
-                  {!inInlineReview ? (
+                  {!(genPhase === 'review' && !showGenerate) ? (
                     <textarea
                       className="w-full bg-transparent outline-none rounded-[12px] px-3 py-[12px]"
                       style={{ minHeight: 360, background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
@@ -1058,7 +1088,7 @@ export default function VoiceAgentSection() {
                   )}
                 </div>
 
-                {inInlineReview && (
+                {(genPhase === 'review' && !showGenerate) && (
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     {changesSummary ? (
                       <span className="text-xs px-2 py-1 rounded-[8px]"
@@ -1077,9 +1107,9 @@ export default function VoiceAgentSection() {
                       </button>
                       <button
                         onClick={onAccept}
-                        disabled={!typingDone}
+                        disabled={!(nonEmpty(proposedPrompt) && (typingPreview.length >= (proposedPrompt?.length || 0)))}
                         className="h-[38px] px-4 rounded-[10px] font-semibold"
-                        style={{ background: typingDone ? CTA : 'rgba(89,217,179,.35)', color:'#0a0f0d' }}
+                        style={{ background: (nonEmpty(proposedPrompt) && (typingPreview.length >= (proposedPrompt?.length || 0))) ? CTA : 'rgba(89,217,179,.35)', color:'#0a0f0d' }}
                       >
                         Accept Changes
                       </button>
@@ -1191,7 +1221,7 @@ export default function VoiceAgentSection() {
         </div>
       </div>
 
-      {/* ─────────── Generate overlay (instructions / presets / configs) ─────────── */}
+      {/* ─────────── Generate overlay ─────────── */}
       {showGenerate && IS_CLIENT ? createPortal(
         <>
           <div
@@ -1239,7 +1269,7 @@ export default function VoiceAgentSection() {
               {/* Body */}
               <div className="px-6 py-5 space-y-3">
                 <div className="text-xs" style={{ color:'var(--text-muted)' }}>
-                  Tip: just type something like “assistant for a dental clinic; tone friendly; handle booking and FAQs”.  
+                  Tip: just type something like “assistant for a dental clinic; tone friendly; handle booking and FAQs”.
                   You don’t need headers — the generator auto-detects and routes it.
                 </div>
                 <div
@@ -1280,7 +1310,7 @@ export default function VoiceAgentSection() {
         document.body
       ) : null}
 
-      {/* Call drawer (solid) */}
+      {/* ─────────── Call drawer (chat + mic + TTS) ─────────── */}
       {IS_CLIENT ? createPortal(
         <>
           <div
@@ -1309,30 +1339,70 @@ export default function VoiceAgentSection() {
           >
             <div className="flex items-center justify-between px-4 h-[64px]"
                  style={{ background:'var(--panel-bg)', borderBottom:'1px solid rgba(255,255,255,.1)' }}>
-              <div className="font-semibold">Chat with {data.name || 'Assistant'}</div>
-              <button onClick={()=>setShowCall(false)} className="px-2 py-1 rounded border"
-                      style={{ color:'var(--text)', borderColor:'var(--input-border)', background:'var(--panel-bg)' }}>
-                Close
-              </button>
-            </div>
-
-            {/* Simple mock chat */}
-            <div className="p-4 overflow-y-auto flex flex-col gap-3">
-              <div className="text-[11px]" style={{ color:'var(--text-muted)' }}>{data.name || 'Assistant'}</div>
-              <div className="chat-ai" style={{ color:'var(--text)', padding:'10px 12px', borderRadius:12 }}>
-                Hi! Ready when you are.
+              <div className="font-semibold flex items-center gap-2">
+                {callActive ? <Phone className="w-4 h-4 text-green-400" /> : <PhoneOff className="w-4 h-4 text-red-400" />}
+                Chat with {data.name || 'Assistant'}
+              </div>
+              <div className="flex items-center gap-2">
+                {canSTT && (
+                  <button
+                    onClick={toggleMic}
+                    className="px-2 py-1 rounded border text-sm"
+                    style={{ color: recognizing ? '#0a0f0d' : 'var(--text)', background: recognizing ? CTA : 'var(--panel-bg)', borderColor:'var(--input-border)' }}
+                  >
+                    {recognizing ? 'Listening…' : 'Mic'}
+                  </button>
+                )}
+                <button onClick={()=>setShowCall(false)} className="px-2 py-1 rounded border text-sm"
+                        style={{ color:'var(--text)', borderColor:'var(--input-border)', background:'var(--panel-bg)' }}>
+                  Close
+                </button>
               </div>
             </div>
 
+            {/* Transcript */}
+            <div className="p-4 overflow-y-auto flex flex-col gap-3">
+              {chat.map((m, i) => (
+                <div key={i} className={`max-w-[92%] ${m.role==='user' ? 'self-end' : 'self-start'}`}>
+                  <div className="text-[11px] mb-1" style={{ color:'var(--text-muted)' }}>
+                    {m.role==='user' ? 'You' : (data.name || 'Assistant')}
+                  </div>
+                  <div
+                    style={{
+                      background: m.role==='user' ? 'rgba(255,255,255,.06)' : 'rgba(89,217,179,.12)',
+                      border: `1px solid ${m.role==='user' ? 'rgba(255,255,255,.12)' : 'rgba(89,217,179,.22)'}`,
+                      color: 'var(--text)', padding:'10px 12px', borderRadius:12, whiteSpace:'pre-wrap'
+                    }}
+                  >
+                    {m.text}
+                  </div>
+                </div>
+              ))}
+              {sending && (
+                <div className="text-xs opacity-70" style={{ color:'var(--text-muted)' }}>Assistant is typing…</div>
+              )}
+            </div>
+
+            {/* Composer */}
             <div className="p-3" style={{ borderTop:'1px solid rgba(255,255,255,.10)' }}>
-              <form onSubmit={(e)=>{ e.preventDefault(); }} className="flex items-center gap-2">
+              <form
+                onSubmit={(e)=>{ e.preventDefault(); onSubmitChat(); }}
+                className="flex items-center gap-2"
+              >
                 <input
+                  value={input}
+                  onChange={(e)=>setInput(e.target.value)}
                   placeholder={`Message ${data.name || 'Assistant'}…`}
                   className="flex-1 rounded-md px-3 py-2 outline-none"
                   style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
                 />
-                <button type="submit" className="h-10 px-4 rounded-md font-semibold" style={{ background:CTA, color:'#fff' }}>
-                  Send
+                <button
+                  type="submit"
+                  disabled={!input.trim() || sending}
+                  className="h-10 px-4 rounded-md font-semibold inline-flex items-center gap-2"
+                  style={{ background: (!input.trim() || sending) ? 'rgba(89,217,179,.35)' : CTA, color:'#0a0f0d' }}
+                >
+                  <Send className="w-4 h-4" /> Send
                 </button>
               </form>
             </div>
