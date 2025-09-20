@@ -6,11 +6,11 @@ import dynamic from 'next/dynamic';
 import { createPortal } from 'react-dom';
 import {
   Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Rocket, Search, Check, Lock,
-  KeyRound, Play, Square, Pause, X, Phone, PhoneOff, Send
+  KeyRound, Play, Square, Pause, X
 } from 'lucide-react';
 import { scopedStorage } from '@/utils/scoped-storage';
 
-// Try to import prompt-engine, but we'll guard every call.
+// Try to import prompt-engine, but guard every call.
 import {
   applyInstructions as _applyInstructions,
   DEFAULT_PROMPT as _DEFAULT_PROMPT,
@@ -77,8 +77,8 @@ const Tokens = () => (
       --fz-title:18px; --fz-sub:15px; --fz-body:14px; --fz-label:12.5px;
       --lh-body:1.45; --ease:cubic-bezier(.22,.61,.36,1);
 
-      --app-sidebar-w:240px;
-      --rail-w:260px;
+      --app-sidebar-w: 240px;
+      --rail-w: 260px;
 
       --page-bg:var(--bg);
       --panel-bg:var(--panel);
@@ -120,7 +120,8 @@ const Tokens = () => (
     .va-menu{
       position:absolute;
       top:calc(100% + 8px);
-      left:0; width:100%;
+      left:0;
+      width:100%;
       z-index:${Z_MENU};
       background:var(--panel-bg);
       border:1px solid ${GREEN_LINE};
@@ -129,11 +130,17 @@ const Tokens = () => (
       overflow:hidden;
     }
 
-    @keyframes va-blink { 0%,49%{opacity:1} 50%,100%{opacity:0} }
+    @keyframes va-blink {
+      0%, 49% { opacity: 1; }
+      50%, 100% { opacity: 0; }
+    }
     .va-caret::after{
-      content:''; display:inline-block; width:8px; height:18px; margin-left:2px;
+      content:'';
+      display:inline-block;
+      width:8px; height:18px; margin-left:2px;
       background: currentColor; opacity:.9; border-radius:1px;
-      animation: va-blink 1s step-end infinite; transform: translateY(3px);
+      animation: va-blink 1s step-end infinite;
+      transform: translateY(3px);
     }
   `}</style>
 );
@@ -161,7 +168,7 @@ type AgentData = {
   numerals: boolean;
 };
 
-/* ─────────── UX: blank template ─────────── */
+/* ─────────── UX: blank template for new assistants ─────────── */
 const BLANK_TEMPLATE_NOTE =
   'This is a blank template with minimal defaults. You can change the model and messages, or click Generate to tailor the prompt to your business.';
 
@@ -176,59 +183,116 @@ const PROMPT_SKELETON =
 
 [Error Handling / Fallback]`;
 
-/* ─────────── local shims if prompt-engine is missing ─────────── */
+/* ─────────── local safe shims (used if prompt-engine fns are missing) ─────────── */
 const looksLikeFullPromptSafe = (raw: string) => {
   const t = (raw || '').toLowerCase();
   return ['[identity]', '[style]', '[response guidelines]', '[task & goals]', '[error handling', '[notes]'].some(h => t.includes(h));
 };
 
 const normalizeFullPromptSafe = (raw: string) => {
-  const capture = (label: string) => {
-    const rx = new RegExp(`\$begin:math:display$${label}\\$end:math:display$\\s*([\\s\\S]*?)(?=\\n\\s*\\[|$)`, 'i');
-    const m = raw.match(rx);
-    return m ? m[1].trim() : '';
+  const sections = {
+    identity: '',
+    style: '',
+    guidelines: '',
+    tasks: '',
+    errors: '',
+    notes: ''
   };
-  const id   = capture('Identity')   || '- You are a helpful, professional AI assistant for this business.';
-  const st   = capture('Style')      || '- Clear, concise, friendly.';
-  const rg   = capture('Response Guidelines') || '- Ask one clarifying question when essential info is missing.';
-  const tg   = capture('Task & Goals') || '- Guide users to their next best action (booking, purchase, or escalation).';
-  const err  = capture('Error Handling / Fallback') || '- If unsure, ask a specific clarifying question first.';
-  const notes= capture('Notes');
+  const add = (k: keyof typeof sections, v: string) => { sections[k] = safeTrim(v); };
+  const pull = (label: string) => {
+    const rx = new RegExp(`\$begin:math:display$${label.replace(/[.*+?^${}()|[$end:math:display$\\]/g,'\\$&')}\\]\\s*([\\s\\S]*?)(?=\\n\\s*\\[|$)`, 'i');
+    const m = raw.match(rx);
+    return m ? m[1] : '';
+  };
+  add('identity', pull('Identity'));
+  add('style', pull('Style'));
+  add('guidelines', pull('Response Guidelines'));
+  add('tasks', pull('Task & Goals'));
+  add('errors', pull('Error Handling / Fallback'));
+  add('notes', pull('Notes'));
 
-  return (`[Identity]\n${id}\n\n[Style]\n${st}\n\n[Response Guidelines]\n${rg}\n\n[Task & Goals]\n${tg}\n\n[Error Handling / Fallback]\n${err}${notes?`\n\n[Notes]\n${notes}`:''}`).trim();
+  const out =
+`[Identity]
+${sections.identity || '- You are a helpful, professional AI assistant for this business.'}
+
+[Style]
+${sections.style || '- Clear, concise, friendly.'}
+
+[Response Guidelines]
+${sections.guidelines || '- Ask one clarifying question when essential info is missing.'}
+
+[Task & Goals]
+${sections.tasks || '- Guide users to their next best action (booking, purchase, or escalation).'}
+
+[Error Handling / Fallback]
+${sections.errors || '- If unsure, ask a specific clarifying question first.'}
+
+${sections.notes ? `[Notes]\n${sections.notes}\n` : ''}`;
+
+  return out.trim();
 };
 
+// map a natural string into the 5 sections
 const applyInstructionsSafe = (base: string, raw: string) => {
   const text = (raw || '').trim();
-  const industryMatch = text.match(/assistant\s+for\s+(?:a|an|the)?\s*([^.;:,]+?)(?:\s+(?:clinic|store|company|business))?(\.|;|,|$)/i);
-  const industry = industryMatch ? industryMatch[1].trim() : '';
+
+  const industryMatch = text.match(/assistant\s+for\s+(a|an|the)?\s*([^.;:,]+?)(\s+clinic|\s+store|\s+company|\s+business)?(\.|;|,|$)/i);
+  const industry = industryMatch ? industryMatch[2].trim() : '';
+
   const toneMatch = text.match(/tone\s*[:=]\s*([a-z,\s-]+)/i) || text.match(/\b(friendly|formal|casual|professional|empathetic|playful)\b/i);
-  const tone = toneMatch ? (toneMatch[1]?.trim?.() || toneMatch[0]) : '';
+  const tone = toneMatch ? (toneMatch as any)[1]?.trim?.() || (toneMatch as any)[0] : '';
+
+  const tasksMatch = text.match(/tasks?\s*[:=]\s*([a-z0-9_,\-\s]+)/i);
+  const tasksRaw = tasksMatch ? (tasksMatch as any)[1] : '';
+  const tasks = tasksRaw
+    ? tasksRaw.split(/[,\s]+/).filter(Boolean)
+    : (text.includes('booking') || text.includes('schedule')) ? ['lead_qualification','booking','faq'] : [];
+
+  const channels = /voice|call|phone/i.test(text) && /chat|website|web/i.test(text) ? 'voice & chat'
+                  : /voice|call|phone/i.test(text) ? 'voice'
+                  : /chat|website|web/i.test(text) ? 'chat'
+                  : '';
+
+  const identity =
+`- You are a versatile AI assistant${industry ? ` for a ${industry}` : ''}. Represent the brand professionally and help users achieve their goals.`;
+
+  const style =
+`- ${tone ? `${tone[0].toUpperCase()}${tone.slice(1)}` : 'Clear, concise, friendly'}. Prefer 2–4 short sentences per turn.
+- Confirm understanding with a brief paraphrase when the request is complex.`;
+
+  const guidelines =
+`- Ask a clarifying question when essential info is missing.
+- Do not fabricate; say when you don’t know or need to check.
+- Summarize next steps when the user has a multi-step task.`;
+
+  const goals =
+`- Qualify the user’s need, answer relevant FAQs, and guide to scheduling, purchase, or escalation.${channels ? ` (${channels})` : ''}
+- Offer to collect structured info (name, contact, preferred time) when booking or follow-up is needed.${tasks.length ? ` Focus on: ${tasks.join(', ')}.` : ''}`;
+
+  const errors =
+`- If uncertain, ask a specific clarifying question.
+- If a tool/endpoint fails, apologize briefly and offer an alternative or human handoff.`;
 
   const merged =
 `[Identity]
-- You are a versatile AI assistant${industry ? ` for a ${industry}` : ''}. Represent the brand professionally and help users achieve their goals.
+${identity}
 
 [Style]
-- ${tone ? `${tone[0].toUpperCase()}${tone.slice(1)}` : 'Clear, concise, friendly'}. Prefer 2–4 short sentences per turn.
-- Confirm understanding with a brief paraphrase when the request is complex.
+${style}
 
 [Response Guidelines]
-- Ask a clarifying question when essential info is missing.
-- Do not fabricate; say when you don’t know or need to check.
-- Summarize next steps when the user has a multi-step task.
+${guidelines}
 
 [Task & Goals]
-- Qualify the user’s need, answer relevant FAQs, and guide to scheduling, purchase, or escalation.
-- Offer to collect structured info (name, contact, preferred time) when booking or follow-up is needed.
+${goals}
 
 [Error Handling / Fallback]
-- If uncertain, ask a specific clarifying question.
-- If a tool/endpoint fails, apologize briefly and offer an alternative or human handoff.`;
+${errors}`;
 
-  return { merged, summary: `Applied ${industry?`industry=${industry}; `:''}${tone?`tone=${tone}; `:''}`.trim() || 'Updated.' };
+  return { merged, summary: `Applied ${industry ? `industry=${industry}; ` : ''}${tone ? `tone=${tone}; ` : ''}${tasks.length ? `tasks=${tasks.join(',')}; ` : ''}`.trim() || 'Updated.' };
 };
 
+/* ─────────── choose real engine or shims at runtime ─────────── */
 const looksLikeFullPromptRT = (raw: string) =>
   isFn(_looksLikeFullPrompt) ? !!_looksLikeFullPrompt(raw) : looksLikeFullPromptSafe(raw);
 
@@ -244,7 +308,7 @@ const DEFAULT_PROMPT_RT = nonEmpty(_DEFAULT_PROMPT) ? _DEFAULT_PROMPT! : PROMPT_
 const DEFAULT_AGENT: AgentData = {
   name: 'Assistant',
   provider: 'openai',
-  model: 'gpt-4o-mini', // better price/latency for chat
+  model: 'GPT-4o',
   firstMode: 'Assistant speaks first',
   firstMsg: 'Hello.',
   systemPrompt: normalizeFullPromptRT(`
@@ -320,10 +384,9 @@ const providerOpts: Opt[] = [
 const modelOptsFor = (provider: string): Opt[] =>
   provider === 'openai'
     ? [
-        { value: 'gpt-4o-mini', label: 'gpt-4o-mini' },
-        { value: 'gpt-4o',      label: 'gpt-4o' },
-        { value: 'gpt-4.1',     label: 'gpt-4.1' },
-        { value: 'o4-mini',     label: 'o4-mini' },
+        { value: 'GPT-4o',  label: 'GPT-4o' },
+        { value: 'GPT-4.1', label: 'GPT-4.1' },
+        { value: 'o4-mini', label: 'o4-mini' },
       ]
     : [{ value: 'coming', label: 'Models coming soon', disabled: true }];
 
@@ -393,7 +456,10 @@ function StyledSelect({
 
   useEffect(() => {
     if (!open || !IS_CLIENT) return;
-    const off = (e: MouseEvent) => { if (wrapRef.current?.contains(e.target as Node)) return; setOpen(false); };
+    const off = (e: MouseEvent) => {
+      if (wrapRef.current?.contains(e.target as Node)) return;
+      setOpen(false);
+    };
     const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
     const onResize = () => {
       if (!btnRef.current) return;
@@ -576,8 +642,12 @@ function computeDiff(base:string, next:string){
     if (lb !== undefined && !setA.has(lb)) rows.push({ t:'add', text: lb });
     if (la !== undefined && !setB.has(la)) rows.push({ t:'rem', text: la });
   }
-  for (let j=a.length;j>b.length;j++){ const la=a[j]; if (la!==undefined && !setB.has(la)) rows.push({ t:'rem', text: la }); }
-  for (let j=a.length;j<b.length;j++){ const lb=b[j]; if (lb!==undefined && !setA.has(lb)) rows.push({ t:'add', text: lb }); }
+  for (let j=a.length;j>b.length;j++){
+    const la=a[j]; if (la!==undefined && !setB.has(la)) rows.push({ t:'rem', text: la });
+  }
+  for (let j=a.length;j<b.length;j++){
+    const lb=b[j]; if (lb!==undefined && !setA.has(lb)) rows.push({ t:'add', text: lb });
+  }
   return rows;
 }
 
@@ -608,6 +678,8 @@ function DiffInline({ base, next }:{ base:string; next:string }){
 }
 
 /* ─────────── Page ─────────── */
+type ChatMsg = { id: string; role: 'user'|'assistant'|'system'; text: string };
+
 export default function VoiceAgentSection() {
   /* align rail to app sidebar */
   useEffect(() => {
@@ -648,7 +720,15 @@ export default function VoiceAgentSection() {
   const [proposedPrompt, setProposedPrompt] = useState('');
   const [changesSummary, setChangesSummary] = useState('');
 
-  // voice preview (TTS)
+  // chat state
+  const [msgs, setMsgs] = useState<ChatMsg[]>(() => [
+    { id: 'sys', role: 'system', text: (DEFAULT_AGENT.systemPrompt || '').trim() },
+    { id: 'hello', role: 'assistant', text: 'Hi! Ready when you are.' }
+  ]);
+  const [input, setInput] = useState('');
+  const [sending, setSending] = useState(false);
+
+  // voice preview + TTS
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   useEffect(() => {
     if (!IS_CLIENT || !('speechSynthesis' in window)) return;
@@ -663,10 +743,23 @@ export default function VoiceAgentSection() {
     const byName = voices.find(v => v.name.toLowerCase().includes((data.voiceName || '').split(' ')[0]?.toLowerCase() || ''));
     const en = voices.find(v => v.lang?.startsWith('en'));
     if (byName) u.voice = byName; else if (en) u.voice = en;
-    window.speechSynthesis.cancel(); window.speechSynthesis.speak(u);
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(u);
   }
-  const speak = (text:string) => speakPreview(text);
+  function speak(text: string){
+    if (!IS_CLIENT || !('speechSynthesis' in window) || !text) return;
+    const u = new SpeechSynthesisUtterance(text);
+    const byName = voices.find(v => v.name.toLowerCase().includes((data.voiceName || '').split(' ')[0]?.toLowerCase() || ''));
+    const en = voices.find(v => v.lang?.startsWith('en'));
+    if (byName) u.voice = byName; else if (en) u.voice = en;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(u);
+  }
   const stopPreview = () => { if (IS_CLIENT && 'speechSynthesis' in window) window.speechSynthesis.cancel(); };
+
+  // helper: add chat message
+  const pushChat = (role: ChatMsg['role'], text: string) =>
+    setMsgs(m => [...m, { id: String(Date.now())+'_'+Math.random().toString(36).slice(2,7), role, text }]);
 
   /* listen for active rail id */
   useEffect(() => {
@@ -746,11 +839,12 @@ export default function VoiceAgentSection() {
   }
 
   /* ── Generate overlay logic ── */
+
   const runTypingIntoBox = (full:string) => {
     setTypingPreview('');
     let i = 0;
     const step = () => {
-      i += Math.max(1, Math.floor((full.length || 0) / 120));
+      i += Math.max(1, Math.floor((full.length || 0) / 120)); // ~120 frames
       setTypingPreview(full.slice(0, Math.min(i, full.length)));
       if (i < full.length && IS_CLIENT) requestAnimationFrame(step);
     };
@@ -766,6 +860,7 @@ export default function VoiceAgentSection() {
     setShowGenerate(true);
   };
 
+  // Replace if full prompt pasted, otherwise auto-detect and merge
   const onGenerate = () => {
     const raw = safeTrim(composerText);
     if (!raw) return;
@@ -789,6 +884,7 @@ export default function VoiceAgentSection() {
         summary = nonEmpty(out.summary) ? out.summary : 'Updated.';
       }
 
+      // Drop the blank template note after first generation
       merged = merged.replace(/^\s*#\s*This is a blank template[\s\S]*?$/im, '').trim() + '\n';
 
       setShowGenerate(false);
@@ -808,55 +904,127 @@ export default function VoiceAgentSection() {
     if (!activeId) return;
     const nextPrompt = nonEmpty(proposedPrompt) ? proposedPrompt : data.systemPrompt;
     const snapshot = {
-      prompt: nextPrompt, model: data.model, temp: 0, name: data.name, summary: changesSummary
+      prompt: nextPrompt,
+      model: data.model,
+      temp: 0,
+      name: data.name,
+      summary: changesSummary
     };
     pushVersion(activeId, snapshot);
     setData(p => ({ ...p, systemPrompt: nextPrompt }));
-    setProposedPrompt(''); setTypingPreview(''); setChangesSummary(''); setGenPhase('idle');
+    setMsgs(m => m.map(x => x.role==='system' ? { ...x, text: nextPrompt } : x));
+    setProposedPrompt('');
+    setTypingPreview('');
+    setChangesSummary('');
+    setGenPhase('idle');
     setToast('Prompt updated');
   };
 
   const onDecline = () => {
-    setProposedPrompt(''); setTypingPreview(''); setChangesSummary(''); setGenPhase('idle');
+    setProposedPrompt('');
+    setTypingPreview('');
+    setChangesSummary('');
+    setGenPhase('idle');
   };
 
-  /* ─────────── “Talk to Assistant” drawer (chat + mic + TTS) ─────────── */
-  type Turn = { role:'user'|'assistant', text:string };
-  const [chat, setChat] = useState<Turn[]>([{ role:'assistant', text:'Hi! Ready when you are.' }]);
-  const [input, setInput] = useState('');
-  const [sending, setSending] = useState(false);
-  const [callActive, setCallActive] = useState(false);
-  const [recognizing, setRecognizing] = useState(false);
-  const recRef = useRef<any>(null);
+  /* ======== TRANSCRIBER (server-first) ======== */
+  const [recorder, setRecorder] = useState<MediaRecorder|null>(null);
+  const [recording, setRecording] = useState(false);
 
-  const pushChat = (role:'user'|'assistant', text:string) =>
-    setChat(c => [...c, { role, text }]);
-
-  const sendToModel = async (userText: string) => {
-    const payload = {
-      model: data.model,
-      systemPrompt: data.systemPrompt,
-      user: userText,
-      apiKeyId: data.apiKeyId || ''
-    };
-    const res = await fetch('/api/voice/chat', {
-      method:'POST',
-      headers:{ 'Content-Type':'application/json' },
-      body: JSON.stringify(payload)
-    });
-    if (!res.ok) throw new Error('chat failed');
-    const json = await res.json();
-    return String(json.text || '');
-  };
-
-  const onSubmitChat = async () => {
-    const userText = input.trim();
-    if (!userText || sending) return;
-    setSending(true);
-    setInput('');
-    pushChat('user', userText);
+  async function startRecording() {
     try {
-      const reply = await sendToModel(userText);
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : (MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '');
+      const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+      const localChunks: BlobPart[] = [];
+      rec.ondataavailable = (e) => { if (e.data?.size) localChunks.push(e.data); };
+      rec.onstop = async () => {
+        setRecording(false);
+        try {
+          const blob = new Blob(localChunks, { type: mime || 'audio/webm' });
+          await handleTranscribe(blob);
+        } finally {
+          stream.getTracks().forEach(t => t.stop());
+        }
+      };
+      setRecorder(rec);
+      setRecording(true);
+      rec.start();
+    } catch {
+      pushChat('assistant', 'Microphone permission denied or unsupported.');
+    }
+  }
+  function stopRecording() {
+    try { recorder?.stop(); } catch {}
+  }
+
+  async function handleTranscribe(blob: Blob) {
+    const form = new FormData();
+    form.append('audio', blob, 'clip.webm');
+    form.append('provider', (data.asrProvider || 'deepgram') as string);
+    const model =
+      data.asrProvider === 'deepgram'
+        ? (data.asrModel?.toLowerCase().replace(/\s+/g,'-') || 'nova-2')
+        : (data.asrModel || 'whisper-1');
+    form.append('model', model);
+    if (data.language) form.append('language', data.language);
+    form.append('numerals', String(!!data.numerals));
+    form.append('denoise', String(!!data.denoise));
+
+    try {
+      const r = await fetch('/api/voice/transcribe', { method: 'POST', body: form });
+      if (!r.ok) {
+        const t = await r.text();
+        pushChat('assistant', `Transcribe failed: ${t.slice(0,180)}…`);
+        return;
+      }
+      const j = await r.json();
+      const transcript = String(j.text || '').trim();
+      if (!transcript) {
+        pushChat('assistant', 'I couldn’t hear anything. Try again?');
+        return;
+      }
+      await sendUserText(transcript);
+    } catch {
+      pushChat('assistant', 'Transcriber error. Try again.');
+    }
+  }
+
+  /* ======== LLM call (safe stub) ======== */
+  async function sendToModel(userText: string): Promise<string> {
+    // If you have a real route:
+    // try POST /api/chat with { system, model, messages }
+    const system = data.systemPrompt || DEFAULT_AGENT.systemPrompt;
+    try {
+      const r = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json' },
+        body: JSON.stringify({
+          model: data.model,
+          provider: data.provider,
+          system,
+          messages: msgs.filter(m => m.role!=='system').concat({ id: 'u_tmp', role:'user', text: userText })
+        })
+      });
+      if (r.ok) {
+        const j = await r.json().catch(()=>null);
+        const reply = j?.reply || j?.text || j?.message || '';
+        if (reply) return String(reply);
+      }
+    } catch {/* ignore and fall back */}
+    // Fallback echo so UI never breaks:
+    return `You said: “${userText}”. (Connect /api/chat for real answers.)`;
+  }
+
+  async function sendUserText(text: string) {
+    const t = text.trim();
+    if (!t) return;
+    pushChat('user', t);
+    setSending(true);
+    try {
+      const reply = await sendToModel(t);
       pushChat('assistant', reply || '(no reply)');
       speak(reply);
     } catch {
@@ -864,62 +1032,7 @@ export default function VoiceAgentSection() {
     } finally {
       setSending(false);
     }
-  };
-
-  // Mic: Web Speech API (browser STT). Fallback: disabled if unavailable.
-  const canSTT = IS_CLIENT && ('webkitSpeechRecognition' in (window as any) || 'SpeechRecognition' in (window as any));
-  const toggleMic = () => {
-    if (!canSTT) return;
-    if (recognizing) {
-      try { recRef.current?.stop?.(); } catch {}
-      setRecognizing(false);
-      return;
-    }
-    const SR: any = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
-    const rec = new SR();
-    rec.lang = (data.language || 'en-US');
-    rec.continuous = false;
-    rec.interimResults = true;
-    let finalText = '';
-    rec.onresult = (e: any) => {
-      let interim = '';
-      for (let i= e.resultIndex; i < e.results.length; i++){
-        const t = e.results[i][0].transcript;
-        if (e.results[i].isFinal) finalText += t;
-        else interim += t;
-      }
-      setInput(finalText || interim);
-    };
-    rec.onerror = () => { setRecognizing(false); };
-    rec.onend = async () => {
-      setRecognizing(false);
-      if ((finalText || '').trim()) {
-        const say = finalText.trim();
-        setInput('');
-        pushChat('user', say);
-        setSending(true);
-        try {
-          const reply = await sendToModel(say);
-          pushChat('assistant', reply || '(no reply)');
-          speak(reply);
-        } catch {
-          pushChat('assistant', 'Sorry — I had trouble responding.');
-        } finally {
-          setSending(false);
-        }
-      }
-    };
-    recRef.current = rec;
-    setRecognizing(true);
-    rec.start();
-  };
-
-  const startCall = () => { setShowCall(true); setCallActive(true); };
-  const endCall = () => {
-    setCallActive(false);
-    if (recognizing) { try { recRef.current?.stop?.(); } catch {} setRecognizing(false); }
-    stopPreview();
-  };
+  }
 
   /* ─────────── UI ─────────── */
   const inInlineReview = genPhase === 'review' && !showGenerate;
@@ -935,7 +1048,7 @@ export default function VoiceAgentSection() {
           <RailBoundary><AssistantRail /></RailBoundary>
         </div>
 
-        <div className="px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w=[1160px]" style={{ fontSize:'var(--fz-body)', lineHeight:'var(--lh-body)' }}>
+        <div className="px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w-[1160px]" style={{ fontSize:'var(--fz-body)', lineHeight:'var(--lh-body)' }}>
           <div className="mb-[var(--s-4)] flex flex-wrap items-center justify-end gap-[var(--s-3)]">
             <button
               onClick={doSave}
@@ -955,28 +1068,16 @@ export default function VoiceAgentSection() {
               <Rocket className="w-4 h-4" /> {publishing ? 'Publishing…' : 'Publish'}
             </button>
 
-            {!callActive ? (
-              <button
-                onClick={startCall}
-                className="inline-flex items-center gap-2 rounded-[10px] select-none"
-                style={{ height:'var(--control-h)', padding:'0 18px', background:CTA, color:'#ffffff', fontWeight:700, boxShadow:'0 10px 22px rgba(89,217,179,.20)' }}
-                onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA_HOVER)}
-                onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA)}
-              >
-                <PhoneFilled style={{ color:'#ffffff' }} />
-                <span style={{ color:'#ffffff' }}>Talk to Assistant</span>
-              </button>
-            ) : (
-              <button
-                onClick={endCall}
-                className="inline-flex items-center gap-2 rounded-[10px] select-none"
-                style={{ height:'var(--control-h)', padding:'0 18px', background:'#ef4444', color:'#ffffff', fontWeight:700 }}
-                title="Hang up"
-              >
-                <PhoneOff className="w-4 h-4" />
-                End Call
-              </button>
-            )}
+            <button
+              onClick={()=>{ setShowCall(true); }}
+              className="inline-flex items-center gap-2 rounded-[10px] select-none"
+              style={{ height:'var(--control-h)', padding:'0 18px', background:CTA, color:'#ffffff', fontWeight:700, boxShadow:'0 10px 22px rgba(89,217,179,.20)' }}
+              onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA_HOVER)}
+              onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA)}
+            >
+              <PhoneFilled style={{ color:'#ffffff' }} />
+              <span style={{ color:'#ffffff' }}>Talk to Assistant</span>
+            </button>
           </div>
 
           {toast ? (
@@ -986,7 +1087,6 @@ export default function VoiceAgentSection() {
             </div>
           ) : null}
 
-          {/* small stat cards */}
           <div className="grid gap-[12px] md:grid-cols-2 mb-[12px]">
             <div className="va-card">
               <div className="va-head" style={{ minHeight: 56 }}>
@@ -1006,7 +1106,6 @@ export default function VoiceAgentSection() {
             </div>
           </div>
 
-          {/* ========== Model / Voice / Transcriber sections (unchanged UI) ========== */}
           <Section
             title="Model"
             icon={<Gauge className="w-4 h-4" style={{ color: CTA }} />}
@@ -1061,7 +1160,7 @@ export default function VoiceAgentSection() {
                 </div>
 
                 <div style={{ position:'relative' }}>
-                  {!(genPhase === 'review' && !showGenerate) ? (
+                  {!inInlineReview ? (
                     <textarea
                       className="w-full bg-transparent outline-none rounded-[12px] px-3 py-[12px]"
                       style={{ minHeight: 360, background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
@@ -1088,7 +1187,7 @@ export default function VoiceAgentSection() {
                   )}
                 </div>
 
-                {(genPhase === 'review' && !showGenerate) && (
+                {inInlineReview && (
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     {changesSummary ? (
                       <span className="text-xs px-2 py-1 rounded-[8px]"
@@ -1107,9 +1206,9 @@ export default function VoiceAgentSection() {
                       </button>
                       <button
                         onClick={onAccept}
-                        disabled={!(nonEmpty(proposedPrompt) && (typingPreview.length >= (proposedPrompt?.length || 0)))}
+                        disabled={!typingDone}
                         className="h-[38px] px-4 rounded-[10px] font-semibold"
-                        style={{ background: (nonEmpty(proposedPrompt) && (typingPreview.length >= (proposedPrompt?.length || 0))) ? CTA : 'rgba(89,217,179,.35)', color:'#0a0f0d' }}
+                        style={{ background: typingDone ? CTA : 'rgba(89,217,179,.35)', color:'#0a0f0d' }}
                       >
                         Accept Changes
                       </button>
@@ -1209,7 +1308,7 @@ export default function VoiceAgentSection() {
             </div>
             <div className="mt-[var(--s-4)] grid sm:grid-cols-2 gap-[12px]">
               <div className="flex items-center justify-between p-3 rounded-[10px]" style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}>
-                <span className="text-sm">Background Denoising Enabled</span>
+                <span className="text-sm">Background Denoising</span>
                 <Toggle checked={data.denoise} onChange={setField('denoise')} />
               </div>
               <div className="flex items-center justify-between p-3 rounded-[10px]" style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}>
@@ -1221,7 +1320,7 @@ export default function VoiceAgentSection() {
         </div>
       </div>
 
-      {/* ─────────── Generate overlay ─────────── */}
+      {/* ─────────── Generate overlay (instructions / presets / configs) ─────────── */}
       {showGenerate && IS_CLIENT ? createPortal(
         <>
           <div
@@ -1310,7 +1409,7 @@ export default function VoiceAgentSection() {
         document.body
       ) : null}
 
-      {/* ─────────── Call drawer (chat + mic + TTS) ─────────── */}
+      {/* Call drawer (chat panel) */}
       {IS_CLIENT ? createPortal(
         <>
           <div
@@ -1327,7 +1426,7 @@ export default function VoiceAgentSection() {
             className="fixed inset-y-0 right-0"
             style={{
               zIndex: 9997,
-              width: 'min(540px,92vw)',
+              width: 'min(620px,92vw)',
               background:'var(--panel-bg)',
               borderLeft:'1px solid rgba(255,255,255,.10)',
               boxShadow:'-28px 0 80px rgba(0,0,0,.55)',
@@ -1339,54 +1438,51 @@ export default function VoiceAgentSection() {
           >
             <div className="flex items-center justify-between px-4 h-[64px]"
                  style={{ background:'var(--panel-bg)', borderBottom:'1px solid rgba(255,255,255,.1)' }}>
-              <div className="font-semibold flex items-center gap-2">
-                {callActive ? <Phone className="w-4 h-4 text-green-400" /> : <PhoneOff className="w-4 h-4 text-red-400" />}
-                Chat with {data.name || 'Assistant'}
-              </div>
+              <div className="font-semibold">Chat with {data.name || 'Assistant'}</div>
               <div className="flex items-center gap-2">
-                {canSTT && (
-                  <button
-                    onClick={toggleMic}
-                    className="px-2 py-1 rounded border text-sm"
-                    style={{ color: recognizing ? '#0a0f0d' : 'var(--text)', background: recognizing ? CTA : 'var(--panel-bg)', borderColor:'var(--input-border)' }}
-                  >
-                    {recognizing ? 'Listening…' : 'Mic'}
-                  </button>
-                )}
-                <button onClick={()=>setShowCall(false)} className="px-2 py-1 rounded border text-sm"
+                <button
+                  onClick={() => recording ? stopRecording() : startRecording()}
+                  className="px-3 h-[34px] rounded border text-sm"
+                  style={{ color: recording ? '#0a0f0d' : 'var(--text)', background: recording ? CTA : 'var(--panel-bg)', borderColor:'var(--input-border)' }}
+                  title={recording ? 'Stop recording' : 'Start recording'}
+                >
+                  {recording ? 'Recording…' : 'Mic'}
+                </button>
+                <button onClick={()=>setShowCall(false)} className="px-3 h-[34px] rounded border text-sm"
                         style={{ color:'var(--text)', borderColor:'var(--input-border)', background:'var(--panel-bg)' }}>
                   Close
                 </button>
               </div>
             </div>
 
-            {/* Transcript */}
+            {/* Chat stream */}
             <div className="p-4 overflow-y-auto flex flex-col gap-3">
-              {chat.map((m, i) => (
-                <div key={i} className={`max-w-[92%] ${m.role==='user' ? 'self-end' : 'self-start'}`}>
-                  <div className="text-[11px] mb-1" style={{ color:'var(--text-muted)' }}>
+              {msgs.filter(m=>m.role!=='system').map(m => (
+                <div key={m.id} className="max-w-[85%]" style={{
+                  alignSelf: m.role==='user' ? 'flex-end' : 'flex-start'
+                }}>
+                  <div className="text-[11px] mb-1" style={{ color:'var(--text-muted)', textAlign: m.role==='user'?'right':'left' }}>
                     {m.role==='user' ? 'You' : (data.name || 'Assistant')}
                   </div>
                   <div
                     style={{
-                      background: m.role==='user' ? 'rgba(255,255,255,.06)' : 'rgba(89,217,179,.12)',
+                      background: m.role==='user' ? 'rgba(255,255,255,.06)' : 'rgba(89,217,179,.10)',
                       border: `1px solid ${m.role==='user' ? 'rgba(255,255,255,.12)' : 'rgba(89,217,179,.22)'}`,
-                      color: 'var(--text)', padding:'10px 12px', borderRadius:12, whiteSpace:'pre-wrap'
+                      color:'var(--text)',
+                      padding:'10px 12px',
+                      borderRadius:12
                     }}
                   >
                     {m.text}
                   </div>
                 </div>
               ))}
-              {sending && (
-                <div className="text-xs opacity-70" style={{ color:'var(--text-muted)' }}>Assistant is typing…</div>
-              )}
             </div>
 
             {/* Composer */}
             <div className="p-3" style={{ borderTop:'1px solid rgba(255,255,255,.10)' }}>
               <form
-                onSubmit={(e)=>{ e.preventDefault(); onSubmitChat(); }}
+                onSubmit={async (e)=>{ e.preventDefault(); await sendUserText(input); setInput(''); }}
                 className="flex items-center gap-2"
               >
                 <input
@@ -1398,11 +1494,11 @@ export default function VoiceAgentSection() {
                 />
                 <button
                   type="submit"
-                  disabled={!input.trim() || sending}
-                  className="h-10 px-4 rounded-md font-semibold inline-flex items-center gap-2"
-                  style={{ background: (!input.trim() || sending) ? 'rgba(89,217,179,.35)' : CTA, color:'#0a0f0d' }}
+                  disabled={sending || !input.trim()}
+                  className="h-10 px-4 rounded-md font-semibold"
+                  style={{ background: sending ? 'rgba(89,217,179,.35)' : CTA, color:'#0a0f0d' }}
                 >
-                  <Send className="w-4 h-4" /> Send
+                  {sending ? 'Sending…' : 'Send'}
                 </button>
               </form>
             </div>
