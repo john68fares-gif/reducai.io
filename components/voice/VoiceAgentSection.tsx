@@ -44,10 +44,7 @@ const ACTIVE_KEY = 'va:activeId';
 const Z_OVERLAY = 100000;
 const Z_MODAL   = 100001;
 const Z_MENU    = 100010;
-const IS_CLIENT = typeof window !== 'undefined';
-
-/** What shows in the prompt box for a brand-new assistant */
-const BLANK_TEMPLATE = `This is a blank template with minimal defaults, you can change the model, temperature, and messages.`;
+const IS_CLIENT = typeof window !== 'undefined' && typeof document !== 'undefined';
 
 /* phone icon */
 function PhoneFilled(props: React.SVGProps<SVGSVGElement>) {
@@ -164,7 +161,10 @@ type AgentData = {
   numerals: boolean;
 };
 
-/* ─────────── canonical blocks (for local fallback only) ─────────── */
+/* ─────────── UX: blank template for new assistants ─────────── */
+const BLANK_TEMPLATE_NOTE =
+  'This is a blank template with minimal defaults. You can change the model and messages, or click Generate to tailor the prompt to your business.';
+
 const PROMPT_SKELETON =
 `[Identity]
 
@@ -183,9 +183,24 @@ const DEFAULT_AGENT: AgentData = {
   model: 'GPT-4o',
   firstMode: 'Assistant speaks first',
   firstMsg: 'Hello.',
-  // Show the *blank* text in the textarea for a new agent.
-  // The generator will still use DEFAULT_PROMPT behind the scenes as a strong base.
-  systemPrompt: BLANK_TEMPLATE,
+  // Show a helpful note until user generates; Normalize into a safe 5-section layout.
+  systemPrompt: normalizeFullPrompt(`
+[Identity]
+- You are a helpful, professional AI assistant for this business.
+
+[Style]
+- Clear, concise, friendly.
+
+[Response Guidelines]
+- Ask one clarifying question when essential info is missing.
+
+[Task & Goals]
+- Guide users to their next best action (booking, purchase, or escalation).
+
+[Error Handling / Fallback]
+- If unsure, ask a specific clarifying question first.
+
+`).trim() + '\n\n' + `# ${BLANK_TEMPLATE_NOTE}\n`,
   ttsProvider: 'openai',
   voiceName: 'Alloy (American)',
   apiKeyId: '',
@@ -200,15 +215,16 @@ const keyFor = (id: string) => `va:agent:${id}`;
 const versKeyFor = (id: string) => `va:versions:${id}`;
 
 const loadAgentData = (id: string): AgentData => {
-  try { const raw = localStorage.getItem(keyFor(id)); if (raw) return { ...DEFAULT_AGENT, ...(JSON.parse(raw)||{}) }; }
+  try { const raw = IS_CLIENT ? localStorage.getItem(keyFor(id)) : null; if (raw) return { ...DEFAULT_AGENT, ...(JSON.parse(raw)||{}) }; }
   catch {}
   return { ...DEFAULT_AGENT };
 };
 const saveAgentData = (id: string, data: AgentData) => {
-  try { localStorage.setItem(keyFor(id), JSON.stringify(data)); } catch {}
+  try { if (IS_CLIENT) localStorage.setItem(keyFor(id), JSON.stringify(data)); } catch {}
 };
 const pushVersion = (id:string, snapshot:any) => {
   try {
+    if (!IS_CLIENT) return;
     const raw = localStorage.getItem(versKeyFor(id));
     const arr = raw ? JSON.parse(raw) : [];
     arr.unshift({ id: `v_${Date.now()}`, ts: Date.now(), ...snapshot });
@@ -537,9 +553,6 @@ function DiffInline({ base, next }:{ base:string; next:string }){
 
 /* ─────────── Page ─────────── */
 export default function VoiceAgentSection() {
-  const mountedRef = useRef(true);
-  useEffect(() => { return () => { mountedRef.current = false; }; }, []);
-
   /* align rail to app sidebar */
   useEffect(() => {
     if (!IS_CLIENT) return;
@@ -666,14 +679,14 @@ export default function VoiceAgentSection() {
     setSaving(true); setToast('');
     try { await apiSave(activeId, data); setToast('Saved'); }
     catch { setToast('Save failed'); }
-    finally { if (mountedRef.current){ setSaving(false); setTimeout(()=>setToast(''), 1400); } }
+    finally { setSaving(false); setTimeout(()=>setToast(''), 1400); }
   }
   async function doPublish(){
     if (!activeId) { setToast('Select or create an agent'); return; }
     setPublishing(true); setToast('');
     try { await apiPublish(activeId); setToast('Published'); }
     catch { setToast('Publish failed'); }
-    finally { if (mountedRef.current){ setPublishing(false); setTimeout(()=>setToast(''), 1400); } }
+    finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
   }
 
   /* ── Generate overlay logic ── */
@@ -682,14 +695,11 @@ export default function VoiceAgentSection() {
     setTypingPreview('');
     let i = 0;
     const step = () => {
-      i += Math.max(1, Math.floor(full.length / 120)); // ~120 frames
+      i += Math.max(1, Math.floor((full.length || 0) / 120)); // ~120 frames
       setTypingPreview(full.slice(0, Math.min(i, full.length)));
-      if (i < full.length && IS_CLIENT && typeof requestAnimationFrame === 'function') {
-        requestAnimationFrame(step);
-      }
+      if (i < full.length && IS_CLIENT) requestAnimationFrame(step);
     };
-    if (IS_CLIENT && typeof requestAnimationFrame === 'function') requestAnimationFrame(step);
-    else setTypingPreview(full);
+    if (IS_CLIENT) requestAnimationFrame(step);
   };
 
   const onOpenGenerate = () => {
@@ -701,7 +711,7 @@ export default function VoiceAgentSection() {
     setShowGenerate(true);
   };
 
-  // Replace if full prompt pasted, otherwise merge/config-build
+  // Replace if full prompt pasted, otherwise auto-detect and merge
   const onGenerate = () => {
     const raw = (composerText || '').trim();
     if (!raw) return;
@@ -709,13 +719,11 @@ export default function VoiceAgentSection() {
     setGenPhase('loading');
 
     try {
-      // Use a strong base to *generate*, even if the textarea currently shows BLANK_TEMPLATE
-      const baseForGenerate =
-        (data.systemPrompt && data.systemPrompt.trim() && looksLikeFullPrompt(data.systemPrompt))
-          ? data.systemPrompt
-          : DEFAULT_PROMPT;
+      const base = (data.systemPrompt && data.systemPrompt.trim().length > 0)
+        ? data.systemPrompt
+        : (DEFAULT_PROMPT || PROMPT_SKELETON);
 
-      basePromptRef.current = baseForGenerate;
+      basePromptRef.current = base;
 
       let merged = '';
       let summary = '';
@@ -724,16 +732,15 @@ export default function VoiceAgentSection() {
         merged = normalizeFullPrompt(raw);
         summary = 'Replaced prompt (manual paste).';
       } else {
-        const out = applyInstructions(baseForGenerate, raw);
-        merged = out.merged;
+        // v2: applyInstructions detects industries & routes lines automatically
+        const out = applyInstructions(base, raw);
+        merged = out.merged || base; // guard
         summary = out.summary || 'Updated.';
       }
 
-      if (!merged || !merged.trim()) {
-        throw new Error('Empty output after generation');
-      }
+      // If user left the # note from the blank template, drop it after first generate
+      merged = merged.replace(/^\s*#\s*This is a blank template[\s\S]*?$/im, '').trim() + '\n';
 
-      // Close overlay, enter review, type it in
       setShowGenerate(false);
       setProposedPrompt(merged);
       setGenPhase('review');
@@ -741,35 +748,28 @@ export default function VoiceAgentSection() {
       setChangesSummary(summary || 'Updated.');
     } catch (err) {
       console.error('Generate failed:', err);
-      if (!mountedRef.current) return;
-      setShowGenerate(false);
-      setGenPhase('idle');
-      setToast('Generate failed — check your instructions and try again');
-      setTimeout(() => setToast(''), 2200);
+      setGenPhase('editing');
+      setToast('Generate failed — please tweak your input and try again.');
+      setTimeout(() => setToast(''), 2400);
     }
   };
 
   const onAccept = async () => {
-    if (!proposedPrompt?.trim()) { setGenPhase('idle'); return; }
-
-    if (activeId) {
-      const snapshot = {
-        prompt: proposedPrompt,
-        model: data.model,
-        temp: 0,
-        name: data.name,
-        summary: changesSummary
-      };
-      pushVersion(activeId, snapshot);
-    }
-
-    setData(p => ({ ...p, systemPrompt: proposedPrompt }));
+    if (!activeId) return;
+    const snapshot = {
+      prompt: proposedPrompt || data.systemPrompt,
+      model: data.model,
+      temp: 0,
+      name: data.name,
+      summary: changesSummary
+    };
+    pushVersion(activeId, snapshot);
+    setData(p => ({ ...p, systemPrompt: proposedPrompt || p.systemPrompt }));
     setProposedPrompt('');
     setTypingPreview('');
     setChangesSummary('');
     setGenPhase('idle');
     setToast('Prompt updated');
-    setTimeout(()=>setToast(''), 1800);
   };
 
   const onDecline = () => {
@@ -781,6 +781,7 @@ export default function VoiceAgentSection() {
 
   /* ─────────── UI ─────────── */
   const inInlineReview = genPhase === 'review' && !showGenerate;
+  const typingDone = Boolean(proposedPrompt) && typingPreview.length >= (proposedPrompt?.length || 0);
 
   return (
     <section className="va-scope" style={{ background:'var(--bg)', color:'var(--text)' }}>
@@ -940,19 +941,19 @@ export default function VoiceAgentSection() {
                       </span>
                     ) : null}
 
-                    <div className="ml-auto flex items-center gap-8">
+                    <div className="ml-auto flex items-center gap-2">
                       <button
                         onClick={onDecline}
                         className="h-[38px] px-4 rounded-[10px]"
-                        style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.9)', color:'var(--text)', fontWeight:600 }}
+                        style={{ background:'var(--panel)', border:'1px solid var(--input-border)', color:'var(--text)', fontWeight:600 }}
                       >
                         Decline
                       </button>
                       <button
                         onClick={onAccept}
-                        disabled={!(Boolean(proposedPrompt) && typingPreview.length >= proposedPrompt.length)}
+                        disabled={!typingDone}
                         className="h-[38px] px-4 rounded-[10px] font-semibold"
-                        style={{ background: (Boolean(proposedPrompt) && typingPreview.length >= proposedPrompt.length) ? CTA : 'rgba(89,217,179,.35)', color:'#0a0f0d' }}
+                        style={{ background: typingDone ? CTA : 'rgba(89,217,179,.35)', color:'#0a0f0d' }}
                       >
                         Accept Changes
                       </button>
@@ -1050,7 +1051,7 @@ export default function VoiceAgentSection() {
                 <StyledSelect value={data.asrModel} onChange={setField('asrModel')} options={asrModelsFor(data.asrProvider)}/>
               </div>
             </div>
-            <div className="mt-[var(--s-4)] grid sm:grid-cols-2 gap-[12px]">
+            <div className="mt-[var(--s-4)] grid sm:grid-cols-2 gap={[12]}>
               <div className="flex items-center justify-between p-3 rounded-[10px]" style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}>
                 <span className="text-sm">Background Denoising Enabled</span>
                 <Toggle checked={data.denoise} onChange={setField('denoise')} />
@@ -1074,7 +1075,7 @@ export default function VoiceAgentSection() {
           />
           <div className="fixed inset-0 grid place-items-center px-4" style={{ zIndex: Z_MODAL }}>
             <div
-              className="w-full max-w-[620px] rounded-[10px] overflow-hidden"
+              className="w-full max-w-[640px] rounded-[12px] overflow-hidden"
               style={{
                 background: 'var(--panel)',
                 color: 'var(--text)',
@@ -1092,8 +1093,8 @@ export default function VoiceAgentSection() {
                 }}
               >
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl grid place-items-center" style={{ background:'var(--brand-weak)' }}>
-                    <span style={{ color: CTA, filter:'drop-shadow(0 0 8px rgba(89,217,179,.35))' }}>
+                  <div className="w-10 h-10 rounded-xl grid place-items-center" style={{ background:'var(--green-weak)' }}>
+                    <span style={{ color: CTA }}>
                       <Wand2 className="w-5 h-5" />
                     </span>
                   </div>
@@ -1112,16 +1113,21 @@ export default function VoiceAgentSection() {
               {/* Body */}
               <div className="px-6 py-5 space-y-3">
                 <div className="text-xs" style={{ color:'var(--text-muted)' }}>
-                  Tip: use <code>preset: dentist</code> or config like
-                  <code> industry=dentist; tone=friendly; tasks=lead_qualification,booking; channels=voice,chat</code>
+                  Tip: you can be natural (e.g., “assistant for a dental clinic; tone friendly; handle booking & FAQs”).
+                  You don’t need to use headers — the generator auto-detects and routes each instruction.
                 </div>
-                <textarea
-                  value={composerText}
-                  onChange={(e)=>setComposerText(e.target.value)}
-                  className="w-full bg-transparent outline-none rounded-[10px] px-3 py-2"
-                  placeholder="Paste a full prompt to replace it — or type preset:/industry=/key=value lines — or just bullets to merge."
-                  style={{ minHeight: 160, maxHeight: '40vh', background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                />
+                <div
+                  className="rounded-[10px]"
+                  style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}
+                >
+                  <textarea
+                    value={composerText}
+                    onChange={(e)=>setComposerText(e.target.value)}
+                    className="w-full bg-transparent outline-none rounded-[10px] px-3 py-2"
+                    placeholder="Describe your business and how the assistant should behave…"
+                    style={{ minHeight: 160, maxHeight: '40vh', color:'var(--text)', resize:'vertical' }}
+                  />
+                </div>
               </div>
 
               {/* Footer */}
@@ -1129,7 +1135,7 @@ export default function VoiceAgentSection() {
                 <button
                   onClick={()=> genPhase!=='loading' && setShowGenerate(false)}
                   className="w-full h-[44px] rounded-[10px]"
-                  style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.9)', color:'var(--text)', fontWeight:600 }}
+                  style={{ background:'var(--panel)', border:'1px solid var(--input-border)', color:'var(--text)', fontWeight:600 }}
                 >
                   Cancel
                 </button>
@@ -1137,9 +1143,9 @@ export default function VoiceAgentSection() {
                   onClick={onGenerate}
                   disabled={!composerText.trim()}
                   className="w-full h-[44px] rounded-[10px] font-semibold inline-flex items-center justify-center gap-2"
-                  style={{ background:CTA, color:'#fff', opacity: (!composerText.trim() ? .6 : 1) }}
+                  style={{ background:CTA, color:'#0a0f0d', opacity: (!composerText.trim() ? .6 : 1) }}
                 >
-                  Generate
+                  <Wand2 className="w-4 h-4" /> Generate
                 </button>
               </div>
             </div>
