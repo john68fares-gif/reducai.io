@@ -1,141 +1,73 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { google } from 'googleapis';
 
-/**
- * Google Sheets connector (read + append)
- * 
- * GET  /api/connectors/sheets?spreadsheetId=...&range=Sheet!A2:E
- * POST /api/connectors/sheets
- *   body: {
- *     spreadsheetId: string,
- *     range: string,                 // e.g., 'Bookings!A2'
- *     values?: string[],             // append raw row
- *     object?: Record<string, any>,  // optional: append with object mapped to header row
- *     headerRange?: string           // optional: defaults to 'Bookings!A1:Z1' if using object
- *   }
- *
- * Env:
- *   - GOOGLE_SA_JSON_BASE64  (required)  base64 of your service account JSON
- *   - SHEETS_BEARER          (optional)  simple shared secret for requests
- */
-
-function getAuth() {
-  const b64 = process.env.GOOGLE_SA_JSON_BASE64 || '';
-  if (!b64) throw new Error('Missing env GOOGLE_SA_JSON_BASE64');
-  const creds = JSON.parse(Buffer.from(b64, 'base64').toString('utf8'));
-  const scopes = ['https://www.googleapis.com/auth/spreadsheets'];
-  return new google.auth.JWT(creds.client_email, undefined, creds.private_key, scopes);
+function parseSheetIdFromUrl(url: string) {
+  const m = url.match(/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  return m ? m[1] : null;
 }
 
-function requireBearer(req: NextApiRequest) {
-  const secret = process.env.SHEETS_BEARER;
-  if (!secret) return; // no guard configured
-  const hdr = (req.headers.authorization || '').trim(); // "Bearer abc"
-  const token = hdr.startsWith('Bearer ') ? hdr.slice(7) : '';
-  if (token !== secret) throw new Error('Unauthorized');
+function auth() {
+  const clientEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+  const privateKey = (process.env.GOOGLE_SERVICE_ACCOUNT_KEY || '').replace(/\\n/g, '\n');
+  if (!clientEmail || !privateKey) throw new Error('Missing Google service account env vars.');
+  const jwt = new google.auth.JWT({
+    email: clientEmail,
+    key: privateKey,
+    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+  });
+  return jwt;
+}
+
+async function readHeaders(sheets: any, sheetId: string, sheetName: string) {
+  const range = `${sheetName}!A1:H1`;
+  const r = await sheets.spreadsheets.values.get({ spreadsheetId: sheetId, range });
+  return (r.data.values?.[0] || []).map((s: string) => String(s).trim());
+}
+
+function makePromptChunk(meta: { sheetName: string; sheetId: string }) {
+  return `
+[Notes]
+Google Sheets connected for appointments.
+- Spreadsheet ID: ${meta.sheetId}
+- Sheet (tab): ${meta.sheetName}
+
+Booking tool rules:
+- Before adding a new appointment, read the sheet and ensure the time window does not overlap any existing row where Status != "Cancelled".
+- Use schema:
+  Date (YYYY-MM-DD) | Start Time (HH:MM, 24h) | End Time (HH:MM) | Client Name | Phone | Email | Notes | Status
+- On success, append a new row with Status="Booked".
+- If conflict, ask for another time.`;
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  res.setHeader('Cache-Control', 'no-store');
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  // two modes: (1) connect/import, (2) booking sub-route delegated below
+  const { url, agentId, sheetName } = req.body || {};
+  const sheetId = parseSheetIdFromUrl(String(url || ''));
+  if (!sheetId) return res.status(400).json({ error: 'Invalid Google Sheet URL.' });
 
   try {
-    requireBearer(req);
-    const auth = getAuth();
-    const sheets = google.sheets({ version: 'v4', auth });
+    const authClient = auth();
+    const sheets = google.sheets({ version: 'v4', auth: authClient });
 
-    if (req.method === 'GET') {
-      const { spreadsheetId, range } = req.query as { spreadsheetId?: string; range?: string };
-      if (!spreadsheetId || !range) {
-        return res.status(400).json({ error: 'Provide spreadsheetId & range' });
-      }
-      const r = await sheets.spreadsheets.values.get({ spreadsheetId, range });
-      const values = r.data.values || [];
-
-      // Try to infer headers if they included row 1; otherwise return raw
-      const looksLikeHeader = values.length && values[0]?.some?.((c: string) => /date|time|status|provider/i.test(c || ''));
-      const data = looksLikeHeader ? values.slice(1) : values;
-      const headers = looksLikeHeader ? values[0] : null;
-
-      return res.status(200).json({ ok: true, values: data, headers });
+    // pick a sheet name: provided or first sheet
+    let tabName = sheetName?.trim();
+    if (!tabName) {
+      const meta = await sheets.spreadsheets.get({ spreadsheetId: sheetId });
+      tabName = meta.data.sheets?.[0]?.properties?.title || 'Sheet1';
     }
 
-    if (req.method === 'POST') {
-      const { spreadsheetId, range, values, object, headerRange } = (req.body || {}) as {
-        spreadsheetId?: string;
-        range?: string;
-        values?: any[];
-        object?: Record<string, any>;
-        headerRange?: string;
-      };
-
-      if (!spreadsheetId || !range) {
-        return res.status(400).json({ error: 'Provide spreadsheetId & range' });
-      }
-
-      // Mode 1: plain array append
-      if (Array.isArray(values)) {
-        const r = await sheets.spreadsheets.values.append({
-          spreadsheetId,
-          range,
-          valueInputOption: 'USER_ENTERED',
-          insertDataOption: 'INSERT_ROWS',
-          requestBody: { values: [values] },
-        });
-        return res.status(200).json({ ok: true, updates: r.data.updates });
-      }
-
-      // Mode 2: object append (maps to header row)
-      if (object && typeof object === 'object') {
-        const hdrRange = headerRange || guessHeaderRange(range);
-        const hdrResp = await sheets.spreadsheets.values.get({ spreadsheetId, range: hdrRange });
-        const headers = (hdrResp.data.values || [])[0] || [];
-        if (!headers.length) {
-          return res.status(400).json({ error: `Header row empty at ${hdrRange}` });
-        }
-
-        const row = headers.map((h: string) => formatCell(object[h] ?? object[normalizeKey(h)] ?? ''));
-        const r = await sheets.spreadsheets.values.append({
-          spreadsheetId,
-          range,
-          valueInputOption: 'USER_ENTERED',
-          insertDataOption: 'INSERT_ROWS',
-          requestBody: { values: [row] },
-        });
-        return res.status(200).json({ ok: true, headers, row, updates: r.data.updates });
-      }
-
-      return res.status(400).json({ error: 'Provide either values[] or object{} to append' });
+    // sanity: ensure headers exist (we just read row 1)
+    const headers = await readHeaders(sheets, sheetId, tabName);
+    if (headers.length < 4) {
+      return res.status(400).json({ error: 'Sheet missing headers row. Please create row 1 as documented.' });
     }
 
-    res.setHeader('Allow', 'GET, POST');
-    return res.status(405).json({ error: 'Method not allowed' });
+    const promptChunk = makePromptChunk({ sheetName: tabName, sheetId });
+    return res.status(200).json({ ok: true, sheetId, sheetName: tabName, promptChunk });
   } catch (e: any) {
-    const msg = String(e?.message || e);
-    const code = /unauthorized/i.test(msg) ? 401 : 500;
-    return res.status(code).json({ error: msg });
+    console.error(e);
+    return res.status(500).json({ error: e?.message || 'Sheets connect failed' });
   }
-}
-
-/* ---------------- helpers ---------------- */
-
-function normalizeKey(s: string) {
-  return String(s || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim();
-}
-
-function guessHeaderRange(appendRange: string) {
-  // e.g., 'Bookings!A2' -> 'Bookings!A1:Z1'
-  const m = /^([^!]+)!(.+)$/.exec(appendRange);
-  if (!m) return 'A1:Z1';
-  const sheet = m[1];
-  return `${sheet}!A1:Z1`;
-}
-
-function formatCell(v: any) {
-  if (v == null) return '';
-  if (v instanceof Date) return v.toISOString();
-  if (typeof v === 'object') return JSON.stringify(v);
-  return String(v);
 }
