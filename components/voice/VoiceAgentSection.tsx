@@ -29,11 +29,11 @@ class RailBoundary extends React.Component<{children:React.ReactNode},{hasError:
 const CTA = '#59d9b3';
 const CTA_HOVER = '#54cfa9';
 const GREEN_LINE = 'rgba(89,217,179,.20)';
-const GREEN_GLOW = '0 10px 26px rgba(89,217,179,.28)'; // dropdown hover glow
+const GREEN_GLOW = '0 10px 26px rgba(89,217,179,.28)';
 const ACTIVE_KEY = 'va:activeId';
 const Z_OVERLAY = 100000;
 const Z_MODAL   = 100001;
-const Z_MENU    = 100010; // dropdown above everything
+const Z_MENU    = 100010;
 
 /* phone icon */
 function PhoneFilled(props: React.SVGProps<SVGSVGElement>) {
@@ -99,7 +99,6 @@ const Tokens = () => (
       color:var(--text);
     }
 
-    /* Dropdown menu base (solid, no sections) */
     .va-menu{
       position:absolute;
       top:calc(100% + 8px);
@@ -113,7 +112,6 @@ const Tokens = () => (
       overflow:hidden;
     }
 
-    /* Typing caret animation */
     @keyframes va-blink {
       0%, 49% { opacity: 1; }
       50%, 100% { opacity: 0; }
@@ -152,34 +150,81 @@ type AgentData = {
   numerals: boolean;
 };
 
+/* ─────────── Prompt templates (your three variants) ─────────── */
+const PROMPT_BASE = `[Identity]
+You are an adaptable AI Assistant designed to support various tasks and scenarios.
+
+[Style]
+- Maintain a neutral and adaptable tone, adjusting as necessary to fit different contexts.
+- Avoid additional embellishments; keep interactions straightforward and clear.
+
+[Response Guidelines]
+- Ensure responses are concise and relevant to the task at hand.
+- Maintain a balance between informative and concise, ensuring clarity for the user.
+
+[Task & Goals]
+1. Welcome the user and gauge the context or task they need assistance with.
+2. Gather necessary details or instructions from the user to perform the task.
+3. Execute any task-specific actions or queries as required.
+4. Confirm successful completion of tasks with the user or provide an update on progress.
+5. Follow through with any additional user inquiries or tasks to be addressed.
+
+[Error Handling / Fallback]
+- If the user's input is unclear, politely ask clarifying questions to better understand their request.
+- If a task cannot be completed, inform the user of the issue and suggest alternative steps if possible.`;
+
+const PROMPT_REDUC = `[Identity]
+You are Reduc AI, a versatile and efficient virtual assistant specializing in optimizing processes and supporting various tasks across industries.
+
+[Style]
+- Maintain a professional yet approachable tone, adapting as needed to fit different user contexts.
+- Keep interactions straightforward and clear, avoiding unnecessary embellishments.
+
+[Response Guidelines]
+- Ensure responses are concise and directly relevant to the task.
+- Balance being informative with brevity to ensure clarity for the user.
+
+[Task & Goals]
+1. Greet the user and determine the specific context or task they require assistance with.
+2. Collect any necessary details or instructions from the user to execute the task efficiently.
+3. Perform task-specific actions or queries using relevant tools or resources as needed.
+4. Confirm the successful completion of tasks or provide updates on progress to the user.
+5. Address any additional inquiries or tasks the user may have before concluding the interaction.
+
+[Error Handling / Fallback]
+- If the user's input is ambiguous or unclear, ask polite clarifying questions to better understand their needs.
+- If unable to complete a task, inform the user of the issue and propose alternative solutions or next steps where possible.`;
+
+const PROMPT_REDUC_AGENCY = `[Identity]
+You are Reduc AI, an intelligent virtual assistant designed to streamline and automate business processes, supporting diverse tasks across industries for an AI automation agency.
+
+[Style]
+- Maintain a professional, yet approachable tone, adjusting to fit various business contexts.
+- Deliver interactions in a direct and clear manner, without unnecessary elaboration.
+
+[Response Guidelines]
+- Keep responses concise and task-focused, ensuring they are informative but brief.
+- Use clear language that enhances user understanding and engagement.
+
+[Task & Goals]
+1. Greet the user warmly and establish the specific business context or task at hand.
+2. Gather required information or instructions from the user to perform the task.
+3. Execute specific actions or queries with pertinent tools or resources efficiently.
+4. Confirm task completion or update the user on the progress succinctly.
+5. Handle any further inquiries or requests from the user before ending the interaction.
+
+[Error Handling / Fallback]
+- Politely seek clarification if user input is unclear, to better address their intent.
+- Notify the user of any task execution issues, offering logical alternative solutions or steps.`;
+
+/* ─────────── defaults ─────────── */
 const DEFAULT_AGENT: AgentData = {
   name: 'Assistant',
   provider: 'openai',
   model: 'GPT-4o',
   firstMode: 'Assistant speaks first',
   firstMsg: 'Hello.',
-  systemPrompt:
-`[Identity]  
-You are an adaptable AI Assistant designed to support various tasks and scenarios.  
-
-[Style]  
-- Maintain a neutral and adaptable tone, adjusting as necessary to fit different contexts.  
-- Avoid additional embellishments; keep interactions straightforward and clear.  
-
-[Response Guidelines]  
-- Ensure responses are concise and relevant to the task at hand.  
-- Maintain a balance between informative and concise, ensuring clarity for the user.  
-
-[Task & Goals]  
-1. Welcome the user and gauge the context or task they need assistance with.  
-2. Gather necessary details or instructions from the user to perform the task.  
-3. Execute any task-specific actions or queries as required.  
-4. Confirm successful completion of tasks with the user or provide an update on progress.  
-5. Follow through with any additional user inquiries or tasks to be addressed.  
-
-[Error Handling / Fallback]  
-- If the user's input is unclear, politely ask clarifying questions to better understand their request.  
-- If a task cannot be completed, inform the user of the issue and suggest alternative steps if possible.`,
+  systemPrompt: PROMPT_BASE,
   ttsProvider: 'openai',
   voiceName: 'Alloy (American)',
   apiKeyId: '',
@@ -283,7 +328,7 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
-/* ─────────── Non-sectioned Select with rail-style green hover ─────────── */
+/* ─────────── Non-sectioned Select ─────────── */
 function StyledSelect({
   value, onChange, options, placeholder, leftIcon, menuTop,
   onPreview, isPreviewing
@@ -358,7 +403,7 @@ function StyledSelect({
             left: (menuPos?.left ?? 0),
             top: (btnRef.current?.getBoundingClientRect().bottom ?? 0) + 8,
             width: (menuPos?.width ?? (btnRef.current?.getBoundingClientRect().width ?? 280)),
-            background:'var(--panel)', // solid
+            background:'var(--panel)',
             border:`1px solid ${GREEN_LINE}`,
             borderRadius:10,
             boxShadow:'0 36px 90px rgba(0,0,0,.55)'
@@ -430,63 +475,108 @@ function StyledSelect({
   );
 }
 
+/* ─────────── Section (expand anim) ─────────── */
+function Section({
+  title, icon, desc, children, defaultOpen = true
+}:{
+  title: string; icon: React.ReactNode; desc?: string; children: React.ReactNode; defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const innerRef = useRef<HTMLDivElement|null>(null);
+  const [h, setH] = useState<number>(0);
+  const measure = () => { if (innerRef.current) setH(innerRef.current.offsetHeight); };
+  useLayoutEffect(() => { measure(); }, [children, open]);
+
+  return (
+    <div className="mb-[12px]">
+      <div className="mb-[6px] text-sm font-medium" style={{ color:'var(--text-muted)' }}>{title}</div>
+
+      <div className="va-card">
+        <button onClick={()=>setOpen(v=>!v)} className="va-head w-full text-left" style={{ color:'var(--text)' }}>
+          <span className="min-w-0 flex items-center gap-3">
+            <span className="inline-grid place-items-center w-7 h-7 rounded-full" style={{ background:'rgba(89,217,179,.10)' }}>
+              {icon}
+            </span>
+            <span className="min-w-0">
+              <span className="block font-semibold truncate" style={{ fontSize:'var(--fz-title)' }}>{title}</span>
+              {desc ? <span className="block text-xs truncate" style={{ color:'var(--text-muted)' }}>{desc}</span> : null}
+            </span>
+          </span>
+          <span className="justify-self-end">
+            {open ? <ChevronUp className="w-4 h-4" style={{ color:'var(--text-muted)' }}/> :
+                    <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)' }}/>}
+          </span>
+        </button>
+
+        <div
+          style={{
+            height: open ? h : 0,
+            opacity: open ? 1 : 0,
+            transform: open ? 'translateY(0)' : 'translateY(-4px)',
+            transition: 'height 260ms var(--ease), opacity 230ms var(--ease), transform 260ms var(--ease)',
+            overflow:'hidden'
+          }}
+          onTransitionEnd={() => { if (open) measure(); }}
+        >
+          <div ref={innerRef} className="p-[var(--s-5)]">{children}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ─────────── Diff helpers ─────────── */
-function diffLines(base:string, next:string){
+function computeDiff(base:string, next:string){
   const a = base.split('\n');
   const b = next.split('\n');
 
+  // Simple LCS-ish greedy marking to preserve order & speed
   const setA = new Set(a);
   const setB = new Set(b);
 
-  const items: Array<{type:'same'|'add'|'remove', text:string}> = [];
-
+  const rows: Array<{t:'same'|'add'|'rem', text:string}> = [];
   const max = Math.max(a.length, b.length);
   for (let i=0;i<max;i++){
     const la = a[i]; const lb = b[i];
-    if (la === lb && la !== undefined){ items.push({ type:'same', text: la! }); continue; }
-    if (lb !== undefined && !setA.has(lb)) items.push({ type:'add', text: lb });
-    if (la !== undefined && !setB.has(la)) items.push({ type:'remove', text: la });
+    if (la === lb && la !== undefined){ rows.push({ t:'same', text: la! }); continue; }
+    if (lb !== undefined && !setA.has(lb)) rows.push({ t:'add', text: lb });
+    if (la !== undefined && !setB.has(la)) rows.push({ t:'rem', text: la });
   }
   for (let j=a.length;j<b.length;j++){
-    const lb=b[j]; if (lb!==undefined && !setA.has(lb)) items.push({ type:'add', text: lb });
+    const lb=b[j]; if (lb!==undefined && !setA.has(lb)) rows.push({ t:'add', text: lb });
   }
-  return items;
+  return rows;
 }
 
-function InlineDiff({ base, next }:{ base:string; next:string }){
-  const rows = diffLines(base, next);
+function DiffInline({ base, next }:{ base:string; next:string }){
+  const rows = computeDiff(base, next);
   return (
-    <div style={{ whiteSpace:'pre-wrap', lineHeight:'1.55' }}>
+    <pre
+      className="rounded-[12px] px-3 py-3 text-sm"
+      style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)', whiteSpace:'pre-wrap', lineHeight:'1.55' }}
+    >
       {rows.map((r, i) => {
-        if (r.type === 'same') return <div key={i}>{r.text || ' '}</div>;
-        if (r.type === 'add') return (
-          <div key={i} style={{
-            background:'var(--green-weak)',
-            borderLeft:'3px solid ' + CTA,
-            padding:'2px 6px',
-            borderRadius:6,
-            margin:'2px 0'
-          }}>{r.text || ' '}</div>
+        if (r.t === 'same') return <span key={i}>{(r.text || ' ') + '\n'}</span>;
+        if (r.t === 'add') return (
+          <span
+            key={i}
+            style={{ background:'var(--green-weak)', borderLeft:'3px solid '+CTA, display:'block', padding:'2px 6px', borderRadius:6, margin:'2px 0' }}
+          >{(r.text || ' ') + '\n'}</span>
         );
         return (
-          <div key={i} style={{
-            background:'var(--red-weak)',
-            borderLeft:'3px solid #ef4444',
-            padding:'2px 6px',
-            borderRadius:6,
-            margin:'2px 0',
-            textDecoration:'line-through',
-            opacity:.9
-          }}>{r.text || ' '}</div>
+          <span
+            key={i}
+            style={{ background:'var(--red-weak)', borderLeft:'3px solid #ef4444', display:'block', padding:'2px 6px', borderRadius:6, margin:'2px 0', textDecoration:'line-through', opacity:.9 }}
+          >{(r.text || ' ') + '\n'}</span>
         );
       })}
-    </div>
+    </pre>
   );
 }
 
 /* ─────────── Page ─────────── */
 export default function VoiceAgentSection() {
-  /* measure sidebar so rail aligns */
+  /* align rail to app sidebar */
   useEffect(() => {
     const candidates = ['[data-app-sidebar]','aside[aria-label="Sidebar"]','aside[class*="sidebar"]','#sidebar'];
     const el = document.querySelector<HTMLElement>(candidates.join(', '));
@@ -513,21 +603,19 @@ export default function VoiceAgentSection() {
 
   const [showCall, setShowCall] = useState(false);
 
+  // Generate overlay
   const [showGenerate, setShowGenerate] = useState(false);
   const [composerText, setComposerText] = useState('');
   const [autoTranslate, setAutoTranslate] = useState(true);
   const [genPhase, setGenPhase] = useState<'idle'|'editing'|'loading'|'review'>('idle');
 
-  // expanded prompt box during review
-  const [reviewExpanded, setReviewExpanded] = useState(false);
-
-  // typing preview into the prompt box
+  // typing inside prompt box
   const basePromptRef = useRef<string>('');
-  const [proposedPrompt, setProposedPrompt] = useState<string>('');
-  const [typingPreview, setTypingPreview] = useState(''); // “type into box”
-  const [changesSummary, setChangesSummary] = useState<string>('');
+  const [typingPreview, setTypingPreview] = useState('');
+  const [proposedPrompt, setProposedPrompt] = useState('');
+  const [changesSummary, setChangesSummary] = useState('');
 
-  // voice preview quick
+  // voice preview
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   useEffect(() => {
     const load = () => setVoices(window.speechSynthesis.getVoices());
@@ -596,12 +684,8 @@ export default function VoiceAgentSection() {
       setData(prev => {
         const next = { ...prev, [k]: v };
         if (k === 'name' && activeId) {
-          try {
-            localStorage.setItem(keyFor(activeId), JSON.stringify(next));
-          } catch {}
-          try {
-            window.dispatchEvent(new CustomEvent('assistant:update', { detail: { id: activeId, name: String(v) } }));
-          } catch {}
+          try { localStorage.setItem(keyFor(activeId), JSON.stringify(next)); } catch {}
+          try { window.dispatchEvent(new CustomEvent('assistant:update', { detail: { id: activeId, name: String(v) } })); } catch {}
         }
         return next;
       });
@@ -625,40 +709,55 @@ export default function VoiceAgentSection() {
     finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
   }
 
-  /* ── Prompt builder helpers (no duplicate [Behavior]) ── */
-  const sanitizeSections = (txt:string) => {
-    // drop duplicate [Behavior] block if present, keep first occurrence
-    // but our structure doesn't use [Behavior]; we ensure core sections exist
-    return txt
-      .replace(/\r/g,'')
-      .replace(/\n{3,}/g, '\n\n');
-  };
+  /* ── Generate overlay logic (injects into existing sections, no [Behavior] dup) ── */
+  const detectLanguage = () => data.language || 'English';
 
-  const detectLanguage = (prompt:string):string => data.language || 'English';
+  const applyEdits = (base: string, instructions: string) => {
+    // Keep only the five canonical sections; append new bullets to the most relevant ones.
+    const blocks = ['[Identity]','[Style]','[Response Guidelines]','[Task & Goals]','[Error Handling / Fallback]'];
+    const parts: Record<string,string[]> = {};
+    let current = '_';
+    base.split('\n').forEach(line => {
+      if (blocks.includes(line.trim())) { current = line.trim(); parts[current] = []; return; }
+      if (current !== '_' ) parts[current].push(line);
+    });
 
-  const buildAIFormatted = (userText:string, targetLang:string, base:string) => {
-    const cleanedList = userText
+    const lines = instructions
       .split('\n')
-      .map(s => s.trim())
-      .filter(Boolean)
-      .map(s => /[.!?]$/.test(s) ? s : `${s}.`);
+      .map(s=>s.trim())
+      .filter(Boolean);
 
-    // ensure base has the canonical sections only once
-    const baseSan = sanitizeSections(base);
+    // naive routing by keywords
+    const toStyle: string[] = [];
+    const toGuides: string[] = [];
+    const toTasks: string[] = [];
+    const toIdentity: string[] = [];
+    const toFallback: string[] = [];
 
-    const adjustments =
-`[Adjustments]
-${cleanedList.map(l => `- ${l}`).join('\n')}`;
+    for (const l of lines) {
+      const bullet = `- ${/[.!?]$/.test(l) ? l : l + '.'}`;
+      if (/tone|formal|friendly|concise|style/i.test(l)) toStyle.push(bullet);
+      else if (/guideline|response|answer|jargon|clarity|concise/i.test(l)) toGuides.push(bullet);
+      else if (/collect|ask|step|goal|task|flow|handoff|handover|escalate/i.test(l)) toTasks.push(bullet);
+      else if (/identity|role|act as|behave/i.test(l)) toIdentity.push(bullet);
+      else toGuides.push(bullet);
+    }
 
-    // merged keeps original sections and appends Adjustments
-    const merged = `${baseSan}\n\n${adjustments}`;
+    if (toIdentity.length) parts['[Identity]'].push(...toIdentity);
+    if (toStyle.length) parts['[Style]'].push(...toStyle);
+    if (toGuides.length) parts['[Response Guidelines]'].push(...toGuides);
+    if (toTasks.length) parts['[Task & Goals]'].push(...toTasks);
+    if (toFallback.length) parts['[Error Handling / Fallback]'].push(...toFallback);
 
-    const summary = `Added ${cleanedList.length} adjustment${cleanedList.length===1?'':'s'}; preserved section order; removed duplicate headers.`;
-    return { merged, summary };
+    const rebuilt =
+      ['[Identity]','[Style]','[Response Guidelines]','[Task & Goals]','[Error Handling / Fallback]']
+        .map(h => `${h}\n${(parts[h]||[]).join('\n')}`.trim())
+        .join('\n\n');
+
+    return rebuilt;
   };
 
-  // typing animation for proposed prompt (rendered inside the prompt box)
-  const runTyping = (full:string) => {
+  const runTypingIntoBox = (full:string) => {
     setTypingPreview('');
     let i = 0;
     const step = () => {
@@ -677,23 +776,22 @@ ${cleanedList.map(l => `- ${l}`).join('\n')}`;
     setChangesSummary('');
     setGenPhase('editing');
     setShowGenerate(true);
-    setReviewExpanded(false);
   };
 
   const onGenerate = async () => {
     setGenPhase('loading');
     basePromptRef.current = data.systemPrompt;
-    const lang = detectLanguage(basePromptRef.current);
-
+    const _lang = detectLanguage();
+    // simulate processing
     setTimeout(() => {
-      const t = autoTranslate ? lang : 'Original';
-      const { merged, summary } = buildAIFormatted(composerText || 'No changes provided', t, basePromptRef.current);
+      const merged = applyEdits(basePromptRef.current, composerText || 'No changes provided');
       setProposedPrompt(merged);
-      setChangesSummary(summary);
+      runTypingIntoBox(merged);
+      const addedCount = computeDiff(basePromptRef.current, merged).filter(r=>r.t==='add').length;
+      const removedCount = computeDiff(basePromptRef.current, merged).filter(r=>r.t==='rem').length;
+      setChangesSummary(`Applied edits (${_lang}). +${addedCount} / -${removedCount} lines.`);
       setGenPhase('review');
-      setReviewExpanded(true);
-      runTyping(merged);
-    }, 320);
+    }, 420);
   };
 
   const onAccept = async () => {
@@ -712,20 +810,20 @@ ${cleanedList.map(l => `- ${l}`).join('\n')}`;
     setTypingPreview('');
     setChangesSummary('');
     setGenPhase('idle');
-    setReviewExpanded(false);
     setToast('Prompt updated');
   };
 
   const onDecline = () => {
-    // keep modal open for edits; collapse prompt box back
+    // keep overlay open to tweak text again
     setProposedPrompt('');
     setTypingPreview('');
     setChangesSummary('');
     setGenPhase('editing');
-    setReviewExpanded(false);
   };
 
   /* ─────────── UI ─────────── */
+  const inReview = genPhase === 'review' && showGenerate;
+
   return (
     <section className="va-scope" style={{ background:'var(--bg)', color:'var(--text)' }}>
       <Tokens />
@@ -839,7 +937,7 @@ ${cleanedList.map(l => `- ${l}`).join('\n')}`;
                   <div className="flex items-center gap-2">
                     <button
                       className="inline-flex items-center gap-2 rounded-[10px] text-sm"
-                      style={{ height:36, padding:'0 12px', background:CTA, color:'#fff' }}  // WHITE TEXT
+                      style={{ height:36, padding:'0 12px', background:CTA, color:'#fff', border:'1px solid rgba(255,255,255,.08)' }} // white text
                       onClick={onOpenGenerate}
                     >
                       <Wand2 className="w-4 h-4" /> Generate
@@ -847,51 +945,37 @@ ${cleanedList.map(l => `- ${l}`).join('\n')}`;
                   </div>
                 </div>
 
-                {/* Prompt box with inline typing/diff overlay */}
-                <div style={{ position:'relative', transition:'min-height 260ms var(--ease)' }}>
-                  <textarea
-                    className="w-full bg-transparent outline-none rounded-[12px] px-3 py-[12px]"
-                    style={{
-                      minHeight: reviewExpanded ? '72vh' : 360,
-                      background:'var(--input-bg)',
-                      border:'1px solid var(--input-border)',
-                      color:'var(--text)',
-                      transition:'min-height 260ms var(--ease)'
-                    }}
-                    value={data.systemPrompt}
-                    onChange={(e)=> setField('systemPrompt')(e.target.value)}
-                    readOnly={genPhase==='loading' || genPhase==='review'}
-                  />
-
-                  {/* Overlay content only during loading/review */}
-                  {(genPhase==='loading' || genPhase==='review') && (
+                <div style={{ position:'relative' }}>
+                  {/* Editable textarea when NOT in review */}
+                  {!inReview ? (
+                    <textarea
+                      className="w-full bg-transparent outline-none rounded-[12px] px-3 py-[12px]"
+                      style={{ minHeight: 360, background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+                      value={data.systemPrompt}
+                      onChange={(e)=> setField('systemPrompt')(e.target.value)}
+                    />
+                  ) : (
+                    // Review mode: auto-expanded, typing + inline diff
                     <div
-                      className={`absolute inset-0 rounded-[12px] px-3 py-[12px] overflow-auto ${genPhase==='review' && typingPreview.length<proposedPrompt.length ? 'va-caret' : ''}`}
+                      className={`rounded-[12px] ${typingPreview.length < (proposedPrompt?.length||0) ? 'va-caret' : ''}`}
                       style={{
-                        pointerEvents:'none',
+                        background:'var(--input-bg)',
+                        border:'1px solid var(--input-border)',
                         color:'var(--text)',
-                        background:'transparent'
+                        padding:'12px',
+                        maxHeight:'unset'
                       }}
                     >
-                      {/* During loading: show typed preview text */}
-                      {genPhase==='loading' && (
-                        <pre style={{ whiteSpace:'pre-wrap', margin:0 }}>{typingPreview || ' '}</pre>
-                      )}
-
-                      {/* During review: show inline diff inside the box */}
-                      {genPhase==='review' && proposedPrompt && (
-                        <InlineDiff base={basePromptRef.current} next={proposedPrompt} />
+                      {/* Typing stream (plain) while it types */}
+                      {typingPreview && typingPreview.length < (proposedPrompt?.length||0) ? (
+                        <pre style={{ whiteSpace:'pre-wrap', margin:0 }}>{typingPreview}</pre>
+                      ) : (
+                        // Once finished, render colored diff inline
+                        <DiffInline base={basePromptRef.current} next={proposedPrompt}/>
                       )}
                     </div>
                   )}
                 </div>
-
-                {/* Optional tiny summary below box during review */}
-                {(genPhase==='review' && !!changesSummary) && (
-                  <div className="mt-2 text-xs" style={{ color:'var(--text-muted)' }}>
-                    Summary: <span style={{ color:'var(--text)' }}>{changesSummary}</span>
-                  </div>
-                )}
               </div>
             </div>
           </Section>
@@ -1003,7 +1087,7 @@ ${cleanedList.map(l => `- ${l}`).join('\n')}`;
           <div
             className="fixed inset-0"
             style={{ zIndex: Z_OVERLAY, background:'rgba(6,8,10,.62)', backdropFilter:'blur(6px)' }}
-            onClick={()=>{ if (genPhase!=='loading') setShowGenerate(false); }}
+            onClick={()=>{ if (genPhase!=='loading') { setShowGenerate(false); setGenPhase('idle'); } }}
           />
           <div className="fixed inset-0 grid place-items-center px-4" style={{ zIndex: Z_MODAL }}>
             <div
@@ -1050,7 +1134,7 @@ ${cleanedList.map(l => `- ${l}`).join('\n')}`;
                     value={composerText}
                     onChange={(e)=>setComposerText(e.target.value)}
                     className="w-full bg-transparent outline-none rounded-[10px] px-3 py-2"
-                    placeholder="e.g., Make tone friendlier, add handoff rule to human after 3 failed attempts, collect name+email up front."
+                    placeholder="e.g., Friendlier tone, add human handoff after 3 failed tries, collect name+email first."
                     style={{ minHeight: 160, maxHeight: '40vh', background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
                   />
                 </div>
@@ -1063,15 +1147,10 @@ ${cleanedList.map(l => `- ${l}`).join('\n')}`;
                   <Toggle checked={autoTranslate} onChange={setAutoTranslate}/>
                 </div>
 
-                {/* NOTE: Preview now lives inside the prompt box. We keep the modal clean. */}
+                {/* Hint: the actual preview now happens *inside* the main System Prompt box */}
                 {genPhase==='loading' && (
-                  <div className="flex items-center gap-2 text-sm" style={{ color:'var(--text-muted)' }}>
-                    <Loader2 className="w-4 h-4 animate-spin" /> Generating preview in the prompt…
-                  </div>
-                )}
-                {genPhase==='review' && (
-                  <div className="text-xs" style={{ color:'var(--text-muted)' }}>
-                    Review the highlighted changes directly in the System Prompt box.
+                  <div className="text-xs flex items-center gap-2" style={{ color:'var(--text-muted)' }}>
+                    <Loader2 className="w-4 h-4 animate-spin" /> Generating draft and streaming it into the prompt…
                   </div>
                 )}
               </div>
@@ -1090,7 +1169,7 @@ ${cleanedList.map(l => `- ${l}`).join('\n')}`;
                     <button
                       onClick={onAccept}
                       className="w-full h-[44px] rounded-[10px] font-semibold"
-                      style={{ background:CTA, color:'#ffffff' }}
+                      style={{ background:CTA, color:'#0a0f0d' }}
                     >
                       Accept Changes
                     </button>
@@ -1109,7 +1188,7 @@ ${cleanedList.map(l => `- ${l}`).join('\n')}`;
                       onClick={onGenerate}
                       disabled={genPhase==='loading' || !composerText.trim()}
                       className="w-full h-[44px] rounded-[10px] font-semibold inline-flex items-center justify-center gap-2"
-                      style={{ background:CTA, color:'#ffffff', opacity: (!composerText.trim() ? .6 : 1) }}
+                      style={{ background:CTA, color:'#fff', opacity: (!composerText.trim() ? .6 : 1) }}
                     >
                       {genPhase==='loading' ? (<><Loader2 className="w-4 h-4 animate-spin" /> Generating…</>) : 'Generate'}
                     </button>
@@ -1166,7 +1245,7 @@ ${cleanedList.map(l => `- ${l}`).join('\n')}`;
             </div>
 
             <div className="p-3" style={{ borderTop:'1px solid rgba(255,255,255,.10)' }}>
-              <form onSubmit={(e)=>{ e.preventDefault(); /* wire real chat here */ }} className="flex items-center gap-2">
+              <form onSubmit={(e)=>{ e.preventDefault(); }} className="flex items-center gap-2">
                 <input
                   placeholder={`Message ${data.name || 'Assistant'}…`}
                   className="flex-1 rounded-md px-3 py-2 outline-none"
@@ -1182,55 +1261,5 @@ ${cleanedList.map(l => `- ${l}`).join('\n')}`;
         document.body
       )}
     </section>
-  );
-}
-
-/* ─────────── Section (expand anim) ─────────── */
-function Section({
-  title, icon, desc, children, defaultOpen = true
-}:{
-  title: string; icon: React.ReactNode; desc?: string; children: React.ReactNode; defaultOpen?: boolean;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  const innerRef = useRef<HTMLDivElement|null>(null);
-  const [h, setH] = useState<number>(0);
-  const measure = () => { if (innerRef.current) setH(innerRef.current.offsetHeight); };
-  useLayoutEffect(() => { measure(); }, [children, open]);
-
-  return (
-    <div className="mb-[12px]">
-      <div className="mb-[6px] text-sm font-medium" style={{ color:'var(--text-muted)' }}>{title}</div>
-
-      <div className="va-card">
-        <button onClick={()=>setOpen(v=>!v)} className="va-head w-full text-left" style={{ color:'var(--text)' }}>
-          <span className="min-w-0 flex items-center gap-3">
-            <span className="inline-grid place-items-center w-7 h-7 rounded-full" style={{ background:'rgba(89,217,179,.10)' }}>
-              {icon}
-            </span>
-            <span className="min-w-0">
-              <span className="block font-semibold truncate" style={{ fontSize:'var(--fz-title)' }}>{title}</span>
-              {desc ? <span className="block text-xs truncate" style={{ color:'var(--text-muted)' }}>{desc}</span> : null}
-            </span>
-          </span>
-          <span className="justify-self-end">
-            {open ? <ChevronUp className="w-4 h-4" style={{ color:'var(--text-muted)' }}/> :
-                    <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)' }}/>}
-          </span>
-        </button>
-
-        <div
-          style={{
-            height: open ? h : 0,
-            opacity: open ? 1 : 0,
-            transform: open ? 'translateY(0)' : 'translateY(-4px)',
-            transition: 'height 260ms var(--ease), opacity 230ms var(--ease), transform 260ms var(--ease)',
-            overflow:'hidden'
-          }}
-          onTransitionEnd={() => { if (open) measure(); }}
-        >
-          <div ref={innerRef} className="p-[var(--s-5)]">{children}</div>
-        </div>
-      </div>
-    </div>
   );
 }
