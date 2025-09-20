@@ -1,196 +1,226 @@
+// components/voice/WebCallButton.tsx
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Mic, Square, Play, X, Loader2 } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
 
-type Msg = { role: 'user' | 'assistant' | 'system'; content: string };
+type Props = {
+  model: string;
+  systemPrompt: string;
+  voiceName: string;
+  assistantName: string;
+  onClose?: () => void;
+
+  // NEW: live transcript callbacks
+  onUserTranscript?: (text: string, isFinal: boolean) => void;
+  onAssistantText?: (text: string, isFinal: boolean) => void;
+  onStateChange?: (state: 'idle'|'connecting'|'connected'|'error', errMsg?: string) => void;
+};
 
 export default function WebCallButton({
   model,
   systemPrompt,
   voiceName,
-  apiKey,               // pass the actual key (or fetch server-side token if you prefer)
-  assistantName = 'Assistant',
+  assistantName,
   onClose,
-}: {
-  model: string;
-  systemPrompt: string;
-  voiceName: string;
-  apiKey: string;
-  assistantName?: string;
-  onClose: () => void;
-}) {
-  const [recording, setRecording] = useState(false);
-  const [loading, setLoading] = useState<'none'|'transcribe'|'reply'>('none');
+  onUserTranscript,
+  onAssistantText,
+  onStateChange,
+}: Props) {
+  const [connecting, setConnecting] = useState(false);
+  const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string>('');
-  const [msgs, setMsgs] = useState<Msg[]>([
-    { role: 'system', content: systemPrompt },
-    { role: 'assistant', content: `Hi! I’m ${assistantName}. How can I help?` },
-  ]);
+  const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
+  const pcRef = useRef<RTCPeerConnection | null>(null);
+  const dcRef = useRef<RTCDataChannel | null>(null);
+  const micStreamRef = useRef<MediaStream | null>(null);
 
-  const mediaRecRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<BlobPart[]>([]);
+  // Buffers for partial streaming
+  const userBufRef = useRef<string>('');
+  const aiBufRef = useRef<string>('');
 
-  // TTS (use selected voice if available)
-  const voices = typeof window !== 'undefined' && 'speechSynthesis' in window
-    ? window.speechSynthesis.getVoices()
-    : [];
-  const ttsVoice = useMemo(() => {
-    const candidates = voices.filter(v => v.name.toLowerCase().includes((voiceName||'').split(' ')[0]?.toLowerCase()||''));
-    return candidates[0] || voices.find(v => v.lang?.startsWith('en')) || null;
-  }, [voices, voiceName]);
-
-  function speak(text: string) {
-    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
-    const u = new SpeechSynthesisUtterance(text);
-    if (ttsVoice) u.voice = ttsVoice;
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(u);
+  function bumpState(s: 'idle'|'connecting'|'connected'|'error', msg?: string) {
+    onStateChange?.(s, msg);
   }
 
-  // refresh voices (Chrome async quirk)
-  useEffect(() => {
-    if (!('speechSynthesis' in window)) return;
-    const fn = () => { /* trigger re-render by state swap if needed */ };
-    (window.speechSynthesis as any).onvoiceschanged = fn;
-    return () => { (window.speechSynthesis as any).onvoiceschanged = null; };
-  }, []);
-
-  async function startRec() {
+  async function startCall() {
     setError('');
+    setConnecting(true);
+    bumpState('connecting');
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mr = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-      chunksRef.current = [];
-      mr.ondataavailable = e => { if (e.data.size) chunksRef.current.push(e.data); };
-      mr.onstop = handleStop;
-      mr.start();
-      mediaRecRef.current = mr;
-      setRecording(true);
-    } catch (e:any) {
-      setError(e?.message || 'Microphone permission denied.');
-    }
-  }
-
-  function stopRec() {
-    mediaRecRef.current?.stop();
-    mediaRecRef.current?.stream.getTracks().forEach(t => t.stop());
-    setRecording(false);
-  }
-
-  async function handleStop() {
-    const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
-    chunksRef.current = [];
-
-    // 1) Transcribe
-    setLoading('transcribe');
-    const fd = new FormData();
-    fd.append('audio', blob, 'audio.webm');
-    try {
-      const tr = await fetch('/api/voice/transcribe', {
+      // 1) get ephemeral token from your backend
+      const tokenRes = await fetch('/api/voice/ephemeral', {
         method: 'POST',
-        headers: { 'x-openai-key': apiKey },
-        body: fd
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model, voiceName, systemPrompt }),
       });
-      if (!tr.ok) throw new Error('Transcription failed');
-      const { text } = await tr.json();
-      if (!text || !text.trim()) { setLoading('none'); return; }
+      const { token, error: tokenErr } = await tokenRes.json();
+      if (!tokenRes.ok || !token) throw new Error(tokenErr || 'Failed to get ephemeral token');
 
-      // push user msg
-      setMsgs(m => [...m, { role: 'user', content: text }]);
+      // 2) mic
+      const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+      micStreamRef.current = mic;
 
-      // 2) Ask assistant
-      setLoading('reply');
-      const rr = await fetch('/api/voice/reply', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-openai-key': apiKey
+      // 3) peer connection
+      const pc = new RTCPeerConnection({ iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }] });
+      pcRef.current = pc;
+
+      // remote audio sink
+      const remote = new MediaStream();
+      if (remoteAudioRef.current) {
+        remoteAudioRef.current.srcObject = remote;
+        remoteAudioRef.current.play().catch(()=>{});
+      }
+      pc.ontrack = (e) => {
+        e.streams[0]?.getAudioTracks().forEach(() => remote.addTrack(e.track));
+      };
+
+      // send mic
+      mic.getAudioTracks().forEach((t) => pc.addTrack(t, mic));
+      // request audio from model
+      pc.addTransceiver('audio', { direction: 'recvonly' });
+
+      // data channel to receive events (transcripts, deltas, etc.)
+      const dc = pc.createDataChannel('oai-events');
+      dcRef.current = dc;
+
+      dc.onmessage = (e) => {
+        // Try to parse JSON event
+        let ev: any = null;
+        try { ev = JSON.parse(String(e.data)); } catch { /* ignore non-json */ }
+
+        if (!ev || !ev.type) return;
+
+        // These event names cover the common Realtime payloads.
+        // Different previews may vary slightly; we handle broadly.
+        switch (ev.type) {
+          // USER (ASR) streaming text
+          case 'input_audio_buffer.transcript.delta':
+          case 'transcript.delta': {
+            userBufRef.current += ev.delta || ev.text || '';
+            onUserTranscript?.(userBufRef.current, false);
+            break;
+          }
+          case 'input_audio_buffer.transcript.completed':
+          case 'transcript.completed': {
+            onUserTranscript?.(userBufRef.current, true);
+            userBufRef.current = '';
+            break;
+          }
+
+          // ASSISTANT text streaming
+          case 'response.output_text.delta':
+          case 'response.delta': {
+            aiBufRef.current += ev.delta || ev.text || '';
+            onAssistantText?.(aiBufRef.current, false);
+            break;
+          }
+          case 'response.completed':
+          case 'response.output_text.completed': {
+            onAssistantText?.(aiBufRef.current, true);
+            aiBufRef.current = '';
+            break;
+          }
+
+          default: {
+            // console.debug('rt event', ev.type, ev);
+          }
+        }
+      };
+
+      // 4) SDP offer/answer
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      const sdpRes = await fetch(
+        `https://api.openai.com/v1/realtime?model=${encodeURIComponent(model || 'gpt-4o-realtime-preview')}`,
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/sdp' },
+          body: offer.sdp!,
+        }
+      );
+      if (!sdpRes.ok) throw new Error(`SDP exchange failed: ${await sdpRes.text()}`);
+      const answerSdp = await sdpRes.text();
+      await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
+
+      // 5) have the assistant greet
+      const greet = {
+        type: 'response.create',
+        response: {
+          modalities: ['audio'],
+          instructions: `You are ${assistantName}. Be concise and friendly.\n${systemPrompt || ''}`,
         },
-        body: JSON.stringify({
-          model,
-          systemPrompt,
-          messages: [...msgs.filter(m => m.role !== 'system'), { role: 'user', content: text }]
-        })
-      });
-      if (!rr.ok) throw new Error('Reply failed');
-      const { reply } = await rr.json();
+      };
+      const maybeSend = () => dc.readyState === 'open' && dc.send(JSON.stringify(greet));
+      if (dc.readyState === 'open') maybeSend();
+      else {
+        const iv = setInterval(() => {
+          if (dc.readyState === 'open') { clearInterval(iv); maybeSend(); }
+        }, 120);
+        setTimeout(() => clearInterval(iv), 3000);
+      }
 
-      // push assistant msg + speak
-      setMsgs(m => [...m, { role: 'assistant', content: reply }]);
-      speak(reply);
-      setLoading('none');
-    } catch (e:any) {
-      setLoading('none');
-      setError(e?.message || 'Something went wrong.');
+      setConnecting(false);
+      setConnected(true);
+      bumpState('connected');
+    } catch (e: any) {
+      const msg = e?.message || 'Call failed';
+      setError(msg);
+      setConnecting(false);
+      setConnected(false);
+      bumpState('error', msg);
+      stopCall(true);
     }
   }
+
+  function stopCall(silent?: boolean) {
+    try { dcRef.current?.close(); } catch {}
+    try { pcRef.current?.close(); } catch {}
+    try { micStreamRef.current?.getTracks().forEach((t) => t.stop()); } catch {}
+    dcRef.current = null; pcRef.current = null; micStreamRef.current = null;
+    setConnected(false);
+    if (!silent) bumpState('idle');
+  }
+
+  useEffect(() => () => stopCall(true), []);
 
   return (
     <aside
       className="fixed inset-y-0 right-0"
       style={{
-        zIndex: 9997,
-        width: 'min(560px,92vw)',
-        background:'var(--panel-bg)',
-        borderLeft:'1px solid rgba(255,255,255,.10)',
-        boxShadow:'-28px 0 80px rgba(0,0,0,.55)',
-        display:'grid', gridTemplateRows:'auto 1fr auto'
+        zIndex: 9997, width: 'min(620px,92vw)',
+        background:'var(--panel-bg,#0d0f11)', borderLeft:'1px solid rgba(255,255,255,.10)',
+        boxShadow:'-28px 0 80px rgba(0,0,0,.55)', display:'grid', gridTemplateRows:'auto auto'
       }}
-      aria-label="Voice chat"
     >
       <div className="flex items-center justify-between px-4 h-[64px]"
-           style={{ background:'var(--panel-bg)', borderBottom:'1px solid rgba(255,255,255,.1)' }}>
-        <div className="font-semibold">Chat with {assistantName}</div>
-        <button onClick={onClose} className="px-2 py-1 rounded border"
-                style={{ color:'var(--text)', borderColor:'var(--input-border)', background:'var(--panel-bg)' }}>
-          <X className="w-4 h-4" />
-        </button>
-      </div>
-
-      <div className="p-4 overflow-y-auto flex flex-col gap-3">
-        {msgs.filter(m => m.role !== 'system').map((m, i) => (
-          <div key={i}
-               style={{
-                 alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
-                 background: m.role === 'user' ? 'rgba(89,217,179,.12)' : 'rgba(255,255,255,.06)',
-                 border: '1px solid rgba(255,255,255,.10)',
-                 padding: '10px 12px',
-                 borderRadius: 12,
-                 maxWidth: '82%'
-               }}>
-            <div style={{ fontSize: 11, opacity: .65, marginBottom: 4 }}>
-              {m.role === 'user' ? 'You' : assistantName}
-            </div>
-            <div>{m.content}</div>
-          </div>
-        ))}
-        {loading !== 'none' && (
-          <div style={{ opacity:.8, fontSize:13, display:'inline-flex', alignItems:'center', gap:8 }}>
-            <Loader2 className="w-4 h-4 animate-spin" /> {loading === 'transcribe' ? 'Transcribing…' : 'Thinking…'}
-          </div>
-        )}
-        {error && <div style={{ color:'#ef4444', fontSize:13 }}>{error}</div>}
-      </div>
-
-      <div className="p-3" style={{ borderTop:'1px solid rgba(255,255,255,.10)' }}>
+           style={{ borderBottom:'1px solid rgba(255,255,255,.1)', color:'var(--text,#e6f1ef)' }}>
+        <div className="font-semibold">Live call with {assistantName || 'Assistant'}</div>
         <div className="flex items-center gap-2">
-          {!recording ? (
-            <button onClick={startRec} className="h-11 px-4 rounded-md font-semibold inline-flex items-center gap-2"
-                    style={{ background:'var(--panel-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}>
-              <Mic className="w-4 h-4" /> Hold to speak
-            </button>
-          ) : (
-            <button onClick={stopRec} className="h-11 px-4 rounded-md font-semibold inline-flex items-center gap-2"
-                    style={{ background:'rgba(239,68,68,.15)', border:'1px solid rgba(239,68,68,.35)', color:'#ffdddd' }}>
-              <Square className="w-4 h-4" /> Stop
-            </button>
-          )}
-          <div style={{ fontSize:12, opacity:.7 }}>
-            Model: {model} • Voice: {voiceName}
-          </div>
+          <button
+            onClick={connected ? () => stopCall() : startCall}
+            className="px-3 h-[34px] rounded text-sm font-semibold"
+            style={{
+              background: connected ? 'rgba(239,68,68,.85)' : '#59d9b3',
+              color: connected ? '#fff' : '#0a0f0d',
+              border: '1px solid rgba(255,255,255,.10)',
+            }}
+          >
+            {connecting ? 'Connecting…' : connected ? 'Hang up' : 'Start call'}
+          </button>
+          <button
+            onClick={() => { stopCall(true); onClose?.(); }}
+            className="px-3 h-[34px] rounded border text-sm"
+            style={{ borderColor:'rgba(255,255,255,.15)', color:'var(--text,#e6f1ef)', background:'transparent' }}
+          >
+            Close
+          </button>
         </div>
       </div>
+
+      {/* Hidden but playing remote audio */}
+      <audio ref={remoteAudioRef} autoPlay playsInline />
     </aside>
   );
 }
