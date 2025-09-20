@@ -679,6 +679,14 @@ export default function VoiceAgentSection() {
     if (IS_CLIENT) requestAnimationFrame(step);
   };
 
+  /** Normalize raw composer text (trim, collapse whitespace, normalize line breaks). */
+  const normalizeComposer = (s: string) =>
+    (s || '')
+      .replace(/\r\n/g, '\n')
+      .replace(/\u00A0/g, ' ')
+      .replace(/[ \t]+\n/g, '\n')
+      .trim();
+
   const onOpenGenerate = () => {
     setComposerText('');
     setProposedPrompt('');
@@ -688,35 +696,56 @@ export default function VoiceAgentSection() {
     setShowGenerate(true);
   };
 
-  // Replace if full prompt pasted, otherwise merge
+  // Replace if full prompt pasted, otherwise merge (with language-aware options)
   const onGenerate = () => {
-    if (!composerText.trim()) return;
-    setGenPhase('loading');
-
-    const base = (data.systemPrompt && data.systemPrompt.trim().length > 0)
-      ? data.systemPrompt
-      : (DEFAULT_PROMPT || PROMPT_SKELETON);
-
-    basePromptRef.current = base;
-
-    let merged = '';
-    let summary = '';
-
-    if (looksLikeFullPrompt(composerText)) {
-      merged = normalizeFullPrompt(composerText);
-      summary = 'Replaced prompt (manual paste).';
-    } else {
-      const out = applyInstructions(base, composerText);
-      merged = out.merged;
-      summary = out.summary;
+    const raw = normalizeComposer(composerText);
+    if (!raw) {
+      setToast('Type something to generate.');
+      return;
     }
 
-    // Close overlay, enter review, type it in
-    setShowGenerate(false);
-    setProposedPrompt(merged);
-    setGenPhase('review');
-    runTypingIntoBox(merged);
-    setChangesSummary(summary || 'Updated.');
+    setGenPhase('loading');
+
+    try {
+      // 1) Choose a sane base (never empty) and normalize
+      const base = normalizeFullPrompt(
+        (data.systemPrompt && data.systemPrompt.trim().length > 0)
+          ? data.systemPrompt
+          : (DEFAULT_PROMPT || PROMPT_SKELETON)
+      );
+      basePromptRef.current = base;
+
+      // 2) Build the next prompt
+      let merged = '';
+      let summary = '';
+
+      if (looksLikeFullPrompt(raw)) {
+        // Full prompt paste → normalize and replace
+        merged = normalizeFullPrompt(raw);
+        summary = 'Replaced entire prompt (manual paste).';
+      } else {
+        // Free-text → apply instructions with language hint
+        const out = applyInstructions(base, raw, { agentLanguage: data.language || 'English' });
+        merged = normalizeFullPrompt(out.merged || '');
+        summary = out.summary || 'Updated.';
+      }
+
+      if (!merged) {
+        throw new Error('Generated prompt was empty after normalization.');
+      }
+
+      // 3) Enter review with type-in animation + diff
+      setShowGenerate(false);
+      setProposedPrompt(merged);
+      setGenPhase('review');
+      runTypingIntoBox(merged);
+      setChangesSummary(summary);
+    } catch (err: any) {
+      console.error('Prompt generation failed:', err);
+      setGenPhase('editing'); // keep overlay open so the user can adjust
+      setToast(err?.message ? `Generate failed: ${err.message}` : 'Generate failed.');
+      setTimeout(() => setToast(''), 2400);
+    }
   };
 
   const onAccept = async () => {
