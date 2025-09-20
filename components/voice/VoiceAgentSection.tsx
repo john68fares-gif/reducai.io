@@ -9,11 +9,8 @@ import {
   KeyRound, Play, Square, Pause, X
 } from 'lucide-react';
 import { scopedStorage } from '@/utils/scoped-storage';
-
-// ⬇️ ADD THIS: import the real call panel (your fixed version of WebCallButton)
 import WebCallButton from '@/components/voice/WebCallButton';
 
-// Try to import prompt-engine, but guard every call.
 import {
   applyInstructions as _applyInstructions,
   DEFAULT_PROMPT as _DEFAULT_PROMPT,
@@ -171,7 +168,6 @@ type AgentData = {
   numerals: boolean;
 };
 
-/* ─────────── UX: blank template for new assistants ─────────── */
 const BLANK_TEMPLATE_NOTE =
   'This is a blank template with minimal defaults. You can change the model and messages, or click Generate to tailor the prompt to your business.';
 
@@ -186,7 +182,7 @@ const PROMPT_SKELETON =
 
 [Error Handling / Fallback]`;
 
-/* ─────────── local safe shims (used if prompt-engine fns are missing) ─────────── */
+/* ─────────── prompt-engine shims ─────────── */
 const looksLikeFullPromptSafe = (raw: string) => {
   const t = (raw || '').toLowerCase();
   return ['[identity]', '[style]', '[response guidelines]', '[task & goals]', '[error handling', '[notes]'].some(h => t.includes(h));
@@ -235,11 +231,10 @@ ${sections.notes ? `[Notes]\n${sections.notes}\n` : ''}`;
   return out.trim();
 };
 
-// map a natural string into the 5 sections
 const applyInstructionsSafe = (base: string, raw: string) => {
   const text = (raw || '').trim();
 
-  const industryMatch = text.match(/assistant\s+for\s+(a|an|the)?\s*([^.;:,]+?)(\s+clinic|\s+store|\s+company|\s+business)?(\.|;|,|$)/i);
+  const industryMatch = text.match(/assistant\s+for\s+(a|an|the)?\s*([^.;:,]+?)(\s+(clinic|store|company|business))?(\.|;|,|$)/i);
   const industry = industryMatch ? industryMatch[2].trim() : '';
 
   const toneMatch = text.match(/tone\s*[:=]\s*([a-z,\s-]+)/i) || text.match(/\b(friendly|formal|casual|professional|empathetic|playful)\b/i);
@@ -295,7 +290,6 @@ ${errors}`;
   return { merged, summary: `Applied ${industry ? `industry=${industry}; ` : ''}${tone ? `tone=${tone}; ` : ''}${tasks.length ? `tasks=${tasks.join(',')}; ` : ''}`.trim() || 'Updated.' };
 };
 
-/* ─────────── choose real engine or shims at runtime ─────────── */
 const looksLikeFullPromptRT = (raw: string) =>
   isFn(_looksLikeFullPrompt) ? !!_looksLikeFullPrompt(raw) : looksLikeFullPromptSafe(raw);
 
@@ -723,15 +717,13 @@ export default function VoiceAgentSection() {
   const [proposedPrompt, setProposedPrompt] = useState('');
   const [changesSummary, setChangesSummary] = useState('');
 
-  // chat state (kept for inline chat UX if you still want text chat)
+  // chat state used for inline chat view (optional)
   const [msgs, setMsgs] = useState<ChatMsg[]>(() => [
     { id: 'sys', role: 'system', text: (DEFAULT_AGENT.systemPrompt || '').trim() },
     { id: 'hello', role: 'assistant', text: 'Hi! Ready when you are.' }
   ]);
-  const [input, setInput] = useState('');
-  const [sending, setSending] = useState(false);
 
-  // voice preview + TTS (browser speech synthesis for quick voice previews)
+  // voice preview + TTS (browser speech synthesis for quick previews)
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   useEffect(() => {
     if (!IS_CLIENT || !('speechSynthesis' in window)) return;
@@ -749,20 +741,7 @@ export default function VoiceAgentSection() {
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(u);
   }
-  function speak(text: string){
-    if (!IS_CLIENT || !('speechSynthesis' in window) || !text) return;
-    const u = new SpeechSynthesisUtterance(text);
-    const byName = voices.find(v => v.name.toLowerCase().includes((data.voiceName || '').split(' ')[0]?.toLowerCase() || ''));
-    const en = voices.find(v => v.lang?.startsWith('en'));
-    if (byName) u.voice = byName; else if (en) u.voice = en;
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(u);
-  }
   const stopPreview = () => { if (IS_CLIENT && 'speechSynthesis' in window) window.speechSynthesis.cancel(); };
-
-  // helper: add chat message
-  const pushChat = (role: ChatMsg['role'], text: string) =>
-    setMsgs(m => [...m, { id: String(Date.now())+'_'+Math.random().toString(36).slice(2,7), role, text }]);
 
   /* listen for active rail id */
   useEffect(() => {
@@ -841,200 +820,19 @@ export default function VoiceAgentSection() {
     finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
   }
 
-  /* ── Generate overlay logic ── */
-  const runTypingIntoBox = (full:string) => {
-    setTypingPreview('');
-    let i = 0;
-    const step = () => {
-      i += Math.max(1, Math.floor((full.length || 0) / 120)); // ~120 frames
-      setTypingPreview(full.slice(0, Math.min(i, full.length)));
-      if (i < full.length && IS_CLIENT) requestAnimationFrame(step);
-    };
-    if (IS_CLIENT) requestAnimationFrame(step);
-  };
-
-  const onOpenGenerate = () => {
-    setComposerText('');
-    setProposedPrompt('');
-    setTypingPreview('');
-    setChangesSummary('');
-    setGenPhase('editing');
-    setShowGenerate(true);
-  };
-
-  const onGenerate = () => {
-    const raw = safeTrim(composerText);
-    if (!raw) return;
-
-    setGenPhase('loading');
-
-    try {
-      const base = nonEmpty(data.systemPrompt) ? data.systemPrompt : DEFAULT_PROMPT_RT;
-      basePromptRef.current = base;
-
-      let merged = '';
-      let summary = '';
-
-      if (looksLikeFullPromptRT(raw)) {
-        const norm = normalizeFullPromptRT(raw);
-        merged = nonEmpty(norm) ? norm : base;
-        summary = 'Replaced prompt (manual paste).';
-      } else {
-        const out = applyInstructionsRT(base, raw) || {};
-        merged = nonEmpty(out.merged) ? out.merged : base;
-        summary = nonEmpty(out.summary) ? out.summary : 'Updated.';
-      }
-
-      // Drop the blank template note after first generation
-      merged = merged.replace(/^\s*#\s*This is a blank template[\s\S]*?$/im, '').trim() + '\n';
-
-      setShowGenerate(false);
-      setProposedPrompt(merged);
-      setGenPhase('review');
-      runTypingIntoBox(merged);
-      setChangesSummary(summary);
-    } catch (err) {
-      console.error('Generate failed:', err);
-      setGenPhase('editing');
-      setToast('Generate failed — parser fallback used. Try simpler wording.');
-      setTimeout(() => setToast(''), 2400);
+  /* ─────────── REALTIME CALL LAUNCH ─────────── */
+  const openCall = () => {
+    const key = apiKeys.find(k => k.id === data.apiKeyId)?.key || '';
+    if (!key) {
+      setToast('Select an OpenAI API key first.');
+      setTimeout(()=>setToast(''), 1800);
+      return;
     }
+    setShowCall(true);
   };
-
-  const onAccept = async () => {
-    if (!activeId) return;
-    const nextPrompt = nonEmpty(proposedPrompt) ? proposedPrompt : data.systemPrompt;
-    const snapshot = {
-      prompt: nextPrompt,
-      model: data.model,
-      temp: 0,
-      name: data.name,
-      summary: changesSummary
-    };
-    pushVersion(activeId, snapshot);
-    setData(p => ({ ...p, systemPrompt: nextPrompt }));
-    setMsgs(m => m.map(x => x.role==='system' ? { ...x, text: nextPrompt } : x));
-    setProposedPrompt('');
-    setTypingPreview('');
-    setChangesSummary('');
-    setGenPhase('idle');
-    setToast('Prompt updated');
-  };
-
-  const onDecline = () => {
-    setProposedPrompt('');
-    setTypingPreview('');
-    setChangesSummary('');
-    setGenPhase('idle');
-  };
-
-  /* ======== TRANSCRIBER (client->server upload) ======== */
-  const [recorder, setRecorder] = useState<MediaRecorder|null>(null);
-  const [recording, setRecording] = useState(false);
-
-  async function startRecording() {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-        ? 'audio/webm;codecs=opus'
-        : (MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '');
-      const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
-      const localChunks: BlobPart[] = [];
-      rec.ondataavailable = (e) => { if (e.data?.size) localChunks.push(e.data); };
-      rec.onstop = async () => {
-        setRecording(false);
-        try {
-          const blob = new Blob(localChunks, { type: mime || 'audio/webm' });
-          await handleTranscribe(blob);
-        } finally {
-          stream.getTracks().forEach(t => t.stop());
-        }
-      };
-      setRecorder(rec);
-      setRecording(true);
-      rec.start();
-    } catch {
-      pushChat('assistant', 'Microphone permission denied or unsupported.');
-    }
-  }
-  function stopRecording() {
-    try { recorder?.stop(); } catch {}
-  }
-
-  async function handleTranscribe(blob: Blob) {
-    const form = new FormData();
-    form.append('audio', blob, 'clip.webm');
-    form.append('provider', (data.asrProvider || 'deepgram') as string);
-    const model =
-      data.asrProvider === 'deepgram'
-        ? (data.asrModel?.toLowerCase().replace(/\s+/g,'-') || 'nova-2')
-        : (data.asrModel || 'whisper-1');
-    form.append('model', model);
-    if (data.language) form.append('language', data.language);
-    form.append('numerals', String(!!data.numerals));
-    form.append('denoise', String(!!data.denoise));
-
-    try {
-      const r = await fetch('/api/voice/transcribe', { method: 'POST', body: form });
-      if (!r.ok) {
-        const t = await r.text();
-        pushChat('assistant', `Transcribe failed: ${t.slice(0,180)}…`);
-        return;
-      }
-      const j = await r.json();
-      const transcript = String(j.text || '').trim();
-      if (!transcript) {
-        pushChat('assistant', 'I couldn’t hear anything. Try again?');
-        return;
-      }
-      await sendUserText(transcript);
-    } catch {
-      pushChat('assistant', 'Transcriber error. Try again.');
-    }
-  }
-
-  /* ======== LLM call (safe stub) ======== */
-  async function sendToModel(userText: string): Promise<string> {
-    const system = data.systemPrompt || DEFAULT_AGENT.systemPrompt;
-    try {
-      const r = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type':'application/json' },
-        body: JSON.stringify({
-          model: data.model,
-          provider: data.provider,
-          system,
-          messages: msgs.filter(m => m.role!=='system').concat({ id: 'u_tmp', role:'user', text: userText })
-        })
-      });
-      if (r.ok) {
-        const j = await r.json().catch(()=>null);
-        const reply = j?.reply || j?.text || j?.message || '';
-        if (reply) return String(reply);
-      }
-    } catch {/* ignore and fall back */}
-    return `You said: “${userText}”. (Connect /api/chat for real answers.)`;
-  }
-
-  async function sendUserText(text: string) {
-    const t = text.trim();
-    if (!t) return;
-    pushChat('user', t);
-    setSending(true);
-    try {
-      const reply = await sendToModel(t);
-      pushChat('assistant', reply || '(no reply)');
-      speak(reply);
-    } catch {
-      pushChat('assistant', 'Sorry — I had trouble responding.');
-    } finally {
-      setSending(false);
-    }
-  }
 
   /* ─────────── UI ─────────── */
   const inInlineReview = genPhase === 'review' && !showGenerate;
-  const typingDone = nonEmpty(proposedPrompt) && (typingPreview.length >= (proposedPrompt?.length || 0));
 
   return (
     <section className="va-scope" style={{ background:'var(--bg)', color:'var(--text)' }}>
@@ -1067,7 +865,7 @@ export default function VoiceAgentSection() {
             </button>
 
             <button
-              onClick={()=>{ setShowCall(true); }}
+              onClick={openCall}
               className="inline-flex items-center gap-2 rounded-[10px] select-none"
               style={{ height:'var(--control-h)', padding:'0 18px', background:CTA, color:'#ffffff', fontWeight:700, boxShadow:'0 10px 22px rgba(89,217,179,.20)' }}
               onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA_HOVER)}
@@ -1150,7 +948,7 @@ export default function VoiceAgentSection() {
                     <button
                       className="inline-flex items-center gap-2 rounded-[10px] text-sm"
                       style={{ height:36, padding:'0 12px', background:CTA, color:'#fff', border:'1px solid rgba(255,255,255,.08)' }}
-                      onClick={onOpenGenerate}
+                      onClick={()=>{ setComposerText(''); setProposedPrompt(''); setTypingPreview(''); setChangesSummary(''); setGenPhase('editing'); setShowGenerate(true); }}
                     >
                       <Wand2 className="w-4 h-4" /> Generate
                     </button>
@@ -1167,7 +965,7 @@ export default function VoiceAgentSection() {
                     />
                   ) : (
                     <div
-                      className={`rounded-[12px] ${typingPreview.length < (proposedPrompt?.length||0) ? 'va-caret' : ''}`}
+                      className={`rounded-[12px]`}
                       style={{
                         background:'var(--input-bg)',
                         border:'1px solid var(--input-border)',
@@ -1176,43 +974,10 @@ export default function VoiceAgentSection() {
                         maxHeight:'unset'
                       }}
                     >
-                      {typingPreview && typingPreview.length < (proposedPrompt?.length||0) ? (
-                        <pre style={{ whiteSpace:'pre-wrap', margin:0 }}>{typingPreview}</pre>
-                      ) : (
-                        <DiffInline base={basePromptRef.current} next={proposedPrompt}/>
-                      )}
+                      <DiffInline base={basePromptRef.current} next={proposedPrompt}/>
                     </div>
                   )}
                 </div>
-
-                {inInlineReview && (
-                  <div className="mt-2 flex flex-wrap items-center gap-2">
-                    {changesSummary ? (
-                      <span className="text-xs px-2 py-1 rounded-[8px]"
-                            style={{ background:'rgba(89,217,179,.10)', border:'1px solid rgba(89,217,179,.22)', color:'var(--text)' }}>
-                        {changesSummary}
-                      </span>
-                    ) : null}
-
-                    <div className="ml-auto flex items-center gap-2">
-                      <button
-                        onClick={onDecline}
-                        className="h-[38px] px-4 rounded-[10px]"
-                        style={{ background:'var(--panel)', border:'1px solid var(--input-border)', color:'var(--text)', fontWeight:600 }}
-                      >
-                        Decline
-                      </button>
-                      <button
-                        onClick={onAccept}
-                        disabled={!typingDone}
-                        className="h-[38px] px-4 rounded-[10px] font-semibold"
-                        style={{ background: typingDone ? CTA : 'rgba(89,217,179,.35)', color:'#0a0f0d' }}
-                      >
-                        Accept Changes
-                      </button>
-                    </div>
-                  </div>
-                )}
               </div>
             </div>
           </Section>
@@ -1367,8 +1132,7 @@ export default function VoiceAgentSection() {
               {/* Body */}
               <div className="px-6 py-5 space-y-3">
                 <div className="text-xs" style={{ color:'var(--text-muted)' }}>
-                  Tip: just type something like “assistant for a dental clinic; tone friendly; handle booking and FAQs”.
-                  You don’t need headers — the generator auto-detects and routes it.
+                  Tip: type something like “assistant for a dental clinic; tone friendly; handle booking and FAQs”.
                 </div>
                 <div
                   className="rounded-[10px]"
@@ -1394,7 +1158,33 @@ export default function VoiceAgentSection() {
                   Cancel
                 </button>
                 <button
-                  onClick={onGenerate}
+                  onClick={()=>{
+                    const raw = safeTrim(composerText);
+                    if (!raw) return;
+                    try {
+                      const base = nonEmpty(data.systemPrompt) ? data.systemPrompt : DEFAULT_PROMPT_RT;
+                      (basePromptRef as any).current = base;
+                      let merged = '';
+                      let summary = '';
+                      if (looksLikeFullPromptRT(raw)) {
+                        const norm = normalizeFullPromptRT(raw);
+                        merged = nonEmpty(norm) ? norm : base;
+                        summary = 'Replaced prompt (manual paste).';
+                      } else {
+                        const out = applyInstructionsRT(base, raw) || {};
+                        merged = nonEmpty(out.merged) ? out.merged : base;
+                        summary = nonEmpty(out.summary) ? out.summary : 'Updated.';
+                      }
+                      merged = merged.replace(/^\s*#\s*This is a blank template[\s\S]*?$/im, '').trim() + '\n';
+                      setShowGenerate(false);
+                      setProposedPrompt(merged);
+                      setChangesSummary(summary);
+                      setGenPhase('review');
+                    } catch {
+                      setToast('Generate failed — try simpler wording.');
+                      setTimeout(()=>setToast(''), 2200);
+                    }
+                  }}
                   disabled={!composerText.trim()}
                   className="w-full h-[44px] rounded-[10px] font-semibold inline-flex items-center justify-center gap-2"
                   style={{ background:CTA, color:'#0a0f0d', opacity: (!composerText.trim() ? .6 : 1) }}
@@ -1408,7 +1198,7 @@ export default function VoiceAgentSection() {
         document.body
       ) : null}
 
-      {/* ─────────── REAL voice/call panel (uses section state) ─────────── */}
+      {/* ─────────── Voice/Call panel (WebRTC) ─────────── */}
       {IS_CLIENT ? createPortal(
         <>
           <div
@@ -1423,7 +1213,8 @@ export default function VoiceAgentSection() {
           />
           {showCall && (
             <WebCallButton
-              model={data.model}
+              // force a realtime-capable model for the call
+              model={'gpt-4o-realtime-preview'}
               systemPrompt={data.systemPrompt}
               voiceName={data.voiceName}
               assistantName={data.name || 'Assistant'}
