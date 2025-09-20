@@ -1,56 +1,25 @@
 // lib/prompt-engine.ts
-/**
- * Prompt Engine — assemble, normalize, and extend system prompts.
- *
- * Works with lib/prompt-presets.ts (PRESETS, TONE_CANONICAL, etc.)
- *
- * Features:
- * - assemblePromptFromPreset: build full system prompt from a preset, brand, tone, booking, services
- * - looksLikeFullPrompt / normalizeFullPrompt: detect and clean pasted full prompts
- * - generateFromFreeText: convert short user instructions into added professional bullets (bucketed)
- * - applyInstructions: wrapper that returns merged prompt + human-readable summary + diff rows
- *
- * This file is intentionally framework/library-agnostic and test-friendly.
- */
+/* =====================================================================
+   Prompt Engine (v2) — presets + configs + robust merging (Next-safe)
+   ===================================================================== */
 
-import {
-  PRESETS,
-  IndustryKey,
-  toneToStyleSentence,
-  TONE_CANONICAL,
-  DEFAULT_TONE,
-  bookingToText,
-  Preset,
-  DiffRow,
-} from './prompt-presets';
-
-/* --------------------- Types --------------------- */
-
-export type GenerateOptions = {
-  agentLanguage?: string; // reserved for future i18n normalization
-};
-
-export type GenerateResult = {
-  nextPrompt: string;
-  diff: DiffRow[];
-  added: number;
-  removed: number;
-  bucketsAdded: Partial<Record<string, number>>;
-};
-
-export type ApplyResult = {
-  merged: string;
-  summary: string;
-  diff: DiffRow[];
-};
-
-/* --------------------- Utilities --------------------- */
-
-/**
- * Ensure the five canonical blocks exist and are in order.
- * If base is missing some headers we use a skeleton from PRESETS generic shape.
- */
+/* ───────── Canonical headers ───────── */
 const HEADERS = [
+  '[Identity]',
+  '[Style]',
+  '[Response Guidelines]',
+  '[Task & Goals]',
+  '[Error Handling / Fallback]',
+] as const;
+
+type Bucket =
+  | '[Identity]'
+  | '[Style]'
+  | '[Response Guidelines]'
+  | '[Task & Goals]'
+  | '[Error Handling / Fallback]';
+
+const ORDER: Bucket[] = [
   '[Identity]',
   '[Style]',
   '[Response Guidelines]',
@@ -58,114 +27,386 @@ const HEADERS = [
   '[Error Handling / Fallback]',
 ];
 
-function ensureBlocksOrder(raw: string): string {
-  if (!raw || typeof raw !== 'string') return HEADERS.join('\n\n');
-  // If it already contains all headers, return as-is (but preserve order).
-  const hasAll = HEADERS.every(h => raw.includes(h));
-  if (hasAll) {
-    // Re-order into canonical order to avoid weird variants
-    const map = splitIntoBlocks(raw);
-    return joinBlocks(map);
-  }
-  return HEADERS.join('\n\n');
+/* ───────── Utilities ───────── */
+
+function isJunkLine(s: string): boolean {
+  const t = (s || '').trim().toLowerCase();
+  if (!t) return true;
+  // throwaways / artifacts
+  if (t === '-' || t === '—' || t === 'assistant' || t === 'assistant.' || t === '.') return true;
+  if (/^[\-\u2013\u2014\.\,\;:]+$/.test(t)) return true; // only punctuation/bullets
+  // extremely short throwaways
+  if (t.length <= 1) return true;
+  return false;
 }
 
-/* --------------------- Block parsing helpers --------------------- */
-
-type BlocksMap = Record<string, string[]>;
-
-function emptyBlocksMap(): BlocksMap {
-  const out: BlocksMap = {};
-  for (const h of HEADERS) out[h] = [];
+function dedupe<T>(arr: T[]): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const x of arr) {
+    const k = String(x).trim().toLowerCase();
+    if (!seen.has(k)) {
+      seen.add(k);
+      out.push(x);
+    }
+  }
   return out;
 }
 
-/**
- * Split a prompt text into canonical blocks.
- * Keeps original lines (non-header lines) and preserves spacing minimally.
- */
-export function splitIntoBlocks(base: string): BlocksMap {
-  const safe = ensureBlocksOrder(base);
-  const map = emptyBlocksMap();
-  const lines = safe.split('\n');
-  let current: string | null = null;
+function bullets(list: string[]): string {
+  const lines = list.map(s => s.trim()).filter(Boolean).filter(s => !isJunkLine(s));
+  return lines.length ? `- ${lines.join('\n- ')}` : '(none)';
+}
 
-  for (let rawLine of lines) {
-    const line = rawLine ?? '';
-    const trimmed = line.trim();
-    if (HEADERS.includes(trimmed)) {
-      current = trimmed;
-      continue;
+function ensureNonEmpty(list: string[], fallbacks: string[]): string[] {
+  const cleaned = dedupe(list).filter(s => !isJunkLine(s));
+  if (cleaned.length) return cleaned;
+  return fallbacks;
+}
+
+function toLines(block: string): string[] {
+  return (block || '')
+    .replace(/^\s*-\s*/gm, '') // strip leading bullets
+    .split('\n')
+    .map(s => s.trim())
+    .filter(Boolean)
+    .filter(s => !isJunkLine(s));
+}
+
+/* ───────── Base default prompt (safe, compact) ───────── */
+export const DEFAULT_PROMPT =
+`[Identity]
+- You are a versatile AI assistant for this business. Represent the brand professionally and help users achieve their goals.
+
+[Style]
+- Clear, concise, friendly. Prefer 2–4 short sentences per turn.
+- Confirm understanding with a brief paraphrase when the request is complex.
+
+[Response Guidelines]
+- Ask a clarifying question when essential info is missing.
+- Cite or link sources when referencing external facts (if available).
+- Do not fabricate; say when you don’t know or need to check.
+- Summarize next steps at the end when the user has a multi-step task.
+
+[Task & Goals]
+- Qualify the user’s need, answer relevant FAQs, and guide to scheduling, purchase, or escalation.
+- Offer to collect structured info (name, contact, preferred time) when booking or follow-up is needed.
+
+[Error Handling / Fallback]
+- If uncertain, ask a specific clarifying question.
+- If a tool/endpoint fails, apologize briefly and offer an alternative or human handoff.`;
+
+/* ───────── Presets (add more anytime) ───────── */
+
+type Preset = {
+  identity: string[];
+  style: string[];
+  guidelines: string[];
+  tasks: string[];
+  fallbacks: string[];
+  seed?: string; // optional extra notes block appended after sections
+};
+
+const PRESETS: Record<string, Preset> = {
+  dentist: {
+    identity: [
+      'You are a virtual front-desk assistant for a dental clinic.',
+      'You handle new and existing patients professionally and empathetically.',
+    ],
+    style: [
+      'Warm, reassuring, matter-of-fact.',
+      'Avoid overwhelming the user with medical jargon; explain in plain language.',
+    ],
+    guidelines: [
+      'Never diagnose; provide general info and recommend an appointment for evaluation.',
+      'Offer options for cleaning, whitening, fillings, crowns, implants, orthodontics, and emergency visits if relevant.',
+      'Collect patient info securely: full name, phone/email, preferred date/time, reason for visit.',
+    ],
+    tasks: [
+      'Qualify the need (pain, cleaning, follow-up).',
+      'Offer appointment slots or a booking link.',
+      'Explain insurance acceptance and payment options at a high level.',
+    ],
+    fallbacks: [
+      'If the user reports severe pain/swelling/fever/trauma, advise urgent evaluation and prioritize an emergency slot.',
+    ],
+    seed: '',
+  },
+  restaurant: {
+    identity: [
+      'You are a reservation and menu assistant for a restaurant.',
+    ],
+    style: [
+      'Enthusiastic, concise, helpful.',
+    ],
+    guidelines: [
+      'Provide hours, location, dress code, and parking when asked.',
+      'Offer dietary options and highlight top dishes.',
+    ],
+    tasks: [
+      'Take reservations (date, time, party size, contact).',
+      'Offer waitlist, special requests, and celebration notes.',
+    ],
+    fallbacks: [
+      'If no availability, propose closest alternatives and waitlist.',
+    ],
+  },
+  real_estate: {
+    identity: [
+      'You assist a real estate agency with buyer/seller inquiries.',
+    ],
+    style: ['Professional, concise, optimistic.'],
+    guidelines: [
+      'Never claim property features not verified; offer to check.',
+      'Summarize listings with beds/baths/price/location/highlights.',
+    ],
+    tasks: [
+      'Qualify budget, location, timelines; book tours; send disclosures on request.',
+    ],
+    fallbacks: [
+      'If data is missing/outdated, say so and offer to confirm with an agent.',
+    ],
+  },
+  ecommerce: {
+    identity: ['You are a shopping assistant for an e-commerce store.'],
+    style: ['Friendly, conversion-focused, brief.'],
+    guidelines: [
+      'Clarify user intents: discover, compare, troubleshoot, return.',
+      'Provide clear return/shipping policies (if known) or link to policy page.',
+    ],
+    tasks: [
+      'Recommend products, compare features/price, guide to checkout.',
+    ],
+    fallbacks: [
+      'If inventory is unknown, offer to notify or suggest similar items.',
+    ],
+  },
+  saas: {
+    identity: ['You are a customer success assistant for a SaaS product.'],
+    style: ['Supportive, pragmatic, crisp.'],
+    guidelines: [
+      'Use step-by-step instructions for setup/questions.',
+      'Link to specific docs pages when relevant.',
+    ],
+    tasks: [
+      'Qualify use-case, recommend plan, help with onboarding and troubleshooting.',
+    ],
+    fallbacks: [
+      'If an issue persists, collect logs and escalate to human support.',
+    ],
+  },
+  hotel: {
+    identity: ['You are a reservation assistant for a hotel.'],
+    style: ['Polite, upbeat, concise.'],
+    guidelines: [
+      'Provide room types, amenities, check-in/out times, and pet/parking policies.',
+    ],
+    tasks: [
+      'Check availability by dates, guests; collect contact to finalize booking.',
+    ],
+    fallbacks: [
+      'If fully booked, suggest nearby dates or partner properties.',
+    ],
+  },
+  salon: {
+    identity: ['You are a booking assistant for a salon/spa.'],
+    style: ['Warm, welcoming, concise.'],
+    guidelines: [
+      'List services (cut, color, styling, nails, massage) with durations if known.',
+    ],
+    tasks: [
+      'Offer times, match stylists, capture contact preferences.',
+    ],
+    fallbacks: [
+      'If no slot, propose earliest availability and waitlist.',
+    ],
+  },
+  legal: {
+    identity: ['You are an intake assistant for a law firm.'],
+    style: ['Respectful, clear, careful.'],
+    guidelines: [
+      'Do not provide legal advice; gather context and propose a consultation.',
+      'Keep sensitive data confidential.',
+    ],
+    tasks: [
+      'Qualify case type, jurisdiction, timelines; book consultation.',
+    ],
+    fallbacks: [
+      'If it’s an emergency or outside scope, recommend appropriate resources.',
+    ],
+  },
+  fitness: {
+    identity: ['You are a membership and scheduling assistant for a gym/coach.'],
+    style: ['Motivational, concise, practical.'],
+    guidelines: [
+      'Offer class schedules, membership tiers, and trial options.',
+    ],
+    tasks: [
+      'Book classes/assessments, collect contact/payment when needed.',
+    ],
+    fallbacks: [
+      'If a class is full, offer alternatives and waitlist.',
+    ],
+  },
+  clinic: {
+    identity: ['You are an intake assistant for a medical clinic.'],
+    style: ['Calm, empathetic, plain language.'],
+    guidelines: [
+      'Never diagnose; encourage appointments for evaluation.',
+      'Explain services (primary care, specialties) at a high level.',
+    ],
+    tasks: [
+      'Qualify reason for visit, insurance basics, schedule appointment.',
+    ],
+    fallbacks: [
+      'For urgent symptoms, advise calling emergency services or urgent care.',
+    ],
+  },
+};
+
+/* ───────── Key=Value Config Routing ───────── */
+
+type Sections = {
+  identity: string[];
+  style: string[];
+  guidelines: string[];
+  tasks: string[];
+  fallbacks: string[];
+};
+
+function emptySections(): Sections {
+  return { identity: [], style: [], guidelines: [], tasks: [], fallbacks: [] };
+}
+
+function routeConfigLine(line: string, sections: Sections, notes: string[]) {
+  const raw = line.trim();
+  const lower = raw.toLowerCase();
+
+  // explicit buckets like: "identity: act as xyz"
+  if (lower.startsWith('identity:')) { sections.identity.push(raw.replace(/^identity:\s*/i, '').trim()); return; }
+  if (lower.startsWith('style:'))    { sections.style.push(raw.replace(/^style:\s*/i, '').trim()); return; }
+  if (lower.startsWith('guideline:') || lower.startsWith('guidelines:')) {
+    sections.guidelines.push(raw.replace(/^guidelines?:\s*/i, '').trim()); return;
+  }
+  if (lower.startsWith('task:') || lower.startsWith('tasks:')) {
+    sections.tasks.push(raw.replace(/^tasks?:\s*/i, '').trim()); return;
+  }
+  if (lower.startsWith('fallback:') || lower.startsWith('error:')) {
+    sections.fallbacks.push(raw.replace(/^(fallback|error)[^:]*:\s*/i, '').trim()); return;
+  }
+
+  // key=value shorthands
+  const m = raw.match(/^([a-z_]+)\s*=\s*(.+)$/i);
+  if (m) {
+    const key = m[1].toLowerCase();
+    const val = m[2].trim();
+    if (!val) return;
+
+    switch (key) {
+      case 'industry': {
+        sections.identity.push(`Industry: ${val}`);
+        break;
+      }
+      case 'tone': {
+        sections.style.push(`Tone: ${val}`);
+        break;
+      }
+      case 'services': {
+        sections.guidelines.push(`Services: ${val}`);
+        break;
+      }
+      case 'tasks': {
+        // allow comma/pipe separated
+        sections.tasks.push(val.replace(/[|]/g, ', '));
+        break;
+      }
+      case 'booking_url': {
+        sections.guidelines.push(`Booking URL: ${val}`);
+        break;
+      }
+      case 'hours': {
+        sections.guidelines.push(`Hours: ${val}`);
+        break;
+      }
+      case 'location': {
+        sections.guidelines.push(`Location: ${val}`);
+        break;
+      }
+      case 'escalation': {
+        sections.fallbacks.push(`Escalation path: ${val}`);
+        break;
+      }
+      case 'channels': {
+        sections.guidelines.push(`Channels: ${val}`);
+        break;
+      }
+      case 'languages': {
+        sections.style.push(`Supported languages: ${val}`);
+        break;
+      }
+      default: {
+        notes.push(raw);
+        break;
+      }
     }
-    if (current) map[current].push(line);
+    return;
   }
-  return map;
+
+  // safety heuristics — “never/avoid” to guidelines
+  if (/\b(never|avoid|do not|don’t)\b/i.test(raw)) {
+    sections.guidelines.push(raw);
+    return;
+  }
+
+  // otherwise, treat as free-form note (only if not junk)
+  if (!isJunkLine(raw)) notes.push(raw);
 }
 
-function joinBlocks(map: BlocksMap): string {
-  return HEADERS.map(h => `${h}\n${(map[h] || []).join('\n')}`.trim()).join('\n\n').trim();
-}
+/* ───────── Full-prompt detection & normalization ───────── */
 
-/* --------------------- Diff util (for UI) --------------------- */
-
-export function computeDiff(base: string, next: string): DiffRow[] {
-  const a = base.split('\n');
-  const b = next.split('\n');
-  const setA = new Set(a);
-  const setB = new Set(b);
-  const rows: DiffRow[] = [];
-  const max = Math.max(a.length, b.length);
-
-  for (let i = 0; i < max; i++) {
-    const la = a[i];
-    const lb = b[i];
-    if (la === lb && la !== undefined) {
-      rows.push({ t: 'same', text: la });
-      continue;
-    }
-    if (lb !== undefined && !setA.has(lb)) rows.push({ t: 'add', text: lb });
-    if (la !== undefined && !setB.has(la)) rows.push({ t: 'rem', text: la });
-  }
-  // Add trailing additions if any (already handled above mostly)
-  for (let j = a.length; j < b.length; j++) {
-    const lb = b[j];
-    if (lb !== undefined && !setA.has(lb)) rows.push({ t: 'add', text: lb });
-  }
-  return rows;
-}
-
-/* --------------------- Full prompt detection & normalization --------------------- */
-
-/** True if raw contains all canonical headers (loose match) */
 export function looksLikeFullPrompt(raw: string): boolean {
-  if (!raw || typeof raw !== 'string') return false;
-  const t = raw;
-  return HEADERS.every(h => new RegExp(escapeRegExp(h)).test(t));
+  const t = raw || '';
+  return (
+    /\[Identity\]/.test(t) &&
+    /\[Style\]/.test(t) &&
+    /\[Response Guidelines\]/.test(t) &&
+    /\[Task & Goals\]/.test(t) &&
+    /\[Error Handling \/ Fallback\]/.test(t)
+  );
 }
 
-function escapeRegExp(s: string) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+function ensureBlocks(base: string): string {
+  const safe = String(base ?? '');
+  const hasAll = HEADERS.every(h => safe.includes(h));
+  if (hasAll) return safe;
+  // produce empty skeleton (we’ll fill with fallbacks later)
+  return [
+    '[Identity]', '',
+    '[Style]', '',
+    '[Response Guidelines]', '',
+    '[Task & Goals]', '',
+    '[Error Handling / Fallback]', '',
+  ].join('\n');
 }
 
 /**
- * Normalize a complete prompt:
- * - ensures the canonical headers (order preserved)
+ * Normalize a *complete* prompt:
+ * - ensure headers exist (order preserved)
  * - rtrim lines
  * - collapse multiple blank lines
- * - remove junk solitary bullets like "- assistant." or lone "-"
+ * - drop junk bullets, lone dashes, “assistant.”
  */
 export function normalizeFullPrompt(raw: string): string {
-  const safe = ensureBlocksOrder(String(raw ?? ''));
+  const safe = ensureBlocks(String(raw ?? ''));
   const lines = safe
     .split('\n')
     .map(l => l.replace(/\s+$/g, '')) // rtrim
     .filter((l, i, arr) => {
-      // collapse 2+ blank lines to max 1
       if (l.trim() !== '') return true;
       const prev = arr[i - 1];
-      return prev && prev.trim() !== '';
+      return prev && prev.trim() !== ''; // collapse multiple blanks
     })
-    .filter(l => !/^\-\s*$/.test(l)) // remove lone "-"
+    .filter(l => !/^\-\s*$/.test(l))
     .filter(l => l.trim().toLowerCase() !== '- assistant.')
     .filter(l => l.trim().toLowerCase() !== 'assistant.')
     .filter(l => l.trim() !== '-');
@@ -173,230 +414,238 @@ export function normalizeFullPrompt(raw: string): string {
   return lines.join('\n').trim();
 }
 
-/* --------------------- Convert user phrases -> professional bullets --------------------- */
+/* ───────── Block parsing & join ───────── */
 
-/**
- * Minimal rewrite heuristics:
- * - Trim and convert to a bullet (- ...)
- * - Convert rude inputs to safety fallback instructions
- * - Normalize some starter phrases to better grammar
- */
-function toBullet(s: string): string {
-  const trimmed = s.trim().replace(/^[-•\u2022]\s*/, '');
-  const sentence = /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
-  // Ensure it starts with a dash and a space for easy diff visibility.
-  return `- ${sentence}`;
-}
+type BlocksMap = Record<Bucket, string[]>;
 
-function sanitizeInsultsToFallback(line: string): string | null {
-  const t = line.toLowerCase();
-  // If user typed abuse/insult, map to a fallback rule line
-  const looksLikeInsultExample =
-    /\b(you are (really )?dumb|you suck|idiot|stupid|dumb|trash|useless|hate)\b/.test(t);
-  if (!looksLikeInsultExample) return null;
-  return toBullet(
-    'If a user expresses frustration or uses insults, remain calm and professional. Redirect to solving the user’s problem and offer to escalate to a human if needed.'
-  );
-}
+function splitIntoBlocks(base: string): BlocksMap {
+  const map: BlocksMap = {
+    '[Identity]': [],
+    '[Style]': [],
+    '[Response Guidelines]': [],
+    '[Task & Goals]': [],
+    '[Error Handling / Fallback]': [],
+  };
 
-/* Route simple line to one of the five buckets using key terms */
-function routeBucketOf(line: string): string {
-  const s = line.toLowerCase();
-  if (/\b(identity|persona|role|act as|behave as|you are)\b/.test(s)) return '[Identity]';
-  if (/\b(tone|style|friendly|formal|approachable|concise|polite|empathetic|confidence|voice|voice style|tone)\b/.test(s))
-    return '[Style]';
-  if (/\b(guideline|format|answer|response|clarity|steps|list|jargon|brevity|structure|citation|example)\b/.test(s))
-    return '[Response Guidelines]';
-  if (/\b(task|goal|collect|ask|confirm|escalate|handoff|flow|process|onboarding|qualify|booking|schedule|pricing|offer)\b/.test(s))
-    return '[Task & Goals]';
-  if (/\b(error|fallback|fail|misunderstanding|retry|sorry|apologize|escalate|abuse|insult|frustration|emergency)\b/.test(s))
-    return '[Error Handling / Fallback]';
-
-  // Default fallback: response guidelines
-  return '[Response Guidelines]';
-}
-
-/* Normalize a single builder line (language detection plug can be later) */
-export function normalizeBuilderLine(line: string): string {
-  // For now just trim. Placeholder for advanced normalization (translation, spelling fixes).
-  return line.trim();
-}
-
-/**
- * generateFromFreeText:
- * - basePrompt: existing full prompt (may be DEFAULT_PROMPT or empty)
- * - freeText: multi-line instructions (bullets / sentences)
- *
- * It normalizes, routes into buckets, rewrites to professional bullets, merges,
- * and returns a diff + summary.
- */
-export function generateFromFreeText(
-  basePrompt: string,
-  freeText: string,
-  _opts?: GenerateOptions
-): GenerateResult {
-  const base = ensureBlocksOrder(basePrompt || '');
-  const blocks = splitIntoBlocks(base);
-
-  const rawLines = (freeText || '')
+  let current: Bucket | '' = '';
+  ensureBlocks(base)
     .split('\n')
-    .map(s => s.trim())
-    .filter(Boolean);
+    .forEach((raw) => {
+      const line = raw ?? '';
+      const t = line.trim() as Bucket;
+      if (ORDER.includes(t)) {
+        current = t;
+        return;
+      }
+      if (current) map[current].push(line);
+    });
 
-  const bucketsAdded: Partial<Record<string, number>> = {};
-  for (const raw of rawLines) {
-    const normalized = normalizeBuilderLine(raw);
-    // sanitize rude inputs to fallback
-    const fallback = sanitizeInsultsToFallback(normalized);
-    const policy = fallback ? fallback : toBullet(normalized);
-    const bucket = routeBucketOf(normalized);
-    blocks[bucket].push(policy);
-    bucketsAdded[bucket] = (bucketsAdded[bucket] || 0) + 1;
+  // strip possible bullet prefixes and junk
+  for (const k of ORDER) {
+    map[k] = toLines(map[k].join('\n'));
   }
 
-  const nextPrompt = joinBlocks(blocks);
-  const diff = computeDiff(base, nextPrompt);
-  const added = diff.filter(d => d.t === 'add').length;
-  const removed = diff.filter(d => d.t === 'rem').length;
-
-  return { nextPrompt, diff, added, removed, bucketsAdded };
+  return map;
 }
 
-/* Wrapper that applies instructions and returns summary text for UI */
+function joinBlocks(map: BlocksMap): string {
+  const identityFinal = ensureNonEmpty(
+    map['[Identity]'],
+    ['You are a helpful virtual assistant for this business.']
+  );
+  const styleFinal = ensureNonEmpty(
+    map['[Style]'],
+    ['Clear, concise, friendly. Keep replies under 4 sentences.']
+  );
+  const guidelinesFinal = ensureNonEmpty(
+    map['[Response Guidelines]'],
+    ['Ask clarifying questions when needed.', 'Do not fabricate facts; say when you don’t know.']
+  );
+  const tasksFinal = ensureNonEmpty(
+    map['[Task & Goals]'],
+    ['Qualify, answer FAQs, and book or escalate.']
+  );
+  const fallbacksFinal = ensureNonEmpty(
+    map['[Error Handling / Fallback]'],
+    ['If uncertain, ask a clarifying question.', 'Offer a human follow-up when appropriate.']
+  );
+
+  return [
+    '[Identity]',
+    bullets(identityFinal),
+    '',
+    '[Style]',
+    bullets(styleFinal),
+    '',
+    '[Response Guidelines]',
+    bullets(guidelinesFinal),
+    '',
+    '[Task & Goals]',
+    bullets(tasksFinal),
+    '',
+    '[Error Handling / Fallback]',
+    bullets(fallbacksFinal),
+  ].join('\n');
+}
+
+/* ───────── Diff (for summaries) ───────── */
+
+export type DiffRow = { t: 'same' | 'add' | 'rem'; text: string };
+function diffLines(a: string, b: string): DiffRow[] {
+  const A = a.split('\n');
+  const B = b.split('\n');
+  const setA = new Set(A);
+  const setB = new Set(B);
+  const rows: DiffRow[] = [];
+  const max = Math.max(A.length, B.length);
+  for (let i = 0; i < max; i++) {
+    const la = A[i];
+    const lb = B[i];
+    if (la === lb && la !== undefined) {
+      rows.push({ t: 'same', text: la });
+      continue;
+    }
+    if (lb !== undefined && !setA.has(lb)) rows.push({ t: 'add', text: lb });
+    if (la !== undefined && !setB.has(la)) rows.push({ t: 'rem', text: la });
+  }
+  for (let j = A.length; j < B.length; j++) {
+    const lb = B[j];
+    if (lb !== undefined && !setA.has(lb)) rows.push({ t: 'add', text: lb });
+  }
+  return rows;
+}
+
+/* ───────── Public API ───────── */
+
+export type GenerateOptions = { agentLanguage?: string };
+
 export function applyInstructions(
   basePrompt: string,
   instructions: string,
-  opts?: GenerateOptions
-): ApplyResult {
-  const { nextPrompt, diff, added, removed, bucketsAdded } = generateFromFreeText(basePrompt, instructions, opts);
-
-  const parts: string[] = [];
-  if (added || removed) parts.push(`+${added} / -${removed} lines`);
-  const bucketBits = Object.entries(bucketsAdded)
-    .map(([k, v]) => `${k} +${v}`)
-    .join(', ');
-  if (bucketBits) parts.push(bucketBits);
-
-  const summary = parts.join(' · ') || 'No changes';
-
-  return { merged: nextPrompt, summary, diff };
-}
-
-/* --------------------- Assemble full prompt from preset --------------------- */
-
-/**
- * assemblePromptFromPreset:
- * - Takes an industry key (preset), brand, locale/title, tone, services list, booking info
- * - Assembles a full prompt with the canonical sections, injecting preset instructions and generated style sentences.
- *
- * This lets you show a "full prompt" in the textarea (frontend) that is consistent and machine-friendly.
- */
-export function assemblePromptFromPreset(params: {
-  industry: IndustryKey | string;
-  brand?: string;
-  inLocation?: string;
-  tone?: string; // friendly, warm, formal, etc.
-  services?: string[]; // optional list of business services to mention
-  booking?: { type: string; url?: string; phone?: string; hours?: string } | null;
-  basePrompt?: string; // optional existing system prompt to merge into
-}): string {
-  const {
-    industry,
-    brand = 'Assistant',
-    inLocation = '',
-    tone,
-    services = [],
-    booking = null,
-    basePrompt = '',
-  } = params;
-
-  const presetKey = ((industry || 'generic') as string) as keyof typeof PRESETS;
-  const preset: Preset = (PRESETS as any)[presetKey] || PRESETS.generic;
-
-  // Tone canonicalization
-  const tKey = (tone && (TONE_CANONICAL as any)[tone.toLowerCase()]) || (Object.values(TONE_CANONICAL)[0] ?? DEFAULT_TONE);
-  const styleSentences = toneToStyleSentence((tKey as any) ?? DEFAULT_TONE);
-
-  // Basic identity injection
-  const inLocText = inLocation ? ` in ${inLocation}` : '';
-  const bookingText = booking ? bookingToText(booking as any) : '';
-
-  // Build identity block (with brand and booking)
-  const identityParts: string[] = [];
-  // Use preset identity template if present; otherwise fallback
-  if (preset.templateInstructions?.identity) {
-    identityParts.push(
-      preset.templateInstructions.identity
-        .replace(/\$\{brand\}/g, brand)
-        .replace(/\$\{inLocation\}/g, inLocText)
-        .replace(/\$\{bookingText\}/g, bookingText)
-    );
-  } else {
-    identityParts.push(`${brand} assistant${inLocText}.`);
+  _opts?: GenerateOptions
+): { merged: string; summary: string; diff: DiffRow[] } {
+  const raw = String(instructions || '').trim();
+  // If it’s already a full prompt, normalize and return directly
+  if (looksLikeFullPrompt(raw)) {
+    const merged = normalizeFullPrompt(raw);
+    const diff = diffLines(basePrompt || '', merged);
+    return { merged, summary: 'Replaced with full prompt', diff };
   }
 
-  // If services are present, add a short line describing them
-  if (services && services.length) {
-    const svcLine = `Services: ${services.slice(0, 8).join(', ')}.`; // limit length
-    identityParts.push(svcLine);
+  // Start from either the provided base or the default
+  const base = (basePrompt && basePrompt.trim().length) ? basePrompt : DEFAULT_PROMPT;
+  const baseBlocks = splitIntoBlocks(base);
+
+  // 1) Try to detect a preset: "preset: dentist" / "preset dentist"
+  const presetMatch = raw.match(/^\s*preset[:\s]+([a-z0-9_\- ]+)\s*$/i);
+  // Or inside a multi-line blob like "preset=dentist"
+  const inlines = raw.split(/\n|;/).map(s => s.trim()).filter(Boolean);
+  const inlinePreset = inlines
+    .map(s => s.match(/^\s*preset\s*[:=]\s*([a-z0-9_\- ]+)\s*$/i))
+    .filter(Boolean)?.[0];
+
+  const presetName = (presetMatch?.[1] || inlinePreset?.[1] || '').toLowerCase().replace(/\s+/g, '_');
+  const usePreset = Boolean(presetName && PRESETS[presetName]);
+
+  if (usePreset) {
+    // Build from preset + any additional key=value lines
+    const preset = PRESETS[presetName];
+
+    // Prime sections with preset content
+    const sections: Sections = {
+      identity: [...preset.identity],
+      style: [...preset.style],
+      guidelines: [...preset.guidelines],
+      tasks: [...preset.tasks],
+      fallbacks: [...preset.fallbacks],
+    };
+
+    const notes: string[] = [];
+
+    // Route additional config lines (excluding the preset one)
+    for (const line of inlines) {
+      if (/^\s*preset\s*[:=]/i.test(line)) continue;
+      if (isJunkLine(line)) continue;
+      routeConfigLine(line, sections, notes);
+    }
+
+    // Merge with base blocks (additive)
+    const mergedBlocks: BlocksMap = {
+      '[Identity]': dedupe([...toLines(bullets(sections.identity)), ...baseBlocks['[Identity]']]),
+      '[Style]': dedupe([...toLines(bullets(sections.style)), ...baseBlocks['[Style]']]),
+      '[Response Guidelines]': dedupe([...toLines(bullets(sections.guidelines)), ...baseBlocks['[Response Guidelines]']]),
+      '[Task & Goals]': dedupe([...toLines(bullets(sections.tasks)), ...baseBlocks['[Task & Goals]']]),
+      '[Error Handling / Fallback]': dedupe([...toLines(bullets(sections.fallbacks)), ...baseBlocks['[Error Handling / Fallback]']]),
+    };
+
+    const core = joinBlocks(mergedBlocks);
+
+    // optional seed/notes
+    const seed = preset.seed ? `\n\n${preset.seed}` : '';
+    const notesFinal = notes.filter(n => !isJunkLine(n));
+    const notesBlock = notesFinal.length ? `\n\n[Notes]\n${bullets(dedupe(notesFinal))}` : '';
+
+    const final = (core + seed + notesBlock).trim();
+    const diff = diffLines(base, final);
+
+    const adds = diff.filter(d => d.t === 'add').length;
+    const rems = diff.filter(d => d.t === 'rem').length;
+    const summary = `Preset "${presetName}" applied · +${adds} / -${rems} lines`;
+
+    return { merged: final, summary, diff };
   }
 
-  // Style block: preset style + tone sentences
-  const styleBlock = [
-    ...(preset.templateInstructions?.style ?? []),
-    ...styleSentences,
-  ];
+  // 2) No preset — treat as instructions/config to merge into the base prompt
+  const sections = emptySections();
+  const notes: string[] = [];
 
-  // Response Guidelines: preset responseGuidelines
-  const responseGuidelines = preset.templateInstructions?.responseGuidelines ?? [
-    'Be concise and helpful.',
-  ];
+  for (const line of inlines) {
+    if (isJunkLine(line)) continue;
+    routeConfigLine(line, sections, notes);
+  }
 
-  // Task & Goals
-  const taskGoals = preset.templateInstructions?.taskGoals ?? ['Assist the user to completion or handoff.'];
+  // Route freeform, non-key=value, non-explicit bucket lines:
+  // We’ll map them to Response Guidelines as a sensible default.
+  // (Only those that didn’t get bucketed already via routeConfigLine)
+  const already =
+    sections.identity.length +
+    sections.style.length +
+    sections.guidelines.length +
+    sections.tasks.length +
+    sections.fallbacks.length;
 
-  // Error / fallback
-  const fallback = preset.templateInstructions?.fallback ?? [
-    'If unsure, ask a clarifying question.',
-    'If a tool fails, apologize and offer alternative options.',
-  ];
-
-  // Compose blocks object
-  const blocks: BlocksMap = {
-    '[Identity]': identityParts,
-    '[Style]': styleBlock,
-    '[Response Guidelines]': responseGuidelines,
-    '[Task & Goals]': taskGoals,
-    '[Error Handling / Fallback]': fallback,
-  };
-
-  // Merge with basePrompt if provided: prefer base for lines already present
-  if (basePrompt && looksLikeFullPrompt(basePrompt)) {
-    // We will merge: keep base's lines, append any missing instructions from preset
-    const baseMap = splitIntoBlocks(basePrompt);
-    for (const h of HEADERS) {
-      // Append preset lines to base if they are not duplicates
-      const presetLines = blocks[h] || [];
-      const baseLinesSet = new Set((baseMap[h] || []).map(l => l.trim()));
-      for (const pl of presetLines) {
-        if (!baseLinesSet.has(pl.trim())) baseMap[h].push(pl);
+  if (already === 0) {
+    // if user only typed bullets like “be friendlier”, treat as guidelines/style combo
+    for (const line of toLines(raw)) {
+      if (/tone|friendly|formal|casual|empathetic|concise/i.test(line)) {
+        sections.style.push(line);
+      } else {
+        sections.guidelines.push(line);
       }
     }
-    return joinBlocks(baseMap);
   }
 
-  return joinBlocks(blocks);
+  // Merge with base
+  const mergedBlocks: BlocksMap = {
+    '[Identity]': dedupe([...baseBlocks['[Identity]'], ...sections.identity]),
+    '[Style]': dedupe([...baseBlocks['[Style]'], ...sections.style]),
+    '[Response Guidelines]': dedupe([...baseBlocks['[Response Guidelines]'], ...sections.guidelines]),
+    '[Task & Goals]': dedupe([...baseBlocks['[Task & Goals]'], ...sections.tasks]),
+    '[Error Handling / Fallback]': dedupe([...baseBlocks['[Error Handling / Fallback]'], ...sections.fallbacks]),
+  };
+
+  const core = joinBlocks(mergedBlocks);
+  const notesFinal = notes.filter(n => !isJunkLine(n));
+  const notesBlock = notesFinal.length ? `
+
+[Notes]
+${bullets(dedupe(notesFinal))}` : '';
+
+  const final = (core + notesBlock).trim();
+  const diff = diffLines(base, final);
+  const adds = diff.filter(d => d.t === 'add').length;
+  const rems = diff.filter(d => d.t === 'rem').length;
+
+  const summary = adds || rems ? `+${adds} / -${rems} lines` : 'No changes';
+  return { merged: final, summary, diff };
 }
-
-/* --------------------- Exports --------------------- */
-
-export default {
-  assemblePromptFromPreset,
-  generateFromFreeText,
-  applyInstructions,
-  computeDiff,
-  looksLikeFullPrompt,
-  normalizeFullPrompt,
-  splitIntoBlocks,
-  joinBlocks,
-};
