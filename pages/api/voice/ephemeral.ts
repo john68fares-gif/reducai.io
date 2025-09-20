@@ -1,15 +1,9 @@
-// pages/api/voice/ephemeral.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
 
 /**
  * Ephemeral token minting for OpenAI Realtime.
- *
- * ❗ How keys are handled:
- *   - Preferred: client sends the selected user key in the header `X-OpenAI-Key`.
- *   - Alternative: client sends `apiKey` in the JSON body.
- *   - Fallback: use server env `OPENAI_API_KEY` (optional).
- *
- * We never log or persist any provided key.
+ * Accepts key in header `X-OpenAI-Key`, body.apiKey, or OPENAI_API_KEY env.
+ * We do not log or persist any keys.
  */
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
@@ -23,46 +17,61 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       systemPrompt,
       voiceName,
       assistantName,
+      apiKey: apiKeyFromBody,
     } = (req.body || {}) as {
       model?: string;
       systemPrompt?: string;
       voiceName?: string;
       assistantName?: string;
-      apiKey?: string; // optional if sent in body
+      apiKey?: string;
     };
 
-    // 1) Resolve API key: header -> body -> env
-    const headerKey = (req.headers['x-openai-key'] || '') as string;
-    const bodyKey = (req.body?.apiKey || '') as string;
-    const serverKey = process.env.OPENAI_API_KEY || '';
-
-    const apiKey = headerKey || bodyKey || serverKey;
+    // Resolve API key: header -> body -> env
+    const headerKey = String(req.headers['x-openai-key'] || '').trim();
+    const bodyKey   = String(apiKeyFromBody || '').trim();
+    const envKey    = String(process.env.OPENAI_API_KEY || '').trim();
+    const apiKey    = headerKey || bodyKey || envKey;
 
     if (!apiKey) {
       return res.status(400).json({
         error:
-          'Missing OpenAI API key. Send it via header "X-OpenAI-Key", body.apiKey, or set OPENAI_API_KEY on the server.',
+          'Missing OpenAI API key. Provide it via header "X-OpenAI-Key", body.apiKey, or set OPENAI_API_KEY on the server.',
       });
     }
-    if (!/^sk-[A-Za-z0-9]{20,}$/.test(apiKey)) {
-      // basic sanity check; avoids logging
+
+    // ✅ NEW: be permissive—OpenAI uses multiple key prefixes now (sk-, sk-proj-, sk-live-, etc.)
+    // Just a minimal sanity check to avoid obvious junk; let OpenAI do the real validation.
+    if (!apiKey.startsWith('sk-') || apiKey.length < 24) {
       return res.status(400).json({ error: 'Invalid OpenAI API key format.' });
     }
 
-    // 2) Create a short-lived session (ephemeral) with OpenAI
+    // Prepare session creation
+    const resolvedModel =
+      model && model.toLowerCase().includes('realtime') ? model : 'gpt-4o-realtime-preview';
+
+    // Map voice label -> OpenAI voice id
+    const v = String(voiceName || '').toLowerCase();
+    const voice =
+      v.includes('alloy') ? 'alloy' :
+      v.includes('verse') ? 'verse' :
+      v.includes('coral') ? 'coral' :
+      v.includes('amber') ? 'amber' :
+      'alloy';
+
+    // Create ephemeral session
     const r = await fetch('https://api.openai.com/v1/realtime/sessions', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
+        // ✅ IMPORTANT for sessions API
+        'OpenAI-Beta': 'realtime=v1',
       },
       body: JSON.stringify({
-        // Use your UI selections; provide sensible defaults
-        model: model || 'gpt-4o-realtime-preview',
-        voice: (voiceName || 'Alloy (American)').toLowerCase().includes('alloy') ? 'alloy' : 'verse',
+        model: resolvedModel,
+        voice,
         instructions: systemPrompt || '',
         name: assistantName || '',
-        // You can add more realtime session options here if needed
       }),
     });
 
@@ -70,13 +79,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const t = await r.text();
       return res.status(r.status).json({ error: `OpenAI session failed: ${t}` });
     }
-    const sessionJson = await r.json();
 
-    // 3) Return ephemeral session details to the browser
-    // OpenAI returns { id, client_secret: { value, expires_at }, ... }
-    return res.status(200).json(sessionJson);
+    const session = await r.json();
+    // returns: { id, client_secret: { value, expires_at }, ... }
+    return res.status(200).json(session);
   } catch (err: any) {
-    // Do not log secrets; just a generic error
     return res.status(500).json({ error: err?.message || 'Unknown error' });
   }
 }
