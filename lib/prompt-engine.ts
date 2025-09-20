@@ -221,8 +221,23 @@ function splitIntoBlocks(base: string): BlocksMap {
   return map;
 }
 
+function collapseBlankRuns(lines: string[]): string[] {
+  // Remove trailing spaces and collapse 2+ blank lines into a single blank line
+  const cleaned = lines.map((l) => l.replace(/\s+$/g, ''));
+  const out: string[] = [];
+  for (const l of cleaned) {
+    if (l.trim() === '' && out[out.length - 1]?.trim() === '') continue;
+    out.push(l);
+  }
+  // Trim leading/trailing blank lines in each block
+  while (out.length && out[0].trim() === '') out.shift();
+  while (out.length && out[out.length - 1].trim() === '') out.pop();
+  return out;
+}
+
 function joinBlocks(map: BlocksMap): string {
-  return BLOCKS.map((b) => `${b}\n${(map[b] || []).join('\n')}`.trim()).join('\n\n');
+  // Keep order and add exactly one blank line between blocks
+  return BLOCKS.map((b) => `${b}\n${collapseBlankRuns(map[b] || []).join('\n')}`.trim()).join('\n\n');
 }
 
 /* ───────── Diff (for UI summaries) ───────── */
@@ -269,18 +284,57 @@ export type GenerateResult = {
   bucketsAdded: Partial<Record<Bucket, number>>;
 };
 
+/* ───────── Structured vs free-form detection ───────── */
+
+function looksLikeStructuredPrompt(s: string): boolean {
+  const t = s || '';
+  return BLOCKS.every((h) => t.includes(h));
+}
+
+/** Normalize a full structured prompt without rewriting content. */
+function normalizeStructuredPrompt(s: string): string {
+  // Parse it like any other prompt, but DO NOT rewrite lines.
+  const parsed = splitIntoBlocks(s);
+
+  // Whitespace cleanup only (no bullet injection, no routing changes).
+  const cleaned: BlocksMap = {
+    '[Identity]': collapseBlankRuns(parsed['[Identity]']),
+    '[Style]': collapseBlankRuns(parsed['[Style]']),
+    '[Response Guidelines]': collapseBlankRuns(parsed['[Response Guidelines]']),
+    '[Task & Goals]': collapseBlankRuns(parsed['[Task & Goals]']),
+    '[Error Handling / Fallback]': collapseBlankRuns(parsed['[Error Handling / Fallback]']),
+  };
+
+  return joinBlocks(cleaned);
+}
+
 /**
  * Merge free-text instructions into a structured prompt.
- * - Normalizes input to English (simple Dutch→English stub).
- * - Rewrites rough input to professional lines.
- * - Routes to the correct block.
- * - Returns the merged prompt + a change summary.
+ * - If user pasted a full prompt (all 5 headers) → replace the whole thing (preserve content).
+ * - Else:
+ *    - Normalizes input to English (simple Dutch→English stub).
+ *    - Rewrites rough input to professional lines.
+ *    - Routes to the correct block.
+ *    - Returns the merged prompt + a change summary.
  */
 export function generateFromFreeText(
   basePrompt: string,
   freeText: string,
   _opts?: GenerateOptions
 ): GenerateResult {
+  // Case 1: Full structured prompt provided → replace (no policy rewrites).
+  if (looksLikeStructuredPrompt(freeText)) {
+    const nextPrompt = normalizeStructuredPrompt(freeText);
+    const base = ensureBlocks(basePrompt || DEFAULT_PROMPT || PROMPT_SKELETON);
+    const diff = computeDiff(base, nextPrompt);
+    const added = diff.filter((d) => d.t === 'add').length;
+    const removed = diff.filter((d) => d.t === 'rem').length;
+    // Not meaningful for replacement; keep empty.
+    const bucketsAdded: Partial<Record<Bucket, number>> = {};
+    return { nextPrompt, diff, added, removed, bucketsAdded };
+  }
+
+  // Case 2: Free-form tweaks → original behavior (route + bulletize).
   const base = ensureBlocks(basePrompt || DEFAULT_PROMPT || PROMPT_SKELETON);
   const blocks = splitIntoBlocks(base);
 
