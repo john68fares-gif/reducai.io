@@ -10,6 +10,9 @@ import {
 } from 'lucide-react';
 import { scopedStorage } from '@/utils/scoped-storage';
 
+// ⬇️ ADD THIS: import the real call panel (your fixed version of WebCallButton)
+import WebCallButton from '@/components/voice/WebCallButton';
+
 // Try to import prompt-engine, but guard every call.
 import {
   applyInstructions as _applyInstructions,
@@ -200,7 +203,7 @@ const normalizeFullPromptSafe = (raw: string) => {
   };
   const add = (k: keyof typeof sections, v: string) => { sections[k] = safeTrim(v); };
   const pull = (label: string) => {
-    const rx = new RegExp(`\$begin:math:display$${label.replace(/[.*+?^${}()|[$end:math:display$\\]/g,'\\$&')}\\]\\s*([\\s\\S]*?)(?=\\n\\s*\\[|$)`, 'i');
+    const rx = new RegExp(`\$begin:math:display$${label.replace(/[.*+?^${}()|[\\$end:math:display$\\\\]/g,'\\$&')}\\]\\s*([\\s\\S]*?)(?=\\n\\s*\\[|$)`, 'i');
     const m = raw.match(rx);
     return m ? m[1] : '';
   };
@@ -720,7 +723,7 @@ export default function VoiceAgentSection() {
   const [proposedPrompt, setProposedPrompt] = useState('');
   const [changesSummary, setChangesSummary] = useState('');
 
-  // chat state
+  // chat state (kept for inline chat UX if you still want text chat)
   const [msgs, setMsgs] = useState<ChatMsg[]>(() => [
     { id: 'sys', role: 'system', text: (DEFAULT_AGENT.systemPrompt || '').trim() },
     { id: 'hello', role: 'assistant', text: 'Hi! Ready when you are.' }
@@ -728,7 +731,7 @@ export default function VoiceAgentSection() {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
 
-  // voice preview + TTS
+  // voice preview + TTS (browser speech synthesis for quick voice previews)
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   useEffect(() => {
     if (!IS_CLIENT || !('speechSynthesis' in window)) return;
@@ -839,7 +842,6 @@ export default function VoiceAgentSection() {
   }
 
   /* ── Generate overlay logic ── */
-
   const runTypingIntoBox = (full:string) => {
     setTypingPreview('');
     let i = 0;
@@ -860,7 +862,6 @@ export default function VoiceAgentSection() {
     setShowGenerate(true);
   };
 
-  // Replace if full prompt pasted, otherwise auto-detect and merge
   const onGenerate = () => {
     const raw = safeTrim(composerText);
     if (!raw) return;
@@ -927,7 +928,7 @@ export default function VoiceAgentSection() {
     setGenPhase('idle');
   };
 
-  /* ======== TRANSCRIBER (server-first) ======== */
+  /* ======== TRANSCRIBER (client->server upload) ======== */
   const [recorder, setRecorder] = useState<MediaRecorder|null>(null);
   const [recording, setRecording] = useState(false);
 
@@ -994,8 +995,6 @@ export default function VoiceAgentSection() {
 
   /* ======== LLM call (safe stub) ======== */
   async function sendToModel(userText: string): Promise<string> {
-    // If you have a real route:
-    // try POST /api/chat with { system, model, messages }
     const system = data.systemPrompt || DEFAULT_AGENT.systemPrompt;
     try {
       const r = await fetch('/api/chat', {
@@ -1014,7 +1013,6 @@ export default function VoiceAgentSection() {
         if (reply) return String(reply);
       }
     } catch {/* ignore and fall back */}
-    // Fallback echo so UI never breaks:
     return `You said: “${userText}”. (Connect /api/chat for real answers.)`;
   }
 
@@ -1261,7 +1259,8 @@ export default function VoiceAgentSection() {
                   placeholder="— Choose —"
                   menuTop={
                     <div className="flex items-center justify-between px-3 py-2 rounded-[10px]"
-                         style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}>
+                         style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}
+                    >
                       <div className="text-xs" style={{ color:'var(--text-muted)' }}>Preview</div>
                       <div className="flex items-center gap-2">
                         <button
@@ -1409,7 +1408,7 @@ export default function VoiceAgentSection() {
         document.body
       ) : null}
 
-      {/* Call drawer (chat panel) */}
+      {/* ─────────── REAL voice/call panel (uses section state) ─────────── */}
       {IS_CLIENT ? createPortal(
         <>
           <div
@@ -1422,87 +1421,16 @@ export default function VoiceAgentSection() {
             }}
             onClick={()=> setShowCall(false)}
           />
-          <aside
-            className="fixed inset-y-0 right-0"
-            style={{
-              zIndex: 9997,
-              width: 'min(620px,92vw)',
-              background:'var(--panel-bg)',
-              borderLeft:'1px solid rgba(255,255,255,.10)',
-              boxShadow:'-28px 0 80px rgba(0,0,0,.55)',
-              transform: `translateX(${showCall ? '0' : '100%'})`,
-              transition: 'transform 280ms var(--ease)',
-              display:'grid', gridTemplateRows:'auto 1fr auto'
-            }}
-            aria-hidden={!showCall}
-          >
-            <div className="flex items-center justify-between px-4 h-[64px]"
-                 style={{ background:'var(--panel-bg)', borderBottom:'1px solid rgba(255,255,255,.1)' }}>
-              <div className="font-semibold">Chat with {data.name || 'Assistant'}</div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => recording ? stopRecording() : startRecording()}
-                  className="px-3 h-[34px] rounded border text-sm"
-                  style={{ color: recording ? '#0a0f0d' : 'var(--text)', background: recording ? CTA : 'var(--panel-bg)', borderColor:'var(--input-border)' }}
-                  title={recording ? 'Stop recording' : 'Start recording'}
-                >
-                  {recording ? 'Recording…' : 'Mic'}
-                </button>
-                <button onClick={()=>setShowCall(false)} className="px-3 h-[34px] rounded border text-sm"
-                        style={{ color:'var(--text)', borderColor:'var(--input-border)', background:'var(--panel-bg)' }}>
-                  Close
-                </button>
-              </div>
-            </div>
-
-            {/* Chat stream */}
-            <div className="p-4 overflow-y-auto flex flex-col gap-3">
-              {msgs.filter(m=>m.role!=='system').map(m => (
-                <div key={m.id} className="max-w-[85%]" style={{
-                  alignSelf: m.role==='user' ? 'flex-end' : 'flex-start'
-                }}>
-                  <div className="text-[11px] mb-1" style={{ color:'var(--text-muted)', textAlign: m.role==='user'?'right':'left' }}>
-                    {m.role==='user' ? 'You' : (data.name || 'Assistant')}
-                  </div>
-                  <div
-                    style={{
-                      background: m.role==='user' ? 'rgba(255,255,255,.06)' : 'rgba(89,217,179,.10)',
-                      border: `1px solid ${m.role==='user' ? 'rgba(255,255,255,.12)' : 'rgba(89,217,179,.22)'}`,
-                      color:'var(--text)',
-                      padding:'10px 12px',
-                      borderRadius:12
-                    }}
-                  >
-                    {m.text}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* Composer */}
-            <div className="p-3" style={{ borderTop:'1px solid rgba(255,255,255,.10)' }}>
-              <form
-                onSubmit={async (e)=>{ e.preventDefault(); await sendUserText(input); setInput(''); }}
-                className="flex items-center gap-2"
-              >
-                <input
-                  value={input}
-                  onChange={(e)=>setInput(e.target.value)}
-                  placeholder={`Message ${data.name || 'Assistant'}…`}
-                  className="flex-1 rounded-md px-3 py-2 outline-none"
-                  style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                />
-                <button
-                  type="submit"
-                  disabled={sending || !input.trim()}
-                  className="h-10 px-4 rounded-md font-semibold"
-                  style={{ background: sending ? 'rgba(89,217,179,.35)' : CTA, color:'#0a0f0d' }}
-                >
-                  {sending ? 'Sending…' : 'Send'}
-                </button>
-              </form>
-            </div>
-          </aside>
+          {showCall && (
+            <WebCallButton
+              model={data.model}
+              systemPrompt={data.systemPrompt}
+              voiceName={data.voiceName}
+              assistantName={data.name || 'Assistant'}
+              apiKey={apiKeys.find(k => k.id === data.apiKeyId)?.key || ''}
+              onClose={()=> setShowCall(false)}
+            />
+          )}
         </>,
         document.body
       ) : null}
