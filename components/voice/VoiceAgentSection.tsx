@@ -43,7 +43,7 @@ const GREEN_GLOW = '0 10px 26px rgba(89,217,179,.28)';
 const ACTIVE_KEY = 'va:activeId';
 const Z_OVERLAY = 100000;
 const Z_MODAL   = 100001;
-const Z_MENU    = 100010;
+const Z_MENU    = 100020; // bumped for safety
 const IS_CLIENT = typeof window !== 'undefined' && typeof document !== 'undefined';
 
 /* phone icon */
@@ -95,6 +95,13 @@ const Tokens = () => (
       --green-strong: rgba(89,217,179,.22);
       --red-weak: rgba(239,68,68,.14);
       --red-strong: rgba(239,68,68,.26);
+
+      /* StepV2-style surfaces for menus */
+      --vs-menu-bg:#101314;
+      --vs-menu-border:rgba(255,255,255,.16);
+      --vs-input-bg:#101314;
+      --vs-input-border:rgba(255,255,255,.14);
+      --vs-input-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 12px 30px rgba(0,0,0,.38);
     }
 
     .va-card{
@@ -428,7 +435,7 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
-/* ─────────── Non-sectioned Select ─────────── */
+/* ─────────── Styled Select (StepV2 look & fixed portal clicks) ─────────── */
 function StyledSelect({
   value, onChange, options, placeholder, leftIcon, menuTop,
   onPreview, isPreviewing
@@ -441,9 +448,13 @@ function StyledSelect({
   const wrapRef = useRef<HTMLDivElement|null>(null);
   const btnRef = useRef<HTMLButtonElement|null>(null);
   const searchRef = useRef<HTMLInputElement|null>(null);
+
+  // NEW: portal menu ref so outside-click handler ignores inside clicks
+  const menuRef = useRef<HTMLDivElement|null>(null);
+
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const [menuPos, setMenuPos] = useState<{left:number; width:number} | null>(null);
+  const [menuPos, setMenuPos] = useState<{left:number; width:number; top:number} | null>(null);
 
   const current = options.find(o => o.value === value) || null;
   const filtered = useMemo(() => {
@@ -451,19 +462,26 @@ function StyledSelect({
     return q ? options.filter(o => o.label.toLowerCase().includes(q)) : options;
   }, [options, query, value]);
 
+  useLayoutEffect(() => {
+    if (!open || !btnRef.current) return;
+    const r = btnRef.current.getBoundingClientRect();
+    setMenuPos({ left: r.left, width: r.width, top: r.bottom + 8 });
+  }, [open]);
+
   useEffect(() => {
     if (!open || !IS_CLIENT) return;
     const off = (e: MouseEvent) => {
-      if (wrapRef.current?.contains(e.target as Node)) return;
+      const t = e.target as Node;
+      if (wrapRef.current?.contains(t)) return;
+      if (menuRef.current?.contains(t)) return; // ✅ keep open on inside clicks
       setOpen(false);
     };
     const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
     const onResize = () => {
       if (!btnRef.current) return;
       const r = btnRef.current.getBoundingClientRect();
-      setMenuPos({ left: r.left, width: r.width });
+      setMenuPos({ left: r.left, width: r.width, top: r.bottom + 8 });
     };
-    onResize();
     window.addEventListener('mousedown', off);
     window.addEventListener('keydown', onEsc);
     window.addEventListener('resize', onResize);
@@ -480,11 +498,11 @@ function StyledSelect({
         ref={btnRef}
         type="button"
         onClick={() => { setOpen(v=>!v); setTimeout(()=>searchRef.current?.focus(),0); }}
-        className="w-full flex items-center justify-between gap-3 px-3 py-3 rounded-[10px] text-sm outline-none transition"
+        className="w-full flex items-center justify-between gap-3 px-4 py-3.5 rounded-[14px] text-sm outline-none transition"
         style={{
-          background:'var(--input-bg)',
-          border:'1px solid var(--input-border)',
-          boxShadow:'var(--input-shadow)',
+          background:'var(--vs-input-bg)',
+          border:'1px solid var(--vs-input-border)',
+          boxShadow:'var(--vs-input-shadow)',
           color:'var(--text)'
         }}
       >
@@ -497,23 +515,23 @@ function StyledSelect({
 
       {open && IS_CLIENT ? createPortal(
         <div
-          className="va-menu p-3"
+          ref={menuRef}
+          className="fixed z-[100020] p-3"
           style={{
-            position:'fixed',
             left: (menuPos?.left ?? 0),
-            top: (btnRef.current?.getBoundingClientRect().bottom ?? 0) + 8,
-            width: (menuPos?.width ?? (btnRef.current?.getBoundingClientRect().width ?? 280)),
-            background:'var(--panel)',
-            border:`1px solid ${GREEN_LINE}`,
-            borderRadius:10,
-            boxShadow:'0 36px 90px rgba(0,0,0,.55)'
+            top: (menuPos?.top ?? 0),
+            width: (menuPos?.width ?? 280),
+            background:'var(--vs-menu-bg)',
+            border:'1px solid var(--vs-menu-border)',
+            borderRadius:20,
+            boxShadow:'0 28px 70px rgba(0,0,0,.12), 0 10px 26px rgba(0,0,0,.08), 0 0 0 1px rgba(0,0,0,.02)'
           }}
         >
           {menuTop ? <div className="mb-2">{menuTop}</div> : null}
 
           <div
-            className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[10px]"
-            style={{ background:'var(--panel)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+            className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[12px]"
+            style={{ background:'var(--vs-input-bg)', border:'1px solid var(--vs-input-border)', boxShadow:'var(--vs-input-shadow)', color:'var(--text)' }}
           >
             <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
             <input
@@ -536,13 +554,11 @@ function StyledSelect({
                 style={{
                   color: o.disabled ? 'var(--text-muted)' : 'var(--text)',
                   background:'transparent',
-                  border:'none',
-                  boxShadow:'none',
+                  border:'1px solid transparent',
                   cursor:o.disabled?'not-allowed':'pointer',
-                  position:'relative'
                 }}
-                onMouseEnter={(e)=>{ if (o.disabled) return; const el=e.currentTarget as HTMLButtonElement; el.style.boxShadow = `${GREEN_GLOW}`; el.style.transform = 'translateY(-1px)'; }}
-                onMouseLeave={(e)=>{ const el=e.currentTarget as HTMLButtonElement; el.style.boxShadow = 'none'; el.style.transform = 'translateY(0)'; }}
+                onMouseEnter={(e)=>{ if (o.disabled) return; const el=e.currentTarget as HTMLButtonElement; el.style.background = 'rgba(0,255,194,0.10)'; el.style.border = '1px solid rgba(0,255,194,0.35)'; }}
+                onMouseLeave={(e)=>{ const el=e.currentTarget as HTMLButtonElement; el.style.background = 'transparent'; el.style.border = '1px solid transparent'; }}
               >
                 {o.disabled ? (
                   <Lock className="w-3.5 h-3.5" />
@@ -555,7 +571,7 @@ function StyledSelect({
                     type="button"
                     onClick={async (e)=>{ e.stopPropagation(); await onPreview(o.value); }}
                     className="w-7 h-7 rounded-full grid place-items-center"
-                    style={{ border:'1px solid var(--input-border)', background:'var(--panel)' }}
+                    style={{ border:'1px solid var(--vs-input-border)', background:'var(--vs-input-bg)' }}
                     aria-label={isPreviewing === o.value ? 'Stop preview' : 'Play preview'}
                     title={isPreviewing === o.value ? 'Stop' : 'Play'}
                   >
@@ -642,7 +658,7 @@ function computeDiff(base:string, next:string){
   for (let j=a.length;j>b.length;j++){
     const la=a[j]; if (la!==undefined && !setB.has(la)) rows.push({ t:'rem', text: la });
   }
-  for (let j=a.length;j<b.length;j++){
+  for (let j=a.length;j>b.length;j++){
     const lb=b[j]; if (lb!==undefined && !setA.has(lb)) rows.push({ t:'add', text: lb });
   }
   return rows;
@@ -701,7 +717,11 @@ export default function VoiceAgentSection() {
 
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
+
+  // toast + kind
   const [toast, setToast] = useState<string>('');
+  const [toastKind, setToastKind] = useState<'ok'|'error'>('ok');
+
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
 
   const [showCall, setShowCall] = useState(false);
@@ -713,17 +733,10 @@ export default function VoiceAgentSection() {
 
   // typing inside prompt box
   const basePromptRef = useRef<string>('');
-  const [typingPreview, setTypingPreview] = useState('');
   const [proposedPrompt, setProposedPrompt] = useState('');
   const [changesSummary, setChangesSummary] = useState('');
 
-  // chat state used for inline chat view (optional)
-  const [msgs, setMsgs] = useState<ChatMsg[]>(() => [
-    { id: 'sys', role: 'system', text: (DEFAULT_AGENT.systemPrompt || '').trim() },
-    { id: 'hello', role: 'assistant', text: 'Hi! Ready when you are.' }
-  ]);
-
-  // voice preview + TTS (browser speech synthesis for quick previews)
+  // voice preview + TTS (browser)
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   useEffect(() => {
     if (!IS_CLIENT || !('speechSynthesis' in window)) return;
@@ -806,26 +819,40 @@ export default function VoiceAgentSection() {
   const modelOpts = useMemo(()=>modelOptsFor(data.provider), [data.provider]);
 
   async function doSave(){
-    if (!activeId) { setToast('Select or create an agent'); return; }
+    if (!activeId) { setToastKind('error'); setToast('Select or create an agent'); setTimeout(()=>setToast(''), 1400); return; }
     setSaving(true); setToast('');
-    try { await apiSave(activeId, data); setToast('Saved'); }
-    catch { setToast('Save failed'); }
+    try { await apiSave(activeId, data); setToastKind('ok'); setToast('Saved'); }
+    catch { setToastKind('error'); setToast('Save failed'); }
     finally { setSaving(false); setTimeout(()=>setToast(''), 1400); }
   }
   async function doPublish(){
-    if (!activeId) { setToast('Select or create an agent'); return; }
+    if (!activeId) { setToastKind('error'); setToast('Select or create an agent'); setTimeout(()=>setToast(''), 1400); return; }
     setPublishing(true); setToast('');
-    try { await apiPublish(activeId); setToast('Published'); }
-    catch { setToast('Publish failed'); }
+    try { await apiPublish(activeId); setToastKind('ok'); setToast('Published'); }
+    catch { setToastKind('error'); setToast('Publish failed'); }
     finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
   }
 
   /* ─────────── REALTIME CALL LAUNCH ─────────── */
   const openCall = () => {
+    if (data.provider !== 'openai') {
+      setToastKind('error');
+      setToast('Voice calls require OpenAI provider.');
+      setTimeout(()=>setToast(''), 2200);
+      return;
+    }
     const key = apiKeys.find(k => k.id === data.apiKeyId)?.key || '';
     if (!key) {
+      setToastKind('error');
       setToast('Select an OpenAI API key first.');
-      setTimeout(()=>setToast(''), 1800);
+      setTimeout(()=>setToast(''), 2200);
+      return;
+    }
+    // basic sanity check to fail fast before hitting /api/voice/ephemeral
+    if (!/^sk-[A-Za-z0-9]{20,}$/.test(key)) {
+      setToastKind('error');
+      setToast('The selected OpenAI API key looks invalid.');
+      setTimeout(()=>setToast(''), 2200);
       return;
     }
     setShowCall(true);
@@ -877,9 +904,15 @@ export default function VoiceAgentSection() {
           </div>
 
           {toast ? (
-            <div className="mb-[var(--s-4)] inline-flex items-center gap-2 px-3 py-1.5 rounded-[10px]"
-                 style={{ background:'rgba(89,217,179,.10)', color:'var(--text)', boxShadow:'0 0 0 1px rgba(89,217,179,.16) inset' }}>
-              <Check className="w-4 h-4" /> {toast}
+            <div
+              className="mb-[var(--s-4)] inline-flex items-center gap-2 px-3 py-1.5 rounded-[10px]"
+              style={
+                toastKind === 'error'
+                  ? { background:'rgba(239,68,68,.14)', color:'#ffd7d7', boxShadow:'0 0 0 1px rgba(239,68,68,.35) inset' }
+                  : { background:'rgba(89,217,179,.10)', color:'var(--text)', boxShadow:'0 0 0 1px rgba(89,217,179,.16) inset' }
+              }
+            >
+              {toastKind === 'error' ? null : <Check className="w-4 h-4" />} {toast}
             </div>
           ) : null}
 
@@ -931,7 +964,7 @@ export default function VoiceAgentSection() {
                 <StyledSelect value={data.model} onChange={setField('model')} options={modelOpts}/>
               </div>
               <div>
-                <div className="mb-[var(--s-2)] text-[12.5px]">First Message Mode</div>
+                <div className="mb-[var(--s-2)] text:[12.5px] text-[12.5px]">First Message Mode</div>
                 <StyledSelect value={data.firstMode} onChange={setField('firstMode')} options={[
                   { value: 'Assistant speaks first', label: 'Assistant speaks first' },
                   { value: 'User speaks first', label: 'User speaks first' },
@@ -948,7 +981,7 @@ export default function VoiceAgentSection() {
                     <button
                       className="inline-flex items-center gap-2 rounded-[10px] text-sm"
                       style={{ height:36, padding:'0 12px', background:CTA, color:'#fff', border:'1px solid rgba(255,255,255,.08)' }}
-                      onClick={()=>{ setComposerText(''); setProposedPrompt(''); setTypingPreview(''); setChangesSummary(''); setGenPhase('editing'); setShowGenerate(true); }}
+                      onClick={()=>{ setComposerText(''); setProposedPrompt(''); setChangesSummary(''); setGenPhase('editing'); setShowGenerate(true); }}
                     >
                       <Wand2 className="w-4 h-4" /> Generate
                     </button>
@@ -1024,7 +1057,7 @@ export default function VoiceAgentSection() {
                   placeholder="— Choose —"
                   menuTop={
                     <div className="flex items-center justify-between px-3 py-2 rounded-[10px]"
-                         style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}
+                         style={{ background:'var(--vs-input-bg)', border:'1px solid var(--vs-input-border)', boxShadow:'var(--vs-input-shadow)' }}
                     >
                       <div className="text-xs" style={{ color:'var(--text-muted)' }}>Preview</div>
                       <div className="flex items-center gap-2">
@@ -1084,7 +1117,7 @@ export default function VoiceAgentSection() {
         </div>
       </div>
 
-      {/* ─────────── Generate overlay (instructions / presets / configs) ─────────── */}
+      {/* ─────────── Generate overlay ─────────── */}
       {showGenerate && IS_CLIENT ? createPortal(
         <>
           <div
@@ -1181,6 +1214,7 @@ export default function VoiceAgentSection() {
                       setChangesSummary(summary);
                       setGenPhase('review');
                     } catch {
+                      setToastKind('error');
                       setToast('Generate failed — try simpler wording.');
                       setTimeout(()=>setToast(''), 2200);
                     }
@@ -1213,7 +1247,6 @@ export default function VoiceAgentSection() {
           />
           {showCall && (
             <WebCallButton
-              // force a realtime-capable model for the call
               model={'gpt-4o-realtime-preview'}
               systemPrompt={data.systemPrompt}
               voiceName={data.voiceName}
