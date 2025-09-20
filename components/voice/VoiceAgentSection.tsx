@@ -6,7 +6,7 @@ import dynamic from 'next/dynamic';
 import { createPortal } from 'react-dom';
 import {
   Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Rocket, Search, Check, Lock,
-  KeyRound, Play, Square, Pause, X, Database, Globe, MapPin, FileUp, Table
+  KeyRound, Play, Square, Pause, X
 } from 'lucide-react';
 import { scopedStorage } from '@/utils/scoped-storage';
 import WebCallButton from '@/components/voice/WebCallButton';
@@ -29,14 +29,6 @@ const AssistantRail = dynamic(
   { ssr: false, loading: () => <div className="px-3 py-3 text-xs opacity-70">Loading…</div> }
 );
 
-/* Prompt facts uploader — lazy to avoid prop typing mismatches */
-const PromptFactsUpload = dynamic(
-  () =>
-    import('@/components/voice/PromptFactsUpload')
-      .then(m => m.default ?? m),
-  { ssr: false, loading: () => <div className="px-2 py-2 text-xs opacity-70">Loading uploader…</div> }
-);
-
 class RailBoundary extends React.Component<{children:React.ReactNode},{hasError:boolean}> {
   constructor(p:any){ super(p); this.state={hasError:false}; }
   static getDerivedStateFromError(){ return {hasError:true}; }
@@ -47,9 +39,11 @@ class RailBoundary extends React.Component<{children:React.ReactNode},{hasError:
 const CTA = '#59d9b3';
 const CTA_HOVER = '#54cfa9';
 const GREEN_LINE = 'rgba(89,217,179,.20)';
+const GREEN_GLOW = '0 10px 26px rgba(89,217,179,.28)';
 const ACTIVE_KEY = 'va:activeId';
 const Z_OVERLAY = 100000;
 const Z_MODAL   = 100001;
+const Z_MENU    = 100020;       // above panels
 const IS_CLIENT = typeof window !== 'undefined' && typeof document !== 'undefined';
 
 /* phone icon */
@@ -100,19 +94,24 @@ const Tokens = () => (
       --green-weak: rgba(89,217,179,.12);
       --green-strong: rgba(89,217,179,.22);
       --red-weak: rgba(239,68,68,.14);
+      --red-strong: rgba(239,68,68,.26);
 
+      /* also used by dropdown triggers (with fallbacks in code) */
       --vs-input-bg:#101314;
       --vs-input-border:rgba(255,255,255,.14);
+      --vs-input-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 12px 30px rgba(0,0,0,.38);
 
       --vs-menu-bg:#101314;
       --vs-menu-border:rgba(255,255,255,.16);
     }
 
+    /* NEW: variables for content rendered in a portal (outside .va-scope) */
     .va-portal{
       --vs-menu-bg:#101314;
       --vs-menu-border:rgba(255,255,255,.16);
       --vs-input-bg:#101314;
       --vs-input-border:rgba(255,255,255,.14);
+      --vs-input-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 12px 30px rgba(0,0,0,.38);
       --text:#e6f1ef;
       --text-muted:#9fb4ad;
     }
@@ -418,7 +417,7 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
     style={{
       height:28, width:50, padding:'0 6px', borderRadius:999, justifyContent:'flex-start',
       background: checked ? 'color-mix(in oklab, #59d9b3 18%, var(--input-bg))' : 'var(--input-bg)',
-      border:'1px solid var(--input-border)'
+      border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)'
     }}
     aria-pressed={checked}
   >
@@ -444,7 +443,7 @@ function StyledSelect({
 }) {
   const wrapRef = useRef<HTMLDivElement|null>(null);
   const btnRef = useRef<HTMLButtonElement|null>(null);
-  const menuRef = useRef<HTMLDivElement|null>(null);
+  const menuRef = useRef<HTMLDivElement|null>(null);       // NEW: track portal to allow clicks
   const searchRef = useRef<HTMLInputElement|null>(null);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -456,18 +455,20 @@ function StyledSelect({
     return q ? options.filter(o => o.label.toLowerCase().includes(q)) : options;
   }, [options, query, value]);
 
+  // position menu
   useLayoutEffect(() => {
     if (!open || !btnRef.current) return;
     const r = btnRef.current.getBoundingClientRect();
     setMenuPos({ left: r.left, top: r.bottom + 8, width: r.width });
   }, [open]);
 
+  // close on outside click — but keep it open when clicking inside portal menu
   useEffect(() => {
     if (!open || !IS_CLIENT) return;
     const off = (e: MouseEvent) => {
       const t = e.target as Node;
       if (wrapRef.current?.contains(t)) return;
-      if (menuRef.current?.contains(t)) return;
+      if (menuRef.current?.contains(t)) return;  // key fix
       setOpen(false);
     };
     const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
@@ -496,6 +497,7 @@ function StyledSelect({
         style={{
           background:'var(--vs-input-bg, #101314)',
           border:'1px solid var(--vs-input-border, rgba(255,255,255,.14))',
+          boxShadow:'var(--vs-input-shadow, none)',
           color:'var(--text)'
         }}
       >
@@ -518,14 +520,14 @@ function StyledSelect({
             background:'var(--vs-menu-bg, #101314)',
             border:'1px solid var(--vs-menu-border, rgba(255,255,255,.16))',
             borderRadius:20,
-            boxShadow:'0 28px 70px rgba(0,0,0,.60), 0 10px 26px rgba(0,0,0,.45)'
+            boxShadow:'0 28px 70px rgba(0,0,0,.60), 0 10px 26px rgba(0,0,0,.45), 0 0 0 1px rgba(0,255,194,.10)'
           }}
         >
           {menuTop ? <div className="mb-2">{menuTop}</div> : null}
 
           <div
             className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[12px]"
-            style={{ background:'var(--vs-input-bg, #101314)', border:'1px solid var(--vs-input-border, rgba(255,255,255,.14))', color:'var(--text)' }}
+            style={{ background:'var(--vs-input-bg, #101314)', border:'1px solid var(--vs-input-border, rgba(255,255,255,.14))', boxShadow:'var(--vs-input-shadow, none)', color:'var(--text)' }}
           >
             <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
             <input
@@ -551,8 +553,14 @@ function StyledSelect({
                   border:'1px solid transparent',
                   cursor:o.disabled?'not-allowed':'pointer',
                 }}
+                onMouseEnter={(e)=>{ if (o.disabled) return; const el=e.currentTarget as HTMLButtonElement; el.style.background = 'rgba(0,255,194,0.10)'; el.style.border = '1px solid rgba(0,255,194,0.35)'; }}
+                onMouseLeave={(e)=>{ const el=e.currentTarget as HTMLButtonElement; el.style.background = 'transparent'; el.style.border = '1px solid transparent'; }}
               >
-                {o.disabled ? <Lock className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" style={{ opacity: o.value===value ? 1 : 0 }} />}
+                {o.disabled ? (
+                  <Lock className="w-3.5 h-3.5" />
+                ) : (
+                  <Check className="w-3.5 h-3.5" style={{ opacity: o.value===value ? 1 : 0 }} />
+                )}
                 <span className="truncate">{o.label}</span>
                 {onPreview ? (
                   <button
@@ -706,7 +714,7 @@ export default function VoiceAgentSection() {
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [toast, setToast] = useState<string>('');
-  const [toastKind, setToastKind] = useState<'info'|'error'>('info');
+  const [toastKind, setToastKind] = useState<'info'|'error'>('info');  // NEW: colorize toast
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
 
   const [showCall, setShowCall] = useState(false);
@@ -721,7 +729,7 @@ export default function VoiceAgentSection() {
   const [proposedPrompt, setProposedPrompt] = useState('');
   const [changesSummary, setChangesSummary] = useState('');
 
-  // chat state (for the call panel's transcript display shell)
+  // chat state used for inline chat view (optional)
   const [msgs, setMsgs] = useState<ChatMsg[]>(() => [
     { id: 'sys', role: 'system', text: (DEFAULT_AGENT.systemPrompt || '').trim() },
     { id: 'hello', role: 'assistant', text: 'Hi! Ready when you are.' }
@@ -836,63 +844,6 @@ export default function VoiceAgentSection() {
     setShowCall(true);
   };
 
-  /* ─────────── helpers to hit your connector API routes ─────────── */
-  async function postJSON(url:string, body:any){
-    const r = await fetch(url, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(body) }).catch(()=>null);
-    if (!r?.ok) throw new Error(`${url} failed`);
-    return r.json();
-  }
-
-  const [websiteUrl, setWebsiteUrl] = useState('');
-  const [mapsInput, setMapsInput] = useState('');
-  const [sheetUrl, setSheetUrl] = useState('');
-  const [busyKey, setBusyKey] = useState<string>('');
-
-  async function runWebsiteImport(){
-    const url = safeTrim(websiteUrl);
-    if (!url) return;
-    try {
-      setBusyKey('website');
-      const res = await postJSON('/api/connectors/website-import', { url, agentId: activeId });
-      if (res?.prompt) setField('systemPrompt')(res.prompt);
-      setToastKind('info'); setToast('Website imported into Business Facts');
-    } catch {
-      setToastKind('error'); setToast('Website import failed');
-    } finally {
-      setBusyKey(''); setTimeout(()=>setToast(''), 1600);
-    }
-  }
-
-  async function runMapsImport(){
-    const input = safeTrim(mapsInput);
-    if (!input) return;
-    try {
-      setBusyKey('maps');
-      const res = await postJSON('/api/connectors/maps-import', { input, agentId: activeId });
-      if (res?.prompt) setField('systemPrompt')(res.prompt);
-      setToastKind('info'); setToast('Google Maps data imported');
-    } catch {
-      setToastKind('error'); setToast('Maps import failed');
-    } finally {
-      setBusyKey(''); setTimeout(()=>setToast(''), 1600);
-    }
-  }
-
-  async function runSheetsImport(){
-    const url = safeTrim(sheetUrl);
-    if (!url) return;
-    try {
-      setBusyKey('sheets');
-      const res = await postJSON('/api/connectors/sheets', { url, agentId: activeId });
-      if (res?.prompt) setField('systemPrompt')(res.prompt);
-      setToastKind('info'); setToast('Google Sheet ingested');
-    } catch {
-      setToastKind('error'); setToast('Sheets import failed');
-    } finally {
-      setBusyKey(''); setTimeout(()=>setToast(''), 1600);
-    }
-  }
-
   /* ─────────── UI ─────────── */
   const inInlineReview = genPhase === 'review' && !showGenerate;
 
@@ -907,12 +858,12 @@ export default function VoiceAgentSection() {
         </div>
 
         <div className="px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w-[1160px]" style={{ fontSize:'var(--fz-body)', lineHeight:'var(--lh-body)' }}>
-          <div className="mb-[12px] flex flex-wrap items-center justify-end gap-[12px]">
+          <div className="mb-[var(--s-4)] flex flex-wrap items-center justify-end gap-[var(--s-3)]">
             <button
               onClick={doSave}
               disabled={saving}
               className="inline-flex items-center gap-2 rounded-[10px] px-4 text-sm transition hover:-translate-y-[1px] disabled:opacity-60"
-              style={{ height:'44px', background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+              style={{ height:'var(--control-h)', background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)' }}
             >
               {saving ? 'Saving…' : 'Save'}
             </button>
@@ -921,7 +872,7 @@ export default function VoiceAgentSection() {
               onClick={doPublish}
               disabled={publishing}
               className="inline-flex items-center gap-2 rounded-[10px] px-4 text-sm transition hover:-translate-y-[1px] disabled:opacity-60"
-              style={{ height:'44px', background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+              style={{ height:'var(--control-h)', background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'var(--text)' }}
             >
               <Rocket className="w-4 h-4" /> {publishing ? 'Publishing…' : 'Publish'}
             </button>
@@ -929,7 +880,7 @@ export default function VoiceAgentSection() {
             <button
               onClick={openCall}
               className="inline-flex items-center gap-2 rounded-[10px] select-none"
-              style={{ height:'44px', padding:'0 18px', background:CTA, color:'#ffffff', fontWeight:700, boxShadow:'0 10px 22px rgba(89,217,179,.20)' }}
+              style={{ height:'var(--control-h)', padding:'0 18px', background:CTA, color:'#ffffff', fontWeight:700, boxShadow:'0 10px 22px rgba(89,217,179,.20)' }}
               onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA_HOVER)}
               onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA)}
             >
@@ -940,7 +891,7 @@ export default function VoiceAgentSection() {
 
           {toast ? (
             <div
-              className="mb-[12px] inline-flex items-center gap-2 px-3 py-1.5 rounded-[10px]"
+              className="mb-[var(--s-4)] inline-flex items-center gap-2 px-3 py-1.5 rounded-[10px]"
               style={{
                 background: toastKind === 'error' ? 'rgba(239,68,68,.12)' : 'rgba(89,217,179,.10)',
                 color: 'var(--text)',
@@ -958,7 +909,7 @@ export default function VoiceAgentSection() {
               <div className="va-head" style={{ minHeight: 56 }}>
                 <div className="text-xs" style={{ color:'var(--text-muted)' }}>Cost</div><div />
               </div>
-              <div className="p-[16px]">
+              <div className="p-[var(--s-4)]">
                 <div className="font-semibold" style={{ fontSize:'var(--fz-sub)' }}>~$0.1/min</div>
               </div>
             </div>
@@ -966,7 +917,7 @@ export default function VoiceAgentSection() {
               <div className="va-head" style={{ minHeight: 56 }}>
                 <div className="text-xs" style={{ color:'var(--text-muted)' }}>Latency</div><div />
               </div>
-              <div className="p-[16px]">
+              <div className="p-[var(--s-4)]">
                 <div className="font-semibold" style={{ fontSize:'var(--fz-sub)' }}>~1050 ms</div>
               </div>
             </div>
@@ -980,28 +931,28 @@ export default function VoiceAgentSection() {
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px]">
               <div>
-                <div className="mb-[8px] text-[12.5px]">Assistant Name</div>
+                <div className="mb-[var(--s-2)] text-[12.5px]">Assistant Name</div>
                 <input
                   value={data.name}
                   onChange={(e)=>setField('name')(e.target.value)}
                   className="w-full bg-transparent outline-none rounded-[10px] px-3"
-                  style={{ height:'44px', background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+                  style={{ height:'var(--control-h)', background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
                   placeholder="e.g., Riley"
                 />
               </div>
               <div>
-                <div className="mb-[8px] text-[12.5px]">Provider</div>
+                <div className="mb-[var(--s-2)] text-[12.5px]">Provider</div>
                 <StyledSelect value={data.provider} onChange={(v)=>setField('provider')(v as AgentData['provider'])} options={providerOpts}/>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt-[16px]">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt-[var(--s-4)]">
               <div>
-                <div className="mb-[8px] text-[12.5px]">Model</div>
+                <div className="mb-[var(--s-2)] text-[12.5px]">Model</div>
                 <StyledSelect value={data.model} onChange={setField('model')} options={modelOpts}/>
               </div>
               <div>
-                <div className="mb-[8px] text-[12.5px]">First Message Mode</div>
+                <div className="mb-[var(--s-2)] text-[12.5px]">First Message Mode</div>
                 <StyledSelect value={data.firstMode} onChange={setField('firstMode')} options={[
                   { value: 'Assistant speaks first', label: 'Assistant speaks first' },
                   { value: 'User speaks first', label: 'User speaks first' },
@@ -1010,9 +961,9 @@ export default function VoiceAgentSection() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 mt-[16px]">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt-[var(--s-4)]">
               <div className="md:col-span-2">
-                <div className="flex items-center justify-between mb-[8px]">
+                <div className="flex items-center justify-between mb-[var(--s-2)]">
                   <div className="font-medium" style={{ fontSize:'var(--fz-label)' }}>System Prompt</div>
                   <div className="flex items-center gap-2">
                     <button
@@ -1040,104 +991,13 @@ export default function VoiceAgentSection() {
                         background:'var(--input-bg)',
                         border:'1px solid var(--input-border)',
                         color:'var(--text)',
-                        padding:'12px'
+                        padding:'12px',
+                        maxHeight:'unset'
                       }}
                     >
                       <DiffInline base={basePromptRef.current} next={proposedPrompt}/>
                     </div>
                   )}
-                </div>
-              </div>
-            </div>
-          </Section>
-
-          {/* ─────────── Business Facts & Imports ─────────── */}
-          <Section
-            title="Business Facts & Imports"
-            icon={<Database className="w-4 h-4" style={{ color: CTA }} />}
-            desc="Pull facts from your website, Google Maps, Google Sheets, or upload files. Merges into the system prompt / facts store."
-            defaultOpen={true}
-          >
-            <div className="grid gap-[12px] md:grid-cols-2">
-              {/* Website Import */}
-              <div className="rounded-[12px] p-3" style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}>
-                <div className="flex items-center gap-2 mb-2">
-                  <Globe className="w-4 h-4" style={{ color: CTA }} />
-                  <div className="text-sm font-medium">Website Import</div>
-                </div>
-                <input
-                  value={websiteUrl}
-                  onChange={(e)=>setWebsiteUrl(e.target.value)}
-                  placeholder="https://example.com"
-                  className="w-full bg-transparent outline-none rounded-[10px] px-3 mb-2"
-                  style={{ height:'40px', background:'var(--panel)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                />
-                <button
-                  onClick={runWebsiteImport}
-                  disabled={!websiteUrl.trim() || busyKey==='website'}
-                  className="w-full rounded-[10px] text-sm"
-                  style={{ height:38, background:CTA, color:'#051412', opacity:(!websiteUrl.trim()||busyKey==='website')?.valueOf()?0.7:1 }}
-                >
-                  {busyKey==='website' ? 'Importing…' : 'Import Website'}
-                </button>
-              </div>
-
-              {/* Google Maps Import */}
-              <div className="rounded-[12px] p-3" style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}>
-                <div className="flex items-center gap-2 mb-2">
-                  <MapPin className="w-4 h-4" style={{ color: CTA }} />
-                  <div className="text-sm font-medium">Google Maps Import</div>
-                </div>
-                <input
-                  value={mapsInput}
-                  onChange={(e)=>setMapsInput(e.target.value)}
-                  placeholder="Place name or Google Maps URL"
-                  className="w-full bg-transparent outline-none rounded-[10px] px-3 mb-2"
-                  style={{ height:'40px', background:'var(--panel)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                />
-                <button
-                  onClick={runMapsImport}
-                  disabled={!mapsInput.trim() || busyKey==='maps'}
-                  className="w-full rounded-[10px] text-sm"
-                  style={{ height:38, background:CTA, color:'#051412', opacity:(!mapsInput.trim()||busyKey==='maps')?.valueOf()?0.7:1 }}
-                >
-                  {busyKey==='maps' ? 'Importing…' : 'Import from Maps'}
-                </button>
-              </div>
-
-              {/* Google Sheets Import */}
-              <div className="rounded-[12px] p-3" style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}>
-                <div className="flex items-center gap-2 mb-2">
-                  <Table className="w-4 h-4" style={{ color: CTA }} />
-                  <div className="text-sm font-medium">Google Sheets</div>
-                </div>
-                <input
-                  value={sheetUrl}
-                  onChange={(e)=>setSheetUrl(e.target.value)}
-                  placeholder="Google Sheet URL"
-                  className="w-full bg-transparent outline-none rounded-[10px] px-3 mb-2"
-                  style={{ height:'40px', background:'var(--panel)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                />
-                <button
-                  onClick={runSheetsImport}
-                  disabled={!sheetUrl.trim() || busyKey==='sheets'}
-                  className="w-full rounded-[10px] text-sm"
-                  style={{ height:38, background:CTA, color:'#051412', opacity:(!sheetUrl.trim()||busyKey==='sheets')?.valueOf()?0.7:1 }}
-                >
-                  {busyKey==='sheets' ? 'Importing…' : 'Import Sheet'}
-                </button>
-              </div>
-
-              {/* File Upload -> Prompt Facts */}
-              <div className="rounded-[12px] p-3" style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}>
-                <div className="flex items-center gap-2 mb-2">
-                  <FileUp className="w-4 h-4" style={{ color: CTA }} />
-                  <div className="text-sm font-medium">Upload Files</div>
-                </div>
-                {/* Render your uploader. If it exposes callbacks, they’re optional; rendering is enough. */}
-                <PromptFactsUpload /* @ts-ignore optional props */ />
-                <div className="mt-2 text-xs" style={{ color:'var(--text-muted)' }}>
-                  PDFs, docs, or text will be summarized and merged into Business Facts.
                 </div>
               </div>
             </div>
@@ -1151,7 +1011,7 @@ export default function VoiceAgentSection() {
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px]">
               <div>
-                <div className="mb-[8px] text-[12.5px] flex items-center gap-2">
+                <div className="mb-[var(--s-2)] text-[12.5px] flex items-center gap-2">
                   <KeyRound className="w-4 h-4 opacity-80" /> OpenAI API Key
                 </div>
                 <StyledSelect
@@ -1172,7 +1032,7 @@ export default function VoiceAgentSection() {
               </div>
 
               <div>
-                <div className="mb-[8px] text-[12.5px]">Voice</div>
+                <div className="mb-[var(--s-2)] text-[12.5px]">Voice</div>
                 <StyledSelect
                   value={data.voiceName}
                   onChange={(v)=>setField('voiceName')(v)}
@@ -1223,15 +1083,15 @@ export default function VoiceAgentSection() {
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px]">
               <div>
-                <div className="mb-[8px] text-[12.5px]">Provider</div>
+                <div className="mb-[var(--s-2)] text-[12.5px]">Provider</div>
                 <StyledSelect value={data.asrProvider} onChange={(v)=>setField('asrProvider')(v as AgentData['asrProvider'])} options={asrProviders}/>
               </div>
               <div>
-                <div className="mb-[8px] text-[12.5px]">Model</div>
+                <div className="mb-[var(--s-2)] text-[12.5px]">Model</div>
                 <StyledSelect value={data.asrModel} onChange={setField('asrModel')} options={asrModelsFor(data.asrProvider)}/>
               </div>
             </div>
-            <div className="mt-[16px] grid sm:grid-cols-2 gap-[12px]">
+            <div className="mt-[var(--s-4)] grid sm:grid-cols-2 gap-[12px]">
               <div className="flex items-center justify-between p-3 rounded-[10px]" style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}>
                 <span className="text-sm">Background Denoising</span>
                 <Toggle checked={data.denoise} onChange={setField('denoise')} />
@@ -1295,7 +1155,10 @@ export default function VoiceAgentSection() {
                 <div className="text-xs" style={{ color:'var(--text-muted)' }}>
                   Tip: type something like “assistant for a dental clinic; tone friendly; handle booking and FAQs”.
                 </div>
-                <div className="rounded-[10px]" style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}>
+                <div
+                  className="rounded-[10px]"
+                  style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}
+                >
                   <textarea
                     value={composerText}
                     onChange={(e)=>setComposerText(e.target.value)}
@@ -1357,7 +1220,7 @@ export default function VoiceAgentSection() {
         document.body
       ) : null}
 
-      {/* ─────────── Chat-style Voice/Call panel (wraps WebCallButton) ─────────── */}
+      {/* ─────────── Voice/Call panel (WebRTC) ─────────── */}
       {IS_CLIENT ? createPortal(
         <>
           <div
@@ -1370,89 +1233,20 @@ export default function VoiceAgentSection() {
             }}
             onClick={()=> setShowCall(false)}
           />
-          <div
-            className="fixed right-4 bottom-4 md:right-6 md:bottom-6"
-            style={{
-              zIndex: 9997,
-              transform: showCall ? 'translateY(0)' : 'translateY(8px)',
-              opacity: showCall ? 1 : 0,
-              pointerEvents: showCall ? 'auto' : 'none',
-              transition: 'opacity .2s var(--ease), transform .2s var(--ease)'
-            }}
-          >
-            {showCall && (
-              <div
-                className="va-card w-[min(92vw,420px)]"
-                style={{ borderRadius:16, overflow:'hidden' }}
-                onClick={(e)=>e.stopPropagation()}
-              >
-                {/* Header */}
-                <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom:'1px solid rgba(255,255,255,.08)' }}>
-                  <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-full grid place-items-center" style={{ background:'rgba(89,217,179,.12)' }}>
-                      <PhoneUpIcon />
-                    </div>
-                    <div>
-                      <div className="text-sm font-semibold" style={{ color:'var(--text)' }}>{data.name || 'Assistant'}</div>
-                      <div className="text-xs" style={{ color:'var(--text-muted)' }}>Live call</div>
-                    </div>
-                  </div>
-                  <button
-                    onClick={()=> setShowCall(false)}
-                    className="w-8 h-8 rounded-[8px] grid place-items-center"
-                    style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)', color:'var(--text)' }}
-                    aria-label="Close"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-
-                {/* Transcript shell */}
-                <div className="px-4 py-3" style={{ maxHeight: 320, overflowY:'auto' }}>
-                  {msgs.map(m => (
-                    <div key={m.id} className={`mb-2 flex ${m.role==='user'?'justify-end':'justify-start'}`}>
-                      <div
-                        className="px-3 py-2 rounded-[12px] text-sm"
-                        style={{
-                          background: m.role==='user' ? 'rgba(89,217,179,.14)' : 'rgba(255,255,255,.06)',
-                          color:'var(--text)',
-                          maxWidth:'80%'
-                        }}
-                      >
-                        {m.text}
-                      </div>
-                    </div>
-                  ))}
-                  <div className="text-xs opacity-70">Connecting microphone…</div>
-                </div>
-
-                {/* Footer embeds the existing WebCallButton */}
-                <div className="p-3" style={{ borderTop:'1px solid rgba(255,255,255,.08)' }}>
-                  <WebCallButton
-                    // force a realtime-capable model for the call
-                    model={'gpt-4o-realtime-preview'}
-                    systemPrompt={data.systemPrompt}
-                    voiceName={data.voiceName}
-                    assistantName={data.name || 'Assistant'}
-                    apiKey={apiKeys.find(k => k.id === data.apiKeyId)?.key || ''}
-                    onClose={()=> setShowCall(false)}
-                  />
-                </div>
-              </div>
-            )}
-          </div>
+          {showCall && (
+            <WebCallButton
+              // force a realtime-capable model for the call
+              model={'gpt-4o-realtime-preview'}
+              systemPrompt={data.systemPrompt}
+              voiceName={data.voiceName}
+              assistantName={data.name || 'Assistant'}
+              apiKey={apiKeys.find(k => k.id === data.apiKeyId)?.key || ''}
+              onClose={()=> setShowCall(false)}
+            />
+          )}
         </>,
         document.body
       ) : null}
     </section>
-  );
-}
-
-/* small icon for the chat header */
-function PhoneUpIcon(){
-  return (
-    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden>
-      <path d="M22 16.92v3.08a1 1 0 0 1-1.09 1 19.86 19.86 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.86 19.86 0 0 1 3 3.09 1 1 0 0 1 4 2h3.09a1 1 0 0 1 1 .75l.7 2.6a1 1 0 0 1-.29 1L7.16 8.09a16 16 0 0 0 6 6l1.74-1.38a1 1 0 0 1 1-.21l2.6.7a1 1 0 0 1 .71 1.02z" fill="currentColor"/>
-    </svg>
   );
 }
