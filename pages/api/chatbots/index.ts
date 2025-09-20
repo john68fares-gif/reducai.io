@@ -1,4 +1,3 @@
-// pages/api/chatbots/index.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { listByOwner, upsert, type ChatBot } from '@/lib/chatbots-store';
 
@@ -15,11 +14,17 @@ function getOwnerId(req: NextApiRequest): string {
   return 'anon';
 }
 
+/**
+ * Hydrate local store from OpenAI for *this* owner only.
+ * STRICT: Only assistants with metadata.ownerId === ownerId are imported.
+ * Ownerless assistants are ignored (use a migration tool to tag them).
+ */
 async function hydrateFromOpenAI(ownerId: string) {
-  if (!OPENAI_API_KEY) return; // skip if no key
-  let url = 'https://api.openai.com/v1/assistants?limit=100';
-  // basic pagination loop
-  for (let guard = 0; guard < 10 && url; guard++) {
+  if (!OPENAI_API_KEY) return; // skip hydration without a key
+
+  let url: string | null = 'https://api.openai.com/v1/assistants?limit=100';
+
+  for (let guard = 0; guard < 12 && url; guard++) {
     const r = await fetch(url, {
       headers: {
         Authorization: `Bearer ${OPENAI_API_KEY}`,
@@ -28,22 +33,19 @@ async function hydrateFromOpenAI(ownerId: string) {
       cache: 'no-store',
     });
     if (!r.ok) break;
+
     const j = await r.json().catch(() => null);
     const list = Array.isArray(j?.data) ? j.data : [];
 
     for (const a of list) {
-      const metaOwner = a?.metadata?.ownerId?.toString?.() || '';
-      // show only assistants belonging to this owner; (optional) include legacy ones with no ownerId
-      if (metaOwner && metaOwner !== ownerId) continue;
+      const metaOwner = (a?.metadata?.ownerId ?? '').toString();
+      if (!metaOwner || metaOwner !== ownerId) continue; // STRICT filter
 
-      const temperature =
-        Number.parseFloat(a?.metadata?.temperature ?? '') ||
-        0.5;
+      const temperature = Number.parseFloat(a?.metadata?.temperature ?? '') || 0.5;
 
-      // Upsert into local store using the OpenAI assistant as source of truth
       upsert({
         id: a.id,
-        ownerId: metaOwner || ownerId,
+        ownerId: metaOwner, // never adopt with a fallback
         name: a.name || 'Untitled Agent',
         model: a.model || 'gpt-4o',
         temperature,
@@ -51,11 +53,10 @@ async function hydrateFromOpenAI(ownerId: string) {
       } as ChatBot);
     }
 
-    if (j?.has_more && j?.last_id) {
-      url = `https://api.openai.com/v1/assistants?limit=100&after=${encodeURIComponent(j.last_id)}`;
-    } else {
-      url = '';
-    }
+    url =
+      j?.has_more && j?.last_id
+        ? `https://api.openai.com/v1/assistants?limit=100&after=${encodeURIComponent(j.last_id)}`
+        : null;
   }
 }
 
@@ -64,15 +65,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
   const ownerId = getOwnerId(req);
 
   if (req.method === 'GET') {
-    // 1) make sure local store has everything from OpenAI for this owner
+    // (1) Pull fresh from OpenAI for this owner (strict filter)
     await hydrateFromOpenAI(ownerId);
 
-    // 2) return local list
+    // (2) Return local list
     const items = listByOwner(ownerId);
     return res.status(200).json({ ok: true, data: items });
   }
 
   if (req.method === 'POST') {
+    // Allow Builder to upsert directly into local store (no OpenAI call here)
     const {
       id,
       name,
