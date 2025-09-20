@@ -1,9 +1,9 @@
+// pages/api/voice/ephemeral.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
 
 /**
  * Ephemeral token minting for OpenAI Realtime.
- * Accepts key in header `X-OpenAI-Key`, body.apiKey, or OPENAI_API_KEY env.
- * We do not log or persist any keys.
+ * Accepts API key via header X-OpenAI-Key, body.apiKey, or OPENAI_API_KEY env.
  */
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
@@ -16,73 +16,61 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       model,
       systemPrompt,
       voiceName,
-      assistantName,
-      apiKey: apiKeyFromBody,
+      // assistantName,   // ❌ DO NOT forward this, Realtime sessions don’t support it
+      apiKey: apiKeyInBody,
     } = (req.body || {}) as {
       model?: string;
       systemPrompt?: string;
       voiceName?: string;
-      assistantName?: string;
+      assistantName?: string; // ignored
       apiKey?: string;
     };
 
     // Resolve API key: header -> body -> env
-    const headerKey = String(req.headers['x-openai-key'] || '').trim();
-    const bodyKey   = String(apiKeyFromBody || '').trim();
-    const envKey    = String(process.env.OPENAI_API_KEY || '').trim();
-    const apiKey    = headerKey || bodyKey || envKey;
+    const headerKey = (req.headers['x-openai-key'] || '') as string;
+    const serverKey = process.env.OPENAI_API_KEY || '';
+    const apiKey = headerKey || apiKeyInBody || serverKey;
 
     if (!apiKey) {
       return res.status(400).json({
         error:
-          'Missing OpenAI API key. Provide it via header "X-OpenAI-Key", body.apiKey, or set OPENAI_API_KEY on the server.',
+          'Missing OpenAI API key. Send it via header "X-OpenAI-Key", body.apiKey, or set OPENAI_API_KEY on the server.',
       });
     }
-
-    // ✅ NEW: be permissive—OpenAI uses multiple key prefixes now (sk-, sk-proj-, sk-live-, etc.)
-    // Just a minimal sanity check to avoid obvious junk; let OpenAI do the real validation.
-    if (!apiKey.startsWith('sk-') || apiKey.length < 24) {
-      return res.status(400).json({ error: 'Invalid OpenAI API key format.' });
+    // 🔧 Don’t over-validate format; OpenAI issues several key prefixes (sk-, sk-proj-, sk-live-…)
+    if (typeof apiKey !== 'string' || apiKey.length < 20) {
+      return res.status(400).json({ error: 'Invalid OpenAI API key.' });
     }
 
-    // Prepare session creation
-    const resolvedModel =
-      model && model.toLowerCase().includes('realtime') ? model : 'gpt-4o-realtime-preview';
-
-    // Map voice label -> OpenAI voice id
-    const v = String(voiceName || '').toLowerCase();
+    // Build voice value supported by Realtime (alloy/verse etc.)
     const voice =
-      v.includes('alloy') ? 'alloy' :
-      v.includes('verse') ? 'verse' :
-      v.includes('coral') ? 'coral' :
-      v.includes('amber') ? 'amber' :
-      'alloy';
+      (voiceName || '').toLowerCase().includes('verse') ? 'verse' : 'alloy';
 
-    // Create ephemeral session
+    // Create the short-lived Realtime session
     const r = await fetch('https://api.openai.com/v1/realtime/sessions', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
-        // ✅ IMPORTANT for sessions API
-        'OpenAI-Beta': 'realtime=v1',
       },
       body: JSON.stringify({
-        model: resolvedModel,
+        model: model || 'gpt-4o-realtime-preview',
         voice,
+        // ✅ supported:
         instructions: systemPrompt || '',
-        name: assistantName || '',
+        // ❌ NOT supported by this endpoint:
+        // name: assistantName,
       }),
     });
 
+    const text = await r.text();
     if (!r.ok) {
-      const t = await r.text();
-      return res.status(r.status).json({ error: `OpenAI session failed: ${t}` });
+      // Pass through OpenAI’s error so the UI shows the real reason
+      return res.status(r.status).json({ error: `OpenAI session failed: ${text}` });
     }
 
-    const session = await r.json();
-    // returns: { id, client_secret: { value, expires_at }, ... }
-    return res.status(200).json(session);
+    const sessionJson = JSON.parse(text);
+    return res.status(200).json(sessionJson);
   } catch (err: any) {
     return res.status(500).json({ error: err?.message || 'Unknown error' });
   }
