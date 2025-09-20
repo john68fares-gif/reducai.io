@@ -10,8 +10,8 @@ import {
 } from 'lucide-react';
 import { scopedStorage } from '@/utils/scoped-storage';
 
-/* ⬇️ NEW: bring in your prompt engine */
-import { applyInstructions, DEFAULT_PROMPT } from '@/lib/prompt-engine';
+// ⬇️ Use your prompt engine (adjust the relative path if needed)
+import { applyInstructions, DEFAULT_PROMPT } from '../../lib/prompt-engine';
 
 /* ───────────────── Assistant rail (fixed) ───────────────── */
 const AssistantRail = dynamic(
@@ -37,6 +37,7 @@ const ACTIVE_KEY = 'va:activeId';
 const Z_OVERLAY = 100000;
 const Z_MODAL   = 100001;
 const Z_MENU    = 100010;
+const IS_CLIENT = typeof window !== 'undefined';
 
 /* phone icon */
 function PhoneFilled(props: React.SVGProps<SVGSVGElement>) {
@@ -153,7 +154,327 @@ type AgentData = {
   numerals: boolean;
 };
 
-/* ─────────── Diff helpers (kept for UI) ─────────── */
+/* ─────────── canonical blocks (for local fallback only) ─────────── */
+const PROMPT_SKELETON =
+`[Identity]
+
+[Style]
+
+[Response Guidelines]
+
+[Task & Goals]
+
+[Error Handling / Fallback]`;
+
+/* ─────────── defaults ─────────── */
+const DEFAULT_AGENT: AgentData = {
+  name: 'Assistant',
+  provider: 'openai',
+  model: 'GPT-4o',
+  firstMode: 'Assistant speaks first',
+  firstMsg: 'Hello.',
+  systemPrompt: DEFAULT_PROMPT, // ← from prompt-engine
+  ttsProvider: 'openai',
+  voiceName: 'Alloy (American)',
+  apiKeyId: '',
+  asrProvider: 'deepgram',
+  asrModel: 'Nova 2',
+  denoise: false,
+  numerals: false,
+  language: 'English'
+};
+
+const keyFor = (id: string) => `va:agent:${id}`;
+const versKeyFor = (id: string) => `va:versions:${id}`;
+
+const loadAgentData = (id: string): AgentData => {
+  try { const raw = localStorage.getItem(keyFor(id)); if (raw) return { ...DEFAULT_AGENT, ...(JSON.parse(raw)||{}) }; }
+  catch {}
+  return { ...DEFAULT_AGENT };
+};
+const saveAgentData = (id: string, data: AgentData) => {
+  try { localStorage.setItem(keyFor(id), JSON.stringify(data)); } catch {}
+};
+const pushVersion = (id:string, snapshot:any) => {
+  try {
+    const raw = localStorage.getItem(versKeyFor(id));
+    const arr = raw ? JSON.parse(raw) : [];
+    arr.unshift({ id: `v_${Date.now()}`, ts: Date.now(), ...snapshot });
+    localStorage.setItem(versKeyFor(id), JSON.stringify(arr.slice(0, 50)));
+  } catch {}
+};
+
+/* ─────────── mock backend ─────────── */
+async function apiSave(agentId: string, payload: AgentData){
+  const r = await fetch(`/api/voice/agent/${agentId}/save`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+  }).catch(()=>null);
+  if (!r?.ok) throw new Error('Save failed');
+  return r.json();
+}
+async function apiPublish(agentId: string){
+  const r = await fetch(`/api/voice/agent/${agentId}/publish`, { method: 'POST' }).catch(()=>null);
+  if (!r?.ok) throw new Error('Publish failed');
+  return r.json();
+}
+
+/* ─────────── option helpers ─────────── */
+type Opt = { value: string; label: string; disabled?: boolean; note?: string };
+
+const providerOpts: Opt[] = [
+  { value: 'openai',     label: 'OpenAI' },
+  { value: 'anthropic',  label: 'Anthropic — coming soon', disabled: true, note: 'soon' },
+  { value: 'google',     label: 'Google — coming soon',    disabled: true, note: 'soon' },
+];
+
+const modelOptsFor = (provider: string): Opt[] =>
+  provider === 'openai'
+    ? [
+        { value: 'GPT-4o',  label: 'GPT-4o' },
+        { value: 'GPT-4.1', label: 'GPT-4.1' },
+        { value: 'o4-mini', label: 'o4-mini' },
+      ]
+    : [{ value: 'coming', label: 'Models coming soon', disabled: true }];
+
+const ttsProviders: Opt[] = [
+  { value: 'openai',    label: 'OpenAI' },
+  { value: 'elevenlabs', label: 'ElevenLabs — coming soon', disabled: true, note: 'soon' },
+];
+
+const asrProviders: Opt[] = [
+  { value: 'deepgram',   label: 'Deepgram' },
+  { value: 'whisper',    label: 'Whisper — coming soon', disabled: true, note: 'soon' },
+  { value: 'assemblyai', label: 'AssemblyAI — coming soon', disabled: true, note: 'soon' },
+];
+
+const asrModelsFor = (asr: string): Opt[] =>
+  asr === 'deepgram'
+    ? [
+        { value: 'Nova 2', label: 'Nova 2' },
+        { value: 'Nova',   label: 'Nova' },
+      ]
+    : [{ value: 'coming', label: 'Models coming soon', disabled: true }];
+
+/* ─────────── UI atoms ─────────── */
+const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}) => (
+  <button
+    onClick={()=>onChange(!checked)}
+    className="inline-flex items-center"
+    style={{
+      height:28, width:50, padding:'0 6px', borderRadius:999, justifyContent:'flex-start',
+      background: checked ? 'color-mix(in oklab, #59d9b3 18%, var(--input-bg))' : 'var(--input-bg)',
+      border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)'
+    }}
+    aria-pressed={checked}
+  >
+    <span
+      style={{
+        width:18, height:18, borderRadius:999,
+        background: checked ? CTA : 'rgba(255,255,255,.12)',
+        transform:`translateX(${checked?22:0}px)`, transition:'transform .18s var(--ease)'
+      }}
+    />
+  </button>
+);
+
+/* ─────────── Non-sectioned Select ─────────── */
+function StyledSelect({
+  value, onChange, options, placeholder, leftIcon, menuTop,
+  onPreview, isPreviewing
+}:{
+  value: string; onChange: (v: string) => void;
+  options: Opt[]; placeholder?: string; leftIcon?: React.ReactNode; menuTop?: React.ReactNode;
+  onPreview?: (v: string) => Promise<void>;
+  isPreviewing?: string | null;
+}) {
+  const wrapRef = useRef<HTMLDivElement|null>(null);
+  const btnRef = useRef<HTMLButtonElement|null>(null);
+  const searchRef = useRef<HTMLInputElement|null>(null);
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [menuPos, setMenuPos] = useState<{left:number; width:number} | null>(null);
+
+  const current = options.find(o => o.value === value) || null;
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return q ? options.filter(o => o.label.toLowerCase().includes(q)) : options;
+  }, [options, query, value]);
+
+  useEffect(() => {
+    if (!open || !IS_CLIENT) return;
+    const off = (e: MouseEvent) => {
+      if (wrapRef.current?.contains(e.target as Node)) return;
+      setOpen(false);
+    };
+    const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    const onResize = () => {
+      if (!btnRef.current) return;
+      const r = btnRef.current.getBoundingClientRect();
+      setMenuPos({ left: r.left, width: r.width });
+    };
+    onResize();
+    window.addEventListener('mousedown', off);
+    window.addEventListener('keydown', onEsc);
+    window.addEventListener('resize', onResize);
+    return () => {
+      window.removeEventListener('mousedown', off);
+      window.removeEventListener('keydown', onEsc);
+      window.removeEventListener('resize', onResize);
+    };
+  }, [open]);
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={() => { setOpen(v=>!v); setTimeout(()=>searchRef.current?.focus(),0); }}
+        className="w-full flex items-center justify-between gap-3 px-3 py-3 rounded-[10px] text-sm outline-none transition"
+        style={{
+          background:'var(--input-bg)',
+          border:'1px solid var(--input-border)',
+          boxShadow:'var(--input-shadow)',
+          color:'var(--text)'
+        }}
+      >
+        <span className="flex items-center gap-2 truncate">
+          {leftIcon}
+          <span className="truncate">{current ? current.label : (placeholder || '— Choose —')}</span>
+        </span>
+        <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)', transform: open ? 'rotate(180deg)' : 'rotate(0)', transition:'transform .18s var(--ease)' }} />
+      </button>
+
+      {open && IS_CLIENT ? createPortal(
+        <div
+          className="va-menu p-3"
+          style={{
+            position:'fixed',
+            left: (menuPos?.left ?? 0),
+            top: (btnRef.current?.getBoundingClientRect().bottom ?? 0) + 8,
+            width: (menuPos?.width ?? (btnRef.current?.getBoundingClientRect().width ?? 280)),
+            background:'var(--panel)',
+            border:`1px solid ${GREEN_LINE}`,
+            borderRadius:10,
+            boxShadow:'0 36px 90px rgba(0,0,0,.55)'
+          }}
+        >
+          {menuTop ? <div className="mb-2">{menuTop}</div> : null}
+
+          <div
+            className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[10px]"
+            style={{ background:'var(--panel)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+          >
+            <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
+            <input
+              ref={searchRef}
+              value={query}
+              onChange={(e)=>setQuery(e.target.value)}
+              placeholder="Type to filter…"
+              className="w-full bg-transparent outline-none text-sm"
+              style={{ color:'var(--text)' }}
+            />
+          </div>
+
+          <div className="max-h-72 overflow-y-auto pr-1" style={{ scrollbarWidth:'thin' }}>
+            {filtered.map(o => (
+              <button
+                key={o.value}
+                disabled={o.disabled}
+                onClick={()=>{ if (o.disabled) return; onChange(o.value); setOpen(false); }}
+                className="w-full text-left text-sm px-3 py-2 rounded-[10px] transition grid grid-cols-[18px_1fr_auto] items-center gap-2 disabled:opacity-60"
+                style={{
+                  color: o.disabled ? 'var(--text-muted)' : 'var(--text)',
+                  background:'transparent',
+                  border:'none',
+                  boxShadow:'none',
+                  cursor:o.disabled?'not-allowed':'pointer',
+                  position:'relative'
+                }}
+                onMouseEnter={(e)=>{ if (o.disabled) return; const el=e.currentTarget as HTMLButtonElement; el.style.boxShadow = `${GREEN_GLOW}`; el.style.transform = 'translateY(-1px)'; }}
+                onMouseLeave={(e)=>{ const el=e.currentTarget as HTMLButtonElement; el.style.boxShadow = 'none'; el.style.transform = 'translateY(0)'; }}
+              >
+                {o.disabled ? (
+                  <Lock className="w-3.5 h-3.5" />
+                ) : (
+                  <Check className="w-3.5 h-3.5" style={{ opacity: o.value===value ? 1 : 0 }} />
+                )}
+                <span className="truncate">{o.label}</span>
+                {onPreview ? (
+                  <button
+                    type="button"
+                    onClick={async (e)=>{ e.stopPropagation(); await onPreview(o.value); }}
+                    className="w-7 h-7 rounded-full grid place-items-center"
+                    style={{ border:'1px solid var(--input-border)', background:'var(--panel)' }}
+                    aria-label={isPreviewing === o.value ? 'Stop preview' : 'Play preview'}
+                    title={isPreviewing === o.value ? 'Stop' : 'Play'}
+                  >
+                    {isPreviewing === o.value ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+                  </button>
+                ) : <span />}
+              </button>
+            ))}
+            {filtered.length===0 && (
+              <div className="px-3 py-6 text-sm" style={{ color:'var(--text-muted)' }}>No matches.</div>
+            )}
+          </div>
+        </div>,
+        document.body
+      ) : null}
+    </div>
+  );
+}
+
+/* ─────────── Section (expand anim) ─────────── */
+function Section({
+  title, icon, desc, children, defaultOpen = true
+}:{
+  title: string; icon: React.ReactNode; desc?: string; children: React.ReactNode; defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const innerRef = useRef<HTMLDivElement|null>(null);
+  const [h, setH] = useState<number>(0);
+  const measure = () => { if (innerRef.current) setH(innerRef.current.offsetHeight); };
+  useLayoutEffect(() => { measure(); }, [children, open]);
+
+  return (
+    <div className="mb-[12px]">
+      <div className="mb-[6px] text-sm font-medium" style={{ color:'var(--text-muted)' }}>{title}</div>
+
+      <div className="va-card">
+        <button onClick={()=>setOpen(v=>!v)} className="va-head w-full text-left" style={{ color:'var(--text)' }}>
+          <span className="min-w-0 flex items-center gap-3">
+            <span className="inline-grid place-items-center w-7 h-7 rounded-full" style={{ background:'rgba(89,217,179,.10)' }}>
+              {icon}
+            </span>
+            <span className="min-w-0">
+              <span className="block font-semibold truncate" style={{ fontSize:'var(--fz-title)' }}>{title}</span>
+              {desc ? <span className="block text-xs truncate" style={{ color:'var(--text-muted)' }}>{desc}</span> : null}
+            </span>
+          </span>
+          <span className="justify-self-end">
+            {open ? <ChevronUp className="w-4 h-4" style={{ color:'var(--text-muted)' }}/> :
+                    <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)' }}/>}
+          </span>
+        </button>
+
+        <div
+          style={{
+            height: open ? h : 0,
+            opacity: open ? 1 : 0,
+            transform: open ? 'translateY(0)' : 'translateY(-4px)',
+            transition: 'height 260ms var(--ease), opacity 230ms var(--ease), transform 260ms var(--ease)',
+            overflow:'hidden'
+          }}
+          onTransitionEnd={() => { if (open) measure(); }}
+        >
+          <div ref={innerRef} className="p-[var(--s-5)]">{children}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─────────── Diff helpers ─────────── */
 function computeDiff(base:string, next:string){
   const a = base.split('\n');
   const b = next.split('\n');
@@ -199,10 +520,75 @@ function DiffInline({ base, next }:{ base:string; next:string }){
   );
 }
 
+/* ─────────── (legacy) instruction routing helpers — kept for parity ───────────
+   NOTE: We now use the prompt engine's applyInstructions; these remain for parity
+   and to keep file length/structure unchanged for you. They are not invoked.
+*/
+const STOPWORDS = new Set([
+  'assistant','ai','bot','ok','okay','yes','no','yup','nope','uh','um','thanks','thank you'
+]);
+
+function normalizeLine(raw: string): string | null {
+  const l = raw.trim();
+  if (!l) return null;
+  const words = l.replace(/[^\w\s-]/g,'').split(/\s+/).filter(Boolean);
+  if (words.length === 0) return null;
+  if (words.length === 1 && (words[0].length < 4 || STOPWORDS.has(words[0].toLowerCase()))) return null;
+
+  const low = l.toLowerCase();
+  if ((/\bjij\b|\bje\b/.test(low)) && /\bdom\b/.test(low)) {
+    return 'If a user expresses frustration or uses insults (e.g., calling the assistant dumb), stay calm, be professional, and redirect toward solving their problem.';
+    }
+  return l;
+}
+function routeBullets(instructions: string) {
+  const lines = instructions
+    .split('\n')
+    .map(s => normalizeLine(s))
+    .filter(Boolean) as string[];
+
+  const toStyle: string[] = [];
+  const toGuides: string[] = [];
+  const toTasks: string[] = [];
+  const toIdentity: string[] = [];
+  const toFallback: string[] = [];
+
+  for (const raw of lines) {
+    const line = raw.trim();
+    const bullet = `- ${/[.!?]$/.test(line) ? line : line + '.'}`;
+
+    if (/identity|role|act as|persona|behave/i.test(line)) toIdentity.push(bullet);
+    else if (/tone|formal|friendly|concise|style|voice|approachable/i.test(line)) toStyle.push(bullet);
+    else if (/error|fallback|fail|misunderstanding|retry|insult|abuse|frustrat/i.test(line)) toFallback.push(bullet);
+    else if (/collect|ask|step|goal|task|flow|handoff|handover|escalate|confirm|welcome|guide|walkthrough/i.test(line)) toTasks.push(bullet);
+    else if (/guideline|response|answer|jargon|clarity|concise|format|steps|list|examples?/i.test(line)) toGuides.push(bullet);
+    else toGuides.push(bullet);
+  }
+  const dedupe = (arr:string[]) => Array.from(new Set(arr));
+  return {
+    toStyle: dedupe(toStyle),
+    toGuides: dedupe(toGuides),
+    toTasks: dedupe(toTasks),
+    toIdentity: dedupe(toIdentity),
+    toFallback: dedupe(toFallback),
+  };
+}
+function ensureBlocks(base: string) {
+  if (
+    base.includes('[Identity]') &&
+    base.includes('[Style]') &&
+    base.includes('[Response Guidelines]') &&
+    base.includes('[Task & Goals]') &&
+    base.includes('[Error Handling / Fallback]')
+  ) return base;
+  return PROMPT_SKELETON;
+}
+
 /* ─────────── Page ─────────── */
 export default function VoiceAgentSection() {
   /* align rail to app sidebar */
   useEffect(() => {
+    if (!IS_CLIENT) return;
     const candidates = ['[data-app-sidebar]','aside[aria-label="Sidebar"]','aside[class*="sidebar"]','#sidebar'];
     const el = document.querySelector<HTMLElement>(candidates.join(', '));
     const setW = (w:number) => document.documentElement.style.setProperty('--app-sidebar-w', `${Math.round(w)}px`);
@@ -217,24 +603,9 @@ export default function VoiceAgentSection() {
   }, []);
 
   const [activeId, setActiveId] = useState<string>(() => {
-    try { return localStorage.getItem(ACTIVE_KEY) || ''; } catch { return ''; }
+    try { return IS_CLIENT ? localStorage.getItem(ACTIVE_KEY) || '' : ''; } catch { return ''; }
   });
-  const [data, setData] = useState<AgentData>(() => (activeId ? loadAgentData(activeId) : {
-    name: 'Assistant',
-    provider: 'openai',
-    model: 'GPT-4o',
-    firstMode: 'Assistant speaks first',
-    firstMsg: 'Hello.',
-    systemPrompt: DEFAULT_PROMPT,   // ⬅️ use prompt-engine default
-    ttsProvider: 'openai',
-    voiceName: 'Alloy (American)',
-    apiKeyId: '',
-    asrProvider: 'deepgram',
-    asrModel: 'Nova 2',
-    denoise: false,
-    numerals: false,
-    language: 'English'
-  }));
+  const [data, setData] = useState<AgentData>(() => (activeId ? loadAgentData(activeId) : DEFAULT_AGENT));
 
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
@@ -257,12 +628,14 @@ export default function VoiceAgentSection() {
   // voice preview
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   useEffect(() => {
+    if (!IS_CLIENT || !('speechSynthesis' in window)) return;
     const load = () => setVoices(window.speechSynthesis.getVoices());
     load();
     (window.speechSynthesis as any).onvoiceschanged = load;
     return () => { (window.speechSynthesis as any).onvoiceschanged = null; };
   }, []);
   function speakPreview(line?: string){
+    if (!IS_CLIENT || !('speechSynthesis' in window)) return;
     const u = new SpeechSynthesisUtterance(line || `Hi, I'm ${data.name || 'your assistant'}. This is a preview.`);
     const byName = voices.find(v => v.name.toLowerCase().includes((data.voiceName || '').split(' ')[0]?.toLowerCase() || ''));
     const en = voices.find(v => v.lang?.startsWith('en'));
@@ -270,10 +643,11 @@ export default function VoiceAgentSection() {
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(u);
   }
-  const stopPreview = () => window.speechSynthesis.cancel();
+  const stopPreview = () => { if (IS_CLIENT && 'speechSynthesis' in window) window.speechSynthesis.cancel(); };
 
   /* listen for active rail id */
   useEffect(() => {
+    if (!IS_CLIENT) return;
     const handler = (e: Event) => setActiveId((e as CustomEvent<string>).detail);
     window.addEventListener('assistant:active', handler as EventListener);
     return () => window.removeEventListener('assistant:active', handler as EventListener);
@@ -282,7 +656,7 @@ export default function VoiceAgentSection() {
   useEffect(() => {
     if (!activeId) return;
     setData(loadAgentData(activeId));
-    try { localStorage.setItem(ACTIVE_KEY, activeId); } catch {}
+    try { if (IS_CLIENT) localStorage.setItem(ACTIVE_KEY, activeId); } catch {}
   }, [activeId]);
 
   useEffect(() => { if (activeId) saveAgentData(activeId, data); }, [activeId, data]);
@@ -323,8 +697,8 @@ export default function VoiceAgentSection() {
       setData(prev => {
         const next = { ...prev, [k]: v };
         if (k === 'name' && activeId) {
-          try { localStorage.setItem(keyFor(activeId), JSON.stringify(next)); } catch {}
-          try { window.dispatchEvent(new CustomEvent('assistant:update', { detail: { id: activeId, name: String(v) } })); } catch {}
+          try { if (IS_CLIENT) localStorage.setItem(keyFor(activeId), JSON.stringify(next)); } catch {}
+          try { if (IS_CLIENT) window.dispatchEvent(new CustomEvent('assistant:update', { detail: { id: activeId, name: String(v) } })); } catch {}
         }
         return next;
       });
@@ -348,7 +722,7 @@ export default function VoiceAgentSection() {
     finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
   }
 
-  /* ── Generate overlay logic (UPDATED to use prompt-engine) ── */
+  /* ── Generate overlay logic (now using prompt-engine.applyInstructions) ── */
 
   const runTypingIntoBox = (full:string) => {
     setTypingPreview('');
@@ -356,9 +730,9 @@ export default function VoiceAgentSection() {
     const step = () => {
       i += Math.max(1, Math.floor(full.length / 120)); // ~120 frames
       setTypingPreview(full.slice(0, Math.min(i, full.length)));
-      if (i < full.length) requestAnimationFrame(step);
+      if (i < full.length && IS_CLIENT) requestAnimationFrame(step);
     };
-    requestAnimationFrame(step);
+    if (IS_CLIENT) requestAnimationFrame(step);
   };
 
   const onOpenGenerate = () => {
@@ -370,10 +744,6 @@ export default function VoiceAgentSection() {
     setShowGenerate(true);
   };
 
-  // detect if user pasted a whole 5-section prompt
-  const looksStructuredPrompt = (s: string) =>
-    /\[Identity\][\s\S]*\[Style\][\s\S]*\[Response Guidelines\][\s\S]*\[Task & Goals\][\s\S]*\[Error Handling\s*\/\s*Fallback\]/i.test(s);
-
   // Close overlay immediately, then stream typing into prompt area with review actions
   const onGenerate = () => {
     if (!composerText.trim()) return;
@@ -381,23 +751,12 @@ export default function VoiceAgentSection() {
 
     const base = (data.systemPrompt && data.systemPrompt.trim().length > 0)
       ? data.systemPrompt
-      : DEFAULT_PROMPT;
+      : (DEFAULT_PROMPT || PROMPT_SKELETON);
 
     basePromptRef.current = base;
 
-    // NEW: Replace wholesale if it looks like a fully-structured prompt,
-    // else merge free-text with applyInstructions()
-    let merged = '';
-    let summary = '';
-
-    if (looksStructuredPrompt(composerText)) {
-      merged = composerText.trim();
-      summary = 'Replaced with structured prompt';
-    } else {
-      const out = applyInstructions(base, composerText);
-      merged = out.merged;
-      summary = out.summary;
-    }
+    // ★ Use your prompt engine to merge edits
+    const { merged, summary } = applyInstructions(base, composerText);
 
     // Close overlay now
     setShowGenerate(false);
@@ -408,10 +767,7 @@ export default function VoiceAgentSection() {
     runTypingIntoBox(merged);
 
     // Summary badge
-    const d = computeDiff(base, merged);
-    const addedCount = d.filter(r=>r.t==='add').length;
-    const removedCount = d.filter(r=>r.t==='rem').length;
-    setChangesSummary(summary || `Applied edits. +${addedCount} / -${removedCount} lines.`);
+    if (summary) setChangesSummary(summary);
   };
 
   const onAccept = async () => {
@@ -810,7 +1166,7 @@ export default function VoiceAgentSection() {
       )}
 
       {/* Call drawer (solid) */}
-      {createPortal(
+      {IS_CLIENT ? createPortal(
         <>
           <div
             className={`fixed inset-0 ${showCall ? '' : 'pointer-events-none'}`}
@@ -868,278 +1224,7 @@ export default function VoiceAgentSection() {
           </aside>
         </>,
         document.body
-      )}
+      ) : null}
     </section>
   );
-}
-
-/* ─────────── option helpers (left at bottom to keep original structure) ─────────── */
-type Opt = { value: string; label: string; disabled?: boolean; note?: string };
-
-const providerOpts: Opt[] = [
-  { value: 'openai',     label: 'OpenAI' },
-  { value: 'anthropic',  label: 'Anthropic — coming soon', disabled: true, note: 'soon' },
-  { value: 'google',     label: 'Google — coming soon',    disabled: true, note: 'soon' },
-];
-
-const modelOptsFor = (provider: string): Opt[] =>
-  provider === 'openai'
-    ? [
-        { value: 'GPT-4o',  label: 'GPT-4o' },
-        { value: 'GPT-4.1', label: 'GPT-4.1' },
-        { value: 'o4-mini', label: 'o4-mini' },
-      ]
-    : [{ value: 'coming', label: 'Models coming soon', disabled: true }];
-
-const ttsProviders: Opt[] = [
-  { value: 'openai',    label: 'OpenAI' },
-  { value: 'elevenlabs', label: 'ElevenLabs — coming soon', disabled: true, note: 'soon' },
-];
-
-const asrProviders: Opt[] = [
-  { value: 'deepgram',   label: 'Deepgram' },
-  { value: 'whisper',    label: 'Whisper — coming soon', disabled: true, note: 'soon' },
-  { value: 'assemblyai', label: 'AssemblyAI — coming soon', disabled: true, note: 'soon' },
-];
-
-const asrModelsFor = (asr: string): Opt[] =>
-  asr === 'deepgram'
-    ? [
-        { value: 'Nova 2', label: 'Nova 2' },
-        { value: 'Nova',   label: 'Nova' },
-      ]
-    : [{ value: 'coming', label: 'Models coming soon', disabled: true }];
-
-/* ─────────── UI atoms (unchanged) ─────────── */
-const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}) => (
-  <button
-    onClick={()=>onChange(!checked)}
-    className="inline-flex items-center"
-    style={{
-      height:28, width:50, padding:'0 6px', borderRadius:999, justifyContent:'flex-start',
-      background: checked ? 'color-mix(in oklab, #59d9b3 18%, var(--input-bg))' : 'var(--input-bg)',
-      border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)'
-    }}
-    aria-pressed={checked}
-  >
-    <span
-      style={{
-        width:18, height:18, borderRadius:999,
-        background: checked ? CTA : 'rgba(255,255,255,.12)',
-        transform:`translateX(${checked?22:0}px)`, transition:'transform .18s var(--ease)'
-      }}
-    />
-  </button>
-);
-
-/* ─────────── Non-sectioned Select (unchanged) ─────────── */
-function StyledSelect({
-  value, onChange, options, placeholder, leftIcon, menuTop,
-  onPreview, isPreviewing
-}:{
-  value: string; onChange: (v: string) => void;
-  options: Opt[]; placeholder?: string; leftIcon?: React.ReactNode; menuTop?: React.ReactNode;
-  onPreview?: (v: string) => Promise<void>;
-  isPreviewing?: string | null;
-}) {
-  const wrapRef = useRef<HTMLDivElement|null>(null);
-  const btnRef = useRef<HTMLButtonElement|null>(null);
-  const searchRef = useRef<HTMLInputElement|null>(null);
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState('');
-  const [menuPos, setMenuPos] = useState<{left:number; width:number} | null>(null);
-
-  const current = options.find(o => o.value === value) || null;
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return q ? options.filter(o => o.label.toLowerCase().includes(q)) : options;
-  }, [options, query, value]);
-
-  useEffect(() => {
-    if (!open) return;
-    const off = (e: MouseEvent) => {
-      if (wrapRef.current?.contains(e.target as Node)) return;
-      setOpen(false);
-    };
-    const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
-    const onResize = () => {
-      if (!btnRef.current) return;
-      const r = btnRef.current.getBoundingClientRect();
-      setMenuPos({ left: r.left, width: r.width });
-    };
-    onResize();
-    window.addEventListener('mousedown', off);
-    window.addEventListener('keydown', onEsc);
-    window.addEventListener('resize', onResize);
-    return () => {
-      window.removeEventListener('mousedown', off);
-      window.removeEventListener('keydown', onEsc);
-      window.removeEventListener('resize', onResize);
-    };
-  }, [open]);
-
-  return (
-    <div ref={wrapRef} className="relative">
-      <button
-        ref={btnRef}
-        type="button"
-        onClick={() => { setOpen(v=>!v); setTimeout(()=>searchRef.current?.focus(),0); }}
-        className="w-full flex items-center justify-between gap-3 px-3 py-3 rounded-[10px] text-sm outline-none transition"
-        style={{
-          background:'var(--input-bg)',
-          border:'1px solid var(--input-border)',
-          boxShadow:'var(--input-shadow)',
-          color:'var(--text)'
-        }}
-      >
-        <span className="flex items-center gap-2 truncate">
-          {leftIcon}
-          <span className="truncate">{current ? current.label : (placeholder || '— Choose —')}</span>
-        </span>
-        <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)', transform: open ? 'rotate(180deg)' : 'rotate(0)', transition:'transform .18s var(--ease)' }} />
-      </button>
-
-      {open && createPortal(
-        <div
-          className="va-menu p-3"
-          style={{
-            position:'fixed',
-            left: (menuPos?.left ?? 0),
-            top: (btnRef.current?.getBoundingClientRect().bottom ?? 0) + 8,
-            width: (menuPos?.width ?? (btnRef.current?.getBoundingClientRect().width ?? 280)),
-            background:'var(--panel)',
-            border:`1px solid ${GREEN_LINE}`,
-            borderRadius:10,
-            boxShadow:'0 36px 90px rgba(0,0,0,.55)'
-          }}
-        >
-          {menuTop ? <div className="mb-2">{menuTop}</div> : null}
-
-          <div
-            className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[10px]"
-            style={{ background:'var(--panel)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-          >
-            <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
-            <input
-              ref={searchRef}
-              value={query}
-              onChange={(e)=>setQuery(e.target.value)}
-              placeholder="Type to filter…"
-              className="w-full bg-transparent outline-none text-sm"
-              style={{ color:'var(--text)' }}
-            />
-          </div>
-
-          <div className="max-h-72 overflow-y-auto pr-1" style={{ scrollbarWidth:'thin' }}>
-            {filtered.map(o => (
-              <button
-                key={o.value}
-                disabled={o.disabled}
-                onClick={()=>{ if (o.disabled) return; onChange(o.value); setOpen(false); }}
-                className="w-full text-left text-sm px-3 py-2 rounded-[10px] transition grid grid-cols-[18px_1fr_auto] items-center gap-2 disabled:opacity-60"
-                style={{
-                  color: o.disabled ? 'var(--text-muted)' : 'var(--text)',
-                  background:'transparent',
-                  border:'none',
-                  boxShadow:'none',
-                  cursor:o.disabled?'not-allowed':'pointer',
-                  position:'relative'
-                }}
-                onMouseEnter={(e)=>{ if (o.disabled) return; const el=e.currentTarget as HTMLButtonElement; el.style.boxShadow = `${GREEN_GLOW}`; el.style.transform = 'translateY(-1px)'; }}
-                onMouseLeave={(e)=>{ const el=e.currentTarget as HTMLButtonElement; el.style.boxShadow = 'none'; el.style.transform = 'translateY(0)'; }}
-              >
-                {o.disabled ? (
-                  <Lock className="w-3.5 h-3.5" />
-                ) : (
-                  <Check className="w-3.5 h-3.5" style={{ opacity: o.value===value ? 1 : 0 }} />
-                )}
-                <span className="truncate">{o.label}</span>
-                {onPreview ? (
-                  <button
-                    type="button"
-                    onClick={async (e)=>{ e.stopPropagation(); await onPreview(o.value); }}
-                    className="w-7 h-7 rounded-full grid place-items-center"
-                    style={{ border:'1px solid var(--input-border)', background:'var(--panel)' }}
-                    aria-label={isPreviewing === o.value ? 'Stop preview' : 'Play preview'}
-                    title={isPreviewing === o.value ? 'Stop' : 'Play'}
-                  >
-                    {isPreviewing === o.value ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-                  </button>
-                ) : <span />}
-              </button>
-            ))}
-            {filtered.length===0 && (
-              <div className="px-3 py-6 text-sm" style={{ color:'var(--text-muted)' }}>No matches.</div>
-            )}
-          </div>
-        </div>,
-        document.body
-      )}
-    </div>
-  );
-}
-
-/* ─────────── mock backend & storage helpers (unchanged) ─────────── */
-const keyFor = (id: string) => `va:agent:${id}`;
-const versKeyFor = (id: string) => `va:versions:${id}`;
-
-const loadAgentData = (id: string): AgentData => {
-  try { const raw = localStorage.getItem(keyFor(id)); if (raw) return { 
-    name: 'Assistant',
-    provider: 'openai',
-    model: 'GPT-4o',
-    firstMode: 'Assistant speaks first',
-    firstMsg: 'Hello.',
-    systemPrompt: DEFAULT_PROMPT,
-    ttsProvider: 'openai',
-    voiceName: 'Alloy (American)',
-    apiKeyId: '',
-    asrProvider: 'deepgram',
-    asrModel: 'Nova 2',
-    denoise: false,
-    numerals: false,
-    language: 'English',
-    ...(JSON.parse(raw)||{})
-  }; }
-  catch {}
-  return { 
-    name: 'Assistant',
-    provider: 'openai',
-    model: 'GPT-4o',
-    firstMode: 'Assistant speaks first',
-    firstMsg: 'Hello.',
-    systemPrompt: DEFAULT_PROMPT,
-    ttsProvider: 'openai',
-    voiceName: 'Alloy (American)',
-    apiKeyId: '',
-    asrProvider: 'deepgram',
-    asrModel: 'Nova 2',
-    denoise: false,
-    numerals: false,
-    language: 'English'
-  };
-};
-const saveAgentData = (id: string, data: AgentData) => {
-  try { localStorage.setItem(keyFor(id), JSON.stringify(data)); } catch {}
-};
-const pushVersion = (id:string, snapshot:any) => {
-  try {
-    const raw = localStorage.getItem(versKeyFor(id));
-    const arr = raw ? JSON.parse(raw) : [];
-    arr.unshift({ id: `v_${Date.now()}`, ts: Date.now(), ...snapshot });
-    localStorage.setItem(versKeyFor(id), JSON.stringify(arr.slice(0, 50)));
-  } catch {}
-};
-
-async function apiSave(agentId: string, payload: AgentData){
-  const r = await fetch(`/api/voice/agent/${agentId}/save`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
-  }).catch(()=>null);
-  if (!r?.ok) throw new Error('Save failed');
-  return r.json();
-}
-async function apiPublish(agentId: string){
-  const r = await fetch(`/api/voice/agent/${agentId}/publish`, { method: 'POST' }).catch(()=>null);
-  if (!r?.ok) throw new Error('Publish failed');
-  return r.json();
 }
