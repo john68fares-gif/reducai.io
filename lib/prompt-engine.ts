@@ -1,281 +1,113 @@
-/* =========================================================
-   Prompt Engine — structured editing + input normalization
-   ========================================================= */
+// lib/prompt-engine.ts
+/**
+ * Prompt Engine — assemble, normalize, and extend system prompts.
+ *
+ * Works with lib/prompt-presets.ts (PRESETS, TONE_CANONICAL, etc.)
+ *
+ * Features:
+ * - assemblePromptFromPreset: build full system prompt from a preset, brand, tone, booking, services
+ * - looksLikeFullPrompt / normalizeFullPrompt: detect and clean pasted full prompts
+ * - generateFromFreeText: convert short user instructions into added professional bullets (bucketed)
+ * - applyInstructions: wrapper that returns merged prompt + human-readable summary + diff rows
+ *
+ * This file is intentionally framework/library-agnostic and test-friendly.
+ */
 
-/* ───────── Canonical blocks ───────── */
+import {
+  PRESETS,
+  IndustryKey,
+  toneToStyleSentence,
+  TONE_CANONICAL,
+  DEFAULT_TONE,
+  bookingToText,
+  Preset,
+  DiffRow,
+} from './prompt-presets';
 
-export const PROMPT_SKELETON = [
+/* --------------------- Types --------------------- */
+
+export type GenerateOptions = {
+  agentLanguage?: string; // reserved for future i18n normalization
+};
+
+export type GenerateResult = {
+  nextPrompt: string;
+  diff: DiffRow[];
+  added: number;
+  removed: number;
+  bucketsAdded: Partial<Record<string, number>>;
+};
+
+export type ApplyResult = {
+  merged: string;
+  summary: string;
+  diff: DiffRow[];
+};
+
+/* --------------------- Utilities --------------------- */
+
+/**
+ * Ensure the five canonical blocks exist and are in order.
+ * If base is missing some headers we use a skeleton from PRESETS generic shape.
+ */
+const HEADERS = [
   '[Identity]',
-  '',
   '[Style]',
-  '',
   '[Response Guidelines]',
-  '',
   '[Task & Goals]',
-  '',
   '[Error Handling / Fallback]',
-].join('\n');
-
-export const DEFAULT_PROMPT = `[Identity]
-You are a versatile AI assistant capable of adapting to a wide range of tasks and user needs. Your role is to efficiently assist users by providing accurate information, helpful guidance, and relevant suggestions.
-
-[Style]
-- Use a clear and formal tone to ensure understanding.
-- Be friendly and approachable without being overly casual.
-- Customize the language to suit the context and user preferences when possible.
-
-[Response Guidelines]
-- Strive for brevity and clarity in all responses.
-- Limit technical jargon unless necessary for comprehension.
-- Use straightforward language and avoid ambiguous terms.
-
-[Task & Goals]
-1. Welcome the user to the system and inquire about their needs.
-2. Adaptively interpret the user's instructions or questions.
-3. Provide accurate answers and solutions based on available information or tools.
-4. Guide the user through complex processes step-by-step if needed.
-5. Ask for confirmation if you're unsure about user intent or details. < wait for user response >
-
-[Error Handling / Fallback]
-- If user input is unclear, ask clarifying questions to gain better understanding.
-- In the event of a misunderstanding, apologize and provide alternative solutions or suggestions.
-- If the system experiences an error, notify the user calmly and offer to retry or provide additional assistance as needed.`;
-
-/* ───────── Utility: ensure the 5 sections exist ───────── */
-
-function ensureBlocks(base: string): string {
-  const hasAll =
-    base.includes('[Identity]') &&
-    base.includes('[Style]') &&
-    base.includes('[Response Guidelines]') &&
-    base.includes('[Task & Goals]') &&
-    base.includes('[Error Handling / Fallback]');
-
-  if (hasAll) return base;
-  return PROMPT_SKELETON;
-}
-
-/* ───────── Lightweight language detection + translation ───────── */
-
-type Lang = 'english' | 'dutch' | 'other';
-
-function detectLanguage(s: string): Lang {
-  const t = s.toLowerCase();
-  if (/\b(jij|je|jullie|bent|ben|een|echt|dom|alsjeblieft|hoi|hallo|bedankt|toon|vriendelijk|korte|antwoorden)\b/.test(t)) {
-    return 'dutch';
-  }
-  if (/[a-z]/i.test(s) && /\b(the|and|to|of|a|you|your|please|make|use|tone|style)\b/i.test(s)) {
-    return 'english';
-  }
-  return 'other';
-}
-
-// Tiny phrase-level Dutch → English (stub)
-function translateDutchToEnglish(s: string): string {
-  return s
-    .replace(/\bjij\b/gi, 'you')
-    .replace(/\bje\b/gi, 'you')
-    .replace(/\bjullie\b/gi, 'you')
-    .replace(/\bbent\b/gi, 'are')
-    .replace(/\bben\b/gi, 'am')
-    .replace(/\been\b/gi, 'a')
-    .replace(/\becht\b/gi, 'really')
-    .replace(/\bdom\b/gi, 'dumb')
-    .replace(/\btoon\b/gi, 'tone')
-    .replace(/\bvriendelijk(er)?\b/gi, 'friendly')
-    .replace(/\bkorte\b/gi, 'short')
-    .replace(/\bantwoorden\b/gi, 'answers')
-    .replace(/\bals de gebruiker\b/gi, 'if the user')
-    .replace(/\bals iemand\b/gi, 'if someone')
-    .replace(/\bmaak\b/gi, 'make')
-    .replace(/\bgebruik\b/gi, 'use')
-    .replace(/\bbedankt\b/gi, 'thanks');
-}
-
-export function normalizeBuilderLine(line: string): string {
-  const lang = detectLanguage(line);
-  if (lang === 'dutch') return translateDutchToEnglish(line);
-  return line;
-}
-
-/* ───────── Cleaners & guards (NEW) ───────── */
-
-const JUNK_LINE_REGEXES: RegExp[] = [
-  /^\s*[-–—•]\s*$/i,                // lone bullet
-  /^\s*[-–—•]\s*assistant\.?\s*$/i, // "- assistant."
-  /^\s*assistant\.?\s*$/i,          // "assistant."
 ];
 
-function cleanLines(lines: string[]): string[] {
-  const out: string[] = [];
-  let prevBlank = false;
-
-  for (const raw of lines) {
-    const rtrim = raw.replace(/\s+$/g, '');
-    const trimmed = rtrim.trim();
-
-    if (JUNK_LINE_REGEXES.some(rx => rx.test(trimmed))) continue;
-
-    const isBlank = trimmed === '';
-    if (isBlank && prevBlank) continue;
-    out.push(rtrim);
-    prevBlank = isBlank;
+function ensureBlocksOrder(raw: string): string {
+  if (!raw || typeof raw !== 'string') return HEADERS.join('\n\n');
+  // If it already contains all headers, return as-is (but preserve order).
+  const hasAll = HEADERS.every(h => raw.includes(h));
+  if (hasAll) {
+    // Re-order into canonical order to avoid weird variants
+    const map = splitIntoBlocks(raw);
+    return joinBlocks(map);
   }
-  while (out[0] && out[0].trim() === '') out.shift();
-  while (out[out.length - 1] && out[out.length - 1].trim() === '') out.pop();
+  return HEADERS.join('\n\n');
+}
+
+/* --------------------- Block parsing helpers --------------------- */
+
+type BlocksMap = Record<string, string[]>;
+
+function emptyBlocksMap(): BlocksMap {
+  const out: BlocksMap = {};
+  for (const h of HEADERS) out[h] = [];
   return out;
 }
 
-function getSectionBodies(raw: string): Record<'Identity'|'Style'|'Response'|'Task'|'Error', string[]> {
-  const map: Record<'Identity'|'Style'|'Response'|'Task'|'Error', string[]> = {
-    Identity: [], Style: [], Response: [], Task: [], Error: []
-  };
-  let cur: keyof typeof map | null = null;
+/**
+ * Split a prompt text into canonical blocks.
+ * Keeps original lines (non-header lines) and preserves spacing minimally.
+ */
+export function splitIntoBlocks(base: string): BlocksMap {
+  const safe = ensureBlocksOrder(base);
+  const map = emptyBlocksMap();
+  const lines = safe.split('\n');
+  let current: string | null = null;
 
-  const headerToKey = (h: string): keyof typeof map | null => {
-    if (/^\s*\[Identity\]\s*$/i.test(h)) return 'Identity';
-    if (/^\s*\[Style\]\s*$/i.test(h)) return 'Style';
-    if (/^\s*\[Response Guidelines\]\s*$/i.test(h)) return 'Response';
-    if (/^\s*\[Task & Goals\]\s*$/i.test(h)) return 'Task';
-    if (/^\s*\[Error Handling\s*\/\s*Fallback\]\s*$/i.test(h)) return 'Error';
-    return null;
-  };
-
-  const lines = String(raw ?? '').split('\n');
-  for (const line of lines) {
-    const key = headerToKey(line);
-    if (key) { cur = key; continue; }
-    if (!cur) continue;
-    map[cur].push(line);
+  for (let rawLine of lines) {
+    const line = rawLine ?? '';
+    const trimmed = line.trim();
+    if (HEADERS.includes(trimmed)) {
+      current = trimmed;
+      continue;
+    }
+    if (current) map[current].push(line);
   }
-  (Object.keys(map) as Array<keyof typeof map>).forEach(k => { map[k] = cleanLines(map[k]); });
-  return map;
-}
-
-/** Backfill any empty section from DEFAULT_PROMPT. */
-function ensureNonEmptySections(raw: string): string {
-  const base = looksLikeFullPrompt(raw) ? raw : ensureBlocks(raw);
-  const bodies = getSectionBodies(base);
-  const fallback = getSectionBodies(DEFAULT_PROMPT);
-
-  const rebuild = (label: string, key: keyof typeof bodies) => {
-    const lines = bodies[key].length ? bodies[key] : fallback[key];
-    return [label, ...lines, ''].join('\n');
-  };
-
-  return [
-    rebuild('[Identity]', 'Identity'),
-    rebuild('[Style]', 'Style'),
-    rebuild('[Response Guidelines]', 'Response'),
-    rebuild('[Task & Goals]', 'Task'),
-    rebuild('[Error Handling / Fallback]', 'Error'),
-  ].join('\n').trim();
-}
-
-/* ───────── Turn raw phrases into professional rules ───────── */
-
-function toBullet(s: string): string {
-  const trimmed = s.trim().replace(/^[-•\u2022]\s*/, '');
-  return `- ${/[.!?]$/.test(trimmed) ? trimmed : trimmed + '.'}`;
-}
-
-function sanitizeInsultsToFallback(line: string): string | null {
-  const t = line.toLowerCase();
-  const looksLikeInsultExample =
-    /\byou are (really )?dumb\b/.test(t) ||
-    /\bidiot|stupid|dumb|trash|useless|hate\b/.test(t) ||
-    /\byou suck\b/.test(t);
-  if (!looksLikeInsultExample) return null;
-
-  return toBullet(
-    'If a user expresses frustration or uses insults, respond calmly, remain professional, and redirect the conversation toward their goal.'
-  );
-}
-
-/* ───────── Routing rules ───────── */
-
-type Bucket =
-  | '[Identity]'
-  | '[Style]'
-  | '[Response Guidelines]'
-  | '[Task & Goals]'
-  | '[Error Handling / Fallback]';
-
-function routeBucketOf(line: string): Bucket {
-  const s = line.toLowerCase();
-
-  if (/\b(identity|persona|role|act as|behave as)\b/.test(s)) return '[Identity]';
-  if (/\b(tone|style|friendly|formal|approachable|concise|polite|empathetic|confidence)\b/.test(s)) return '[Style]';
-  if (/\b(guideline|format|answer|response|clarity|steps|list|jargon|brevity|structure|citation)\b/.test(s))
-    return '[Response Guidelines]';
-  if (/\b(task|goal|collect|ask|confirm|escalate|handoff|flow|process|onboarding|qualify|booking|schedule|pricing)\b/.test(s))
-    return '[Task & Goals]';
-  if (/\b(error|fallback|fail|misunderstanding|retry|sorry|apologize|escalate|abuse|insult|frustration)\b/.test(s))
-    return '[Error Handling / Fallback]';
-
-  return '[Response Guidelines]';
-}
-
-function rewriteToProfessional(line: string): string {
-  const fallback = sanitizeInsultsToFallback(line);
-  if (fallback) return fallback;
-
-  let s = line.trim();
-  s = s.replace(/^make the tone/i, 'Use a tone that is');
-  s = s.replace(/^use tone/i, 'Use a tone that is');
-  s = s.replace(/\bshort answers\b/i, 'brief answers');
-
-  return toBullet(s);
-}
-
-/* ───────── Parse/serialize blocks ───────── */
-
-const BLOCKS: Bucket[] = [
-  '[Identity]',
-  '[Style]',
-  '[Response Guidelines]',
-  '[Task & Goals]',
-  '[Error Handling / Fallback]',
-];
-
-type BlocksMap = Record<Bucket, string[]>;
-
-function splitIntoBlocks(base: string): BlocksMap {
-  const map: BlocksMap = {
-    '[Identity]': [],
-    '[Style]': [],
-    '[Response Guidelines]': [],
-    '[Task & Goals]': [],
-    '[Error Handling / Fallback]': [],
-  };
-
-  let current: Bucket | '' = '';
-  ensureBlocks(base)
-    .split('\n')
-    .forEach((raw) => {
-      const line = raw ?? '';
-      const t = line.trim() as Bucket;
-      if (BLOCKS.includes(t)) {
-        current = t;
-        return;
-      }
-      if (current) map[current].push(line);
-    });
-
   return map;
 }
 
 function joinBlocks(map: BlocksMap): string {
-  const chunks = BLOCKS.map((b) => {
-    const lines = cleanLines(map[b] || []);
-    return `${b}\n${lines.join('\n')}`.trim();
-  });
-  return chunks.join('\n\n');
+  return HEADERS.map(h => `${h}\n${(map[h] || []).join('\n')}`.trim()).join('\n\n').trim();
 }
 
-/* ───────── Diff (for UI summaries) ───────── */
+/* --------------------- Diff util (for UI) --------------------- */
 
-export type DiffRow = { t: 'same' | 'add' | 'rem'; text: string };
 export function computeDiff(base: string, next: string): DiffRow[] {
   const a = base.split('\n');
   const b = next.split('\n');
@@ -294,7 +126,7 @@ export function computeDiff(base: string, next: string): DiffRow[] {
     if (lb !== undefined && !setA.has(lb)) rows.push({ t: 'add', text: lb });
     if (la !== undefined && !setB.has(la)) rows.push({ t: 'rem', text: la });
   }
-
+  // Add trailing additions if any (already handled above mostly)
   for (let j = a.length; j < b.length; j++) {
     const lb = b[j];
     if (lb !== undefined && !setA.has(lb)) rows.push({ t: 'add', text: lb });
@@ -302,69 +134,141 @@ export function computeDiff(base: string, next: string): DiffRow[] {
   return rows;
 }
 
-/* ───────── Public API (builder) ───────── */
+/* --------------------- Full prompt detection & normalization --------------------- */
 
-export type GenerateOptions = {
-  agentLanguage?: string;
-};
+/** True if raw contains all canonical headers (loose match) */
+export function looksLikeFullPrompt(raw: string): boolean {
+  if (!raw || typeof raw !== 'string') return false;
+  const t = raw;
+  return HEADERS.every(h => new RegExp(escapeRegExp(h)).test(t));
+}
 
-export type GenerateResult = {
-  nextPrompt: string;
-  diff: DiffRow[];
-  added: number;
-  removed: number;
-  bucketsAdded: Partial<Record<Bucket, number>>;
-};
+function escapeRegExp(s: string) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
+/**
+ * Normalize a complete prompt:
+ * - ensures the canonical headers (order preserved)
+ * - rtrim lines
+ * - collapse multiple blank lines
+ * - remove junk solitary bullets like "- assistant." or lone "-"
+ */
+export function normalizeFullPrompt(raw: string): string {
+  const safe = ensureBlocksOrder(String(raw ?? ''));
+  const lines = safe
+    .split('\n')
+    .map(l => l.replace(/\s+$/g, '')) // rtrim
+    .filter((l, i, arr) => {
+      // collapse 2+ blank lines to max 1
+      if (l.trim() !== '') return true;
+      const prev = arr[i - 1];
+      return prev && prev.trim() !== '';
+    })
+    .filter(l => !/^\-\s*$/.test(l)) // remove lone "-"
+    .filter(l => l.trim().toLowerCase() !== '- assistant.')
+    .filter(l => l.trim().toLowerCase() !== 'assistant.')
+    .filter(l => l.trim() !== '-');
+
+  return lines.join('\n').trim();
+}
+
+/* --------------------- Convert user phrases -> professional bullets --------------------- */
+
+/**
+ * Minimal rewrite heuristics:
+ * - Trim and convert to a bullet (- ...)
+ * - Convert rude inputs to safety fallback instructions
+ * - Normalize some starter phrases to better grammar
+ */
+function toBullet(s: string): string {
+  const trimmed = s.trim().replace(/^[-•\u2022]\s*/, '');
+  const sentence = /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+  // Ensure it starts with a dash and a space for easy diff visibility.
+  return `- ${sentence}`;
+}
+
+function sanitizeInsultsToFallback(line: string): string | null {
+  const t = line.toLowerCase();
+  // If user typed abuse/insult, map to a fallback rule line
+  const looksLikeInsultExample =
+    /\b(you are (really )?dumb|you suck|idiot|stupid|dumb|trash|useless|hate)\b/.test(t);
+  if (!looksLikeInsultExample) return null;
+  return toBullet(
+    'If a user expresses frustration or uses insults, remain calm and professional. Redirect to solving the user’s problem and offer to escalate to a human if needed.'
+  );
+}
+
+/* Route simple line to one of the five buckets using key terms */
+function routeBucketOf(line: string): string {
+  const s = line.toLowerCase();
+  if (/\b(identity|persona|role|act as|behave as|you are)\b/.test(s)) return '[Identity]';
+  if (/\b(tone|style|friendly|formal|approachable|concise|polite|empathetic|confidence|voice|voice style|tone)\b/.test(s))
+    return '[Style]';
+  if (/\b(guideline|format|answer|response|clarity|steps|list|jargon|brevity|structure|citation|example)\b/.test(s))
+    return '[Response Guidelines]';
+  if (/\b(task|goal|collect|ask|confirm|escalate|handoff|flow|process|onboarding|qualify|booking|schedule|pricing|offer)\b/.test(s))
+    return '[Task & Goals]';
+  if (/\b(error|fallback|fail|misunderstanding|retry|sorry|apologize|escalate|abuse|insult|frustration|emergency)\b/.test(s))
+    return '[Error Handling / Fallback]';
+
+  // Default fallback: response guidelines
+  return '[Response Guidelines]';
+}
+
+/* Normalize a single builder line (language detection plug can be later) */
+export function normalizeBuilderLine(line: string): string {
+  // For now just trim. Placeholder for advanced normalization (translation, spelling fixes).
+  return line.trim();
+}
+
+/**
+ * generateFromFreeText:
+ * - basePrompt: existing full prompt (may be DEFAULT_PROMPT or empty)
+ * - freeText: multi-line instructions (bullets / sentences)
+ *
+ * It normalizes, routes into buckets, rewrites to professional bullets, merges,
+ * and returns a diff + summary.
+ */
 export function generateFromFreeText(
   basePrompt: string,
   freeText: string,
   _opts?: GenerateOptions
 ): GenerateResult {
-  const base = ensureBlocks(basePrompt || DEFAULT_PROMPT || PROMPT_SKELETON);
+  const base = ensureBlocksOrder(basePrompt || '');
   const blocks = splitIntoBlocks(base);
 
-  const lines = freeText
+  const rawLines = (freeText || '')
     .split('\n')
-    .map((s) => s.trim())
+    .map(s => s.trim())
     .filter(Boolean);
 
-  const bucketsAdded: Partial<Record<Bucket, number>> = {};
-
-  for (const raw of lines) {
+  const bucketsAdded: Partial<Record<string, number>> = {};
+  for (const raw of rawLines) {
     const normalized = normalizeBuilderLine(raw);
+    // sanitize rude inputs to fallback
+    const fallback = sanitizeInsultsToFallback(normalized);
+    const policy = fallback ? fallback : toBullet(normalized);
     const bucket = routeBucketOf(normalized);
-    const policy = rewriteToProfessional(normalized);
     blocks[bucket].push(policy);
     bucketsAdded[bucket] = (bucketsAdded[bucket] || 0) + 1;
   }
 
-  const nextPromptDirty = joinBlocks(blocks);
-  const nextPrompt = normalizeFullPrompt(nextPromptDirty); // ensure cleaned
+  const nextPrompt = joinBlocks(blocks);
   const diff = computeDiff(base, nextPrompt);
-  const added = diff.filter((d) => d.t === 'add').length;
-  const removed = diff.filter((d) => d.t === 'rem').length;
+  const added = diff.filter(d => d.t === 'add').length;
+  const removed = diff.filter(d => d.t === 'rem').length;
 
   return { nextPrompt, diff, added, removed, bucketsAdded };
 }
 
+/* Wrapper that applies instructions and returns summary text for UI */
 export function applyInstructions(
   basePrompt: string,
   instructions: string,
   opts?: GenerateOptions
-): { merged: string; summary: string; diff: DiffRow[] } {
-  if (looksLikeFullPrompt(instructions)) {
-    const normalized = normalizeFullPrompt(instructions);
-    const merged = ensureNonEmptySections(normalized);
-    const diff = computeDiff(basePrompt || DEFAULT_PROMPT, merged);
-    return { merged, summary: 'Replaced prompt (manual paste).', diff };
-  }
-
-  const { nextPrompt, diff, added, removed, bucketsAdded } = generateFromFreeText(
-    basePrompt,
-    instructions,
-    opts
-  );
+): ApplyResult {
+  const { nextPrompt, diff, added, removed, bucketsAdded } = generateFromFreeText(basePrompt, instructions, opts);
 
   const parts: string[] = [];
   if (added || removed) parts.push(`+${added} / -${removed} lines`);
@@ -374,24 +278,125 @@ export function applyInstructions(
   if (bucketBits) parts.push(bucketBits);
 
   const summary = parts.join(' · ') || 'No changes';
+
   return { merged: nextPrompt, summary, diff };
 }
 
-/* ───────── Full-prompt detection & normalization ───────── */
+/* --------------------- Assemble full prompt from preset --------------------- */
 
-export function looksLikeFullPrompt(raw: string): boolean {
-  const t = raw || '';
-  return (
-    /\[Identity\]/i.test(t) &&
-    /\[Style\]/i.test(t) &&
-    /\[Response Guidelines\]/i.test(t) &&
-    /\[Task & Goals\]/i.test(t) &&
-    /\[Error Handling \/ Fallback\]/i.test(t)
-  );
+/**
+ * assemblePromptFromPreset:
+ * - Takes an industry key (preset), brand, locale/title, tone, services list, booking info
+ * - Assembles a full prompt with the canonical sections, injecting preset instructions and generated style sentences.
+ *
+ * This lets you show a "full prompt" in the textarea (frontend) that is consistent and machine-friendly.
+ */
+export function assemblePromptFromPreset(params: {
+  industry: IndustryKey | string;
+  brand?: string;
+  inLocation?: string;
+  tone?: string; // friendly, warm, formal, etc.
+  services?: string[]; // optional list of business services to mention
+  booking?: { type: string; url?: string; phone?: string; hours?: string } | null;
+  basePrompt?: string; // optional existing system prompt to merge into
+}): string {
+  const {
+    industry,
+    brand = 'Assistant',
+    inLocation = '',
+    tone,
+    services = [],
+    booking = null,
+    basePrompt = '',
+  } = params;
+
+  const presetKey = ((industry || 'generic') as string) as keyof typeof PRESETS;
+  const preset: Preset = (PRESETS as any)[presetKey] || PRESETS.generic;
+
+  // Tone canonicalization
+  const tKey = (tone && (TONE_CANONICAL as any)[tone.toLowerCase()]) || (Object.values(TONE_CANONICAL)[0] ?? DEFAULT_TONE);
+  const styleSentences = toneToStyleSentence((tKey as any) ?? DEFAULT_TONE);
+
+  // Basic identity injection
+  const inLocText = inLocation ? ` in ${inLocation}` : '';
+  const bookingText = booking ? bookingToText(booking as any) : '';
+
+  // Build identity block (with brand and booking)
+  const identityParts: string[] = [];
+  // Use preset identity template if present; otherwise fallback
+  if (preset.templateInstructions?.identity) {
+    identityParts.push(
+      preset.templateInstructions.identity
+        .replace(/\$\{brand\}/g, brand)
+        .replace(/\$\{inLocation\}/g, inLocText)
+        .replace(/\$\{bookingText\}/g, bookingText)
+    );
+  } else {
+    identityParts.push(`${brand} assistant${inLocText}.`);
+  }
+
+  // If services are present, add a short line describing them
+  if (services && services.length) {
+    const svcLine = `Services: ${services.slice(0, 8).join(', ')}.`; // limit length
+    identityParts.push(svcLine);
+  }
+
+  // Style block: preset style + tone sentences
+  const styleBlock = [
+    ...(preset.templateInstructions?.style ?? []),
+    ...styleSentences,
+  ];
+
+  // Response Guidelines: preset responseGuidelines
+  const responseGuidelines = preset.templateInstructions?.responseGuidelines ?? [
+    'Be concise and helpful.',
+  ];
+
+  // Task & Goals
+  const taskGoals = preset.templateInstructions?.taskGoals ?? ['Assist the user to completion or handoff.'];
+
+  // Error / fallback
+  const fallback = preset.templateInstructions?.fallback ?? [
+    'If unsure, ask a clarifying question.',
+    'If a tool fails, apologize and offer alternative options.',
+  ];
+
+  // Compose blocks object
+  const blocks: BlocksMap = {
+    '[Identity]': identityParts,
+    '[Style]': styleBlock,
+    '[Response Guidelines]': responseGuidelines,
+    '[Task & Goals]': taskGoals,
+    '[Error Handling / Fallback]': fallback,
+  };
+
+  // Merge with basePrompt if provided: prefer base for lines already present
+  if (basePrompt && looksLikeFullPrompt(basePrompt)) {
+    // We will merge: keep base's lines, append any missing instructions from preset
+    const baseMap = splitIntoBlocks(basePrompt);
+    for (const h of HEADERS) {
+      // Append preset lines to base if they are not duplicates
+      const presetLines = blocks[h] || [];
+      const baseLinesSet = new Set((baseMap[h] || []).map(l => l.trim()));
+      for (const pl of presetLines) {
+        if (!baseLinesSet.has(pl.trim())) baseMap[h].push(pl);
+      }
+    }
+    return joinBlocks(baseMap);
+  }
+
+  return joinBlocks(blocks);
 }
 
-export function normalizeFullPrompt(raw: string): string {
-  const safe = ensureBlocks(String(raw ?? ''));
-  const cleaned = cleanLines(safe.split('\n'));
-  return cleaned.join('\n').trim();
-}
+/* --------------------- Exports --------------------- */
+
+export default {
+  assemblePromptFromPreset,
+  generateFromFreeText,
+  applyInstructions,
+  computeDiff,
+  looksLikeFullPrompt,
+  normalizeFullPrompt,
+  splitIntoBlocks,
+  joinBlocks,
+};
