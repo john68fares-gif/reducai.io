@@ -1,4 +1,3 @@
-// pages/api/keys/claim.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
 import crypto from 'crypto';
 import { createClient } from '@supabase/supabase-js';
@@ -118,7 +117,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
           code: unique ? 'already_claimed' : 'db_error',
           message: unique
             ? 'This API key is already in use by a different account.'
-            : insertErr.message || 'Failed to claim API key.',
+            : (insertErr as any).message || 'Failed to claim API key.',
         },
       });
     return;
