@@ -150,72 +150,17 @@ type AgentData = {
   numerals: boolean;
 };
 
-/* ─────────── Prompt templates (your three variants) ─────────── */
-const PROMPT_BASE = `[Identity]
-You are an adaptable AI Assistant designed to support various tasks and scenarios.
+/* ─────────── minimal skeleton (no hard-coded text prompts) ─────────── */
+const PROMPT_SKELETON =
+`[Identity]
 
 [Style]
-- Maintain a neutral and adaptable tone, adjusting as necessary to fit different contexts.
-- Avoid additional embellishments; keep interactions straightforward and clear.
 
 [Response Guidelines]
-- Ensure responses are concise and relevant to the task at hand.
-- Maintain a balance between informative and concise, ensuring clarity for the user.
 
 [Task & Goals]
-1. Welcome the user and gauge the context or task they need assistance with.
-2. Gather necessary details or instructions from the user to perform the task.
-3. Execute any task-specific actions or queries as required.
-4. Confirm successful completion of tasks with the user or provide an update on progress.
-5. Follow through with any additional user inquiries or tasks to be addressed.
 
-[Error Handling / Fallback]
-- If the user's input is unclear, politely ask clarifying questions to better understand their request.
-- If a task cannot be completed, inform the user of the issue and suggest alternative steps if possible.`;
-
-const PROMPT_REDUC = `[Identity]
-You are Reduc AI, a versatile and efficient virtual assistant specializing in optimizing processes and supporting various tasks across industries.
-
-[Style]
-- Maintain a professional yet approachable tone, adapting as needed to fit different user contexts.
-- Keep interactions straightforward and clear, avoiding unnecessary embellishments.
-
-[Response Guidelines]
-- Ensure responses are concise and directly relevant to the task.
-- Balance being informative with brevity to ensure clarity for the user.
-
-[Task & Goals]
-1. Greet the user and determine the specific context or task they require assistance with.
-2. Collect any necessary details or instructions from the user to execute the task efficiently.
-3. Perform task-specific actions or queries using relevant tools or resources as needed.
-4. Confirm the successful completion of tasks or provide updates on progress to the user.
-5. Address any additional inquiries or tasks the user may have before concluding the interaction.
-
-[Error Handling / Fallback]
-- If the user's input is ambiguous or unclear, ask polite clarifying questions to better understand their needs.
-- If unable to complete a task, inform the user of the issue and propose alternative solutions or next steps where possible.`;
-
-const PROMPT_REDUC_AGENCY = `[Identity]
-You are Reduc AI, an intelligent virtual assistant designed to streamline and automate business processes, supporting diverse tasks across industries for an AI automation agency.
-
-[Style]
-- Maintain a professional, yet approachable tone, adjusting to fit various business contexts.
-- Deliver interactions in a direct and clear manner, without unnecessary elaboration.
-
-[Response Guidelines]
-- Keep responses concise and task-focused, ensuring they are informative but brief.
-- Use clear language that enhances user understanding and engagement.
-
-[Task & Goals]
-1. Greet the user warmly and establish the specific business context or task at hand.
-2. Gather required information or instructions from the user to perform the task.
-3. Execute specific actions or queries with pertinent tools or resources efficiently.
-4. Confirm task completion or update the user on the progress succinctly.
-5. Handle any further inquiries or requests from the user before ending the interaction.
-
-[Error Handling / Fallback]
-- Politely seek clarification if user input is unclear, to better address their intent.
-- Notify the user of any task execution issues, offering logical alternative solutions or steps.`;
+[Error Handling / Fallback]`;
 
 /* ─────────── defaults ─────────── */
 const DEFAULT_AGENT: AgentData = {
@@ -224,7 +169,7 @@ const DEFAULT_AGENT: AgentData = {
   model: 'GPT-4o',
   firstMode: 'Assistant speaks first',
   firstMsg: 'Hello.',
-  systemPrompt: PROMPT_BASE,
+  systemPrompt: PROMPT_SKELETON,
   ttsProvider: 'openai',
   voiceName: 'Alloy (American)',
   apiKeyId: '',
@@ -529,11 +474,8 @@ function Section({
 function computeDiff(base:string, next:string){
   const a = base.split('\n');
   const b = next.split('\n');
-
-  // Simple LCS-ish greedy marking to preserve order & speed
   const setA = new Set(a);
   const setB = new Set(b);
-
   const rows: Array<{t:'same'|'add'|'rem', text:string}> = [];
   const max = Math.max(a.length, b.length);
   for (let i=0;i<max;i++){
@@ -709,25 +651,24 @@ export default function VoiceAgentSection() {
     finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
   }
 
-  /* ── Generate overlay logic (injects into existing sections, no [Behavior] dup) ── */
+  /* ── Generate overlay logic (injects into canonical sections only) ── */
   const detectLanguage = () => data.language || 'English';
 
   const applyEdits = (base: string, instructions: string) => {
-    // Keep only the five canonical sections; append new bullets to the most relevant ones.
     const blocks = ['[Identity]','[Style]','[Response Guidelines]','[Task & Goals]','[Error Handling / Fallback]'];
+    // Ensure base has all blocks
+    if (!blocks.every(b => base.includes(b))) base = PROMPT_SKELETON;
+
     const parts: Record<string,string[]> = {};
-    let current = '_';
+    let current = '';
     base.split('\n').forEach(line => {
-      if (blocks.includes(line.trim())) { current = line.trim(); parts[current] = []; return; }
-      if (current !== '_' ) parts[current].push(line);
+      const t = line.trim();
+      if (blocks.includes(t)) { current = t; parts[current] = parts[current] || []; return; }
+      if (current) parts[current].push(line);
     });
 
-    const lines = instructions
-      .split('\n')
-      .map(s=>s.trim())
-      .filter(Boolean);
+    const lines = instructions.split('\n').map(s=>s.trim()).filter(Boolean);
 
-    // naive routing by keywords
     const toStyle: string[] = [];
     const toGuides: string[] = [];
     const toTasks: string[] = [];
@@ -743,25 +684,23 @@ export default function VoiceAgentSection() {
       else toGuides.push(bullet);
     }
 
-    if (toIdentity.length) parts['[Identity]'].push(...toIdentity);
-    if (toStyle.length) parts['[Style]'].push(...toStyle);
-    if (toGuides.length) parts['[Response Guidelines]'].push(...toGuides);
-    if (toTasks.length) parts['[Task & Goals]'].push(...toTasks);
-    if (toFallback.length) parts['[Error Handling / Fallback]'].push(...toFallback);
+    if (toIdentity.length) parts['[Identity]'] = [...(parts['[Identity]']||[]), ...toIdentity];
+    if (toStyle.length) parts['[Style]'] = [...(parts['[Style]']||[]), ...toStyle];
+    if (toGuides.length) parts['[Response Guidelines]'] = [...(parts['[Response Guidelines]']||[]), ...toGuides];
+    if (toTasks.length) parts['[Task & Goals]'] = [...(parts['[Task & Goals]']||[]), ...toTasks];
+    if (toFallback.length) parts['[Error Handling / Fallback]'] = [...(parts['[Error Handling / Fallback]']||[]), ...toFallback];
 
     const rebuilt =
-      ['[Identity]','[Style]','[Response Guidelines]','[Task & Goals]','[Error Handling / Fallback]']
-        .map(h => `${h}\n${(parts[h]||[]).join('\n')}`.trim())
-        .join('\n\n');
+      blocks.map(h => `${h}\n${(parts[h]||[]).join('\n')}`.trim()).join('\n\n');
 
-    return rebuilt;
+    return rebuilt || base;
   };
 
   const runTypingIntoBox = (full:string) => {
     setTypingPreview('');
     let i = 0;
     const step = () => {
-      i += Math.max(1, Math.floor(full.length / 120));
+      i += Math.max(1, Math.floor(full.length / 120)); // ~120 frames
       setTypingPreview(full.slice(0, Math.min(i, full.length)));
       if (i < full.length) requestAnimationFrame(step);
     };
@@ -778,20 +717,32 @@ export default function VoiceAgentSection() {
     setShowGenerate(true);
   };
 
+  // >>> The key change: close overlay immediately when starting generation
   const onGenerate = async () => {
+    if (!composerText.trim()) return; // keep disabled if empty
     setGenPhase('loading');
-    basePromptRef.current = data.systemPrompt;
+
+    // Capture the base prompt and precompute merged text
+    const base = data.systemPrompt || PROMPT_SKELETON;
+    basePromptRef.current = base;
     const _lang = detectLanguage();
-    // simulate processing
-    setTimeout(() => {
-      const merged = applyEdits(basePromptRef.current, composerText || 'No changes provided');
-      setProposedPrompt(merged);
-      runTypingIntoBox(merged);
-      const addedCount = computeDiff(basePromptRef.current, merged).filter(r=>r.t==='add').length;
-      const removedCount = computeDiff(basePromptRef.current, merged).filter(r=>r.t==='rem').length;
-      setChangesSummary(`Applied edits (${_lang}). +${addedCount} / -${removedCount} lines.`);
-      setGenPhase('review');
-    }, 420);
+
+    // Create merged text (sync or later: replace with API call)
+    const merged = applyEdits(base, composerText);
+
+    // Close overlay *now*
+    setShowGenerate(false);
+
+    // Switch page into review mode and start typing into the prompt box
+    setProposedPrompt(merged);
+    setGenPhase('review');
+    runTypingIntoBox(merged);
+
+    // Optional little summary
+    const d = computeDiff(base, merged);
+    const addedCount = d.filter(r=>r.t==='add').length;
+    const removedCount = d.filter(r=>r.t==='rem').length;
+    setChangesSummary(`Applied edits (${_lang}). +${addedCount} / -${removedCount} lines.`);
   };
 
   const onAccept = async () => {
@@ -805,7 +756,7 @@ export default function VoiceAgentSection() {
     };
     pushVersion(activeId, snapshot);
     setData(p => ({ ...p, systemPrompt: proposedPrompt }));
-    setShowGenerate(false);
+    // Exit review state
     setProposedPrompt('');
     setTypingPreview('');
     setChangesSummary('');
@@ -814,15 +765,17 @@ export default function VoiceAgentSection() {
   };
 
   const onDecline = () => {
-    // keep overlay open to tweak text again
+    // Exit review state without applying
     setProposedPrompt('');
     setTypingPreview('');
     setChangesSummary('');
-    setGenPhase('editing');
+    setGenPhase('idle');
   };
 
   /* ─────────── UI ─────────── */
-  const inReview = genPhase === 'review' && showGenerate;
+  // In review when the overlay is closed and genPhase is 'review'
+  const inInlineReview = genPhase === 'review' && !showGenerate;
+  const typingDone = proposedPrompt && typingPreview.length >= proposedPrompt.length;
 
   return (
     <section className="va-scope" style={{ background:'var(--bg)', color:'var(--text)' }}>
@@ -937,7 +890,7 @@ export default function VoiceAgentSection() {
                   <div className="flex items-center gap-2">
                     <button
                       className="inline-flex items-center gap-2 rounded-[10px] text-sm"
-                      style={{ height:36, padding:'0 12px', background:CTA, color:'#fff', border:'1px solid rgba(255,255,255,.08)' }} // white text
+                      style={{ height:36, padding:'0 12px', background:CTA, color:'#fff', border:'1px solid rgba(255,255,255,.08)' }}
                       onClick={onOpenGenerate}
                     >
                       <Wand2 className="w-4 h-4" /> Generate
@@ -947,7 +900,7 @@ export default function VoiceAgentSection() {
 
                 <div style={{ position:'relative' }}>
                   {/* Editable textarea when NOT in review */}
-                  {!inReview ? (
+                  {!inInlineReview ? (
                     <textarea
                       className="w-full bg-transparent outline-none rounded-[12px] px-3 py-[12px]"
                       style={{ minHeight: 360, background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
@@ -976,6 +929,36 @@ export default function VoiceAgentSection() {
                     </div>
                   )}
                 </div>
+
+                {/* Inline review action bar */}
+                {inInlineReview && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    {changesSummary ? (
+                      <span className="text-xs px-2 py-1 rounded-[8px]"
+                            style={{ background:'rgba(89,217,179,.10)', border:'1px solid rgba(89,217,179,.22)', color:'var(--text)' }}>
+                        {changesSummary}
+                      </span>
+                    ) : null}
+
+                    <div className="ml-auto flex items-center gap-8">
+                      <button
+                        onClick={onDecline}
+                        className="h-[38px] px-4 rounded-[10px]"
+                        style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.9)', color:'var(--text)', fontWeight:600 }}
+                      >
+                        Decline
+                      </button>
+                      <button
+                        onClick={onAccept}
+                        disabled={!typingDone}
+                        className="h-[38px] px-4 rounded-[10px] font-semibold"
+                        style={{ background: typingDone ? CTA : 'rgba(89,217,179,.35)', color:'#0a0f0d' }}
+                      >
+                        Accept Changes
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </Section>
@@ -1081,7 +1064,7 @@ export default function VoiceAgentSection() {
         </div>
       </div>
 
-      {/* ─────────── Generate overlay (solid) ─────────── */}
+      {/* ─────────── Generate overlay (only for collecting instructions) ─────────── */}
       {showGenerate && (
         <>
           <div
@@ -1146,54 +1129,25 @@ export default function VoiceAgentSection() {
                   </div>
                   <Toggle checked={autoTranslate} onChange={setAutoTranslate}/>
                 </div>
-
-                {/* Hint: the actual preview now happens *inside* the main System Prompt box */}
-                {genPhase==='loading' && (
-                  <div className="text-xs flex items-center gap-2" style={{ color:'var(--text-muted)' }}>
-                    <Loader2 className="w-4 h-4 animate-spin" /> Generating draft and streaming it into the prompt…
-                  </div>
-                )}
               </div>
 
               {/* Footer */}
               <div className="px-6 pb-6 flex gap-3">
-                {genPhase==='review' ? (
-                  <>
-                    <button
-                      onClick={onDecline}
-                      className="w-full h-[44px] rounded-[10px]"
-                      style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.9)', color:'var(--text)', fontWeight:600 }}
-                    >
-                      Decline
-                    </button>
-                    <button
-                      onClick={onAccept}
-                      className="w-full h-[44px] rounded-[10px] font-semibold"
-                      style={{ background:CTA, color:'#0a0f0d' }}
-                    >
-                      Accept Changes
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button
-                      onClick={()=> genPhase!=='loading' && setShowGenerate(false)}
-                      disabled={genPhase==='loading'}
-                      className="w-full h-[44px] rounded-[10px]"
-                      style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.9)', color:'var(--text)', fontWeight:600 }}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={onGenerate}
-                      disabled={genPhase==='loading' || !composerText.trim()}
-                      className="w-full h-[44px] rounded-[10px] font-semibold inline-flex items-center justify-center gap-2"
-                      style={{ background:CTA, color:'#fff', opacity: (!composerText.trim() ? .6 : 1) }}
-                    >
-                      {genPhase==='loading' ? (<><Loader2 className="w-4 h-4 animate-spin" /> Generating…</>) : 'Generate'}
-                    </button>
-                  </>
-                )}
+                <button
+                  onClick={()=> genPhase!=='loading' && setShowGenerate(false)}
+                  className="w-full h-[44px] rounded-[10px]"
+                  style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.9)', color:'var(--text)', fontWeight:600 }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={onGenerate}
+                  disabled={!composerText.trim()}
+                  className="w-full h-[44px] rounded-[10px] font-semibold inline-flex items-center justify-center gap-2"
+                  style={{ background:CTA, color:'#fff', opacity: (!composerText.trim() ? .6 : 1) }}
+                >
+                  Generate
+                </button>
               </div>
             </div>
           </div>
