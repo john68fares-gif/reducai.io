@@ -880,7 +880,7 @@ export default function VoiceAgentSection() {
 
   /* ─────────── UI ─────────── */
   const inInlineReview = genPhase === 'review' && !showGenerate;
-  const typingDone = proposedPrompt && typingPreview.length >= proposedPrompt.length;
+  const typingDone = Boolean(proposedPrompt) && typingPreview.length >= (proposedPrompt?.length || 0);
 
   return (
     <section className="va-scope" style={{ background:'var(--bg)', color:'var(--text)' }}>
@@ -979,7 +979,7 @@ export default function VoiceAgentSection() {
                 <StyledSelect value={data.model} onChange={setField('model')} options={modelOpts}/>
               </div>
               <div>
-                <div className="mb-[var(--s-2)] text={[12.5] as any}>First Message Mode</div>
+                <div className="mb-[var(--s-2)] text-[12.5px]">First Message Mode</div>
                 <StyledSelect value={data.firstMode} onChange={setField('firstMode')} options={[
                   { value: 'Assistant speaks first', label: 'Assistant speaks first' },
                   { value: 'User speaks first', label: 'User speaks first' },
