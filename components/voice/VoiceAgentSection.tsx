@@ -9,6 +9,7 @@ import {
   KeyRound, Play, Square, Pause, X
 } from 'lucide-react';
 import { scopedStorage } from '@/utils/scoped-storage';
+import { DEFAULT_PROMPT as ENGINE_DEFAULT_PROMPT, applyInstructions } from '@/lib/prompt-engine';
 
 /* ───────────────── Assistant rail (fixed) ───────────────── */
 const AssistantRail = dynamic(
@@ -150,7 +151,7 @@ type AgentData = {
   numerals: boolean;
 };
 
-/* ─────────── canonical blocks ─────────── */
+/* ─────────── canonical blocks (kept local for UI fallbacks) ─────────── */
 const PROMPT_SKELETON =
 `[Identity]
 
@@ -162,29 +163,8 @@ const PROMPT_SKELETON =
 
 [Error Handling / Fallback]`;
 
-/* ─────────── NEW DEFAULT PROMPT (PASTE YOUR NEW PROMPT BELOW) ─────────── */
-/** 
- * Replace the content inside the template string with the new prompt we made.
- * Everything else in the file is unchanged.
- */
-const NEW_PROMPT = `[Identity]
-<<< PASTE YOUR NEW PROMPT CONTENT HERE >>>
-
-[Style]
-<<< KEEP YOUR NEW PROMPT'S STYLE SECTION HERE >>>
-
-[Response Guidelines]
-<<< KEEP YOUR NEW PROMPT'S GUIDELINES HERE >>>
-
-[Task & Goals]
-<<< KEEP YOUR NEW PROMPT'S TASKS/G OALS HERE >>>
-
-[Error Handling / Fallback]
-<<< KEEP YOUR NEW PROMPT'S FALLBACK SECTION HERE >>>`;
-
-/* ─────────── your main default prompt ─────────── */
-/* The app now uses NEW_PROMPT instead of the old DEFAULT_PROMPT text */
-const DEFAULT_PROMPT = NEW_PROMPT;
+/* ─────────── your main default prompt (now from prompt-engine) ─────────── */
+const DEFAULT_PROMPT = ENGINE_DEFAULT_PROMPT;
 
 /* ─────────── defaults ─────────── */
 const DEFAULT_AGENT: AgentData = {
@@ -540,105 +520,16 @@ function DiffInline({ base, next }:{ base:string; next:string }){
   );
 }
 
-/* ─────────── Instruction routing + edits ─────────── */
-const STOPWORDS = new Set([
-  'assistant','ai','bot','ok','okay','yes','no','yup','nope','uh','um','thanks','thank you'
-]);
-
-function normalizeLine(raw: string): string | null {
-  const l = raw.trim();
-  if (!l) return null;
-  // discard single short tokens and stopwords
-  const words = l.replace(/[^\w\s-]/g,'').split(/\s+/).filter(Boolean);
-  if (words.length === 0) return null;
-  if (words.length === 1 && (words[0].length < 4 || STOPWORDS.has(words[0].toLowerCase()))) return null;
-
-  // special handling: Dutch insult → policy rule
-  const low = l.toLowerCase();
-  if ((/\bjij\b|\bje\b/.test(low)) && /\bdom\b/.test(low)) {
-    return 'If a user expresses frustration or uses insults (e.g., calling the assistant dumb), stay calm, be professional, and redirect toward solving their problem.';
-  }
-
-  return l;
-}
-
-function routeBullets(instructions: string) {
-  const lines = instructions
-    .split('\n')
-    .map(s => normalizeLine(s))
-    .filter(Boolean) as string[];
-
-  const toStyle: string[] = [];
-  const toGuides: string[] = [];
-  const toTasks: string[] = [];
-  const toIdentity: string[] = [];
-  const toFallback: string[] = [];
-
-  for (const raw of lines) {
-    const line = raw.trim();
-    const bullet = `- ${/[.!?]$/.test(line) ? line : line + '.'}`;
-
-    if (/identity|role|act as|persona|behave/i.test(line)) toIdentity.push(bullet);
-    else if (/tone|formal|friendly|concise|style|voice|approachable/i.test(line)) toStyle.push(bullet);
-    else if (/error|fallback|fail|misunderstanding|retry|insult|abuse|frustrat/i.test(line)) toFallback.push(bullet);
-    else if (/collect|ask|step|goal|task|flow|handoff|handover|escalate|confirm|welcome|guide|walkthrough/i.test(line)) toTasks.push(bullet);
-    else if (/guideline|response|answer|jargon|clarity|concise|format|steps|list|examples?/i.test(line)) toGuides.push(bullet);
-    else toGuides.push(bullet);
-  }
-
-  // Deduplicate within each block
-  const dedupe = (arr:string[]) => Array.from(new Set(arr));
-  return {
-    toStyle: dedupe(toStyle),
-    toGuides: dedupe(toGuides),
-    toTasks: dedupe(toTasks),
-    toIdentity: dedupe(toIdentity),
-    toFallback: dedupe(toFallback),
-  };
-}
-
-function ensureBlocks(base: string) {
-  if (
-    base.includes('[Identity]') &&
-    base.includes('[Style]') &&
-    base.includes('[Response Guidelines]') &&
-    base.includes('[Task & Goals]') &&
-    base.includes('[Error Handling / Fallback]')
-  ) return base;
-  return PROMPT_SKELETON;
-}
-
+/* ─────────── Instruction routing + edits (delegated to prompt-engine) ─────────── */
+/** Keep the same signature the UI expects; delegate to applyInstructions. */
 function applyEdits(base: string, instructions: string) {
-  const blocks = ['[Identity]','[Style]','[Response Guidelines]','[Task & Goals]','[Error Handling / Fallback]'];
-  base = ensureBlocks(base);
-
-  // parse existing blocks
-  const parts: Record<string,string[]> = {};
-  let current = '';
-  base.split('\n').forEach(line => {
-    const t = line.trim();
-    if (blocks.includes(t)) { current = t; parts[current] = parts[current] || []; return; }
-    if (current) parts[current].push(line);
-  });
-
-  const { toStyle, toGuides, toTasks, toIdentity, toFallback } = routeBullets(instructions);
-
-  if (toIdentity.length) parts['[Identity]'] = [...(parts['[Identity]']||[]), ...toIdentity];
-  if (toStyle.length) parts['[Style]'] = [...(parts['[Style]']||[]), ...toStyle];
-  if (toGuides.length) parts['[Response Guidelines]'] = [...(parts['[Response Guidelines]']||[]), ...toGuides];
-  if (toTasks.length) parts['[Task & Goals]'] = [...(parts['[Task & Goals]']||[]), ...toTasks];
-  if (toFallback.length) parts['[Error Handling / Fallback]'] = [...(parts['[Error Handling / Fallback]']||[]), ...toFallback];
-
-  // final cleanup: trim trailing blank lines and collapse multiples
-  for (const h of blocks) {
-    const arr = (parts[h]||[]).map(s => s.replace(/\s+$/,''));
-    parts[h] = arr.filter((v,i,a)=> i===0 || v!=='' || (i>0 && a[i-1] !== ''));
-  }
-
-  const rebuilt =
-    blocks.map(h => `${h}\n${(parts[h]||[]).join('\n')}`.trim()).join('\n\n');
-
-  return rebuilt || base;
+  const safeBase =
+    base && base.includes('[Identity]') ? base : (DEFAULT_PROMPT || PROMPT_SKELETON);
+  const { merged, summary } = applyInstructions(safeBase, instructions);
+  // Return both the merged text and the summary via a tiny wrapper object-like tuple
+  // (we only used the string before; now we’ll read the summary in onGenerate).
+  (applyEdits as any)._lastSummary = summary;
+  return merged;
 }
 
 /* ─────────── Page ─────────── */
@@ -808,6 +699,7 @@ export default function VoiceAgentSection() {
 
     basePromptRef.current = base;
 
+    // Delegate merging to the shared prompt-engine
     const merged = applyEdits(base, composerText);
 
     // Close overlay now
@@ -818,11 +710,9 @@ export default function VoiceAgentSection() {
     setGenPhase('review');
     runTypingIntoBox(merged);
 
-    // Summary badge
-    const d = computeDiff(base, merged);
-    const addedCount = d.filter(r=>r.t==='add').length;
-    const removedCount = d.filter(r=>r.t==='rem').length;
-    setChangesSummary(`Applied edits. +${addedCount} / -${removedCount} lines.`);
+    // Summary badge (from prompt-engine)
+    const summary = (applyEdits as any)._lastSummary || '';
+    setChangesSummary(summary || 'Applied edits.');
   };
 
   const onAccept = async () => {
