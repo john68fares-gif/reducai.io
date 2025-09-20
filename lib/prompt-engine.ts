@@ -1,4 +1,4 @@
-// prompt-engine.ts
+// lib/prompt-engine.ts
 
 /* =========================================================
    Prompt Engine — structured editing + input normalization
@@ -54,39 +54,27 @@ function ensureBlocks(base: string): string {
     base.includes('[Error Handling / Fallback]');
 
   if (hasAll) return base;
-
-  // If anything is missing, start from a clean skeleton
   return PROMPT_SKELETON;
 }
 
-/* ───────── Lightweight language detection + translation ─────────
-   We normalize builder input into English so the downstream routing
-   works consistently. (Stub; swap with real translation later.)
-*/
+/* ───────── Lightweight language detection + translation ───────── */
 
 type Lang = 'english' | 'dutch' | 'other';
 
 function detectLanguage(s: string): Lang {
   const t = s.toLowerCase();
-
-  // crude Dutch hints
   if (/\b(jij|je|jullie|bent|ben|een|echt|dom|alsjeblieft|hoi|hallo|bedankt|toon|vriendelijk|korte|antwoorden)\b/.test(t)) {
     return 'dutch';
   }
-
-  // crude English hint (latin chars + common words)
   if (/[a-z]/i.test(s) && /\b(the|and|to|of|a|you|your|please|make|use|tone|style)\b/i.test(s)) {
     return 'english';
   }
-
-  // fallthrough
   return 'other';
 }
 
-// Tiny phrase-level Dutch → English (extend as you like)
+// Tiny phrase-level Dutch → English (stub)
 function translateDutchToEnglish(s: string): string {
   return s
-    // pronouns / basic verbs
     .replace(/\bjij\b/gi, 'you')
     .replace(/\bje\b/gi, 'you')
     .replace(/\bjullie\b/gi, 'you')
@@ -95,7 +83,6 @@ function translateDutchToEnglish(s: string): string {
     .replace(/\been\b/gi, 'a')
     .replace(/\becht\b/gi, 'really')
     .replace(/\bdom\b/gi, 'dumb')
-    // common prompt words
     .replace(/\btoon\b/gi, 'tone')
     .replace(/\bvriendelijk(er)?\b/gi, 'friendly')
     .replace(/\bkorte\b/gi, 'short')
@@ -107,32 +94,25 @@ function translateDutchToEnglish(s: string): string {
     .replace(/\bbedankt\b/gi, 'thanks');
 }
 
-// Normalize a single instruction line into English
 export function normalizeBuilderLine(line: string): string {
   const lang = detectLanguage(line);
   if (lang === 'dutch') return translateDutchToEnglish(line);
-  // If "other", return as-is (or plug a real translator later)
   return line;
 }
 
-/* ───────── Turn raw phrases into professional rules ─────────
-   - Converts insults or rough phrasing into clear, helpful policy lines.
-   - Adds punctuation & bullet formatting to fit the blocks cleanly.
-*/
+/* ───────── Turn raw phrases into professional rules ───────── */
 
 function toBullet(s: string): string {
-  const trimmed = s.trim().replace(/^[-•\u2022]\s*/, ''); // strip leading bullets
+  const trimmed = s.trim().replace(/^[-•\u2022]\s*/, '');
   return `- ${/[.!?]$/.test(trimmed) ? trimmed : trimmed + '.'}`;
 }
 
-/** Convert harsh/insult examples into a calm professional fallback rule. */
 function sanitizeInsultsToFallback(line: string): string | null {
   const t = line.toLowerCase();
   const looksLikeInsultExample =
     /\byou are (really )?dumb\b/.test(t) ||
     /\bidiot|stupid|dumb|trash|useless|hate\b/.test(t) ||
     /\byou suck\b/.test(t);
-
   if (!looksLikeInsultExample) return null;
 
   return toBullet(
@@ -140,9 +120,7 @@ function sanitizeInsultsToFallback(line: string): string | null {
   );
 }
 
-/* ───────── Routing rules ─────────
-   Decide which block a given (normalized) line belongs to.
-*/
+/* ───────── Routing rules ───────── */
 
 type Bucket =
   | '[Identity]'
@@ -163,20 +141,14 @@ function routeBucketOf(line: string): Bucket {
   if (/\b(error|fallback|fail|misunderstanding|retry|sorry|apologize|escalate|abuse|insult|frustration)\b/.test(s))
     return '[Error Handling / Fallback]';
 
-  // default → Response Guidelines
   return '[Response Guidelines]';
 }
 
 function rewriteToProfessional(line: string): string {
-  // If line is an insult or contains a toxic example → convert to fallback policy.
   const fallback = sanitizeInsultsToFallback(line);
   if (fallback) return fallback;
 
-  // Otherwise, keep the user's intent but make it a crisp, instructive rule.
-  // Light transformations (turn imperative hints into proper policy lines).
   let s = line.trim();
-
-  // Common quick rephrasings
   s = s.replace(/^make the tone/i, 'Use a tone that is');
   s = s.replace(/^use tone/i, 'Use a tone that is');
   s = s.replace(/\bshort answers\b/i, 'brief answers');
@@ -221,23 +193,8 @@ function splitIntoBlocks(base: string): BlocksMap {
   return map;
 }
 
-function collapseBlankRuns(lines: string[]): string[] {
-  // Remove trailing spaces and collapse 2+ blank lines into a single blank line
-  const cleaned = lines.map((l) => l.replace(/\s+$/g, ''));
-  const out: string[] = [];
-  for (const l of cleaned) {
-    if (l.trim() === '' && out[out.length - 1]?.trim() === '') continue;
-    out.push(l);
-  }
-  // Trim leading/trailing blank lines in each block
-  while (out.length && out[0].trim() === '') out.shift();
-  while (out.length && out[out.length - 1].trim() === '') out.pop();
-  return out;
-}
-
 function joinBlocks(map: BlocksMap): string {
-  // Keep order and add exactly one blank line between blocks
-  return BLOCKS.map((b) => `${b}\n${collapseBlankRuns(map[b] || []).join('\n')}`.trim()).join('\n\n');
+  return BLOCKS.map((b) => `${b}\n${(map[b] || []).join('\n')}`.trim()).join('\n\n');
 }
 
 /* ───────── Diff (for UI summaries) ───────── */
@@ -269,10 +226,9 @@ export function computeDiff(base: string, next: string): DiffRow[] {
   return rows;
 }
 
-/* ───────── Public API ───────── */
+/* ───────── Public API (builder) ───────── */
 
 export type GenerateOptions = {
-  /** Currently unused; when you add more languages later, pass in 'English', 'Dutch', etc. */
   agentLanguage?: string;
 };
 
@@ -284,57 +240,11 @@ export type GenerateResult = {
   bucketsAdded: Partial<Record<Bucket, number>>;
 };
 
-/* ───────── Structured vs free-form detection ───────── */
-
-function looksLikeStructuredPrompt(s: string): boolean {
-  const t = s || '';
-  return BLOCKS.every((h) => t.includes(h));
-}
-
-/** Normalize a full structured prompt without rewriting content. */
-function normalizeStructuredPrompt(s: string): string {
-  // Parse it like any other prompt, but DO NOT rewrite lines.
-  const parsed = splitIntoBlocks(s);
-
-  // Whitespace cleanup only (no bullet injection, no routing changes).
-  const cleaned: BlocksMap = {
-    '[Identity]': collapseBlankRuns(parsed['[Identity]']),
-    '[Style]': collapseBlankRuns(parsed['[Style]']),
-    '[Response Guidelines]': collapseBlankRuns(parsed['[Response Guidelines]']),
-    '[Task & Goals]': collapseBlankRuns(parsed['[Task & Goals]']),
-    '[Error Handling / Fallback]': collapseBlankRuns(parsed['[Error Handling / Fallback]']),
-  };
-
-  return joinBlocks(cleaned);
-}
-
-/**
- * Merge free-text instructions into a structured prompt.
- * - If user pasted a full prompt (all 5 headers) → replace the whole thing (preserve content).
- * - Else:
- *    - Normalizes input to English (simple Dutch→English stub).
- *    - Rewrites rough input to professional lines.
- *    - Routes to the correct block.
- *    - Returns the merged prompt + a change summary.
- */
 export function generateFromFreeText(
   basePrompt: string,
   freeText: string,
   _opts?: GenerateOptions
 ): GenerateResult {
-  // Case 1: Full structured prompt provided → replace (no policy rewrites).
-  if (looksLikeStructuredPrompt(freeText)) {
-    const nextPrompt = normalizeStructuredPrompt(freeText);
-    const base = ensureBlocks(basePrompt || DEFAULT_PROMPT || PROMPT_SKELETON);
-    const diff = computeDiff(base, nextPrompt);
-    const added = diff.filter((d) => d.t === 'add').length;
-    const removed = diff.filter((d) => d.t === 'rem').length;
-    // Not meaningful for replacement; keep empty.
-    const bucketsAdded: Partial<Record<Bucket, number>> = {};
-    return { nextPrompt, diff, added, removed, bucketsAdded };
-  }
-
-  // Case 2: Free-form tweaks → original behavior (route + bulletize).
   const base = ensureBlocks(basePrompt || DEFAULT_PROMPT || PROMPT_SKELETON);
   const blocks = splitIntoBlocks(base);
 
@@ -346,31 +256,20 @@ export function generateFromFreeText(
   const bucketsAdded: Partial<Record<Bucket, number>> = {};
 
   for (const raw of lines) {
-    // 1) normalize (translate to English if needed)
     const normalized = normalizeBuilderLine(raw);
-
-    // 2) decide target bucket
     const bucket = routeBucketOf(normalized);
-
-    // 3) rewrite to professional policy line
     const policy = rewriteToProfessional(normalized);
-
-    // 4) append to that block
     blocks[bucket].push(policy);
-
     bucketsAdded[bucket] = (bucketsAdded[bucket] || 0) + 1;
   }
 
   const nextPrompt = joinBlocks(blocks);
-
   const diff = computeDiff(base, nextPrompt);
   const added = diff.filter((d) => d.t === 'add').length;
   const removed = diff.filter((d) => d.t === 'rem').length;
 
   return { nextPrompt, diff, added, removed, bucketsAdded };
 }
-
-/* ───────── Convenience: apply+summarize in one go ───────── */
 
 export function applyInstructions(
   basePrompt: string,
@@ -395,16 +294,43 @@ export function applyInstructions(
   return { merged: nextPrompt, summary, diff };
 }
 
-/* ───────── Example (for quick local testing; remove in prod) ─────────
-const demoBase = DEFAULT_PROMPT;
-const demoInput = `
-maak de toon vriendelijker en gebruik korte antwoorden
-als de gebruiker zegt jij bent dom
-format answers with numbered steps
-collect name and email first
-`;
+/* ───────── NEW: Full-prompt normalization & detection ───────── */
 
-const out = applyInstructions(demoBase, demoInput);
-console.log(out.summary);
-console.log(out.merged);
---------------------------------------------------------------------- */
+/** True if raw contains all five canonical headers. */
+export function looksLikeFullPrompt(raw: string): boolean {
+  const t = raw || '';
+  return (
+    /\[Identity\]/.test(t) &&
+    /\[Style\]/.test(t) &&
+    /\[Response Guidelines\]/.test(t) &&
+    /\[Task & Goals\]/.test(t) &&
+    /\[Error Handling \/ Fallback\]/.test(t)
+  );
+}
+
+/**
+ * Normalize a *complete* prompt:
+ * - ensure headers exist (order preserved),
+ * - trim trailing spaces,
+ * - collapse multiple blank lines,
+ * - drop junk bullets like "- assistant." or a lone "-".
+ */
+export function normalizeFullPrompt(raw: string): string {
+  const safe = ensureBlocks(String(raw ?? ''));
+  const lines = safe
+    .split('\n')
+    .map((l) => l.replace(/\s+$/g, '')) // rtrim
+    .filter((l, i, arr) => {
+      // collapse 2+ blank lines to max 1
+      if (l.trim() !== '') return true;
+      const prev = arr[i - 1];
+      return prev && prev.trim() !== '';
+    })
+    // drop junk bullets that caused your issue
+    .filter((l) => !/^\-\s*$/.test(l)) // lone "-"
+    .filter((l) => l.trim().toLowerCase() !== '- assistant.')
+    .filter((l) => l.trim().toLowerCase() !== 'assistant.')
+    .filter((l) => l.trim() !== '-');
+
+  return lines.join('\n').trim();
+}
