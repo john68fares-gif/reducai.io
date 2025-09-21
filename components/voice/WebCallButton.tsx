@@ -2,30 +2,37 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Mic, MicOff, PhoneOff, Loader2, ChevronDown, X, Bot, User,
-} from 'lucide-react';
+import { Mic, MicOff, X, Bot, User, Loader2 } from 'lucide-react';
 
 /* ─────────────────────────────────────────────────────────
    Props
    ───────────────────────────────────────────────────────── */
+type Language = 'auto' | 'en' | 'de' | 'nl' | 'es' | 'ar';
+
 type Props = {
+  /** These come from your Voice Agent setup (no in-panel changing) */
   model: string;                 // e.g. "gpt-4o-realtime-preview"
   systemPrompt: string;
-  voiceName: string;             // friendly or OpenAI voice id
+  voiceName: string;             // OpenAI voice id or friendly name
   assistantName: string;
   apiKey: string;
-  onClose?: () => void;
 
+  /** Panel behaviour */
+  onClose?: () => void;
   firstMode?: 'Assistant speaks first' | 'User speaks first' | 'Silent until tool required';
   firstMsg?: string;
-  languageHint?: 'auto' | 'en' | 'de' | 'nl' | 'es' | 'ar';
 
-  // Audio realism flags
-  phoneFilter?: boolean;         // default false (clearest)
+  /** Language is explicit (no guessing unless you pass "auto") */
+  language?: Language;           // default 'en'
+
+  /** Audio realism flags (kept, default off for clarity) */
+  phoneFilter?: boolean;
   farMic?: boolean;
   ambience?: 'off' | 'kitchen' | 'cafe';
   ambienceLevel?: number;
+
+  /** Optional: let users override voice in the header */
+  allowVoiceOverride?: boolean;  // default false
 };
 
 /* ─────────────────────────────────────────────────────────
@@ -44,40 +51,39 @@ type Mood = 'joke' | 'sad' | 'angry' | 'positive' | 'neutral';
 const RAW_ID_PATTERN = /^[a-z0-9._-]{3,}$/i;
 const pick = <T,>(arr: T[]) => arr[Math.floor(Math.random() * arr.length)];
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
-const fmtTime = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const time = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
 /* ─────────────────────────────────────────────────────────
-   OpenAI voices (live + fallback)
+   Voices (live from OpenAI + fallback)
    ───────────────────────────────────────────────────────── */
 const DEFAULT_OAI_VOICES = ['alloy','verse','coral','amber','opal','sage','pebble','juniper','cobalt'];
 const FRIENDLY_TO_ID: Record<string, string> = {
   Breeze:'alloy', Orion:'alloy',
-  Nova:'verse', Flow:'verse',
+  Nova:'verse',  Flow:'verse',
   Terra:'coral', Aster:'coral',
-  Maya:'amber', Kai:'amber',
+  Maya:'amber',  Kai:'amber',
   Willow:'alloy', Aria:'verse', Flint:'coral', Ivy:'amber',
   Alloy:'alloy', Verse:'verse', Coral:'coral', Amber:'amber',
 };
 
 /* ─────────────────────────────────────────────────────────
-   Humanization snippets
+   Human touches
    ───────────────────────────────────────────────────────── */
-const BACKCHANNEL_LINES = [
+const BACKCHANNELS = [
   'Let me check that…','One moment—checking.','Sure, give me a sec…',
   'Okay, I’m on it.','Alright, looking that up…','Just a second…',
   'Got it—pulling that up.','Mm-hmm… checking now.',
 ];
-const THINKING_FILLERS = ['hmm…','uh…','let’s see…','right…','okay…'];
+const FILLERS = ['hmm…','uh…','let’s see…','right…','okay…'];
 const LAUGHS = ['ha— that’s good!','heh, nice one.','(soft laugh) yeah, that got me.','haha— okay, I like that.'];
-
-const THINKING_PAUSE_MS = [900, 1200, 1500, 1800];
+const THINKING = [900, 1200, 1500, 1800];
 const BACKCHANNEL_PROB = 0.18;
 const BACKCHANNEL_COOLDOWN_MS = 4200;
 
 /* ─────────────────────────────────────────────────────────
    Mood / language helpers
    ───────────────────────────────────────────────────────── */
-function detectMood(s: string): Mood {
+function moodOf(s: string): Mood {
   const t = (s || '').toLowerCase();
   if (!t.trim()) return 'neutral';
   if (/(haha|lol|lmao|🤣|😅|😆|grap|grappig|good one)/.test(t)) return 'joke';
@@ -86,49 +92,33 @@ function detectMood(s: string): Mood {
   if (/(great|awesome|nice|love|perfect|amazing|thanks!?|top|lekker|geweldig)/.test(t)) return 'positive';
   return 'neutral';
 }
-function styleForMood(m: Mood) {
-  switch (m) {
-    case 'joke':     return 'If the caller makes a joke, react with a short, natural laugh before answering. Keep it light.';
-    case 'sad':      return 'Sound warm and supportive. Slow down slightly and acknowledge feelings before giving info.';
-    case 'angry':    return 'Stay calm and professional. Lower intensity, acknowledge frustration, and focus on solutions.';
-    case 'positive': return 'Be upbeat and friendly; don’t oversell.';
-    default:         return 'Keep a relaxed conversational tone.';
-  }
-}
-function languageNudge(lang: Props['languageHint']) {
-  if (lang === 'auto') return 'Auto-detect and reply in the user’s language (English, German, Dutch, Spanish, or Arabic).';
-  const map: Record<string, string> = {
-    en: 'Respond in natural, conversational English with contractions.',
-    de: 'Antworte natürlich und umgangssprachlich auf Deutsch.',
-    nl: 'Antwoord in natuurlijk, informeel Nederlands.',
-    es: 'Responde en español conversacional.',
-    ar: 'يرجى الرد بالعربية بأسلوب محادثة طبيعي.',
+
+function strictLanguageRule(lang: Language) {
+  const maps: Record<Exclude<Language,'auto'>, string> = {
+    en: 'Always speak English. Do not switch languages unless explicitly asked.',
+    de: 'Sprich ausschließlich Deutsch. Wechsle die Sprache nur auf ausdrückliche Bitte.',
+    nl: 'Spreek uitsluitend Nederlands. Wissel alleen van taal als de gebruiker dat expliciet vraagt.',
+    es: 'Habla exclusivamente español. No cambies de idioma salvo petición explícita.',
+    ar: 'تحدث باللغة العربية فقط. لا تغير اللغة إلا إذا طلب المستخدم ذلك صراحة.',
   };
-  return map[lang] || '';
+  if (lang === 'auto') return 'Auto-detect the user language and continue in it until they ask to switch.';
+  return maps[lang] || maps.en;
 }
-function baseStyle(lang: Props['languageHint']) {
-  const langN = languageNudge(lang);
-  const shared = [
-    // PRIORITY RULE so your prompt “wins”
-    'If the user states explicit formatting rules (e.g., “answer yes/no only”, “tell jokes”), follow those rules strictly until they say otherwise.',
-    'Do not speak over the caller; if the caller starts talking, stop.',
-    'Wait ~1–2 seconds of silence before replying (unless a brief acknowledgement).',
-    'Use natural pacing with brief pauses and occasional mild disfluencies.',
-    'Avoid rigid menu patterns; speak like a person.',
+
+function baseStyle(lang: Language) {
+  return [
+    strictLanguageRule(lang),
+    // Prompt obeys caller rules
+    'If the caller gives explicit formatting rules (e.g., “yes/no only”), follow them strictly until they say otherwise.',
+    // Conversational pacing
+    'Do not speak over the caller; if the caller starts talking, stop immediately.',
+    'Use natural pacing, small pauses, and mild disfluencies (sparingly).',
+    'Acknowledge briefly before details; avoid rigid menu patterns.',
   ].join(' ');
-  return `${langN}\n\n${shared}`;
-}
-function turnStyleNudge(): string {
-  return pick([
-    'Vary intonation; avoid flat delivery.',
-    'Give a short acknowledgement before details.',
-    'If the user hesitates, slow down and simplify.',
-    'Keep options conversational, not templated.',
-  ]);
 }
 
 /* ─────────────────────────────────────────────────────────
-   WebAudio (clean defaults)
+   WebAudio
    ───────────────────────────────────────────────────────── */
 function createSaturator(ac: AudioContext, drive = 1.05) {
   const shaper = ac.createWaveShaper();
@@ -208,7 +198,7 @@ async function attachProcessedAudio(
   (audioEl as any).srcObject = dest.stream;
   await audioEl.play().catch(()=>{});
 
-  let ambCleanup: null | (()=>void) = null;
+  let ambCleanup: null | (()=>void)> = null;
   if (ambience !== 'off') ambCleanup = createAmbience(ac, ambience, ambienceLevel);
 
   return () => {
@@ -222,29 +212,30 @@ async function attachProcessedAudio(
    Component
    ───────────────────────────────────────────────────────── */
 export default function WebCallPanel({
-  model: modelProp,
+  model,
   systemPrompt,
-  voiceName: voiceProp,
+  voiceName,
   assistantName,
   apiKey,
   onClose,
   firstMode = 'Assistant speaks first',
   firstMsg = 'Hello.',
-  languageHint = 'auto',
+  language = 'en',
   phoneFilter = false,
   farMic = false,
   ambience = 'off',
   ambienceLevel = 0.08,
+  allowVoiceOverride = false,
 }: Props) {
   const [connecting, setConnecting] = useState(false);
   const [connected, setConnected] = useState(false);
   const [muted, setMuted] = useState(false);
   const [error, setError] = useState<string>('');
 
-  const [selectedModel, setSelectedModel] = useState<string>(modelProp || 'gpt-4o-realtime-preview');
   const [voices, setVoices] = useState<string[]>([]);
   const [selectedVoice, setSelectedVoice] = useState<string>('');
   const [log, setLog] = useState<TranscriptRow[]>([]);
+  const logRef = useRef<TranscriptRow[]>([]);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
@@ -257,18 +248,22 @@ export default function WebCallPanel({
   const lastBackchannelAtRef = useRef<number>(0);
   const baseInstructionsRef = useRef<string>('');
 
-  // Resolve voice id
+  /** Keep a live copy of log for event handlers */
+  useEffect(() => { logRef.current = log; }, [log]);
+
+  /** Voice id resolution */
   const voiceId = useMemo(() => {
-    const key = (selectedVoice || voiceProp || '').trim();
+    const key = (selectedVoice || voiceName || '').trim();
     if (RAW_ID_PATTERN.test(key) && !FRIENDLY_TO_ID[key]) return key.toLowerCase();
     return FRIENDLY_TO_ID[key] || key || 'alloy';
-  }, [selectedVoice, voiceProp]);
+  }, [selectedVoice, voiceName]);
 
-  // Fetch OpenAI voices (real list) with fallback
+  /** Load OpenAI voices once (for optional override) */
   useEffect(() => {
+    if (!allowVoiceOverride) return; // skip network if not needed
     let cancelled = false;
-    async function loadVoices() {
-      const fallback = Array.from(new Set([voiceProp, ...DEFAULT_OAI_VOICES].filter(Boolean))) as string[];
+    (async () => {
+      const fallback = Array.from(new Set([voiceName, ...DEFAULT_OAI_VOICES].filter(Boolean))) as string[];
       try {
         const res = await fetch('https://api.openai.com/v1/voices', {
           headers: { Authorization: `Bearer ${apiKey}` },
@@ -286,13 +281,12 @@ export default function WebCallPanel({
           setSelectedVoice((fallback[0] as string) || 'alloy');
         }
       }
-    }
-    loadVoices();
+    })();
     return () => { cancelled = true; };
-  }, [apiKey, voiceProp]);
+  }, [apiKey, allowVoiceOverride, voiceName]);
 
-  // Helpers
-  const upsertRow = (id: string, who: TranscriptRow['who'], patch: Partial<TranscriptRow> | ((prev?: TranscriptRow)=>Partial<TranscriptRow>)) => {
+  /* Transcript helpers */
+  const upsert = (id: string, who: TranscriptRow['who'], patch: Partial<TranscriptRow> | ((prev?: TranscriptRow)=>Partial<TranscriptRow>)) => {
     setLog((prev) => {
       const i = prev.findIndex((r) => r.id === id);
       if (i === -1) {
@@ -310,12 +304,13 @@ export default function WebCallPanel({
     const id = `${who}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     setLog((prev) => [...prev, { id, who, text, at: Date.now(), done: true }]);
   };
-  function safeSend(dc: RTCDataChannel | null, payload: any) {
+  const safeSend = (payload: any) => {
+    const dc = dcRef.current;
     if (!dc || dc.readyState !== 'open') return;
     try { dc.send(JSON.stringify(payload)); } catch {}
-  }
+  };
 
-  // Gentle VAD (duck only)
+  /* Gentle VAD (duck only to avoid stutter) */
   async function setupVAD() {
     try {
       const mic = micStreamRef.current;
@@ -346,17 +341,9 @@ export default function WebCallPanel({
       return () => { try{ ac.close() }catch{} };
     } catch { return () => {}; }
   }
-  const userIsSilentFor = (ms:number) => Date.now() - (lastMicActiveAtRef.current || 0) > ms;
-  function sendBackchannel(dc: RTCDataChannel | null) {
-    const now = Date.now();
-    if (now - (lastBackchannelAtRef.current || 0) < BACKCHANNEL_COOLDOWN_MS) return;
-    if (Math.random() > BACKCHANNEL_PROB) return;
-    lastBackchannelAtRef.current = now;
-    safeSend(dc, { type: 'response.create', response: { modalities: ['audio'], instructions: pick(BACKCHANNEL_LINES) } });
-  }
-  const splitFirstMessages = (input: string) => (input || '').split(/\r?\n|\|/g).map(s=>s.trim()).filter(Boolean).slice(0,20);
+  const userSilentFor = (ms:number) => Date.now() - (lastMicActiveAtRef.current || 0) > ms;
 
-  // Start call
+  /* Start the call */
   async function startCall() {
     setError('');
     if (!apiKey) { setError('No API key selected.'); return; }
@@ -364,11 +351,11 @@ export default function WebCallPanel({
     try {
       setConnecting(true);
 
-      // 1) ephemeral
+      // 1) ephemeral (use model from Voice Agent prop)
       const sessionRes = await fetch('/api/voice/ephemeral', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-OpenAI-Key': apiKey },
-        body: JSON.stringify({ model: selectedModel, voiceName: voiceId, assistantName, systemPrompt }),
+        body: JSON.stringify({ model, voiceName: voiceId, assistantName, systemPrompt }),
       });
       if (!sessionRes.ok) throw new Error(`Ephemeral token error: ${await sessionRes.text()}`);
       const session = await sessionRes.json();
@@ -376,10 +363,10 @@ export default function WebCallPanel({
       if (!EPHEMERAL) throw new Error('Missing ephemeral client_secret.value');
 
       // 2) mic
-      const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
       micStreamRef.current = mic;
 
-      // 3) peer
+      // 3) RTCPeer
       const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
       pcRef.current = pc;
 
@@ -387,10 +374,8 @@ export default function WebCallPanel({
       pc.ontrack = async (e) => {
         e.streams[0]?.getAudioTracks().forEach((t) => remote.addTrack(t));
         if (!audioRef.current) return;
-        if (closeChainRef.current) { try{ closeChainRef.current() }catch{} closeChainRef.current = null; }
-        closeChainRef.current = await attachProcessedAudio(
-          audioRef.current, remote, { phoneFilter, farMic, ambience, ambienceLevel }
-        );
+        if (closeChainRef.current) { try{ closeChainRef.current() }catch{}; closeChainRef.current = null; }
+        closeChainRef.current = await attachProcessedAudio(audioRef.current, remote, { phoneFilter, farMic, ambience, ambienceLevel });
       };
 
       const sendTrack = mic.getAudioTracks()[0];
@@ -402,43 +387,42 @@ export default function WebCallPanel({
       dcRef.current = dc;
 
       dc.onopen = () => {
-        const style = [baseStyle(languageHint), turnStyleNudge()].join(' ');
+        // Pin base prompt + language rule
+        baseInstructionsRef.current = `${systemPrompt || ''}\n\n${baseStyle(language)}`;
 
-        // 🔒 Pin base + meta-rule so user rules win
-        baseInstructionsRef.current = `${systemPrompt || ''}\n\n${style}`;
-
-        safeSend(dc, {
+        // ✅ IMPORTANT: enable transcription + server VAD
+        safeSend({
           type: 'session.update',
           session: {
             instructions: baseInstructionsRef.current,
             voice: voiceId,
-            // ← FIXED types (strings)
             input_audio_format: 'pcm16',
             output_audio_format: 'pcm16',
+            input_audio_transcription: { model: 'gpt-4o-transcribe' },
+            turn_detection: { type: 'server_vad' },
           },
         });
 
+        // Optional “assistant speaks first”
         if (firstMode === 'Assistant speaks first') {
-          const lines = splitFirstMessages(firstMsg || 'Hello.');
+          const lines = (firstMsg || 'Hello.').split(/\r?\n|\|/g).map(s=>s.trim()).filter(Boolean);
           const startAt = Date.now();
           const gate = setInterval(() => {
-            const quiet = userIsSilentFor(1200);
+            const quiet = userSilentFor(1200);
             const timeout = Date.now() - startAt > 2200;
             if (quiet || timeout) {
               clearInterval(gate);
               lines.forEach((ln, idx) => {
                 const jitter = 220 + Math.random()*240;
                 const delay = idx * (340 + Math.random()*200) + jitter;
-                setTimeout(() => {
-                  safeSend(dc, { type: 'response.create', response: { modalities: ['audio'], instructions: ln } });
-                }, delay);
+                setTimeout(() => safeSend({ type: 'response.create', response: { modalities: ['audio'], instructions: ln } }), delay);
               });
             }
           }, 120);
         }
       };
 
-      // 5) messages
+      // 5) Realtime messages
       dc.onmessage = (ev) => {
         try {
           const msg = JSON.parse(ev.data);
@@ -447,44 +431,45 @@ export default function WebCallPanel({
           if (t === 'response.output_text.delta') {
             const id = msg?.response_id || msg?.id || 'assistant_current';
             const delta = msg?.delta || '';
-            upsertRow(id, 'assistant', (prev) => ({ text: (prev?.text || '') + String(delta) }));
+            upsert(id, 'assistant', (prev) => ({ text: (prev?.text || '') + String(delta) }));
           }
           if (t === 'response.completed' || t === 'response.stop') {
             const id = msg?.response_id || msg?.id || 'assistant_current';
-            upsertRow(id, 'assistant', { done: true });
+            upsert(id, 'assistant', { done: true });
           }
 
           if (t === 'transcript.delta') {
             const id = msg?.transcript_id || msg?.id || 'user_current';
             const delta = msg?.delta || '';
-            upsertRow(id, 'user', (prev) => ({ text: (prev?.text || '') + String(delta) }));
+            upsert(id, 'user', (prev) => ({ text: (prev?.text || '') + String(delta) }));
           }
           if (t === 'transcript.completed') {
             const id = msg?.transcript_id || msg?.id || 'user_current';
-            const row = (log.find(r => r.id === id) || { text: '' });
+            const row = (logRef.current.find(r => r.id === id) || { text: '' });
             const text = (row.text || '').trim();
-            const mood = detectMood(text);
-            upsertRow(id, 'user', { done: true });
+            upsert(id, 'user', { done: true });
 
-            // Append nudges; never overwrite base
-            const dutchLikely = / de | het | een | jij | je | we | wij | lekker | alsjeblieft | dank je | bedankt | hoe | wat | waarom | grap /.test(text.toLowerCase());
-            const langAdj = dutchLikely ? 'Spreek vlot en informeel Nederlands; varieer intonatie en tempo.' : '';
-            const appended = `${baseInstructionsRef.current}\n\n${styleForMood(mood)} ${turnStyleNudge()} ${langAdj}`.trim();
+            // Append small style nudges (never overwrite your base)
+            const m = moodOf(text);
+            const nudge =
+              m === 'joke' ? 'Give a warm, short laugh before the answer.' :
+              m === 'sad'  ? 'Slow down and sound supportive.' :
+              m === 'angry'? 'Stay calm, acknowledge frustration, then solve it.' :
+                             'Keep a relaxed conversational tone.';
+            safeSend({ type: 'session.update', session: { instructions: `${baseInstructionsRef.current}\n\n${nudge}` } });
 
-            safeSend(dcRef.current, { type: 'session.update', session: { instructions: appended } });
-
-            const wait = pick(THINKING_PAUSE_MS);
+            // Backchannel/filler a moment later
+            const wait = pick(THINKING);
             setTimeout(() => {
-              // subtle backchannel/fillers
               const now = Date.now();
               if (now - (lastBackchannelAtRef.current || 0) > BACKCHANNEL_COOLDOWN_MS && Math.random() <= BACKCHANNEL_PROB) {
                 lastBackchannelAtRef.current = now;
-                safeSend(dcRef.current, { type: 'response.create', response: { modalities: ['audio'], instructions: pick(BACKCHANNEL_LINES) } });
+                safeSend({ type: 'response.create', response: { modalities: ['audio'], instructions: pick(BACKCHANNELS) } });
               }
-              if (mood === 'joke') {
-                safeSend(dcRef.current, { type: 'response.create', response: { modalities: ['audio'], instructions: pick(LAUGHS) } });
+              if (m === 'joke') {
+                safeSend({ type: 'response.create', response: { modalities: ['audio'], instructions: pick(LAUGHS) } });
               } else if (Math.random() < 0.08) {
-                safeSend(dcRef.current, { type: 'response.create', response: { modalities: ['audio'], instructions: pick(THINKING_FILLERS) } });
+                safeSend({ type: 'response.create', response: { modalities: ['audio'], instructions: pick(FILLERS) } });
               }
             }, wait);
           }
@@ -500,11 +485,11 @@ export default function WebCallPanel({
         else if (['disconnected','failed','closed'].includes(pc.connectionState)) { endCall(false); }
       };
 
-      // 6) SDP
+      // 6) SDP (use the Voice Agent model prop)
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
-      const url = `https://api.openai.com/v1/realtime?model=${encodeURIComponent(selectedModel || 'gpt-4o-realtime-preview')}`;
+      const url = `https://api.openai.com/v1/realtime?model=${encodeURIComponent(model)}`;
       const answerRes = await fetch(url, {
         method: 'POST',
         headers: {
@@ -563,7 +548,7 @@ export default function WebCallPanel({
     startCall();
     return () => { cleanup(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedModel, voiceId]);
+  }, [model, voiceId]); // model comes from Voice Agent; no in-panel picker
 
   /* ─────────────────────────── UI — RIGHT DRAWER PANEL ─────────────────────────── */
   return (
@@ -573,38 +558,21 @@ export default function WebCallPanel({
       role="dialog"
       aria-label="Voice call panel"
     >
-      {/* Header */}
+      {/* Header (no model selector; optional voice override) */}
       <header className="flex items-center gap-2 px-4 py-3 border-b border-[rgba(255,255,255,.10)]">
         <div className="flex items-center gap-2 min-w-0">
           <Bot className="w-5 h-5 opacity-80" />
           <div className="truncate">
             <div className="text-xs opacity-70">Talking to</div>
             <div className="font-semibold truncate">{assistantName || 'Assistant'}</div>
+            <div className="text-[10px] opacity-60">Model: {model} • Voice: {voiceId}</div>
           </div>
         </div>
 
         <div className="ml-auto flex items-center gap-2">
-          {/* Model selector */}
-          <div className="relative">
+          {allowVoiceOverride && (
             <select
-              className="appearance-none bg-transparent text-xs rounded-lg px-2.5 py-1.5 pr-7"
-              style={{ border: '1px solid rgba(255,255,255,.16)', color: '#e6f1ef' }}
-              value={selectedModel}
-              onChange={(e)=>setSelectedModel(e.target.value)}
-              title="Model"
-            >
-              <option value="gpt-4o-realtime-preview">gpt-4o-realtime-preview</option>
-              <option value="gpt-4o-realtime-preview-2024-12-17">gpt-4o-realtime-preview-2024-12-17</option>
-              <option value="gpt-4o-realtime-audio-preview">gpt-4o-realtime-audio-preview</option>
-              <option value="gpt-4o-mini-tts">gpt-4o-mini-tts</option>
-            </select>
-            <ChevronDown className="w-4 h-4 absolute right-2 top-2 opacity-60 pointer-events-none" />
-          </div>
-
-          {/* Voice selector (real OpenAI ids) */}
-          <div className="relative">
-            <select
-              className="appearance-none bg-transparent text-xs rounded-lg px-2.5 py-1.5 pr-7"
+              className="appearance-none bg-transparent text-xs rounded-lg px-2.5 py-1.5"
               style={{ border: '1px solid rgba(255,255,255,.16)', color: '#e6f1ef' }}
               value={voiceId}
               onChange={(e)=>setSelectedVoice(e.target.value)}
@@ -614,8 +582,7 @@ export default function WebCallPanel({
                 <option key={v} value={v}>{v}</option>
               ))}
             </select>
-            <ChevronDown className="w-4 h-4 absolute right-2 top-2 opacity-60 pointer-events-none" />
-          </div>
+          )}
 
           <button
             onClick={toggleMute}
@@ -638,32 +605,31 @@ export default function WebCallPanel({
         </div>
       </header>
 
-      {/* Chat list */}
+      {/* Chat bubbles */}
       <main className="flex-1 overflow-y-auto px-3 py-3 space-y-3" style={{ scrollbarWidth: 'thin' }}>
         {log.length === 0 && (
           <div className="text-sm opacity-70 px-2">
-            {connecting ? 'Connecting to voice…' : (firstMode === 'Assistant speaks first' ? 'Waiting for assistant…' : 'Say hello! We’ll show the transcript here.')}
+            {connecting ? 'Connecting to voice…' : (firstMode === 'Assistant speaks first' ? 'Waiting for assistant…' : 'Say hello. Transcript will appear here.')}
           </div>
         )}
 
         {log.map((row) => (
           <div key={row.id} className={`flex ${row.who === 'user' ? 'justify-end' : 'justify-start'}`}>
-            {/* avatar */}
             {row.who === 'assistant' && (
               <div className="mr-2 mt-[2px] shrink-0 rounded-full bg-[rgba(89,217,179,.12)] border border-[rgba(89,217,179,.25)] w-7 h-7 grid place-items-center">
                 <Bot className="w-4 h-4 opacity-80" />
               </div>
             )}
 
-            {/* bubble */}
-            <div className={`max-w-[80%] rounded-2xl px-3 py-2 text-[0.95rem] leading-snug border`}
-                 style={{
-                   background: row.who === 'user' ? 'rgba(56,196,143,.18)' : 'rgba(255,255,255,.06)',
-                   borderColor: row.who === 'user' ? 'rgba(56,196,143,.35)' : 'rgba(255,255,255,.14)',
-                   color: '#e6f1ef',
-                 }}>
+            <div
+              className="max-w-[80%] rounded-2xl px-3 py-2 text-[0.95rem] leading-snug border"
+              style={{
+                background: row.who === 'user' ? 'rgba(56,196,143,.18)' : 'rgba(255,255,255,.06)',
+                borderColor: row.who === 'user' ? 'rgba(56,196,143,.35)' : 'rgba(255,255,255,.14)',
+                color: '#e6f1ef',
+              }}>
               <div>{row.text || <span className="opacity-50">…</span>}</div>
-              <div className="text-[10px] mt-1 opacity-60 text-right">{fmtTime(row.at)}</div>
+              <div className="text-[10px] mt-1 opacity-60 text-right">{time(row.at)}</div>
             </div>
 
             {row.who === 'user' && (
@@ -674,7 +640,6 @@ export default function WebCallPanel({
           </div>
         ))}
 
-        {/* error banner styled like “red box” */}
         {error && (
           <div className="text-xs px-3 py-2 rounded-lg border"
                style={{ background: 'rgba(239,68,68,.12)', borderColor: 'rgba(239,68,68,.25)', color: '#ffd7d7' }}>
@@ -683,14 +648,13 @@ export default function WebCallPanel({
         )}
       </main>
 
-      {/* Footer status */}
+      {/* Footer with live status + hidden audio sink */}
       <footer className="border-t border-[rgba(255,255,255,.10)] px-3 py-2">
         <div className="flex items-center justify-between gap-2 text-xs">
           <div className="flex items-center gap-2">
             {connecting && <Loader2 className="w-4 h-4 animate-spin" />}
             <span className="opacity-80">
               {connected ? 'Connected' : (connecting ? 'Connecting…' : 'Idle')}
-              {' '}• Model: {selectedModel} • Voice: {voiceId}
             </span>
           </div>
           <audio ref={audioRef} autoPlay playsInline />
