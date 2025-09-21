@@ -9,8 +9,14 @@ type Props = {
   systemPrompt: string;
   voiceName: string;
   assistantName: string;
-  apiKey: string;            // <- from your dropdown (selected key value)
+  apiKey: string; // <- from your dropdown (selected key value)
   onClose?: () => void;
+
+  // NEW (backward compatible)
+  firstMode?: 'Assistant speaks first' | 'User speaks first' | 'Silent until tool required';
+  firstMsg?: string;
+  // optional hint for web-call only; model still auto-detects
+  languageHint?: 'auto' | 'en' | 'de' | 'nl' | 'es';
 };
 
 type TranscriptRow = {
@@ -29,6 +35,9 @@ export default function WebCallButton({
   assistantName,
   apiKey,
   onClose,
+  firstMode = 'Assistant speaks first',
+  firstMsg = 'Hello.',
+  languageHint = 'auto',
 }: Props) {
   const [connecting, setConnecting] = useState(false);
   const [connected, setConnected] = useState(false);
@@ -39,6 +48,10 @@ export default function WebCallButton({
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
   const dcRef = useRef<RTCDataChannel | null>(null);
+
+  // WebAudio “phone call” chain
+  const acRef = useRef<AudioContext | null>(null);
+  const phoneChainCleanupRef = useRef<(() => void) | null>(null);
 
   const [log, setLog] = useState<TranscriptRow[]>([]);
 
@@ -69,6 +82,78 @@ export default function WebCallButton({
     const id = `${who}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     setLog((prev) => [...prev, { id, who, text, done: true }]);
   };
+
+  // Small helper: safely send JSON on DC
+  function safeSend(dc: RTCDataChannel | null, payload: any) {
+    if (!dc || dc.readyState !== 'open') return;
+    try { dc.send(JSON.stringify(payload)); } catch {/* noop */ }
+  }
+
+  // Build a nudge for language auto-detection for EN/DE/NL/ES
+  function languageNudge() {
+    if (languageHint === 'auto') {
+      return 'Auto-detect and reply in the user’s language (English, German, Dutch, or Spanish).';
+    }
+    const map: Record<string, string> = {
+      en: 'Respond in English.',
+      de: 'Antworte auf Deutsch.',
+      nl: 'Antwoord in het Nederlands.',
+      es: 'Responde en español.',
+    };
+    return map[languageHint] || '';
+  }
+
+  // Create “telephone” EQ chain: high-pass ~300 Hz, low-pass ~3.4 kHz, mild compression
+  async function attachPhoneAudio(remoteStream: MediaStream) {
+    try {
+      const ac = new (window.AudioContext || (window as any).webkitAudioContext)();
+      acRef.current = ac;
+
+      const src = ac.createMediaStreamSource(remoteStream);
+
+      const hp = ac.createBiquadFilter();
+      hp.type = 'highpass';
+      hp.frequency.value = 300;
+
+      const lp = ac.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = 3400;
+
+      const comp = ac.createDynamicsCompressor();
+      comp.threshold.value = -12;
+      comp.knee.value = 18;
+      comp.ratio.value = 2.5;
+      comp.attack.value = 0.003;
+      comp.release.value = 0.25;
+
+      const dest = ac.createMediaStreamDestination();
+      src.connect(hp);
+      hp.connect(lp);
+      lp.connect(comp);
+      comp.connect(dest);
+
+      if (audioRef.current) {
+        audioRef.current.srcObject = dest.stream;
+        await audioRef.current.play().catch(() => {/* iOS needs gesture */});
+      }
+
+      phoneChainCleanupRef.current = () => {
+        try { src.disconnect(); } catch {}
+        try { hp.disconnect(); } catch {}
+        try { lp.disconnect(); } catch {}
+        try { comp.disconnect(); } catch {}
+        try { ac.close(); } catch {}
+        acRef.current = null;
+      };
+    } catch {
+      // Fallback: set remote stream straight on the element
+      if (audioRef.current) {
+        audioRef.current.srcObject = remoteStream;
+        audioRef.current.play().catch(() => {});
+      }
+      phoneChainCleanupRef.current = null;
+    }
+  }
 
   async function startCall() {
     setError('');
@@ -113,16 +198,13 @@ export default function WebCallButton({
       });
       pcRef.current = pc;
 
-      // Remote audio sink
+      // Remote audio sink (we’ll route through WebAudio for the phone effect)
       const remote = new MediaStream();
-      if (audioRef.current) {
-        audioRef.current.srcObject = remote;
-        // On Safari you usually need a user gesture before play; we try anyway:
-        audioRef.current.play().catch(() => {/* ignored */});
-      }
 
       pc.ontrack = (e) => {
         e.streams[0]?.getAudioTracks().forEach((t) => remote.addTrack(t));
+        // Attach phone-style chain exactly once
+        attachPhoneAudio(remote);
       };
 
       // We want to *send* mic and *receive* assistant audio
@@ -135,17 +217,32 @@ export default function WebCallButton({
       dcRef.current = dc;
 
       dc.onopen = () => {
-        // Provide session params (instructions/voice) as a runtime update too.
+        // Provide session params (instructions/voice) as a runtime update.
+        // Also nudge auto-language and “natural” pacing.
+        const extraStyle =
+          'Speak with natural, human pacing. Brief 0.2 second pauses between clauses, occasional mild disfluencies like “um” or “uh” when appropriate. Avoid overdoing it.';
         const sessionUpdate = {
           type: 'session.update',
           session: {
-            instructions: systemPrompt || '',
+            instructions: `${systemPrompt || ''}\n\n${languageNudge()}\n\n${extraStyle}`,
             voice: voiceId,
+            // Explicit formats (most browsers are fine with defaults)
             input_audio_format: { type: 'input_audio_format', audio_format: 'pcm16' },
             output_audio_format: { type: 'output_audio_format', audio_format: 'pcm16' },
           },
         };
         safeSend(dc, sessionUpdate);
+
+        // Kick off first message if configured to speak first
+        if (firstMode === 'Assistant speaks first' && firstMsg?.trim()) {
+          safeSend(dc, {
+            type: 'response.create',
+            response: {
+              modalities: ['audio'],
+              instructions: firstMsg,
+            },
+          });
+        }
       };
 
       // Handle realtime messages
@@ -165,7 +262,7 @@ export default function WebCallButton({
             upsertRow(id, 'assistant', { done: true });
           }
 
-          // user transcript (depending on model, may send transcript.* events)
+          // user transcript
           if (t === 'transcript.delta') {
             const id = msg?.transcript_id || msg?.id || 'user_current';
             const delta = msg?.delta || '';
@@ -181,7 +278,7 @@ export default function WebCallButton({
             addLine('assistant', msg.text);
           }
         } catch {
-          // Non-JSON or unknown message; ignore
+          // ignore unknown/non-JSON
         }
       };
 
@@ -222,10 +319,10 @@ export default function WebCallButton({
       };
       await pc.setRemoteDescription(answer);
 
-      // On iOS mobile, call play() after a user gesture (we already attempted above)
+      // On iOS, try to prime playback
       if (audioRef.current) {
         audioRef.current.muted = false;
-        audioRef.current.play().catch(() => {/* user gesture required */});
+        audioRef.current.play().catch(() => {/* user gesture might be required */});
       }
     } catch (e: any) {
       setConnecting(false);
@@ -233,11 +330,6 @@ export default function WebCallButton({
       setError(e?.message || 'Failed to start call.');
       cleanup();
     }
-  }
-
-  function safeSend(dc: RTCDataChannel | null, payload: any) {
-    if (!dc || dc.readyState !== 'open') return;
-    try { dc.send(JSON.stringify(payload)); } catch {/* noop */}
   }
 
   function toggleMute() {
@@ -258,6 +350,9 @@ export default function WebCallButton({
       micStreamRef.current?.getTracks()?.forEach((t) => t.stop());
     } catch {}
     micStreamRef.current = null;
+
+    try { phoneChainCleanupRef.current?.(); } catch {}
+    phoneChainCleanupRef.current = null;
   }
 
   function endCall(userIntent = true) {
@@ -270,10 +365,7 @@ export default function WebCallButton({
   useEffect(() => {
     // Auto-connect when this panel mounts
     startCall();
-
-    return () => {
-      cleanup();
-    };
+    return () => { cleanup(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -322,7 +414,7 @@ export default function WebCallButton({
           <div className="h-[42vh] sm:h-[48vh] overflow-y-auto pr-1" style={{ scrollbarWidth: 'thin' }}>
             {log.length === 0 && (
               <div className="text-sm opacity-70">
-                {connecting ? 'Connecting to voice…' : 'Say hello! We’ll show the transcript here.'}
+                {connecting ? 'Connecting to voice…' : (firstMode === 'Assistant speaks first' ? 'Waiting for assistant…' : 'Say hello! We’ll show the transcript here.')}
               </div>
             )}
             <div className="flex flex-col gap-2">
@@ -373,7 +465,7 @@ export default function WebCallButton({
               </div>
             </div>
 
-            {/* Hidden audio sink (auto plays assistant voice) */}
+            {/* Hidden audio sink (processed through WebAudio phone chain) */}
             <audio ref={audioRef} autoPlay playsInline />
           </div>
         </div>
