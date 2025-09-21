@@ -228,7 +228,6 @@ function StyledSelect({
 ────────────────────────────────────────────────────────────────────────── */
 type TranscriptRow = { id:string; who:'user'|'assistant'; text:string; at:number; done?:boolean };
 
-const clamp01 = (v:number)=>Math.max(0,Math.min(1,v));
 const fmtTime = (ts:number)=>new Date(ts).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
 
 function languageNudge(lang: Props['languageHint']){
@@ -255,7 +254,7 @@ function createAmbience(ac: AudioContext, kind:'kitchen'|'cafe', level=0.08){
   src.buffer=buf; src.loop=true;
   const band=ac.createBiquadFilter(); band.type='bandpass'; band.frequency.value=kind==='kitchen'?950:350; band.Q.value=kind==='kitchen'?0.9:0.6;
   const hp=ac.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=120;
-  const g=ac.createGain(); g.gain.value=clamp01(level)*0.18;
+  const g=ac.createGain(); g.gain.value=0.18*Math.min(1,Math.max(0,level));
   src.connect(band); band.connect(hp); hp.connect(g); g.connect(ac.destination);
   src.start();
   return ()=>{ try{src.stop()}catch{}; [src,band,hp,g].forEach(n=>{try{(n as any).disconnect()}catch{}}); };
@@ -448,16 +447,11 @@ export default function WebCallButton({
           input_audio_format:'pcm16',
           output_audio_format:'pcm16',
           modalities:['audio','text'],
-
-          // make the server produce user transcripts
           input_audio_transcription: { model: 'whisper-1' },
-
-          // let server handle turn-taking so deltas arrive cleanly
           turn_detection: {
             type: 'server_vad',
             threshold: 0.5,
             prefix_silence_ms: 80,
-            // if you set a larger pause in props, respect it:
             silence_duration_ms: Math.max(120, prosody?.turnEndPauseMs ?? 160),
           },
         }});
@@ -474,14 +468,8 @@ export default function WebCallButton({
               safeSend(dc,{ type:'response.create', response:{ modalities:['audio','text'], instructions: ln }});
             }
           };
-
-          if (greetMode==='client') {
-            greet();
-          } else {
-            setTimeout(()=>{
-              if (!sawAssistantDeltaRef.current) greet();
-            }, 1200);
-          }
+          if (greetMode==='client') greet();
+          else setTimeout(()=>{ if (!sawAssistantDeltaRef.current) greet(); }, 1200);
         }
       };
 
@@ -507,7 +495,7 @@ export default function WebCallButton({
             addLine('assistant', msg.text);
           }
 
-          // USER transcript variants
+          // USER transcript variants (we handle all)
           const isUserDelta =
             /(^|\.)(input_.*transcript|transcript)(\.|_)delta$/.test(t) ||
             t === 'conversation.item.input_audio_transcript.delta' ||
@@ -528,7 +516,7 @@ export default function WebCallButton({
             upsert(id,'user',{ done:true });
           }
 
-          // single-shot fallback some runtimes emit
+          // single-shot fallback
           if ((t.includes('transcript') || t.includes('input_audio_buffer')) && typeof msg?.text === 'string' && !msg?.delta) {
             addLine('user', msg.text);
           }
