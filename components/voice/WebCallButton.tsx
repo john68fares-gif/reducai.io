@@ -7,21 +7,19 @@ import { Mic, MicOff, PhoneOff, Loader2, MessageSquare } from 'lucide-react';
 type Props = {
   model: string;
   systemPrompt: string;
-  voiceName: string;          // Friendly label OR raw OpenAI voice id
+  voiceName: string;
   assistantName: string;
   apiKey: string;
   onClose?: () => void;
 
-  // Conversation boot config
   firstMode?: 'Assistant speaks first' | 'User speaks first' | 'Silent until tool required';
-  firstMsg?: string;          // You can provide multiple, separated by "|" or newlines
+  firstMsg?: string;
   languageHint?: 'auto' | 'en' | 'de' | 'nl' | 'es' | 'ar';
 
-  // Optional audio realism flags
-  phoneFilter?: boolean;      // default true
-  farMic?: boolean;           // default false — close, intimate mic by default
-  ambience?: 'off' | 'kitchen' | 'cafe'; // default 'off'
-  ambienceLevel?: number;     // 0..1 (default .08)
+  phoneFilter?: boolean;
+  farMic?: boolean;
+  ambience?: 'off' | 'kitchen' | 'cafe';
+  ambienceLevel?: number;
 };
 
 type TranscriptRow = {
@@ -33,93 +31,51 @@ type TranscriptRow = {
 
 const CTA = '#59d9b3';
 
-/* ──────────────────────────────────────────────────────────
-   Voices
-   ────────────────────────────────────────────────────────── */
 const FRIENDLY_TO_ID: Record<string, string> = {
-  // neutral / smooth
-  'Breeze': 'alloy',
-  'Orion':  'alloy',
-  // warm / approachable
-  'Nova':   'verse',
-  'Flow':   'verse',
-  // crisp / precise
-  'Terra':  'coral',
-  'Aster':  'coral',
-  // bright / energetic
-  'Maya':   'amber',
-  'Kai':    'amber',
-  // extra friendly labels → spread across base timbres
-  'Willow': 'alloy',
-  'Aria':   'verse',
-  'Flint':  'coral',
-  'Ivy':    'amber',
-  // fallbacks
-  'Alloy':  'alloy',
-  'Verse':  'verse',
-  'Coral':  'coral',
-  'Amber':  'amber',
+  Breeze: 'alloy', Orion: 'alloy',
+  Nova: 'verse',  Flow: 'verse',
+  Terra: 'coral', Aster: 'coral',
+  Maya: 'amber',  Kai: 'amber',
+  Willow: 'alloy', Aria: 'verse', Flint: 'coral', Ivy: 'amber',
+  Alloy: 'alloy', Verse: 'verse', Coral: 'coral', Amber: 'amber',
 };
 const RAW_ID_PATTERN = /^[a-z0-9._-]{3,}$/i;
 
-/* ──────────────────────────────────────────────────────────
-   Humanization snippets
-   ────────────────────────────────────────────────────────── */
 const BACKCHANNEL_LINES = [
-  "Let me check that…",
-  "One moment—checking.",
-  "Sure, give me a sec…",
-  "Okay, I’m on it.",
-  "Alright, looking that up…",
-  "Just a second…",
-  "Got it—pulling that up.",
-  "Mm-hmm… checking now.",
+  'Okay, I’m on it.', 'Let me check that…', 'One moment—checking.', 'Sure, give me a sec…'
 ];
-const THINKING_FILLERS = ["hmm…", "uh…", "let’s see…", "right…", "okay…"];
-const LAUGHS = [
-  "ha— that’s good!",
-  "heh, nice one.",
-  "(soft laugh) yeah, that got me.",
-  "haha— okay, I like that.",
-  "ha— alright, fair enough.",
-];
-const THINKING_PAUSE_MS = [900, 1200, 1500, 1800];
-const BACKCHANNEL_PROB = 0.20;
-const BACKCHANNEL_COOLDOWN_MS = 4200;
+const THINKING_FILLERS = ['hmm…', 'uh…', 'let’s see…', 'right…', 'okay…'];
+const LAUGHS = ['ha— that’s good!', 'heh, nice one.', '(soft laugh) yeah, that got me.'];
 
-/* ──────────────────────────────────────────────────────────
-   Utilities
-   ────────────────────────────────────────────────────────── */
+const THINKING_PAUSE_MS = [900, 1200, 1500, 1800];
+const BACKCHANNEL_PROB = 0.18;
+const BACKCHANNEL_COOLDOWN_MS = 4000;
+
 function pick<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length)]; }
 function clamp01(v:number){ return Math.max(0, Math.min(1, v)); }
 
-/* Mood detection (light heuristic) */
 type Mood = 'joke' | 'sad' | 'angry' | 'positive' | 'neutral';
 function detectMood(s: string): Mood {
   const t = (s || '').toLowerCase();
   if (!t.trim()) return 'neutral';
-  if (/(haha|lol|lmao|🤣|😅|😆|grap|grappig|dat.*grappig|good one)/.test(t)) return 'joke';
-  if (/(sad|upset|depress|bad day|:(\(|😢|😭)|verdrietig|baal|ik.*verloren|ik.*pijn)/.test(t)) return 'sad';
-  if (/(angry|mad|furious|annoyed|wtf|sucks|terrible|awful|!{2,}|boos|woest|geïrriteerd)/.test(t)) return 'angry';
-  if (/(great|awesome|nice|love|perfect|amazing|thanks!|thank you!|top|lekker|geweldig|thanks)/.test(t)) return 'positive';
+  if (/(haha|lol|lmao|🤣|😅|😆|grap|grappig|good one)/.test(t)) return 'joke';
+  if (/(sad|upset|depress|bad day|😢|😭|verdrietig|baal)/.test(t)) return 'sad';
+  if (/(angry|mad|furious|annoyed|wtf|sucks|terrible|awful|!{2,}|boos)/.test(t)) return 'angry';
+  if (/(great|awesome|nice|love|perfect|amazing|thanks|geweldig|top)/.test(t)) return 'positive';
   return 'neutral';
 }
-
 function styleForMood(m: Mood) {
   switch (m) {
-    case 'joke':     return "If the caller makes a joke, react with a short, natural laugh before answering. Keep it light.";
-    case 'sad':      return "Sound warm and supportive. Slow down slightly and acknowledge feelings before giving info.";
-    case 'angry':    return "Stay calm and professional. Lower intensity, acknowledge frustration, and focus on solutions.";
-    case 'positive': return "Be upbeat and friendly, a touch of enthusiasm; don’t oversell.";
-    default:         return "Keep a relaxed conversational tone.";
+    case 'joke': return 'If the caller makes a joke, react with a short, natural laugh before answering.';
+    case 'sad': return 'Sound warm and supportive. Slow down slightly and acknowledge feelings first.';
+    case 'angry': return 'Stay calm and professional. Acknowledge frustration; focus on solutions.';
+    case 'positive': return 'Be upbeat and friendly; don’t oversell.';
+    default: return 'Keep a relaxed conversational tone.';
   }
 }
 
-/* Language nudge (also helps Dutch sound casual) */
 function languageNudge(lang: Props['languageHint']) {
-  if (lang === 'auto') {
-    return 'Auto-detect and reply in the user’s language (English, German, Dutch, Spanish, or Arabic).';
-  }
+  if (lang === 'auto') return 'Auto-detect and reply in the user’s language (English, German, Dutch, Spanish, or Arabic).';
   const map: Record<string, string> = {
     en: 'Respond in natural, conversational English with contractions.',
     de: 'Antworte natürlich und umgangssprachlich auf Deutsch.',
@@ -130,35 +86,6 @@ function languageNudge(lang: Props['languageHint']) {
   return map[lang] || '';
 }
 
-/* ──────────────────────────────────────────────────────────
-   Build per-turn instructions (ALWAYS include systemPrompt here)
-   ────────────────────────────────────────────────────────── */
-function buildTurnInstructions(opts: {
-  systemPrompt: string;
-  languageHint: Props['languageHint'];
-  mood: string;
-  extraNudge?: string;
-}) {
-  const { systemPrompt, languageHint, mood, extraNudge } = opts;
-  const langBlock = languageNudge(languageHint);
-  const shared = [
-    'Do not speak over the user. If the user starts speaking, stop immediately.',
-    'Wait about 1–2 seconds of silence before replying unless it’s a short acknowledgement.',
-    'Keep replies concise and natural; vary rhythm and intonation.',
-  ].join('\n');
-  return [
-    systemPrompt || '',
-    langBlock,
-    shared,
-    mood,
-    (languageHint === 'nl' ? 'Spreek vlot en informeel Nederlands; varieer intonatie.' : ''),
-    extraNudge || '',
-  ].filter(Boolean).join('\n');
-}
-
-/* ──────────────────────────────────────────────────────────
-   WebAudio chain (close mic)
-   ────────────────────────────────────────────────────────── */
 function createSaturator(ac: AudioContext, drive=1.15) {
   const shaper = ac.createWaveShaper();
   const curve = new Float32Array(1024);
@@ -204,10 +131,9 @@ async function attachProcessedAudio(
   opts: { phoneFilter: boolean; farMic: boolean; ambience: 'off'|'kitchen'|'cafe'; ambienceLevel: number }
 ){
   const { phoneFilter, farMic, ambience, ambienceLevel } = opts;
-
   if (!phoneFilter) {
     audioEl.srcObject = remoteStream;
-    await audioEl.play().catch(()=>{});
+    try { await audioEl.play(); } catch (e) { console.warn('[AUDIO PLAY BLOCKED]', e); }
     return () => {};
   }
 
@@ -241,7 +167,7 @@ async function attachProcessedAudio(
   merger.connect(dest);
 
   audioEl.srcObject = dest.stream;
-  await audioEl.play().catch(()=>{});
+  try { await audioEl.play(); } catch (e) { console.warn('[AUDIO PLAY BLOCKED]', e); }
 
   let ambCleanup: null | (()=>void) = null;
   if (ambience !== 'off') ambCleanup = createAmbience(ac, ambience, ambienceLevel);
@@ -253,9 +179,6 @@ async function attachProcessedAudio(
   };
 }
 
-/* ──────────────────────────────────────────────────────────
-   Component
-   ────────────────────────────────────────────────────────── */
 export default function WebCallButton({
   model,
   systemPrompt,
@@ -284,8 +207,11 @@ export default function WebCallButton({
   const closeChainRef = useRef<null | (()=>void)>(null);
   const vadLoopRef = useRef<number | null>(null);
   const lastMicActiveAtRef = useRef<number>(0);
+  const lastCancelAtRef = useRef<number>(0); // throttle response.cancel
+  const speakingRef = useRef<boolean>(false); // mic > threshold state
 
   const [log, setLog] = useState<TranscriptRow[]>([]);
+  const transcriptsRef = useRef<Record<string, string>>({}); // always-fresh transcript text
   const lastBackchannelAtRef = useRef<number>(0);
 
   const voiceId = useMemo(() => {
@@ -294,7 +220,11 @@ export default function WebCallButton({
     return FRIENDLY_TO_ID[key] || 'alloy';
   }, [voiceName]);
 
-  // transcript state helpers
+  const addLine = (who: TranscriptRow['who'], text: string) => {
+    const id = `${who}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    setLog((prev) => [...prev, { id, who, text, done: true }]);
+  };
+
   const upsertRow = (id: string, who: TranscriptRow['who'], patch: Partial<TranscriptRow> | ((prev?: TranscriptRow)=>Partial<TranscriptRow>)) => {
     setLog((prev) => {
       const i = prev.findIndex((r) => r.id === id);
@@ -309,51 +239,37 @@ export default function WebCallButton({
       return next;
     });
   };
-  const addLine = (who: TranscriptRow['who'], text: string) => {
-    const id = `${who}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    setLog((prev) => [...prev, { id, who, text, done: true }]);
-  };
 
   function safeSend(dc: RTCDataChannel | null, payload: any) {
     if (!dc || dc.readyState !== 'open') return;
-    try { dc.send(JSON.stringify(payload)); } catch {}
+    try { dc.send(JSON.stringify(payload)); } catch (e) { console.error('[DC send failed]', e); }
   }
 
-  /* VAD (barge-in) */
-  async function setupVAD() {
-    try {
-      const mic = micStreamRef.current;
-      if (!mic) return () => {};
-      const AC = (window.AudioContext || (window as any).webkitAudioContext);
-      const ac = new AC();
-      const src = ac.createMediaStreamSource(mic);
-      const analyser = ac.createAnalyser();
-      analyser.fftSize = 512;
-      analyser.smoothingTimeConstant = 0.85;
-      src.connect(analyser);
+  // ---------- ENFORCE PROMPT PER TURN ----------
+  function respondFor(userText: string, extras: string[] = []) {
+    const mood = detectMood(userText);
+    const moodStyle = styleForMood(mood);
+    const langHint = languageNudge(languageHint);
+    const dutchLikely = / de | het | een | jij | je | we | wij | lekker | alsjeblieft | dank je | bedankt | hoe | wat | waarom | grap /.test(userText.toLowerCase());
+    const nlAdj = dutchLikely ? 'Spreek vlot en informeel Nederlands; varieer intonatie en tempo.' : '';
 
-      const buf = new Uint8Array(analyser.frequencyBinCount);
-      const loop = () => {
-        analyser.getByteFrequencyData(buf);
-        let sum = 0;
-        for (let i=0;i<buf.length;i++) sum += buf[i]*buf[i];
-        const rms = Math.sqrt(sum / buf.length) / 255;
-        if (rms > 0.06) {
-          lastMicActiveAtRef.current = Date.now();
-          safeSend(dcRef.current, { type: 'response.cancel' });
-          if (audioRef.current) audioRef.current.volume = 0.27;
-        } else {
-          if (audioRef.current) audioRef.current.volume = 1.0;
-        }
-        vadLoopRef.current = requestAnimationFrame(loop);
-      };
-      vadLoopRef.current = requestAnimationFrame(loop);
-      return () => { try{ ac.close() }catch{} };
-    } catch { return () => {}; }
-  }
+    const instructions = [
+      systemPrompt,                // <- your strict rules LIVE HERE
+      langHint,
+      moodStyle,
+      nlAdj,
+      'Do not speak over the caller. Pause ~1s before replying.',
+      ...extras,
+    ].filter(Boolean).join('\n');
 
-  function userIsSilentFor(ms:number) {
-    return Date.now() - (lastMicActiveAtRef.current || 0) > ms;
+    console.log('[TURN INSTRUCTIONS]', instructions);
+    safeSend(dcRef.current, {
+      type: 'response.create',
+      response: {
+        modalities: ['audio'],
+        instructions: `${instructions}\n\nUser: "${userText}"\nAssistant:`,
+      },
+    });
   }
 
   function sendBackchannel(dc: RTCDataChannel | null) {
@@ -369,9 +285,64 @@ export default function WebCallButton({
     return input.split(/\r?\n|\|/g).map(s => s.trim()).filter(Boolean).slice(0, 20);
   }
 
+  async function setupVAD() {
+    try {
+      const mic = micStreamRef.current;
+      if (!mic) return () => {};
+
+      const AC = (window.AudioContext || (window as any).webkitAudioContext);
+      const ac = new AC();
+      const src = ac.createMediaStreamSource(mic);
+      const analyser = ac.createAnalyser();
+      analyser.fftSize = 512;
+      analyser.smoothingTimeConstant = 0.85;
+      src.connect(analyser);
+
+      const buf = new Uint8Array(analyser.frequencyBinCount);
+
+      const loop = () => {
+        analyser.getByteFrequencyData(buf);
+        let sum = 0;
+        for (let i=0;i<buf.length;i++) sum += buf[i]*buf[i];
+        const rms = Math.sqrt(sum / buf.length) / 255;
+
+        const active = rms > 0.06;
+        if (active) {
+          lastMicActiveAtRef.current = Date.now();
+          if (!speakingRef.current) {
+            // rising edge -> user started talking
+            speakingRef.current = true;
+            // throttle cancel to avoid nuking assistant continuously
+            const now = Date.now();
+            if (now - lastCancelAtRef.current > 1200) {
+              lastCancelAtRef.current = now;
+              safeSend(dcRef.current, { type: 'response.cancel' });
+              if (audioRef.current) audioRef.current.volume = 0.27;
+              // console.log('[VAD] cancel sent');
+            }
+          }
+        } else {
+          speakingRef.current = false;
+          if (audioRef.current) audioRef.current.volume = 1.0;
+        }
+
+        vadLoopRef.current = requestAnimationFrame(loop);
+      };
+      vadLoopRef.current = requestAnimationFrame(loop);
+
+      return () => { try{ ac.close() }catch{} };
+    } catch {
+      return () => {};
+    }
+  }
+
+  function userIsSilentFor(ms:number) {
+    return Date.now() - (lastMicActiveAtRef.current || 0) > ms;
+  }
+
   async function startCall() {
     setError('');
-    if (!apiKey) { setError('No API key selected. Choose one in the dropdown.'); return; }
+    if (!apiKey) { setError('No API key selected.'); return; }
 
     try {
       setConnecting(true);
@@ -382,9 +353,12 @@ export default function WebCallButton({
         headers: { 'Content-Type': 'application/json', 'X-OpenAI-Key': apiKey },
         body: JSON.stringify({ model, voiceName, assistantName, systemPrompt }),
       });
-      if (!sessionRes.ok) throw new Error(`Ephemeral token error: ${await sessionRes.text()}`);
-      const session = await sessionRes.json();
+
+      const raw = await sessionRes.text();
+      if (!sessionRes.ok) throw new Error(`Ephemeral token error: ${raw}`);
+      const session = JSON.parse(raw);
       const EPHEMERAL = session?.client_secret?.value;
+      console.log('[EPHEMERAL]', !!EPHEMERAL);
       if (!EPHEMERAL) throw new Error('Missing ephemeral client_secret.value');
 
       // 2) mic
@@ -394,6 +368,10 @@ export default function WebCallButton({
       // 3) peer
       const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
       pcRef.current = pc;
+
+      pc.oniceconnectionstatechange = () => {
+        console.log('[ICE]', pc.iceConnectionState);
+      };
 
       const remote = new MediaStream();
       pc.ontrack = async (e) => {
@@ -415,9 +393,13 @@ export default function WebCallButton({
       const dc = pc.createDataChannel('oai-events');
       dcRef.current = dc;
 
+      dc.onerror = (e) => console.error('[DC error]', e);
+      dc.onclose = () => console.warn('[DC closed]');
+
       dc.onopen = () => {
-        // IMPORTANT: only set voice/formats here. Do NOT include instructions,
-        // so we don't overwrite turn-level rules.
+        console.log('[DC] open');
+
+        // Keep session.update minimal—don’t put behavior rules here.
         safeSend(dc, {
           type: 'session.update',
           session: {
@@ -427,23 +409,26 @@ export default function WebCallButton({
           },
         });
 
-        // If the assistant should speak first, create a response that includes the systemPrompt.
+        // Smoke test: force speech so you know audio works
+        safeSend(dc, {
+          type: 'response.create',
+          response: { modalities: ['audio'], instructions: 'Test—voice is live. If you can hear me, say hello.' }
+        });
+
+        // Optional: assistant speaks first, but include systemPrompt so rules apply
         if (firstMode === 'Assistant speaks first') {
           const lines = splitFirstMessages(firstMsg || 'Hello.');
-          lines.forEach((ln, idx) => {
-            const inst = buildTurnInstructions({
-              systemPrompt,
-              languageHint,
-              mood: 'Keep a relaxed, friendly tone.',
-              extraNudge: 'Avoid rigid menu-like phrasing.',
-            });
-            setTimeout(() => {
-              safeSend(dc, {
-                type: 'response.create',
-                response: { modalities: ['audio'], instructions: `${inst}\n\n${ln}` },
+          const startAt = Date.now();
+          const gate = setInterval(() => {
+            const quiet = userIsSilentFor(1000);
+            const timeout = Date.now() - startAt > 2000;
+            if (quiet || timeout) {
+              clearInterval(gate);
+              lines.forEach((ln, idx) => {
+                setTimeout(() => { respondFor(ln, ['Keep it to one or two short sentences.']); }, idx * 240);
               });
-            }, 260 + idx * 360);
-          });
+            }
+          }, 120);
         }
       };
 
@@ -453,78 +438,57 @@ export default function WebCallButton({
           const msg = JSON.parse(ev.data);
           const t = msg?.type as string;
 
-          // assistant stream
+          if (t?.includes('error') || t === 'response.error') {
+            console.error('[Realtime ERROR]', msg);
+            setError(prev => prev ? prev : (msg?.error?.message || 'Realtime error.'));
+          }
+
           if (t === 'response.output_text.delta') {
             const id = msg?.response_id || msg?.id || 'assistant_current';
-            const delta = msg?.delta || '';
-            upsertRow(id, 'assistant', (prev) => ({ text: (prev?.text || '') + String(delta) }));
+            const delta = String(msg?.delta || '');
+            upsertRow(id, 'assistant', (prev) => ({ text: (prev?.text || '') + delta }));
           }
           if (t === 'response.completed' || t === 'response.stop') {
             const id = msg?.response_id || msg?.id || 'assistant_current';
             upsertRow(id, 'assistant', { done: true });
           }
 
-          // user transcript partial
           if (t === 'transcript.delta') {
             const id = msg?.transcript_id || msg?.id || 'user_current';
-            const delta = msg?.delta || '';
-            upsertRow(id, 'user', (prev) => ({ text: (prev?.text || '') + String(delta) }));
+            const delta = String(msg?.delta || '');
+            transcriptsRef.current[id] = (transcriptsRef.current[id] || '') + delta;
+            upsertRow(id, 'user', (prev) => ({ text: (prev?.text || '') + delta }));
           }
-
-          // user finished speaking -> CREATE A RESPONSE with systemPrompt included
           if (t === 'transcript.completed') {
             const id = msg?.transcript_id || msg?.id || 'user_current';
-            const row = (log.find(r => r.id === id) || { text: '' });
-            const text = (row.text || '').trim();
+            const text = (transcriptsRef.current[id] || '').trim();
             upsertRow(id, 'user', { done: true });
 
-            const mood = detectMood(text);
-            const inst = buildTurnInstructions({
-              systemPrompt,
-              languageHint,
-              mood: styleForMood(mood),
-              extraNudge: pick([
-                'Vary intonation; avoid flat delivery.',
-                'Use a brief acknowledgement before the main point.',
-                'If the user hesitates, slow down and simplify.',
-                'Avoid repeating identical templates.',
-              ]),
-            });
-
-            // Core: ask model to respond following our turn-level instructions
-            safeSend(dcRef.current, {
-              type: 'response.create',
-              response: {
-                modalities: ['audio'],
-                instructions: `${inst}\n\nUser said: "${text}"\nAssistant:`,
-              },
-            });
-
-            // optional small backchannel/filler/laugh
+            // light turn effects (don’t overwrite rules!)
             const wait = pick(THINKING_PAUSE_MS);
             setTimeout(() => {
-              // light backchannel
-              const now = Date.now();
-              if (now - (lastBackchannelAtRef.current || 0) > BACKCHANNEL_COOLDOWN_MS && Math.random() < BACKCHANNEL_PROB) {
-                lastBackchannelAtRef.current = now;
-                safeSend(dcRef.current, { type: 'response.create', response: { modalities: ['audio'], instructions: pick(BACKCHANNEL_LINES) } });
-              }
-              if (mood === 'joke') {
+              if (detectMood(text) === 'joke') {
                 safeSend(dcRef.current, { type: 'response.create', response: { modalities: ['audio'], instructions: pick(LAUGHS) } });
               } else if (Math.random() < 0.08) {
                 safeSend(dcRef.current, { type: 'response.create', response: { modalities: ['audio'], instructions: pick(THINKING_FILLERS) } });
+              } else {
+                sendBackchannel(dcRef.current);
               }
             }, wait);
+
+            if (text) respondFor(text);
           }
 
-          // fallback
           if (t === 'response.output_text' && typeof msg?.text === 'string') {
             addLine('assistant', msg.text);
           }
-        } catch { /* ignore non-JSON */ }
+        } catch {
+          // non-JSON frames
+        }
       };
 
       pc.onconnectionstatechange = () => {
+        console.log('[PC]', pc.connectionState);
         if (pc.connectionState === 'connected') { setConnected(true); setConnecting(false); }
         else if (['disconnected','failed','closed'].includes(pc.connectionState)) { endCall(false); }
       };
@@ -543,14 +507,16 @@ export default function WebCallButton({
         },
         body: offer.sdp,
       });
-      if (!answerRes.ok) throw new Error(`Realtime SDP failed: ${await answerRes.text()}`);
+      const ansText = await answerRes.text();
+      if (!answerRes.ok) throw new Error(`Realtime SDP failed: ${ansText}`);
+      console.log('[SDP answer len]', ansText.length);
 
-      const answer = { type: 'answer' as RTCSdpType, sdp: await answerRes.text() };
+      const answer = { type: 'answer' as RTCSdpType, sdp: ansText };
       await pc.setRemoteDescription(answer);
 
       if (audioRef.current) {
         audioRef.current.muted = false;
-        audioRef.current.play().catch(() => {});
+        try { await audioRef.current.play(); } catch (e) { console.warn('[AUDIO PLAY BLOCKED]', e); }
       }
 
       // start VAD after audio is flowing
@@ -558,7 +524,10 @@ export default function WebCallButton({
       const prevCleanup = closeChainRef.current;
       closeChainRef.current = () => { try{ prevCleanup && prevCleanup() }catch{}; try{ stopVad && stopVad() }catch{} };
 
+      setError(''); // clear transient errors
+
     } catch (e: any) {
+      console.error('[startCall error]', e);
       setConnecting(false); setConnected(false);
       setError(e?.message || 'Failed to start call.');
       cleanup();
@@ -597,7 +566,6 @@ export default function WebCallButton({
   }
 
   useEffect(() => {
-    // prime silence so assistant doesn’t jump in instantly
     lastMicActiveAtRef.current = Date.now();
     startCall();
     return () => { cleanup(); };
@@ -606,12 +574,11 @@ export default function WebCallButton({
 
   return (
     <div
-      className="fixed right-4 bottom-4 sm:right-6 sm:bottom-6 w=[min(640px,92vw)] rounded-2xl overflow-hidden"
+      className="fixed right-4 bottom-4 sm:right-6 sm:bottom-6 w-[min(640px,92vw)] rounded-2xl overflow-hidden"
       style={{ zIndex: 9999, border: '1px solid rgba(255,255,255,.12)', background: '#0d0f11', boxShadow: '0 24px 80px rgba(0,0,0,.6)' }}
       role="dialog"
       aria-label="Voice call panel"
     >
-      {/* Header */}
       <div className="flex items-center justify-between px-4 py-3"
            style={{ borderBottom: '1px solid rgba(255,255,255,.10)', background: 'linear-gradient(90deg, #0d0f11 0%, rgba(255,255,255,.04) 50%, #0d0f11 100%)' }}>
         <div className="min-w-0">
@@ -639,9 +606,7 @@ export default function WebCallButton({
         </div>
       </div>
 
-      {/* Body */}
       <div className="grid grid-cols-[1fr] sm:grid-cols-[1.1fr_.9fr] gap-0">
-        {/* Transcript */}
         <div className="p-3 sm:p-4" style={{ borderRight: '1px solid rgba(255,255,255,.10)' }}>
           <div className="flex items-center gap-2 text-sm mb-2 opacity-80">
             <MessageSquare className="w-4 h-4" /> Live transcript
@@ -681,7 +646,6 @@ export default function WebCallButton({
           )}
         </div>
 
-        {/* Status + audio element */}
         <div className="p-4 grid content-center">
           <div className="mx-auto w-full max-w-[320px] text-center">
             <div
@@ -699,8 +663,6 @@ export default function WebCallButton({
                 </span>
               </div>
             </div>
-
-            {/* Hidden audio sink (processed through WebAudio chain) */}
             <audio ref={audioRef} autoPlay playsInline />
           </div>
         </div>
