@@ -1,4 +1,3 @@
-// components/voice/WebCallPanel.tsx
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -8,9 +7,9 @@ import { Mic, MicOff, X, Bot, User, Loader2, ChevronDown } from 'lucide-react';
 /* ───────────────────────── Props ───────────────────────── */
 type Props = {
   className?: string;
-  model: string;
+  model: string;                 // initial model
   systemPrompt: string;
-  voiceName: string;
+  voiceName: string;             // friendly or OpenAI voice id
   assistantName: string;
   apiKey: string;
   onClose?: () => void;
@@ -19,6 +18,7 @@ type Props = {
   firstMsg?: string;
   languageHint?: 'auto' | 'en' | 'de' | 'nl' | 'es' | 'ar';
 
+  // Audio realism
   phoneFilter?: boolean;
   farMic?: boolean;
   ambience?: 'off' | 'kitchen' | 'cafe';
@@ -158,6 +158,7 @@ export default function WebCallPanel({
   const [error,setError]=useState<string>('');
   const [voices,setVoices]=useState<string[]>([]);
   const [selectedVoice,setSelectedVoice]=useState<string>('');
+  const [selectedModel,setSelectedModel]=useState<string>(model || 'gpt-4o-realtime-preview');
   const [log,setLog]=useState<TranscriptRow[]>([]);
   const logRef=useRef<TranscriptRow[]>([]);
   useEffect(()=>{ logRef.current=log; },[log]);
@@ -174,12 +175,14 @@ export default function WebCallPanel({
   const baseInstructionsRef=useRef<string>('');
   const scrollerRef=useRef<HTMLDivElement|null>(null);
 
+  // resolve voice id
   const voiceId=useMemo(()=>{
     const key=(selectedVoice||voiceProp||'').trim();
     if(RAW_ID.test(key)&&!FRIENDLY_TO_ID[key]) return key.toLowerCase();
     return FRIENDLY_TO_ID[key] || key || 'alloy';
   },[selectedVoice,voiceProp]);
 
+  // fetch voices (filtered)
   useEffect(()=>{
     let cancelled=false;
     (async()=>{
@@ -198,6 +201,7 @@ export default function WebCallPanel({
     return()=>{ cancelled=true; };
   },[apiKey,voiceProp]);
 
+  // helpers
   const upsert=(id:string, who:TranscriptRow['who'], patch:Partial<TranscriptRow>|((p?:TranscriptRow)=>Partial<TranscriptRow>))=>{
     setLog(prev=>{
       const i=prev.findIndex(r=>r.id===id);
@@ -217,11 +221,13 @@ export default function WebCallPanel({
   };
   const splitFirst=(input:string)=> (input||'').split(/\r?\n|\|/g).map(s=>s.trim()).filter(Boolean).slice(0,20);
 
+  // auto scroll to bottom
   useEffect(()=>{
     const el=scrollerRef.current; if(!el) return;
     el.scrollTop = el.scrollHeight;
   },[log,connecting,connected]);
 
+  // gentle VAD ducking
   async function setupVAD(){
     try{
       const mic=micStreamRef.current; if(!mic) return;
@@ -241,28 +247,32 @@ export default function WebCallPanel({
   }
   const userSilentFor=(ms:number)=> Date.now()-(lastMicActiveAtRef.current||0)>ms;
 
+  /* ─────────────── start call ─────────────── */
   async function startCall(){
     setError('');
     if(!apiKey){ setError('No API key selected.'); return; }
     try{
       setConnecting(true);
+      // 1) ephemeral
       const sessionRes=await fetch('/api/voice/ephemeral',{
         method:'POST', headers:{ 'Content-Type':'application/json', 'X-OpenAI-Key':apiKey },
-        body:JSON.stringify({ model, voiceName:voiceId, assistantName, systemPrompt }),
+        body:JSON.stringify({ model: selectedModel, voiceName:voiceId, assistantName, systemPrompt }),
       });
       if(!sessionRes.ok) throw new Error(`Ephemeral token error: ${await sessionRes.text()}`);
       const session=await sessionRes.json(); const EPHEMERAL=session?.client_secret?.value;
       if(!EPHEMERAL) throw new Error('Missing ephemeral client_secret.value');
 
+      // 2) mic
       const mic=await navigator.mediaDevices.getUserMedia({ audio:true }); micStreamRef.current=mic;
 
+      // 3) peer
       const pc=new RTCPeerConnection({ iceServers:[{ urls:'stun:stun.l.google.com:19302' }] }); pcRef.current=pc;
 
       const remote=new MediaStream();
       pc.ontrack=async (e)=>{
         e.streams[0]?.getAudioTracks().forEach(t=>remote.addTrack(t));
         if(!audioRef.current) return;
-        if(closeChainRef.current){ try{closeChainRef.current()}catch{} closeChainRef.current=null; }
+        if(closeChainRef.current){ try{closeChainRef.current()}catch{}; closeChainRef.current=null; }
         closeChainRef.current=await attachProcessedAudio(audioRef.current, remote, { phoneFilter, farMic, ambience, ambienceLevel });
       };
 
@@ -270,6 +280,7 @@ export default function WebCallPanel({
       pc.addTrack(sendTrack, mic);
       pc.addTransceiver('audio',{ direction:'recvonly' });
 
+      // 4) data channel
       const dc=pc.createDataChannel('oai-events'); dcRef.current=dc;
 
       dc.onopen=()=>{
@@ -301,11 +312,12 @@ export default function WebCallPanel({
         }
       };
 
-      // STREAMED TRANSCRIPTS
+      // 5) messages (TRANSCRIPTS for user + assistant)
       dc.onmessage=(ev)=>{
         try{
           const msg=JSON.parse(ev.data); const t=msg?.type as string;
 
+          // Assistant text stream
           if(t==='response.output_text.delta'){
             const id=msg?.response_id||msg?.id||'assistant_current';
             const delta=msg?.delta||'';
@@ -315,7 +327,11 @@ export default function WebCallPanel({
             const id=msg?.response_id||msg?.id||'assistant_current';
             upsert(id,'assistant',{ done:true });
           }
+          if(t==='response.output_text' && typeof msg?.text==='string'){
+            addLine('assistant', msg.text);
+          }
 
+          // User speech transcript stream
           if(t==='transcript.delta'){
             const id=msg?.transcript_id||msg?.id||'user_current';
             const delta=msg?.delta||'';
@@ -349,10 +365,6 @@ export default function WebCallPanel({
               }
             }, wait);
           }
-
-          if(t==='response.output_text' && typeof msg?.text==='string'){
-            addLine('assistant', msg.text);
-          }
         }catch{}
       };
 
@@ -361,8 +373,9 @@ export default function WebCallPanel({
         else if(['disconnected','failed','closed'].includes(pc.connectionState)){ endCall(false); }
       };
 
+      // 6) SDP
       const offer=await pc.createOffer(); await pc.setLocalDescription(offer);
-      const url=`https://api.openai.com/v1/realtime?model=${encodeURIComponent(model)}`;
+      const url=`https://api.openai.com/v1/realtime?model=${encodeURIComponent(selectedModel)}`;
       const answerRes=await fetch(url,{
         method:'POST',
         headers:{ Authorization:`Bearer ${EPHEMERAL}`, 'Content-Type':'application/sdp', 'OpenAI-Beta':'realtime=v1' },
@@ -383,27 +396,36 @@ export default function WebCallPanel({
     }
   }
 
+  /* controls / cleanup */
   function toggleMute(){
     const tracks=micStreamRef.current?.getAudioTracks()||[];
     const next=!muted; tracks.forEach(t=>t.enabled=!next); setMuted(next);
   }
   function cleanup(){
-    if(vadLoopRef.current) cancelAnimationFrame(vadLoopRef.current); vadLoopRef.current=null;
-    try{ dcRef.current?.close(); }catch{} dcRef.current=null;
-    try{ pcRef.current?.close(); }catch{} pcRef.current=null;
-    try{ micStreamRef.current?.getTracks()?.forEach(t=>t.stop()); }catch{} micStreamRef.current=null;
+    if(vadLoopRef.current) cancelAnimationFrame(vadLoopRef.current);
+    vadLoopRef.current=null;
+    try{ dcRef.current?.close(); }catch{}
+    dcRef.current=null;
+    try{ pcRef.current?.close(); }catch{}
+    pcRef.current=null;
+    try{ micStreamRef.current?.getTracks()?.forEach(t=>t.stop()); }catch{}
+    micStreamRef.current=null;
     try{ closeChainRef.current && closeChainRef.current(); }catch{}
-    closeChainRef.current = null; // ✅ important
+    closeChainRef.current = null; // ✅ fix: do NOT reassign the ref variable itself
   }
   function endCall(userIntent=true){ cleanup(); setConnected(false); setConnecting(false); if(userIntent) onClose?.(); }
 
-  useEffect(()=>{ lastMicActiveAtRef.current=Date.now(); startCall(); return ()=>{ cleanup(); }; /* eslint-disable-next-line */ },[model,voiceId]);
+  // re-start call when model/voice changes
+  useEffect(()=>{ lastMicActiveAtRef.current=Date.now(); startCall(); return ()=>{ cleanup(); }; // eslint-disable-next-line
+  },[selectedModel,voiceId]);
 
-  /* ───────────────────────── UI — render as FIXED overlay via portal ───────────────────────── */
+  /* ───────────────────────── UI — fixed overlay via portal ───────────────────────── */
   const panel = (
     <aside
       className={`fixed top-0 right-0 h-screen w-[min(480px,95vw)] bg-[#0d0f11] border-l border-[rgba(255,255,255,.12)] shadow-2xl flex flex-col ${className||''}`}
-      style={{ zIndex: 10050 }} role="dialog" aria-label="Voice call panel"
+      style={{ zIndex: 200000 }}
+      role="dialog"
+      aria-label="Voice call panel"
     >
       {/* Header */}
       <div className="flex items-center gap-2 px-4 py-3 border-b border-[rgba(255,255,255,.10)]">
@@ -418,10 +440,24 @@ export default function WebCallPanel({
         </div>
 
         <div className="ml-auto flex items-center gap-2">
-          {/* model label */}
-          <span className="text-xs px-2 py-1 rounded-[8px]" style={{ border:'1px solid rgba(255,255,255,.14)', color:'#e6f1ef' }}>{model}</span>
+          {/* Model selector */}
+          <div className="relative">
+            <select
+              className="appearance-none bg-transparent text-xs rounded-[8px] px-2.5 py-1.5 pr-7"
+              style={{ border:'1px solid rgba(255,255,255,.14)', color:'#e6f1ef' }}
+              value={selectedModel}
+              onChange={(e)=>setSelectedModel(e.target.value)}
+              title="Model"
+            >
+              <option value="gpt-4o-realtime-preview">gpt-4o-realtime-preview</option>
+              <option value="gpt-4o-realtime-preview-2024-12-17">gpt-4o-realtime-preview-2024-12-17</option>
+              <option value="gpt-4o-realtime-audio-preview">gpt-4o-realtime-audio-preview</option>
+              <option value="gpt-4o-mini-tts">gpt-4o-mini-tts</option>
+            </select>
+            <ChevronDown className="w-4 h-4 absolute right-2 top-2" style={{ color:'rgba(255,255,255,.6)' }} />
+          </div>
 
-          {/* voice selector */}
+          {/* Voice selector */}
           <div className="relative">
             <select
               className="appearance-none bg-transparent text-xs rounded-[8px] px-2.5 py-1.5 pr-7"
@@ -441,7 +477,8 @@ export default function WebCallPanel({
             onClick={toggleMute}
             className="w-8 h-8 rounded-[8px] grid place-items-center"
             style={{ border:'1px solid rgba(255,255,255,.14)', color:'#e6f1ef', background: muted ? 'rgba(239,68,68,.14)' : 'transparent' }}
-            title={muted ? 'Unmute mic' : 'Mute mic'}>
+            title={muted ? 'Unmute mic' : 'Mute mic'} aria-label={muted ? 'Unmute' : 'Mute'}
+          >
             {muted ? <MicOff className="w-4 h-4"/> : <Mic className="w-4 h-4" />}
           </button>
 
@@ -456,13 +493,14 @@ export default function WebCallPanel({
         </div>
       </div>
 
-      {/* Transcript */}
+      {/* Transcript — WhatsApp-style */}
       <div ref={scrollerRef} className="px-3 py-3 space-y-3 overflow-y-auto" style={{ scrollbarWidth:'thin', color:'#e6f1ef' }}>
         {log.length===0 && (
           <div className="text-sm" style={{ color:'rgba(255,255,255,.6)' }}>
             {connecting ? 'Connecting to voice…' : (firstMode==='Assistant speaks first' ? 'Waiting for assistant…' : 'Say hello! We’ll show the transcript here.')}
           </div>
         )}
+
         {log.map(row=>(
           <div key={row.id} className={`flex ${row.who==='user' ? 'justify-end' : 'justify-start'}`}>
             {row.who==='assistant' && (
@@ -498,14 +536,14 @@ export default function WebCallPanel({
         )}
       </div>
 
-      {/* Footer */}
+      {/* Footer status */}
       <div className="px-3 py-2 border-t border-[rgba(255,255,255,.10)]" style={{ color:'#e6f1ef' }}>
         <div className="flex items-center justify-between gap-2 text-xs">
           <div className="flex items-center gap-2">
             {connecting && <Loader2 className="w-4 h-4 animate-spin" />}
             <span style={{ opacity:.85 }}>
               {connected ? 'Connected' : (connecting ? 'Connecting…' : 'Idle')}
-              {' '}• Model: {model} • Voice: {voiceId}
+              {' '}• Model: {selectedModel} • Voice: {voiceId}
             </span>
           </div>
           <audio ref={audioRef} autoPlay playsInline />
@@ -514,7 +552,6 @@ export default function WebCallPanel({
     </aside>
   );
 
-  // Render via portal so it floats above any page blur
   if (typeof window === 'undefined') return null;
   return createPortal(panel, document.body);
 }
