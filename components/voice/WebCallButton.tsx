@@ -7,16 +7,15 @@ import { Mic, MicOff, PhoneOff, Loader2, MessageSquare } from 'lucide-react';
 type Props = {
   model: string;
   systemPrompt: string;
-  voiceName: string;
+  voiceName: string;          // Friendly label (e.g., "Breeze", "Orion", "Nova"...)
   assistantName: string;
-  apiKey: string; // <- from your dropdown (selected key value)
+  apiKey: string;             // from your dropdown
   onClose?: () => void;
 
-  // NEW (backward compatible)
+  // Conversation boot config
   firstMode?: 'Assistant speaks first' | 'User speaks first' | 'Silent until tool required';
-  firstMsg?: string;
-  // optional hint for web-call only; model still auto-detects
-  languageHint?: 'auto' | 'en' | 'de' | 'nl' | 'es';
+  firstMsg?: string;          // You can provide multiple, separated by "|" or newlines
+  languageHint?: 'auto' | 'en' | 'de' | 'nl' | 'es' | 'ar';
 };
 
 type TranscriptRow = {
@@ -27,6 +26,42 @@ type TranscriptRow = {
 };
 
 const CTA = '#59d9b3';
+
+// ---- New: curated friendly voice list (distinct timbres; no accent labels) ----
+// You can add/remove display names freely; map them below to OpenAI IDs.
+const VOICE_DISPLAY_TO_ID: Record<string, string> = {
+  // smooth/neutral
+  'Breeze': 'alloy',
+  'Orion':  'alloy',
+  // warm/approachable
+  'Nova':   'verse',
+  'Flow':   'verse',
+  // crisp/precise
+  'Terra':  'coral',
+  'Aster':  'coral',
+  // bright/energetic
+  'Maya':   'amber',
+  'Kai':    'amber',
+
+  // fallbacks (aliasing older names so nothing breaks)
+  'Alloy':  'alloy',
+  'Verse':  'verse',
+  'Coral':  'coral',
+  'Amber':  'amber',
+};
+
+// Backchannel stock lines (short and polite). Randomized.
+const BACKCHANNEL_LINES = [
+  "Let me check that for you…",
+  "One moment, I’m checking.",
+  "Got it—checking that now.",
+  "Sure thing, give me a sec…",
+  "Okay, I’m on it.",
+];
+
+// Probability & cooldown so it doesn’t talk too much between turns
+const BACKCHANNEL_PROB = 0.18;     // 18% chance after a user utterance
+const BACKCHANNEL_COOLDOWN_MS = 4000;
 
 export default function WebCallButton({
   model,
@@ -54,15 +89,17 @@ export default function WebCallButton({
   const phoneChainCleanupRef = useRef<(() => void) | null>(null);
 
   const [log, setLog] = useState<TranscriptRow[]>([]);
+  const lastBackchannelAtRef = useRef<number>(0);
 
-  // Map "nice" voice name to OpenAI voice id
+  // Map friendly voice name -> OpenAI voice id
   const voiceId = useMemo(() => {
-    const v = (voiceName || '').toLowerCase();
-    if (v.includes('alloy')) return 'alloy';
-    if (v.includes('verse')) return 'verse';
-    if (v.includes('coral')) return 'coral';
-    if (v.includes('amber')) return 'amber';
-    return 'alloy';
+    const key = (voiceName || '').trim();
+    // exact match first
+    if (VOICE_DISPLAY_TO_ID[key]) return VOICE_DISPLAY_TO_ID[key];
+    // fuzzy contains (case-insensitive)
+    const lower = key.toLowerCase();
+    const found = Object.keys(VOICE_DISPLAY_TO_ID).find(k => lower.includes(k.toLowerCase()));
+    return found ? VOICE_DISPLAY_TO_ID[found] : 'alloy';
   }, [voiceName]);
 
   // Helpers to add/patch transcript lines
@@ -89,16 +126,17 @@ export default function WebCallButton({
     try { dc.send(JSON.stringify(payload)); } catch {/* noop */ }
   }
 
-  // Build a nudge for language auto-detection for EN/DE/NL/ES
+  // Language hint text (adds to instructions)
   function languageNudge() {
     if (languageHint === 'auto') {
-      return 'Auto-detect and reply in the user’s language (English, German, Dutch, or Spanish).';
+      return 'Auto-detect and reply in the user’s language (English, German, Dutch, Spanish, or Arabic).';
     }
     const map: Record<string, string> = {
       en: 'Respond in English.',
       de: 'Antworte auf Deutsch.',
       nl: 'Antwoord in het Nederlands.',
       es: 'Responde en español.',
+      ar: 'يرجى الرد باللغة العربية.',
     };
     return map[languageHint] || '';
   }
@@ -106,7 +144,8 @@ export default function WebCallButton({
   // Create “telephone” EQ chain: high-pass ~300 Hz, low-pass ~3.4 kHz, mild compression
   async function attachPhoneAudio(remoteStream: MediaStream) {
     try {
-      const ac = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const AC = (window.AudioContext || (window as any).webkitAudioContext);
+      const ac = new AC();
       acRef.current = ac;
 
       const src = ac.createMediaStreamSource(remoteStream);
@@ -120,17 +159,14 @@ export default function WebCallButton({
       lp.frequency.value = 3400;
 
       const comp = ac.createDynamicsCompressor();
-      comp.threshold.value = -12;
+      comp.threshold.value = -14;
       comp.knee.value = 18;
-      comp.ratio.value = 2.5;
+      comp.ratio.value = 2.4;
       comp.attack.value = 0.003;
       comp.release.value = 0.25;
 
       const dest = ac.createMediaStreamDestination();
-      src.connect(hp);
-      hp.connect(lp);
-      lp.connect(comp);
-      comp.connect(dest);
+      src.connect(hp); hp.connect(lp); lp.connect(comp); comp.connect(dest);
 
       if (audioRef.current) {
         audioRef.current.srcObject = dest.stream;
@@ -155,6 +191,34 @@ export default function WebCallButton({
     }
   }
 
+  function sendBackchannel(dc: RTCDataChannel | null) {
+    const now = Date.now();
+    if (now - (lastBackchannelAtRef.current || 0) < BACKCHANNEL_COOLDOWN_MS) return;
+    if (Math.random() > BACKCHANNEL_PROB) return;
+
+    const line = BACKCHANNEL_LINES[Math.floor(Math.random() * BACKCHANNEL_LINES.length)];
+    lastBackchannelAtRef.current = now;
+
+    safeSend(dc, {
+      type: 'response.create',
+      response: {
+        // Short verbal acknowledgement in audio only
+        modalities: ['audio'],
+        instructions: line,
+      },
+    });
+  }
+
+  // Split firstMsg into multiple entries by "|" or newline
+  function splitFirstMessages(input: string): string[] {
+    if (!input) return [];
+    return input
+      .split(/\r?\n|\|/g)
+      .map(s => s.trim())
+      .filter(Boolean)
+      .slice(0, 20);
+  }
+
   async function startCall() {
     setError('');
     if (!apiKey) {
@@ -170,7 +234,7 @@ export default function WebCallButton({
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-OpenAI-Key': apiKey, // <- passes the selected key securely to your route
+          'X-OpenAI-Key': apiKey, // secure pass-through
         },
         body: JSON.stringify({
           model,
@@ -218,29 +282,34 @@ export default function WebCallButton({
 
       dc.onopen = () => {
         // Provide session params (instructions/voice) as a runtime update.
-        // Also nudge auto-language and “natural” pacing.
+        // Also nudge auto-language and “human pacing”.
         const extraStyle =
-          'Speak with natural, human pacing. Brief 0.2 second pauses between clauses, occasional mild disfluencies like “um” or “uh” when appropriate. Avoid overdoing it.';
+          'Speak with natural, human pacing. Brief ~0.2s pauses between clauses, and very occasional mild disfluencies (e.g., “uh”, “um”) when appropriate—but do not overuse them.';
         const sessionUpdate = {
           type: 'session.update',
           session: {
             instructions: `${systemPrompt || ''}\n\n${languageNudge()}\n\n${extraStyle}`,
             voice: voiceId,
-            // Explicit formats (most browsers are fine with defaults)
             input_audio_format: { type: 'input_audio_format', audio_format: 'pcm16' },
             output_audio_format: { type: 'output_audio_format', audio_format: 'pcm16' },
           },
         };
         safeSend(dc, sessionUpdate);
 
-        // Kick off first message if configured to speak first
-        if (firstMode === 'Assistant speaks first' && firstMsg?.trim()) {
-          safeSend(dc, {
-            type: 'response.create',
-            response: {
-              modalities: ['audio'],
-              instructions: firstMsg,
-            },
+        // Kick off first message(s) if configured
+        if (firstMode === 'Assistant speaks first') {
+          const lines = splitFirstMessages(firstMsg || 'Hello.');
+          lines.forEach((ln, idx) => {
+            const delay = idx * 350; // small gap to keep them natural
+            setTimeout(() => {
+              safeSend(dc, {
+                type: 'response.create',
+                response: {
+                  modalities: ['audio'],
+                  instructions: ln,
+                },
+              });
+            }, delay);
           });
         }
       };
@@ -262,7 +331,7 @@ export default function WebCallButton({
             upsertRow(id, 'assistant', { done: true });
           }
 
-          // user transcript
+          // user transcript (some RT models send transcript.*)
           if (t === 'transcript.delta') {
             const id = msg?.transcript_id || msg?.id || 'user_current';
             const delta = msg?.delta || '';
@@ -271,6 +340,9 @@ export default function WebCallButton({
           if (t === 'transcript.completed') {
             const id = msg?.transcript_id || msg?.id || 'user_current';
             upsertRow(id, 'user', { done: true });
+
+            // Optional: backchannel line to sound more human (random + cooldown)
+            sendBackchannel(dcRef.current);
           }
 
           // Fallback: some payloads deliver text blocks differently
@@ -460,7 +532,7 @@ export default function WebCallButton({
               <div className="flex items-center justify-center gap-2">
                 {connecting && <Loader2 className="w-4 h-4 animate-spin" />}
                 <span className="text-xs opacity-70">
-                  {muted ? 'Mic muted' : 'Mic live'} • Model: {model || 'gpt-4o-realtime-preview'}
+                  {muted ? 'Mic muted' : 'Mic live'} • Model: {model || 'gpt-4o-realtime-preview'} • Voice: {voiceName}
                 </span>
               </div>
             </div>
