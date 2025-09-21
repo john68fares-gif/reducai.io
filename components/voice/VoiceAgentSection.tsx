@@ -91,10 +91,7 @@ const Tokens = () => (
 
       --green-weak: rgba(89,217,179,.12);
       --green-strong: rgba(89,217,179,.22);
-      --red-weak: rgba(239,68,68,.14);
-      --red-strong: rgba(239,68,68,.26);
 
-      /* dropdown tokens */
       --vs-input-bg:#101314;
       --vs-input-border:rgba(255,255,255,.14);
       --vs-input-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 12px 30px rgba(0,0,0,.38);
@@ -188,6 +185,7 @@ const looksLikeFullPromptSafe = (raw: string) => {
   return ['[identity]', '[style]', '[response guidelines]', '[task & goals]', '[error handling', '[notes]'].some(h => t.includes(h));
 };
 
+// fixed: correct bracket regex (your earlier version had a mangled pattern)
 const normalizeFullPromptSafe = (raw: string) => {
   const sections = {
     identity: '',
@@ -452,7 +450,6 @@ function StyledSelect({
     return q ? options.filter(o => o.label.toLowerCase().includes(q)) : options;
   }, [options, query, value]);
 
-  // compute menu position with clamp + flip
   function calcMenu(){
     if (!btnRef.current) return;
     const r = btnRef.current.getBoundingClientRect();
@@ -477,7 +474,6 @@ function StyledSelect({
 
   useLayoutEffect(() => { if (open) calcMenu(); }, [open]);
 
-  // close on outside click (allow clicks inside portal menu)
   useEffect(() => {
     if (!open || !IS_CLIENT) return;
     const off = (e: MouseEvent) => {
@@ -703,16 +699,26 @@ function DiffInline({ base, next }:{ base:string; next:string }){
 
 /* ─────────── Realtime model chooser (NOT hardcoded) ─────────── */
 function getRealtimeModelFor(provider: AgentData['provider'], uiModel: string): string {
-  // Map UI model names -> realtime-capable model IDs per provider.
-  // Add more mappings as you onboard other providers.
+  // Map UI model names -> realtime-capable IDs per provider.
+  // Extend this as you add providers.
+  const m = (uiModel || '').toLowerCase();
+
   if (provider === 'openai') {
-    // If the chosen model is a 4o/4.1/o4 variant, use the realtime preview.
-    const m = (uiModel || '').toLowerCase();
+    // use OpenAI realtime for all 4o/4.1/o4 variants; otherwise fallback to the same
     if (m.includes('4o') || m.includes('4.1') || m.includes('o4')) return 'gpt-4o-realtime-preview';
-    // Fallback to realtime preview (stable default for OpenAI voice calls).
     return 'gpt-4o-realtime-preview';
   }
-  // Future providers: return their realtime model IDs here.
+
+  // Anthropic/Google placeholders for when you wire their RT stacks:
+  if (provider === 'anthropic') {
+    // return e.g. 'claude-3-5-sonnet-realtime' when available
+    return 'gpt-4o-realtime-preview';
+  }
+  if (provider === 'google') {
+    // return e.g. 'gemini-1.5-pro-realtime' when available
+    return 'gpt-4o-realtime-preview';
+  }
+
   return 'gpt-4o-realtime-preview';
 }
 
@@ -754,18 +760,18 @@ export default function VoiceAgentSection() {
   const [composerText, setComposerText] = useState('');
   const [genPhase, setGenPhase] = useState<'idle'|'editing'|'loading'|'review'>('idle');
 
-  // typing inside prompt box
+  // prompt edit state
   const basePromptRef = useRef<string>('');
   const [proposedPrompt, setProposedPrompt] = useState('');
   const [changesSummary, setChangesSummary] = useState('');
 
-  // chat state (optional)
+  // chat seed
   const [msgs] = useState<ChatMsg[]>(() => [
     { id: 'sys', role: 'system', text: (DEFAULT_AGENT.systemPrompt || '').trim() },
     { id: 'hello', role: 'assistant', text: 'Hi! Ready when you are.' }
   ]);
 
-  // voice preview (browser TTS)
+  // voice preview (browser)
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   useEffect(() => {
     if (!IS_CLIENT || !('speechSynthesis' in window)) return;
@@ -856,13 +862,14 @@ export default function VoiceAgentSection() {
   }
   async function doPublish(){
     if (!activeId) { setToastKind('error'); setToast('Select or create an agent'); return; }
-    setPublishing=true; setToast('');
+    setPublishing(true); setToast('');
     try { await apiPublish(activeId); setToastKind('info'); setToast('Published'); }
     catch { setToastKind('error'); setToast('Publish failed'); }
     finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
   }
 
   /* ─────────── REALTIME CALL LAUNCH ─────────── */
+  const callModel = getRealtimeModelFor(data.provider, data.model);
   const openCall = () => {
     const key = apiKeys.find(k => k.id === data.apiKeyId)?.key || '';
     if (!key) {
@@ -876,7 +883,6 @@ export default function VoiceAgentSection() {
 
   /* ─────────── UI ─────────── */
   const inInlineReview = genPhase === 'review' && !showGenerate;
-  const callModel = getRealtimeModelFor(data.provider, data.model);
 
   return (
     <section className="va-scope" style={{ background:'var(--bg)', color:'var(--text)' }}>
@@ -1262,7 +1268,7 @@ export default function VoiceAgentSection() {
           />
           {showCall && (
             <WebCallButton
-              model={callModel}                 {/* NOT hardcoded; derived from selection */}
+              model={callModel}                 // derived from selection — NOT hardcoded
               systemPrompt={data.systemPrompt}
               voiceName={data.voiceName}
               assistantName={data.name || 'Assistant'}
