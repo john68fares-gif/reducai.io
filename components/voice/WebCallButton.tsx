@@ -18,41 +18,43 @@ type ProsodyOpts = {
 type Props = {
   className?: string;
 
-  // ✅ model comes from VoiceAgentSection — no preview picker here
+  // model is provided by parent; we do NOT show it in the UI
   model: string;
 
   systemPrompt: string;
-  voiceName: string;         // friendly or OpenAI id (e.g. Alloy (American) or 'alloy')
+  voiceName: string;         // friendly or OpenAI id (e.g. "Alloy (American)" or "alloy")
   assistantName: string;
   apiKey: string;
 
-  // where to fetch ephemeral token (your existing /api/voice/ephemeral)
   ephemeralEndpoint?: string;
 
   onClose?: () => void;
   onError?: (e: any) => void;
 
+  // pass these from VoiceAgentSection (see small patch under this file)
   firstMode?: 'Assistant speaks first' | 'User speaks first' | 'Silent until tool required';
   firstMsg?: string;
-  languageHint?: 'auto' | 'en' | 'de' | 'nl' | 'es' | 'ar';
 
+  // who should send the very first greeting?
+  // - 'server'  -> we wait; if server stays silent for 1200ms we send it (to avoid dupes)
+  // - 'client'  -> client sends immediately
+  // - 'off'     -> no client greeting
+  greetMode?: 'server' | 'client' | 'off';
+
+  languageHint?: 'auto' | 'en' | 'de' | 'nl' | 'es' | 'ar';
   prosody?: ProsodyOpts;
 
-  // extra audio realism
-  phoneFilter?: boolean;             // deprecated by prosody.phoneFilter
+  phoneFilter?: boolean;
   farMic?: boolean;
   ambience?: 'off' | 'kitchen' | 'cafe';
   ambienceLevel?: number;
 };
 
 /* ──────────────────────────────────────────────────────────────────────────
-   STYLE TOKENS (copied to match VoiceAgentSection)
+   STYLE TOKENS (match VoiceAgentSection)
 ────────────────────────────────────────────────────────────────────────── */
 const CTA = '#59d9b3';
-const GREEN_LINE = 'rgba(89,217,179,.20)';
 const IS_CLIENT = typeof window !== 'undefined' && typeof document !== 'undefined';
-
-/* Small stamp bubble colors */
 const HUMAN_LIKE = new Set(['alloy','verse','coral','amber','sage','juniper','opal','pebble','cobalt']);
 const DEFAULT_VOICES = ['alloy','verse','coral','amber','sage','juniper'];
 const FRIENDLY_TO_ID: Record<string,string> = {
@@ -61,7 +63,7 @@ const FRIENDLY_TO_ID: Record<string,string> = {
 };
 
 /* ──────────────────────────────────────────────────────────────────────────
-   SELECT (cloned look from VoiceAgentSection)
+   StyledSelect clone (identical look)
 ────────────────────────────────────────────────────────────────────────── */
 type Opt = { value: string; label: string; disabled?: boolean; iconLeft?: React.ReactNode };
 function StyledSelect({
@@ -213,7 +215,6 @@ const RAW_ID = /^[a-z0-9._-]{3,}$/i;
 const clamp01 = (v:number)=>Math.max(0,Math.min(1,v));
 const fmtTime = (ts:number)=>new Date(ts).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
 
-/* mood/language nudges kept short to avoid changing your prompt behavior */
 function languageNudge(lang: Props['languageHint']){
   if (lang==='auto') return 'Auto-detect and reply in the caller’s language (EN/DE/NL/ES/AR).';
   const map:Record<string,string>={
@@ -225,16 +226,13 @@ function languageNudge(lang: Props['languageHint']){
   }; return map[lang||'auto']||'';
 }
 
-/* voice mapping */
 const resolveVoiceId = (key:string) => {
   const k = (key||'').trim();
   if (RAW_ID.test(k) && !FRIENDLY_TO_ID[k]) return k.toLowerCase();
   return FRIENDLY_TO_ID[k] || k || 'alloy';
 };
 
-/* ──────────────────────────────────────────────────────────────────────────
-   WEB AUDIO (phone filter / ambience)
-────────────────────────────────────────────────────────────────────────── */
+/* light phone-ish filter + ambience (optional) */
 function createSaturator(ac: AudioContext, drive=1.05){
   const sh=ac.createWaveShaper(); const curve=new Float32Array(1024);
   for(let i=0;i<curve.length;i++){ const x=(i/(curve.length-1))*2-1; curve[i]=Math.tanh(x*drive); }
@@ -286,8 +284,9 @@ export default function WebCallButton({
   ephemeralEndpoint = '/api/voice/ephemeral',
   onClose,
   onError,
-  firstMode='Assistant speaks first',
+  firstMode='User speaks first',        // default avoids auto-greet unless asked
   firstMsg='Hello.',
+  greetMode='server',                   // see note above
   languageHint='auto',
   prosody,
   phoneFilter=false,
@@ -300,33 +299,28 @@ export default function WebCallButton({
   const [muted,setMuted]=useState(false);
   const [error,setError]=useState<string>('');
 
-  // dropdown: voices (styled like in the Section)
   const [voices,setVoices]=useState<string[]>([]);
   const [selectedVoice,setSelectedVoice]=useState<string>('');
   const voiceId = useMemo(()=> resolveVoiceId(selectedVoice || voiceName), [selectedVoice, voiceName]);
 
-  // chat log (WhatsApp style) — BOTH user and assistant
   const [log,setLog]=useState<TranscriptRow[]>([]);
   const logRef=useRef<TranscriptRow[]>([]);
   useEffect(()=>{ logRef.current=log; },[log]);
 
-  // media + rtc
   const audioRef=useRef<HTMLAudioElement|null>(null);
   const pcRef=useRef<RTCPeerConnection|null>(null);
   const micStreamRef=useRef<MediaStream|null>(null);
   const dcRef=useRef<RTCDataChannel|null>(null);
 
-  // cleaning chains
   const closeChainRef=useRef<null|(()=>void)>(null);
   const vadLoopRef=useRef<number|null>(null);
-  const lastMicActiveAtRef=useRef<number>(0);
   const baseInstructionsRef=useRef<string>('');
   const scrollerRef=useRef<HTMLDivElement|null>(null);
+  const sawAssistantDeltaRef=useRef<boolean>(false);
 
-  // scroll to bottom on new lines
   useEffect(()=>{ const el=scrollerRef.current; if(!el) return; el.scrollTop=el.scrollHeight; },[log,connecting,connected]);
 
-  // fetch available voices (filtered to human-like)
+  // fetch voices from OpenAI Platform
   useEffect(()=>{
     let cancelled=false;
     const fallback = Array.from(new Set([voiceName,...DEFAULT_VOICES].filter(Boolean))) as string[];
@@ -345,7 +339,6 @@ export default function WebCallButton({
     return()=>{ cancelled=true; };
   },[apiKey, voiceName]);
 
-  /* helpers */
   const upsert=(id:string, who:TranscriptRow['who'], patch:Partial<TranscriptRow>|((p?:TranscriptRow)=>Partial<TranscriptRow>))=>{
     setLog(prev=>{
       const i=prev.findIndex(r=>r.id===id);
@@ -364,7 +357,7 @@ export default function WebCallButton({
     if(!dc||dc.readyState!=='open') return; try{ dc.send(JSON.stringify(payload)); }catch{}
   };
 
-  // simple VAD to duck assistant audio while you speak
+  // minimal VAD ducking
   async function setupVAD(){
     try{
       const mic=micStreamRef.current; if(!mic) return;
@@ -372,10 +365,9 @@ export default function WebCallButton({
       const src=ac.createMediaStreamSource(mic); const an=ac.createAnalyser(); an.fftSize=512; an.smoothingTimeConstant=0.88;
       src.connect(an);
       const buf=new Uint8Array(an.frequencyBinCount);
-      const loop=()=>{ an.getByteFrequencyData(buf); let sum=0; for(let i=0;i<buf.length;i++) sum+=buf[i]*buf[i];
-        const rms=Math.sqrt(sum/buf.length)/255;
-        if(rms>0.07){ lastMicActiveAtRef.current=Date.now(); if(audioRef.current) audioRef.current.volume=0.35; }
-        else{ if(audioRef.current) audioRef.current.volume=1.0; }
+      const loop=()=>{ an.getByteFrequencyData(buf); let sum=0; for(let i=0;i<buf.length;i++) sum+=buf[i]*i;
+        const loud=sum/(buf.length*buf.length);
+        if(loud>0.5){ if(audioRef.current) audioRef.current.volume=0.35; } else { if(audioRef.current) audioRef.current.volume=1.0; }
         vadLoopRef.current=requestAnimationFrame(loop);
       };
       vadLoopRef.current=requestAnimationFrame(loop);
@@ -383,7 +375,6 @@ export default function WebCallButton({
     }catch{ return ()=>{}; }
   }
 
-  /* ─────────────── start call ─────────────── */
   async function startCall(){
     setError('');
     if(!apiKey){ setError('No API key selected.'); onError?.('No API key'); return; }
@@ -399,12 +390,11 @@ export default function WebCallButton({
       const session=await sessionRes.json(); const EPHEMERAL=session?.client_secret?.value;
       if(!EPHEMERAL) throw new Error('Missing ephemeral client_secret.value');
 
-      // 2) get mic
+      // 2) mic
       const mic=await navigator.mediaDevices.getUserMedia({ audio:true }); micStreamRef.current=mic;
 
       // 3) peer
       const pc=new RTCPeerConnection({ iceServers:[{ urls:'stun:stun.l.google.com:19302' }] }); pcRef.current=pc;
-
       const remote=new MediaStream();
       pc.ontrack=async (e)=>{
         e.streams[0]?.getAudioTracks().forEach(t=>remote.addTrack(t));
@@ -415,8 +405,6 @@ export default function WebCallButton({
           phoneFilter: !!usePhone, farMic, ambience, ambienceLevel
         });
       };
-
-      // send mic
       const sendTrack=mic.getAudioTracks()[0];
       pc.addTrack(sendTrack, mic);
       pc.addTransceiver('audio',{ direction:'recvonly' });
@@ -425,17 +413,17 @@ export default function WebCallButton({
       const dc=pc.createDataChannel('oai-events'); dcRef.current=dc;
 
       dc.onopen=()=>{
-        // Build base instructions
+        // base instructions
         const style = [
           systemPrompt || '',
           languageNudge(languageHint),
           prosody?.fillerWords ? 'Use mild, natural disfluencies.' : '',
-          (prosody?.microPausesMs ? `Allow micro pauses (~${prosody.microPausesMs} ms) for natural pacing.` : ''),
-          (prosody?.turnEndPauseMs ? `Wait ~${prosody.turnEndPauseMs} ms of silence before replying.` : 'Wait ~1–2 seconds of silence before replying.')
+          (prosody?.microPausesMs ? `Allow micro pauses (~${prosody.microPausesMs} ms).` : ''),
+          (prosody?.turnEndPauseMs ? `Wait ~${prosody.turnEndPauseMs} ms of silence before replying.` : '')
         ].filter(Boolean).join('\n\n');
         baseInstructionsRef.current = style;
 
-        // configure session (we request text and audio back)
+        // session config
         safeSend(dc,{ type:'session.update', session:{
           instructions: baseInstructionsRef.current,
           voice: voiceId,
@@ -444,24 +432,38 @@ export default function WebCallButton({
           modalities:['audio','text']
         }});
 
-        // seed first message if needed
-        if(firstMode==='Assistant speaks first'){
-          const lines=(firstMsg||'Hello.').split(/\r?\n|\|/g).map(s=>s.trim()).filter(Boolean).slice(0,6);
-          setTimeout(()=>{
+        // ——— Greeting logic (no duplicates) ———
+        const wantClientGreeting =
+          greetMode==='client' ||
+          (greetMode==='server' && firstMode==='Assistant speaks first');
+
+        if (wantClientGreeting) {
+          const greet = () => {
+            const lines=(firstMsg||'Hello.').split(/\r?\n|\|/g).map(s=>s.trim()).filter(Boolean).slice(0,6);
             for(const ln of lines){
               safeSend(dc,{ type:'response.create', response:{ modalities:['audio','text'], instructions: ln }});
             }
-          }, 800);
+          };
+
+          if (greetMode==='client') {
+            greet();
+          } else {
+            // greetMode==='server' -> wait briefly; only greet if server stays silent
+            setTimeout(()=>{
+              if (!sawAssistantDeltaRef.current) greet();
+            }, 1200);
+          }
         }
       };
 
-      // 5) handle events — ✅ USER + ASSISTANT transcripts
+      // 5) events — BOTH transcripts
       dc.onmessage=(ev)=>{
         try{
           const msg=JSON.parse(ev.data); const t=msg?.type as string;
 
-          // Assistant text stream
+          // assistant text stream
           if(t==='response.output_text.delta'){
+            sawAssistantDeltaRef.current = true;
             const id=msg?.response_id||msg?.id||'assistant_current';
             const delta=msg?.delta||'';
             upsert(id,'assistant',(prev)=>({ text:(prev?.text||'')+String(delta) }));
@@ -470,23 +472,22 @@ export default function WebCallButton({
             const id=msg?.response_id||msg?.id||'assistant_current';
             upsert(id,'assistant',{ done:true });
           }
-          // Some servers also emit a one-shot 'response.output_text'
           if(t==='response.output_text' && typeof msg?.text==='string'){
+            sawAssistantDeltaRef.current = true;
             addLine('assistant', msg.text);
           }
 
-          // ✅ USER transcript stream (this is what you asked for)
-          if(t==='transcript.delta'){             // incremental user text
+          // USER transcript (incremental)
+          if(t==='transcript.delta'){
             const id=msg?.transcript_id||msg?.id||'user_current';
-            const delta=msg?.delta||'';
-            upsert(id,'user',(prev)=>({ text:(prev?.text||'')+String(delta) }));
+            const d=msg?.delta||'';
+            upsert(id,'user',(prev)=>({ text:(prev?.text||'')+String(d) }));
           }
-          if(t==='transcript.completed'){          // finalize the bubble
+          if(t==='transcript.completed'){
             const id=msg?.transcript_id||msg?.id||'user_current';
             upsert(id,'user',{ done:true });
           }
-
-          // (Optional) Some runtimes emit ASR in another shape — normalize here as fallback
+          // fallback shape some runtimes emit
           if(t==='input_audio_buffer.transcript' && typeof msg?.text==='string'){
             addLine('user', msg.text);
           }
@@ -503,7 +504,7 @@ export default function WebCallButton({
       const url=`https://api.openai.com/v1/realtime?model=${encodeURIComponent(model)}`;
       const answerRes=await fetch(url,{
         method:'POST',
-        headers:{ Authorization:`Bearer ${EPHEMERAL}`, 'Content-Type':'application/sdp', 'OpenAI-Beta':'realtime=v1' },
+        headers:{ Authorization:`Bearer ${session.client_secret.value}`, 'Content-Type':'application/sdp', 'OpenAI-Beta':'realtime=v1' },
         body: offer.sdp,
       });
       if(!answerRes.ok) throw new Error(`Realtime SDP failed: ${await answerRes.text()}`);
@@ -523,7 +524,6 @@ export default function WebCallButton({
     }
   }
 
-  /* controls / cleanup */
   function toggleMute(){
     const tracks=micStreamRef.current?.getAudioTracks()||[];
     const next=!muted; tracks.forEach(t=>t.enabled=!next); setMuted(next);
@@ -542,12 +542,12 @@ export default function WebCallButton({
   }
   function endCall(userIntent=true){ cleanup(); setConnected(false); setConnecting(false); if(userIntent) onClose?.(); }
 
-  // re-start call when voice changes (model is fixed from parent)
+  // start on mount / voice change
   useEffect(()=>{ startCall(); return ()=>{ cleanup(); }; // eslint-disable-next-line
   },[voiceId]);
 
   /* ────────────────────────────────────────────────────────────────────────
-     UI — SAME STYLE AS VOICEAGENTSECTION (no overlay; panel card)
+     UI — same “va-card / va-head” style
   ───────────────────────────────────────────────────────────────────────── */
   const header = (
     <div className="va-head" style={{ minHeight: 72 }}>
@@ -559,12 +559,12 @@ export default function WebCallButton({
         <div className="min-w-0">
           <div className="text-xs" style={{ color:'var(--text-muted)' }}>Talking to</div>
           <div className="font-semibold truncate" style={{ color:'var(--text)' }}>{assistantName || 'Assistant'}</div>
-          <div className="text-[11px] opacity-70 truncate">Model: {model} • Voice: {voiceId}</div>
+          {/* Model intentionally hidden per your request */}
         </div>
       </div>
 
       <div className="ml-auto flex items-center gap-2">
-        {/* Voice dropdown (styled like section) */}
+        {/* Voice dropdown (matching style) */}
         <div style={{ width: 180 }}>
           <StyledSelect
             value={voiceId}
@@ -608,7 +608,7 @@ export default function WebCallButton({
             style={{ color:'var(--text-muted)', background:'var(--panel)', borderColor:'rgba(255,255,255,.10)' }}
           >
             {connecting ? 'Connecting to voice…' :
-             firstMode==='Assistant speaks first' ? 'Assistant will greet you shortly…' : 'Say something — we’ll transcribe you and reply.'}
+             firstMode==='Assistant speaks first' ? 'Assistant will greet you shortly…' : 'Say something to start — your words will appear here.'}
           </div>
         )}
 
