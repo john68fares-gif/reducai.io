@@ -1,13 +1,15 @@
-// components/voice/WebCallButton.tsx
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Mic, MicOff, PhoneOff, Loader2, MessageSquare } from 'lucide-react';
+import { Mic, MicOff, PhoneOff, Loader2, MessageSquare, ChevronDown } from 'lucide-react';
 
+/** ─────────────────────────────────────────────────────────
+ *  Props
+ *  ───────────────────────────────────────────────────────── */
 type Props = {
-  model: string;
+  model: string;              // default selected model (e.g., "gpt-4o-realtime-preview")
   systemPrompt: string;
-  voiceName: string;
+  voiceName: string;          // friendly or raw OpenAI voice id
   assistantName: string;
   apiKey: string;
   onClose?: () => void;
@@ -16,12 +18,16 @@ type Props = {
   firstMsg?: string;
   languageHint?: 'auto' | 'en' | 'de' | 'nl' | 'es' | 'ar';
 
-  phoneFilter?: boolean;
+  // Audio realism flags
+  phoneFilter?: boolean;      // now defaults to false for clarity
   farMic?: boolean;
   ambience?: 'off' | 'kitchen' | 'cafe';
   ambienceLevel?: number;
 };
 
+/** ─────────────────────────────────────────────────────────
+ *  Types / Utils
+ *  ───────────────────────────────────────────────────────── */
 type TranscriptRow = {
   id: string;
   who: 'user' | 'assistant';
@@ -29,8 +35,23 @@ type TranscriptRow = {
   done?: boolean;
 };
 
-const CTA = '#59d9b3';
+type Mood = 'joke' | 'sad' | 'angry' | 'positive' | 'neutral';
 
+const CTA = '#59d9b3';
+const RAW_ID_PATTERN = /^[a-z0-9._-]{3,}$/i;
+
+function pick<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length)]; }
+function clamp01(v:number){ return Math.max(0, Math.min(1, v)); }
+
+/** ─────────────────────────────────────────────────────────
+ *  Default voice fallbacks (OpenAI ids)
+ *  ───────────────────────────────────────────────────────── */
+const DEFAULT_OAI_VOICES = [
+  // Commonly-available OpenAI realtime/TTS voices
+  'alloy', 'verse', 'coral', 'amber', 'pebble', 'sage', 'opal', 'cobalt', 'juniper',
+];
+
+/** Friendly label → id passthrough (still allowed) */
 const FRIENDLY_TO_ID: Record<string, string> = {
   Breeze: 'alloy', Orion: 'alloy',
   Nova: 'verse',  Flow: 'verse',
@@ -39,41 +60,47 @@ const FRIENDLY_TO_ID: Record<string, string> = {
   Willow: 'alloy', Aria: 'verse', Flint: 'coral', Ivy: 'amber',
   Alloy: 'alloy', Verse: 'verse', Coral: 'coral', Amber: 'amber',
 };
-const RAW_ID_PATTERN = /^[a-z0-9._-]{3,}$/i;
 
+/** ─────────────────────────────────────────────────────────
+ *  Humanization snippets
+ *  ───────────────────────────────────────────────────────── */
 const BACKCHANNEL_LINES = [
-  'Okay, I’m on it.', 'Let me check that…', 'One moment—checking.', 'Sure, give me a sec…'
+  "Let me check that…", "One moment—checking.", "Sure, give me a sec…",
+  "Okay, I’m on it.", "Alright, looking that up…", "Just a second…",
+  "Got it—pulling that up.", "Mm-hmm… checking now.",
 ];
-const THINKING_FILLERS = ['hmm…', 'uh…', 'let’s see…', 'right…', 'okay…'];
-const LAUGHS = ['ha— that’s good!', 'heh, nice one.', '(soft laugh) yeah, that got me.'];
+
+const THINKING_FILLERS = ["hmm…", "uh…", "let’s see…", "right…", "okay…"];
+const LAUGHS = [
+  "ha— that’s good!", "heh, nice one.", "(soft laugh) yeah, that got me.",
+  "haha— okay, I like that.", "ha— alright, fair enough.",
+];
 
 const THINKING_PAUSE_MS = [900, 1200, 1500, 1800];
 const BACKCHANNEL_PROB = 0.18;
-const BACKCHANNEL_COOLDOWN_MS = 4000;
+const BACKCHANNEL_COOLDOWN_MS = 4200;
 
-function pick<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length)]; }
-function clamp01(v:number){ return Math.max(0, Math.min(1, v)); }
-
-type Mood = 'joke' | 'sad' | 'angry' | 'positive' | 'neutral';
+/** ─────────────────────────────────────────────────────────
+ *  Mood / language helpers
+ *  ───────────────────────────────────────────────────────── */
 function detectMood(s: string): Mood {
   const t = (s || '').toLowerCase();
   if (!t.trim()) return 'neutral';
   if (/(haha|lol|lmao|🤣|😅|😆|grap|grappig|good one)/.test(t)) return 'joke';
-  if (/(sad|upset|depress|bad day|😢|😭|verdrietig|baal)/.test(t)) return 'sad';
+  if (/(sad|upset|depress|bad day|:(\(|😢|😭)|verdrietig|baal)/.test(t)) return 'sad';
   if (/(angry|mad|furious|annoyed|wtf|sucks|terrible|awful|!{2,}|boos)/.test(t)) return 'angry';
-  if (/(great|awesome|nice|love|perfect|amazing|thanks|geweldig|top)/.test(t)) return 'positive';
+  if (/(great|awesome|nice|love|perfect|amazing|thanks!?|top|lekker|geweldig)/.test(t)) return 'positive';
   return 'neutral';
 }
 function styleForMood(m: Mood) {
   switch (m) {
-    case 'joke': return 'If the caller makes a joke, react with a short, natural laugh before answering.';
-    case 'sad': return 'Sound warm and supportive. Slow down slightly and acknowledge feelings first.';
-    case 'angry': return 'Stay calm and professional. Acknowledge frustration; focus on solutions.';
-    case 'positive': return 'Be upbeat and friendly; don’t oversell.';
-    default: return 'Keep a relaxed conversational tone.';
+    case 'joke':     return "If the caller makes a joke, react with a short, natural laugh before answering. Keep it light.";
+    case 'sad':      return "Sound warm and supportive. Slow down slightly and acknowledge feelings before giving info.";
+    case 'angry':    return "Stay calm and professional. Lower intensity, acknowledge frustration, and focus on solutions.";
+    case 'positive': return "Be upbeat and friendly, a touch of enthusiasm; don’t oversell.";
+    default:         return "Keep a relaxed conversational tone.";
   }
 }
-
 function languageNudge(lang: Props['languageHint']) {
   if (lang === 'auto') return 'Auto-detect and reply in the user’s language (English, German, Dutch, Spanish, or Arabic).';
   const map: Record<string, string> = {
@@ -85,8 +112,33 @@ function languageNudge(lang: Props['languageHint']) {
   };
   return map[lang] || '';
 }
+function baseStyle(lang: Props['languageHint']) {
+  const langN = languageNudge(lang);
+  const shared = [
+    'Do not speak over the caller. If the caller starts speaking, stop immediately.',
+    'Wait ~1–2 seconds of silence before replying (unless a brief acknowledgement).',
+    'Use natural pacing with brief pauses; occasional mild disfluencies are okay (don’t overuse).',
+    'Vary sentence rhythm: mix short punchy lines with longer ones.',
+    'When listing options, avoid rigid menu patterns. Speak like a person, not a kiosk.',
+    'Prefer contractions. Keep energy human and relaxed.',
+  ].join(' ');
+  const dutchExtra = 'In het Nederlands: spreek vlot en informeel, gebruik alledaagse woorden, laat de intonatie natuurlijk variëren.';
+  return `${langN}\n\n${shared}${lang === 'nl' ? ` ${dutchExtra}` : ''}`;
+}
+function turnStyleNudge(): string {
+  const styles = [
+    "Vary intonation: some words warmer, some cooler; don’t read in a flat pattern.",
+    "Use a short supportive acknowledgement before giving details.",
+    "If the user hesitates, slow down and simplify the next sentence.",
+    "Keep options conversational; avoid repeating identical templates.",
+  ];
+  return pick(styles);
+}
 
-function createSaturator(ac: AudioContext, drive=1.15) {
+/** ─────────────────────────────────────────────────────────
+ *  WebAudio plumbing (cleaner defaults)
+ *  ───────────────────────────────────────────────────────── */
+function createSaturator(ac: AudioContext, drive=1.1) {
   const shaper = ac.createWaveShaper();
   const curve = new Float32Array(1024);
   for (let i=0; i<curve.length; i++){
@@ -97,7 +149,6 @@ function createSaturator(ac: AudioContext, drive=1.15) {
   shaper.oversample = '2x';
   return shaper;
 }
-
 function createAmbience(ac: AudioContext, kind: 'kitchen'|'cafe', level = 0.08) {
   const noise = ac.createBufferSource();
   const len = ac.sampleRate * 2;
@@ -116,49 +167,45 @@ function createAmbience(ac: AudioContext, kind: 'kitchen'|'cafe', level = 0.08) 
   band.Q.value = kind === 'kitchen' ? 0.9 : 0.6;
 
   const hp = ac.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 120;
-
-  const g = ac.createGain(); g.gain.value = clamp01(level) * 0.22;
+  const g = ac.createGain(); g.gain.value = clamp01(level) * 0.18;
 
   noise.connect(band); band.connect(hp); hp.connect(g); g.connect(ac.destination);
   noise.start();
-
   return () => { try{noise.stop()}catch{}; [noise, band, hp, g].forEach(n=>{try{(n as any).disconnect()}catch{}}); };
 }
-
 async function attachProcessedAudio(
   audioEl: HTMLAudioElement,
   remoteStream: MediaStream,
   opts: { phoneFilter: boolean; farMic: boolean; ambience: 'off'|'kitchen'|'cafe'; ambienceLevel: number }
 ){
   const { phoneFilter, farMic, ambience, ambienceLevel } = opts;
-  if (!phoneFilter) {
+
+  if (!phoneFilter) {  // straight-through = clearest
     audioEl.srcObject = remoteStream;
-    try { await audioEl.play(); } catch (e) { console.warn('[AUDIO PLAY BLOCKED]', e); }
+    await audioEl.play().catch(()=>{});
     return () => {};
   }
 
   const AC = (window.AudioContext || (window as any).webkitAudioContext);
   const ac = new AC();
-
   const src = ac.createMediaStreamSource(remoteStream);
 
-  const hp = ac.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 90;
-  const lp = ac.createBiquadFilter(); lp.type = 'lowpass';  lp.frequency.value = 5200;
+  // Keep clarity; wider band than before
+  const hp = ac.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 70;
+  const lp = ac.createBiquadFilter(); lp.type = 'lowpass';  lp.frequency.value = 12000;
 
-  const presence = ac.createBiquadFilter(); presence.type = 'peaking'; presence.frequency.value = 2700; presence.Q.value = 0.9; presence.gain.value = 2.4;
-  const body = ac.createBiquadFilter(); body.type = 'lowshelf'; body.frequency.value = 180; body.gain.value = 2.0;
+  // gentle presence & body
+  const presence = ac.createBiquadFilter(); presence.type = 'peaking'; presence.frequency.value = 2800; presence.Q.value = 0.9; presence.gain.value = 1.6;
+  const body = ac.createBiquadFilter(); body.type = 'lowshelf'; body.frequency.value = 160; body.gain.value = 1.2;
 
-  const sat = createSaturator(ac, 1.15);
-
+  const sat = createSaturator(ac, 1.05); // subtle
   const comp = ac.createDynamicsCompressor();
-  comp.threshold.value = -18; comp.knee.value = 16; comp.ratio.value = 2.0;
-  comp.attack.value = 0.005;  comp.release.value = 0.18;
+  comp.threshold.value = -20; comp.knee.value = 18; comp.ratio.value = 1.7;
+  comp.attack.value = 0.008;  comp.release.value = 0.18;
 
-  const wetGain = ac.createGain(); wetGain.gain.value = farMic ? 0.015 : 0.0;
-
+  const wetGain = ac.createGain(); wetGain.gain.value = farMic ? 0.01 : 0.0;
   const merger = ac.createGain();
   const dryGain = ac.createGain(); dryGain.gain.value = 1.0;
-
   const dest = ac.createMediaStreamDestination();
 
   src.connect(hp); hp.connect(lp); lp.connect(presence); presence.connect(body); body.connect(sat); sat.connect(comp);
@@ -167,7 +214,7 @@ async function attachProcessedAudio(
   merger.connect(dest);
 
   audioEl.srcObject = dest.stream;
-  try { await audioEl.play(); } catch (e) { console.warn('[AUDIO PLAY BLOCKED]', e); }
+  await audioEl.play().catch(()=>{});
 
   let ambCleanup: null | (()=>void) = null;
   if (ambience !== 'off') ambCleanup = createAmbience(ac, ambience, ambienceLevel);
@@ -179,17 +226,20 @@ async function attachProcessedAudio(
   };
 }
 
+/** ─────────────────────────────────────────────────────────
+ *  Component
+ *  ───────────────────────────────────────────────────────── */
 export default function WebCallButton({
-  model,
+  model: modelProp,
   systemPrompt,
-  voiceName,
+  voiceName: voiceProp,
   assistantName,
   apiKey,
   onClose,
   firstMode = 'Assistant speaks first',
   firstMsg = 'Hello.',
   languageHint = 'auto',
-  phoneFilter = true,
+  phoneFilter = false,          // clearer default
   farMic = false,
   ambience = 'off',
   ambienceLevel = 0.08,
@@ -199,32 +249,62 @@ export default function WebCallButton({
   const [muted, setMuted] = useState(false);
   const [error, setError] = useState<string>('');
 
+  const [selectedModel, setSelectedModel] = useState<string>(modelProp || 'gpt-4o-realtime-preview');
+  const [voices, setVoices] = useState<string[]>([]);
+  const [selectedVoice, setSelectedVoice] = useState<string>('');
+  const [log, setLog] = useState<TranscriptRow[]>([]);
+
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
   const dcRef = useRef<RTCDataChannel | null>(null);
 
+  // Cleanup refs
   const closeChainRef = useRef<null | (()=>void)>(null);
   const vadLoopRef = useRef<number | null>(null);
   const lastMicActiveAtRef = useRef<number>(0);
-  const lastCancelAtRef = useRef<number>(0); // throttle response.cancel
-  const speakingRef = useRef<boolean>(false); // mic > threshold state
-
-  const [log, setLog] = useState<TranscriptRow[]>([]);
-  const transcriptsRef = useRef<Record<string, string>>({}); // always-fresh transcript text
   const lastBackchannelAtRef = useRef<number>(0);
 
+  // Keep base instructions pinned
+  const baseInstructionsRef = useRef<string>('');
+
+  /** Resolve voice id from selection/friendly names */
   const voiceId = useMemo(() => {
-    const key = (voiceName || '').trim();
+    const key = (selectedVoice || voiceProp || '').trim();
     if (RAW_ID_PATTERN.test(key) && !FRIENDLY_TO_ID[key]) return key.toLowerCase();
-    return FRIENDLY_TO_ID[key] || 'alloy';
-  }, [voiceName]);
+    return FRIENDLY_TO_ID[key] || key || 'alloy';
+  }, [selectedVoice, voiceProp]);
 
-  const addLine = (who: TranscriptRow['who'], text: string) => {
-    const id = `${who}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    setLog((prev) => [...prev, { id, who, text, done: true }]);
-  };
+  /** Try to fetch live OpenAI voices; fall back to defaults */
+  useEffect(() => {
+    let cancelled = false;
+    async function loadVoices() {
+      const fallback = Array.from(new Set([voiceProp, ...DEFAULT_OAI_VOICES].filter(Boolean))) as string[];
+      try {
+        const res = await fetch('https://api.openai.com/v1/voices', {
+          headers: { Authorization: `Bearer ${apiKey}` }
+        });
+        if (!res.ok) throw new Error(String(res.status));
+        const data = await res.json();
+        const ids: string[] = Array.isArray(data?.data)
+          ? data.data.map((v: any) => v?.id).filter(Boolean)
+          : fallback;
+        if (!cancelled) {
+          setVoices(ids.length ? ids : fallback);
+          setSelectedVoice((ids[0] as string) || 'alloy');
+        }
+      } catch {
+        if (!cancelled) {
+          setVoices(fallback);
+          setSelectedVoice((fallback[0] as string) || 'alloy');
+        }
+      }
+    }
+    loadVoices();
+    return () => { cancelled = true; };
+  }, [apiKey, voiceProp]);
 
+  /** Helpers */
   const upsertRow = (id: string, who: TranscriptRow['who'], patch: Partial<TranscriptRow> | ((prev?: TranscriptRow)=>Partial<TranscriptRow>)) => {
     setLog((prev) => {
       const i = prev.findIndex((r) => r.id === id);
@@ -239,39 +319,50 @@ export default function WebCallButton({
       return next;
     });
   };
-
+  const addLine = (who: TranscriptRow['who'], text: string) => {
+    const id = `${who}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    setLog((prev) => [...prev, { id, who, text, done: true }]);
+  };
   function safeSend(dc: RTCDataChannel | null, payload: any) {
     if (!dc || dc.readyState !== 'open') return;
-    try { dc.send(JSON.stringify(payload)); } catch (e) { console.error('[DC send failed]', e); }
+    try { dc.send(JSON.stringify(payload)); } catch {}
   }
 
-  // ---------- ENFORCE PROMPT PER TURN ----------
-  function respondFor(userText: string, extras: string[] = []) {
-    const mood = detectMood(userText);
-    const moodStyle = styleForMood(mood);
-    const langHint = languageNudge(languageHint);
-    const dutchLikely = / de | het | een | jij | je | we | wij | lekker | alsjeblieft | dank je | bedankt | hoe | wat | waarom | grap /.test(userText.toLowerCase());
-    const nlAdj = dutchLikely ? 'Spreek vlot en informeel Nederlands; varieer intonatie en tempo.' : '';
+  /** VAD (gentler; less cut-offs) */
+  async function setupVAD() {
+    try {
+      const mic = micStreamRef.current;
+      if (!mic) return;
+      const AC = (window.AudioContext || (window as any).webkitAudioContext);
+      const ac = new AC();
+      const src = ac.createMediaStreamSource(mic);
+      const analyser = ac.createAnalyser();
+      analyser.fftSize = 512;
+      analyser.smoothingTimeConstant = 0.88;
+      src.connect(analyser);
 
-    const instructions = [
-      systemPrompt,                // <- your strict rules LIVE HERE
-      langHint,
-      moodStyle,
-      nlAdj,
-      'Do not speak over the caller. Pause ~1s before replying.',
-      ...extras,
-    ].filter(Boolean).join('\n');
-
-    console.log('[TURN INSTRUCTIONS]', instructions);
-    safeSend(dcRef.current, {
-      type: 'response.create',
-      response: {
-        modalities: ['audio'],
-        instructions: `${instructions}\n\nUser: "${userText}"\nAssistant:`,
-      },
-    });
+      const buf = new Uint8Array(analyser.frequencyBinCount);
+      const loop = () => {
+        analyser.getByteFrequencyData(buf);
+        let sum = 0;
+        for (let i=0;i<buf.length;i++) sum += buf[i]*buf[i];
+        const rms = Math.sqrt(sum / buf.length) / 255; // 0..1
+        if (rms > 0.07) {
+          lastMicActiveAtRef.current = Date.now();
+          // don’t hard-cancel mid-word; just duck
+          if (audioRef.current) audioRef.current.volume = 0.35;
+        } else {
+          if (audioRef.current) audioRef.current.volume = 1.0;
+        }
+        vadLoopRef.current = requestAnimationFrame(loop);
+      };
+      vadLoopRef.current = requestAnimationFrame(loop);
+      return () => { try{ ac.close() }catch{} };
+    } catch { return () => {}; }
   }
-
+  function userIsSilentFor(ms:number) {
+    return Date.now() - (lastMicActiveAtRef.current || 0) > ms;
+  }
   function sendBackchannel(dc: RTCDataChannel | null) {
     const now = Date.now();
     if (now - (lastBackchannelAtRef.current || 0) < BACKCHANNEL_COOLDOWN_MS) return;
@@ -279,86 +370,28 @@ export default function WebCallButton({
     lastBackchannelAtRef.current = now;
     safeSend(dc, { type: 'response.create', response: { modalities: ['audio'], instructions: pick(BACKCHANNEL_LINES) } });
   }
-
   function splitFirstMessages(input: string): string[] {
     if (!input) return [];
     return input.split(/\r?\n|\|/g).map(s => s.trim()).filter(Boolean).slice(0, 20);
   }
 
-  async function setupVAD() {
-    try {
-      const mic = micStreamRef.current;
-      if (!mic) return () => {};
-
-      const AC = (window.AudioContext || (window as any).webkitAudioContext);
-      const ac = new AC();
-      const src = ac.createMediaStreamSource(mic);
-      const analyser = ac.createAnalyser();
-      analyser.fftSize = 512;
-      analyser.smoothingTimeConstant = 0.85;
-      src.connect(analyser);
-
-      const buf = new Uint8Array(analyser.frequencyBinCount);
-
-      const loop = () => {
-        analyser.getByteFrequencyData(buf);
-        let sum = 0;
-        for (let i=0;i<buf.length;i++) sum += buf[i]*buf[i];
-        const rms = Math.sqrt(sum / buf.length) / 255;
-
-        const active = rms > 0.06;
-        if (active) {
-          lastMicActiveAtRef.current = Date.now();
-          if (!speakingRef.current) {
-            // rising edge -> user started talking
-            speakingRef.current = true;
-            // throttle cancel to avoid nuking assistant continuously
-            const now = Date.now();
-            if (now - lastCancelAtRef.current > 1200) {
-              lastCancelAtRef.current = now;
-              safeSend(dcRef.current, { type: 'response.cancel' });
-              if (audioRef.current) audioRef.current.volume = 0.27;
-              // console.log('[VAD] cancel sent');
-            }
-          }
-        } else {
-          speakingRef.current = false;
-          if (audioRef.current) audioRef.current.volume = 1.0;
-        }
-
-        vadLoopRef.current = requestAnimationFrame(loop);
-      };
-      vadLoopRef.current = requestAnimationFrame(loop);
-
-      return () => { try{ ac.close() }catch{} };
-    } catch {
-      return () => {};
-    }
-  }
-
-  function userIsSilentFor(ms:number) {
-    return Date.now() - (lastMicActiveAtRef.current || 0) > ms;
-  }
-
+  /** Start the call */
   async function startCall() {
     setError('');
-    if (!apiKey) { setError('No API key selected.'); return; }
+    if (!apiKey) { setError('No API key selected. Choose one in the dropdown.'); return; }
 
     try {
       setConnecting(true);
 
-      // 1) ephemeral session
+      // 1) ephemeral
       const sessionRes = await fetch('/api/voice/ephemeral', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-OpenAI-Key': apiKey },
-        body: JSON.stringify({ model, voiceName, assistantName, systemPrompt }),
+        body: JSON.stringify({ model: selectedModel, voiceName: voiceId, assistantName, systemPrompt }),
       });
-
-      const raw = await sessionRes.text();
-      if (!sessionRes.ok) throw new Error(`Ephemeral token error: ${raw}`);
-      const session = JSON.parse(raw);
+      if (!sessionRes.ok) throw new Error(`Ephemeral token error: ${await sessionRes.text()}`);
+      const session = await sessionRes.json();
       const EPHEMERAL = session?.client_secret?.value;
-      console.log('[EPHEMERAL]', !!EPHEMERAL);
       if (!EPHEMERAL) throw new Error('Missing ephemeral client_secret.value');
 
       // 2) mic
@@ -368,10 +401,6 @@ export default function WebCallButton({
       // 3) peer
       const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
       pcRef.current = pc;
-
-      pc.oniceconnectionstatechange = () => {
-        console.log('[ICE]', pc.iceConnectionState);
-      };
 
       const remote = new MediaStream();
       pc.ontrack = async (e) => {
@@ -393,39 +422,43 @@ export default function WebCallButton({
       const dc = pc.createDataChannel('oai-events');
       dcRef.current = dc;
 
-      dc.onerror = (e) => console.error('[DC error]', e);
-      dc.onclose = () => console.warn('[DC closed]');
-
       dc.onopen = () => {
-        console.log('[DC] open');
+        const style = [
+          baseStyle(languageHint),
+          'For clinics/legal: professional and concise. For food/retail: friendly and efficient.',
+          turnStyleNudge(),
+        ].join(' ');
 
-        // Keep session.update minimal—don’t put behavior rules here.
-        safeSend(dc, {
+        // IMPORTANT: keep a pinned base
+        baseInstructionsRef.current = `${systemPrompt || ''}\n\n${style}`;
+
+        const sessionUpdate = {
           type: 'session.update',
           session: {
+            instructions: baseInstructionsRef.current,
             voice: voiceId,
-            input_audio_format: { type: 'input_audio_format', audio_format: 'pcm16' },
-            output_audio_format: { type: 'output_audio_format', audio_format: 'pcm16' },
+            // 🔧 FIX: must be strings, NOT objects
+            input_audio_format: 'pcm16',
+            output_audio_format: 'pcm16',
           },
-        });
+        };
+        safeSend(dc, sessionUpdate);
 
-        // Smoke test: force speech so you know audio works
-        safeSend(dc, {
-          type: 'response.create',
-          response: { modalities: ['audio'], instructions: 'Test—voice is live. If you can hear me, say hello.' }
-        });
-
-        // Optional: assistant speaks first, but include systemPrompt so rules apply
+        // speak first after a short silence gate
         if (firstMode === 'Assistant speaks first') {
           const lines = splitFirstMessages(firstMsg || 'Hello.');
           const startAt = Date.now();
           const gate = setInterval(() => {
-            const quiet = userIsSilentFor(1000);
-            const timeout = Date.now() - startAt > 2000;
+            const quiet = userIsSilentFor(1200);
+            const timeout = Date.now() - startAt > 2200;
             if (quiet || timeout) {
               clearInterval(gate);
               lines.forEach((ln, idx) => {
-                setTimeout(() => { respondFor(ln, ['Keep it to one or two short sentences.']); }, idx * 240);
+                const jitter = 220 + Math.random()*240;
+                const delay = idx * (340 + Math.random()*200) + jitter;
+                setTimeout(() => {
+                  safeSend(dc, { type: 'response.create', response: { modalities: ['audio'], instructions: ln } });
+                }, delay);
               });
             }
           }, 120);
@@ -438,57 +471,59 @@ export default function WebCallButton({
           const msg = JSON.parse(ev.data);
           const t = msg?.type as string;
 
-          if (t?.includes('error') || t === 'response.error') {
-            console.error('[Realtime ERROR]', msg);
-            setError(prev => prev ? prev : (msg?.error?.message || 'Realtime error.'));
-          }
-
+          // assistant stream
           if (t === 'response.output_text.delta') {
             const id = msg?.response_id || msg?.id || 'assistant_current';
-            const delta = String(msg?.delta || '');
-            upsertRow(id, 'assistant', (prev) => ({ text: (prev?.text || '') + delta }));
+            const delta = msg?.delta || '';
+            upsertRow(id, 'assistant', (prev) => ({ text: (prev?.text || '') + String(delta) }));
           }
           if (t === 'response.completed' || t === 'response.stop') {
             const id = msg?.response_id || msg?.id || 'assistant_current';
             upsertRow(id, 'assistant', { done: true });
           }
 
+          // user transcript
           if (t === 'transcript.delta') {
             const id = msg?.transcript_id || msg?.id || 'user_current';
-            const delta = String(msg?.delta || '');
-            transcriptsRef.current[id] = (transcriptsRef.current[id] || '') + delta;
-            upsertRow(id, 'user', (prev) => ({ text: (prev?.text || '') + delta }));
+            const delta = msg?.delta || '';
+            upsertRow(id, 'user', (prev) => ({ text: (prev?.text || '') + String(delta) }));
           }
           if (t === 'transcript.completed') {
             const id = msg?.transcript_id || msg?.id || 'user_current';
-            const text = (transcriptsRef.current[id] || '').trim();
+            const row = (log.find(r => r.id === id) || { text: '' });
+            const text = (row.text || '').trim();
+            const mood = detectMood(text);
             upsertRow(id, 'user', { done: true });
 
-            // light turn effects (don’t overwrite rules!)
+            // per-turn adjustments: APPEND to base, never overwrite
+            const dutchLikely = / de | het | een | jij | je | we | wij | lekker | alsjeblieft | dank je | bedankt | hoe | wat | waarom | grap /.test(text.toLowerCase());
+            const langAdj = dutchLikely ? 'Spreek vlot en informeel Nederlands; varieer intonatie en tempo.' : '';
+            const moodStyle = styleForMood(mood);
+            const nudge = turnStyleNudge();
+            const appended = `${baseInstructionsRef.current}\n\n${moodStyle} ${nudge} ${langAdj}`.trim();
+
+            safeSend(dcRef.current, { type: 'session.update', session: { instructions: appended } });
+
+            // small pause + optional backchannel/laugh/filler
             const wait = pick(THINKING_PAUSE_MS);
             setTimeout(() => {
-              if (detectMood(text) === 'joke') {
+              sendBackchannel(dcRef.current);
+              if (mood === 'joke') {
                 safeSend(dcRef.current, { type: 'response.create', response: { modalities: ['audio'], instructions: pick(LAUGHS) } });
               } else if (Math.random() < 0.08) {
                 safeSend(dcRef.current, { type: 'response.create', response: { modalities: ['audio'], instructions: pick(THINKING_FILLERS) } });
-              } else {
-                sendBackchannel(dcRef.current);
               }
             }, wait);
-
-            if (text) respondFor(text);
           }
 
+          // fallback (full text)
           if (t === 'response.output_text' && typeof msg?.text === 'string') {
             addLine('assistant', msg.text);
           }
-        } catch {
-          // non-JSON frames
-        }
+        } catch { /* ignore non-JSON */ }
       };
 
       pc.onconnectionstatechange = () => {
-        console.log('[PC]', pc.connectionState);
         if (pc.connectionState === 'connected') { setConnected(true); setConnecting(false); }
         else if (['disconnected','failed','closed'].includes(pc.connectionState)) { endCall(false); }
       };
@@ -497,7 +532,7 @@ export default function WebCallButton({
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
-      const url = `https://api.openai.com/v1/realtime?model=${encodeURIComponent(model || 'gpt-4o-realtime-preview')}`;
+      const url = `https://api.openai.com/v1/realtime?model=${encodeURIComponent(selectedModel || 'gpt-4o-realtime-preview')}`;
       const answerRes = await fetch(url, {
         method: 'POST',
         headers: {
@@ -507,27 +542,21 @@ export default function WebCallButton({
         },
         body: offer.sdp,
       });
-      const ansText = await answerRes.text();
-      if (!answerRes.ok) throw new Error(`Realtime SDP failed: ${ansText}`);
-      console.log('[SDP answer len]', ansText.length);
+      if (!answerRes.ok) throw new Error(`Realtime SDP failed: ${await answerRes.text()}`);
 
-      const answer = { type: 'answer' as RTCSdpType, sdp: ansText };
+      const answer = { type: 'answer' as RTCSdpType, sdp: await answerRes.text() };
       await pc.setRemoteDescription(answer);
 
       if (audioRef.current) {
         audioRef.current.muted = false;
-        try { await audioRef.current.play(); } catch (e) { console.warn('[AUDIO PLAY BLOCKED]', e); }
+        audioRef.current.play().catch(() => {});
       }
 
-      // start VAD after audio is flowing
       const stopVad = await setupVAD();
       const prevCleanup = closeChainRef.current;
       closeChainRef.current = () => { try{ prevCleanup && prevCleanup() }catch{}; try{ stopVad && stopVad() }catch{} };
 
-      setError(''); // clear transient errors
-
     } catch (e: any) {
-      console.error('[startCall error]', e);
       setConnecting(false); setConnected(false);
       setError(e?.message || 'Failed to start call.');
       cleanup();
@@ -540,24 +569,18 @@ export default function WebCallButton({
     tracks.forEach((t) => (t.enabled = !next));
     setMuted(next);
   }
-
   function cleanup() {
     if (vadLoopRef.current) cancelAnimationFrame(vadLoopRef.current);
     vadLoopRef.current = null;
-
     try { dcRef.current?.close(); } catch {}
     dcRef.current = null;
-
     try { pcRef.current?.close(); } catch {}
     pcRef.current = null;
-
     try { micStreamRef.current?.getTracks()?.forEach((t) => t.stop()); } catch {}
     micStreamRef.current = null;
-
     try { closeChainRef.current && closeChainRef.current(); } catch {}
     closeChainRef.current = null;
   }
-
   function endCall(userIntent = true) {
     cleanup();
     setConnected(false);
@@ -566,26 +589,64 @@ export default function WebCallButton({
   }
 
   useEffect(() => {
+    // gate so the assistant doesn’t jump in instantly
     lastMicActiveAtRef.current = Date.now();
     startCall();
     return () => { cleanup(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [selectedModel, voiceId]);
 
+  /** ─────────────── UI */
   return (
     <div
-      className="fixed right-4 bottom-4 sm:right-6 sm:bottom-6 w-[min(640px,92vw)] rounded-2xl overflow-hidden"
+      className="fixed right-4 bottom-4 sm:right-6 sm:bottom-6 w-[min(920px,95vw)] rounded-2xl overflow-hidden"
       style={{ zIndex: 9999, border: '1px solid rgba(255,255,255,.12)', background: '#0d0f11', boxShadow: '0 24px 80px rgba(0,0,0,.6)' }}
       role="dialog"
       aria-label="Voice call panel"
     >
+      {/* Header */}
       <div className="flex items-center justify-between px-4 py-3"
            style={{ borderBottom: '1px solid rgba(255,255,255,.10)', background: 'linear-gradient(90deg, #0d0f11 0%, rgba(255,255,255,.04) 50%, #0d0f11 100%)' }}>
         <div className="min-w-0">
           <div className="text-sm opacity-80">Talking to</div>
           <div className="font-semibold truncate">{assistantName || 'Assistant'}</div>
         </div>
+
+        {/* Controls like your screenshots: model + voice */}
         <div className="flex items-center gap-2">
+          <div className="hidden sm:flex items-center gap-2">
+            <div className="relative">
+              <select
+                className="appearance-none bg-transparent text-sm rounded-lg px-3 py-2 pr-8"
+                style={{ border: '1px solid rgba(255,255,255,.16)', color: '#e6f1ef' }}
+                value={selectedModel}
+                onChange={(e)=>setSelectedModel(e.target.value)}
+                title="Model"
+              >
+                {/* Add/adjust to match your Voice Agent choices */}
+                <option value="gpt-4o-realtime-preview">gpt-4o-realtime-preview</option>
+                <option value="gpt-4o-realtime-preview-2024-12-17">gpt-4o-realtime-preview-2024-12-17</option>
+                <option value="gpt-4o-realtime-audio-preview">gpt-4o-realtime-audio-preview</option>
+                <option value="gpt-4o-mini-tts">gpt-4o-mini-tts</option>
+              </select>
+              <ChevronDown className="w-4 h-4 absolute right-2 top-2.5 opacity-70 pointer-events-none" />
+            </div>
+            <div className="relative">
+              <select
+                className="appearance-none bg-transparent text-sm rounded-lg px-3 py-2 pr-8"
+                style={{ border: '1px solid rgba(255,255,255,.16)', color: '#e6f1ef' }}
+                value={voiceId}
+                onChange={(e)=>setSelectedVoice(e.target.value)}
+                title="Voice"
+              >
+                {(voices.length ? voices : DEFAULT_OAI_VOICES).map(v => (
+                  <option key={v} value={v}>{v}</option>
+                ))}
+              </select>
+              <ChevronDown className="w-4 h-4 absolute right-2 top-2.5 opacity-70 pointer-events-none" />
+            </div>
+          </div>
+
           <button
             onClick={toggleMute}
             className="h-9 w-9 rounded-full grid place-items-center"
@@ -606,12 +667,14 @@ export default function WebCallButton({
         </div>
       </div>
 
-      <div className="grid grid-cols-[1fr] sm:grid-cols-[1.1fr_.9fr] gap-0">
+      {/* Body */}
+      <div className="grid grid-cols-1 lg:grid-cols-[1.1fr_.9fr] gap-0">
+        {/* Transcript (right-pane style like the screenshots) */}
         <div className="p-3 sm:p-4" style={{ borderRight: '1px solid rgba(255,255,255,.10)' }}>
           <div className="flex items-center gap-2 text-sm mb-2 opacity-80">
-            <MessageSquare className="w-4 h-4" /> Live transcript
+            <MessageSquare className="w-4 h-4" /> Call Transcript
           </div>
-          <div className="h-[42vh] sm:h-[48vh] overflow-y-auto pr-1" style={{ scrollbarWidth: 'thin' }}>
+          <div className="h-[42vh] sm:h-[56vh] overflow-y-auto pr-1" style={{ scrollbarWidth: 'thin' }}>
             {log.length === 0 && (
               <div className="text-sm opacity-70">
                 {connecting ? 'Connecting to voice…' : (firstMode === 'Assistant speaks first' ? 'Waiting for assistant…' : 'Say hello! We’ll show the transcript here.')}
@@ -646,8 +709,9 @@ export default function WebCallButton({
           )}
         </div>
 
+        {/* Status + audio element */}
         <div className="p-4 grid content-center">
-          <div className="mx-auto w-full max-w-[320px] text-center">
+          <div className="mx-auto w-full max-w-[360px] text-center">
             <div
               className="mx-auto rounded-2xl px-4 py-6"
               style={{ background: 'rgba(89,217,179,.08)', border: '1px solid rgba(89,217,179,.22)' }}
@@ -659,10 +723,12 @@ export default function WebCallButton({
               <div className="flex items-center justify-center gap-2">
                 {connecting && <Loader2 className="w-4 h-4 animate-spin" />}
                 <span className="text-xs opacity-70">
-                  {muted ? 'Mic muted' : 'Mic live'} • Model: {model || 'gpt-4o-realtime-preview'} • Voice: {voiceName}
+                  {muted ? 'Mic muted' : 'Mic live'} • Model: {selectedModel} • Voice: {voiceId}
                 </span>
               </div>
             </div>
+
+            {/* Hidden audio sink (processed through WebAudio chain) */}
             <audio ref={audioRef} autoPlay playsInline />
           </div>
         </div>
