@@ -1,3 +1,4 @@
+// components/voice/WebCallButton.tsx
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -7,23 +8,28 @@ import { Mic, MicOff, X, Bot, User, Loader2, ChevronDown } from 'lucide-react';
 /* ───────────────────────── Props ───────────────────────── */
 type Props = {
   className?: string;
-  model: string;                 // initial model from Voice Agent
-  models?: string[];             // ✅ full list injected by Voice Agent
-  systemPrompt: string;
-  voiceName: string;             // friendly or OpenAI voice id
+  // ✅ Model is injected from VoiceAgentSection (no local dropdown here)
+  model: string;
+  systemPrompt: string;          // backend/compiled or plain — your VoiceAgentSection already passes backend version
+  voiceName: string;             // friendly or OpenAI voice id (can be changed in-panel)
   assistantName: string;
   apiKey: string;
+
+  ephemeralEndpoint?: string;    // defaults to /api/voice/ephemeral
   onClose?: () => void;
+  onError?: (err:any)=>void;
+
+  // Voice realism knobs (kept for parity with your previous impl)
+  prosody?: {
+    fillerWords?: boolean;
+    microPausesMs?: number;
+    phoneFilter?: boolean;
+    turnEndPauseMs?: number;
+  };
 
   firstMode?: 'Assistant speaks first' | 'User speaks first' | 'Silent until tool required';
   firstMsg?: string;
   languageHint?: 'auto' | 'en' | 'de' | 'nl' | 'es' | 'ar';
-
-  // Audio realism
-  phoneFilter?: boolean;
-  farMic?: boolean;
-  ambience?: 'off' | 'kitchen' | 'cafe';
-  ambienceLevel?: number;
 };
 
 /* ───────────────────────── Types / utils ───────────────────────── */
@@ -137,30 +143,28 @@ async function attachProcessedAudio(audioEl:HTMLAudioElement, remote:MediaStream
 }
 
 /* ───────────────────────── Component ───────────────────────── */
-export default function WebCallPanel({
+export default function WebCallButton({
   className,
   model,
-  models = [],                // ✅ models from parent (Voice Agent)
   systemPrompt,
   voiceName: voiceProp,
   assistantName,
   apiKey,
+  ephemeralEndpoint='/api/voice/ephemeral',
   onClose,
+  onError,
   firstMode='Assistant speaks first',
   firstMsg='Hello.',
   languageHint='auto',
-  phoneFilter=false,
-  farMic=false,
-  ambience='off',
-  ambienceLevel=0.08,
+  prosody,
 }: Props){
+  const phoneFilter = !!prosody?.phoneFilter;
   const [connecting,setConnecting]=useState(false);
   const [connected,setConnected]=useState(false);
   const [muted,setMuted]=useState(false);
   const [error,setError]=useState<string>('');
   const [voices,setVoices]=useState<string[]>([]);
   const [selectedVoice,setSelectedVoice]=useState<string>('');
-  const [selectedModel,setSelectedModel]=useState<string>(model || 'gpt-4o-realtime-preview');
   const [log,setLog]=useState<TranscriptRow[]>([]);
   const logRef=useRef<TranscriptRow[]>([]);
   useEffect(()=>{ logRef.current=log; },[log]);
@@ -256,9 +260,9 @@ export default function WebCallPanel({
     try{
       setConnecting(true);
       // 1) ephemeral
-      const sessionRes=await fetch('/api/voice/ephemeral',{
+      const sessionRes=await fetch(ephemeralEndpoint || '/api/voice/ephemeral',{
         method:'POST', headers:{ 'Content-Type':'application/json', 'X-OpenAI-Key':apiKey },
-        body:JSON.stringify({ model: selectedModel, voiceName:voiceId, assistantName, systemPrompt }),
+        body:JSON.stringify({ model, voiceName:voiceId, assistantName, systemPrompt }),
       });
       if(!sessionRes.ok) throw new Error(`Ephemeral token error: ${await sessionRes.text()}`);
       const session=await sessionRes.json(); const EPHEMERAL=session?.client_secret?.value;
@@ -275,7 +279,12 @@ export default function WebCallPanel({
         e.streams[0]?.getAudioTracks().forEach(t=>remote.addTrack(t));
         if(!audioRef.current) return;
         if(closeChainRef.current){ try{closeChainRef.current()}catch{}; closeChainRef.current=null; }
-        closeChainRef.current=await attachProcessedAudio(audioRef.current, remote, { phoneFilter, farMic, ambience, ambienceLevel });
+        closeChainRef.current=await attachProcessedAudio(audioRef.current, remote, {
+          phoneFilter: !!prosody?.phoneFilter,
+          farMic: false,
+          ambience: 'off',
+          ambienceLevel: 0.08
+        });
       };
 
       const sendTrack=mic.getAudioTracks()[0];
@@ -289,14 +298,15 @@ export default function WebCallPanel({
         const style=[baseStyle(languageHint),turnStyleNudge()].join(' ');
         baseInstructionsRef.current=`${systemPrompt || ''}\n\n${style}`;
 
-        // ✅ Ensure text + transcription are emitted
+        // ✅ Text output + both-side transcription on
         safeSend(dc,{ type:'session.update', session:{
           instructions: baseInstructionsRef.current,
           voice: voiceId,
           input_audio_format:'pcm16',
           output_audio_format:'pcm16',
           modalities: ['audio','text'],
-          input_audio_transcription: { enabled: true },
+          input_audio_transcription: { enabled: true }, // ← user speech to text
+          turn_detection: { type: 'server_vad' },       // helpful for duplex
         }});
 
         if(firstMode==='Assistant speaks first'){
@@ -322,7 +332,7 @@ export default function WebCallPanel({
         try{
           const msg=JSON.parse(ev.data); const t=msg?.type as string;
 
-          // Assistant text stream
+          // Assistant text stream (from model)
           if(t==='response.output_text.delta'){
             const id=msg?.response_id||msg?.id||'assistant_current';
             const delta=msg?.delta||'';
@@ -336,7 +346,7 @@ export default function WebCallPanel({
             addLine('assistant', msg.text);
           }
 
-          // Some models emit assistant speech-only; if they send audio transcript deltas, capture those too.
+          // Some models return separate audio transcript stream
           if(t==='response.audio_transcript.delta'){
             const id=msg?.response_id||msg?.id||'assistant_current';
             const delta=msg?.delta||'';
@@ -347,7 +357,7 @@ export default function WebCallPanel({
             upsert(id,'assistant',{ done:true });
           }
 
-          // User speech transcript stream
+          // ✅ USER speech transcript stream (WhatsApp bubble on right)
           if(t==='transcript.delta'){
             const id=msg?.transcript_id||msg?.id||'user_current';
             const delta=msg?.delta||'';
@@ -381,6 +391,7 @@ export default function WebCallPanel({
               }
             }, wait);
           }
+
         }catch{}
       };
 
@@ -391,7 +402,7 @@ export default function WebCallPanel({
 
       // 6) SDP
       const offer=await pc.createOffer(); await pc.setLocalDescription(offer);
-      const url=`https://api.openai.com/v1/realtime?model=${encodeURIComponent(selectedModel)}`;
+      const url=`https://api.openai.com/v1/realtime?model=${encodeURIComponent(model)}`;
       const answerRes=await fetch(url,{
         method:'POST',
         headers:{ Authorization:`Bearer ${EPHEMERAL}`, 'Content-Type':'application/sdp', 'OpenAI-Beta':'realtime=v1' },
@@ -408,7 +419,10 @@ export default function WebCallPanel({
       closeChainRef.current=()=>{ try{prevClean&&prevClean()}catch{}; try{stopVad&&stopVad()}catch{} };
     }catch(e:any){
       setConnecting(false); setConnected(false);
-      setError(e?.message||'Failed to start call.'); cleanup();
+      const msg = e?.message || 'Failed to start call.';
+      setError(msg);
+      onError?.(e);
+      cleanup();
     }
   }
 
@@ -427,56 +441,40 @@ export default function WebCallPanel({
     try{ micStreamRef.current?.getTracks()?.forEach(t=>t.stop()); }catch{}
     micStreamRef.current=null;
     try{ closeChainRef.current && closeChainRef.current(); }catch{}
-    closeChainRef.current = null; // ✅ do NOT reassign the ref object itself
+    closeChainRef.current = null;
   }
   function endCall(userIntent=true){ cleanup(); setConnected(false); setConnecting(false); if(userIntent) onClose?.(); }
 
-  // re-start call when model/voice changes
+  // start once (model comes from parent — no dropdown here)
   useEffect(()=>{ lastMicActiveAtRef.current=Date.now(); startCall(); return ()=>{ cleanup(); }; // eslint-disable-next-line
-  },[selectedModel,voiceId]);
+  },[voiceId]); // allow live voice swap
 
-  /* ───────────────────────── UI — fixed overlay via portal ───────────────────────── */
+  /* ───────────────────────── UI — fixed overlay styled like VoiceAgentSection ───────────────────────── */
   const panel = (
     <aside
-      className={`fixed top-0 right-0 h-screen w-[min(480px,95vw)] bg-[#0d0f11] border-l border-[rgba(255,255,255,.12)] shadow-2xl flex flex-col ${className||''}`}
-      style={{ zIndex: 200000 }}
+      className={`fixed top-0 right-0 h-screen w-[min(480px,95vw)] bg-[var(--panel-bg)] border-l border-[var(--border-weak)] shadow-2xl flex flex-col ${className||''}`}
+      style={{ zIndex: 100001 }}  // align with VoiceAgentSection Zs
       role="dialog"
       aria-label="Voice call panel"
     >
-      {/* Header */}
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-[rgba(255,255,255,.10)]">
+      {/* Header (matches VoiceAgentSection tone) */}
+      <div className="va-head" style={{ minHeight:56 }}>
         <div className="flex items-center gap-3 min-w-0">
-          <div className="inline-grid place-items-center w-7 h-7 rounded-full" style={{ background:'rgba(89,217,179,.12)' }}>
+          <div className="inline-grid place-items-center w-7 h-7 rounded-[8px]" style={{ background:'rgba(89,217,179,.12)' }}>
             <Bot className="w-4 h-4" style={{ color:'#59d9b3' }} />
           </div>
           <div className="min-w-0">
-            <div className="text-xs" style={{ color:'rgba(255,255,255,.6)' }}>Talking to</div>
-            <div className="font-semibold truncate" style={{ color:'#e6f1ef' }}>{assistantName || 'Assistant'}</div>
+            <div className="text-xs" style={{ color:'var(--text-muted)' }}>Talking to</div>
+            <div className="font-semibold truncate" style={{ color:'var(--text)' }}>{assistantName || 'Assistant'}</div>
           </div>
         </div>
 
-        <div className="ml-auto flex items-center gap-2">
-          {/* Model selector — from Voice Agent */}
+        <div className="flex items-center gap-2">
+          {/* Voice selector only (model is controlled upstream) */}
           <div className="relative">
             <select
               className="appearance-none bg-transparent text-xs rounded-[8px] px-2.5 py-1.5 pr-7"
-              style={{ border:'1px solid rgba(255,255,255,.14)', color:'#e6f1ef' }}
-              value={selectedModel}
-              onChange={(e)=>setSelectedModel(e.target.value)}
-              title="Model"
-            >
-              { (models.length ? models : [model]).map(m => (
-                <option key={m} value={m}>{m}</option>
-              )) }
-            </select>
-            <ChevronDown className="w-4 h-4 absolute right-2 top-2" style={{ color:'rgba(255,255,255,.6)' }} />
-          </div>
-
-          {/* Voice selector */}
-          <div className="relative">
-            <select
-              className="appearance-none bg-transparent text-xs rounded-[8px] px-2.5 py-1.5 pr-7"
-              style={{ border:'1px solid rgba(255,255,255,.14)', color:'#e6f1ef' }}
+              style={{ border:'1px solid rgba(255,255,255,.14)', color:'var(--text)' }}
               value={voiceId}
               onChange={(e)=>setSelectedVoice(e.target.value)}
               title="Voice"
@@ -485,13 +483,13 @@ export default function WebCallPanel({
                 <option key={v} value={v}>{v}</option>
               ))}
             </select>
-            <ChevronDown className="w-4 h-4 absolute right-2 top-2" style={{ color:'rgba(255,255,255,.6)' }} />
+            <ChevronDown className="w-4 h-4 absolute right-2 top-2" style={{ color:'var(--text-muted)' }} />
           </div>
 
           <button
             onClick={toggleMute}
             className="w-8 h-8 rounded-[8px] grid place-items-center"
-            style={{ border:'1px solid rgba(255,255,255,.14)', color:'#e6f1ef', background: muted ? 'rgba(239,68,68,.14)' : 'transparent' }}
+            style={{ border:'1px solid rgba(255,255,255,.14)', color:'var(--text)', background: muted ? 'rgba(239,68,68,.14)' : 'var(--panel-bg)' }}
             title={muted ? 'Unmute mic' : 'Mute mic'} aria-label={muted ? 'Unmute' : 'Mute'}
           >
             {muted ? <MicOff className="w-4 h-4"/> : <Mic className="w-4 h-4" />}
@@ -508,10 +506,10 @@ export default function WebCallPanel({
         </div>
       </div>
 
-      {/* Transcript — WhatsApp-style */}
-      <div ref={scrollerRef} className="px-3 py-3 space-y-3 overflow-y-auto" style={{ scrollbarWidth:'thin', color:'#e6f1ef' }}>
+      {/* Transcript — WhatsApp-style bubbles (both sides) */}
+      <div ref={scrollerRef} className="px-3 py-3 space-y-3 overflow-y-auto" style={{ scrollbarWidth:'thin', color:'var(--text)' }}>
         {log.length===0 && (
-          <div className="text-sm" style={{ color:'rgba(255,255,255,.6)' }}>
+          <div className="text-sm" style={{ color:'var(--text-muted)' }}>
             {connecting ? 'Connecting to voice…' : (firstMode==='Assistant speaks first' ? 'Waiting for assistant…' : 'Say hello! We’ll show the transcript here.')}
           </div>
         )}
@@ -519,13 +517,13 @@ export default function WebCallPanel({
         {log.map(row=>(
           <div key={row.id} className={`flex ${row.who==='user' ? 'justify-end' : 'justify-start'}`}>
             {row.who==='assistant' && (
-              <div className="mr-2 mt-[2px] shrink-0 rounded-full w-7 h-7 grid place-items-center"
+              <div className="mr-2 mt-[2px] shrink-0 rounded-[8px] w-7 h-7 grid place-items-center"
                    style={{ background:'rgba(89,217,179,.12)', border:'1px solid rgba(89,217,179,.25)' }}>
                 <Bot className="w-4 h-4" style={{ color:'#59d9b3' }} />
               </div>
             )}
 
-            <div className="max-w-[80%] rounded-2xl px-3 py-2 text-[0.95rem] leading-snug border"
+            <div className="max-w-[80%] rounded-[12px] px-3 py-2 text-[0.95rem] leading-snug border"
                  style={{
                    background: row.who==='user' ? 'rgba(56,196,143,.18)' : 'rgba(255,255,255,.06)',
                    borderColor: row.who==='user' ? 'rgba(56,196,143,.35)' : 'rgba(255,255,255,.14)',
@@ -535,7 +533,7 @@ export default function WebCallPanel({
             </div>
 
             {row.who==='user' && (
-              <div className="ml-2 mt-[2px] shrink-0 rounded-full w-7 h-7 grid place-items-center"
+              <div className="ml-2 mt-[2px] shrink-0 rounded-[8px] w-7 h-7 grid place-items-center"
                    style={{ background:'rgba(255,255,255,.10)', border:'1px solid rgba(255,255,255,.18)' }}>
                 <User className="w-4 h-4" />
               </div>
@@ -552,13 +550,13 @@ export default function WebCallPanel({
       </div>
 
       {/* Footer status */}
-      <div className="px-3 py-2 border-t border-[rgba(255,255,255,.10)]" style={{ color:'#e6f1ef' }}>
+      <div className="px-3 py-2 border-t border-[rgba(255,255,255,.10)]" style={{ color:'var(--text)' }}>
         <div className="flex items-center justify-between gap-2 text-xs">
           <div className="flex items-center gap-2">
             {connecting && <Loader2 className="w-4 h-4 animate-spin" />}
             <span style={{ opacity:.85 }}>
               {connected ? 'Connected' : (connecting ? 'Connecting…' : 'Idle')}
-              {' '}• Model: {selectedModel} • Voice: {voiceId}
+              {' '}• Model: {model} • Voice: {voiceId}
             </span>
           </div>
           <audio ref={audioRef} autoPlay playsInline />
