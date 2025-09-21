@@ -7,7 +7,7 @@ import { Mic, MicOff, PhoneOff, Loader2, MessageSquare } from 'lucide-react';
 type Props = {
   model: string;
   systemPrompt: string;
-  voiceName: string;          // Friendly label (e.g., "Breeze", "Orion", "Nova"...)
+  voiceName: string;          // Friendly label OR raw OpenAI voice id
   assistantName: string;
   apiKey: string;
   onClose?: () => void;
@@ -19,9 +19,9 @@ type Props = {
 
   // Optional audio realism flags
   phoneFilter?: boolean;      // default true
-  farMic?: boolean;           // default false now — closer mic by default
+  farMic?: boolean;           // default false — we want a close, intimate mic by default
   ambience?: 'off' | 'kitchen' | 'cafe'; // default 'off'
-  ambienceLevel?: number;     // 0..1 (default .10)
+  ambienceLevel?: number;     // 0..1 (default .08)
 };
 
 type TranscriptRow = {
@@ -33,20 +33,35 @@ type TranscriptRow = {
 
 const CTA = '#59d9b3';
 
-/* ───────── Voices (distinct timbres; no accent labels) ───────── */
-const VOICE_DISPLAY_TO_ID: Record<string, string> = {
-  // smooth/neutral
+/* ──────────────────────────────────────────────────────────
+   Voices
+   - Support friendly display names AND raw OpenAI IDs.
+   - If user types a known OpenAI id (e.g. "alloy") we pass it through.
+   - Friendly names map to diverse timbres (spread across ids).
+   ────────────────────────────────────────────────────────── */
+const FRIENDLY_TO_ID: Record<string, string> = {
+  // neutral / smooth
   'Breeze': 'alloy',
   'Orion':  'alloy',
-  // warm/approachable
+
+  // warm / approachable
   'Nova':   'verse',
   'Flow':   'verse',
-  // crisp/precise
+
+  // crisp / precise
   'Terra':  'coral',
   'Aster':  'coral',
-  // bright/energetic
+
+  // bright / energetic
   'Maya':   'amber',
   'Kai':    'amber',
+
+  // extra friendly labels → spread across base timbres
+  'Willow': 'alloy',
+  'Aria':   'verse',
+  'Flint':  'coral',
+  'Ivy':    'amber',
+
   // fallbacks
   'Alloy':  'alloy',
   'Verse':  'verse',
@@ -54,7 +69,12 @@ const VOICE_DISPLAY_TO_ID: Record<string, string> = {
   'Amber':  'amber',
 };
 
-/* ───────── Humanization content ───────── */
+// If the value looks like a raw OpenAI voice id, use it directly.
+const RAW_ID_PATTERN = /^[a-z0-9._-]{3,}$/i;
+
+/* ──────────────────────────────────────────────────────────
+   Humanization snippets
+   ────────────────────────────────────────────────────────── */
 const BACKCHANNEL_LINES = [
   "Let me check that…",
   "One moment—checking.",
@@ -64,7 +84,6 @@ const BACKCHANNEL_LINES = [
   "Just a second…",
   "Got it—pulling that up.",
   "Mm-hmm… checking now.",
-  "Okay… one sec…",
 ];
 
 const THINKING_FILLERS = ["hmm…", "uh…", "let’s see…", "right…", "okay…"];
@@ -76,63 +95,63 @@ const LAUGHS = [
   "ha— alright, fair enough.",
 ];
 
-const THINKING_PAUSE_MS = [900, 1200, 1500, 1800]; // less rushed
-const BACKCHANNEL_PROB = 0.22;
-const BACKCHANNEL_COOLDOWN_MS = 4500;
+// pacing
+const THINKING_PAUSE_MS = [900, 1200, 1500, 1800];
+const BACKCHANNEL_PROB = 0.20;
+const BACKCHANNEL_COOLDOWN_MS = 4200;
 
-/* ───────── Tiny utils ───────── */
+/* ──────────────────────────────────────────────────────────
+   Utilities
+   ────────────────────────────────────────────────────────── */
 function pick<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length)]; }
 function clamp01(v:number){ return Math.max(0, Math.min(1, v)); }
 
-/* ───────── Mood detection (very light heuristic) ───────── */
+/* Mood detection (light heuristic) */
 type Mood = 'joke' | 'sad' | 'angry' | 'positive' | 'neutral';
-
 function detectMood(s: string): Mood {
   const t = (s || '').toLowerCase();
   if (!t.trim()) return 'neutral';
-  if (/(haha|lol|lmao|🤣|😅|😆|that.*funny|good one)/.test(t)) return 'joke';
-  if (/(sad|upset|depress|bad day|:(\(|😢|😭)|i.*lost|i.*hurt)/.test(t)) return 'sad';
-  if (/(angry|mad|furious|annoyed|wtf|this.*sucks|terrible|awful|!{2,})/.test(t)) return 'angry';
-  if (/(great|awesome|nice|love|perfect|cool|amazing|thanks!|thank you!)/.test(t)) return 'positive';
+  if (/(haha|lol|lmao|🤣|😅|😆|grap|grappig|dat.*grappig|good one)/.test(t)) return 'joke';
+  if (/(sad|upset|depress|bad day|:(\(|😢|😭)|verdrietig|baal|ik.*verloren|ik.*pijn)/.test(t)) return 'sad';
+  if (/(angry|mad|furious|annoyed|wtf|sucks|terrible|awful|!{2,}|boos|woest|geïrriteerd)/.test(t)) return 'angry';
+  if (/(great|awesome|nice|love|perfect|amazing|thanks!|thank you!|top|lekker|geweldig|thanks)/.test(t)) return 'positive';
   return 'neutral';
 }
 
 function styleForMood(m: Mood) {
   switch (m) {
-    case 'joke':
-      return "If the caller makes a joke, react with a short, natural laugh before answering. Keep it light.";
-    case 'sad':
-      return "Sound warm and supportive. Slow down slightly and acknowledge feelings before giving info.";
-    case 'angry':
-      return "Stay calm and professional. Lower intensity, acknowledge frustration, and focus on solutions.";
-    case 'positive':
-      return "Be upbeat and friendly, a touch of enthusiasm, but not salesy unless asked.";
-    default:
-      return "Keep a relaxed conversational tone.";
+    case 'joke':     return "If the caller makes a joke, react with a short, natural laugh before answering. Keep it light.";
+    case 'sad':      return "Sound warm and supportive. Slow down slightly and acknowledge feelings before giving info.";
+    case 'angry':    return "Stay calm and professional. Lower intensity, acknowledge frustration, and focus on solutions.";
+    case 'positive': return "Be upbeat and friendly, a touch of enthusiasm; don’t oversell.";
+    default:         return "Keep a relaxed conversational tone.";
   }
 }
 
-/* ───────── WebAudio builders (closer mic) ───────── */
-// very subtle short IR for a touch of space (almost dry)
-function makeImpulseResponse(ac: AudioContext, duration=0.04, decay=1.0) {
-  const rate = ac.sampleRate;
-  const length = Math.round(rate * duration);
-  const ir = ac.createBuffer(2, length, rate);
-  for (let ch=0; ch<2; ch++){
-    const data = ir.getChannelData(ch);
-    let last = 0;
-    for (let i=0;i<length;i++){
-      const white = Math.random()*2-1;
-      last = last*0.92 + white*0.08;
-      const t = i/length;
-      data[i] = last * Math.pow(1 - t, decay) * 0.12; // very subtle
-    }
+/* Language nudge (extra Dutch tuning for colloquial style) */
+function languageNudge(lang: Props['languageHint']) {
+  if (lang === 'auto') {
+    return 'Auto-detect and reply in the user’s language (English, German, Dutch, Spanish, or Arabic).';
   }
-  return ir;
+  const map: Record<string, string> = {
+    en: 'Respond in natural, conversational English with contractions.',
+    de: 'Antworte natürlich und umgangssprachlich auf Deutsch.',
+    nl: 'Antwoord in natuurlijk, informeel Nederlands; gebruik korte zinnen en alledaagse woorden.',
+    es: 'Responde en español conversacional y natural.',
+    ar: 'يرجى الرد بالعربية بأسلوب محادثة طبيعي.',
+  };
+  return map[lang] || '';
 }
 
-// mild saturation to reduce “robotic edge”
-function createSaturator(ac: AudioContext, drive=0.9) {
+/* ──────────────────────────────────────────────────────────
+   WebAudio chain (CLOSE mic; remove room/echo; de-robotize)
+   - gentle HP/LP
+   - presence boost
+   - low-shelf body
+   - tiny saturation
+   - soft compression
+   ────────────────────────────────────────────────────────── */
+function createSaturator(ac: AudioContext, drive=1.15) {
   const shaper = ac.createWaveShaper();
   const curve = new Float32Array(1024);
   for (let i=0; i<curve.length; i++){
@@ -144,8 +163,7 @@ function createSaturator(ac: AudioContext, drive=0.9) {
   return shaper;
 }
 
-// optional colored noise ambience
-function createAmbience(ac: AudioContext, kind: 'kitchen'|'cafe', level = 0.10) {
+function createAmbience(ac: AudioContext, kind: 'kitchen'|'cafe', level = 0.08) {
   const noise = ac.createBufferSource();
   const len = ac.sampleRate * 2;
   const buf = ac.createBuffer(1, len, ac.sampleRate);
@@ -156,31 +174,86 @@ function createAmbience(ac: AudioContext, kind: 'kitchen'|'cafe', level = 0.10) 
     prev = prev*0.97 + white*0.03;
     data[i] = prev;
   }
-  noise.buffer = buf;
-  noise.loop = true;
+  noise.buffer = buf; noise.loop = true;
 
-  const band = ac.createBiquadFilter();
-  band.type = 'bandpass';
+  const band = ac.createBiquadFilter(); band.type = 'bandpass';
   band.frequency.value = kind === 'kitchen' ? 950 : 350;
   band.Q.value = kind === 'kitchen' ? 0.9 : 0.6;
 
-  const hp = ac.createBiquadFilter();
-  hp.type = 'highpass';
-  hp.frequency.value = 120;
+  const hp = ac.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 120;
 
-  const gain = ac.createGain();
-  gain.gain.value = clamp01(level) * 0.25;
+  const g = ac.createGain(); g.gain.value = clamp01(level) * 0.22;
 
-  noise.connect(band); band.connect(hp); hp.connect(gain); gain.connect(ac.destination);
+  noise.connect(band); band.connect(hp); hp.connect(g); g.connect(ac.destination);
   noise.start();
 
+  return () => { try{noise.stop()}catch{}; [noise, band, hp, g].forEach(n=>{try{(n as any).disconnect()}catch{}}); };
+}
+
+async function attachProcessedAudio(
+  audioEl: HTMLAudioElement,
+  remoteStream: MediaStream,
+  opts: { phoneFilter: boolean; farMic: boolean; ambience: 'off'|'kitchen'|'cafe'; ambienceLevel: number }
+){
+  const { phoneFilter, farMic, ambience, ambienceLevel } = opts;
+
+  if (!phoneFilter) { // straight through
+    audioEl.srcObject = remoteStream;
+    await audioEl.play().catch(()=>{});
+    return () => {};
+  }
+
+  const AC = (window.AudioContext || (window as any).webkitAudioContext);
+  const ac = new AC();
+
+  const src = ac.createMediaStreamSource(remoteStream);
+
+  // gentle band-limit (keep body)
+  const hp = ac.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 90;  // closer
+  const lp = ac.createBiquadFilter(); lp.type = 'lowpass';  lp.frequency.value = 5200; // more sparkle
+
+  // presence & body
+  const presence = ac.createBiquadFilter(); presence.type = 'peaking'; presence.frequency.value = 2700; presence.Q.value = 0.9; presence.gain.value = 2.4;
+  const body = ac.createBiquadFilter(); body.type = 'lowshelf'; body.frequency.value = 180; body.gain.value = 2.0;
+
+  // tiny saturation to reduce “AI brittleness”
+  const sat = createSaturator(ac, 1.15);
+
+  const comp = ac.createDynamicsCompressor();
+  comp.threshold.value = -18; comp.knee.value = 16; comp.ratio.value = 2.0;
+  comp.attack.value = 0.005;  comp.release.value = 0.18;
+
+  // OPTIONAL tiny room (ultra subtle). If farMic=false we skip any reverb.
+  const wetGain = ac.createGain(); wetGain.gain.value = farMic ? 0.015 : 0.0;
+
+  const merger = ac.createGain();
+  const dryGain = ac.createGain(); dryGain.gain.value = 1.0;
+
+  const dest = ac.createMediaStreamDestination();
+
+  // wire
+  src.connect(hp); hp.connect(lp); lp.connect(presence); presence.connect(body); body.connect(sat); sat.connect(comp);
+  comp.connect(dryGain); dryGain.connect(merger);
+  comp.connect(wetGain); wetGain.connect(merger);
+  merger.connect(dest);
+
+  audioEl.srcObject = dest.stream;
+  await audioEl.play().catch(()=>{});
+
+  // ambience
+  let ambCleanup: null | (()=>void) = null;
+  if (ambience !== 'off') ambCleanup = createAmbience(ac, ambience, ambienceLevel);
+
   return () => {
-    try{noise.stop()}catch{}; try{noise.disconnect()}catch{};
-    try{band.disconnect()}catch{}; try{hp.disconnect()}catch{}; try{gain.disconnect()}catch{};
+    [src,hp,lp,presence,body,sat,comp,wetGain,merger,dryGain].forEach(n=>{try{(n as any).disconnect()}catch{}});
+    try{ ac.close() }catch{}
+    if (ambCleanup) { try{ ambCleanup() }catch{} }
   };
 }
 
-/* ───────── Component ───────── */
+/* ──────────────────────────────────────────────────────────
+   Component
+   ────────────────────────────────────────────────────────── */
 export default function WebCallButton({
   model,
   systemPrompt,
@@ -192,9 +265,9 @@ export default function WebCallButton({
   firstMsg = 'Hello.',
   languageHint = 'auto',
   phoneFilter = true,
-  farMic = false,          // ⬅ closer by default
+  farMic = false,
   ambience = 'off',
-  ambienceLevel = 0.10,
+  ambienceLevel = 0.08,
 }: Props) {
   const [connecting, setConnecting] = useState(false);
   const [connected, setConnected] = useState(false);
@@ -206,29 +279,22 @@ export default function WebCallButton({
   const micStreamRef = useRef<MediaStream | null>(null);
   const dcRef = useRef<RTCDataChannel | null>(null);
 
-  // WebAudio chain
-  const acRef = useRef<AudioContext | null>(null);
-  const phoneChainCleanupRef = useRef<(() => void) | null>(null);
-  const ambienceCleanupRef = useRef<(() => void) | null>(null);
-
-  // simple mic VAD for barge-in
-  const micAnalyserRef = useRef<AnalyserNode | null>(null);
+  // Cleanup refs
+  const closeChainRef = useRef<null | (()=>void)>(null);
   const vadLoopRef = useRef<number | null>(null);
   const lastMicActiveAtRef = useRef<number>(0);
 
   const [log, setLog] = useState<TranscriptRow[]>([]);
   const lastBackchannelAtRef = useRef<number>(0);
 
-  // Map friendly voice name -> OpenAI voice id
+  // Resolve voice id
   const voiceId = useMemo(() => {
     const key = (voiceName || '').trim();
-    if (VOICE_DISPLAY_TO_ID[key]) return VOICE_DISPLAY_TO_ID[key];
-    const lower = key.toLowerCase();
-    const found = Object.keys(VOICE_DISPLAY_TO_ID).find(k => lower.includes(k.toLowerCase()));
-    return found ? VOICE_DISPLAY_TO_ID[found] : 'alloy';
+    if (RAW_ID_PATTERN.test(key) && !FRIENDLY_TO_ID[key]) return key.toLowerCase();
+    return FRIENDLY_TO_ID[key] || 'alloy';
   }, [voiceName]);
 
-  // Helpers to add/patch transcript lines
+  // upsert helper
   const upsertRow = (id: string, who: TranscriptRow['who'], patch: Partial<TranscriptRow> | ((prev?: TranscriptRow)=>Partial<TranscriptRow>)) => {
     setLog((prev) => {
       const i = prev.findIndex((r) => r.id === id);
@@ -249,132 +315,40 @@ export default function WebCallButton({
     setLog((prev) => [...prev, { id, who, text, done: true }]);
   };
 
-  // safely send JSON on DC
   function safeSend(dc: RTCDataChannel | null, payload: any) {
     if (!dc || dc.readyState !== 'open') return;
-    try { dc.send(JSON.stringify(payload)); } catch {/* noop */}
+    try { dc.send(JSON.stringify(payload)); } catch {}
   }
 
-  // Language hint text (adds to instructions)
-  function languageNudge() {
-    if (languageHint === 'auto') {
-      return 'Auto-detect and reply in the user’s language (English, German, Dutch, Spanish, or Arabic).';
-    }
-    const map: Record<string, string> = {
-      en: 'Respond in English.',
-      de: 'Antworte auf Deutsch.',
-      nl: 'Antwoord in het Nederlands.',
-      es: 'Responde en español.',
-      ar: 'يرجى الرد باللغة العربية.',
-    };
-    return map[languageHint] || '';
+  /* language + style base */
+  function baseStyle(lang: Props['languageHint']) {
+    const langN = languageNudge(lang);
+    const shared = [
+      'Do not speak over the caller. If the caller starts speaking, stop immediately.',
+      'Wait ~1–2 seconds of silence before replying (unless a brief acknowledgement).',
+      'Use natural pacing with brief pauses; occasional mild disfluencies are okay (don’t overuse).',
+      'Vary sentence rhythm: mix short punchy lines with longer ones.',
+      'When listing options, avoid rigid menu patterns. Speak like a person, not a kiosk.',
+      'Prefer contractions. Keep energy human and relaxed.',
+    ].join(' ');
+    // Extra Dutch colloquiality so it doesn’t sound stiff
+    const dutchExtra = 'In het Nederlands: spreek vlot en informeel, gebruik alledaagse woorden, laat de intonatie natuurlijk variëren.';
+    return `${langN}\n\n${shared}${lang === 'nl' ? ` ${dutchExtra}` : ''}`;
   }
 
-  /* ───────── Phone / near-mic processing (parallel wet/dry, presence boost, mild saturation) ───────── */
-  async function attachPhoneAudio(remoteStream: MediaStream) {
-    if (!phoneFilter) {
-      if (audioRef.current) {
-        audioRef.current.srcObject = remoteStream;
-        await audioRef.current.play().catch(() => {});
-      }
-      phoneChainCleanupRef.current = null;
-      return;
-    }
-
-    try {
-      const AC = (window.AudioContext || (window as any).webkitAudioContext);
-      const ac = new AC();
-      acRef.current = ac;
-
-      if (ambience !== 'off') {
-        ambienceCleanupRef.current = createAmbience(ac, ambience as ('kitchen'|'cafe'), ambienceLevel);
-      }
-
-      const src = ac.createMediaStreamSource(remoteStream);
-
-      // gentler band-limiting for clarity + body
-      const hp = ac.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 140;
-      const lp = ac.createBiquadFilter(); lp.type = 'lowpass';  lp.frequency.value = 4500;
-
-      // presence bump ~2.7kHz
-      const presence = ac.createBiquadFilter();
-      presence.type = 'peaking';
-      presence.frequency.value = 2700;
-      presence.Q.value = 0.9;
-      presence.gain.value = 2.6;
-
-      // de-harsh via tiny saturation pre-comp
-      const sat = createSaturator(ac, 1.2);
-
-      const comp = ac.createDynamicsCompressor();
-      comp.threshold.value = -17; comp.knee.value = 16; comp.ratio.value = 2.0;
-      comp.attack.value = 0.005;  comp.release.value = 0.18;
-
-      // parallel mix (mostly dry)
-      const dryGain = ac.createGain(); dryGain.gain.value = 1.0;
-
-      const convolver = ac.createConvolver();
-      convolver.buffer = farMic ? makeImpulseResponse(ac, 0.04, 1.0) : null;
-      const wetGain = ac.createGain();
-      wetGain.gain.value = farMic ? 0.02 : 0.0; // ⬅ ultra subtle; set farMic=false for pure close
-
-      const merger = ac.createGain(); // sum
-      const dest = ac.createMediaStreamDestination();
-
-      // chain: src -> hp -> lp -> presence -> sat -> comp -> [dry + (conv->wet)] -> merger -> dest
-      src.connect(hp); hp.connect(lp); lp.connect(presence); presence.connect(sat); sat.connect(comp);
-
-      comp.connect(dryGain); dryGain.connect(merger);
-      comp.connect(convolver);
-      convolver.connect(wetGain); wetGain.connect(merger);
-
-      merger.connect(dest);
-
-      if (audioRef.current) {
-        audioRef.current.srcObject = dest.stream;
-        await audioRef.current.play().catch(() => {/* iOS needs gesture */});
-      }
-
-      phoneChainCleanupRef.current = () => {
-        try { src.disconnect(); } catch {}
-        try { hp.disconnect(); } catch {}
-        try { lp.disconnect(); } catch {}
-        try { presence.disconnect(); } catch {}
-        try { sat.disconnect(); } catch {}
-        try { comp.disconnect(); } catch {}
-        try { dryGain.disconnect(); } catch {}
-        try { convolver.disconnect(); } catch {}
-        try { wetGain.disconnect(); } catch {}
-        try { merger.disconnect(); } catch {}
-        try { ac.close(); } catch {}
-        acRef.current = null;
-        if (ambienceCleanupRef.current) { try { ambienceCleanupRef.current(); } catch {} ambienceCleanupRef.current = null; }
-      };
-    } catch {
-      if (audioRef.current) {
-        audioRef.current.srcObject = remoteStream;
-        audioRef.current.play().catch(() => {});
-      }
-      phoneChainCleanupRef.current = null;
-    }
-  }
-
-  /* ───────── Mic VAD for barge-in (stop talking if user speaks) ───────── */
+  /* VAD (barge-in) */
   async function setupVAD() {
     try {
       const mic = micStreamRef.current;
       if (!mic) return;
 
       const AC = (window.AudioContext || (window as any).webkitAudioContext);
-      const ac = acRef.current || new AC();
-      acRef.current = ac;
-
+      const ac = new AC();
       const src = ac.createMediaStreamSource(mic);
       const analyser = ac.createAnalyser();
       analyser.fftSize = 512;
       analyser.smoothingTimeConstant = 0.85;
       src.connect(analyser);
-      micAnalyserRef.current = analyser;
 
       const buf = new Uint8Array(analyser.frequencyBinCount);
       const loop = () => {
@@ -384,18 +358,20 @@ export default function WebCallButton({
         const rms = Math.sqrt(sum / buf.length) / 255; // 0..1
         if (rms > 0.06) {
           lastMicActiveAtRef.current = Date.now();
-          // Stop assistant if it’s speaking
+          // stop assistant + duck volume
           safeSend(dcRef.current, { type: 'response.cancel' });
-          // duck audio quickly so it never feels like overlap
-          if (audioRef.current) audioRef.current.volume = 0.25;
+          if (audioRef.current) audioRef.current.volume = 0.27;
         } else {
           if (audioRef.current) audioRef.current.volume = 1.0;
         }
         vadLoopRef.current = requestAnimationFrame(loop);
       };
       vadLoopRef.current = requestAnimationFrame(loop);
+
+      // close analyser context with the big cleanup
+      return () => { try{ ac.close() }catch{} };
     } catch {
-      // best-effort; ignore if VAD cannot init
+      return () => {};
     }
   }
 
@@ -407,91 +383,75 @@ export default function WebCallButton({
     const now = Date.now();
     if (now - (lastBackchannelAtRef.current || 0) < BACKCHANNEL_COOLDOWN_MS) return;
     if (Math.random() > BACKCHANNEL_PROB) return;
-
-    const line = pick(BACKCHANNEL_LINES);
     lastBackchannelAtRef.current = now;
-
-    safeSend(dc, {
-      type: 'response.create',
-      response: { modalities: ['audio'], instructions: line },
-    });
+    safeSend(dc, { type: 'response.create', response: { modalities: ['audio'], instructions: pick(BACKCHANNEL_LINES) } });
   }
 
-  // Split firstMsg into multiple entries by "|" or newline
   function splitFirstMessages(input: string): string[] {
     if (!input) return [];
-    return input
-      .split(/\r?\n|\|/g)
-      .map(s => s.trim())
-      .filter(Boolean)
-      .slice(0, 20);
+    return input.split(/\r?\n|\|/g).map(s => s.trim()).filter(Boolean).slice(0, 20);
   }
 
-  // Per-turn style variety so offers don’t sound templated
   function turnStyleNudge(): string {
     const styles = [
-      "Vary sentence rhythm: mix short punchy lines with longer ones.",
-      "When listing options, alternate phrasing and keep it conversational, not menu-like.",
-      "Prefer contractions (we’re, it’s). Avoid rigid patterns like “we have X, do you want Y”.",
-      "Keep energy natural and human; gentle smile in the voice.",
+      "Vary intonation: some words warmer, some cooler; don’t read in a flat pattern.",
+      "Use a short supportive acknowledgement before giving details.",
+      "If the user hesitates, slow down and simplify the next sentence.",
+      "Keep options conversational; avoid repeating identical templates.",
     ];
     return pick(styles);
   }
 
   async function startCall() {
     setError('');
-    if (!apiKey) {
-      setError('No API key selected. Choose one in the dropdown.');
-      return;
-    }
+    if (!apiKey) { setError('No API key selected. Choose one in the dropdown.'); return; }
 
     try {
       setConnecting(true);
 
-      // 1) Mint ephemeral session using selected user key
+      // 1) ephemeral session
       const sessionRes = await fetch('/api/voice/ephemeral', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-OpenAI-Key': apiKey },
         body: JSON.stringify({ model, voiceName, assistantName, systemPrompt }),
       });
-
-      if (!sessionRes.ok) {
-        const t = await sessionRes.text();
-        throw new Error(`Ephemeral token error: ${t}`);
-      }
+      if (!sessionRes.ok) throw new Error(`Ephemeral token error: ${await sessionRes.text()}`);
       const session = await sessionRes.json();
       const EPHEMERAL = session?.client_secret?.value;
       if (!EPHEMERAL) throw new Error('Missing ephemeral client_secret.value');
 
-      // 2) Mic
+      // 2) mic
       const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
       micStreamRef.current = mic;
 
-      // 3) RTCPeerConnection & audio
+      // 3) peer
       const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
       pcRef.current = pc;
 
       const remote = new MediaStream();
-      pc.ontrack = (e) => {
+      pc.ontrack = async (e) => {
         e.streams[0]?.getAudioTracks().forEach((t) => remote.addTrack(t));
-        attachPhoneAudio(remote);
+        if (!audioRef.current) return;
+        // processed chain (CLOSE mic)
+        if (closeChainRef.current) { try{ closeChainRef.current() }catch{} closeChainRef.current = null; }
+        closeChainRef.current = await attachProcessedAudio(
+          audioRef.current,
+          remote,
+          { phoneFilter, farMic, ambience, ambienceLevel }
+        );
       };
 
       const sendTrack = mic.getAudioTracks()[0];
       pc.addTrack(sendTrack, mic);
       pc.addTransceiver('audio', { direction: 'recvonly' });
 
-      // 4) Data channel
+      // 4) data channel
       const dc = pc.createDataChannel('oai-events');
       dcRef.current = dc;
 
       dc.onopen = () => {
-        // Style: human pacing, mood adaptation, no talking over caller
-        const baseStyle = [
-          'Do not speak over the caller. If the caller starts speaking, stop immediately.',
-          'Wait ~1–2 seconds of silence before replying (unless a quick acknowledgement).',
-          'Use natural pacing with brief pauses; occasional mild disfluencies are okay (don’t overuse).',
-          'Match the caller’s mood; laugh softly if a joke is made.',
+        const style = [
+          baseStyle(languageHint),
           'For clinics/legal: professional and concise. For food/retail: friendly and efficient.',
           turnStyleNudge(),
         ].join(' ');
@@ -499,7 +459,7 @@ export default function WebCallButton({
         const sessionUpdate = {
           type: 'session.update',
           session: {
-            instructions: `${systemPrompt || ''}\n\n${languageNudge()}\n\n${baseStyle}`,
+            instructions: `${systemPrompt || ''}\n\n${style}`,
             voice: voiceId,
             input_audio_format: { type: 'input_audio_format', audio_format: 'pcm16' },
             output_audio_format: { type: 'output_audio_format', audio_format: 'pcm16' },
@@ -507,7 +467,7 @@ export default function WebCallButton({
         };
         safeSend(dc, sessionUpdate);
 
-        // Assistant speaks first — but wait for ~1.2s silence or timeout
+        // speak first after a short silence gate
         if (firstMode === 'Assistant speaks first') {
           const lines = splitFirstMessages(firstMsg || 'Hello.');
           const startAt = Date.now();
@@ -517,8 +477,8 @@ export default function WebCallButton({
             if (quiet || timeout) {
               clearInterval(gate);
               lines.forEach((ln, idx) => {
-                const jitter = 240 + Math.random()*240;
-                const delay = idx * (360 + Math.random()*220) + jitter;
+                const jitter = 220 + Math.random()*240;
+                const delay = idx * (340 + Math.random()*200) + jitter;
                 setTimeout(() => {
                   safeSend(dc, { type: 'response.create', response: { modalities: ['audio'], instructions: ln } });
                 }, delay);
@@ -528,13 +488,13 @@ export default function WebCallButton({
         }
       };
 
-      // Handle realtime messages
+      // messages
       dc.onmessage = (ev) => {
         try {
           const msg = JSON.parse(ev.data);
           const t = msg?.type as string;
 
-          // assistant text streaming
+          // assistant stream
           if (t === 'response.output_text.delta') {
             const id = msg?.response_id || msg?.id || 'assistant_current';
             const delta = msg?.delta || '';
@@ -553,64 +513,47 @@ export default function WebCallButton({
           }
           if (t === 'transcript.completed') {
             const id = msg?.transcript_id || msg?.id || 'user_current';
-            const thisRow = log.find(r => r.id === id);
-            const textNow = (thisRow?.text || '').trim();
-            const mood = detectMood(textNow);
-
+            const row = (log.find(r => r.id === id) || { text: '' });
+            const text = (row.text || '').trim();
+            const mood = detectMood(text);
             upsertRow(id, 'user', { done: true });
 
-            // Per-turn style refresh (adds mood + variety)
+            // per-turn adjustments: mood + phrasing variety; Dutch colloquialisms if detected
+            const dutchLikely = / de | het | een | jij | je | we | wij | lekker | alsjeblieft | dank je | bedankt | hoe | wat | waarom | grap /.test(text.toLowerCase());
+            const langAdj = dutchLikely ? 'Spreek vlot en informeel Nederlands; varieer intonatie en tempo.' : '';
             const moodStyle = styleForMood(mood);
             const nudge = turnStyleNudge();
-            safeSend(dcRef.current, {
-              type: 'session.update',
-              session: { instructions: `${moodStyle} ${nudge}` }
-            });
+            safeSend(dcRef.current, { type: 'session.update', session: { instructions: `${moodStyle} ${nudge} ${langAdj}` } });
 
-            // tiny “thinking” pause + optional backchannel/filler
+            // small pause + optional backchannel/laugh/filler
             const wait = pick(THINKING_PAUSE_MS);
             setTimeout(() => {
               sendBackchannel(dcRef.current);
               if (mood === 'joke') {
-                // quick, human laugh then continue
-                safeSend(dcRef.current, {
-                  type: 'response.create',
-                  response: { modalities: ['audio'], instructions: pick(LAUGHS) }
-                });
+                safeSend(dcRef.current, { type: 'response.create', response: { modalities: ['audio'], instructions: pick(LAUGHS) } });
               } else if (Math.random() < 0.08) {
-                safeSend(dcRef.current, {
-                  type: 'response.create',
-                  response: { modalities: ['audio'], instructions: pick(THINKING_FILLERS) }
-                });
+                safeSend(dcRef.current, { type: 'response.create', response: { modalities: ['audio'], instructions: pick(THINKING_FILLERS) } });
               }
             }, wait);
           }
 
-          // Fallback: full text
+          // fallback (full text)
           if (t === 'response.output_text' && typeof msg?.text === 'string') {
             addLine('assistant', msg.text);
           }
-        } catch {
-          // ignore non-JSON frames
-        }
+        } catch { /* ignore non-JSON */ }
       };
 
       pc.onconnectionstatechange = () => {
-        if (pc.connectionState === 'connected') {
-          setConnected(true);
-          setConnecting(false);
-        } else if (['disconnected', 'failed', 'closed'].includes(pc.connectionState)) {
-          endCall(false);
-        }
+        if (pc.connectionState === 'connected') { setConnected(true); setConnecting(false); }
+        else if (['disconnected','failed','closed'].includes(pc.connectionState)) { endCall(false); }
       };
 
       // 5) SDP
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
-      const baseUrl = 'https://api.openai.com/v1/realtime';
-      const url = `${baseUrl}?model=${encodeURIComponent(model || 'gpt-4o-realtime-preview')}`;
-
+      const url = `https://api.openai.com/v1/realtime?model=${encodeURIComponent(model || 'gpt-4o-realtime-preview')}`;
       const answerRes = await fetch(url, {
         method: 'POST',
         headers: {
@@ -620,11 +563,7 @@ export default function WebCallButton({
         },
         body: offer.sdp,
       });
-
-      if (!answerRes.ok) {
-        const txt = await answerRes.text();
-        throw new Error(`Realtime SDP failed: ${txt}`);
-      }
+      if (!answerRes.ok) throw new Error(`Realtime SDP failed: ${await answerRes.text()}`);
 
       const answer = { type: 'answer' as RTCSdpType, sdp: await answerRes.text() };
       await pc.setRemoteDescription(answer);
@@ -634,11 +573,14 @@ export default function WebCallButton({
         audioRef.current.play().catch(() => {});
       }
 
-      // start VAD after audio context exists
-      setupVAD();
+      // start VAD after audio is flowing
+      const stopVad = await setupVAD();
+      // include VAD teardown in cleanup
+      const prevCleanup = closeChainRef.current;
+      closeChainRef.current = () => { try{ prevCleanup && prevCleanup() }catch{}; try{ stopVad && stopVad() }catch{} };
+
     } catch (e: any) {
-      setConnecting(false);
-      setConnected(false);
+      setConnecting(false); setConnected(false);
       setError(e?.message || 'Failed to start call.');
       cleanup();
     }
@@ -664,13 +606,8 @@ export default function WebCallButton({
     try { micStreamRef.current?.getTracks()?.forEach((t) => t.stop()); } catch {}
     micStreamRef.current = null;
 
-    try { phoneChainCleanupRef.current?.(); } catch {}
-    phoneChainCleanupRef.current = null;
-
-    if (ambienceCleanupRef.current) { try { ambienceCleanupRef.current(); } catch {} ambienceCleanupRef.current = null; }
-
-    try { acRef.current?.close(); } catch {}
-    acRef.current = null;
+    try { closeChainRef.current && closeChainRef.current(); } catch {}
+    closeChainRef.current = null;
   }
 
   function endCall(userIntent = true) {
@@ -681,7 +618,7 @@ export default function WebCallButton({
   }
 
   useEffect(() => {
-    // prime “silence” window so assistant doesn't jump in immediately
+    // prime silence so assistant doesn’t jump in instantly
     lastMicActiveAtRef.current = Date.now();
     startCall();
     return () => { cleanup(); };
