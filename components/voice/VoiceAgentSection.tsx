@@ -6,12 +6,12 @@ import dynamic from 'next/dynamic';
 import { createPortal } from 'react-dom';
 import {
   Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Rocket, Search, Check, Lock,
-  KeyRound, Play, Square, Pause, X
+  KeyRound, Play, Square, Pause, X, MessageSquareText, Cpu, Bot, User
 } from 'lucide-react';
 import { scopedStorage } from '@/utils/scoped-storage';
 import WebCallButton from '@/components/voice/WebCallButton';
 
-// prompt-engine (kept — works if provided; shims below backstop it)
+/* If you have prompt-engine, we’ll use it; else safe shims. */
 import {
   applyInstructions as _applyInstructions,
   DEFAULT_PROMPT as _DEFAULT_PROMPT,
@@ -43,30 +43,8 @@ const GREEN_LINE = 'rgba(89,217,179,.20)';
 const ACTIVE_KEY = 'va:activeId';
 const Z_OVERLAY = 100000;
 const Z_MODAL   = 100001;
-const Z_MENU    = 100020;
+const Z_MENU    = 100020;       // above panels
 const IS_CLIENT = typeof window !== 'undefined' && typeof document !== 'undefined';
-
-/* icons (simple brand dots to avoid asset imports) */
-const BrandDot = ({ color }: { color: string }) => (
-  <span
-    style={{ backgroundColor: color }}
-    className="inline-block w-2.5 h-2.5 rounded-full shrink-0"
-    aria-hidden
-  />
-);
-const ProviderIcon = (p:'openai'|'anthropic'|'google') => (
-  <span className="inline-flex items-center gap-2">
-    <BrandDot color={p==='openai' ? '#10a37f' : p==='anthropic' ? '#5b5bff' : '#4285f4'} />
-  </span>
-);
-const ModelIcon = (label:string) => {
-  const l = label.toLowerCase();
-  const color =
-    l.includes('5') ? '#7c3aed' :
-    l.includes('4') ? '#10a37f' :
-    l.includes('3') ? '#f59e0b' : '#94a3b8';
-  return <BrandDot color={color} />;
-};
 
 /* phone icon */
 function PhoneFilled(props: React.SVGProps<SVGSVGElement>) {
@@ -80,11 +58,10 @@ function PhoneFilled(props: React.SVGProps<SVGSVGElement>) {
   );
 }
 
-/* ─────────── little safety helpers ─────────── */
+/* ─────────── little helpers ─────────── */
 const isFn = (f: any): f is Function => typeof f === 'function';
 const isStr = (v: any): v is string => typeof v === 'string';
 const nonEmpty = (v: any): v is string => isStr(v) && v.trim().length > 0;
-const coerceStr = (v: any): string => (isStr(v) ? v : '');
 const safeTrim = (v: any): string => (nonEmpty(v) ? v.trim() : '');
 
 /* ─────────── theme tokens ─────────── */
@@ -95,7 +72,7 @@ const Tokens = () => (
 
       --s-2:8px; --s-3:12px; --s-4:16px; --s-5:20px; --s-6:24px;
       --radius-outer:10px;
-      --control-h:44px; --header-h:88px;
+      --control-h:44px; --header-h:72px;
       --fz-title:18px; --fz-sub:15px; --fz-body:14px; --fz-label:12.5px;
       --lh-body:1.45; --ease:cubic-bezier(.22,.61,.36,1);
 
@@ -114,16 +91,14 @@ const Tokens = () => (
                     0 0 0 1px ${GREEN_LINE};
 
       --green-weak: rgba(89,217,179,.12);
-      --green-strong: rgba(89,217,179,.22);
 
+      /* dropdown tokens */
       --vs-input-bg:#101314;
       --vs-input-border:rgba(255,255,255,.14);
       --vs-input-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 12px 30px rgba(0,0,0,.38);
-
       --vs-menu-bg:#101314;
       --vs-menu-border:rgba(255,255,255,.16);
     }
-
     .va-portal{
       --vs-menu-bg:#101314;
       --vs-menu-border:rgba(255,255,255,.16);
@@ -133,7 +108,6 @@ const Tokens = () => (
       --text:#e6f1ef;
       --text-muted:#9fb4ad;
     }
-
     .va-card{
       border-radius:var(--radius-outer);
       border:1px solid var(--border-weak);
@@ -141,7 +115,6 @@ const Tokens = () => (
       box-shadow:var(--card-shadow);
       overflow:hidden; isolation:isolate;
     }
-
     .va-head{
       min-height:var(--header-h);
       display:grid; grid-template-columns:1fr auto; align-items:center;
@@ -153,19 +126,15 @@ const Tokens = () => (
       border-bottom:1px solid rgba(255,255,255,.08);
       color:var(--text);
     }
-
-    /* panel drawer */
-    .va-drawer {
-      position: fixed; inset: 0 0 0 auto; width: min(520px, 90vw);
-      transform: translateX(100%);
-      transition: transform .26s var(--ease);
-      z-index: 100005;
-      display: grid; grid-template-rows: auto 1fr auto;
-      background: var(--panel-bg);
-      border-left: 1px solid ${GREEN_LINE};
-      box-shadow: 0 0 0 1px rgba(255,255,255,.05) inset, 0 24px 70px rgba(0,0,0,.6);
+    @keyframes va-blink { 0%, 49% {opacity:1;} 50%, 100% {opacity:0;} }
+    .va-caret::after{
+      content:'';
+      display:inline-block;
+      width:8px; height:18px; margin-left:2px;
+      background: currentColor; opacity:.9; border-radius:1px;
+      animation: va-blink 1s step-end infinite;
+      transform: translateY(3px);
     }
-    .va-drawer.open { transform: translateX(0); }
   `}</style>
 );
 
@@ -192,8 +161,87 @@ type AgentData = {
   numerals: boolean;
 };
 
-const BLANK_TEMPLATE_NOTE =
-  'This is a blank template with minimal defaults. You can change the model and messages, or click Generate to tailor the prompt to your business.';
+/* ─────────── prompt-engine shims (SAFE) ─────────── */
+const looksLikeFullPromptSafe = (raw: string) => {
+  const t = (raw || '').toLowerCase();
+  return ['[identity]', '[style]', '[response guidelines]', '[task & goals]', '[error handling', '[notes]'].some(h => t.includes(h));
+};
+
+const normalizeFullPromptSafe = (raw: string) => {
+  // very safe: keep only the known sections in order
+  const pull = (label: string) => {
+    const rx = new RegExp(`\$begin:math:display$\\\\s*${label.replace(/[-/\\\\^$*+?.()|[$end:math:display${}]/g,'\\$&')}\\s*\\]([\\s\\S]*?)(?=\\n\\s*\\[|$)`, 'i');
+    const m = (raw || '').match(rx);
+    return m ? m[1].trim() : '';
+  };
+  const sec = {
+    identity: pull('Identity') || '- You are a helpful, professional AI assistant for this business.',
+    style: pull('Style') || '- Clear, concise, friendly.',
+    guidelines: pull('Response Guidelines') || '- Ask one clarifying question when essential info is missing.',
+    tasks: pull('Task & Goals') || '- Guide users to their next best action (booking, purchase, or escalation).',
+    errors: pull('Error Handling / Fallback') || '- If unsure, ask a specific clarifying question first.',
+    notes: pull('Notes') || ''
+  };
+  return (
+`[Identity]
+${sec.identity}
+
+[Style]
+${sec.style}
+
+[Response Guidelines]
+${sec.guidelines}
+
+[Task & Goals]
+${sec.tasks}
+
+[Error Handling / Fallback]
+${sec.errors}
+${sec.notes ? `\n[Notes]\n${sec.notes}` : ''}`.trim());
+};
+
+const applyInstructionsSafe = (base: string, raw: string) => {
+  const text = (raw || '').trim();
+  const industryMatch = text.match(/assistant\s+for\s+(?:a|an|the)?\s*([^.;:,]+?)(?:\s+(?:clinic|store|company|business))?(?:\.|;|,|$)/i);
+  const industry = industryMatch ? industryMatch[1].trim() : '';
+  const toneMatch = text.match(/tone\s*[:=]\s*([a-z,\s-]+)/i) || text.match(/\b(friendly|formal|casual|professional|empathetic|playful)\b/i);
+  const tone = toneMatch ? (toneMatch as any)[1]?.trim?.() || (toneMatch as any)[0] : '';
+  const tasksMatch = text.match(/tasks?\s*[:=]\s*([a-z0-9_,\-\s]+)/i);
+  const tasks = (tasksMatch ? tasksMatch[1] : '')
+    .split(/[,\s]+/).filter(Boolean);
+
+  const merged = normalizeFullPromptSafe(
+`[Identity]
+- You are a versatile AI assistant${industry ? ` for a ${industry}` : ''}. Represent the brand professionally and help users achieve their goals.
+
+[Style]
+- ${tone ? `${tone[0].toUpperCase()}${tone.slice(1)}` : 'Clear, concise, friendly'}. Prefer 2–4 short sentences per turn.
+- Confirm understanding with a brief paraphrase when the request is complex.
+
+[Response Guidelines]
+- Ask a clarifying question when essential info is missing.
+- Do not fabricate; say when you don’t know or need to check.
+- Summarize next steps when the user has a multi-step task.
+
+[Task & Goals]
+- Qualify the user’s need, answer relevant FAQs, and guide to scheduling, purchase, or escalation.
+- Offer to collect structured info (name, contact, preferred time) when booking or follow-up is needed.${tasks.length ? ` Focus on: ${tasks.join(', ')}.` : ''}
+
+[Error Handling / Fallback]
+- If uncertain, ask a specific clarifying question.
+- If a tool/endpoint fails, apologize briefly and offer an alternative or human handoff.`);
+
+  return { merged, summary: 'Updated.' };
+};
+
+const looksLikeFullPromptRT = (raw: string) =>
+  isFn(_looksLikeFullPrompt) ? !!_looksLikeFullPrompt(raw) : looksLikeFullPromptSafe(raw);
+
+const normalizeFullPromptRT = (raw: string) =>
+  isFn(_normalizeFullPrompt) ? String(_normalizeFullPrompt(raw) || '') : normalizeFullPromptSafe(raw);
+
+const applyInstructionsRT = (base: string, raw: string) =>
+  isFn(_applyInstructions) ? (_applyInstructions as any)(base, raw) : applyInstructionsSafe(base, raw);
 
 const PROMPT_SKELETON =
 `[Identity]
@@ -206,115 +254,15 @@ const PROMPT_SKELETON =
 
 [Error Handling / Fallback]`;
 
-/* ─────────── prompt-engine shims ─────────── */
-const looksLikeFullPromptSafe = (raw: string) => {
-  const t = (raw || '').toLowerCase();
-  return ['[identity]', '[style]', '[response guidelines]', '[task & goals]', '[error handling', '[notes]'].some(h => t.includes(h));
-};
-
-const normalizeFullPromptSafe = (raw: string) => {
-  const sections = { identity:'', style:'', guidelines:'', tasks:'', errors:'', notes:'' };
-  const add = (k: keyof typeof sections, v: string) => { sections[k] = safeTrim(v); };
-  const pull = (label: string) => {
-    const rx = new RegExp(`\$begin:math:display$${label.replace(/[.*+?^${}()|[\\$end:math:display$\\\\]/g,'\\$&')}\\]\\s*([\\s\\S]*?)(?=\\n\\s*\\[|$)`, 'i');
-    const m = raw.match(rx); return m ? m[1] : '';
-  };
-  add('identity', pull('Identity'));
-  add('style', pull('Style'));
-  add('guidelines', pull('Response Guidelines'));
-  add('tasks', pull('Task & Goals'));
-  add('errors', pull('Error Handling / Fallback'));
-  add('notes', pull('Notes'));
-
-  const out =
-`[Identity]
-${sections.identity || '- You are a helpful, professional AI assistant for this business.'}
-
-[Style]
-${sections.style || '- Clear, concise, friendly.'}
-
-[Response Guidelines]
-${sections.guidelines || '- Ask one clarifying question when essential info is missing.'}
-
-[Task & Goals]
-${sections.tasks || '- Guide users to their next best action (booking, purchase, or escalation).'}
-
-[Error Handling / Fallback]
-${sections.errors || '- If unsure, ask a specific clarifying question first.'}
-
-${sections.notes ? `[Notes]\n${sections.notes}\n` : ''}`;
-  return out.trim();
-};
-
-const applyInstructionsSafe = (base: string, raw: string) => {
-  const text = (raw || '').trim();
-  const industryMatch = text.match(/assistant\s+for\s+(a|an|the)?\s*([^.;:,]+?)(\s+(clinic|store|company|business))?(\.|;|,|$)/i);
-  const industry = industryMatch ? industryMatch[2].trim() : '';
-
-  const toneMatch = text.match(/tone\s*[:=]\s*([a-z,\s-]+)/i) || text.match(/\b(friendly|formal|casual|professional|empathetic|playful)\b/i);
-  const tone = toneMatch ? (toneMatch as any)[1]?.trim?.() || (toneMatch as any)[0] : '';
-
-  const tasksMatch = text.match(/tasks?\s*[:=]\s*([a-z0-9_,\-\s]+)/i);
-  const tasksRaw = tasksMatch ? (tasksMatch as any)[1] : '';
-  const tasks = tasksRaw
-    ? tasksRaw.split(/[,\s]+/).filter(Boolean)
-    : (text.includes('booking') || text.includes('schedule')) ? ['lead_qualification','booking','faq'] : [];
-
-  const channels = /voice|call|phone/i.test(text) && /chat|website|web/i.test(text) ? 'voice & chat'
-                  : /voice|call|phone/i.test(text) ? 'voice'
-                  : /chat|website|web/i.test(text) ? 'chat' : '';
-
-  const identity =
-`- You are a versatile AI assistant${industry ? ` for a ${industry}` : ''}. Represent the brand professionally.`;
-
-  const style =
-`- ${tone ? `${tone[0].toUpperCase()}${tone.slice(1)}` : 'Clear, concise, friendly'}. Use 2–4 short sentences per turn.`;
-
-  const guidelines =
-`- Ask a clarifying question when essential info is missing.
-- Don’t fabricate; say when you need to check.`;
-
-  const goals =
-`- Qualify needs, answer FAQs, guide to scheduling/purchase/escalation.${channels ? ` (${channels})` : ''}${tasks.length ? ` Focus: ${tasks.join(', ')}.` : ''}`;
-
-  const errors =
-`- If uncertain, ask a specific clarifying question.
-- If a tool fails, apologize briefly and offer alternatives.`;
-
-  const merged =
-`[Identity]
-${identity}
-
-[Style]
-${style}
-
-[Response Guidelines]
-${guidelines}
-
-[Task & Goals]
-${goals}
-
-[Error Handling / Fallback]
-${errors}`;
-
-  return { merged, summary: 'Updated.' };
-};
-
-const looksLikeFullPromptRT = (raw: string) =>
-  isFn(_looksLikeFullPrompt) ? !!_looksLikeFullPrompt(raw) : looksLikeFullPromptSafe(raw);
-const normalizeFullPromptRT = (raw: string) =>
-  isFn(_normalizeFullPrompt) ? coerceStr(_normalizeFullPrompt(raw)) : normalizeFullPromptSafe(raw);
-const applyInstructionsRT = (base: string, raw: string) =>
-  isFn(_applyInstructions) ? (_applyInstructions as any)(base, raw) : applyInstructionsSafe(base, raw);
 const DEFAULT_PROMPT_RT = nonEmpty(_DEFAULT_PROMPT) ? _DEFAULT_PROMPT! : PROMPT_SKELETON;
 
 /* ─────────── defaults ─────────── */
 const DEFAULT_AGENT: AgentData = {
   name: 'Assistant',
   provider: 'openai',
-  model: 'GPT-4o',
+  model: 'gpt-4o', // value keys not labels
   firstMode: 'Assistant speaks first',
-  firstMsg: 'Hello.',
+  firstMsg: 'Hello! I can help with anything here. What would you like to do?',
   systemPrompt: normalizeFullPromptRT(`
 [Identity]
 - You are a helpful, professional AI assistant for this business.
@@ -330,7 +278,7 @@ const DEFAULT_AGENT: AgentData = {
 
 [Error Handling / Fallback]
 - If unsure, ask a specific clarifying question first.
-`).trim() + '\n\n' + `# ${BLANK_TEMPLATE_NOTE}\n`,
+`),
   ttsProvider: 'openai',
   voiceName: 'Alloy (American)',
   apiKeyId: '',
@@ -349,18 +297,7 @@ const loadAgentData = (id: string): AgentData => {
   catch {}
   return { ...DEFAULT_AGENT };
 };
-const saveAgentData = (id: string, data: AgentData) => {
-  try { if (IS_CLIENT) localStorage.setItem(keyFor(id), JSON.stringify(data)); } catch {}
-};
-const pushVersion = (id:string, snapshot:any) => {
-  try {
-    if (!IS_CLIENT) return;
-    const raw = localStorage.getItem(versKeyFor(id));
-    const arr = raw ? JSON.parse(raw) : [];
-    arr.unshift({ id: `v_${Date.now()}`, ts: Date.now(), ...snapshot });
-    localStorage.setItem(versKeyFor(id), JSON.stringify(arr.slice(0, 50)));
-  } catch {}
-};
+const saveAgentData = (id: string, data: AgentData) => { try { if (IS_CLIENT) localStorage.setItem(keyFor(id), JSON.stringify(data)); } catch {} };
 
 /* ─────────── mock backend (save/publish) ─────────── */
 async function apiSave(agentId: string, payload: AgentData){
@@ -376,47 +313,50 @@ async function apiPublish(agentId: string){
   return r.json();
 }
 
-/* ─────────── option helpers ─────────── */
-type Opt = { value: string; label: string; disabled?: boolean; note?: string; iconLeft?: React.ReactNode };
+/* ─────────── logos ─────────── */
+const OpenAILogo = () => <Cpu className="w-3.5 h-3.5" />;
+const AnthropicLogo = () => <Bot className="w-3.5 h-3.5" />;
+const GoogleLogo = () => (
+  <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" aria-hidden><circle cx="12" cy="12" r="10" fill="currentColor"/></svg>
+);
+
+/* ─────────── options ─────────── */
+type Opt = { value: string; label: string; disabled?: boolean; note?: string; icon?: React.ReactNode };
 
 const providerOpts: Opt[] = [
-  { value: 'openai',     label: 'OpenAI',     iconLeft: ProviderIcon('openai') },
-  { value: 'anthropic',  label: 'Anthropic — coming soon', disabled: true, note: 'soon', iconLeft: ProviderIcon('anthropic') },
-  { value: 'google',     label: 'Google — coming soon',    disabled: true, note: 'soon', iconLeft: ProviderIcon('google') },
+  { value: 'openai',     label: 'OpenAI', icon: <OpenAILogo/> },
+  { value: 'anthropic',  label: 'Anthropic — coming soon', icon: <AnthropicLogo/>, disabled: true },
+  { value: 'google',     label: 'Google — coming soon',    icon: <GoogleLogo/>, disabled: true },
 ];
 
-/* include 5/4/3 keystrings + logos; these are UI choices and do not force backend availability */
+/* Model options: include 5 / 4 / 3 keys and show tiny logos */
 const modelOptsFor = (provider: string): Opt[] => {
   if (provider === 'openai') {
     return [
-      { value: 'gpt-5-preview', label: 'GPT-5 Preview', iconLeft: ModelIcon('5') },
-      { value: 'GPT-4.1',       label: 'GPT-4.1',      iconLeft: ModelIcon('4') },
-      { value: 'GPT-4o',        label: 'GPT-4o',       iconLeft: ModelIcon('4') },
-      { value: 'gpt-4',         label: 'GPT-4',        iconLeft: ModelIcon('4') },
-      { value: 'o4-mini',       label: 'o4-mini',      iconLeft: ModelIcon('4') },
-      { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo',iconLeft: ModelIcon('3') },
+      { value: 'gpt-5',    label: 'GPT-5',    icon: <OpenAILogo/> },
+      { value: 'gpt-4.1',  label: 'GPT-4.1',  icon: <OpenAILogo/> },
+      { value: 'gpt-4o',   label: 'GPT-4o',   icon: <OpenAILogo/> },
+      { value: 'gpt-3.5',  label: 'GPT-3.5',  icon: <OpenAILogo/> },
+      { value: 'o4-mini',  label: 'o4-mini',  icon: <OpenAILogo/> },
     ];
   }
   return [{ value: 'coming', label: 'Models coming soon', disabled: true }];
 };
 
 const ttsProviders: Opt[] = [
-  { value: 'openai',    label: 'OpenAI', iconLeft: ProviderIcon('openai') },
-  { value: 'elevenlabs', label: 'ElevenLabs — coming soon', disabled: true, note: 'soon' },
+  { value: 'openai',    label: 'OpenAI', icon: <OpenAILogo/> },
+  { value: 'elevenlabs', label: 'ElevenLabs — coming soon', disabled: true },
 ];
 
 const asrProviders: Opt[] = [
-  { value: 'deepgram',   label: 'Deepgram',  iconLeft: <BrandDot color="#1fb6ff" /> },
-  { value: 'whisper',    label: 'Whisper — coming soon', disabled: true, note: 'soon', iconLeft: ProviderIcon('openai') },
-  { value: 'assemblyai', label: 'AssemblyAI — coming soon', disabled: true, note: 'soon', iconLeft: <BrandDot color="#9333ea" /> },
+  { value: 'deepgram',   label: 'Deepgram' },
+  { value: 'whisper',    label: 'Whisper — coming soon', disabled: true },
+  { value: 'assemblyai', label: 'AssemblyAI — coming soon', disabled: true },
 ];
 
 const asrModelsFor = (asr: string): Opt[] =>
   asr === 'deepgram'
-    ? [
-        { value: 'Nova 2', label: 'Nova 2', iconLeft: <BrandDot color="#1fb6ff" /> },
-        { value: 'Nova',   label: 'Nova',   iconLeft: <BrandDot color="#1fb6ff" /> },
-      ]
+    ? [{ value: 'Nova 2', label: 'Nova 2' }, { value: 'Nova', label: 'Nova' }]
     : [{ value: 'coming', label: 'Models coming soon', disabled: true }];
 
 /* ─────────── UI atoms ─────────── */
@@ -441,7 +381,10 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
-/* ─────────── Styled select with portal (less rounded + viewport clamp + icons + bottom space) ─────────── */
+/* clamp utility */
+const clamp = (v:number, min:number, max:number) => Math.max(min, Math.min(max, v));
+
+/* ─────────── Styled select (portal, less rounded, with icons, clamped) ─────────── */
 function StyledSelect({
   value, onChange, options, placeholder, leftIcon, menuTop,
   onPreview, isPreviewing
@@ -457,7 +400,7 @@ function StyledSelect({
   const searchRef = useRef<HTMLInputElement|null>(null);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const [menuPos, setMenuPos] = useState<{left:number; top:number; width:number; maxH:number} | null>(null);
+  const [menuPos, setMenuPos] = useState<{left:number; top:number; width:number} | null>(null);
 
   const current = options.find(o => o.value === value) || null;
   const filtered = useMemo(() => {
@@ -465,28 +408,19 @@ function StyledSelect({
     return q ? options.filter(o => o.label.toLowerCase().includes(q)) : options;
   }, [options, query, value]);
 
-  function calcMenu(){
-    if (!btnRef.current) return;
+  // position, clamped to viewport
+  useLayoutEffect(() => {
+    if (!open || !btnRef.current) return;
     const r = btnRef.current.getBoundingClientRect();
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    const padding = 8;
-    const width = Math.min(r.width, Math.max(220, r.width));
-    const left = Math.min(Math.max(padding, r.left), vw - width - padding);
-    const spaceBelow = vh - r.bottom - padding;
-    const spaceAbove = r.top - padding;
-    const desired = 340;
-    let maxH = Math.max(220, Math.min(desired, spaceBelow - 12));
-    let top = r.bottom + 8;
-    if (spaceBelow < 220 && spaceAbove > spaceBelow) {
-      maxH = Math.max(220, Math.min(desired, spaceAbove - 12));
-      top = Math.max(padding, r.top - (maxH + 16));
-    }
-    setMenuPos({ left, top, width, maxH });
-  }
+    const width = r.width;
+    const left = clamp(r.left, 8, Math.max(8, window.innerWidth - width - 8));
+    const bottomSpace = window.innerHeight - r.bottom;
+    const menuH = 320;
+    const top = bottomSpace > menuH ? r.bottom + 8 : Math.max(8, r.top - 8 - menuH);
+    setMenuPos({ left, top, width });
+  }, [open]);
 
-  useLayoutEffect(() => { if (open) calcMenu(); }, [open]);
-
+  // outside click — include portal
   useEffect(() => {
     if (!open || !IS_CLIENT) return;
     const off = (e: MouseEvent) => {
@@ -496,16 +430,18 @@ function StyledSelect({
       setOpen(false);
     };
     const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
-    const onResize = () => { if (open) calcMenu(); };
+    const onResize = () => {
+      if (!btnRef.current) return;
+      const r = btnRef.current.getBoundingClientRect();
+      setMenuPos({ left: r.left, top: r.bottom + 8, width: r.width });
+    };
     window.addEventListener('mousedown', off);
     window.addEventListener('keydown', onEsc);
     window.addEventListener('resize', onResize);
-    window.addEventListener('scroll', onResize, true);
     return () => {
       window.removeEventListener('mousedown', off);
       window.removeEventListener('keydown', onEsc);
       window.removeEventListener('resize', onResize);
-      window.removeEventListener('scroll', onResize, true);
     };
   }, [open]);
 
@@ -517,15 +453,14 @@ function StyledSelect({
         onClick={() => { setOpen(v=>!v); setTimeout(()=>searchRef.current?.focus(),0); }}
         className="w-full flex items-center justify-between gap-3 px-3 py-3 rounded-[8px] text-sm outline-none transition"
         style={{
-          background:'var(--vs-input-bg, #101314)',
-          border:'1px solid var(--vs-input-border, rgba(255,255,255,.14))',
-          boxShadow:'var(--vs-input-shadow, none)',
+          background:'var(--vs-input-bg)',
+          border:'1px solid var(--vs-input-border)',
+          boxShadow:'var(--vs-input-shadow)',
           color:'var(--text)'
         }}
       >
         <span className="flex items-center gap-2 truncate">
           {leftIcon}
-          {current?.iconLeft}
           <span className="truncate">{current ? current.label : (placeholder || '— Choose —')}</span>
         </span>
         <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)' }} />
@@ -537,22 +472,22 @@ function StyledSelect({
           className="fixed z-[100020] p-3 va-portal"
           style={{
             position:'fixed',
-            left: (menuPos?.left ?? 0),
-            top: (menuPos?.top ?? 0),
+            left: (menuPos?.left ?? 8),
+            top: (menuPos?.top ?? 8),
             width: (menuPos?.width ?? (btnRef.current?.getBoundingClientRect().width ?? 280)),
-            background:'var(--vs-menu-bg, #101314)',
-            border:'1px solid var(--vs-menu-border, rgba(255,255,255,.16))',
-            borderRadius:12,
+            background:'var(--vs-menu-bg)',
+            border:'1px solid var(--vs-menu-border)',
+            borderRadius:10,
             boxShadow:'0 28px 70px rgba(0,0,0,.60), 0 10px 26px rgba(0,0,0,.45), 0 0 0 1px rgba(0,255,194,.10)',
-            maxHeight: menuPos?.maxH ?? 320,
-            overflow:'hidden auto',
+            maxHeight: 360,
+            overflow:'hidden'
           }}
         >
           {menuTop ? <div className="mb-2">{menuTop}</div> : null}
 
           <div
             className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[8px]"
-            style={{ background:'var(--vs-input-bg, #101314)', border:'1px solid var(--vs-input-border, rgba(255,255,255,.14))', boxShadow:'var(--vs-input-shadow, none)', color:'var(--text)' }}
+            style={{ background:'var(--vs-input-bg)', border:'1px solid var(--vs-input-border)', color:'var(--text)' }}
           >
             <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
             <input
@@ -565,31 +500,30 @@ function StyledSelect({
             />
           </div>
 
-          <div className="pr-1" style={{ scrollbarWidth:'thin' }}>
+          <div className="max-h-72 overflow-y-auto pr-1" style={{ scrollbarWidth:'thin' }}>
             {filtered.map(o => (
               <button
                 key={o.value}
                 disabled={!!o.disabled}
                 onClick={()=>{ if (o.disabled) return; onChange(o.value); setOpen(false); }}
-                className="w-full text-left text-sm px-3 py-2 rounded-[8px] transition grid grid-cols-[18px_18px_1fr_auto] items-center gap-2 disabled:opacity-60"
+                className="w-full text-left text-sm px-3 py-2 rounded-[6px] transition grid grid-cols-[18px_1fr_auto] items-center gap-2 disabled:opacity-60"
                 style={{
                   color: o.disabled ? 'var(--text-muted)' : 'var(--text)',
                   background:'transparent',
                   border:'1px solid transparent',
                   cursor:o.disabled?'not-allowed':'pointer',
                 }}
-                onMouseEnter={(e)=>{ if (o.disabled) return; const el=e.currentTarget as HTMLButtonElement; el.style.background = 'rgba(0,255,194,0.10)'; el.style.border = '1px solid rgba(0,255,194,0.35)'; }}
+                onMouseEnter={(e)=>{ if (o.disabled) return; const el=e.currentTarget as HTMLButtonElement; el.style.background = 'rgba(0,255,194,0.10)'; el.style.border = '1px solid rgba(0,255,194,0.28)'; }}
                 onMouseLeave={(e)=>{ const el=e.currentTarget as HTMLButtonElement; el.style.background = 'transparent'; el.style.border = '1px solid transparent'; }}
               >
-                {o.disabled ? <Lock className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" style={{ opacity: o.value===value ? 1 : 0 }} />}
-                <span className="inline-grid place-items-center">{o.iconLeft ?? <span />}</span>
+                {o.icon ? <span className="opacity-90">{o.icon}</span> : (o.disabled ? <Lock className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" style={{ opacity: o.value===value ? 1 : 0 }} />)}
                 <span className="truncate">{o.label}</span>
                 {onPreview ? (
                   <button
                     type="button"
                     onClick={async (e)=>{ e.stopPropagation(); await onPreview(o.value); }}
                     className="w-7 h-7 rounded-full grid place-items-center"
-                    style={{ border:'1px solid var(--vs-input-border, rgba(255,255,255,.14))', background:'var(--vs-input-bg, #101314)' }}
+                    style={{ border:'1px solid var(--vs-input-border)', background:'var(--vs-input-bg)' }}
                     aria-label={isPreviewing === o.value ? 'Stop preview' : 'Play preview'}
                     title={isPreviewing === o.value ? 'Stop' : 'Play'}
                   >
@@ -602,9 +536,6 @@ function StyledSelect({
               <div className="px-3 py-6 text-sm" style={{ color:'var(--text-muted)' }}>No matches.</div>
             )}
           </div>
-
-          {/* bottom space so menu isn't glued to the edge */}
-          <div style={{ height: 8 }} />
         </div>,
         document.body
       ) : null}
@@ -612,7 +543,7 @@ function StyledSelect({
   );
 }
 
-/* ─────────── Section (expand anim) ─────────── */
+/* ─────────── Section (expand) ─────────── */
 function Section({
   title, icon, desc, children, defaultOpen = true
 }:{
@@ -662,28 +593,21 @@ function Section({
   );
 }
 
-/* ─────────── Diff helpers ─────────── */
+/* ─────────── Diff helpers (for inline review) ─────────── */
 function computeDiff(base:string, next:string){
   const a = (base || '').split('\n');
   const b = (next || '').split('\n');
-  const setA = new Set(a);
-  const setB = new Set(b);
   const rows: Array<{t:'same'|'add'|'rem', text:string}> = [];
   const max = Math.max(a.length, b.length);
   for (let i=0;i<max;i++){
     const la = a[i]; const lb = b[i];
     if (la === lb && la !== undefined){ rows.push({ t:'same', text: la! }); continue; }
-    if (lb !== undefined && !setA.has(lb)) rows.push({ t:'add', text: lb });
-    if (la !== undefined && !setB.has(la)) rows.push({ t:'rem', text: la });
-  }
-  for (let j=a.length;j>b.length;j++){
-    const la=a[j]; if (la!==undefined && !setB.has(la)) rows.push({ t:'rem', text: la });
-  }
-  for (let j=a.length;j<b.length;j++){
-    const lb=b[j]; if (lb!==undefined && !setA.has(lb)) rows.push({ t:'add', text: lb });
+    if (lb !== undefined && (la !== lb)) rows.push({ t:'add', text: lb });
+    if (la !== undefined && (la !== lb)) rows.push({ t:'rem', text: la });
   }
   return rows;
 }
+
 function DiffInline({ base, next }:{ base:string; next:string }){
   const rows = computeDiff(base, next);
   return (
@@ -710,17 +634,15 @@ function DiffInline({ base, next }:{ base:string; next:string }){
   );
 }
 
-/* ─────────── Realtime model chooser (provider-agnostic mapping) ─────────── */
-function getRealtimeModelFor(provider: AgentData['provider'], uiModel: string): string {
-  const m = (uiModel || '').toLowerCase();
-  if (provider === 'openai') {
-    if (m.includes('5') || m.includes('4') || m.includes('o4')) return 'gpt-4o-realtime-preview';
-    if (m.includes('3')) return 'gpt-4o-realtime-preview'; // fallback RT
-    return 'gpt-4o-realtime-preview';
-  }
-  // placeholders until you wire other RTP backends
-  if (provider === 'anthropic') return 'gpt-4o-realtime-preview';
-  if (provider === 'google')    return 'gpt-4o-realtime-preview';
+/* ─────────── model mapping for WebRTC ─────────── */
+function mapToRealtime(model: string){
+  // You can wire your own mapping. We fallback to 4o realtime.
+  const m = model.toLowerCase();
+  if (m.includes('5')) return 'gpt-4o-realtime-preview';
+  if (m.includes('4o')) return 'gpt-4o-realtime-preview';
+  if (m.includes('4.1')) return 'gpt-4o-realtime-preview';
+  if (m.includes('3.5')) return 'gpt-4o-realtime-preview';
+  if (m.includes('o4')) return 'gpt-4o-realtime-preview';
   return 'gpt-4o-realtime-preview';
 }
 
@@ -755,21 +677,24 @@ export default function VoiceAgentSection() {
   const [toastKind, setToastKind] = useState<'info'|'error'>('info');
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
 
-  /* call panel */
+  // Panel open
   const [showCall, setShowCall] = useState(false);
-  const [transcript, setTranscript] = useState<Array<{role:'assistant'|'user', text:string}>>([]);
 
-  // Generate overlay (no presets)
+  // Generate overlay
   const [showGenerate, setShowGenerate] = useState(false);
   const [composerText, setComposerText] = useState('');
   const [genPhase, setGenPhase] = useState<'idle'|'editing'|'loading'|'review'>('idle');
 
-  // prompt edit state
+  // inline review
   const basePromptRef = useRef<string>('');
   const [proposedPrompt, setProposedPrompt] = useState('');
-  const [changesSummary, setChangesSummary] = useState('');
 
-  // voice preview (browser)
+  // simple transcript
+  const [msgs, setMsgs] = useState<ChatMsg[]>(() => [
+    { id: 'sys', role: 'system', text: (DEFAULT_AGENT.systemPrompt || '').trim() },
+  ]);
+
+  // voice preview via browser TTS
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   useEffect(() => {
     if (!IS_CLIENT || !('speechSynthesis' in window)) return;
@@ -796,14 +721,15 @@ export default function VoiceAgentSection() {
     window.addEventListener('assistant:active', handler as EventListener);
     return () => window.removeEventListener('assistant:active', handler as EventListener);
   }, []);
+
   useEffect(() => {
     if (!activeId) return;
     setData(loadAgentData(activeId));
     try { if (IS_CLIENT) localStorage.setItem(ACTIVE_KEY, activeId); } catch {}
   }, [activeId]);
+
   useEffect(() => { if (activeId) saveAgentData(activeId, data); }, [activeId, data]);
 
-  /* load API keys */
   useEffect(() => {
     (async () => {
       try {
@@ -820,10 +746,10 @@ export default function VoiceAgentSection() {
 
         setApiKeys(cleaned);
 
-        const storeSelected = await store.getJSON<string>('apiKeys.selectedId', '');
+        const globalSelected = await store.getJSON<string>('apiKeys.selectedId', '');
         const chosen =
           (data.apiKeyId && cleaned.some((k) => k.id === data.apiKeyId)) ? data.apiKeyId! :
-          (storeSelected && cleaned.some((k) => k.id === storeSelected)) ? storeSelected :
+          (globalSelected && cleaned.some((k) => k.id === globalSelected)) ? globalSelected :
           (cleaned[0]?.id || '');
 
         if (chosen && chosen !== data.apiKeyId) {
@@ -865,53 +791,30 @@ export default function VoiceAgentSection() {
     finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
   }
 
-  /* ─────────── REALTIME CALL PANEL ─────────── */
-  const callModel = getRealtimeModelFor(data.provider, data.model);
-
+  /* ─────────── REALTIME CALL LAUNCH ─────────── */
   const openCall = () => {
     const key = apiKeys.find(k => k.id === data.apiKeyId)?.key || '';
     if (!key) {
-      setToastKind('error'); setToast('Select an OpenAI API key first.'); setTimeout(()=>setToast(''), 2200);
+      setToastKind('error');
+      setToast('Select an OpenAI API key first.');
+      setTimeout(()=>setToast(''), 2200);
       return;
     }
-    // reset transcript
-    setTranscript([]);
-    // seed "assistant speaks first"
-    if (data.firstMode === 'Assistant speaks first' && nonEmpty(data.firstMsg)) {
-      setTranscript([{ role: 'assistant', text: data.firstMsg }]);
-    }
+    // seed first message in transcript if assistant speaks first
+    setMsgs(prev => {
+      const base: ChatMsg[] = [{ id: 'sys', role: 'system', text: data.systemPrompt.trim() }];
+      if (data.firstMode === 'Assistant speaks first' && nonEmpty(data.firstMsg)) {
+        base.push({ id: 'hello', role: 'assistant', text: data.firstMsg });
+      }
+      return base;
+    });
     setShowCall(true);
   };
 
-  // Hook up to events optionally dispatched by your WebCallButton (if you emit them)
-  useEffect(() => {
-    if (!IS_CLIENT) return;
-    const onPartial = (e: any) => {
-      const { role, text } = e.detail || {};
-      if (!role || !text) return;
-      setTranscript(prev => {
-        const copy = [...prev];
-        // show partial as replace of last same-role partial, else append
-        const last = copy[copy.length-1];
-        if (last && last.role === role && !last.text.endsWith('✓')) {
-          copy[copy.length-1] = { role, text };
-          return copy;
-        }
-        return [...copy, { role, text }];
-      });
-    };
-    const onFinal = (e: any) => {
-      const { role, text } = e.detail || {};
-      if (!role || !text) return;
-      setTranscript(prev => [...prev, { role, text }]);
-    };
-    window.addEventListener('webcall:partial' as any, onPartial as any);
-    window.addEventListener('webcall:final' as any, onFinal as any);
-    return () => {
-      window.removeEventListener('webcall:partial' as any, onPartial as any);
-      window.removeEventListener('webcall:final' as any, onFinal as any);
-    };
-  }, []);
+  /* ─────────── transcript sink from WebCallButton ─────────── */
+  const onTranscriptEvent = (ev: { role:'user'|'assistant', text:string }) => {
+    setMsgs(prev => [...prev, { id: String(Date.now())+Math.random(), role: ev.role, text: ev.text }]);
+  };
 
   /* ─────────── UI ─────────── */
   const inInlineReview = genPhase === 'review' && !showGenerate;
@@ -973,6 +876,7 @@ export default function VoiceAgentSection() {
             </div>
           ) : null}
 
+          {/* quick stats */}
           <div className="grid gap-[12px] md:grid-cols-2 mb-[12px]">
             <div className="va-card">
               <div className="va-head" style={{ minHeight: 56 }}>
@@ -992,10 +896,11 @@ export default function VoiceAgentSection() {
             </div>
           </div>
 
+          {/* Model */}
           <Section
             title="Model"
             icon={<Gauge className="w-4 h-4" style={{ color: CTA }} />}
-            desc="Configure the model, assistant name, and first message."
+            desc="Configure the model, assistant name, first message, and startup behavior."
             defaultOpen={true}
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px]">
@@ -1011,52 +916,56 @@ export default function VoiceAgentSection() {
               </div>
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]">Provider</div>
-                <StyledSelect
-                  value={data.provider}
-                  onChange={(v)=>setField('provider')(v as AgentData['provider'])}
-                  options={providerOpts}
-                />
+                <StyledSelect value={data.provider} onChange={(v)=>setField('provider')(v as AgentData['provider'])} options={providerOpts} />
               </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt-[var(--s-4)]">
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]">Model</div>
-                <StyledSelect value={data.model} onChange={setField('model')} options={modelOpts}/>
+                <StyledSelect
+                  value={data.model}
+                  onChange={setField('model')}
+                  options={modelOpts}
+                  leftIcon={<OpenAILogo/>}
+                />
               </div>
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]">First Message Mode</div>
-                <StyledSelect value={data.firstMode} onChange={setField('firstMode')} options={[
-                  { value: 'Assistant speaks first', label: 'Assistant speaks first' },
-                  { value: 'User speaks first', label: 'User speaks first' },
-                  { value: 'Silent until tool required', label: 'Silent until tool required' },
-                ]}/>
+                <StyledSelect
+                  value={data.firstMode}
+                  onChange={setField('firstMode') as any}
+                  options={[
+                    { value: 'Assistant speaks first', label: 'Assistant speaks first' },
+                    { value: 'User speaks first', label: 'User speaks first' },
+                    { value: 'Silent until tool required', label: 'Silent until tool required' },
+                  ]}
+                />
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt-[var(--s-4)]">
-              <div>
+            <div className="mt-[var(--s-4)] grid grid-cols-1 md:grid-cols-2 gap-[12px]">
+              <div className="md:col-span-2">
                 <div className="mb-[var(--s-2)] text-[12.5px]">First Message</div>
                 <input
                   value={data.firstMsg}
                   onChange={(e)=>setField('firstMsg')(e.target.value)}
                   className="w-full bg-transparent outline-none rounded-[8px] px-3"
                   style={{ height:'var(--control-h)', background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                  placeholder="What the assistant says first…"
+                  placeholder="What the assistant should say first…"
                 />
               </div>
-              <div className="md:col-span-1" />
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt-[var(--s-4)]">
-              <div className="md:col-span-2">
+            <div className="grid grid-cols-1 md:grid-cols-1 gap-[12px] mt-[var(--s-4)]">
+              <div className="">
                 <div className="flex items-center justify-between mb-[var(--s-2)]">
                   <div className="font-medium" style={{ fontSize:'var(--fz-label)' }}>System Prompt</div>
                   <div className="flex items-center gap-2">
                     <button
                       className="inline-flex items-center gap-2 rounded-[8px] text-sm"
-                      style={{ height:36, padding:'0 12px', background:CTA, color:'#fff', border:'1px solid rgba(255,255,255,.08)' }}
-                      onClick={()=>{ setComposerText(''); setProposedPrompt(''); setChangesSummary(''); setGenPhase('editing'); setShowGenerate(true); }}
+                      style={{ height:36, padding:'0 12px', background:CTA, color:'#0a0f0d', border:'1px solid rgba(255,255,255,.08)' }}
+                      onClick={()=>{ setComposerText(''); setProposedPrompt(''); setGenPhase('editing'); setShowGenerate(true); }}
                     >
                       <Wand2 className="w-4 h-4" /> Generate
                     </button>
@@ -1067,19 +976,14 @@ export default function VoiceAgentSection() {
                   {!inInlineReview ? (
                     <textarea
                       className="w-full bg-transparent outline-none rounded-[8px] px-3 py-[12px]"
-                      style={{ minHeight: 360, background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+                      style={{ minHeight: 300, background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
                       value={data.systemPrompt}
                       onChange={(e)=> setField('systemPrompt')(e.target.value)}
                     />
                   ) : (
                     <div
                       className="rounded-[8px]"
-                      style={{
-                        background:'var(--input-bg)',
-                        border:'1px solid var(--input-border)',
-                        color:'var(--text)',
-                        padding:'12px'
-                      }}
+                      style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)', padding:'12px' }}
                     >
                       <DiffInline base={basePromptRef.current} next={proposedPrompt}/>
                     </div>
@@ -1089,6 +993,278 @@ export default function VoiceAgentSection() {
             </div>
           </Section>
 
+          {/* Voice */}
           <Section
             title="Voice"
-            icon={<Volume2 className="w-4 h
+            icon={<Volume2 className="w-4 h-4" style={{ color: CTA }} />}
+            desc="Choose TTS and preview the voice."
+            defaultOpen={true}
+          >
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px]">
+              <div>
+                <div className="mb-[var(--s-2)] text-[12.5px] flex items-center gap-2">
+                  <KeyRound className="w-4 h-4 opacity-80" /> OpenAI API Key
+                </div>
+                <StyledSelect
+                  value={data.apiKeyId || ''}
+                  onChange={async (val)=>{
+                    setField('apiKeyId')(val);
+                    try { const store = await scopedStorage(); await store.ensureOwnerGuard(); await store.setJSON('apiKeys.selectedId', val); } catch {}
+                  }}
+                  options={[
+                    { value: '', label: 'Select an API key…' },
+                    ...apiKeys.map(k=>({ value: k.id, label: `${k.name} ••••${(k.key||'').slice(-4).toUpperCase()}` }))
+                  ]}
+                  leftIcon={<KeyRound className="w-4 h-4" style={{ color: CTA }} />}
+                />
+                <div className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
+                  Keys are stored per-account via scoped storage.
+                </div>
+              </div>
+
+              <div>
+                <div className="mb-[var(--s-2)] text-[12.5px]">Voice</div>
+                <StyledSelect
+                  value={data.voiceName}
+                  onChange={(v)=>setField('voiceName')(v)}
+                  options={[
+                    { value: 'Alloy (American)', label: 'Alloy (American)' },
+                    { value: 'Verse (American)', label: 'Verse (American)' },
+                    { value: 'Coral (British)', label: 'Coral (British)' },
+                    { value: 'Amber (Australian)', label: 'Amber (Australian)' },
+                  ]}
+                  placeholder="— Choose —"
+                  menuTop={
+                    <div className="flex items-center justify-between px-3 py-2 rounded-[8px]"
+                         style={{ background:'var(--vs-input-bg)', border:'1px solid var(--vs-input-border)' }}
+                    >
+                      <div className="text-xs" style={{ color:'var(--text-muted)' }}>Preview</div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={()=>speakPreview(`This is ${data.voiceName || 'the selected'} voice preview.`)}
+                          className="w-8 h-8 rounded-full grid place-items-center"
+                          aria-label="Play voice"
+                          style={{ background: CTA, color:'#0a0f0d' }}
+                        >
+                          <Play className="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={stopPreview}
+                          className="w-8 h-8 rounded-full grid place-items-center border"
+                          aria-label="Stop preview"
+                          style={{ background: 'var(--panel-bg)', color:'var(--text)', borderColor:'var(--input-border)' }}
+                        >
+                          <Square className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  }
+                />
+              </div>
+            </div>
+          </Section>
+
+          {/* Transcriber */}
+          <Section
+            title="Transcriber"
+            icon={<Mic className="w-4 h-4" style={{ color: CTA }} />}
+            desc="Transcription settings"
+            defaultOpen={true}
+          >
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px]">
+              <div>
+                <div className="mb-[var(--s-2)] text-[12.5px]">Provider</div>
+                <StyledSelect value={data.asrProvider} onChange={(v)=>setField('asrProvider')(v as AgentData['asrProvider'])} options={asrProviders}/>
+              </div>
+              <div>
+                <div className="mb-[var(--s-2)] text-[12.5px]">Model</div>
+                <StyledSelect value={data.asrModel} onChange={setField('asrModel')} options={asrModelsFor(data.asrProvider)}/>
+              </div>
+            </div>
+            <div className="mt-[var(--s-4)] grid sm:grid-cols-2 gap-[12px]">
+              <div className="flex items-center justify-between p-3 rounded-[8px]" style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}>
+                <span className="text-sm">Background Denoising</span>
+                <Toggle checked={data.denoise} onChange={setField('denoise')} />
+              </div>
+              <div className="flex items-center justify-between p-3 rounded-[8px]" style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}>
+                <span className="text-sm">Use Numerals</span>
+                <Toggle checked={data.numerals} onChange={setField('numerals')} />
+              </div>
+            </div>
+
+            {/* give some space at end of page as requested */}
+            <div style={{ height: 40 }} />
+          </Section>
+        </div>
+      </div>
+
+      {/* ─────────── Generate overlay (no presets UI; simple composer) ─────────── */}
+      {showGenerate && IS_CLIENT ? createPortal(
+        <>
+          <div
+            className="fixed inset-0"
+            style={{ zIndex: Z_OVERLAY, background:'rgba(6,8,10,.62)', backdropFilter:'blur(6px)' }}
+            onClick={()=>{ if (genPhase!=='loading') { setShowGenerate(false); setGenPhase('idle'); } }}
+          />
+          <div className="fixed inset-0 grid place-items-center px-4" style={{ zIndex: Z_MODAL }}>
+            <div
+              className="w-full max-w-[640px] rounded-[10px] overflow-hidden"
+              style={{
+                background: 'var(--panel)',
+                color: 'var(--text)',
+                border: `1px solid ${GREEN_LINE}`,
+                maxHeight: '86vh',
+                boxShadow:'0 22px 44px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px rgba(89,217,179,.20)'
+              }}
+            >
+              <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom:`1px solid ${GREEN_LINE}` }}>
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl grid place-items-center" style={{ background:'var(--green-weak)' }}>
+                    <Wand2 className="w-5 h-5" style={{ color: CTA }}/>
+                  </div>
+                  <div className="text-lg font-semibold">Generate Prompt</div>
+                </div>
+                <button onClick={()=> genPhase!=='loading' && setShowGenerate(false)} className="w-8 h-8 rounded-[8px] grid place-items-center" style={{ border:`1px solid ${GREEN_LINE}` }} aria-label="Close">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="px-6 py-5 space-y-3">
+                <div className="text-xs" style={{ color:'var(--text-muted)' }}>
+                  Describe how the assistant should behave (no presets).
+                </div>
+                <div className="rounded-[8px]" style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}>
+                  <textarea
+                    value={composerText}
+                    onChange={(e)=>setComposerText(e.target.value)}
+                    className="w-full bg-transparent outline-none rounded-[8px] px-3 py-2"
+                    placeholder="e.g., assistant for a clinic; tone friendly; tasks: booking, faq"
+                    style={{ minHeight: 160, maxHeight: '40vh', color:'var(--text)', resize:'vertical' }}
+                  />
+                </div>
+              </div>
+
+              <div className="px-6 pb-6 flex gap-3">
+                <button
+                  onClick={()=> genPhase!=='loading' && setShowGenerate(false)}
+                  className="w-full h-[44px] rounded-[8px]"
+                  style={{ background:'var(--panel)', border:'1px solid var(--input-border)', color:'var(--text)', fontWeight:600 }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={()=>{
+                    const raw = safeTrim(composerText);
+                    if (!raw) return;
+                    try {
+                      const base = nonEmpty(data.systemPrompt) ? data.systemPrompt : DEFAULT_PROMPT_RT;
+                      (basePromptRef as any).current = base;
+                      let merged = '';
+                      if (looksLikeFullPromptRT(raw)) {
+                        const norm = normalizeFullPromptRT(raw);
+                        merged = nonEmpty(norm) ? norm : base;
+                      } else {
+                        const out = applyInstructionsRT(base, raw) || {};
+                        merged = nonEmpty(out.merged) ? out.merged : base;
+                      }
+                      setShowGenerate(false);
+                      setProposedPrompt(merged);
+                      setGenPhase('review');
+                      setData(prev => ({ ...prev, systemPrompt: merged }));
+                    } catch {
+                      setToastKind('error');
+                      setToast('Generate failed — try simpler wording.');
+                      setTimeout(()=>setToast(''), 2200);
+                    }
+                  }}
+                  disabled={!composerText.trim()}
+                  className="w-full h-[44px] rounded-[8px] font-semibold inline-flex items-center justify-center gap-2"
+                  style={{ background:CTA, color:'#0a0f0d', opacity: (!composerText.trim() ? .6 : 1) }}
+                >
+                  <Wand2 className="w-4 h-4" /> Generate
+                </button>
+              </div>
+            </div>
+          </div>
+        </>,
+        document.body
+      ) : null}
+
+      {/* ─────────── Voice/Call PANEL (slide-in), with transcript ─────────── */}
+      {IS_CLIENT ? createPortal(
+        <>
+          <div
+            className={`fixed inset-0 ${showCall ? '' : 'pointer-events-none'}`}
+            style={{
+              zIndex: 9996,
+              background: showCall ? 'rgba(8,10,12,.78)' : 'transparent',
+              opacity: showCall ? 1 : 0,
+              transition: 'opacity .2s var(--ease)'
+            }}
+            onClick={()=> setShowCall(false)}
+          />
+          <div
+            className="fixed right-0 top-0 h-full w-full sm:w-[520px] max-w-[90vw]"
+            style={{
+              zIndex: 9997,
+              transform: showCall ? 'translateX(0)' : 'translateX(100%)',
+              transition: 'transform .22s var(--ease)'
+            }}
+            aria-hidden={!showCall}
+          >
+            <div className="h-full flex flex-col" style={{ background:'var(--panel)', borderLeft:'1px solid rgba(255,255,255,.10)' }}>
+              {/* header */}
+              <div className="flex items-center justify-between px-4" style={{ height:56, borderBottom:'1px solid rgba(255,255,255,.10)' }}>
+                <div className="flex items-center gap-2">
+                  <MessageSquareText className="w-4 h-4" style={{ color: CTA }}/>
+                  <div className="font-semibold">Assistant Call</div>
+                </div>
+                <button onClick={()=>setShowCall(false)} className="w-8 h-8 rounded-[8px] grid place-items-center" style={{ border:'1px solid rgba(255,255,255,.12)' }}>
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* body */}
+              <div className="flex-1 grid" style={{ gridTemplateRows:'auto 1fr auto' }}>
+                {/* WebRTC control */}
+                <div className="p-3 border-b" style={{ borderColor:'rgba(255,255,255,.10)' }}>
+                  <WebCallButton
+                    // model is mapped – no longer hardcoded to 4o
+                    model={mapToRealtime(data.model)}
+                    systemPrompt={data.systemPrompt}
+                    voiceName={data.voiceName}
+                    assistantName={data.name || 'Assistant'}
+                    apiKey={apiKeys.find(k => k.id === data.apiKeyId)?.key || ''}
+                    assistantStarts={data.firstMode === 'Assistant speaks first'}
+                    firstMessage={data.firstMsg}
+                    onTranscript={onTranscriptEvent}
+                    onClose={()=> setShowCall(false)}
+                  />
+                </div>
+
+                {/* transcript */}
+                <div className="overflow-y-auto p-3 space-y-2">
+                  {msgs.map(m => (
+                    <div key={m.id} className="flex items-start gap-2">
+                      {m.role === 'assistant' ? <Bot className="w-4 h-4 mt-1" style={{ color: CTA }}/> : m.role === 'user' ? <User className="w-4 h-4 mt-1" /> : <Cpu className="w-4 h-4 mt-1" />}
+                      <div className="text-sm">
+                        <div className="opacity-70">{m.role === 'assistant' ? 'AI says' : m.role === 'user' ? 'You say' : 'System'}</div>
+                        <div>{m.text}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* footer spacer */}
+                <div className="p-3 text-xs opacity-70">Transcription updates in real time.</div>
+              </div>
+            </div>
+          </div>
+        </>,
+        document.body
+      ) : null}
+    </section>
+  );
+}
