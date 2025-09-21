@@ -9,13 +9,19 @@ type Props = {
   systemPrompt: string;
   voiceName: string;          // Friendly label (e.g., "Breeze", "Orion", "Nova"...)
   assistantName: string;
-  apiKey: string;             // from your dropdown
+  apiKey: string;
   onClose?: () => void;
 
   // Conversation boot config
   firstMode?: 'Assistant speaks first' | 'User speaks first' | 'Silent until tool required';
   firstMsg?: string;          // You can provide multiple, separated by "|" or newlines
   languageHint?: 'auto' | 'en' | 'de' | 'nl' | 'es' | 'ar';
+
+  // Optional audio realism flags (you can surface later in UI)
+  phoneFilter?: boolean;      // default true
+  farMic?: boolean;           // default true — adds small room “distance”
+  ambience?: 'off' | 'kitchen' | 'cafe'; // default 'off'
+  ambienceLevel?: number;     // 0..1 (default .12)
 };
 
 type TranscriptRow = {
@@ -27,8 +33,7 @@ type TranscriptRow = {
 
 const CTA = '#59d9b3';
 
-// ---- New: curated friendly voice list (distinct timbres; no accent labels) ----
-// You can add/remove display names freely; map them below to OpenAI IDs.
+/* ───────── Voices (distinct timbres; no accent labels) ───────── */
 const VOICE_DISPLAY_TO_ID: Record<string, string> = {
   // smooth/neutral
   'Breeze': 'alloy',
@@ -43,26 +48,103 @@ const VOICE_DISPLAY_TO_ID: Record<string, string> = {
   'Maya':   'amber',
   'Kai':    'amber',
 
-  // fallbacks (aliasing older names so nothing breaks)
+  // fallbacks
   'Alloy':  'alloy',
   'Verse':  'verse',
   'Coral':  'coral',
   'Amber':  'amber',
 };
 
-// Backchannel stock lines (short and polite). Randomized.
+/* ───────── Humanization content ───────── */
 const BACKCHANNEL_LINES = [
   "Let me check that for you…",
-  "One moment, I’m checking.",
-  "Got it—checking that now.",
-  "Sure thing, give me a sec…",
-  "Okay, I’m on it.",
+  "One moment—checking.",
+  "Okay, give me a sec…",
+  "Sure, I’m on it.",
+  "Alright, looking that up…",
+  "Just a second…",
+  "Got it—let me pull that up.",
+  "Mm-hmm… checking now.",
+  "Okay… one sec…",
 ];
 
-// Probability & cooldown so it doesn’t talk too much between turns
-const BACKCHANNEL_PROB = 0.18;     // 18% chance after a user utterance
-const BACKCHANNEL_COOLDOWN_MS = 4000;
+const THINKING_FILLERS = [
+  "hmm…",
+  "uh…",
+  "let’s see…",
+  "right…",
+  "okay…",
+];
 
+const BACKCHANNEL_PROB = 0.22;
+const BACKCHANNEL_COOLDOWN_MS = 4500;
+
+// light pause after the user stops talking before assistant answers
+const THINKING_PAUSE_MS = [220, 380, 540, 760]; // randomly pick one
+
+/* ───────── Tiny utils ───────── */
+function pick<T>(arr: T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+function clamp01(v:number){ return Math.max(0, Math.min(1, v)); }
+
+/* ───────── WebAudio builders ───────── */
+// Make a simple small-room impulse (convolver) for “far mic” feel
+function makeImpulseResponse(ac: AudioContext, duration=0.12, decay=1.8) {
+  const rate = ac.sampleRate;
+  const length = Math.round(rate * duration);
+  const ir = ac.createBuffer(2, length, rate);
+  for (let ch=0; ch<2; ch++){
+    const data = ir.getChannelData(ch);
+    for (let i=0;i<length;i++){
+      // pink-ish noise tail
+      const t = i/length;
+      data[i] = (Math.random()*2-1) * Math.pow(1 - t, decay) * 0.6;
+    }
+  }
+  return ir;
+}
+
+// Create colored-noise ambience (kitchen/cafe)
+function createAmbience(ac: AudioContext, kind: 'kitchen'|'cafe', level = 0.12) {
+  const noise = ac.createBufferSource();
+  const len = ac.sampleRate * 2;
+  const buf = ac.createBuffer(1, len, ac.sampleRate);
+  const data = buf.getChannelData(0);
+  let white = 0;
+  for (let i=0;i<len;i++){
+    // pink-ish noise (Voss-ish)
+    white = Math.random()*2-1;
+    data[i] = (data[i-1] || 0)*0.97 + white*0.03;
+  }
+  noise.buffer = buf;
+  noise.loop = true;
+
+  const band = ac.createBiquadFilter();
+  band.type = 'bandpass';
+  band.frequency.value = kind === 'kitchen' ? 950 : 350; // sizzle vs murmur
+  band.Q.value = kind === 'kitchen' ? 0.9 : 0.6;
+
+  const hp = ac.createBiquadFilter(); // avoid low rumble
+  hp.type = 'highpass';
+  hp.frequency.value = 120;
+
+  const gain = ac.createGain();
+  gain.gain.value = clamp01(level) * 0.4; // conservative
+
+  noise.connect(band); band.connect(hp); hp.connect(gain); gain.connect(ac.destination);
+  noise.start();
+
+  return () => {
+    try { noise.stop(); } catch {}
+    try { noise.disconnect(); } catch {}
+    try { band.disconnect(); } catch {}
+    try { hp.disconnect(); } catch {}
+    try { gain.disconnect(); } catch {}
+  };
+}
+
+/* ───────── Component ───────── */
 export default function WebCallButton({
   model,
   systemPrompt,
@@ -73,6 +155,10 @@ export default function WebCallButton({
   firstMode = 'Assistant speaks first',
   firstMsg = 'Hello.',
   languageHint = 'auto',
+  phoneFilter = true,
+  farMic = true,
+  ambience = 'off',
+  ambienceLevel = 0.12,
 }: Props) {
   const [connecting, setConnecting] = useState(false);
   const [connected, setConnected] = useState(false);
@@ -87,6 +173,7 @@ export default function WebCallButton({
   // WebAudio “phone call” chain
   const acRef = useRef<AudioContext | null>(null);
   const phoneChainCleanupRef = useRef<(() => void) | null>(null);
+  const ambienceCleanupRef = useRef<(() => void) | null>(null);
 
   const [log, setLog] = useState<TranscriptRow[]>([]);
   const lastBackchannelAtRef = useRef<number>(0);
@@ -94,23 +181,24 @@ export default function WebCallButton({
   // Map friendly voice name -> OpenAI voice id
   const voiceId = useMemo(() => {
     const key = (voiceName || '').trim();
-    // exact match first
     if (VOICE_DISPLAY_TO_ID[key]) return VOICE_DISPLAY_TO_ID[key];
-    // fuzzy contains (case-insensitive)
     const lower = key.toLowerCase();
     const found = Object.keys(VOICE_DISPLAY_TO_ID).find(k => lower.includes(k.toLowerCase()));
     return found ? VOICE_DISPLAY_TO_ID[found] : 'alloy';
   }, [voiceName]);
 
   // Helpers to add/patch transcript lines
-  const upsertRow = (id: string, who: TranscriptRow['who'], patch: Partial<TranscriptRow>) => {
+  const upsertRow = (id: string, who: TranscriptRow['who'], patch: Partial<TranscriptRow> | ((prev?: TranscriptRow)=>Partial<TranscriptRow>)) => {
     setLog((prev) => {
       const i = prev.findIndex((r) => r.id === id);
       if (i === -1) {
-        return [...prev, { id, who, text: patch.text ?? '', done: !!patch.done }];
+        const base: TranscriptRow = { id, who, text: '', done: false };
+        const p = typeof patch === 'function' ? patch(undefined) : patch;
+        return [...prev, { ...base, ...p }];
       }
       const next = [...prev];
-      next[i] = { ...next[i], ...patch };
+      const p = typeof patch === 'function' ? patch(next[i]) : patch;
+      next[i] = { ...next[i], ...p };
       return next;
     });
   };
@@ -123,7 +211,7 @@ export default function WebCallButton({
   // Small helper: safely send JSON on DC
   function safeSend(dc: RTCDataChannel | null, payload: any) {
     if (!dc || dc.readyState !== 'open') return;
-    try { dc.send(JSON.stringify(payload)); } catch {/* noop */ }
+    try { dc.send(JSON.stringify(payload)); } catch {/* noop */}
   }
 
   // Language hint text (adds to instructions)
@@ -141,32 +229,65 @@ export default function WebCallButton({
     return map[languageHint] || '';
   }
 
-  // Create “telephone” EQ chain: high-pass ~300 Hz, low-pass ~3.4 kHz, mild compression
+  /* ───────── Phone / far-mic processing ───────── */
   async function attachPhoneAudio(remoteStream: MediaStream) {
+    if (!phoneFilter) {
+      if (audioRef.current) {
+        audioRef.current.srcObject = remoteStream;
+        await audioRef.current.play().catch(() => {});
+      }
+      phoneChainCleanupRef.current = null;
+      return;
+    }
+
     try {
       const AC = (window.AudioContext || (window as any).webkitAudioContext);
       const ac = new AC();
       acRef.current = ac;
 
+      // background ambience (optional)
+      if (ambience !== 'off') {
+        ambienceCleanupRef.current = createAmbience(ac, ambience as ('kitchen'|'cafe'), ambienceLevel);
+      }
+
       const src = ac.createMediaStreamSource(remoteStream);
 
+      // band-limit like a phone speaker
       const hp = ac.createBiquadFilter();
       hp.type = 'highpass';
-      hp.frequency.value = 300;
+      hp.frequency.value = 280;
 
       const lp = ac.createBiquadFilter();
       lp.type = 'lowpass';
-      lp.frequency.value = 3400;
+      lp.frequency.value = 3600;
 
       const comp = ac.createDynamicsCompressor();
-      comp.threshold.value = -14;
+      comp.threshold.value = -16;
       comp.knee.value = 18;
-      comp.ratio.value = 2.4;
-      comp.attack.value = 0.003;
-      comp.release.value = 0.25;
+      comp.ratio.value = 2.6;
+      comp.attack.value = 0.006;
+      comp.release.value = 0.22;
 
+      // slight far-mic feel
+      const gainPre = ac.createGain();
+      gainPre.gain.value = 0.9;
+
+      const convolver = ac.createConvolver();
+      if (farMic) {
+        convolver.buffer = makeImpulseResponse(ac, 0.11, 2.1);
+      } else {
+        // bypass if not farMic
+        const empty = ac.createBuffer(2, 1, ac.sampleRate);
+        convolver.buffer = empty;
+      }
+
+      // post reverb trim
+      const gainPost = ac.createGain();
+      gainPost.gain.value = farMic ? 0.88 : 1.0;
+
+      // chain
       const dest = ac.createMediaStreamDestination();
-      src.connect(hp); hp.connect(lp); lp.connect(comp); comp.connect(dest);
+      src.connect(gainPre); gainPre.connect(hp); hp.connect(lp); lp.connect(comp); comp.connect(convolver); convolver.connect(gainPost); gainPost.connect(dest);
 
       if (audioRef.current) {
         audioRef.current.srcObject = dest.stream;
@@ -175,11 +296,18 @@ export default function WebCallButton({
 
       phoneChainCleanupRef.current = () => {
         try { src.disconnect(); } catch {}
+        try { gainPre.disconnect(); } catch {}
         try { hp.disconnect(); } catch {}
         try { lp.disconnect(); } catch {}
         try { comp.disconnect(); } catch {}
+        try { convolver.disconnect(); } catch {}
+        try { gainPost.disconnect(); } catch {}
         try { ac.close(); } catch {}
         acRef.current = null;
+        if (ambienceCleanupRef.current) {
+          try { ambienceCleanupRef.current(); } catch {}
+          ambienceCleanupRef.current = null;
+        }
       };
     } catch {
       // Fallback: set remote stream straight on the element
@@ -196,13 +324,12 @@ export default function WebCallButton({
     if (now - (lastBackchannelAtRef.current || 0) < BACKCHANNEL_COOLDOWN_MS) return;
     if (Math.random() > BACKCHANNEL_PROB) return;
 
-    const line = BACKCHANNEL_LINES[Math.floor(Math.random() * BACKCHANNEL_LINES.length)];
+    const line = pick(BACKCHANNEL_LINES);
     lastBackchannelAtRef.current = now;
 
     safeSend(dc, {
       type: 'response.create',
       response: {
-        // Short verbal acknowledgement in audio only
         modalities: ['audio'],
         instructions: line,
       },
@@ -229,12 +356,12 @@ export default function WebCallButton({
     try {
       setConnecting(true);
 
-      // 1) Ask our server to mint an ephemeral session from the *selected* user key
+      // 1) Mint ephemeral session using selected user key
       const sessionRes = await fetch('/api/voice/ephemeral', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-OpenAI-Key': apiKey, // secure pass-through
+          'X-OpenAI-Key': apiKey,
         },
         body: JSON.stringify({
           model,
@@ -252,39 +379,39 @@ export default function WebCallButton({
       const EPHEMERAL = session?.client_secret?.value;
       if (!EPHEMERAL) throw new Error('Missing ephemeral client_secret.value');
 
-      // 2) Prepare local microphone stream
+      // 2) Mic
       const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
       micStreamRef.current = mic;
 
-      // 3) Create RTCPeerConnection and hook up audio
+      // 3) RTCPeerConnection & audio
       const pc = new RTCPeerConnection({
         iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
       });
       pcRef.current = pc;
 
-      // Remote audio sink (we’ll route through WebAudio for the phone effect)
       const remote = new MediaStream();
-
       pc.ontrack = (e) => {
         e.streams[0]?.getAudioTracks().forEach((t) => remote.addTrack(t));
-        // Attach phone-style chain exactly once
         attachPhoneAudio(remote);
       };
 
-      // We want to *send* mic and *receive* assistant audio
       const sendTrack = mic.getAudioTracks()[0];
       pc.addTrack(sendTrack, mic);
       pc.addTransceiver('audio', { direction: 'recvonly' });
 
-      // 4) Data channel for events (transcripts, etc.)
+      // 4) Data channel
       const dc = pc.createDataChannel('oai-events');
       dcRef.current = dc;
 
       dc.onopen = () => {
-        // Provide session params (instructions/voice) as a runtime update.
-        // Also nudge auto-language and “human pacing”.
-        const extraStyle =
-          'Speak with natural, human pacing. Brief ~0.2s pauses between clauses, and very occasional mild disfluencies (e.g., “uh”, “um”) when appropriate—but do not overuse them.';
+        // Style instructions for human pacing & disfluency (lightly)
+        const extraStyle = [
+          'Speak with natural, human pacing.',
+          'Use brief ~0.15–0.35s pauses at commas/clauses; ~0.4–0.8s between sentences.',
+          'Occasionally use mild disfluencies (e.g., “uh”, “um”, “hmm”) when appropriate—but do not overuse.',
+          'If asked for availability or to “check” something, acknowledge first, pause briefly, then answer.',
+        ].join(' ');
+
         const sessionUpdate = {
           type: 'session.update',
           session: {
@@ -296,18 +423,16 @@ export default function WebCallButton({
         };
         safeSend(dc, sessionUpdate);
 
-        // Kick off first message(s) if configured
+        // Assistant speaks first (optionally multiple openers)
         if (firstMode === 'Assistant speaks first') {
           const lines = splitFirstMessages(firstMsg || 'Hello.');
           lines.forEach((ln, idx) => {
-            const delay = idx * 350; // small gap to keep them natural
+            const jitter = 220 + Math.random()*200;
+            const delay = idx * (320 + Math.random()*180) + jitter;
             setTimeout(() => {
               safeSend(dc, {
                 type: 'response.create',
-                response: {
-                  modalities: ['audio'],
-                  instructions: ln,
-                },
+                response: { modalities: ['audio'], instructions: ln },
               });
             }, delay);
           });
@@ -320,37 +445,49 @@ export default function WebCallButton({
           const msg = JSON.parse(ev.data);
           const t = msg?.type as string;
 
-          // assistant text as it streams
+          // assistant text streaming
           if (t === 'response.output_text.delta') {
             const id = msg?.response_id || msg?.id || 'assistant_current';
             const delta = msg?.delta || '';
-            upsertRow(id, 'assistant', (prev => ({ text: (prev?.text || '') + String(delta) })) as any);
+            upsertRow(id, 'assistant', (prev) => ({ text: (prev?.text || '') + String(delta) }));
           }
           if (t === 'response.completed' || t === 'response.stop') {
             const id = msg?.response_id || msg?.id || 'assistant_current';
             upsertRow(id, 'assistant', { done: true });
           }
 
-          // user transcript (some RT models send transcript.*)
+          // user transcript
           if (t === 'transcript.delta') {
             const id = msg?.transcript_id || msg?.id || 'user_current';
             const delta = msg?.delta || '';
-            upsertRow(id, 'user', (prev => ({ text: (prev?.text || '') + String(delta) })) as any);
+            upsertRow(id, 'user', (prev) => ({ text: (prev?.text || '') + String(delta) }));
           }
           if (t === 'transcript.completed') {
             const id = msg?.transcript_id || msg?.id || 'user_current';
             upsertRow(id, 'user', { done: true });
 
-            // Optional: backchannel line to sound more human (random + cooldown)
-            sendBackchannel(dcRef.current);
+            // 1) optional tiny “thinking” pause before the model answers
+            const wait = pick(THINKING_PAUSE_MS);
+            setTimeout(() => {
+              // 2) optional backchannel (random + cooldown)
+              sendBackchannel(dcRef.current);
+
+              // 3) very tiny filler sometimes, audio-only, no text
+              if (Math.random() < 0.08) {
+                safeSend(dcRef.current, {
+                  type: 'response.create',
+                  response: { modalities: ['audio'], instructions: pick(THINKING_FILLERS) }
+                });
+              }
+            }, wait);
           }
 
-          // Fallback: some payloads deliver text blocks differently
+          // Fallback: full text
           if (t === 'response.output_text' && typeof msg?.text === 'string') {
             addLine('assistant', msg.text);
           }
         } catch {
-          // ignore unknown/non-JSON
+          // ignore non-JSON frames
         }
       };
 
@@ -363,7 +500,7 @@ export default function WebCallButton({
         }
       };
 
-      // 5) Create SDP offer and send it to OpenAI Realtime
+      // 5) SDP
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
@@ -385,16 +522,12 @@ export default function WebCallButton({
         throw new Error(`Realtime SDP failed: ${txt}`);
       }
 
-      const answer = {
-        type: 'answer' as RTCSdpType,
-        sdp: await answerRes.text(),
-      };
+      const answer = { type: 'answer' as RTCSdpType, sdp: await answerRes.text() };
       await pc.setRemoteDescription(answer);
 
-      // On iOS, try to prime playback
       if (audioRef.current) {
         audioRef.current.muted = false;
-        audioRef.current.play().catch(() => {/* user gesture might be required */});
+        audioRef.current.play().catch(() => {});
       }
     } catch (e: any) {
       setConnecting(false);
@@ -425,6 +558,14 @@ export default function WebCallButton({
 
     try { phoneChainCleanupRef.current?.(); } catch {}
     phoneChainCleanupRef.current = null;
+
+    if (ambienceCleanupRef.current) {
+      try { ambienceCleanupRef.current(); } catch {}
+      ambienceCleanupRef.current = null;
+    }
+
+    try { acRef.current?.close(); } catch {}
+    acRef.current = null;
   }
 
   function endCall(userIntent = true) {
@@ -537,7 +678,7 @@ export default function WebCallButton({
               </div>
             </div>
 
-            {/* Hidden audio sink (processed through WebAudio phone chain) */}
+            {/* Hidden audio sink (processed through WebAudio chain) */}
             <audio ref={audioRef} autoPlay playsInline />
           </div>
         </div>
