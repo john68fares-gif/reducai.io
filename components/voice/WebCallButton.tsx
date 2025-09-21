@@ -6,22 +6,22 @@ import { Mic, MicOff, PhoneOff, Loader2, MessageSquare } from 'lucide-react';
 
 type Props = {
   model: string;
-  systemPrompt: string;
-  voiceName: string;          // Friendly label OR raw OpenAI voice id
+  systemPrompt: string;       // <-- your rules live here (yes/no only, tell jokes, domain tone, etc.)
+  voiceName: string;          // friendly label OR raw OpenAI voice id
   assistantName: string;
   apiKey: string;
   onClose?: () => void;
 
   // Conversation boot config
   firstMode?: 'Assistant speaks first' | 'User speaks first' | 'Silent until tool required';
-  firstMsg?: string;          // You can provide multiple, separated by "|" or newlines
+  firstMsg?: string;          // can be multi-line or use "|"
   languageHint?: 'auto' | 'en' | 'de' | 'nl' | 'es' | 'ar';
 
   // Optional audio realism flags
-  phoneFilter?: boolean;      // default true
-  farMic?: boolean;           // default false — we want a close, intimate mic by default
-  ambience?: 'off' | 'kitchen' | 'cafe'; // default 'off'
-  ambienceLevel?: number;     // 0..1 (default .08)
+  phoneFilter?: boolean;
+  farMic?: boolean;           // false = close-mic by default
+  ambience?: 'off' | 'kitchen' | 'cafe';
+  ambienceLevel?: number;     // 0..1
 };
 
 type TranscriptRow = {
@@ -33,76 +33,41 @@ type TranscriptRow = {
 
 const CTA = '#59d9b3';
 
-/* ──────────────────────────────────────────────────────────
-   Voices
-   - Support friendly display names AND raw OpenAI IDs.
-   - If user types a known OpenAI id (e.g. "alloy") we pass it through.
-   - Friendly names map to diverse timbres (spread across ids).
-   ────────────────────────────────────────────────────────── */
+/* ---------------- Voices ---------------- */
 const FRIENDLY_TO_ID: Record<string, string> = {
-  // neutral / smooth
-  'Breeze': 'alloy',
-  'Orion':  'alloy',
-
-  // warm / approachable
-  'Nova':   'verse',
-  'Flow':   'verse',
-
-  // crisp / precise
-  'Terra':  'coral',
-  'Aster':  'coral',
-
-  // bright / energetic
-  'Maya':   'amber',
-  'Kai':    'amber',
-
-  // extra friendly labels → spread across base timbres
-  'Willow': 'alloy',
-  'Aria':   'verse',
-  'Flint':  'coral',
-  'Ivy':    'amber',
-
-  // fallbacks
-  'Alloy':  'alloy',
-  'Verse':  'verse',
-  'Coral':  'coral',
-  'Amber':  'amber',
+  'Breeze': 'alloy', 'Orion': 'alloy',
+  'Nova': 'verse',   'Flow': 'verse',
+  'Terra': 'coral',  'Aster': 'coral',
+  'Maya': 'amber',   'Kai': 'amber',
+  'Willow': 'alloy', 'Aria': 'verse',
+  'Flint': 'coral',  'Ivy': 'amber',
+  'Alloy': 'alloy',  'Verse': 'verse',
+  'Coral': 'coral',  'Amber': 'amber',
 };
-
-// If the value looks like a raw OpenAI voice id, use it directly.
 const RAW_ID_PATTERN = /^[a-z0-9._-]{3,}$/i;
 
-/* ──────────────────────────────────────────────────────────
-   Humanization snippets
-   ────────────────────────────────────────────────────────── */
+/* ---------------- Humanization snippets ---------------- */
 const BACKCHANNEL_LINES = [
-  "Let me check that…",
-  "One moment—checking.",
-  "Sure, give me a sec…",
-  "Okay, I’m on it.",
-  "Alright, looking that up…",
-  "Just a second…",
-  "Got it—pulling that up.",
-  "Mm-hmm… checking now.",
+  'Let me check that…',
+  'One moment—checking.',
+  'Sure, give me a sec…',
+  'Okay, I’m on it.',
+  'Alright, looking that up…',
+  'Just a second…',
+  'Got it—pulling that up.',
+  'Mm-hmm… checking now.',
 ];
-
-const THINKING_FILLERS = ["hmm…", "uh…", "let’s see…", "right…", "okay…"];
+const THINKING_FILLERS = ['hmm…', 'uh…', 'let’s see…', 'right…', 'okay…'];
 const LAUGHS = [
-  "ha— that’s good!",
-  "heh, nice one.",
-  "(soft laugh) yeah, that got me.",
-  "haha— okay, I like that.",
-  "ha— alright, fair enough.",
+  'ha— that’s good!',
+  'heh, nice one.',
+  '(soft laugh) yeah, that got me.',
+  'haha— okay, I like that.',
+  'ha— alright, fair enough.',
 ];
-
-// pacing
 const THINKING_PAUSE_MS = [900, 1200, 1500, 1800];
-const BACKCHANNEL_PROB = 0.20;
-const BACKCHANNEL_COOLDOWN_MS = 4200;
 
-/* ──────────────────────────────────────────────────────────
-   Utilities
-   ────────────────────────────────────────────────────────── */
+/* ---------------- Utils ---------------- */
 function pick<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length)]; }
 function clamp01(v:number){ return Math.max(0, Math.min(1, v)); }
 
@@ -117,22 +82,19 @@ function detectMood(s: string): Mood {
   if (/(great|awesome|nice|love|perfect|amazing|thanks!|thank you!|top|lekker|geweldig|thanks)/.test(t)) return 'positive';
   return 'neutral';
 }
-
 function styleForMood(m: Mood) {
   switch (m) {
-    case 'joke':     return "If the caller makes a joke, react with a short, natural laugh before answering. Keep it light.";
-    case 'sad':      return "Sound warm and supportive. Slow down slightly and acknowledge feelings before giving info.";
-    case 'angry':    return "Stay calm and professional. Lower intensity, acknowledge frustration, and focus on solutions.";
-    case 'positive': return "Be upbeat and friendly, a touch of enthusiasm; don’t oversell.";
-    default:         return "Keep a relaxed conversational tone.";
+    case 'joke':     return 'If the caller makes a joke, react with a short, natural laugh before answering. Keep it light.';
+    case 'sad':      return 'Sound warm and supportive. Slow down slightly and acknowledge feelings before giving info.';
+    case 'angry':    return 'Stay calm and professional. Lower intensity, acknowledge frustration, and focus on solutions.';
+    case 'positive': return 'Be upbeat and friendly, a touch of enthusiasm; don’t oversell.';
+    default:         return 'Keep a relaxed conversational tone.';
   }
 }
 
-/* Language nudge (extra Dutch tuning for colloquial style) */
+/* Language nudge (extra Dutch colloquial) */
 function languageNudge(lang: Props['languageHint']) {
-  if (lang === 'auto') {
-    return 'Auto-detect and reply in the user’s language (English, German, Dutch, Spanish, or Arabic).';
-  }
+  if (lang === 'auto') return 'Auto-detect and reply in the user’s language (English, German, Dutch, Spanish, or Arabic).';
   const map: Record<string, string> = {
     en: 'Respond in natural, conversational English with contractions.',
     de: 'Antworte natürlich und umgangssprachlich auf Deutsch.',
@@ -143,14 +105,7 @@ function languageNudge(lang: Props['languageHint']) {
   return map[lang] || '';
 }
 
-/* ──────────────────────────────────────────────────────────
-   WebAudio chain (CLOSE mic; remove room/echo; de-robotize)
-   - gentle HP/LP
-   - presence boost
-   - low-shelf body
-   - tiny saturation
-   - soft compression
-   ────────────────────────────────────────────────────────── */
+/* ---------------- WebAudio (close mic; de-robotize) ---------------- */
 function createSaturator(ac: AudioContext, drive=1.15) {
   const shaper = ac.createWaveShaper();
   const curve = new Float32Array(1024);
@@ -162,7 +117,6 @@ function createSaturator(ac: AudioContext, drive=1.15) {
   shaper.oversample = '2x';
   return shaper;
 }
-
 function createAmbience(ac: AudioContext, kind: 'kitchen'|'cafe', level = 0.08) {
   const noise = ac.createBufferSource();
   const len = ac.sampleRate * 2;
@@ -175,63 +129,39 @@ function createAmbience(ac: AudioContext, kind: 'kitchen'|'cafe', level = 0.08) 
     data[i] = prev;
   }
   noise.buffer = buf; noise.loop = true;
-
   const band = ac.createBiquadFilter(); band.type = 'bandpass';
   band.frequency.value = kind === 'kitchen' ? 950 : 350;
   band.Q.value = kind === 'kitchen' ? 0.9 : 0.6;
-
   const hp = ac.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 120;
-
   const g = ac.createGain(); g.gain.value = clamp01(level) * 0.22;
-
   noise.connect(band); band.connect(hp); hp.connect(g); g.connect(ac.destination);
   noise.start();
-
   return () => { try{noise.stop()}catch{}; [noise, band, hp, g].forEach(n=>{try{(n as any).disconnect()}catch{}}); };
 }
-
 async function attachProcessedAudio(
   audioEl: HTMLAudioElement,
   remoteStream: MediaStream,
   opts: { phoneFilter: boolean; farMic: boolean; ambience: 'off'|'kitchen'|'cafe'; ambienceLevel: number }
 ){
   const { phoneFilter, farMic, ambience, ambienceLevel } = opts;
-
-  if (!phoneFilter) { // straight through
-    audioEl.srcObject = remoteStream;
-    await audioEl.play().catch(()=>{});
-    return () => {};
-  }
+  if (!phoneFilter) { audioEl.srcObject = remoteStream; await audioEl.play().catch(()=>{}); return () => {}; }
 
   const AC = (window.AudioContext || (window as any).webkitAudioContext);
   const ac = new AC();
-
   const src = ac.createMediaStreamSource(remoteStream);
 
-  // gentle band-limit (keep body)
-  const hp = ac.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 90;  // closer
-  const lp = ac.createBiquadFilter(); lp.type = 'lowpass';  lp.frequency.value = 5200; // more sparkle
-
-  // presence & body
+  const hp = ac.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 90;
+  const lp = ac.createBiquadFilter(); lp.type = 'lowpass';  lp.frequency.value = 5200;
   const presence = ac.createBiquadFilter(); presence.type = 'peaking'; presence.frequency.value = 2700; presence.Q.value = 0.9; presence.gain.value = 2.4;
   const body = ac.createBiquadFilter(); body.type = 'lowshelf'; body.frequency.value = 180; body.gain.value = 2.0;
-
-  // tiny saturation to reduce “AI brittleness”
   const sat = createSaturator(ac, 1.15);
+  const comp = ac.createDynamicsCompressor(); comp.threshold.value = -18; comp.knee.value = 16; comp.ratio.value = 2.0; comp.attack.value = 0.005; comp.release.value = 0.18;
 
-  const comp = ac.createDynamicsCompressor();
-  comp.threshold.value = -18; comp.knee.value = 16; comp.ratio.value = 2.0;
-  comp.attack.value = 0.005;  comp.release.value = 0.18;
-
-  // OPTIONAL tiny room (ultra subtle). If farMic=false we skip any reverb.
   const wetGain = ac.createGain(); wetGain.gain.value = farMic ? 0.015 : 0.0;
-
   const merger = ac.createGain();
   const dryGain = ac.createGain(); dryGain.gain.value = 1.0;
-
   const dest = ac.createMediaStreamDestination();
 
-  // wire
   src.connect(hp); hp.connect(lp); lp.connect(presence); presence.connect(body); body.connect(sat); sat.connect(comp);
   comp.connect(dryGain); dryGain.connect(merger);
   comp.connect(wetGain); wetGain.connect(merger);
@@ -240,7 +170,6 @@ async function attachProcessedAudio(
   audioEl.srcObject = dest.stream;
   await audioEl.play().catch(()=>{});
 
-  // ambience
   let ambCleanup: null | (()=>void) = null;
   if (ambience !== 'off') ambCleanup = createAmbience(ac, ambience, ambienceLevel);
 
@@ -251,9 +180,7 @@ async function attachProcessedAudio(
   };
 }
 
-/* ──────────────────────────────────────────────────────────
-   Component
-   ────────────────────────────────────────────────────────── */
+/* ---------------- Component ---------------- */
 export default function WebCallButton({
   model,
   systemPrompt,
@@ -279,22 +206,25 @@ export default function WebCallButton({
   const micStreamRef = useRef<MediaStream | null>(null);
   const dcRef = useRef<RTCDataChannel | null>(null);
 
-  // Cleanup refs
+  // Cleanups / state
   const closeChainRef = useRef<null | (()=>void)>(null);
   const vadLoopRef = useRef<number | null>(null);
   const lastMicActiveAtRef = useRef<number>(0);
-
   const [log, setLog] = useState<TranscriptRow[]>([]);
   const lastBackchannelAtRef = useRef<number>(0);
 
-  // Resolve voice id
+  // ***** NEW: sticky core instructions derived from your systemPrompt *****
+  const coreInstructionsRef = useRef<string>('');
+  const flagsRef = useRef({ strictYesNo: false, jokesMode: false });
+
+  // Voice id resolve
   const voiceId = useMemo(() => {
     const key = (voiceName || '').trim();
     if (RAW_ID_PATTERN.test(key) && !FRIENDLY_TO_ID[key]) return key.toLowerCase();
     return FRIENDLY_TO_ID[key] || 'alloy';
   }, [voiceName]);
 
-  // upsert helper
+  // Helpers
   const upsertRow = (id: string, who: TranscriptRow['who'], patch: Partial<TranscriptRow> | ((prev?: TranscriptRow)=>Partial<TranscriptRow>)) => {
     setLog((prev) => {
       const i = prev.findIndex((r) => r.id === id);
@@ -309,18 +239,16 @@ export default function WebCallButton({
       return next;
     });
   };
-
   const addLine = (who: TranscriptRow['who'], text: string) => {
     const id = `${who}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     setLog((prev) => [...prev, { id, who, text, done: true }]);
   };
-
   function safeSend(dc: RTCDataChannel | null, payload: any) {
     if (!dc || dc.readyState !== 'open') return;
     try { dc.send(JSON.stringify(payload)); } catch {}
   }
 
-  /* language + style base */
+  // Build base style text
   function baseStyle(lang: Props['languageHint']) {
     const langN = languageNudge(lang);
     const shared = [
@@ -331,17 +259,28 @@ export default function WebCallButton({
       'When listing options, avoid rigid menu patterns. Speak like a person, not a kiosk.',
       'Prefer contractions. Keep energy human and relaxed.',
     ].join(' ');
-    // Extra Dutch colloquiality so it doesn’t sound stiff
     const dutchExtra = 'In het Nederlands: spreek vlot en informeel, gebruik alledaagse woorden, laat de intonatie natuurlijk variëren.';
     return `${langN}\n\n${shared}${lang === 'nl' ? ` ${dutchExtra}` : ''}`;
   }
 
-  /* VAD (barge-in) */
+  // Parse systemPrompt for flags (kept super simple on purpose)
+  function extractFlags(sp: string) {
+    const t = (sp || '').toLowerCase();
+    const strictYesNo =
+      /(answer|respond|reply).*(only|just).*(yes|no)\b/.test(t) ||
+      /\b(only|just)\s*(yes|no)\b/.test(t) ||
+      /\balleen\s*(ja|nee)\b/.test(t);
+    const jokesMode =
+      /(tell|make|crack).*(joke|jokes)/.test(t) ||
+      /(vertel|maak).*(grap|grappen)/.test(t);
+    return { strictYesNo, jokesMode };
+  }
+
+  // VAD (barge-in)
   async function setupVAD() {
     try {
       const mic = micStreamRef.current;
       if (!mic) return;
-
       const AC = (window.AudioContext || (window as any).webkitAudioContext);
       const ac = new AC();
       const src = ac.createMediaStreamSource(mic);
@@ -349,16 +288,14 @@ export default function WebCallButton({
       analyser.fftSize = 512;
       analyser.smoothingTimeConstant = 0.85;
       src.connect(analyser);
-
       const buf = new Uint8Array(analyser.frequencyBinCount);
       const loop = () => {
         analyser.getByteFrequencyData(buf);
         let sum = 0;
         for (let i=0;i<buf.length;i++) sum += buf[i]*buf[i];
-        const rms = Math.sqrt(sum / buf.length) / 255; // 0..1
+        const rms = Math.sqrt(sum / buf.length) / 255;
         if (rms > 0.06) {
           lastMicActiveAtRef.current = Date.now();
-          // stop assistant + duck volume
           safeSend(dcRef.current, { type: 'response.cancel' });
           if (audioRef.current) audioRef.current.volume = 0.27;
         } else {
@@ -367,24 +304,24 @@ export default function WebCallButton({
         vadLoopRef.current = requestAnimationFrame(loop);
       };
       vadLoopRef.current = requestAnimationFrame(loop);
-
-      // close analyser context with the big cleanup
       return () => { try{ ac.close() }catch{} };
-    } catch {
-      return () => {};
-    }
+    } catch { return () => {}; }
   }
 
   function userIsSilentFor(ms:number) {
     return Date.now() - (lastMicActiveAtRef.current || 0) > ms;
   }
 
-  function sendBackchannel(dc: RTCDataChannel | null) {
+  function sendBackchannelIfAllowed() {
+    // respect strict yes/no: no backchannels, no fillers, no laughs
+    if (flagsRef.current.strictYesNo) return;
     const now = Date.now();
-    if (now - (lastBackchannelAtRef.current || 0) < BACKCHANNEL_COOLDOWN_MS) return;
-    if (Math.random() > BACKCHANNEL_PROB) return;
+    const COOLDOWN = 4200;
+    const PROB = 0.20;
+    if (now - (lastBackchannelAtRef.current || 0) < COOLDOWN) return;
+    if (Math.random() > PROB) return;
     lastBackchannelAtRef.current = now;
-    safeSend(dc, { type: 'response.create', response: { modalities: ['audio'], instructions: pick(BACKCHANNEL_LINES) } });
+    safeSend(dcRef.current, { type: 'response.create', response: { modalities: ['audio'], instructions: pick(BACKCHANNEL_LINES) } });
   }
 
   function splitFirstMessages(input: string): string[] {
@@ -394,12 +331,18 @@ export default function WebCallButton({
 
   function turnStyleNudge(): string {
     const styles = [
-      "Vary intonation: some words warmer, some cooler; don’t read in a flat pattern.",
-      "Use a short supportive acknowledgement before giving details.",
-      "If the user hesitates, slow down and simplify the next sentence.",
-      "Keep options conversational; avoid repeating identical templates.",
+      'Vary intonation: some words warmer, some cooler; don’t read in a flat pattern.',
+      'Use a short supportive acknowledgement before giving details.',
+      'If the user hesitates, slow down and simplify the next sentence.',
+      'Keep options conversational; avoid repeating identical templates.',
     ];
     return pick(styles);
+  }
+
+  // ALWAYS include the sticky core prompt in every session.update
+  function mergeInstructions(extra: string) {
+    const core = coreInstructionsRef.current || '';
+    return (core + '\n\n' + (extra || '')).trim();
   }
 
   async function startCall() {
@@ -432,7 +375,6 @@ export default function WebCallButton({
       pc.ontrack = async (e) => {
         e.streams[0]?.getAudioTracks().forEach((t) => remote.addTrack(t));
         if (!audioRef.current) return;
-        // processed chain (CLOSE mic)
         if (closeChainRef.current) { try{ closeChainRef.current() }catch{} closeChainRef.current = null; }
         closeChainRef.current = await attachProcessedAudio(
           audioRef.current,
@@ -450,24 +392,40 @@ export default function WebCallButton({
       dcRef.current = dc;
 
       dc.onopen = () => {
-        const style = [
-          baseStyle(languageHint),
-          'For clinics/legal: professional and concise. For food/retail: friendly and efficient.',
-          turnStyleNudge(),
-        ].join(' ');
+        // derive sticky core prompt ONCE
+        flagsRef.current = extractFlags(systemPrompt || '');
+        const strictAddon = flagsRef.current.strictYesNo
+          ? 'CRITICAL: Answer with only a single word: "Yes" or "No". No other text.'
+          : '';
+        const jokesAddon = flagsRef.current.jokesMode
+          ? 'Keep a playful tone and, when appropriate, add a short original joke (max one sentence).'
+          : '';
 
-        const sessionUpdate = {
+        const core = [
+          systemPrompt || '',
+          languageNudge(languageHint),
+          'For clinics/legal: professional and concise. For food/retail: friendly and efficient.',
+          'Do not speak over the caller. If the caller starts speaking, stop immediately.',
+          'Wait ~1–2 seconds of silence before replying (unless a brief acknowledgement).',
+          'Use natural pacing and vary rhythm; avoid rigid menu-like phrasing.',
+          strictAddon,
+          jokesAddon,
+        ].filter(Boolean).join('\n');
+
+        coreInstructionsRef.current = core; // <-- STICKY
+
+        // Send session.update with the core prompt (not overwritten later)
+        safeSend(dc, {
           type: 'session.update',
           session: {
-            instructions: `${systemPrompt || ''}\n\n${style}`,
+            instructions: coreInstructionsRef.current,
             voice: voiceId,
             input_audio_format: { type: 'input_audio_format', audio_format: 'pcm16' },
             output_audio_format: { type: 'output_audio_format', audio_format: 'pcm16' },
           },
-        };
-        safeSend(dc, sessionUpdate);
+        });
 
-        // speak first after a short silence gate
+        // Assistant speaks first (gate on brief silence)
         if (firstMode === 'Assistant speaks first') {
           const lines = splitFirstMessages(firstMsg || 'Hello.');
           const startAt = Date.now();
@@ -494,7 +452,6 @@ export default function WebCallButton({
           const msg = JSON.parse(ev.data);
           const t = msg?.type as string;
 
-          // assistant stream
           if (t === 'response.output_text.delta') {
             const id = msg?.response_id || msg?.id || 'assistant_current';
             const delta = msg?.delta || '';
@@ -505,7 +462,6 @@ export default function WebCallButton({
             upsertRow(id, 'assistant', { done: true });
           }
 
-          // user transcript
           if (t === 'transcript.delta') {
             const id = msg?.transcript_id || msg?.id || 'user_current';
             const delta = msg?.delta || '';
@@ -518,30 +474,42 @@ export default function WebCallButton({
             const mood = detectMood(text);
             upsertRow(id, 'user', { done: true });
 
-            // per-turn adjustments: mood + phrasing variety; Dutch colloquialisms if detected
+            // per-turn adjustments (ALWAYS MERGED with sticky core)
             const dutchLikely = / de | het | een | jij | je | we | wij | lekker | alsjeblieft | dank je | bedankt | hoe | wat | waarom | grap /.test(text.toLowerCase());
             const langAdj = dutchLikely ? 'Spreek vlot en informeel Nederlands; varieer intonatie en tempo.' : '';
             const moodStyle = styleForMood(mood);
             const nudge = turnStyleNudge();
-            safeSend(dcRef.current, { type: 'session.update', session: { instructions: `${moodStyle} ${nudge} ${langAdj}` } });
 
-            // small pause + optional backchannel/laugh/filler
+            // strict yes/no overrides any fluff — keep the constraint LAST for priority
+            const strictLine = flagsRef.current.strictYesNo
+              ? 'CRITICAL: Answer with only a single word: "Yes" or "No". No other text.'
+              : '';
+
+            const jokesLine = flagsRef.current.jokesMode
+              ? 'Keep a playful tone and, when appropriate, add a short original joke (max one sentence).'
+              : '';
+
+            const dynamic = mergeInstructions([moodStyle, nudge, langAdj, jokesLine, strictLine].filter(Boolean).join(' '));
+            safeSend(dcRef.current, { type: 'session.update', session: { instructions: dynamic } });
+
+            // pause + optional backchannel / laugh / filler (disabled in strict yes/no)
             const wait = pick(THINKING_PAUSE_MS);
             setTimeout(() => {
-              sendBackchannel(dcRef.current);
-              if (mood === 'joke') {
-                safeSend(dcRef.current, { type: 'response.create', response: { modalities: ['audio'], instructions: pick(LAUGHS) } });
-              } else if (Math.random() < 0.08) {
-                safeSend(dcRef.current, { type: 'response.create', response: { modalities: ['audio'], instructions: pick(THINKING_FILLERS) } });
+              if (!flagsRef.current.strictYesNo) {
+                sendBackchannelIfAllowed();
+                if (mood === 'joke') {
+                  safeSend(dcRef.current, { type: 'response.create', response: { modalities: ['audio'], instructions: pick(LAUGHS) } });
+                } else if (Math.random() < 0.08) {
+                  safeSend(dcRef.current, { type: 'response.create', response: { modalities: ['audio'], instructions: pick(THINKING_FILLERS) } });
+                }
               }
             }, wait);
           }
 
-          // fallback (full text)
           if (t === 'response.output_text' && typeof msg?.text === 'string') {
             addLine('assistant', msg.text);
           }
-        } catch { /* ignore non-JSON */ }
+        } catch { /* ignore */ }
       };
 
       pc.onconnectionstatechange = () => {
@@ -573,9 +541,7 @@ export default function WebCallButton({
         audioRef.current.play().catch(() => {});
       }
 
-      // start VAD after audio is flowing
       const stopVad = await setupVAD();
-      // include VAD teardown in cleanup
       const prevCleanup = closeChainRef.current;
       closeChainRef.current = () => { try{ prevCleanup && prevCleanup() }catch{}; try{ stopVad && stopVad() }catch{} };
 
@@ -596,16 +562,12 @@ export default function WebCallButton({
   function cleanup() {
     if (vadLoopRef.current) cancelAnimationFrame(vadLoopRef.current);
     vadLoopRef.current = null;
-
     try { dcRef.current?.close(); } catch {}
     dcRef.current = null;
-
     try { pcRef.current?.close(); } catch {}
     pcRef.current = null;
-
     try { micStreamRef.current?.getTracks()?.forEach((t) => t.stop()); } catch {}
     micStreamRef.current = null;
-
     try { closeChainRef.current && closeChainRef.current(); } catch {}
     closeChainRef.current = null;
   }
@@ -618,8 +580,7 @@ export default function WebCallButton({
   }
 
   useEffect(() => {
-    // prime silence so assistant doesn’t jump in instantly
-    lastMicActiveAtRef.current = Date.now();
+    lastMicActiveAtRef.current = Date.now(); // avoid instant jump-in
     startCall();
     return () => { cleanup(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
