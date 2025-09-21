@@ -139,7 +139,7 @@ function StyledSelect({
         ref={btnRef}
         type="button"
         onClick={() => { setOpen(v=>!v); setTimeout(()=>searchRef.current?.focus(),0); }}
-        className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-[8px] text-sm outline-none transition"
+        className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-[6px] text-sm outline-none transition"
         style={{
           height:'var(--control-h)',
           background:'var(--vs-input-bg, #101314)',
@@ -164,14 +164,14 @@ function StyledSelect({
             width: (menuPos?.width ?? (btnRef.current?.getBoundingClientRect().width ?? 280)),
             background:'#101314',
             border:'1px solid rgba(255,255,255,.16)',
-            borderRadius:10,
+            borderRadius:8,
             boxShadow:'0 24px 64px rgba(0,0,0,.60), 0 8px 20px rgba(0,0,0,.45), 0 0 0 1px rgba(0,255,194,.10)'
           }}
         >
           {menuTop ? <div className="mb-2">{menuTop}</div> : null}
 
           <div
-            className="flex items-center gap-2 mb-2 px-2 py-1.5 rounded-[8px]"
+            className="flex items-center gap-2 mb-2 px-2 py-1.5 rounded-[6px]"
             style={{ background:'#101314', border:'1px solid rgba(255,255,255,.14)', color:'var(--text)' }}
           >
             <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
@@ -191,7 +191,7 @@ function StyledSelect({
                 key={o.value}
                 disabled={!!o.disabled}
                 onClick={()=>{ if (o.disabled) return; onChange(o.value); setOpen(false); }}
-                className="w-full text-left text-sm px-2.5 py-2 rounded-[8px] transition grid grid-cols-[18px_1fr_auto] items-center gap-2 disabled:opacity-60"
+                className="w-full text-left text-sm px-2.5 py-2 rounded-[6px] transition grid grid-cols-[18px_1fr_auto] items-center gap-2 disabled:opacity-60"
                 style={{
                   color: o.disabled ? 'var(--text-muted)' : 'var(--text)',
                   background:'transparent',
@@ -440,7 +440,7 @@ export default function WebCallButton({
         ].filter(Boolean).join('\n\n');
         baseInstructionsRef.current = style;
 
-        // ── CRITICAL: enable transcripts + server VAD ──
+        // ── CRITICAL: transcripts on + server VAD ──
         safeSend(dc,{ type:'session.update', session:{
           instructions: baseInstructionsRef.current,
           voice: voiceId,
@@ -448,11 +448,10 @@ export default function WebCallButton({
           output_audio_format:'pcm16',
           modalities:['audio','text'],
 
-          // you → server transcription
+          // USER speech → transcript (incremental + final)
           input_audio_transcription: { model: 'whisper-1' },
 
-          // assistant → text stream + audio transcript (catch both)
-          // (output text comes via response.output_text.*, some runtimes also send response.audio_transcript.*)
+          // Let server handle turn-taking so deltas are clean
           turn_detection: {
             type: 'server_vad',
             threshold: 0.5,
@@ -484,13 +483,13 @@ export default function WebCallButton({
         }
       };
 
-      // 5) events — handle ALL common transcript shapes
+      // 5) events — catch ALL assistant + user transcript shapes
       dc.onmessage=(ev)=>{
         try{
           const msg=JSON.parse(ev.data);
           const t = String(msg?.type || '');
 
-          // ── ASSISTANT TEXT (several possible shapes)
+          // —— ASSISTANT TEXT STREAMS ——
           if (t === 'response.output_text.delta') {
             sawAssistantDeltaRef.current = true;
             const id=msg?.response_id||msg?.id||'assistant_current';
@@ -501,22 +500,22 @@ export default function WebCallButton({
             sawAssistantDeltaRef.current = true;
             addLine('assistant', msg.text);
           }
+          // Some runtimes also send spoken-audio transcript separately:
           if (t === 'response.audio_transcript.delta') {
-            // some runtimes send transcript of spoken audio separately
             const id=msg?.response_id||msg?.id||'assistant_current';
             upsert(id,'assistant',(prev)=>({ text:(prev?.text||'')+String(msg?.delta||'') }));
           }
-          if (t === 'response.audio_transcript.completed' || t === 'response.completed' || t==='response.stop') {
+          if (t === 'response.audio_transcript.completed' || t === 'response.completed' || t === 'response.stop') {
             const id=msg?.response_id||msg?.id||'assistant_current';
             upsert(id,'assistant',{ done:true });
           }
-          // fallback: message created with text content
+          // Fallback: assistant message created with text content
           if (t === 'conversation.item.created' && msg?.item?.type==='message' && msg?.item?.role==='assistant') {
             const text=(msg?.item?.content||[]).map((c:any)=>c?.text||c?.transcript||'').join(' ').trim();
             if (text) addLine('assistant', text);
           }
 
-          // ── USER TRANSCRIPT (handle deltas + completes across variants)
+          // —— USER TRANSCRIPTS ——
           const isUserDelta =
             /(^|\.)(input_.*transcript|transcript)(\.|_)delta$/.test(t) ||
             t === 'conversation.item.input_audio_transcript.delta' ||
@@ -537,7 +536,7 @@ export default function WebCallButton({
             upsert(id,'user',{ done:true });
           }
 
-          // single-shot fallback some runtimes emit
+          // Single-shot fallback
           if ((t.includes('transcript') || t.includes('input_audio_buffer')) && typeof msg?.text === 'string' && !msg?.delta) {
             addLine('user', msg.text);
           }
@@ -597,12 +596,12 @@ export default function WebCallButton({
   },[voiceId]);
 
   /* ────────────────────────────────────────────────────────────────────────
-     UI — FULL-HEIGHT RIGHT SHEET (overlay style)
+     UI — FULL-HEIGHT RIGHT SHEET (overlay style), less rounded
   ───────────────────────────────────────────────────────────────────────── */
   const header = (
-    <div className="va-head" style={{ minHeight: 72 }}>
+    <div className="va-head" style={{ minHeight: 68 }}>
       <div className="flex items-center gap-3 min-w-0">
-        <div className="inline-grid place-items-center w-9 h-9 rounded-lg"
+        <div className="inline-grid place-items-center w-9 h-9 rounded-[6px]"
              style={{ background:'rgba(89,217,179,.12)', border:'1px solid rgba(89,217,179,.25)' }}>
           <Bot className="w-5 h-5" style={{ color: CTA }} />
         </div>
@@ -624,7 +623,7 @@ export default function WebCallButton({
 
         <button
           onClick={toggleMute}
-          className="w-9 h-9 rounded-[8px] grid place-items-center"
+          className="w-9 h-9 rounded-[6px] grid place-items-center"
           style={{
             border:'1px solid rgba(255,255,255,.14)', color:'var(--text)',
             background: muted ? 'rgba(239,68,68,.14)' : 'transparent'
@@ -636,7 +635,7 @@ export default function WebCallButton({
 
         <button
           onClick={()=>endCall(true)}
-          className="w-9 h-9 rounded-[8px] grid place-items-center"
+          className="w-9 h-9 rounded-[6px] grid place-items-center"
           style={{ border:'1px solid rgba(239,68,68,.38)', background:'rgba(239,68,68,.18)', color:'#ffd7d7' }}
           title="End call"
         >
@@ -651,7 +650,7 @@ export default function WebCallButton({
       <div ref={scrollerRef} className="space-y-3" style={{ minHeight:'100%' }}>
         {log.length===0 && (
           <div
-            className="text-sm rounded-[8px] px-3 py-2 border"
+            className="text-sm rounded-[6px] px-3 py-2 border"
             style={{ color:'var(--text-muted)', background:'var(--panel)', borderColor:'rgba(255,255,255,.10)' }}
           >
             {connecting ? 'Connecting to voice…' :
@@ -662,13 +661,13 @@ export default function WebCallButton({
         {log.map(row=>(
           <div key={row.id} className={`flex ${row.who==='user' ? 'justify-end' : 'justify-start'}`}>
             {row.who==='assistant' && (
-              <div className="mr-2 mt-[2px] shrink-0 rounded-full w-8 h-8 grid place-items-center"
+              <div className="mr-2 mt-[2px] shrink-0 rounded-[6px] w-8 h-8 grid place-items-center"
                    style={{ background:'rgba(89,217,179,.12)', border:'1px solid rgba(89,217,179,.25)' }}>
                 <Bot className="w-4 h-4" style={{ color: CTA }} />
               </div>
             )}
             <div
-              className="max-w-[78%] rounded-2xl px-3 py-2 text-[0.95rem] leading-snug border"
+              className="max-w-[78%] rounded-[10px] px-3 py-2 text-[0.95rem] leading-snug border"
               style={{
                 background: row.who==='user' ? 'rgba(56,196,143,.18)' : 'rgba(255,255,255,.06)',
                 borderColor: row.who==='user' ? 'rgba(56,196,143,.35)' : 'rgba(255,255,255,.14)',
@@ -678,7 +677,7 @@ export default function WebCallButton({
               <div className="text-[10px] mt-1 opacity-60 text-right">{fmtTime(row.at)}</div>
             </div>
             {row.who==='user' && (
-              <div className="ml-2 mt-[2px] shrink-0 rounded-full w-8 h-8 grid place-items-center"
+              <div className="ml-2 mt-[2px] shrink-0 rounded-[6px] w-8 h-8 grid place-items-center"
                    style={{ background:'rgba(255,255,255,.10)', border:'1px solid rgba(255,255,255,.18)' }}>
                 <User className="w-4 h-4" />
               </div>
@@ -687,7 +686,7 @@ export default function WebCallButton({
         ))}
 
         {error && (
-          <div className="text-xs px-3 py-2 rounded-[8px] border"
+          <div className="text-xs px-3 py-2 rounded-[6px] border"
                style={{ background:'rgba(239,68,68,.12)', borderColor:'rgba(239,68,68,.25)', color:'#ffd7d7' }}>
             {error}
           </div>
@@ -724,12 +723,12 @@ export default function WebCallButton({
         background: 'var(--panel-bg)',
         color: 'var(--text)',
         borderLeft: `1px solid ${GREEN_LINE}`,
-        borderTopLeftRadius: 10,
-        borderBottomLeftRadius: 10,
+        borderTopLeftRadius: 8,
+        borderBottomLeftRadius: 8,
         borderTopRightRadius: 0,
         borderBottomRightRadius: 0,
         display: 'grid',
-        gridTemplateRows: '72px 1fr 52px',
+        gridTemplateRows: '68px 1fr 52px',
         overflow: 'hidden',
         boxShadow:'0 22px 44px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px rgba(89,217,179,.20)',
       }}
