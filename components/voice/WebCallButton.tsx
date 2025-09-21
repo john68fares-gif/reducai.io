@@ -2,14 +2,15 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Mic, MicOff, X, Bot, User, Loader2, ChevronDown } from 'lucide-react';
 
 /* ───────────────────────── Props ───────────────────────── */
 type Props = {
   className?: string;
-  model: string;                 // inherited from VA dropdown
-  systemPrompt: string;          // from VA prompt (backend string OK)
-  voiceName: string;             // friendly or OpenAI voice id
+  model: string;
+  systemPrompt: string;
+  voiceName: string;
   assistantName: string;
   apiKey: string;
   onClose?: () => void;
@@ -18,7 +19,6 @@ type Props = {
   firstMsg?: string;
   languageHint?: 'auto' | 'en' | 'de' | 'nl' | 'es' | 'ar';
 
-  // Audio realism
   phoneFilter?: boolean;
   farMic?: boolean;
   ambience?: 'off' | 'kitchen' | 'cafe';
@@ -159,10 +159,8 @@ export default function WebCallPanel({
   const [voices,setVoices]=useState<string[]>([]);
   const [selectedVoice,setSelectedVoice]=useState<string>('');
   const [log,setLog]=useState<TranscriptRow[]>([]);
-
-  // mirror log in a ref to avoid stale closure inside dc.onmessage
-  const logRef = useRef<TranscriptRow[]>([]);
-  useEffect(()=>{ logRef.current = log; }, [log]);
+  const logRef=useRef<TranscriptRow[]>([]);
+  useEffect(()=>{ logRef.current=log; },[log]);
 
   const audioRef=useRef<HTMLAudioElement|null>(null);
   const pcRef=useRef<RTCPeerConnection|null>(null);
@@ -176,14 +174,12 @@ export default function WebCallPanel({
   const baseInstructionsRef=useRef<string>('');
   const scrollerRef=useRef<HTMLDivElement|null>(null);
 
-  // resolve voice id
   const voiceId=useMemo(()=>{
     const key=(selectedVoice||voiceProp||'').trim();
     if(RAW_ID.test(key)&&!FRIENDLY_TO_ID[key]) return key.toLowerCase();
     return FRIENDLY_TO_ID[key] || key || 'alloy';
   },[selectedVoice,voiceProp]);
 
-  // fetch voices (filtered)
   useEffect(()=>{
     let cancelled=false;
     (async()=>{
@@ -202,7 +198,6 @@ export default function WebCallPanel({
     return()=>{ cancelled=true; };
   },[apiKey,voiceProp]);
 
-  // helpers
   const upsert=(id:string, who:TranscriptRow['who'], patch:Partial<TranscriptRow>|((p?:TranscriptRow)=>Partial<TranscriptRow>))=>{
     setLog(prev=>{
       const i=prev.findIndex(r=>r.id===id);
@@ -222,13 +217,11 @@ export default function WebCallPanel({
   };
   const splitFirst=(input:string)=> (input||'').split(/\r?\n|\|/g).map(s=>s.trim()).filter(Boolean).slice(0,20);
 
-  // auto scroll to bottom
   useEffect(()=>{
     const el=scrollerRef.current; if(!el) return;
     el.scrollTop = el.scrollHeight;
   },[log,connecting,connected]);
 
-  // gentle VAD ducking
   async function setupVAD(){
     try{
       const mic=micStreamRef.current; if(!mic) return;
@@ -248,13 +241,11 @@ export default function WebCallPanel({
   }
   const userSilentFor=(ms:number)=> Date.now()-(lastMicActiveAtRef.current||0)>ms;
 
-  /* ─────────────── start call ─────────────── */
   async function startCall(){
     setError('');
     if(!apiKey){ setError('No API key selected.'); return; }
     try{
       setConnecting(true);
-      // 1) ephemeral
       const sessionRes=await fetch('/api/voice/ephemeral',{
         method:'POST', headers:{ 'Content-Type':'application/json', 'X-OpenAI-Key':apiKey },
         body:JSON.stringify({ model, voiceName:voiceId, assistantName, systemPrompt }),
@@ -263,10 +254,8 @@ export default function WebCallPanel({
       const session=await sessionRes.json(); const EPHEMERAL=session?.client_secret?.value;
       if(!EPHEMERAL) throw new Error('Missing ephemeral client_secret.value');
 
-      // 2) mic
       const mic=await navigator.mediaDevices.getUserMedia({ audio:true }); micStreamRef.current=mic;
 
-      // 3) peer
       const pc=new RTCPeerConnection({ iceServers:[{ urls:'stun:stun.l.google.com:19302' }] }); pcRef.current=pc;
 
       const remote=new MediaStream();
@@ -281,7 +270,6 @@ export default function WebCallPanel({
       pc.addTrack(sendTrack, mic);
       pc.addTransceiver('audio',{ direction:'recvonly' });
 
-      // 4) data channel
       const dc=pc.createDataChannel('oai-events'); dcRef.current=dc;
 
       dc.onopen=()=>{
@@ -313,12 +301,11 @@ export default function WebCallPanel({
         }
       };
 
-      // 5) messages  ——  STREAMED TRANSCRIPTS (WhatsApp-style)
+      // STREAMED TRANSCRIPTS
       dc.onmessage=(ev)=>{
         try{
           const msg=JSON.parse(ev.data); const t=msg?.type as string;
 
-          // Assistant text stream
           if(t==='response.output_text.delta'){
             const id=msg?.response_id||msg?.id||'assistant_current';
             const delta=msg?.delta||'';
@@ -329,7 +316,6 @@ export default function WebCallPanel({
             upsert(id,'assistant',{ done:true });
           }
 
-          // User transcript stream
           if(t==='transcript.delta'){
             const id=msg?.transcript_id||msg?.id||'user_current';
             const delta=msg?.delta||'';
@@ -337,10 +323,8 @@ export default function WebCallPanel({
           }
           if(t==='transcript.completed'){
             const id=msg?.transcript_id||msg?.id||'user_current';
-            // mark the user line as done
             upsert(id,'user',{ done:true });
 
-            // read the *latest* value (avoid stale closure)
             const row = logRef.current.find(r=>r.id===id);
             const text=(row?.text||'').trim();
             const mood=detectMood(text);
@@ -366,7 +350,6 @@ export default function WebCallPanel({
             }, wait);
           }
 
-          // Some servers also emit a consolidated text message
           if(t==='response.output_text' && typeof msg?.text==='string'){
             addLine('assistant', msg.text);
           }
@@ -378,7 +361,6 @@ export default function WebCallPanel({
         else if(['disconnected','failed','closed'].includes(pc.connectionState)){ endCall(false); }
       };
 
-      // 6) SDP
       const offer=await pc.createOffer(); await pc.setLocalDescription(offer);
       const url=`https://api.openai.com/v1/realtime?model=${encodeURIComponent(model)}`;
       const answerRes=await fetch(url,{
@@ -401,7 +383,6 @@ export default function WebCallPanel({
     }
   }
 
-  /* controls / cleanup */
   function toggleMute(){
     const tracks=micStreamRef.current?.getAudioTracks()||[];
     const next=!muted; tracks.forEach(t=>t.enabled=!next); setMuted(next);
@@ -412,36 +393,39 @@ export default function WebCallPanel({
     try{ pcRef.current?.close(); }catch{} pcRef.current=null;
     try{ micStreamRef.current?.getTracks()?.forEach(t=>t.stop()); }catch{} micStreamRef.current=null;
     try{ closeChainRef.current && closeChainRef.current(); }catch{}
-    closeChainRef.current = null; // ✅ fix: mutate .current, don’t reassign the ref
+    closeChainRef.current = null; // ✅ important
   }
   function endCall(userIntent=true){ cleanup(); setConnected(false); setConnecting(false); if(userIntent) onClose?.(); }
 
   useEffect(()=>{ lastMicActiveAtRef.current=Date.now(); startCall(); return ()=>{ cleanup(); }; /* eslint-disable-next-line */ },[model,voiceId]);
 
-  /* ───────────────────────── UI — VA card style (NOT overlay) ───────────────────────── */
-  return (
-    <div className={`va-card ${className||''}`} role="group" aria-label="Voice call panel" style={{ display:'grid', gridTemplateRows:'auto 1fr auto' }}>
+  /* ───────────────────────── UI — render as FIXED overlay via portal ───────────────────────── */
+  const panel = (
+    <aside
+      className={`fixed top-0 right-0 h-screen w-[min(480px,95vw)] bg-[#0d0f11] border-l border-[rgba(255,255,255,.12)] shadow-2xl flex flex-col ${className||''}`}
+      style={{ zIndex: 10050 }} role="dialog" aria-label="Voice call panel"
+    >
       {/* Header */}
-      <div className="va-head" style={{ minHeight:56 }}>
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-[rgba(255,255,255,.10)]">
         <div className="flex items-center gap-3 min-w-0">
           <div className="inline-grid place-items-center w-7 h-7 rounded-full" style={{ background:'rgba(89,217,179,.12)' }}>
             <Bot className="w-4 h-4" style={{ color:'#59d9b3' }} />
           </div>
           <div className="min-w-0">
-            <div className="text-xs" style={{ color:'var(--text-muted)' }}>Talking to</div>
-            <div className="font-semibold truncate">{assistantName || 'Assistant'}</div>
+            <div className="text-xs" style={{ color:'rgba(255,255,255,.6)' }}>Talking to</div>
+            <div className="font-semibold truncate" style={{ color:'#e6f1ef' }}>{assistantName || 'Assistant'}</div>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <span className="text-xs px-2 py-1 rounded-[8px]" style={{ border:'1px solid rgba(255,255,255,.14)', color:'var(--text)' }} title="Model">
-            {model}
-          </span>
+        <div className="ml-auto flex items-center gap-2">
+          {/* model label */}
+          <span className="text-xs px-2 py-1 rounded-[8px]" style={{ border:'1px solid rgba(255,255,255,.14)', color:'#e6f1ef' }}>{model}</span>
 
+          {/* voice selector */}
           <div className="relative">
             <select
               className="appearance-none bg-transparent text-xs rounded-[8px] px-2.5 py-1.5 pr-7"
-              style={{ border:'1px solid rgba(255,255,255,.14)', color:'var(--text)' }}
+              style={{ border:'1px solid rgba(255,255,255,.14)', color:'#e6f1ef' }}
               value={voiceId}
               onChange={(e)=>setSelectedVoice(e.target.value)}
               title="Voice"
@@ -450,15 +434,14 @@ export default function WebCallPanel({
                 <option key={v} value={v}>{v}</option>
               ))}
             </select>
-            <ChevronDown className="w-4 h-4 absolute right-2 top-2" style={{ color:'var(--text-muted)' }} />
+            <ChevronDown className="w-4 h-4 absolute right-2 top-2" style={{ color:'rgba(255,255,255,.6)' }} />
           </div>
 
           <button
             onClick={toggleMute}
             className="w-8 h-8 rounded-[8px] grid place-items-center"
-            style={{ border:'1px solid rgba(255,255,255,.14)', color:'var(--text)', background: muted ? 'rgba(239,68,68,.14)' : 'var(--panel)' }}
-            title={muted ? 'Unmute mic' : 'Mute mic'} aria-label={muted ? 'Unmute' : 'Mute'}
-          >
+            style={{ border:'1px solid rgba(255,255,255,.14)', color:'#e6f1ef', background: muted ? 'rgba(239,68,68,.14)' : 'transparent' }}
+            title={muted ? 'Unmute mic' : 'Mute mic'}>
             {muted ? <MicOff className="w-4 h-4"/> : <Mic className="w-4 h-4" />}
           </button>
 
@@ -473,14 +456,13 @@ export default function WebCallPanel({
         </div>
       </div>
 
-      {/* Transcript — WhatsApp style bubbles, auto-scroll */}
-      <div ref={scrollerRef} className="px-3 py-3 space-y-3 overflow-y-auto" style={{ scrollbarWidth:'thin' }}>
+      {/* Transcript */}
+      <div ref={scrollerRef} className="px-3 py-3 space-y-3 overflow-y-auto" style={{ scrollbarWidth:'thin', color:'#e6f1ef' }}>
         {log.length===0 && (
-          <div className="text-sm" style={{ color:'var(--text-muted)' }}>
+          <div className="text-sm" style={{ color:'rgba(255,255,255,.6)' }}>
             {connecting ? 'Connecting to voice…' : (firstMode==='Assistant speaks first' ? 'Waiting for assistant…' : 'Say hello! We’ll show the transcript here.')}
           </div>
         )}
-
         {log.map(row=>(
           <div key={row.id} className={`flex ${row.who==='user' ? 'justify-end' : 'justify-start'}`}>
             {row.who==='assistant' && (
@@ -494,7 +476,6 @@ export default function WebCallPanel({
                  style={{
                    background: row.who==='user' ? 'rgba(56,196,143,.18)' : 'rgba(255,255,255,.06)',
                    borderColor: row.who==='user' ? 'rgba(56,196,143,.35)' : 'rgba(255,255,255,.14)',
-                   color:'var(--text)'
                  }}>
               <div>{row.text || <span style={{ opacity:.5 }}>…</span>}</div>
               <div className="text-[10px] mt-1 opacity-60 text-right">{fmt(row.at)}</div>
@@ -503,7 +484,7 @@ export default function WebCallPanel({
             {row.who==='user' && (
               <div className="ml-2 mt-[2px] shrink-0 rounded-full w-7 h-7 grid place-items-center"
                    style={{ background:'rgba(255,255,255,.10)', border:'1px solid rgba(255,255,255,.18)' }}>
-                <User className="w-4 h-4" style={{ color:'var(--text)' }} />
+                <User className="w-4 h-4" />
               </div>
             )}
           </div>
@@ -517,9 +498,9 @@ export default function WebCallPanel({
         )}
       </div>
 
-      {/* Footer status */}
-      <div className="px-3 py-2" style={{ borderTop:'1px solid rgba(255,255,255,.10)' }}>
-        <div className="flex items-center justify-between gap-2 text-xs" style={{ color:'var(--text)' }}>
+      {/* Footer */}
+      <div className="px-3 py-2 border-t border-[rgba(255,255,255,.10)]" style={{ color:'#e6f1ef' }}>
+        <div className="flex items-center justify-between gap-2 text-xs">
           <div className="flex items-center gap-2">
             {connecting && <Loader2 className="w-4 h-4 animate-spin" />}
             <span style={{ opacity:.85 }}>
@@ -530,6 +511,10 @@ export default function WebCallPanel({
           <audio ref={audioRef} autoPlay playsInline />
         </div>
       </div>
-    </div>
+    </aside>
   );
+
+  // Render via portal so it floats above any page blur
+  if (typeof window === 'undefined') return null;
+  return createPortal(panel, document.body);
 }
