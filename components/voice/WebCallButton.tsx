@@ -7,7 +7,8 @@ import { Mic, MicOff, X, Bot, User, Loader2, ChevronDown } from 'lucide-react';
 /* ───────────────────────── Props ───────────────────────── */
 type Props = {
   className?: string;
-  model: string;                 // initial model
+  model: string;                 // initial model from Voice Agent
+  models?: string[];             // ✅ full list injected by Voice Agent
   systemPrompt: string;
   voiceName: string;             // friendly or OpenAI voice id
   assistantName: string;
@@ -139,6 +140,7 @@ async function attachProcessedAudio(audioEl:HTMLAudioElement, remote:MediaStream
 export default function WebCallPanel({
   className,
   model,
+  models = [],                // ✅ models from parent (Voice Agent)
   systemPrompt,
   voiceName: voiceProp,
   assistantName,
@@ -287,11 +289,14 @@ export default function WebCallPanel({
         const style=[baseStyle(languageHint),turnStyleNudge()].join(' ');
         baseInstructionsRef.current=`${systemPrompt || ''}\n\n${style}`;
 
+        // ✅ Ensure text + transcription are emitted
         safeSend(dc,{ type:'session.update', session:{
           instructions: baseInstructionsRef.current,
           voice: voiceId,
           input_audio_format:'pcm16',
           output_audio_format:'pcm16',
+          modalities: ['audio','text'],
+          input_audio_transcription: { enabled: true },
         }});
 
         if(firstMode==='Assistant speaks first'){
@@ -329,6 +334,17 @@ export default function WebCallPanel({
           }
           if(t==='response.output_text' && typeof msg?.text==='string'){
             addLine('assistant', msg.text);
+          }
+
+          // Some models emit assistant speech-only; if they send audio transcript deltas, capture those too.
+          if(t==='response.audio_transcript.delta'){
+            const id=msg?.response_id||msg?.id||'assistant_current';
+            const delta=msg?.delta||'';
+            upsert(id,'assistant',(prev)=>({ text:(prev?.text||'')+String(delta) }));
+          }
+          if(t==='response.audio_transcript.done'){
+            const id=msg?.response_id||msg?.id||'assistant_current';
+            upsert(id,'assistant',{ done:true });
           }
 
           // User speech transcript stream
@@ -411,7 +427,7 @@ export default function WebCallPanel({
     try{ micStreamRef.current?.getTracks()?.forEach(t=>t.stop()); }catch{}
     micStreamRef.current=null;
     try{ closeChainRef.current && closeChainRef.current(); }catch{}
-    closeChainRef.current = null; // ✅ fix: do NOT reassign the ref variable itself
+    closeChainRef.current = null; // ✅ do NOT reassign the ref object itself
   }
   function endCall(userIntent=true){ cleanup(); setConnected(false); setConnecting(false); if(userIntent) onClose?.(); }
 
@@ -440,7 +456,7 @@ export default function WebCallPanel({
         </div>
 
         <div className="ml-auto flex items-center gap-2">
-          {/* Model selector */}
+          {/* Model selector — from Voice Agent */}
           <div className="relative">
             <select
               className="appearance-none bg-transparent text-xs rounded-[8px] px-2.5 py-1.5 pr-7"
@@ -449,10 +465,9 @@ export default function WebCallPanel({
               onChange={(e)=>setSelectedModel(e.target.value)}
               title="Model"
             >
-              <option value="gpt-4o-realtime-preview">gpt-4o-realtime-preview</option>
-              <option value="gpt-4o-realtime-preview-2024-12-17">gpt-4o-realtime-preview-2024-12-17</option>
-              <option value="gpt-4o-realtime-audio-preview">gpt-4o-realtime-audio-preview</option>
-              <option value="gpt-4o-mini-tts">gpt-4o-mini-tts</option>
+              { (models.length ? models : [model]).map(m => (
+                <option key={m} value={m}>{m}</option>
+              )) }
             </select>
             <ChevronDown className="w-4 h-4 absolute right-2 top-2" style={{ color:'rgba(255,255,255,.6)' }} />
           </div>
