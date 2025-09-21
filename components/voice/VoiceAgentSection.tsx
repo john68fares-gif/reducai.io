@@ -42,7 +42,7 @@ const GREEN_LINE = 'rgba(89,217,179,.20)';
 const ACTIVE_KEY = 'va:activeId';
 const Z_OVERLAY = 100000;
 const Z_MODAL   = 100001;
-const Z_MENU    = 100020;       // above panels
+const Z_MENU    = 100020;
 const IS_CLIENT = typeof window !== 'undefined' && typeof document !== 'undefined';
 
 /* phone icon */
@@ -166,7 +166,7 @@ type AgentData = {
   denoise: boolean;
   numerals: boolean;
 
-  // NEW: integrations
+  // integrations
   sheetsUrl?: string;
   sheetsTab?: string;
 };
@@ -185,127 +185,87 @@ const PROMPT_SKELETON =
 
 [Error Handling / Fallback]`;
 
-/* ─────────── prompt-engine shims (FIXED) ─────────── */
+/* ─────────── prompt-engine shims (FIXED regex) ─────────── */
 const looksLikeFullPromptSafe = (raw: string) => {
   const t = (raw || '').toLowerCase();
   return ['[identity]', '[style]', '[response guidelines]', '[task & goals]', '[error handling', '[notes]'].some(h => t.includes(h));
 };
-
-// Safe label-escape for regex
 const _esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
 const normalizeFullPromptSafe = (raw: string) => {
-  const sections = {
-    identity: '',
-    style: '',
-    guidelines: '',
-    tasks: '',
-    errors: '',
-    notes: ''
-  };
   const pull = (label: string) => {
     const rx = new RegExp(String.raw`$begin:math:display$${_esc(label)}$end:math:display$\s*([\s\S]*?)(?=\n\s*\[|$)`, 'i');
     const m = raw.match(rx);
     return m ? m[1].trim() : '';
   };
-  sections.identity   = pull('Identity');
-  sections.style      = pull('Style');
-  sections.guidelines = pull('Response Guidelines');
-  sections.tasks      = pull('Task & Goals');
-  sections.errors     = pull('Error Handling / Fallback');
-  sections.notes      = pull('Notes');
+  const identity   = pull('Identity');
+  const style      = pull('Style');
+  const guidelines = pull('Response Guidelines');
+  const tasks      = pull('Task & Goals');
+  const errors     = pull('Error Handling / Fallback');
+  const notes      = pull('Notes');
 
-  const out =
+  return (
 `[Identity]
-${sections.identity || '- You are a helpful, professional AI assistant for this business.'}
+${identity || '- You are a helpful, professional AI assistant for this business.'}
 
 [Style]
-${sections.style || '- Clear, concise, friendly.'}
+${style || '- Clear, concise, friendly.'}
 
 [Response Guidelines]
-${sections.guidelines || '- Ask one clarifying question when essential info is missing.'}
+${guidelines || '- Ask one clarifying question when essential info is missing.'}
 
 [Task & Goals]
-${sections.tasks || '- Guide users to their next best action (booking, purchase, or escalation).'}
+${tasks || '- Guide users to their next best action (booking, purchase, or escalation).'}
 
 [Error Handling / Fallback]
-${sections.errors || '- If unsure, ask a specific clarifying question first.'}
-${sections.notes ? `
+${errors || '- If unsure, ask a specific clarifying question first.'}` + (notes ? `
 
 [Notes]
-${sections.notes}` : ''}`.trim();
-
-  return out;
+${notes}` : '')
+  ).trim();
 };
-
 const applyInstructionsSafe = (base: string, raw: string) => {
   const text = (raw || '').trim();
-
   const industryMatch = text.match(/assistant\s+for\s+(?:a|an|the)?\s*([^.;:,]+?)(?:\s+(?:clinic|store|company|business))?(?:[.;:,]|$)/i);
   const industry = industryMatch ? industryMatch[1].trim() : '';
-
   const toneMatch = text.match(/tone\s*[:=]\s*([a-z,\s-]+)/i) || text.match(/\b(friendly|formal|casual|professional|empathetic|playful)\b/i);
   const tone = toneMatch ? (toneMatch as any)[1]?.trim?.() || (toneMatch as any)[0] : '';
-
   const tasksMatch = text.match(/tasks?\s*[:=]\s*([a-z0-9_,\-\s]+)/i);
   const tasksRaw = tasksMatch ? (tasksMatch as any)[1] : '';
-  const tasks = tasksRaw
-    ? tasksRaw.split(/[,\s]+/).filter(Boolean)
-    : (text.includes('booking') || text.includes('schedule')) ? ['lead_qualification','booking','faq'] : [];
-
+  const tasks = tasksRaw ? tasksRaw.split(/[,\s]+/).filter(Boolean)
+                         : (text.includes('booking') || text.includes('schedule')) ? ['lead_qualification','booking','faq'] : [];
   const channels = /voice|call|phone/i.test(text) && /chat|website|web/i.test(text) ? 'voice & chat'
                   : /voice|call|phone/i.test(text) ? 'voice'
                   : /chat|website|web/i.test(text) ? 'chat'
                   : '';
-
-  const identity =
-`- You are a versatile AI assistant${industry ? ` for a ${industry}` : ''}. Represent the brand professionally and help users achieve their goals.`;
-
-  const style =
-`- ${tone ? `${tone[0].toUpperCase()}${tone.slice(1)}` : 'Clear, concise, friendly'}. Prefer 2–4 short sentences per turn.
-- Confirm understanding with a brief paraphrase when the request is complex.`;
-
-  const guidelines =
-`- Ask a clarifying question when essential info is missing.
-- Do not fabricate; say when you don’t know or need to check.
-- Summarize next steps when the user has a multi-step task.`;
-
-  const goals =
-`- Qualify the user’s need, answer relevant FAQs, and guide to scheduling, purchase, or escalation.${channels ? ` (${channels})` : ''}
-- Offer to collect structured info (name, contact, preferred time) when booking or follow-up is needed.${tasks.length ? ` Focus on: ${tasks.join(', ')}.` : ''}`;
-
-  const errors =
-`- If uncertain, ask a specific clarifying question.
-- If a tool/endpoint fails, apologize briefly and offer an alternative or human handoff.`;
-
   const merged =
 `[Identity]
-${identity}
+- You are a versatile AI assistant${industry ? ` for a ${industry}` : ''}. Represent the brand professionally and help users achieve their goals.
 
 [Style]
-${style}
+- ${tone ? `${tone[0].toUpperCase()}${tone.slice(1)}` : 'Clear, concise, friendly'}. Prefer 2–4 short sentences per turn.
+- Confirm understanding with a brief paraphrase when the request is complex.
 
 [Response Guidelines]
-${guidelines}
+- Ask a clarifying question when essential info is missing.
+- Do not fabricate; say when you don’t know or need to check.
+- Summarize next steps when the user has a multi-step task.
 
 [Task & Goals]
-${goals}
+- Qualify the user’s need, answer relevant FAQs, and guide to scheduling, purchase, or escalation.${channels ? ` (${channels})` : ''}
+- Offer to collect structured info (name, contact, preferred time) when booking or follow-up is needed.${tasks.length ? ` Focus on: ${tasks.join(', ')}.` : ''}
 
 [Error Handling / Fallback]
-${errors}`;
-
+- If uncertain, ask a specific clarifying question.
+- If a tool/endpoint fails, apologize briefly and offer an alternative or human handoff.`;
   return { merged, summary: `Applied ${industry ? `industry=${industry}; ` : ''}${tone ? `tone=${tone}; ` : ''}${tasks.length ? `tasks=${tasks.join(',')}; ` : ''}`.trim() || 'Updated.' };
 };
-
 const looksLikeFullPromptRT = (raw: string) =>
   isFn(_looksLikeFullPrompt) ? !!_looksLikeFullPrompt(raw) : looksLikeFullPromptSafe(raw);
-
 const normalizeFullPromptRT = (raw: string) =>
   isFn(_normalizeFullPrompt) ? String(_normalizeFullPrompt(raw) || '') : normalizeFullPromptSafe(raw);
-
 const applyInstructionsRT = (base: string, raw: string) =>
   isFn(_applyInstructions) ? (_applyInstructions as any)(base, raw) : applyInstructionsSafe(base, raw);
-
 const DEFAULT_PROMPT_RT = nonEmpty(_DEFAULT_PROMPT) ? _DEFAULT_PROMPT! : PROMPT_SKELETON;
 
 /* ─────────── defaults ─────────── */
@@ -658,7 +618,6 @@ function computeDiff(base:string, next:string){
   }
   return rows;
 }
-
 function DiffInline({ base, next }:{ base:string; next:string }){
   const rows = computeDiff(base, next);
   return (
@@ -726,12 +685,6 @@ export default function VoiceAgentSection() {
   const [proposedPrompt, setProposedPrompt] = useState('');
   const [changesSummary, setChangesSummary] = useState('');
 
-  // chat state (optional)
-  const [msgs] = useState<ChatMsg[]>(() => [
-    { id: 'sys', role: 'system', text: (DEFAULT_AGENT.systemPrompt || '').trim() },
-    { id: 'hello', role: 'assistant', text: 'Hi! Ready when you are.' }
-  ]);
-
   // voice preview + TTS (browser speech synthesis)
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   useEffect(() => {
@@ -771,11 +724,12 @@ export default function VoiceAgentSection() {
   useEffect(() => {
     (async () => {
       try {
-        const store = await scopedStorage();
-        await store.ensureOwnerGuard();
+        // ✅ use `storage` (no re-declare)
+        const storage = await scopedStorage();
+        await storage.ensureOwnerGuard();
 
-        const v1 = await store.getJSON<ApiKey[]>('apiKeys.v1', []);
-        const legacy = await store.getJSON<ApiKey[]>('apiKeys', []);
+        const v1 = await storage.getJSON<ApiKey[]>('apiKeys.v1', []);
+        const legacy = await storage.getJSON<ApiKey[]>('apiKeys', []);
         const merged = Array.isArray(v1) && v1.length ? v1 : Array.isArray(legacy) ? legacy : [];
         const cleaned = merged
           .filter(Boolean)
@@ -784,8 +738,7 @@ export default function VoiceAgentSection() {
 
         setApiKeys(cleaned);
 
-        const store = await scopedStorage();
-        const globalSelected = await store.getJSON<string>('apiKeys.selectedId', '');
+        const globalSelected = await storage.getJSON<string>('apiKeys.selectedId', '');
         const chosen =
           (data.apiKeyId && cleaned.some((k) => k.id === data.apiKeyId)) ? data.apiKeyId! :
           (globalSelected && cleaned.some((k) => k.id === globalSelected)) ? globalSelected :
@@ -793,12 +746,12 @@ export default function VoiceAgentSection() {
 
         if (chosen && chosen !== data.apiKeyId) {
           setData(prev => ({ ...prev, apiKeyId: chosen }));
-          await store.setJSON('apiKeys.selectedId', chosen);
+          await storage.setJSON('apiKeys.selectedId', chosen);
         }
 
         // Load saved sheets info
-        const sheetsUrl = await store.getJSON<string>('va:sheets:url', data.sheetsUrl || '');
-        const sheetsTab = await store.getJSON<string>('va:sheets:tab', data.sheetsTab || 'Appointments');
+        const sheetsUrl = await storage.getJSON<string>('va:sheets:url', data.sheetsUrl || '');
+        const sheetsTab = await storage.getJSON<string>('va:sheets:tab', data.sheetsTab || 'Appointments');
         if (sheetsUrl || sheetsTab) setData(prev => ({ ...prev, sheetsUrl, sheetsTab }));
       } catch {}
     })();
@@ -817,8 +770,6 @@ export default function VoiceAgentSection() {
       });
     };
   }
-
-  const modelOpts = useMemo(()=>modelOptsFor(data.provider), [data.provider]);
 
   async function doSave(){
     if (!activeId) { setToastKind('error'); setToast('Select or create an agent'); return; }
@@ -882,10 +833,10 @@ export default function VoiceAgentSection() {
 
   async function saveSheet(){
     try {
-      const store = await scopedStorage();
-      await store.ensureOwnerGuard();
-      await store.setJSON('va:sheets:url', sheetUrlInput);
-      await store.setJSON('va:sheets:tab', sheetTabInput || 'Appointments');
+      const storage = await scopedStorage();
+      await storage.ensureOwnerGuard();
+      await storage.setJSON('va:sheets:url', sheetUrlInput);
+      await storage.setJSON('va:sheets:tab', sheetTabInput || 'Appointments');
       setData(prev => ({ ...prev, sheetsUrl: sheetUrlInput, sheetsTab: sheetTabInput || 'Appointments' }));
       setToastKind('info'); setToast('Google Sheet saved');
       setTimeout(()=>setToast(''), 1600);
@@ -896,7 +847,7 @@ export default function VoiceAgentSection() {
     }
   }
 
-  /* ─────────── Prompt generator actions ─────────── */
+  /* Prompt generator actions */
   const inInlineReview = genPhase === 'review' && !showGenerate;
 
   function openGenerator(){
@@ -950,7 +901,7 @@ export default function VoiceAgentSection() {
     setGenPhase('idle');
   }
 
-  /* ─────────── UI ─────────── */
+  /* UI */
   return (
     <section className="va-scope" style={{ background:'var(--bg)', color:'var(--text)' }}>
       <Tokens />
@@ -961,7 +912,7 @@ export default function VoiceAgentSection() {
           <RailBoundary><AssistantRail /></RailBoundary>
         </div>
 
-        <div className="px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w-[1160px]" style={{ fontSize:'var(--fz-body)', lineHeight:'var(--lh-body)' }}>
+        <div className="px-3 md:px-5 lg:px-6 py-5 mx-auto w/full max-w-[1160px]" style={{ fontSize:'var(--fz-body)', lineHeight:'var(--lh-body)' }}>
           <div className="mb-[var(--s-4)] flex flex-wrap items-center justify-end gap-[var(--s-3)]">
             <button
               onClick={doSave}
@@ -1142,7 +1093,7 @@ export default function VoiceAgentSection() {
                   value={data.apiKeyId || ''}
                   onChange={async (val)=>{
                     setField('apiKeyId')(val);
-                    try { const store = await scopedStorage(); await store.ensureOwnerGuard(); await store.setJSON('apiKeys.selectedId', val); } catch {}
+                    try { const storage = await scopedStorage(); await storage.ensureOwnerGuard(); await storage.setJSON('apiKeys.selectedId', val); } catch {}
                   }}
                   options={[
                     { value: '', label: 'Select an API key…' },
@@ -1275,7 +1226,7 @@ export default function VoiceAgentSection() {
         </div>
       </div>
 
-      {/* ─────────── Generate overlay ─────────── */}
+      {/* Generate overlay */}
       {showGenerate && IS_CLIENT ? createPortal(
         <>
           <div
@@ -1295,7 +1246,6 @@ export default function VoiceAgentSection() {
               }}
               onClick={(e)=>e.stopPropagation()}
             >
-              {/* Header */}
               <div
                 className="flex items-center justify-between px-6 py-4"
                 style={{
@@ -1321,7 +1271,6 @@ export default function VoiceAgentSection() {
                 </button>
               </div>
 
-              {/* Body */}
               <div className="px-6 py-5 space-y-3">
                 <div className="text-xs" style={{ color:'var(--text-muted)' }}>
                   Tip: “assistant for a dental clinic; tone friendly; tasks=booking,faq; channels=voice &amp; chat”.
@@ -1340,7 +1289,6 @@ export default function VoiceAgentSection() {
                 </div>
               </div>
 
-              {/* Footer */}
               <div className="px-6 pb-6 flex gap-3">
                 <button
                   onClick={()=> setShowGenerate(false)}
@@ -1364,7 +1312,7 @@ export default function VoiceAgentSection() {
         document.body
       ) : null}
 
-      {/* ─────────── Google Sheets overlay ─────────── */}
+      {/* Google Sheets overlay */}
       {showSheets && IS_CLIENT ? createPortal(
         <>
           <div
@@ -1384,7 +1332,6 @@ export default function VoiceAgentSection() {
               }}
               onClick={(e)=>e.stopPropagation()}
             >
-              {/* Header */}
               <div
                 className="flex items-center justify-between px-6 py-4"
                 style={{
@@ -1410,7 +1357,6 @@ export default function VoiceAgentSection() {
                 </button>
               </div>
 
-              {/* Body */}
               <div className="px-6 py-5 space-y-3">
                 <div className="text-xs" style={{ color:'var(--text-muted)' }}>
                   Paste the Google Sheet URL with sharing set to <b>Anyone with the link (Editor)</b>. The agent will read availability and append confirmed bookings.
@@ -1463,7 +1409,6 @@ export default function VoiceAgentSection() {
                 ) : null}
               </div>
 
-              {/* Footer */}
               <div className="px-6 pb-6 flex gap-3">
                 <button
                   onClick={testSheet}
@@ -1488,7 +1433,7 @@ export default function VoiceAgentSection() {
         document.body
       ) : null}
 
-      {/* ─────────── Voice/Call panel (WebRTC) ─────────── */}
+      {/* Voice/Call panel (WebRTC) */}
       {IS_CLIENT ? createPortal(
         <>
           <div
@@ -1503,15 +1448,13 @@ export default function VoiceAgentSection() {
           />
           {showCall && (
             <WebCallButton
-              // force a realtime-capable model for the call
               model={'gpt-4o-realtime-preview'}
               systemPrompt={data.systemPrompt}
               voiceName={data.voiceName}
               assistantName={data.name || 'Assistant'}
               apiKey={apiKeys.find(k => k.id === data.apiKeyId)?.key || ''}
               onClose={()=> setShowCall(false)}
-              // If your WebCallButton supports passing integrations, you can plumb them here:
-              // sheets={{ url: data.sheetsUrl, tab: data.sheetsTab }}
+              // sheets={{ url: data.sheetsUrl, tab: data.sheetsTab }} // wire if supported
             />
           )}
         </>,
