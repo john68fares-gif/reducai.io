@@ -6,8 +6,7 @@ import dynamic from 'next/dynamic';
 import { createPortal } from 'react-dom';
 import {
   Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Rocket, Search, Check, Lock,
-  KeyRound, Play, Square, Pause, X, Link2, Save, TestTube2, Database, UserRound, Loader2,
-  ChevronRight, ChevronLeft, ExternalLink, Clipboard, FilePlus2, Globe, MapPin
+  KeyRound, Play, Square, Pause, X
 } from 'lucide-react';
 import { scopedStorage } from '@/utils/scoped-storage';
 import WebCallButton from '@/components/voice/WebCallButton';
@@ -62,7 +61,6 @@ function PhoneFilled(props: React.SVGProps<SVGSVGElement>) {
 const isFn = (f: any): f is Function => typeof f === 'function';
 const nonEmpty = (v: any): v is string => typeof v === 'string' && v.trim().length > 0;
 const safeTrim = (v: any): string => (nonEmpty(v) ? v.trim() : '');
-const sleep = (ms:number)=> new Promise(r=>setTimeout(r,ms));
 
 /* ─────────── theme tokens ─────────── */
 const Tokens = () => (
@@ -76,19 +74,19 @@ const Tokens = () => (
       --lh-body:1.45; --ease:cubic-bezier(.22,.61,.36,1);
       --app-sidebar-w: 240px; --rail-w: 260px;
       --page-bg:var(--bg); --panel-bg:var(--panel); --input-bg:var(--panel);
-      --input-border:rgba(255,255,255,.18); --input-shadow:0 0 0 1px rgba(255,255,255,.06) inset;
+      --input-border:rgba(255,255,255,.10); --input-shadow:0 0 0 1px rgba(255,255,255,.06) inset;
       --border-weak:rgba(255,255,255,.10);
       --card-shadow:0 22px 44px rgba(0,0,0,.28),
                     0 0 0 1px rgba(255,255,255,.06) inset,
                     0 0 0 1px ${GREEN_LINE};
       --green-weak: rgba(89,217,179,.12); --green-strong: rgba(89,217,179,.22);
       --red-weak: rgba(239,68,68,.14); --red-strong: rgba(239,68,68,.26);
-      --vs-input-bg:#101314; --vs-input-border:rgba(255,255,255,.22);
+      --vs-input-bg:#101314; --vs-input-border:rgba(255,255,255,.14);
       --vs-input-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 12px 30px rgba(0,0,0,.38);
       --vs-menu-bg:#101314; --vs-menu-border:rgba(255,255,255,.16);
     }
     .va-portal{ --vs-menu-bg:#101314; --vs-menu-border:rgba(255,255,255,.16);
-      --vs-input-bg:#101314; --vs-input-border:rgba(255,255,255,.22);
+      --vs-input-bg:#101314; --vs-input-border:rgba(255,255,255,.14);
       --vs-input-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 12px 30px rgba(0,0,0,.38);
       --text:#e6f1ef; --text-muted:#9fb4ad; }
     .va-card{ border-radius:var(--radius-outer); border:1px solid var(--border-weak);
@@ -96,8 +94,6 @@ const Tokens = () => (
     .va-head{ min-height:var(--header-h); display:grid; grid-template-columns:1fr auto; align-items:center; padding:0 16px;
       background:linear-gradient(90deg,var(--panel-bg) 0%,color-mix(in oklab,var(--panel-bg) 97%, white 3%) 50%,var(--panel-bg) 100%);
       border-bottom:1px solid rgba(255,255,255,.08); color:var(--text); }
-    .va-cta{ background:${CTA}; color:#fff; font-weight:700; }
-    .va-cta:hover{ background:${CTA_HOVER}; }
   `}</style>
 );
 
@@ -121,13 +117,6 @@ type AgentData = {
 
   denoise: boolean;
   numerals: boolean;
-
-  // integrations
-  gsAuthed?: boolean;
-  gsEmail?: string;
-  gsSheets?: Array<{ id: string; name: string }>;
-  gsSelected?: string[];              // up to 50 spreadsheet IDs
-  gsTabs?: Record<string,string>;     // per-spreadsheet chosen tab name
 };
 
 /* ─────────── prompt-engine shims (fixed) ─────────── */
@@ -253,12 +242,7 @@ const DEFAULT_AGENT: AgentData = {
   asrModel: 'Nova 2',
   denoise: false,
   numerals: false,
-  language: 'English',
-  gsAuthed: false,
-  gsEmail: '',
-  gsSheets: [],
-  gsSelected: [],
-  gsTabs: {}
+  language: 'English'
 };
 
 const keyFor = (id: string) => `va:agent:${id}`;
@@ -414,7 +398,7 @@ function StyledSelect({
         className="w-full flex items-center justify-between gap-3 px-3 py-3 rounded-[14px] text-sm outline-none transition"
         style={{
           background:'var(--vs-input-bg, #101314)',
-          border:'1px solid var(--vs-input-border, rgba(255,255,255,.22))',
+          border:'1px solid var(--vs-input-border, rgba(255,255,255,.14))',
           boxShadow:'var(--vs-input-shadow, none)',
           color:'var(--text)'
         }}
@@ -444,7 +428,7 @@ function StyledSelect({
 
           <div
             className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[12px]"
-            style={{ background:'var(--vs-input-bg, #101314)', border:'1px solid var(--vs-input-border, rgba(255,255,255,.22))', color:'var(--text)' }}
+            style={{ background:'var(--vs-input-bg, #101314)', border:'1px solid var(--vs-input-border, rgba(255,255,255,.14))', color:'var(--text)' }}
           >
             <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
             <input
@@ -480,7 +464,7 @@ function StyledSelect({
                     type="button"
                     onClick={async (e)=>{ e.stopPropagation(); await onPreview(o.value); }}
                     className="w-7 h-7 rounded-full grid place-items-center"
-                    style={{ border:'1px solid var(--vs-input-border, rgba(255,255,255,.22))', background:'var(--vs-input-bg, #101314)' }}
+                    style={{ border:'1px solid var(--vs-input-border, rgba(255,255,255,.14))', background:'var(--vs-input-bg, #101314)' }}
                   >
                     {isPreviewing === o.value ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
                   </button>
@@ -596,29 +580,19 @@ function DiffInline({ base, next }:{ base:string; next:string }){
   );
 }
 
-/* ─────────── Tiny typewriter for prompt preview ─────────── */
-function useTypewriter(text:string, speed=8){
-  const [out,setOut] = useState('');
-  const [running,setRunning] = useState(false);
-  const [done,setDone] = useState(false);
-  const full = text || '';
-  const start = async () => {
-    setOut(''); setRunning(true); setDone(false);
-    for (let i=0;i<full.length;i++){
-      setOut(full.slice(0,i+1));
-      // faster for long blocks, slower around newlines for drama :)
-      await sleep(full[i] === '\n' ? speed*5 : speed);
-    }
-    setRunning(false); setDone(true);
-  };
-  const stop = () => { setOut(full); setRunning(false); setDone(true); };
-  useEffect(()=>{ setOut(''); setRunning(false); setDone(false); }, [text]);
-  return { out, running, done, start, stop };
+/* ─────────── Tiny typewriter for the generator ─────────── */
+function TypeLine({text, speed=14}:{text:string; speed?:number}) {
+  const [i,setI] = useState(0);
+  useEffect(()=>{
+    setI(0);
+    if (!text) return;
+    const id = setInterval(()=> setI(v => (v < text.length ? v+1 : v)), 1000/ speed);
+    return ()=> clearInterval(id);
+  },[text,speed]);
+  return <span>{text.slice(0,i)}<span className="opacity-60">▍</span></span>;
 }
 
 /* ─────────── Page ─────────── */
-type ChatMsg = { id: string; role: 'user'|'assistant'|'system'; text: string };
-
 export default function VoiceAgentSection() {
   /* align rail to app sidebar */
   useEffect(() => {
@@ -656,15 +630,6 @@ export default function VoiceAgentSection() {
   const basePromptRef = useRef<string>('');
   const [proposedPrompt, setProposedPrompt] = useState('');
   const [changesSummary, setChangesSummary] = useState('');
-  const typer = useTypewriter(proposedPrompt, 6);
-
-  // Sheets overlay state
-  const [showSheets, setShowSheets] = useState(false);
-  const [sheetStep, setSheetStep] = useState<1|2|3>(1);
-  const [gsLoading, setGsLoading] = useState(false);
-  const [gsErr, setGsErr] = useState('');
-  const [sourceKind, setSourceKind] = useState<'sheets'|'website'|'maps'>('sheets');
-  const [pasteUrl, setPasteUrl] = useState('');
 
   // voice preview + TTS
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
@@ -728,14 +693,6 @@ export default function VoiceAgentSection() {
           setData(prev => ({ ...prev, apiKeyId: chosen }));
           await storage.setJSON('apiKeys.selectedId', chosen);
         }
-
-        // restore gs state
-        const gsAuthed = await storage.getJSON<boolean>('va:gs:authed', false);
-        const gsEmail  = await storage.getJSON<string>('va:gs:email', '');
-        const gsSheets = await storage.getJSON<Array<{id:string; name:string}>>('va:gs:sheets', []);
-        const gsSelected = await storage.getJSON<string[]>('va:gs:selected', []);
-        const gsTabs = await storage.getJSON<Record<string,string>>('va:gs:tabs', {});
-        setData(prev => ({ ...prev, gsAuthed, gsEmail, gsSheets, gsSelected, gsTabs }));
       } catch {}
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -769,18 +726,6 @@ export default function VoiceAgentSection() {
     finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
   }
 
-  /* ─────────── REALTIME CALL LAUNCH ─────────── */
-  const openCall = () => {
-    const key = apiKeys.find(k => k.id === data.apiKeyId)?.key || '';
-    if (!key) {
-      setToastKind('error');
-      setToast('Select an OpenAI API key first.');
-      setTimeout(()=>setToast(''), 2200);
-      return;
-    }
-    setShowCall(true);
-  };
-
   /* Prompt generator actions */
   const inInlineReview = genPhase === 'review' && !showGenerate;
   function openGenerator(){
@@ -809,8 +754,6 @@ export default function VoiceAgentSection() {
       setProposedPrompt(merged);
       setChangesSummary(summary);
       setGenPhase('review');
-      // kick off typing preview automatically
-      setTimeout(()=>typer.start(), 20);
     } catch {
       setToastKind('error');
       setToast('Generate failed — try simpler wording.');
@@ -825,119 +768,6 @@ export default function VoiceAgentSection() {
     setToastKind('info'); setToast('Prompt updated'); setTimeout(()=>setToast(''), 1400);
   }
   function discardGenerated(){ setProposedPrompt(''); setChangesSummary(''); setGenPhase('idle'); }
-
-  /* ─────────── Google Sheets overlay logic ─────────── */
-  async function rememberGsState(next: Partial<AgentData>) {
-    try {
-      const storage = await scopedStorage(); await storage.ensureOwnerGuard();
-      if (next.gsAuthed !== undefined) await storage.setJSON('va:gs:authed', next.gsAuthed);
-      if (next.gsEmail !== undefined) await storage.setJSON('va:gs:email', next.gsEmail);
-      if (next.gsSheets !== undefined) await storage.setJSON('va:gs:sheets', next.gsSheets);
-      if (next.gsSelected !== undefined) await storage.setJSON('va:gs:selected', next.gsSelected);
-      if (next.gsTabs !== undefined) await storage.setJSON('va:gs:tabs', next.gsTabs);
-    } catch {}
-  }
-
-  function startGoogleAuth(){
-    setGsErr('');
-    const w = 520, h = 640;
-    const y = window.top!.outerHeight / 2 + window.top!.screenY - ( h / 2);
-    const x = window.top!.outerWidth  / 2 + window.top!.screenX - ( w / 2);
-    const pop = window.open(`/api/connectors/sheets?action=auth_begin`, 'gsheets', `width=${w},height=${h},left=${x},top=${y}`);
-    if (!pop) { setGsErr('Popup blocked — allow popups for this site.'); return; }
-
-    const onMsg = (ev: MessageEvent) => {
-      if (!ev?.data || typeof ev.data !== 'object') return;
-      if (ev.data.type === 'gsheets:authed') {
-        window.removeEventListener('message', onMsg);
-        setData(prev => ({ ...prev, gsAuthed: true, gsEmail: ev.data.email || '' }));
-        rememberGsState({ gsAuthed: true, gsEmail: ev.data.email || '' });
-        loadSpreadsheets();
-        setSheetStep(2);
-      }
-    };
-    window.addEventListener('message', onMsg);
-  }
-
-  async function loadSpreadsheets(){
-    setGsLoading(true); setGsErr('');
-    try{
-      const r = await fetch('/api/connectors/sheets', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'list_spreadsheets' })});
-      const j = await r.json();
-      if (!r.ok || !Array.isArray(j?.items)) throw new Error(j?.error || 'Failed to list spreadsheets');
-      setData(prev => ({ ...prev, gsSheets: j.items }));
-      rememberGsState({ gsSheets: j.items });
-    } catch(e:any){
-      setGsErr(e?.message || 'Failed to list spreadsheets');
-    } finally { setGsLoading(false); }
-  }
-
-  async function loadTabsFor(spreadsheetId: string){
-    try{
-      const r = await fetch('/api/connectors/sheets', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'list_tabs', spreadsheetId })});
-      const j = await r.json();
-      if (!r.ok || !Array.isArray(j?.tabs)) throw new Error(j?.error || 'Failed to list tabs');
-      // set first tab if none chosen
-      setData(prev => {
-        const nextTabs = { ...(prev.gsTabs||{}) };
-        if (!nextTabs[spreadsheetId] && j.tabs[0]) nextTabs[spreadsheetId] = j.tabs[0];
-        return { ...prev, gsTabs: nextTabs };
-      });
-    } catch {/* ignore */}
-  }
-
-  function toggleSpreadsheet(id: string){
-    setData(prev => {
-      const sel = new Set(prev.gsSelected || []);
-      if (sel.has(id)) sel.delete(id); else if (sel.size < 50) sel.add(id);
-      const next = { ...prev, gsSelected: Array.from(sel) };
-      rememberGsState({ gsSelected: next.gsSelected });
-      if (sel.has(id)) loadTabsFor(id);
-      return next;
-    });
-  }
-
-  async function setTab(spreadsheetId: string, tab: string){
-    setData(prev => {
-      const next = { ...prev, gsTabs: { ...(prev.gsTabs||{}), [spreadsheetId]: tab } };
-      rememberGsState({ gsTabs: next.gsTabs });
-      return next;
-    });
-  }
-
-  function getSpreadsheetIdFromUrl(url:string){
-    // https://docs.google.com/spreadsheets/d/{ID}/
-    const m = url.match(/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
-    return m ? m[1] : '';
-  }
-  function addByUrl(){
-    const id = getSpreadsheetIdFromUrl(pasteUrl.trim());
-    if (!id) { setGsErr('Could not find a spreadsheet ID in that URL'); return; }
-    const exists = (data.gsSheets||[]).some(s=>s.id===id);
-    if (!exists) {
-      setData(prev => ({ ...prev, gsSheets: [{ id, name: 'Added by URL' }, ...(prev.gsSheets||[]) ] }));
-    }
-    if (!(data.gsSelected||[]).includes(id)) toggleSpreadsheet(id);
-    setPasteUrl('');
-  }
-
-  async function testAvailability(){
-    setGsLoading(true); setGsErr('');
-    try{
-      const r = await fetch('/api/connectors/sheets', { method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ action:'test', selected: data.gsSelected, tabs: data.gsTabs })});
-      const j = await r.json();
-      if (!r.ok || !j?.ok) throw new Error(j?.message || 'Test failed');
-      setToastKind('info'); setToast('Sheets connected'); setTimeout(()=>setToast(''), 1500);
-    } catch(e:any){
-      setGsErr(e?.message || 'Could not verify connection');
-    } finally { setGsLoading(false); }
-  }
-
-  async function saveSheetsAndClose(){
-    await rememberGsState({ gsSelected: data.gsSelected, gsTabs: data.gsTabs });
-    setShowSheets(false);
-  }
 
   /* ─────────── UI ─────────── */
   return (
@@ -954,19 +784,21 @@ export default function VoiceAgentSection() {
           <div className="mb-[var(--s-4)] flex flex-wrap items-center justify-end gap-[var(--s-3)]">
             <button onClick={doSave} disabled={saving}
               className="inline-flex items-center gap-2 rounded-[10px] px-4 text-sm transition hover:-translate-y-[1px] disabled:opacity-60"
-              style={{ height:'var(--control-h)', background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'#fff' }}>
+              style={{ height:'var(--control-h)', background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)' }}>
               {saving ? 'Saving…' : 'Save'}
             </button>
 
             <button onClick={doPublish} disabled={publishing}
               className="inline-flex items-center gap-2 rounded-[10px] px-4 text-sm transition hover:-translate-y-[1px] disabled:opacity-60"
-              style={{ height:'var(--control-h)', background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)', color:'#fff' }}>
+              style={{ height:'var(--control-h)', background:'var(--input-bg)', border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)' }}>
               <Rocket className="w-4 h-4" /> {publishing ? 'Publishing…' : 'Publish'}
             </button>
 
-            <button onClick={openCall}
-              className="inline-flex items-center gap-2 rounded-[10px] select-none va-cta"
-              style={{ height:'var(--control-h)', padding:'0 18px', boxShadow:'0 10px 22px rgba(89,217,179,.20)' }}
+            <button onClick={()=>setShowCall(true)}
+              className="inline-flex items-center gap-2 rounded-[10px] select-none"
+              style={{ height:'var(--control-h)', padding:'0 18px', background:CTA, color:'#ffffff', fontWeight:700, boxShadow:'0 10px 22px rgba(89,217,179,.20)' }}
+              onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA_HOVER)}
+              onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA)}
             >
               <PhoneFilled style={{ color:'#ffffff' }} />
               <span style={{ color:'#ffffff' }}>Talk to Assistant</span>
@@ -1008,7 +840,7 @@ export default function VoiceAgentSection() {
                   value={data.name}
                   onChange={(e)=>setField('name')(e.target.value)}
                   className="w-full bg-transparent outline-none rounded-[10px] px-3"
-                  style={{ height:'var(--control-h)', background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'#e6f1ef' }}
+                  style={{ height:'var(--control-h)', background:'var(--input-bg)', border:'1px solid var(--input-border)' }}
                   placeholder="e.g., Riley"
                 />
               </div>
@@ -1039,8 +871,8 @@ export default function VoiceAgentSection() {
                   <div className="font-medium" style={{ fontSize:'var(--fz-label)' }}>System Prompt</div>
                   <div className="flex items-center gap-2">
                     <button
-                      className="inline-flex items-center gap-2 rounded-[10px] text-sm va-cta"
-                      style={{ height:36, padding:'0 12px', border:'1px solid rgba(255,255,255,.08)' }}
+                      className="inline-flex items-center gap-2 rounded-[10px] text-sm"
+                      style={{ height:36, padding:'0 12px', background:CTA, color:'#fff', border:'1px solid rgba(255,255,255,.08)' }}
                       onClick={openGenerator}
                     >
                       <Wand2 className="w-4 h-4" /> Generate
@@ -1052,43 +884,23 @@ export default function VoiceAgentSection() {
                   {!inInlineReview ? (
                     <textarea
                       className="w-full bg-transparent outline-none rounded-[12px] px-3 py-[12px]"
-                      style={{ minHeight: 360, background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'#e6f1ef' }}
+                      style={{ minHeight: 360, background:'var(--input-bg)', border:'1px solid var(--input-border)' }}
                       value={data.systemPrompt}
                       onChange={(e)=> setField('systemPrompt')(e.target.value)}
                     />
                   ) : (
-                    <div className="rounded-[12px] space-y-3" style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', padding:'12px' }}>
-                      <div className="flex items-center justify-between">
+                    <div className="rounded-[12px]" style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', padding:'12px' }}>
+                      <div className="flex items-center justify-between mb-2">
                         <div className="text-sm" style={{ color:'var(--text-muted)' }}>{changesSummary || 'Review changes'}</div>
                         <div className="flex items-center gap-2">
                           <button onClick={discardGenerated} className="h-9 px-3 rounded-[10px]"
-                                  style={{ background:'transparent', border:'1px solid var(--input-border)', color:'#e6f1ef' }}>Discard</button>
-                          <button onClick={acceptGenerated} className="h-9 px-3 rounded-[10px] inline-flex items-center gap-2 va-cta">
+                                  style={{ background:'transparent', border:'1px solid var(--input-border)' }}>Discard</button>
+                          <button onClick={acceptGenerated} className="h-9 px-3 rounded-[10px] inline-flex items-center gap-2"
+                                  style={{ background:CTA, color:'#0a0f0d', fontWeight:600 }}>
                             <Check className="w-4 h-4" /> Accept
                           </button>
                         </div>
                       </div>
-
-                      {/* Typewriter Preview */}
-                      <div className="rounded-[10px] p-3" style={{ background:'rgba(255,255,255,.02)', border:'1px dashed rgba(255,255,255,.18)' }}>
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="text-xs" style={{ color:'var(--text-muted)' }}>Preview (typing effect)</div>
-                          <div className="flex items-center gap-2">
-                            {!typer.running && !typer.done && (
-                              <button className="h-8 px-3 rounded-[8px] va-cta" onClick={typer.start}><Play className="w-3.5 h-3.5" /> </button>
-                            )}
-                            {typer.running && (
-                              <button className="h-8 px-3 rounded-[8px]" onClick={typer.stop}
-                                      style={{ background:'transparent', border:'1px solid var(--input-border)', color:'#e6f1ef' }}>
-                                Skip
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                        <pre style={{ whiteSpace:'pre-wrap', lineHeight:'1.55', color:'#e6f1ef', fontSize:13 }}>{typer.out}</pre>
-                      </div>
-
-                      {/* Diff */}
                       <DiffInline base={basePromptRef.current} next={proposedPrompt}/>
                     </div>
                   )}
@@ -1139,17 +951,17 @@ export default function VoiceAgentSection() {
                   placeholder="— Choose —"
                   menuTop={
                     <div className="flex items-center justify-between px-3 py-2 rounded-[10px]"
-                         style={{ background:'var(--vs-input-bg, #101314)', border:'1px solid var(--vs-input-border, rgba(255,255,255,.22))' }}
+                         style={{ background:'var(--vs-input-bg, #101314)', border:'1px solid var(--vs-input-border, rgba(255,255,255,.14))' }}
                     >
                       <div className="text-xs" style={{ color:'var(--text-muted)' }}>Preview</div>
                       <div className="flex items-center gap-2">
                         <button type="button" onClick={()=>speakPreview(`This is ${data.voiceName || 'the selected'} voice preview.`)}
-                                className="w-8 h-8 rounded-full grid place-items-center va-cta">
+                                className="w-8 h-8 rounded-full grid place-items-center" style={{ background: CTA, color:'#0a0f0d' }}>
                           <Play className="w-4 h-4" />
                         </button>
                         <button type="button" onClick={stopPreview}
                                 className="w-8 h-8 rounded-full grid place-items-center border"
-                                style={{ background: 'var(--panel-bg)', borderColor:'var(--input-border)', color:'#e6f1ef' }}>
+                                style={{ background: 'var(--panel-bg)', borderColor:'var(--input-border)' }}>
                           <Square className="w-4 h-4" />
                         </button>
                       </div>
@@ -1160,83 +972,7 @@ export default function VoiceAgentSection() {
             </div>
           </Section>
 
-          {/* Transcriber */}
-          <Section
-            title="Transcriber"
-            icon={<Mic className="w-4 h-4" style={{ color: CTA }} />}
-            desc="Transcription settings"
-          >
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px]">
-              <div>
-                <div className="mb-[var(--s-2)] text-[12.5px]">Provider</div>
-                <StyledSelect value={data.asrProvider} onChange={(v)=>setField('asrProvider')(v as AgentData['asrProvider'])} options={asrProviders}/>
-              </div>
-              <div>
-                <div className="mb-[var(--s-2)] text-[12.5px]">Model</div>
-                <StyledSelect value={data.asrModel} onChange={setField('asrModel')} options={asrModelsFor(data.asrProvider)}/>
-              </div>
-            </div>
-            <div className="mt-[var(--s-4)] grid sm:grid-cols-2 gap-[12px]">
-              <div className="flex items-center justify-between p-3 rounded-[10px]" style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}>
-                <span className="text-sm">Background Denoising</span>
-                <Toggle checked={data.denoise} onChange={setField('denoise')} />
-              </div>
-              <div className="flex items-center justify-between p-3 rounded-[10px]" style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}>
-                <span className="text-sm">Use Numerals</span>
-                <Toggle checked={data.numerals} onChange={setField('numerals')} />
-              </div>
-            </div>
-          </Section>
-
-          {/* Integrations — Google Sheets */}
-          <Section
-            title="Integrations"
-            icon={<Database className="w-4 h-4" style={{ color: CTA }} />}
-            desc="Connect data sources the agent can read/write."
-          >
-            {/* Source picker (for future Website / Maps) */}
-            <div className="grid sm:grid-cols-2 gap-2 mb-3">
-              <StyledSelect
-                value={sourceKind}
-                onChange={(v)=>setSourceKind(v as any)}
-                options={[
-                  { value:'sheets', label:'Google Sheets' },
-                  { value:'website', label:'Website — coming soon', disabled:true },
-                  { value:'maps', label:'Google Maps — coming soon', disabled:true },
-                ]}
-                leftIcon={<Database className="w-4 h-4" style={{ color: CTA }} />}
-              />
-            </div>
-
-            {/* Sheets card */}
-            {sourceKind==='sheets' && (
-              <div className="p-3 rounded-[12px]" style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}>
-                <div className="flex items-center justify-between">
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium">Google Sheets — Appointments</div>
-                    <div className="text-xs truncate" style={{ color:'var(--text-muted)' }}>
-                      {data.gsAuthed ? (data.gsEmail ? `Connected as ${data.gsEmail}` : 'Connected') : 'Not connected'}
-                      {data.gsSelected?.length ? ` • ${data.gsSelected.length} selected` : ''}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={()=>{ setShowSheets(true); setSheetStep(data.gsAuthed ? 2 : 1); }}
-                      className="h-[36px] px-3 rounded-[10px] inline-flex items-center gap-2 va-cta"
-                    >
-                      <Link2 className="w-4 h-4" /> {data.gsAuthed ? 'Manage' : 'Connect'}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="mt-3 text-xs" style={{ color:'var(--text-muted)' }}>
-                  Expected columns (any order): <code>Name</code>, <code>Phone</code>, <code>Email</code>,
-                  <code> Date</code>, <code>Time</code>, <code>Notes</code>, <code>Status</code>.
-                  The assistant will check availability across the selected sheets/tabs and append confirmed bookings.
-                </div>
-              </div>
-            )}
-          </Section>
+          {/* (Sheets removed for now) */}
         </div>
       </div>
 
@@ -1259,15 +995,31 @@ export default function VoiceAgentSection() {
                   <div className="text-lg font-semibold">Generate Prompt</div>
                 </div>
                 <button onClick={()=> setShowGenerate(false)} className="w-8 h-8 rounded-[8px] grid place-items-center"
-                        style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'#e6f1ef' }} aria-label="Close">
+                        style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}` }} aria-label="Close">
                   <X className="w-4 h-4" />
                 </button>
               </div>
 
-              <div className="px-6 py-5 space-y-3">
+              {/* typing demo + presets */}
+              <div className="px-6 pt-5 space-y-3">
                 <div className="text-xs" style={{ color:'var(--text-muted)' }}>
-                  Tip: “assistant for a dental clinic; tone friendly; tasks=booking,faq; channels=voice &amp; chat”.
+                  <TypeLine text="Tip: “assistant for a dental clinic; tone friendly; tasks=booking,faq; channels=voice & chat”" />
                 </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    'assistant for a dental clinic; tone friendly; tasks=booking,faq',
+                    'assistant for an e-commerce store; tone professional; tasks=faq,orders,returns',
+                    'assistant for a real-estate agency; tone warm; tasks=lead_qualification,booking'
+                  ].map((t,i)=>(
+                    <button key={i} onClick={()=>setComposerText(t)}
+                      className="text-xs px-3 py-1.5 rounded-[10px]"
+                      style={{ background:'rgba(89,217,179,.10)', border:'1px solid rgba(89,217,179,.25)' }}>
+                      Use preset {i+1}
+                    </button>
+                  ))}
+                </div>
+
                 <div className="rounded-[10px]" style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}>
                   <textarea value={composerText} onChange={(e)=>setComposerText(e.target.value)}
                     className="w-full bg-transparent outline-none rounded-[10px] px-3 py-2"
@@ -1278,233 +1030,14 @@ export default function VoiceAgentSection() {
 
               <div className="px-6 pb-6 flex gap-3">
                 <button onClick={()=> setShowGenerate(false)} className="w-full h-[44px] rounded-[10px]"
-                        style={{ background:'var(--panel)', border:'1px solid var(--input-border)', color:'#e6f1ef' }}>
+                        style={{ background:'var(--panel)', border:'1px solid var(--input-border)' }}>
                   Cancel
                 </button>
                 <button onClick={generateFromComposer} disabled={!composerText.trim()}
-                        className="w-full h-[44px] rounded-[10px] font-semibold inline-flex items-center justify-center gap-2 va-cta"
-                        style={{ opacity: (!composerText.trim() ? .6 : 1) }}>
+                        className="w-full h-[44px] rounded-[10px] font-semibold inline-flex items-center justify-center gap-2"
+                        style={{ background:CTA, color:'#0a0f0d', opacity: (!composerText.trim() ? .6 : 1) }}>
                   <Wand2 className="w-4 h-4" /> Generate
                 </button>
-              </div>
-            </div>
-          </div>
-        </>,
-        document.body
-      ) : null}
-
-      {/* Google Sheets overlay (STEP 1/2/3) */}
-      {showSheets && IS_CLIENT ? createPortal(
-        <>
-          <div className="fixed inset-0" style={{ zIndex: Z_OVERLAY, background:'rgba(6,8,10,.62)', backdropFilter:'blur(6px)' }} onClick={()=> setShowSheets(false)} />
-          <div className="fixed inset-0 grid place-items-center px-4" style={{ zIndex: Z_MODAL }}>
-            <div className="w-full max-w-[800px] rounded-[12px] overflow-hidden" style={{
-              background:'var(--panel)', color:'var(--text)', border:`1px solid ${GREEN_LINE}`, maxHeight:'86vh',
-              boxShadow:'0 22px 44px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px rgba(89,217,179,.20)'
-            }} onClick={(e)=>e.stopPropagation()}>
-              <div className="flex items-center justify-between px-6 py-4" style={{
-                background:`linear-gradient(90deg,var(--panel) 0%,color-mix(in oklab,var(--panel) 97%, white 3%) 50%,var(--panel) 100%)`,
-                borderBottom:`1px solid ${GREEN_LINE}` }}>
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl grid place-items-center" style={{ background:'var(--green-weak)' }}>
-                    <span style={{ color: CTA }}><Database className="w-5 h-5" /></span>
-                  </div>
-                  <div className="text-lg font-semibold">Google Sheets</div>
-                </div>
-                <button onClick={()=> setShowSheets(false)} className="w-8 h-8 rounded-[8px] grid place-items-center"
-                        style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'#e6f1ef' }} aria-label="Close">
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              {/* stepper */}
-              <div className="px-6 pt-4 pb-2 flex items-center gap-3 text-xs" style={{ color:'var(--text-muted)' }}>
-                <span className={`px-2 py-1 rounded ${sheetStep===1?'bg-[rgba(89,217,179,.12)]':''}`}>1. Sign in</span>
-                <ChevronRight className="w-3 h-3" />
-                <span className={`px-2 py-1 rounded ${sheetStep===2?'bg-[rgba(89,217,179,.12)]':''}`}>2. Choose spreadsheets</span>
-                <ChevronRight className="w-3 h-3" />
-                <span className={`px-2 py-1 rounded ${sheetStep===3?'bg-[rgba(89,217,179,.12)]':''}`}>3. Pick tabs & test</span>
-              </div>
-
-              <div className="px-6 py-4" style={{ maxHeight:'60vh', overflow:'auto' }}>
-                {/* STEP 1 */}
-                {sheetStep===1 && (
-                  <div className="space-y-4">
-                    <div className="text-sm" style={{ color:'var(--text-muted)' }}>
-                      Connect your Google account so we can list your spreadsheets and allow the assistant to read/write appointments.
-                    </div>
-                    <button onClick={startGoogleAuth}
-                            className="h-[44px] px-4 rounded-[10px] inline-flex items-center gap-2 va-cta">
-                      <UserRound className="w-4 h-4" /> Sign in with Google
-                    </button>
-                    {data.gsAuthed && (
-                      <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-[10px]"
-                           style={{ background:'rgba(89,217,179,.10)', boxShadow:'0 0 0 1px rgba(89,217,179,.16) inset' }}>
-                        <Check className="w-4 h-4" /> Connected as {data.gsEmail || 'your account'}
-                      </div>
-                    )}
-                    {gsErr && <div className="text-sm" style={{ color:'#ef4444' }}>{gsErr}</div>}
-                  </div>
-                )}
-
-                {/* STEP 2 */}
-                {sheetStep===2 && (
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="text-sm" style={{ color:'var(--text-muted)' }}>
-                        Select up to <b>50</b> spreadsheets. Search to filter. We’ll check all for availability.
-                      </div>
-                      <button onClick={loadSpreadsheets}
-                              className="h-[36px] px-3 rounded-[10px] inline-flex items-center gap-2"
-                              style={{ background:'transparent', border:'1px solid var(--input-border)', color:'#e6f1ef' }}>
-                        {gsLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Loader2 className="w-4 h-4" />} Refresh
-                      </button>
-                    </div>
-
-                    {/* paste-by-URL helper */}
-                    <div className="grid md:grid-cols-[1fr_auto] gap-2">
-                      <input
-                        value={pasteUrl}
-                        onChange={(e)=>setPasteUrl(e.target.value)}
-                        placeholder="Paste a Google Sheet link (optional)…"
-                        className="w-full bg-transparent outline-none rounded-[10px] px-3"
-                        style={{ height:40, border:'1px solid var(--input-border)', color:'#e6f1ef' }}
-                      />
-                      <button onClick={addByUrl} className="h-[40px] px-3 rounded-[10px] inline-flex items-center gap-2"
-                              style={{ background:'transparent', border:'1px solid var(--input-border)', color:'#e6f1ef' }}>
-                        <FilePlus2 className="w-4 h-4" /> Add
-                      </button>
-                    </div>
-
-                    <div className="rounded-[12px] p-3" style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}>
-                      <input
-                        placeholder="Search spreadsheets…"
-                        onChange={(e)=>{
-                          const q = e.target.value.toLowerCase();
-                          const list = document.querySelectorAll<HTMLDivElement>('[data-sheet-name]');
-                          list.forEach(el => {
-                            const name = (el.dataset.sheetName || '').toLowerCase();
-                            el.style.display = name.includes(q) ? '' : 'none';
-                          });
-                        }}
-                        className="w-full bg-transparent outline-none rounded-[10px] px-3 mb-3"
-                        style={{ height:40, border:'1px solid var(--input-border)', color:'#e6f1ef' }}
-                      />
-                      <div className="grid md:grid-cols-2 gap-2">
-                        {(data.gsSheets||[]).map(s => {
-                          const checked = (data.gsSelected||[]).includes(s.id);
-                          return (
-                            <div key={s.id} data-sheet-name={s.name}
-                                 className="flex items-center justify-between px-3 py-2 rounded-[10px]"
-                                 style={{ border:'1px solid var(--input-border)', background: checked ? 'rgba(89,217,179,.10)' : 'transparent' }}>
-                              <div className="truncate">{s.name}</div>
-                              <div className="flex items-center gap-2">
-                                <input type="checkbox" checked={checked} onChange={()=>toggleSpreadsheet(s.id)} />
-                                <a href={`https://docs.google.com/spreadsheets/d/${s.id}`} target="_blank" rel="noreferrer"
-                                   className="text-xs underline inline-flex items-center gap-1">
-                                  Open <ExternalLink className="w-3 h-3" />
-                                </a>
-                              </div>
-                            </div>
-                          );
-                        })}
-                        {!data.gsSheets?.length && (
-                          <div className="text-sm" style={{ color:'var(--text-muted)' }}>
-                            {gsLoading ? 'Loading…' : 'No spreadsheets found or not loaded yet.'}
-                          </div>
-                        )}
-                      </div>
-                      <div className="mt-2 text-xs" style={{ color:'var(--text-muted)' }}>
-                        Selected: {data.gsSelected?.length || 0} / 50
-                      </div>
-                    </div>
-                    {gsErr && <div className="text-sm" style={{ color:'#ef4444' }}>{gsErr}</div>}
-                  </div>
-                )}
-
-                {/* STEP 3 */}
-                {sheetStep===3 && (
-                  <div className="space-y-4">
-                    <div className="text-sm" style={{ color:'var(--text-muted)' }}>
-                      For each selected spreadsheet, choose the worksheet (tab) where appointments live.
-                    </div>
-                    <div className="space-y-2">
-                      {(data.gsSelected||[]).map(id => {
-                        const sheet = (data.gsSheets||[]).find(s=>s.id===id);
-                        return (
-                          <div key={id} className="p-3 rounded-[10px]" style={{ border:'1px solid var(--input-border)' }}>
-                            <div className="flex items-center justify-between mb-2">
-                              <div className="font-medium text-sm truncate">{sheet?.name || id}</div>
-                              <a href={`https://docs.google.com/spreadsheets/d/${id}`} target="_blank" rel="noreferrer"
-                                 className="text-xs underline inline-flex items-center gap-1">Open <ExternalLink className="w-3 h-3" /></a>
-                            </div>
-                            <button
-                              onClick={()=>loadTabsFor(id)}
-                              className="h-[32px] px-3 rounded-[8px] inline-flex items-center gap-2"
-                              style={{ background:'transparent', border:'1px solid var(--input-border)', color:'#e6f1ef' }}
-                            >
-                              Load tabs
-                            </button>
-                            <input
-                              placeholder="Type tab name (e.g., Appointments)…"
-                              value={data.gsTabs?.[id] || ''}
-                              onChange={(e)=>setTab(id, e.target.value)}
-                              className="w-full bg-transparent outline-none rounded-[8px] px-3 mt-2"
-                              style={{ height:40, border:'1px solid var(--input-border)', color:'#e6f1ef' }}
-                            />
-                            <div className="mt-1 text-xs" style={{ color:'var(--text-muted)' }}>
-                              Tip: after “Load tabs”, start typing to autocomplete.
-                            </div>
-                          </div>
-                        );
-                      })}
-                      {!data.gsSelected?.length && (
-                        <div className="text-sm" style={{ color:'var(--text-muted)' }}>
-                          No spreadsheets selected in step 2.
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <button onClick={testAvailability}
-                              className="h-[36px] px-3 rounded-[10px] inline-flex items-center gap-2"
-                              style={{ background:'transparent', border:'1px solid var(--input-border)', color:'#e6f1ef' }}>
-                        {gsLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <TestTube2 className="w-4 h-4" />}
-                        Test connection
-                      </button>
-                      {gsErr && <div className="text-sm" style={{ color:'#ef4444' }}>{gsErr}</div>}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* footer */}
-              <div className="px-6 pb-6 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  {sheetStep>1 && (
-                    <button onClick={()=>setSheetStep((s)=> (s-1) as any)}
-                            className="h-[36px] px-3 rounded-[10px] inline-flex items-center gap-2"
-                            style={{ background:'transparent', border:'1px solid var(--input-border)', color:'#e6f1ef' }}>
-                      <ChevronLeft className="w-4 h-4" /> Back
-                    </button>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  {sheetStep<3 && (
-                    <button onClick={()=>setSheetStep((s)=> (s+1) as any)}
-                            disabled={sheetStep===1 && !data.gsAuthed}
-                            className="h-[36px] px-3 rounded-[10px] inline-flex items-center gap-2 va-cta"
-                            style={{ opacity:(sheetStep===1 && !data.gsAuthed)?0.6:1 }}>
-                      Next <ChevronRight className="w-4 h-4" />
-                    </button>
-                  )}
-                  {sheetStep===3 && (
-                    <button onClick={saveSheetsAndClose}
-                            className="h-[36px] px-3 rounded-[10px] inline-flex items-center gap-2 va-cta">
-                      <Save className="w-4 h-4" /> Save & Close
-                    </button>
-                  )}
-                </div>
               </div>
             </div>
           </div>
@@ -1526,8 +1059,6 @@ export default function VoiceAgentSection() {
               assistantName={data.name || 'Assistant'}
               apiKey={apiKeys.find(k => k.id === data.apiKeyId)?.key || ''}
               onClose={()=> setShowCall(false)}
-              // Pass gs config to your call layer if supported:
-              // gs={{ selected: data.gsSelected, tabs: data.gsTabs }}
             />
           )}
         </>,
