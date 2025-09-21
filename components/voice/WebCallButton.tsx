@@ -160,6 +160,10 @@ export default function WebCallPanel({
   const [selectedVoice,setSelectedVoice]=useState<string>('');
   const [log,setLog]=useState<TranscriptRow[]>([]);
 
+  // mirror log in a ref to avoid stale closure inside dc.onmessage
+  const logRef = useRef<TranscriptRow[]>([]);
+  useEffect(()=>{ logRef.current = log; }, [log]);
+
   const audioRef=useRef<HTMLAudioElement|null>(null);
   const pcRef=useRef<RTCPeerConnection|null>(null);
   const micStreamRef=useRef<MediaStream|null>(null);
@@ -309,11 +313,12 @@ export default function WebCallPanel({
         }
       };
 
-      // 5) messages
+      // 5) messages  ——  STREAMED TRANSCRIPTS (WhatsApp-style)
       dc.onmessage=(ev)=>{
         try{
           const msg=JSON.parse(ev.data); const t=msg?.type as string;
 
+          // Assistant text stream
           if(t==='response.output_text.delta'){
             const id=msg?.response_id||msg?.id||'assistant_current';
             const delta=msg?.delta||'';
@@ -324,6 +329,7 @@ export default function WebCallPanel({
             upsert(id,'assistant',{ done:true });
           }
 
+          // User transcript stream
           if(t==='transcript.delta'){
             const id=msg?.transcript_id||msg?.id||'user_current';
             const delta=msg?.delta||'';
@@ -331,9 +337,11 @@ export default function WebCallPanel({
           }
           if(t==='transcript.completed'){
             const id=msg?.transcript_id||msg?.id||'user_current';
+            // mark the user line as done
             upsert(id,'user',{ done:true });
 
-            const row=log.find(r=>r.id===id);
+            // read the *latest* value (avoid stale closure)
+            const row = logRef.current.find(r=>r.id===id);
             const text=(row?.text||'').trim();
             const mood=detectMood(text);
 
@@ -358,6 +366,7 @@ export default function WebCallPanel({
             }, wait);
           }
 
+          // Some servers also emit a consolidated text message
           if(t==='response.output_text' && typeof msg?.text==='string'){
             addLine('assistant', msg.text);
           }
@@ -402,7 +411,8 @@ export default function WebCallPanel({
     try{ dcRef.current?.close(); }catch{} dcRef.current=null;
     try{ pcRef.current?.close(); }catch{} pcRef.current=null;
     try{ micStreamRef.current?.getTracks()?.forEach(t=>t.stop()); }catch{} micStreamRef.current=null;
-    try{ closeChainRef.current&&closeChainRef.current(); }catch{} closeChainRef=null;
+    try{ closeChainRef.current && closeChainRef.current(); }catch{}
+    closeChainRef.current = null; // ✅ fix: mutate .current, don’t reassign the ref
   }
   function endCall(userIntent=true){ cleanup(); setConnected(false); setConnecting(false); if(userIntent) onClose?.(); }
 
@@ -411,7 +421,7 @@ export default function WebCallPanel({
   /* ───────────────────────── UI — VA card style (NOT overlay) ───────────────────────── */
   return (
     <div className={`va-card ${className||''}`} role="group" aria-label="Voice call panel" style={{ display:'grid', gridTemplateRows:'auto 1fr auto' }}>
-      {/* Header — same styling as VA head */}
+      {/* Header */}
       <div className="va-head" style={{ minHeight:56 }}>
         <div className="flex items-center gap-3 min-w-0">
           <div className="inline-grid place-items-center w-7 h-7 rounded-full" style={{ background:'rgba(89,217,179,.12)' }}>
@@ -424,16 +434,10 @@ export default function WebCallPanel({
         </div>
 
         <div className="flex items-center gap-2">
-          {/* model label (inherited) */}
-          <span
-            className="text-xs px-2 py-1 rounded-[8px]"
-            style={{ border:'1px solid rgba(255,255,255,.14)', color:'var(--text)' }}
-            title="Model"
-          >
+          <span className="text-xs px-2 py-1 rounded-[8px]" style={{ border:'1px solid rgba(255,255,255,.14)', color:'var(--text)' }} title="Model">
             {model}
           </span>
 
-          {/* voice selector */}
           <div className="relative">
             <select
               className="appearance-none bg-transparent text-xs rounded-[8px] px-2.5 py-1.5 pr-7"
