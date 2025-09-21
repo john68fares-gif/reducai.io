@@ -1,7 +1,6 @@
 // pages/api/connectors/sheets.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { google } from 'googleapis';
-import { createServerSupabaseClient } from '@supabase/auth-helpers-nextjs';
 import { createClient as createAdminClient } from '@supabase/supabase-js';
 
 const {
@@ -9,6 +8,7 @@ const {
   GOOGLE_CLIENT_SECRET = '',
   NEXT_PUBLIC_SITE_URL = '',
   SUPABASE_URL = '',
+  SUPABASE_ANON_KEY = '',
   SUPABASE_SERVICE_ROLE = '',
 } = process.env;
 
@@ -28,11 +28,25 @@ function admin() {
   return createAdminClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE, { auth: { persistSession: false } });
 }
 
-async function getUserId(req: NextApiRequest, res: NextApiResponse) {
-  const supabase = createServerSupabaseClient({ req, res });
-  const { data: { user }, error } = await supabase.auth.getUser();
-  if (error || !user) return null;
-  return user.id;
+/** Minimal auth helper without @supabase/auth-helpers-nextjs */
+async function getUserId(req: NextApiRequest): Promise<string | null> {
+  try {
+    // Try Authorization: Bearer <access_token>, then cookie 'sb-access-token'
+    const authHeader = req.headers.authorization;
+    const bearer = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : undefined;
+    const cookieAccess =
+      (req.cookies && (req.cookies['sb-access-token'] || (req.cookies as any)['sb:token'])) || undefined;
+    const accessToken = bearer || cookieAccess;
+    if (!accessToken) return null;
+
+    // Use the Admin client’s auth API to validate token (anon key works for getUser with access token)
+    const anon = createAdminClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: false } });
+    const { data, error } = await anon.auth.getUser(accessToken);
+    if (error || !data?.user) return null;
+    return data.user.id;
+  } catch {
+    return null;
+  }
 }
 
 async function getUserConn(user_id: string) {
@@ -50,24 +64,23 @@ async function getUserConn(user_id: string) {
 
 async function saveTokens(user_id: string, email: string, tokens: any) {
   const supa = admin();
-  const expires_at =
-    tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : null;
-
+  const expires_at = tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : null;
   const payload: any = {
     user_id,
     email,
     provider: 'google',
     access_token: tokens.access_token || null,
     refresh_token: tokens.refresh_token || null,
-    expires_at: expires_at,
+    expires_at,
   };
-
-  // Insert a new row; keep history (simpler & safe)
   const { error } = await supa.from('connections_google').insert(payload);
   if (error) throw error;
 }
 
-async function upsertSheetCache(user_id: string, items: Array<{ id: string; name: string; owner_email?: string }>) {
+async function upsertSheetCache(
+  user_id: string,
+  items: Array<{ id: string; name: string; owner_email?: string }>
+) {
   if (!items?.length) return;
   const supa = admin();
   const rows = items.map(i => ({
@@ -76,7 +89,6 @@ async function upsertSheetCache(user_id: string, items: Array<{ id: string; name
     owner_email: i.owner_email || null,
     user_id,
   }));
-  // Upsert by primary key spreadsheet_id
   const { error } = await supa.from('gs_spreadsheets').upsert(rows, { onConflict: 'spreadsheet_id' });
   if (error) throw error;
 }
@@ -88,89 +100,66 @@ function withClientTokens(tokens: any) {
     refresh_token: tokens.refresh_token,
     expiry_date: tokens.expiry_date,
   });
-  // Auto-refresh if needed
-  auth.on('tokens', (tk) => {
-    // you could persist refreshed tokens here if desired
-  });
   return auth;
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const action = (req.method === 'GET' ? req.query.action : (req.body?.action || req.query.action)) as string | undefined;
+  const action = (req.method === 'GET' ? req.query.action : (req.body?.action || req.query.action)) as
+    | string
+    | undefined;
 
-  if (!action) {
-    res.status(400).json({ error: 'Missing action' });
-    return;
-  }
+  if (!action) return res.status(400).json({ error: 'Missing action' });
 
-  const user_id = await getUserId(req, res);
+  // Public actions that run in a popup still need a session to save tokens under the right user.
+  const user_id = await getUserId(req);
+
   if (!user_id && action !== 'auth_begin' && action !== 'oauth_callback') {
-    res.status(401).json({ error: 'Not authenticated' });
-    return;
+    return res.status(401).json({ error: 'Not authenticated' });
   }
 
   try {
     switch (action) {
       case 'auth_begin': {
-        // Start Google OAuth in popup
         const redirectUri = `${NEXT_PUBLIC_SITE_URL}/api/connectors/sheets?action=oauth_callback`;
         const client = oauthClient(redirectUri);
         const url = client.generateAuthUrl({
           access_type: 'offline',
           scope: SCOPE,
-          prompt: 'consent', // forces refresh_token on repeat
+          prompt: 'consent',
         });
-        // Redirect the popup to Google
         res.writeHead(302, { Location: url });
         res.end();
         return;
       }
 
       case 'oauth_callback': {
-        // Exchange code for tokens, save, then postMessage back to opener
         const redirectUri = `${NEXT_PUBLIC_SITE_URL}/api/connectors/sheets?action=oauth_callback`;
         const client = oauthClient(redirectUri);
         const code = req.query.code as string | undefined;
 
-        // We still need the user who initiated this flow
-        const uid = await getUserId(req, res);
-        if (!uid) {
-          res.status(401).send('No session');
-          return;
-        }
+        const uid = await getUserId(req);
+        if (!uid) return res.status(401).send('No session');
 
-        if (!code) {
-          res.status(400).send('Missing code');
-          return;
-        }
+        if (!code) return res.status(400).send('Missing code');
 
         const { tokens } = await client.getToken(code);
         client.setCredentials(tokens);
 
-        // Fetch email
         const oauth2 = google.oauth2({ version: 'v2', auth: client });
         const me = await oauth2.userinfo.get();
         const email = me.data.email || 'unknown';
 
         await saveTokens(uid, email, tokens);
 
-        // Close the popup + inform the opener
         res.setHeader('Content-Type', 'text/html');
-        res.status(200).send(`
-<!doctype html>
-<html>
-  <body style="background:#0b0c10;color:#e6f1ef;font-family:system-ui">
-    <script>
-      try {
-        if (window.opener) {
-          window.opener.postMessage({ type: 'gsheets:authed', email: ${JSON.stringify(email)} }, '*');
-        }
-      } catch (e) {}
-      window.close();
-    </script>
-    <p>You can close this window.</p>
-  </body>
-</html>`);
+        res.status(200).send(`<!doctype html>
+<html><body style="background:#0b0c10;color:#e6f1ef;font-family:system-ui">
+<script>
+try{ if(window.opener){ window.opener.postMessage({ type:'gsheets:authed', email:${JSON.stringify(email)} }, '*'); } }catch(e){}
+window.close();
+</script>
+<p>You can close this window.</p>
+</body></html>`);
         return;
       }
 
@@ -185,28 +174,25 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         });
 
         const drive = google.drive({ version: 'v3', auth });
-        // List spreadsheets from Drive
         const r = await drive.files.list({
           q: "mimeType='application/vnd.google-apps.spreadsheet' and trashed=false",
           fields: 'files(id,name,owners(emailAddress))',
           pageSize: 1000,
         });
 
-        const items = (r.data.files || []).map((f) => ({
+        const items = (r.data.files || []).map(f => ({
           id: f.id!,
           name: f.name || 'Untitled',
           owner_email: f.owners?.[0]?.emailAddress || null,
         }));
 
-        // cache
         await upsertSheetCache(user_id!, items);
 
-        res.status(200).json({ items });
-        return;
+        return res.status(200).json({ items });
       }
 
       case 'list_tabs': {
-        const spreadsheetId = req.body?.spreadsheetId || req.query.spreadsheetId;
+        const spreadsheetId = (req.body?.spreadsheetId || req.query.spreadsheetId) as string | undefined;
         if (!spreadsheetId) return res.status(400).json({ error: 'Missing spreadsheetId' });
 
         const conn = await getUserConn(user_id!);
@@ -224,19 +210,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           .map(s => s.properties?.title)
           .filter(Boolean) as string[];
 
-        res.status(200).json({ tabs });
-        return;
+        return res.status(200).json({ tabs });
       }
 
       case 'test': {
-        // Just sanity-check the selection exists in our cache (and the user is connected).
         const conn = await getUserConn(user_id!);
         if (!conn) return res.status(400).json({ ok: false, message: 'Not connected' });
 
         const selected: string[] = Array.isArray(req.body?.selected) ? req.body.selected : [];
-        if (!selected.length) {
-          return res.status(200).json({ ok: true, message: 'Connected, but no sheets selected yet.' });
-        }
+        if (!selected.length) return res.status(200).json({ ok: true, message: 'Connected, but no sheets selected yet.' });
 
         const supa = admin();
         const { data: rows, error } = await supa
@@ -247,20 +229,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         if (error) throw error;
 
         const missing = selected.filter(id => !rows?.some(r => r.spreadsheet_id === id));
-        if (missing.length) {
-          return res.status(400).json({ ok: false, message: `Missing from cache: ${missing.join(', ')}` });
-        }
+        if (missing.length) return res.status(400).json({ ok: false, message: `Missing from cache: ${missing.join(', ')}` });
 
-        res.status(200).json({ ok: true });
-        return;
+        return res.status(200).json({ ok: true });
       }
 
       default:
-        res.status(400).json({ error: `Unknown action: ${action}` });
-        return;
+        return res.status(400).json({ error: `Unknown action: ${action}` });
     }
   } catch (e: any) {
     console.error('sheets api error', e);
-    res.status(500).json({ error: e?.message || 'Server error' });
+    return res.status(500).json({ error: e?.message || 'Server error' });
   }
 }
