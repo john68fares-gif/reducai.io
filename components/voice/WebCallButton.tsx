@@ -17,9 +17,12 @@ type ProsodyOpts = {
 
 type Props = {
   className?: string;
-  model: string;                 // hidden from UI
+
+  // model is provided by parent; we do NOT show it in the UI
+  model: string;
+
   systemPrompt: string;
-  voiceName: string;             // friendly or id
+  voiceName: string;         // friendly or OpenAI id (e.g. "Alloy (American)" or "alloy")
   assistantName: string;
   apiKey: string;
 
@@ -28,8 +31,14 @@ type Props = {
   onClose?: () => void;
   onError?: (e: any) => void;
 
+  // pass these from VoiceAgentSection
   firstMode?: 'Assistant speaks first' | 'User speaks first' | 'Silent until tool required';
   firstMsg?: string;
+
+  // who should send the very first greeting?
+  // - 'server'  -> we wait; if server stays silent for 1200ms we send it (to avoid dupes)
+  // - 'client'  -> client sends immediately
+  // - 'off'     -> no client greeting
   greetMode?: 'server' | 'client' | 'off';
 
   languageHint?: 'auto' | 'en' | 'de' | 'nl' | 'es' | 'ar';
@@ -42,45 +51,19 @@ type Props = {
 };
 
 /* ──────────────────────────────────────────────────────────────────────────
-   STYLE / VOICE HELPERS
+   STYLE TOKENS (match VoiceAgentSection)
 ────────────────────────────────────────────────────────────────────────── */
 const CTA = '#59d9b3';
-const GREEN_LINE = 'rgba(89,217,179,.20)';
 const IS_CLIENT = typeof window !== 'undefined' && typeof document !== 'undefined';
-
-const ALLOWED_VOICE_IDS = [
-  'alloy','ash','ballad','coral','echo','sage','shimmer','verse','marin','cedar'
-] as const;
-const DEFAULT_VOICES = ['alloy','verse','coral','sage'];
-
-const FRIENDLY_TO_ID_ENTRIES: Array<[RegExp, string]> = [
-  [/^\s*alloy(\s*\(.*\))?\s*$/i, 'alloy'],
-  [/^\s*verse(\s*\(.*\))?\s*$/i, 'verse'],
-  [/^\s*coral(\s*\(.*\))?\s*$/i, 'coral'],
-  // “Amber (Australian)” isn’t an id → map to a valid one
-  [/^\s*amber(\s*\(.*\))?\s*$/i, 'cedar'],
-  [/^\s*ash(\s*\(.*\))?\s*$/i, 'ash'],
-  [/^\s*ballad(\s*\(.*\))?\s*$/i, 'ballad'],
-  [/^\s*echo(\s*\(.*\))?\s*$/i, 'echo'],
-  [/^\s*sage(\s*\(.*\))?\s*$/i, 'sage'],
-  [/^\s*shimmer(\s*\(.*\))?\s*$/i, 'shimmer'],
-  [/^\s*marin(\s*\(.*\))?\s*$/i, 'marin'],
-  [/^\s*cedar(\s*\(.*\))?\s*$/i, 'cedar'],
-];
-
-function resolveVoiceId(input: string){
-  if (!input) return 'alloy';
-  const raw = String(input).trim();
-  const lower = raw.toLowerCase();
-  const exact = ALLOWED_VOICE_IDS.find(v => v === lower);
-  if (exact) return exact;
-  for (const [rx, id] of FRIENDLY_TO_ID_ENTRIES) if (rx.test(raw)) return id;
-  const stripped = raw.replace(/\(.*?\)/g, '').trim().toLowerCase();
-  return (ALLOWED_VOICE_IDS.find(v => v === stripped) ?? 'alloy');
-}
+const HUMAN_LIKE = new Set(['alloy','verse','coral','amber','sage','juniper','opal','pebble','cobalt']);
+const DEFAULT_VOICES = ['alloy','verse','coral','amber','sage','juniper'];
+const FRIENDLY_TO_ID: Record<string,string> = {
+  'Alloy (American)':'alloy','Verse (American)':'verse','Coral (British)':'coral','Amber (Australian)':'amber',
+  Alloy:'alloy', Verse:'verse', Coral:'coral', Amber:'amber', Sage:'sage', Juniper:'juniper'
+};
 
 /* ──────────────────────────────────────────────────────────────────────────
-   StyledSelect (match your VoiceAgentSection)
+   StyledSelect clone (identical look)
 ────────────────────────────────────────────────────────────────────────── */
 type Opt = { value: string; label: string; disabled?: boolean; iconLeft?: React.ReactNode };
 function StyledSelect({
@@ -139,7 +122,7 @@ function StyledSelect({
         ref={btnRef}
         type="button"
         onClick={() => { setOpen(v=>!v); setTimeout(()=>searchRef.current?.focus(),0); }}
-        className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-[6px] text-sm outline-none transition"
+        className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-[8px] text-sm outline-none transition"
         style={{
           height:'var(--control-h)',
           background:'var(--vs-input-bg, #101314)',
@@ -164,14 +147,14 @@ function StyledSelect({
             width: (menuPos?.width ?? (btnRef.current?.getBoundingClientRect().width ?? 280)),
             background:'#101314',
             border:'1px solid rgba(255,255,255,.16)',
-            borderRadius:8,
+            borderRadius:10,
             boxShadow:'0 24px 64px rgba(0,0,0,.60), 0 8px 20px rgba(0,0,0,.45), 0 0 0 1px rgba(0,255,194,.10)'
           }}
         >
           {menuTop ? <div className="mb-2">{menuTop}</div> : null}
 
           <div
-            className="flex items-center gap-2 mb-2 px-2 py-1.5 rounded-[6px]"
+            className="flex items-center gap-2 mb-2 px-2 py-1.5 rounded-[8px]"
             style={{ background:'#101314', border:'1px solid rgba(255,255,255,.14)', color:'var(--text)' }}
           >
             <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
@@ -191,7 +174,7 @@ function StyledSelect({
                 key={o.value}
                 disabled={!!o.disabled}
                 onClick={()=>{ if (o.disabled) return; onChange(o.value); setOpen(false); }}
-                className="w-full text-left text-sm px-2.5 py-2 rounded-[6px] transition grid grid-cols-[18px_1fr_auto] items-center gap-2 disabled:opacity-60"
+                className="w-full text-left text-sm px-2.5 py-2 rounded-[8px] transition grid grid-cols-[18px_1fr_auto] items-center gap-2 disabled:opacity-60"
                 style={{
                   color: o.disabled ? 'var(--text-muted)' : 'var(--text)',
                   background:'transparent',
@@ -228,6 +211,8 @@ function StyledSelect({
 ────────────────────────────────────────────────────────────────────────── */
 type TranscriptRow = { id:string; who:'user'|'assistant'; text:string; at:number; done?:boolean };
 
+const RAW_ID = /^[a-z0-9._-]{3,}$/i;
+const clamp01 = (v:number)=>Math.max(0,Math.min(1,v));
 const fmtTime = (ts:number)=>new Date(ts).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
 
 function languageNudge(lang: Props['languageHint']){
@@ -239,6 +224,29 @@ function languageNudge(lang: Props['languageHint']){
     es:'Responde en español conversacional.',
     ar:'يرجى الرد بالعربية بأسلوب محادثة طبيعي.',
   }; return map[lang||'auto']||'';
+}
+
+const resolveVoiceId = (key:string) => {
+  const k = (key||'').trim();
+  if (RAW_ID.test(k) && !FRIENDLY_TO_ID[k]) return k.toLowerCase();
+  return FRIENDLY_TO_ID[k] || k || 'alloy';
+};
+
+/* human style composer (for the “amazingly human” feel) */
+function buildHumanStyle(opts:{
+  languageHint: Props['languageHint'];
+  prosody?: ProsodyOpts;
+}){
+  const {languageHint, prosody} = opts;
+  const hints = [
+    languageNudge(languageHint),
+    'You are a warm, fast conversational partner.',
+    'Use short, natural sentences, occasional brief backchannels (e.g., “mm-hm”, “okay”), and mild disfluencies sparingly.',
+    prosody?.fillerWords ? 'Use mild, natural disfluencies when appropriate.' : '',
+    prosody?.microPausesMs ? `Insert micro-pauses of ~${prosody.microPausesMs} ms at commas or clause boundaries.` : '',
+    prosody?.turnEndPauseMs ? `Wait ~${prosody.turnEndPauseMs} ms of silence before replying.` : 'Wait ~160 ms of silence before replying.',
+  ].filter(Boolean);
+  return hints.join('\n\n');
 }
 
 /* light phone-ish filter + ambience (optional) */
@@ -254,7 +262,7 @@ function createAmbience(ac: AudioContext, kind:'kitchen'|'cafe', level=0.08){
   src.buffer=buf; src.loop=true;
   const band=ac.createBiquadFilter(); band.type='bandpass'; band.frequency.value=kind==='kitchen'?950:350; band.Q.value=kind==='kitchen'?0.9:0.6;
   const hp=ac.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=120;
-  const g=ac.createGain(); g.gain.value=0.18*Math.min(1,Math.max(0,level));
+  const g=ac.createGain(); g.gain.value=clamp01(level)*0.18;
   src.connect(band); band.connect(hp); hp.connect(g); g.connect(ac.destination);
   src.start();
   return ()=>{ try{src.stop()}catch{}; [src,band,hp,g].forEach(n=>{try{(n as any).disconnect()}catch{}}); };
@@ -293,9 +301,9 @@ export default function WebCallButton({
   ephemeralEndpoint = '/api/voice/ephemeral',
   onClose,
   onError,
-  firstMode='User speaks first',
+  firstMode='User speaks first',        // default avoids auto-greet unless asked
   firstMsg='Hello.',
-  greetMode='server',
+  greetMode='server',                   // see note above
   languageHint='auto',
   prosody,
   phoneFilter=false,
@@ -329,28 +337,20 @@ export default function WebCallButton({
 
   useEffect(()=>{ const el=scrollerRef.current; if(!el) return; el.scrollTop=el.scrollHeight; },[log,connecting,connected]);
 
-  // fetch voices from OpenAI Platform (best effort)
+  // fetch voices from OpenAI Platform
   useEffect(()=>{
     let cancelled=false;
-    const fallback = Array.from(new Set([resolveVoiceId(voiceName), ...DEFAULT_VOICES])) as string[];
+    const fallback = Array.from(new Set([voiceName,...DEFAULT_VOICES].filter(Boolean))) as string[];
     (async()=>{
       try{
         const r=await fetch('https://api.openai.com/v1/voices',{ headers:{ Authorization:`Bearer ${apiKey}` }});
         if(!r.ok) throw new Error(String(r.status));
         const j=await r.json();
         let ids:Array<string>=Array.isArray(j?.data)? j.data.map((v:any)=>v?.id).filter(Boolean):[];
-        ids = ids.filter(id => ALLOWED_VOICE_IDS.includes(String(id)));
-        if(!ids.length) ids=fallback;
-        if(!cancelled){
-          setVoices(ids);
-          const wanted = resolveVoiceId(voiceName);
-          setSelectedVoice(ids.includes(wanted) ? wanted : (ids[0]||'alloy'));
-        }
+        ids=ids.filter(id=>HUMAN_LIKE.has(id)); if(!ids.length) ids=fallback;
+        if(!cancelled){ setVoices(ids); setSelectedVoice(ids.includes(resolveVoiceId(voiceName))? resolveVoiceId(voiceName) : (ids[0]||'alloy')); }
       }catch{
-        if(!cancelled){
-          setVoices(fallback);
-          setSelectedVoice(fallback[0] || 'alloy');
-        }
+        if(!cancelled){ setVoices(fallback); setSelectedVoice(resolveVoiceId(voiceName) || fallback[0]||'alloy'); }
       }
     })();
     return()=>{ cancelled=true; };
@@ -430,17 +430,14 @@ export default function WebCallButton({
       const dc=pc.createDataChannel('oai-events'); dcRef.current=dc;
 
       dc.onopen=()=>{
-        // base instructions
+        // human-y base instructions
         const style = [
           systemPrompt || '',
-          languageNudge(languageHint),
-          prosody?.fillerWords ? 'Use mild, natural disfluencies.' : '',
-          (prosody?.microPausesMs ? `Allow micro pauses (~${prosody.microPausesMs} ms).` : ''),
-          (prosody?.turnEndPauseMs ? `Wait ~${prosody.turnEndPauseMs} ms of silence before replying.` : '')
+          buildHumanStyle({ languageHint, prosody }),
         ].filter(Boolean).join('\n\n');
         baseInstructionsRef.current = style;
 
-        // ── CRITICAL: transcripts on + server VAD ──
+        // ── CRITICAL: enable transcripts + server VAD ──
         safeSend(dc,{ type:'session.update', session:{
           instructions: baseInstructionsRef.current,
           voice: voiceId,
@@ -448,10 +445,10 @@ export default function WebCallButton({
           output_audio_format:'pcm16',
           modalities:['audio','text'],
 
-          // USER speech → transcript (incremental + final)
+          // YOU → server transcription (your mic)
           input_audio_transcription: { model: 'whisper-1' },
 
-          // Let server handle turn-taking so deltas are clean
+          // turn-taking (assistant waits short silence before speaking)
           turn_detection: {
             type: 'server_vad',
             threshold: 0.5,
@@ -476,6 +473,7 @@ export default function WebCallButton({
           if (greetMode==='client') {
             greet();
           } else {
+            // greetMode==='server' -> wait briefly; only greet if server stays silent
             setTimeout(()=>{
               if (!sawAssistantDeltaRef.current) greet();
             }, 1200);
@@ -483,39 +481,38 @@ export default function WebCallButton({
         }
       };
 
-      // 5) events — catch ALL assistant + user transcript shapes
+      // 5) events — BOTH transcripts, robust to shape variants
       dc.onmessage=(ev)=>{
         try{
-          const msg=JSON.parse(ev.data);
-          const t = String(msg?.type || '');
+          const msg=JSON.parse(ev.data); const t=String(msg?.type||'');
 
-          // —— ASSISTANT TEXT STREAMS ——
-          if (t === 'response.output_text.delta') {
+          // ── ASSISTANT text stream
+          if(t==='response.output_text.delta'){
             sawAssistantDeltaRef.current = true;
             const id=msg?.response_id||msg?.id||'assistant_current';
             const delta=msg?.delta||'';
             upsert(id,'assistant',(prev)=>({ text:(prev?.text||'')+String(delta) }));
           }
-          if (t === 'response.output_text' && typeof msg?.text==='string') {
+          if(t==='response.output_text' && typeof msg?.text==='string'){
             sawAssistantDeltaRef.current = true;
             addLine('assistant', msg.text);
           }
-          // Some runtimes also send spoken-audio transcript separately:
-          if (t === 'response.audio_transcript.delta') {
+          // Some runtimes also stream transcript of the generated audio:
+          if(t==='response.audio_transcript.delta'){
             const id=msg?.response_id||msg?.id||'assistant_current';
             upsert(id,'assistant',(prev)=>({ text:(prev?.text||'')+String(msg?.delta||'') }));
           }
-          if (t === 'response.audio_transcript.completed' || t === 'response.completed' || t === 'response.stop') {
+          if(t==='response.audio_transcript.completed' || t==='response.completed' || t==='response.stop'){
             const id=msg?.response_id||msg?.id||'assistant_current';
             upsert(id,'assistant',{ done:true });
           }
-          // Fallback: assistant message created with text content
-          if (t === 'conversation.item.created' && msg?.item?.type==='message' && msg?.item?.role==='assistant') {
+          // Fallback: assistant message created with inline text/transcript
+          if (t==='conversation.item.created' && msg?.item?.type==='message' && msg?.item?.role==='assistant') {
             const text=(msg?.item?.content||[]).map((c:any)=>c?.text||c?.transcript||'').join(' ').trim();
             if (text) addLine('assistant', text);
           }
 
-          // —— USER TRANSCRIPTS ——
+          // ── USER transcript (this was missing before)
           const isUserDelta =
             /(^|\.)(input_.*transcript|transcript)(\.|_)delta$/.test(t) ||
             t === 'conversation.item.input_audio_transcript.delta' ||
@@ -527,16 +524,16 @@ export default function WebCallButton({
             t === 'input_audio_buffer.transcript.completed';
 
           if (isUserDelta) {
-            const id = msg?.transcript_id || msg?.item_id || msg?.id || 'user_current';
-            const d  = msg?.delta || msg?.text || '';
+            const id=msg?.transcript_id || msg?.item_id || msg?.id || 'user_current';
+            const d = msg?.delta || msg?.text || '';
             upsert(id,'user',(prev)=>({ text:(prev?.text||'')+String(d) }));
           }
           if (isUserComplete) {
-            const id = msg?.transcript_id || msg?.item_id || msg?.id || 'user_current';
+            const id=msg?.transcript_id || msg?.item_id || msg?.id || 'user_current';
             upsert(id,'user',{ done:true });
           }
 
-          // Single-shot fallback
+          // single-shot fallback some runtimes emit
           if ((t.includes('transcript') || t.includes('input_audio_buffer')) && typeof msg?.text === 'string' && !msg?.delta) {
             addLine('user', msg.text);
           }
@@ -591,17 +588,17 @@ export default function WebCallButton({
   }
   function endCall(userIntent=true){ cleanup(); setConnected(false); setConnecting(false); if(userIntent) onClose?.(); }
 
-  // start on mount / when voice changes
+  // start on mount / voice change
   useEffect(()=>{ startCall(); return ()=>{ cleanup(); }; // eslint-disable-next-line
   },[voiceId]);
 
   /* ────────────────────────────────────────────────────────────────────────
-     UI — FULL-HEIGHT RIGHT SHEET (overlay style), less rounded
+     UI — same “va-card / va-head” style, tighter rounding on bubbles
   ───────────────────────────────────────────────────────────────────────── */
   const header = (
-    <div className="va-head" style={{ minHeight: 68 }}>
+    <div className="va-head" style={{ minHeight: 72 }}>
       <div className="flex items-center gap-3 min-w-0">
-        <div className="inline-grid place-items-center w-9 h-9 rounded-[6px]"
+        <div className="inline-grid place-items-center w-9 h-9 rounded-[10px]"
              style={{ background:'rgba(89,217,179,.12)', border:'1px solid rgba(89,217,179,.25)' }}>
           <Bot className="w-5 h-5" style={{ color: CTA }} />
         </div>
@@ -612,6 +609,7 @@ export default function WebCallButton({
       </div>
 
       <div className="ml-auto flex items-center gap-2">
+        {/* Voice dropdown (matching style) */}
         <div style={{ width: 180 }}>
           <StyledSelect
             value={voiceId}
@@ -623,7 +621,7 @@ export default function WebCallButton({
 
         <button
           onClick={toggleMute}
-          className="w-9 h-9 rounded-[6px] grid place-items-center"
+          className="w-9 h-9 rounded-[8px] grid place-items-center"
           style={{
             border:'1px solid rgba(255,255,255,.14)', color:'var(--text)',
             background: muted ? 'rgba(239,68,68,.14)' : 'transparent'
@@ -635,7 +633,7 @@ export default function WebCallButton({
 
         <button
           onClick={()=>endCall(true)}
-          className="w-9 h-9 rounded-[6px] grid place-items-center"
+          className="w-9 h-9 rounded-[8px] grid place-items-center"
           style={{ border:'1px solid rgba(239,68,68,.38)', background:'rgba(239,68,68,.18)', color:'#ffd7d7' }}
           title="End call"
         >
@@ -646,11 +644,12 @@ export default function WebCallButton({
   );
 
   const body = (
-    <div className="p-3 md:p-4" style={{ color:'var(--text)', overflowY:'auto' }}>
-      <div ref={scrollerRef} className="space-y-3" style={{ minHeight:'100%' }}>
+    <div className="p-3 md:p-4" style={{ color:'var(--text)' }}>
+      {/* Transcript — bubbles for BOTH sides */}
+      <div ref={scrollerRef} className="space-y-3 overflow-y-auto" style={{ maxHeight:'52vh', scrollbarWidth:'thin' }}>
         {log.length===0 && (
           <div
-            className="text-sm rounded-[6px] px-3 py-2 border"
+            className="text-sm rounded-[8px] px-3 py-2 border"
             style={{ color:'var(--text-muted)', background:'var(--panel)', borderColor:'rgba(255,255,255,.10)' }}
           >
             {connecting ? 'Connecting to voice…' :
@@ -660,12 +659,15 @@ export default function WebCallButton({
 
         {log.map(row=>(
           <div key={row.id} className={`flex ${row.who==='user' ? 'justify-end' : 'justify-start'}`}>
+            {/* left avatar for assistant */}
             {row.who==='assistant' && (
-              <div className="mr-2 mt-[2px] shrink-0 rounded-[6px] w-8 h-8 grid place-items-center"
+              <div className="mr-2 mt-[2px] shrink-0 rounded-[10px] w-8 h-8 grid place-items-center"
                    style={{ background:'rgba(89,217,179,.12)', border:'1px solid rgba(89,217,179,.25)' }}>
                 <Bot className="w-4 h-4" style={{ color: CTA }} />
               </div>
             )}
+
+            {/* bubble (less rounded than before) */}
             <div
               className="max-w-[78%] rounded-[10px] px-3 py-2 text-[0.95rem] leading-snug border"
               style={{
@@ -676,8 +678,10 @@ export default function WebCallButton({
               <div>{row.text || <span style={{ opacity:.5 }}>…</span>}</div>
               <div className="text-[10px] mt-1 opacity-60 text-right">{fmtTime(row.at)}</div>
             </div>
+
+            {/* right avatar for user */}
             {row.who==='user' && (
-              <div className="ml-2 mt-[2px] shrink-0 rounded-[6px] w-8 h-8 grid place-items-center"
+              <div className="ml-2 mt-[2px] shrink-0 rounded-[10px] w-8 h-8 grid place-items-center"
                    style={{ background:'rgba(255,255,255,.10)', border:'1px solid rgba(255,255,255,.18)' }}>
                 <User className="w-4 h-4" />
               </div>
@@ -686,7 +690,7 @@ export default function WebCallButton({
         ))}
 
         {error && (
-          <div className="text-xs px-3 py-2 rounded-[6px] border"
+          <div className="text-xs px-3 py-2 rounded-[8px] border"
                style={{ background:'rgba(239,68,68,.12)', borderColor:'rgba(239,68,68,.25)', color:'#ffd7d7' }}>
             {error}
           </div>
@@ -709,28 +713,12 @@ export default function WebCallButton({
     </div>
   );
 
-  // full-height right sheet (overlay style)
   const panel = (
     <aside
-      className={`va-card ${className || ''}`}
+      className={`va-card ${className||''}`}
       style={{
-        position: 'fixed',
-        top: 0,
-        right: 0,
-        bottom: 0,
-        width: 'clamp(380px, 34vw, 560px)',
-        zIndex: 100010,
-        background: 'var(--panel-bg)',
-        color: 'var(--text)',
-        borderLeft: `1px solid ${GREEN_LINE}`,
-        borderTopLeftRadius: 8,
-        borderBottomLeftRadius: 8,
-        borderTopRightRadius: 0,
-        borderBottomRightRadius: 0,
-        display: 'grid',
-        gridTemplateRows: '68px 1fr 52px',
-        overflow: 'hidden',
-        boxShadow:'0 22px 44px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px rgba(89,217,179,.20)',
+        position:'fixed', right:16, bottom:16, width:'min(520px, 95vw)',
+        zIndex: 100010, background:'var(--panel-bg)', color:'var(--text)'
       }}
       role="dialog"
       aria-label="Voice call panel"
