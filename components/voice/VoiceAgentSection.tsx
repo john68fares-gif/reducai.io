@@ -11,7 +11,7 @@ import {
 import { scopedStorage } from '@/utils/scoped-storage';
 import WebCallButton from '@/components/voice/WebCallButton';
 
-/* If you have prompt-engine, we’ll use it; else safe shims. */
+/* Try to use prompt-engine if present; otherwise use safe shims */
 import {
   applyInstructions as _applyInstructions,
   DEFAULT_PROMPT as _DEFAULT_PROMPT,
@@ -43,8 +43,14 @@ const GREEN_LINE = 'rgba(89,217,179,.20)';
 const ACTIVE_KEY = 'va:activeId';
 const Z_OVERLAY = 100000;
 const Z_MODAL   = 100001;
-const Z_MENU    = 100020;       // above panels
 const IS_CLIENT = typeof window !== 'undefined' && typeof document !== 'undefined';
+
+/* little helpers */
+const isFn = (f: any): f is Function => typeof f === 'function';
+const isStr = (v: any): v is string => typeof v === 'string';
+const nonEmpty = (v: any): v is string => isStr(v) && v.trim().length > 0;
+const safeTrim = (v: any): string => (nonEmpty(v) ? v.trim() : '');
+const clamp = (v:number, min:number, max:number) => Math.max(min, Math.min(max, v));
 
 /* phone icon */
 function PhoneFilled(props: React.SVGProps<SVGSVGElement>) {
@@ -57,12 +63,6 @@ function PhoneFilled(props: React.SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
-
-/* ─────────── little helpers ─────────── */
-const isFn = (f: any): f is Function => typeof f === 'function';
-const isStr = (v: any): v is string => typeof v === 'string';
-const nonEmpty = (v: any): v is string => isStr(v) && v.trim().length > 0;
-const safeTrim = (v: any): string => (nonEmpty(v) ? v.trim() : '');
 
 /* ─────────── theme tokens ─────────── */
 const Tokens = () => (
@@ -161,14 +161,12 @@ type AgentData = {
   numerals: boolean;
 };
 
-/* ─────────── prompt-engine shims (SAFE) ─────────── */
+/* ─────────── prompt shims (SAFE; no broken regex) ─────────── */
 const looksLikeFullPromptSafe = (raw: string) => {
   const t = (raw || '').toLowerCase();
   return ['[identity]', '[style]', '[response guidelines]', '[task & goals]', '[error handling', '[notes]'].some(h => t.includes(h));
 };
-
 const normalizeFullPromptSafe = (raw: string) => {
-  // very safe: keep only the known sections in order
   const pull = (label: string) => {
     const rx = new RegExp(`\$begin:math:display$\\\\s*${label.replace(/[-/\\\\^$*+?.()|[$end:math:display${}]/g,'\\$&')}\\s*\\]([\\s\\S]*?)(?=\\n\\s*\\[|$)`, 'i');
     const m = (raw || '').match(rx);
@@ -197,9 +195,11 @@ ${sec.tasks}
 
 [Error Handling / Fallback]
 ${sec.errors}
-${sec.notes ? `\n[Notes]\n${sec.notes}` : ''}`.trim());
-};
+${sec.notes ? `
 
+[Notes]
+${sec.notes}` : ''}`.trim());
+};
 const applyInstructionsSafe = (base: string, raw: string) => {
   const text = (raw || '').trim();
   const industryMatch = text.match(/assistant\s+for\s+(?:a|an|the)?\s*([^.;:,]+?)(?:\s+(?:clinic|store|company|business))?(?:\.|;|,|$)/i);
@@ -230,16 +230,12 @@ const applyInstructionsSafe = (base: string, raw: string) => {
 [Error Handling / Fallback]
 - If uncertain, ask a specific clarifying question.
 - If a tool/endpoint fails, apologize briefly and offer an alternative or human handoff.`);
-
   return { merged, summary: 'Updated.' };
 };
-
 const looksLikeFullPromptRT = (raw: string) =>
   isFn(_looksLikeFullPrompt) ? !!_looksLikeFullPrompt(raw) : looksLikeFullPromptSafe(raw);
-
 const normalizeFullPromptRT = (raw: string) =>
   isFn(_normalizeFullPrompt) ? String(_normalizeFullPrompt(raw) || '') : normalizeFullPromptSafe(raw);
-
 const applyInstructionsRT = (base: string, raw: string) =>
   isFn(_applyInstructions) ? (_applyInstructions as any)(base, raw) : applyInstructionsSafe(base, raw);
 
@@ -260,9 +256,9 @@ const DEFAULT_PROMPT_RT = nonEmpty(_DEFAULT_PROMPT) ? _DEFAULT_PROMPT! : PROMPT_
 const DEFAULT_AGENT: AgentData = {
   name: 'Assistant',
   provider: 'openai',
-  model: 'gpt-4o', // value keys not labels
+  model: 'gpt-4o',
   firstMode: 'Assistant speaks first',
-  firstMsg: 'Hello! I can help with anything here. What would you like to do?',
+  firstMsg: 'Hello! I can help with anything here.',
   systemPrompt: normalizeFullPromptRT(`
 [Identity]
 - You are a helpful, professional AI assistant for this business.
@@ -290,8 +286,6 @@ const DEFAULT_AGENT: AgentData = {
 };
 
 const keyFor = (id: string) => `va:agent:${id}`;
-const versKeyFor = (id: string) => `va:versions:${id}`;
-
 const loadAgentData = (id: string): AgentData => {
   try { const raw = IS_CLIENT ? localStorage.getItem(keyFor(id)) : null; if (raw) return { ...DEFAULT_AGENT, ...(JSON.parse(raw)||{}) }; }
   catch {}
@@ -299,65 +293,61 @@ const loadAgentData = (id: string): AgentData => {
 };
 const saveAgentData = (id: string, data: AgentData) => { try { if (IS_CLIENT) localStorage.setItem(keyFor(id), JSON.stringify(data)); } catch {} };
 
-/* ─────────── mock backend (save/publish) ─────────── */
-async function apiSave(agentId: string, payload: AgentData){
-  const r = await fetch(`/api/voice/agent/${agentId}/save`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
-  }).catch(()=>null);
-  if (!r?.ok) throw new Error('Save failed');
-  return r.json();
-}
-async function apiPublish(agentId: string){
-  const r = await fetch(`/api/voice/agent/${agentId}/publish`, { method: 'POST' }).catch(()=>null);
-  if (!r?.ok) throw new Error('Publish failed');
-  return r.json();
-}
-
-/* ─────────── logos ─────────── */
+/* ─────────── Logos ─────────── */
 const OpenAILogo = () => <Cpu className="w-3.5 h-3.5" />;
 const AnthropicLogo = () => <Bot className="w-3.5 h-3.5" />;
 const GoogleLogo = () => (
   <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" aria-hidden><circle cx="12" cy="12" r="10" fill="currentColor"/></svg>
 );
 
-/* ─────────── options ─────────── */
+/* ─────────── Options (loaded from pages/api/openai/models.ts if present) ─────────── */
 type Opt = { value: string; label: string; disabled?: boolean; note?: string; icon?: React.ReactNode };
-
-const providerOpts: Opt[] = [
-  { value: 'openai',     label: 'OpenAI', icon: <OpenAILogo/> },
-  { value: 'anthropic',  label: 'Anthropic — coming soon', icon: <AnthropicLogo/>, disabled: true },
-  { value: 'google',     label: 'Google — coming soon',    icon: <GoogleLogo/>, disabled: true },
-];
-
-/* Model options: include 5 / 4 / 3 keys and show tiny logos */
-const modelOptsFor = (provider: string): Opt[] => {
-  if (provider === 'openai') {
-    return [
-      { value: 'gpt-5',    label: 'GPT-5',    icon: <OpenAILogo/> },
-      { value: 'gpt-4.1',  label: 'GPT-4.1',  icon: <OpenAILogo/> },
-      { value: 'gpt-4o',   label: 'GPT-4o',   icon: <OpenAILogo/> },
-      { value: 'gpt-3.5',  label: 'GPT-3.5',  icon: <OpenAILogo/> },
-      { value: 'o4-mini',  label: 'o4-mini',  icon: <OpenAILogo/> },
-    ];
-  }
-  return [{ value: 'coming', label: 'Models coming soon', disabled: true }];
+type ModelsModule = {
+  providers?: Array<{ value: string; label: string }>;
+  modelsByProvider?: Record<string, Array<{ value: string; label: string }>>;
 };
 
-const ttsProviders: Opt[] = [
-  { value: 'openai',    label: 'OpenAI', icon: <OpenAILogo/> },
-  { value: 'elevenlabs', label: 'ElevenLabs — coming soon', disabled: true },
+/* local fallback (contains 5/4/3 keys and logos) */
+const FALLBACK_PROVIDERS: Opt[] = [
+  { value: 'openai', label: 'OpenAI', icon: <OpenAILogo/> },
+  { value: 'anthropic', label: 'Anthropic — coming soon', icon: <AnthropicLogo/>, disabled: true },
+  { value: 'google', label: 'Google — coming soon', icon: <GoogleLogo/>, disabled: true },
 ];
+const FALLBACK_MODELS: Record<string, Opt[]> = {
+  openai: [
+    { value: 'gpt-5', label: 'GPT-5', icon: <OpenAILogo/> },
+    { value: 'gpt-4.1', label: 'GPT-4.1', icon: <OpenAILogo/> },
+    { value: 'gpt-4o', label: 'GPT-4o', icon: <OpenAILogo/> },
+    { value: 'gpt-3.5', label: 'GPT-3.5', icon: <OpenAILogo/> },
+    { value: 'o4-mini', label: 'o4-mini', icon: <OpenAILogo/> },
+  ]
+};
 
-const asrProviders: Opt[] = [
-  { value: 'deepgram',   label: 'Deepgram' },
-  { value: 'whisper',    label: 'Whisper — coming soon', disabled: true },
-  { value: 'assemblyai', label: 'AssemblyAI — coming soon', disabled: true },
-];
-
-const asrModelsFor = (asr: string): Opt[] =>
-  asr === 'deepgram'
-    ? [{ value: 'Nova 2', label: 'Nova 2' }, { value: 'Nova', label: 'Nova' }]
-    : [{ value: 'coming', label: 'Models coming soon', disabled: true }];
+/* runtime loader from pages/api/openai/models.ts (what you asked) */
+async function loadModelsFromApiFile(): Promise<{ providers: Opt[]; models: Record<string, Opt[]> }> {
+  try {
+    // IMPORTANT: dynamic client import to avoid build issues if that file is server-only
+    const mod: ModelsModule = await import('@/pages/api/openai/models');
+    const providersRaw = mod.providers || [];
+    const byProvRaw = mod.modelsByProvider || {};
+    const providers: Opt[] = providersRaw.map(p => ({
+      value: p.value, label: p.label,
+      icon: p.value === 'openai' ? <OpenAILogo/> : p.value === 'anthropic' ? <AnthropicLogo/> : <GoogleLogo/>
+    }));
+    const models: Record<string, Opt[]> = {};
+    Object.keys(byProvRaw).forEach(k => {
+      models[k] = (byProvRaw[k] || []).map(m => ({
+        value: m.value, label: m.label,
+        icon: k === 'openai' ? <OpenAILogo/> : k === 'anthropic' ? <AnthropicLogo/> : <GoogleLogo/>
+      }));
+    });
+    // Ensure 5/4/3 keystrings are present for openai (you asked for them)
+    if (!models.openai || !models.openai.length) models.openai = FALLBACK_MODELS.openai;
+    return { providers: providers.length ? providers : FALLBACK_PROVIDERS, models: Object.keys(models).length ? models : FALLBACK_MODELS };
+  } catch {
+    return { providers: FALLBACK_PROVIDERS, models: FALLBACK_MODELS };
+  }
+}
 
 /* ─────────── UI atoms ─────────── */
 const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}) => (
@@ -381,10 +371,7 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
-/* clamp utility */
-const clamp = (v:number, min:number, max:number) => Math.max(min, Math.min(max, v));
-
-/* ─────────── Styled select (portal, less rounded, with icons, clamped) ─────────── */
+/* StyledSelect: less rounded + clamped + icons */
 function StyledSelect({
   value, onChange, options, placeholder, leftIcon, menuTop,
   onPreview, isPreviewing
@@ -408,19 +395,17 @@ function StyledSelect({
     return q ? options.filter(o => o.label.toLowerCase().includes(q)) : options;
   }, [options, query, value]);
 
-  // position, clamped to viewport
   useLayoutEffect(() => {
     if (!open || !btnRef.current) return;
     const r = btnRef.current.getBoundingClientRect();
     const width = r.width;
     const left = clamp(r.left, 8, Math.max(8, window.innerWidth - width - 8));
-    const bottomSpace = window.innerHeight - r.bottom;
     const menuH = 320;
+    const bottomSpace = window.innerHeight - r.bottom;
     const top = bottomSpace > menuH ? r.bottom + 8 : Math.max(8, r.top - 8 - menuH);
     setMenuPos({ left, top, width });
   }, [open]);
 
-  // outside click — include portal
   useEffect(() => {
     if (!open || !IS_CLIENT) return;
     const off = (e: MouseEvent) => {
@@ -593,7 +578,7 @@ function Section({
   );
 }
 
-/* ─────────── Diff helpers (for inline review) ─────────── */
+/* ─────────── Diff helpers (inline review) ─────────── */
 function computeDiff(base:string, next:string){
   const a = (base || '').split('\n');
   const b = (next || '').split('\n');
@@ -607,7 +592,6 @@ function computeDiff(base:string, next:string){
   }
   return rows;
 }
-
 function DiffInline({ base, next }:{ base:string; next:string }){
   const rows = computeDiff(base, next);
   return (
@@ -634,13 +618,13 @@ function DiffInline({ base, next }:{ base:string; next:string }){
   );
 }
 
-/* ─────────── model mapping for WebRTC ─────────── */
+/* ─────────── realtime model mapping (not hardcoded to 4o) ─────────── */
 function mapToRealtime(model: string){
-  // You can wire your own mapping. We fallback to 4o realtime.
-  const m = model.toLowerCase();
+  const m = (model || '').toLowerCase();
+  // Map your selected model to a realtime-capable variant.
   if (m.includes('5')) return 'gpt-4o-realtime-preview';
-  if (m.includes('4o')) return 'gpt-4o-realtime-preview';
   if (m.includes('4.1')) return 'gpt-4o-realtime-preview';
+  if (m.includes('4o')) return 'gpt-4o-realtime-preview';
   if (m.includes('3.5')) return 'gpt-4o-realtime-preview';
   if (m.includes('o4')) return 'gpt-4o-realtime-preview';
   return 'gpt-4o-realtime-preview';
@@ -677,10 +661,13 @@ export default function VoiceAgentSection() {
   const [toastKind, setToastKind] = useState<'info'|'error'>('info');
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
 
-  // Panel open
+  const [providerOpts, setProviderOpts] = useState<Opt[]>(FALLBACK_PROVIDERS);
+  const [modelOptsByProvider, setModelOptsByProvider] = useState<Record<string, Opt[]>>(FALLBACK_MODELS);
+
+  // slide-in panel visibility (starts hidden)
   const [showCall, setShowCall] = useState(false);
 
-  // Generate overlay
+  // Generate overlay (no presets)
   const [showGenerate, setShowGenerate] = useState(false);
   const [composerText, setComposerText] = useState('');
   const [genPhase, setGenPhase] = useState<'idle'|'editing'|'loading'|'review'>('idle');
@@ -689,10 +676,22 @@ export default function VoiceAgentSection() {
   const basePromptRef = useRef<string>('');
   const [proposedPrompt, setProposedPrompt] = useState('');
 
-  // simple transcript
+  // transcript
   const [msgs, setMsgs] = useState<ChatMsg[]>(() => [
     { id: 'sys', role: 'system', text: (DEFAULT_AGENT.systemPrompt || '').trim() },
   ]);
+
+  // load providers/models from pages/api/openai/models.ts (what you asked)
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      const { providers, models } = await loadModelsFromApiFile();
+      if (!mounted) return;
+      setProviderOpts(providers);
+      setModelOptsByProvider(models);
+    })();
+    return () => { mounted = false; };
+  }, []);
 
   // voice preview via browser TTS
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
@@ -705,7 +704,7 @@ export default function VoiceAgentSection() {
   }, []);
   function speakPreview(line?: string){
     if (!IS_CLIENT || !('speechSynthesis' in window)) return;
-    const u = new SpeechSynthesisUtterance(line || `Hi, I'm ${data.name || 'your assistant'}. This is a preview.`);
+    const u = new SpeechSynthesisUtterance(line || `Hi, I'm ${data.name || 'your assistant'}.`);
     const byName = voices.find(v => v.name.toLowerCase().includes((data.voiceName || '').split(' ')[0]?.toLowerCase() || ''));
     const en = voices.find(v => v.lang?.startsWith('en'));
     if (byName) u.voice = byName; else if (en) u.voice = en;
@@ -721,13 +720,11 @@ export default function VoiceAgentSection() {
     window.addEventListener('assistant:active', handler as EventListener);
     return () => window.removeEventListener('assistant:active', handler as EventListener);
   }, []);
-
   useEffect(() => {
     if (!activeId) return;
     setData(loadAgentData(activeId));
     try { if (IS_CLIENT) localStorage.setItem(ACTIVE_KEY, activeId); } catch {}
   }, [activeId]);
-
   useEffect(() => { if (activeId) saveAgentData(activeId, data); }, [activeId, data]);
 
   useEffect(() => {
@@ -735,7 +732,6 @@ export default function VoiceAgentSection() {
       try {
         const store = await scopedStorage();
         await store.ensureOwnerGuard();
-
         const v1 = await store.getJSON<ApiKey[]>('apiKeys.v1', []);
         const legacy = await store.getJSON<ApiKey[]>('apiKeys', []);
         const merged = Array.isArray(v1) && v1.length ? v1 : Array.isArray(legacy) ? legacy : [];
@@ -743,15 +739,12 @@ export default function VoiceAgentSection() {
           .filter(Boolean)
           .map((k: any) => ({ id: String(k?.id || ''), name: String(k?.name || ''), key: String(k?.key || '') }))
           .filter((k) => k.id && k.name);
-
         setApiKeys(cleaned);
-
         const globalSelected = await store.getJSON<string>('apiKeys.selectedId', '');
         const chosen =
           (data.apiKeyId && cleaned.some((k) => k.id === data.apiKeyId)) ? data.apiKeyId! :
           (globalSelected && cleaned.some((k) => k.id === globalSelected)) ? globalSelected :
           (cleaned[0]?.id || '');
-
         if (chosen && chosen !== data.apiKeyId) {
           setData(prev => ({ ...prev, apiKeyId: chosen }));
           await store.setJSON('apiKeys.selectedId', chosen);
@@ -774,24 +767,26 @@ export default function VoiceAgentSection() {
     };
   }
 
-  const modelOpts = useMemo(()=>modelOptsFor(data.provider), [data.provider]);
+  const modelOpts = useMemo(()=>modelOptsByProvider[data.provider] || [], [data.provider, modelOptsByProvider]);
 
   async function doSave(){
     if (!activeId) { setToastKind('error'); setToast('Select or create an agent'); return; }
     setSaving(true); setToast('');
-    try { await apiSave(activeId, data); setToastKind('info'); setToast('Saved'); }
+    try { await (await fetch(`/api/voice/agent/${activeId}/save`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data)
+    })).json(); setToastKind('info'); setToast('Saved'); }
     catch { setToastKind('error'); setToast('Save failed'); }
     finally { setSaving(false); setTimeout(()=>setToast(''), 1400); }
   }
   async function doPublish(){
     if (!activeId) { setToastKind('error'); setToast('Select or create an agent'); return; }
     setPublishing(true); setToast('');
-    try { await apiPublish(activeId); setToastKind('info'); setToast('Published'); }
+    try { await (await fetch(`/api/voice/agent/${activeId}/publish`, { method: 'POST' })).json(); setToastKind('info'); setToast('Published'); }
     catch { setToastKind('error'); setToast('Publish failed'); }
     finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
   }
 
-  /* ─────────── REALTIME CALL LAUNCH ─────────── */
+  /* ─────────── Panel open: seed transcript if assistant should speak first ─────────── */
   const openCall = () => {
     const key = apiKeys.find(k => k.id === data.apiKeyId)?.key || '';
     if (!key) {
@@ -800,30 +795,24 @@ export default function VoiceAgentSection() {
       setTimeout(()=>setToast(''), 2200);
       return;
     }
-    // seed first message in transcript if assistant speaks first
-    setMsgs(prev => {
-      const base: ChatMsg[] = [{ id: 'sys', role: 'system', text: data.systemPrompt.trim() }];
-      if (data.firstMode === 'Assistant speaks first' && nonEmpty(data.firstMsg)) {
-        base.push({ id: 'hello', role: 'assistant', text: data.firstMsg });
-      }
-      return base;
-    });
+    setMsgs([{ id: 'sys', role: 'system', text: data.systemPrompt.trim() }]);
+    if (data.firstMode === 'Assistant speaks first' && nonEmpty(data.firstMsg)) {
+      setMsgs(prev => [...prev, { id: 'hello', role: 'assistant', text: data.firstMsg }]);
+    }
     setShowCall(true);
   };
 
-  /* ─────────── transcript sink from WebCallButton ─────────── */
   const onTranscriptEvent = (ev: { role:'user'|'assistant', text:string }) => {
     setMsgs(prev => [...prev, { id: String(Date.now())+Math.random(), role: ev.role, text: ev.text }]);
   };
 
-  /* ─────────── UI ─────────── */
   const inInlineReview = genPhase === 'review' && !showGenerate;
 
   return (
     <section className="va-scope" style={{ background:'var(--bg)', color:'var(--text)' }}>
       <Tokens />
 
-      {/* rail + content */}
+      {/* layout */}
       <div className="grid w-full" style={{ gridTemplateColumns: '260px 1fr' }}>
         <div className="sticky top-0 h-screen" style={{ borderRight:'1px solid rgba(255,255,255,.06)' }}>
           <RailBoundary><AssistantRail /></RailBoundary>
@@ -927,7 +916,7 @@ export default function VoiceAgentSection() {
                   value={data.model}
                   onChange={setField('model')}
                   options={modelOpts}
-                  leftIcon={<OpenAILogo/>}
+                  leftIcon={data.provider === 'openai' ? <OpenAILogo/> : data.provider === 'anthropic' ? <AnthropicLogo/> : <GoogleLogo/>}
                 />
               </div>
               <div>
@@ -958,18 +947,16 @@ export default function VoiceAgentSection() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-1 gap-[12px] mt-[var(--s-4)]">
-              <div className="">
+              <div>
                 <div className="flex items-center justify-between mb-[var(--s-2)]">
                   <div className="font-medium" style={{ fontSize:'var(--fz-label)' }}>System Prompt</div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      className="inline-flex items-center gap-2 rounded-[8px] text-sm"
-                      style={{ height:36, padding:'0 12px', background:CTA, color:'#0a0f0d', border:'1px solid rgba(255,255,255,.08)' }}
-                      onClick={()=>{ setComposerText(''); setProposedPrompt(''); setGenPhase('editing'); setShowGenerate(true); }}
-                    >
-                      <Wand2 className="w-4 h-4" /> Generate
-                    </button>
-                  </div>
+                  <button
+                    className="inline-flex items-center gap-2 rounded-[8px] text-sm"
+                    style={{ height:36, padding:'0 12px', background:CTA, color:'#0a0f0d', border:'1px solid rgba(255,255,255,.08)' }}
+                    onClick={()=>{ setComposerText(''); setProposedPrompt(''); setGenPhase('editing'); setShowGenerate(true); }}
+                  >
+                    <Wand2 className="w-4 h-4" /> Generate
+                  </button>
                 </div>
 
                 <div style={{ position:'relative' }}>
@@ -981,10 +968,7 @@ export default function VoiceAgentSection() {
                       onChange={(e)=> setField('systemPrompt')(e.target.value)}
                     />
                   ) : (
-                    <div
-                      className="rounded-[8px]"
-                      style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)', padding:'12px' }}
-                    >
+                    <div className="rounded-[8px]" style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)', padding:'12px' }}>
                       <DiffInline base={basePromptRef.current} next={proposedPrompt}/>
                     </div>
                   )}
@@ -1076,11 +1060,19 @@ export default function VoiceAgentSection() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px]">
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]">Provider</div>
-                <StyledSelect value={data.asrProvider} onChange={(v)=>setField('asrProvider')(v as AgentData['asrProvider'])} options={asrProviders}/>
+                <StyledSelect value={data.asrProvider} onChange={(v)=>setField('asrProvider')(v as AgentData['asrProvider'])} options={[
+                  { value: 'deepgram', label: 'Deepgram' },
+                  { value: 'whisper', label: 'Whisper — coming soon', disabled: true },
+                  { value: 'assemblyai', label: 'AssemblyAI — coming soon', disabled: true },
+                ]}/>
               </div>
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]">Model</div>
-                <StyledSelect value={data.asrModel} onChange={setField('asrModel')} options={asrModelsFor(data.asrProvider)}/>
+                <StyledSelect value={data.asrModel} onChange={setField('asrModel')} options={
+                  data.asrProvider === 'deepgram'
+                    ? [{ value: 'Nova 2', label: 'Nova 2' }, { value: 'Nova', label: 'Nova' }]
+                    : [{ value: 'coming', label: 'Models coming soon', disabled: true }]
+                }/>
               </div>
             </div>
             <div className="mt-[var(--s-4)] grid sm:grid-cols-2 gap-[12px]">
@@ -1094,13 +1086,13 @@ export default function VoiceAgentSection() {
               </div>
             </div>
 
-            {/* give some space at end of page as requested */}
+            {/* bottom space so transcriber sits at the end of page */}
             <div style={{ height: 40 }} />
           </Section>
         </div>
       </div>
 
-      {/* ─────────── Generate overlay (no presets UI; simple composer) ─────────── */}
+      {/* ─────────── Generate overlay (NO PRESETS) ─────────── */}
       {showGenerate && IS_CLIENT ? createPortal(
         <>
           <div
@@ -1195,6 +1187,7 @@ export default function VoiceAgentSection() {
       {/* ─────────── Voice/Call PANEL (slide-in), with transcript ─────────── */}
       {IS_CLIENT ? createPortal(
         <>
+          {/* overlay */}
           <div
             className={`fixed inset-0 ${showCall ? '' : 'pointer-events-none'}`}
             style={{
@@ -1205,6 +1198,8 @@ export default function VoiceAgentSection() {
             }}
             onClick={()=> setShowCall(false)}
           />
+
+          {/* panel (starts off-screen; not visible until opened) */}
           <div
             className="fixed right-0 top-0 h-full w-full sm:w-[520px] max-w-[90vw]"
             style={{
@@ -1231,15 +1226,14 @@ export default function VoiceAgentSection() {
                 {/* WebRTC control */}
                 <div className="p-3 border-b" style={{ borderColor:'rgba(255,255,255,.10)' }}>
                   <WebCallButton
-                    // model is mapped – no longer hardcoded to 4o
-                    model={mapToRealtime(data.model)}
+                    model={mapToRealtime(data.model)}            // ← NOT hardcoded to 4o
                     systemPrompt={data.systemPrompt}
                     voiceName={data.voiceName}
                     assistantName={data.name || 'Assistant'}
                     apiKey={apiKeys.find(k => k.id === data.apiKeyId)?.key || ''}
                     assistantStarts={data.firstMode === 'Assistant speaks first'}
                     firstMessage={data.firstMsg}
-                    onTranscript={onTranscriptEvent}
+                    onTranscript={onTranscriptEvent}              // ← “AI says / You say”
                     onClose={()=> setShowCall(false)}
                   />
                 </div>
@@ -1257,8 +1251,8 @@ export default function VoiceAgentSection() {
                   ))}
                 </div>
 
-                {/* footer spacer */}
-                <div className="p-3 text-xs opacity-70">Transcription updates in real time.</div>
+                {/* footer */}
+                <div className="p-3 text-xs opacity-70">Live transcript updates.</div>
               </div>
             </div>
           </div>
