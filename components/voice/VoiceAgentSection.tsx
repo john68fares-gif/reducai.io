@@ -5,8 +5,8 @@ import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 're
 import dynamic from 'next/dynamic';
 import { createPortal } from 'react-dom';
 import {
-  Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Rocket, Search, Check, Lock,
-  KeyRound, Play, Square, Pause, X
+  Wand2, ChevronDown, ChevronUp, Gauge, Volume2, Rocket, Search, Check, Lock,
+  KeyRound, Play, Square, Pause, X, Phone, Plus, Trash2, FileText, FileImage
 } from 'lucide-react';
 import { scopedStorage } from '@/utils/scoped-storage';
 import WebCallButton from '@/components/voice/WebCallButton';
@@ -42,10 +42,9 @@ const GREEN_LINE = 'rgba(89,217,179,.20)';
 const ACTIVE_KEY = 'va:activeId';
 const Z_OVERLAY = 100000;
 const Z_MODAL   = 100001;
-const Z_MENU    = 100020;
 const IS_CLIENT = typeof window !== 'undefined' && typeof document !== 'undefined';
 
-/* phone icon */
+/* phone icon (filled) */
 function PhoneFilled(props: React.SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 24 24" width="16" height="16" {...props} aria-hidden>
@@ -56,6 +55,11 @@ function PhoneFilled(props: React.SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+/* small OpenAI dot for Provider select */
+const OpenAILogoDot = () => (
+  <span className="inline-block w-4 h-4 rounded-full" style={{ background:'#10a37f' }} />
+);
 
 /* ─────────── helpers ─────────── */
 const isFn = (f: any): f is Function => typeof f === 'function';
@@ -68,8 +72,9 @@ const Tokens = () => (
     .va-scope{
       --bg:#0b0c10; --panel:#0d0f11; --text:#e6f1ef; --text-muted:#9fb4ad;
       --s-2:8px; --s-3:12px; --s-4:16px; --s-5:20px; --s-6:24px;
-      --radius-outer:10px;
-      --control-h:44px; --header-h:88px;
+      --radius-outer:10px;               /* slightly less rounded */
+      --control-h:36px;                  /* tighter triggers */
+      --header-h:84px;
       --fz-title:18px; --fz-sub:15px; --fz-body:14px; --fz-label:12.5px;
       --lh-body:1.45; --ease:cubic-bezier(.22,.61,.36,1);
       --app-sidebar-w: 240px; --rail-w: 260px;
@@ -104,7 +109,8 @@ type AgentData = {
   provider: 'openai' | 'anthropic' | 'google';
   model: string;
   firstMode: string;
-  firstMsg: string;
+  firstMsg: string;          // legacy (kept for back-compat/migration)
+  firstMsgs?: string[];      // rotation (up to 20)
   systemPrompt: string;
   language?: string;
 
@@ -117,7 +123,12 @@ type AgentData = {
 
   denoise: boolean;
   numerals: boolean;
+
+  phoneNumber?: string;
+  files?: File[];
 };
+
+type OpenAIModel = { id: string };
 
 /* ─────────── prompt-engine shims (fixed) ─────────── */
 const PROMPT_SKELETON =
@@ -242,15 +253,28 @@ const DEFAULT_AGENT: AgentData = {
   asrModel: 'Nova 2',
   denoise: false,
   numerals: false,
-  language: 'English'
+  language: 'English',
+  firstMsgs: ['Hello.'],
+  phoneNumber: '',
+  files: []
 };
 
 const keyFor = (id: string) => `va:agent:${id}`;
 const versKeyFor = (id: string) => `va:versions:${id}`;
 
 const loadAgentData = (id: string): AgentData => {
-  try { const raw = IS_CLIENT ? localStorage.getItem(keyFor(id)) : null; if (raw) return { ...DEFAULT_AGENT, ...(JSON.parse(raw)||{}) }; }
-  catch {}
+  try {
+    const raw = IS_CLIENT ? localStorage.getItem(keyFor(id)) : null;
+    if (raw) {
+      const parsed = { ...DEFAULT_AGENT, ...(JSON.parse(raw)||{}) } as AgentData;
+      // migration: promote single firstMsg -> firstMsgs
+      if (!Array.isArray(parsed.firstMsgs) || parsed.firstMsgs.length === 0) {
+        const base = (parsed.firstMsg && parsed.firstMsg.trim()) ? parsed.firstMsg.trim() : 'Hello.';
+        parsed.firstMsgs = [base];
+      }
+      return parsed;
+    }
+  } catch {}
   return { ...DEFAULT_AGENT };
 };
 const saveAgentData = (id: string, data: AgentData) => {
@@ -288,30 +312,51 @@ const providerOpts: Opt[] = [
   { value: 'anthropic',  label: 'Anthropic — coming soon', disabled: true, note: 'soon' },
   { value: 'google',     label: 'Google — coming soon',    disabled: true, note: 'soon' },
 ];
-const modelOptsFor = (provider: string): Opt[] =>
-  provider === 'openai'
-    ? [
-        { value: 'GPT-4o',  label: 'GPT-4o' },
-        { value: 'GPT-4.1', label: 'GPT-4.1' },
-        { value: 'o4-mini', label: 'o4-mini' },
-      ]
-    : [{ value: 'coming', label: 'Models coming soon', disabled: true }];
-const ttsProviders: Opt[] = [
-  { value: 'openai',    label: 'OpenAI' },
-  { value: 'elevenlabs', label: 'ElevenLabs — coming soon', disabled: true, note: 'soon' },
+
+const STATIC_OPENAI_MODELS: Opt[] = [
+  { value: 'gpt-4o',                  label: 'GPT-4o' },
+  { value: 'gpt-4.1',                 label: 'GPT-4.1' },
+  { value: 'gpt-4o-mini',             label: 'GPT-4o mini' },
+  { value: 'o4-mini',                 label: 'o4-mini' },
+  { value: 'gpt-4o-realtime-preview', label: 'GPT-4o Realtime (preview)' },
 ];
-const asrProviders: Opt[] = [
-  { value: 'deepgram',   label: 'Deepgram' },
-  { value: 'whisper',    label: 'Whisper — coming soon', disabled: true, note: 'soon' },
-  { value: 'assemblyai', label: 'AssemblyAI — coming soon', disabled: true, note: 'soon' },
-];
-const asrModelsFor = (asr: string): Opt[] =>
-  asr === 'deepgram'
-    ? [
-        { value: 'Nova 2', label: 'Nova 2' },
-        { value: 'Nova',   label: 'Nova' },
-      ]
-    : [{ value: 'coming', label: 'Models coming soon', disabled: true }];
+
+/* live OpenAI model fetch */
+function normalizeModelLabel(id: string){
+  if (/^gpt-5/i.test(id)) return id.replace(/^gpt-5/i, 'GPT-5');
+  if (/^gpt-4\.1/i.test(id)) return id.replace(/^gpt-4\.1/i,'GPT-4.1');
+  if (/^gpt-4o/i.test(id)) return id.replace(/^gpt-4o/i,'GPT-4o');
+  if (/^o4/i.test(id)) return id.replace(/^o4/i,'o4');
+  return id;
+}
+function isVoiceOrChatModel(id: string){
+  return /^(gpt-4o|gpt-4\.1|gpt-5|o4)/i.test(id) || /realtime/i.test(id);
+}
+async function fetchOpenAIModels(apiKey: string): Promise<Opt[]> {
+  const cacheKey = `va:modelCache:${(apiKey||'').slice(-6)}`;
+  try {
+    const cached = IS_CLIENT ? sessionStorage.getItem(cacheKey) : null;
+    if (cached) {
+      const parsed: string[] = JSON.parse(cached);
+      return parsed.filter(isVoiceOrChatModel).map(id => ({ value: id, label: normalizeModelLabel(id) }));
+    }
+  } catch {}
+  try {
+    const r = await fetch('https://api.openai.com/v1/models', {
+      headers: { Authorization: `Bearer ${apiKey}` }
+    });
+    if (!r.ok) throw new Error('models failed');
+    const json = await r.json();
+    const ids: string[] = Array.isArray(json?.data) ? json.data.map((m: OpenAIModel) => m.id) : [];
+    if (IS_CLIENT) sessionStorage.setItem(cacheKey, JSON.stringify(ids));
+    return ids
+      .filter(isVoiceOrChatModel)
+      .sort()
+      .map(id => ({ value: id, label: normalizeModelLabel(id) }));
+  } catch {
+    return STATIC_OPENAI_MODELS;
+  }
+}
 
 /* ─────────── simple atoms ─────────── */
 const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}) => (
@@ -395,8 +440,9 @@ function StyledSelect({
         ref={btnRef}
         type="button"
         onClick={() => { setOpen(v=>!v); setTimeout(()=>searchRef.current?.focus(),0); }}
-        className="w-full flex items-center justify-between gap-3 px-3 py-3 rounded-[14px] text-sm outline-none transition"
+        className="w-full flex items-center justify-between gap-3 px-3 rounded-[10px] text-sm outline-none transition"
         style={{
+          height:'var(--control-h)',
           background:'var(--vs-input-bg, #101314)',
           border:'1px solid var(--vs-input-border, rgba(255,255,255,.14))',
           boxShadow:'var(--vs-input-shadow, none)',
@@ -420,14 +466,15 @@ function StyledSelect({
             width: (menuPos?.width ?? (btnRef.current?.getBoundingClientRect().width ?? 280)),
             background:'var(--vs-menu-bg, #101314)',
             border:'1px solid var(--vs-menu-border, rgba(255,255,255,.16))',
-            borderRadius:20,
-            boxShadow:'0 28px 70px rgba(0,0,0,.60), 0 10px 26px rgba(0,0,0,.45), 0 0 0 1px rgba(0,255,194,.10)'
+            borderRadius:14,
+            boxShadow:'0 28px 70px rgba(0,0,0,.60), 0 10px 26px rgba(0,0,0,.45), 0 0 0 1px rgba(0,255,194,.10)',
+            maxHeight:'60vh', overflowY:'auto'
           }}
         >
           {menuTop ? <div className="mb-2">{menuTop}</div> : null}
 
           <div
-            className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[12px]"
+            className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[10px]"
             style={{ background:'var(--vs-input-bg, #101314)', border:'1px solid var(--vs-input-border, rgba(255,255,255,.14))', color:'var(--text)' }}
           >
             <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
@@ -441,13 +488,13 @@ function StyledSelect({
             />
           </div>
 
-          <div className="max-h-72 overflow-y-auto pr-1" style={{ scrollbarWidth:'thin' }}>
+          <div className="max-h-[52vh] overflow-y-auto pr-1" style={{ scrollbarWidth:'thin' }}>
             {filtered.map(o => (
               <button
                 key={o.value}
                 disabled={!!o.disabled}
-                onClick={()=>{ if (o.disabled) return; onChange(o.value); }}
-                className="w-full text-left text-sm px-3 py-2 rounded-[10px] transition grid grid-cols-[18px_1fr_auto] items-center gap-2 disabled:opacity-60"
+                onClick={()=>{ if (o.disabled) return; onChange(o.value); setOpen(false); }}
+                className="w-full text-left text-sm px-3 py-2 rounded-[8px] transition grid grid-cols-[18px_1fr_auto] items-center gap-2 disabled:opacity-60"
                 style={{
                   color: o.disabled ? 'var(--text-muted)' : 'var(--text)',
                   background:'transparent',
@@ -486,7 +533,7 @@ function StyledSelect({
 function Section({
   title, icon, desc, children, defaultOpen = true
 }:{
-  title: string; icon: React.ReactNode; desc?: string; children: React.ReactNode; defaultOpen?: boolean;
+  title: string; icon?: React.ReactNode; desc?: string; children: React.ReactNode; defaultOpen?: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   const innerRef = useRef<HTMLDivElement|null>(null);
@@ -501,9 +548,7 @@ function Section({
       <div className="va-card">
         <button onClick={()=>setOpen(v=>!v)} className="va-head w-full text-left" style={{ color:'var(--text)' }}>
           <span className="min-w-0 flex items-center gap-3">
-            <span className="inline-grid place-items-center w-7 h-7 rounded-full" style={{ background:'rgba(89,217,179,.10)' }}>
-              {icon}
-            </span>
+            {icon ? <span className="inline-grid place-items-center w-7 h-7 rounded-full" style={{ background:'rgba(89,217,179,.10)' }}>{icon}</span> : null}
             <span className="min-w-0">
               <span className="block font-semibold truncate" style={{ fontSize:'var(--fz-title)' }}>{title}</span>
               {desc ? <span className="block text-xs truncate" style={{ color:'var(--text-muted)' }}>{desc}</span> : null}
@@ -667,6 +712,7 @@ export default function VoiceAgentSection() {
 
   useEffect(() => { if (activeId) saveAgentData(activeId, data); }, [activeId, data]);
 
+  /* API keys from scoped storage */
   useEffect(() => {
     (async () => {
       try {
@@ -697,6 +743,23 @@ export default function VoiceAgentSection() {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /* live OpenAI models */
+  const [modelOpts, setModelOpts] = useState<Opt[]>(STATIC_OPENAI_MODELS);
+  useEffect(() => {
+    (async () => {
+      if (data.provider !== 'openai') { setModelOpts([{ value:'coming', label:'Models coming soon', disabled:true }]); return; }
+      const key = apiKeys.find(k => k.id === data.apiKeyId)?.key || '';
+      if (!key) { setModelOpts(STATIC_OPENAI_MODELS); return; }
+      const opts = await fetchOpenAIModels(key);
+      setModelOpts(opts.length ? opts : STATIC_OPENAI_MODELS);
+      // if current model not in list, select first
+      if (!opts.find(o => o.value === data.model)) {
+        setData(prev => ({ ...prev, model: (opts[0]?.value || 'gpt-4o') }));
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.apiKeyId, data.provider]);
 
   function setField<K extends keyof AgentData>(k: K) {
     return (v: AgentData[K]) => {
@@ -769,6 +832,27 @@ export default function VoiceAgentSection() {
   }
   function discardGenerated(){ setProposedPrompt(''); setChangesSummary(''); setGenPhase('idle'); }
 
+  /* start call: choose first message if needed */
+  function handleTalkToAssistant(){
+    if (data.firstMode === 'Assistant speaks first' && data.firstMsgs && data.firstMsgs.length) {
+      const pool = data.firstMsgs.filter(s => s && s.trim());
+      const pick = pool[Math.floor(Math.random() * pool.length)] || 'Hello.';
+      try {
+        if (IS_CLIENT) {
+          sessionStorage.setItem('va:firstGreeting', pick);
+          window.dispatchEvent(new CustomEvent('assistant:firstMessage', { detail: { id: activeId, text: pick } }));
+        }
+      } catch {}
+    }
+    setShowCall(true);
+  }
+
+  /* file helpers */
+  function onFilesSelected(list: FileList | null){
+    const files = Array.from(list || []);
+    setField('files')(files);
+  }
+
   /* ─────────── UI ─────────── */
   return (
     <section className="va-scope" style={{ background:'var(--bg)', color:'var(--text)' }}>
@@ -780,7 +864,7 @@ export default function VoiceAgentSection() {
           <RailBoundary><AssistantRail /></RailBoundary>
         </div>
 
-        <div className="px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w-[1160px]" style={{ fontSize:'var(--fz-body)', lineHeight:'var(--lh-body)' }}>
+        <div className="px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w-[1160px]" style={{ fontSize:'var(--fz-body)', lineHeight:'var(--lh-body)', paddingBottom: 48 }}>
           <div className="mb-[var(--s-4)] flex flex-wrap items-center justify-end gap-[var(--s-3)]">
             <button onClick={doSave} disabled={saving}
               className="inline-flex items-center gap-2 rounded-[10px] px-4 text-sm transition hover:-translate-y-[1px] disabled:opacity-60"
@@ -794,7 +878,7 @@ export default function VoiceAgentSection() {
               <Rocket className="w-4 h-4" /> {publishing ? 'Publishing…' : 'Publish'}
             </button>
 
-            <button onClick={()=>setShowCall(true)}
+            <button onClick={handleTalkToAssistant}
               className="inline-flex items-center gap-2 rounded-[10px] select-none"
               style={{ height:'var(--control-h)', padding:'0 18px', background:CTA, color:'#ffffff', fontWeight:700, boxShadow:'0 10px 22px rgba(89,217,179,.20)' }}
               onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA_HOVER)}
@@ -846,14 +930,19 @@ export default function VoiceAgentSection() {
               </div>
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]">Provider</div>
-                <StyledSelect value={data.provider} onChange={(v)=>setField('provider')(v as AgentData['provider'])} options={providerOpts}/>
+                <StyledSelect
+                  value={data.provider}
+                  onChange={(v)=>setField('provider')(v as AgentData['provider'])}
+                  options={providerOpts}
+                  leftIcon={data.provider==='openai' ? <OpenAILogoDot/> : null}
+                />
               </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt-[var(--s-4)]">
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]">Model</div>
-                <StyledSelect value={data.model} onChange={setField('model')} options={modelOptsFor(data.provider)}/>
+                <StyledSelect value={data.model} onChange={setField('model')} options={modelOpts}/>
               </div>
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]">First Message Mode</div>
@@ -865,8 +954,50 @@ export default function VoiceAgentSection() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt-[var(--s-4)]">
-              <div className="md:col-span-2">
+            {/* First message rotation editor */}
+            <div className="mt-[var(--s-4)]">
+              <div className="mb-[var(--s-2)] text-[12.5px]">First Message Rotation (up to 20)</div>
+              {(data.firstMsgs || []).map((m, i) => (
+                <div key={i} className="flex items-center gap-2 mb-2">
+                  <input
+                    value={m}
+                    onChange={(e)=>{
+                      const copy = [...(data.firstMsgs || [])];
+                      copy[i] = e.target.value;
+                      setField('firstMsgs')(copy);
+                    }}
+                    className="flex-1 bg-transparent outline-none rounded-[10px] px-3"
+                    style={{ height:'var(--control-h)', background:'var(--input-bg)', border:'1px solid var(--input-border)' }}
+                    placeholder={`Message ${i+1}`}
+                  />
+                  <button
+                    onClick={()=>{
+                      const copy = [...(data.firstMsgs || [])];
+                      copy.splice(i,1);
+                      setField('firstMsgs')(copy);
+                    }}
+                    className="w-9 h-9 grid place-items-center rounded-[10px]"
+                    style={{ border:'1px solid var(--input-border)', background:'var(--input-bg)' }}
+                    aria-label="Remove message"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+              {(data.firstMsgs?.length || 0) < 20 && (
+                <button
+                  onClick={()=> setField('firstMsgs')([...(data.firstMsgs || []), ''])}
+                  className="inline-flex items-center gap-2 px-3 rounded-[10px] text-sm"
+                  style={{ height:'var(--control-h)', border:'1px solid var(--input-border)', background:'var(--input-bg)' }}
+                >
+                  <Plus className="w-4 h-4" /> Add message
+                </button>
+              )}
+            </div>
+
+            {/* System prompt + dropzone */}
+            <div className="grid grid-cols-1 md:grid-cols-1 gap-[12px] mt-[var(--s-4)]">
+              <div>
                 <div className="flex items-center justify-between mb-[var(--s-2)]">
                   <div className="font-medium" style={{ fontSize:'var(--fz-label)' }}>System Prompt</div>
                   <div className="flex items-center gap-2">
@@ -882,12 +1013,45 @@ export default function VoiceAgentSection() {
 
                 <div style={{ position:'relative' }}>
                   {!inInlineReview ? (
-                    <textarea
-                      className="w-full bg-transparent outline-none rounded-[12px] px-3 py-[12px]"
-                      style={{ minHeight: 360, background:'var(--input-bg)', border:'1px solid var(--input-border)' }}
-                      value={data.systemPrompt}
-                      onChange={(e)=> setField('systemPrompt')(e.target.value)}
-                    />
+                    <>
+                      <textarea
+                        className="w-full bg-transparent outline-none rounded-[12px] px-3 py-[12px]"
+                        style={{ minHeight: 320, background:'var(--input-bg)', border:'1px solid var(--input-border)' }}
+                        value={data.systemPrompt}
+                        onChange={(e)=> setField('systemPrompt')(e.target.value)}
+                      />
+                      {/* dropzone */}
+                      <div className="mt-3 rounded-[12px] px-3 py-3"
+                           style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}>
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="text-sm" style={{ color:'var(--text-muted)' }}>Optional files to inform the AI</div>
+                          <label className="px-2 py-1 text-xs rounded-[8px] cursor-pointer"
+                                 style={{ border:'1px solid var(--input-border)' }}>
+                            Upload…
+                            <input
+                              type="file"
+                              multiple
+                              accept=".pdf,.txt,.md,.csv,image/*"
+                              className="hidden"
+                              onChange={(e)=> onFilesSelected(e.target.files)}
+                            />
+                          </label>
+                        </div>
+                        {data.files && data.files.length > 0 ? (
+                          <ul className="space-y-1 text-sm">
+                            {data.files.map((f, idx) => (
+                              <li key={idx} className="flex items-center gap-2">
+                                {/^image\//.test(f.type) ? <FileImage className="w-4 h-4"/> : <FileText className="w-4 h-4" />}
+                                <span className="truncate">{f.name}</span>
+                                <span className="opacity-60">({Math.ceil(f.size/1024)} KB)</span>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <div className="text-xs opacity-70">No files selected.</div>
+                        )}
+                      </div>
+                    </>
                   ) : (
                     <div className="rounded-[12px]" style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', padding:'12px' }}>
                       <div className="flex items-center justify-between mb-2">
@@ -909,7 +1073,7 @@ export default function VoiceAgentSection() {
             </div>
           </Section>
 
-          {/* Voice */}
+          {/* Voice & Phone */}
           <Section
             title="Voice"
             icon={<Volume2 className="w-4 h-4" style={{ color: CTA }} />}
@@ -968,6 +1132,29 @@ export default function VoiceAgentSection() {
                     </div>
                   }
                 />
+              </div>
+            </div>
+
+            {/* Phone number */}
+            <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-[12px] mt-[12px]">
+              <div>
+                <div className="mb-[var(--s-2)] text-[12.5px]">Phone Number</div>
+                <input
+                  value={data.phoneNumber || ''}
+                  onChange={(e)=>setField('phoneNumber')(e.target.value)}
+                  placeholder="+1 555 123 4567"
+                  className="w-full bg-transparent outline-none rounded-[10px] px-3"
+                  style={{ height:'var(--control-h)', background:'var(--input-bg)', border:'1px solid var(--input-border)' }}
+                />
+              </div>
+              <div className="flex items-end">
+                <button
+                  onClick={()=> window.dispatchEvent(new Event('phone:import'))}
+                  className="rounded-[10px] px-3"
+                  style={{ height:'var(--control-h)', border:'1px solid var(--input-border)', background:'var(--input-bg)' }}
+                >
+                  Import from Numbers
+                </button>
               </div>
             </div>
           </Section>
@@ -1053,7 +1240,7 @@ export default function VoiceAgentSection() {
                onClick={()=> setShowCall(false)} />
           {showCall && (
             <WebCallButton
-              model={'gpt-4o-realtime-preview'}
+              model={data.model || 'gpt-4o'}
               systemPrompt={data.systemPrompt}
               voiceName={data.voiceName}
               assistantName={data.name || 'Assistant'}
