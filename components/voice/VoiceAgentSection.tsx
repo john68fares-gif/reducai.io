@@ -1,27 +1,64 @@
-// components/voice/VoiceAgentSection.tsx
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
 import dynamic from 'next/dynamic';
-import Image from 'next/image';
 import { createPortal } from 'react-dom';
 import {
   Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Rocket, Search, Check, Lock,
-  KeyRound, Play, Square, Pause, X, Upload, MessageSquareText
+  KeyRound, Play, Square, Pause, X, UploadCloud, FileText
 } from 'lucide-react';
-
 import { scopedStorage } from '@/utils/scoped-storage';
 import WebCallButton from '@/components/voice/WebCallButton';
 
-// IMPORTANT: models now come from the server file you asked for
-import { OPENAI_MODELS } from '@/pages/api/openai/models';
+/* ───────── models: source of truth ─────────
+   Expected export from pages/api/openai/models.ts:
 
-import {
-  applyInstructions as _applyInstructions,
-  DEFAULT_PROMPT as _DEFAULT_PROMPT,
-  looksLikeFullPrompt as _looksLikeFullPrompt,
-  normalizeFullPrompt as _normalizeFullPrompt,
-} from '@/lib/prompt-engine';
+   export type UiModel = {
+     id: string;          // keystring sent to API
+     label: string;       // "GPT 5", "GPT 4.1", …
+     family: 'gpt-5'|'gpt-4o'|'gpt-4.1'|'gpt-3.5'|'o3'|'o4-mini'|string;
+     tags?: string[];     // ["Multimodal","Latest"]
+     realtime?: boolean;  // true if it supports Realtime
+     tts?: boolean;       // voice built-in
+     icon?: 'openai' | string;
+   }
+
+   export const openaiModels: UiModel[] = [...]
+*/
+
+let openaiModelsImport: any = null;
+try {
+  // Import from your required file
+  openaiModelsImport = require('@/pages/api/openai/models');
+} catch { /* SSR/route alias safety */ }
+
+type UiModel = {
+  id: string;
+  label: string;
+  family?: string;
+  tags?: string[];
+  realtime?: boolean;
+  tts?: boolean;
+  icon?: 'openai' | string;
+};
+
+// fallback if import fails (keeps 5/4/3 keys & realtime siblings)
+const FALLBACK_OPENAI_MODELS: UiModel[] = [
+  { id: 'gpt-5',            label: 'GPT 5',          family: 'gpt-5',   tags: ['Multimodal','Latest'], icon:'openai' },
+  { id: 'gpt-5-mini',       label: 'GPT 5 Mini',     family: 'gpt-5',   tags: ['Mini'],                icon:'openai' },
+  { id: 'gpt-4.1',          label: 'GPT 4.1',        family: 'gpt-4.1', tags: ['Multimodal'],          icon:'openai' },
+  { id: 'gpt-4o',           label: 'GPT 4o',         family: 'gpt-4o',  tags: ['Multimodal','Standard'], icon:'openai' },
+  { id: 'gpt-4o-mini',      label: 'GPT 4o Mini',    family: 'gpt-4o',  tags: ['Mini'],                icon:'openai' },
+
+  // realtime siblings you actually call with
+  { id: 'gpt-4o-realtime',  label: 'GPT 4o Realtime', family: 'gpt-4o', tags: ['Realtime'], realtime:true, tts:true, icon:'openai' },
+  { id: 'gpt-4o-mini-rt',   label: 'GPT 4o Mini RT',  family: 'gpt-4o', tags: ['Realtime','Mini','Preview'], realtime:true, tts:true, icon:'openai' },
+];
+
+const OPENAI_MODELS: UiModel[] =
+  (openaiModelsImport?.openaiModels as UiModel[]) ||
+  (openaiModelsImport?.default as UiModel[]) ||
+  FALLBACK_OPENAI_MODELS;
 
 /* ───────────────── Assistant rail (fixed) ───────────────── */
 const AssistantRail = dynamic(
@@ -48,27 +85,7 @@ const ACTIVE_KEY = 'va:activeId';
 const Z_OVERLAY = 100000;
 const Z_MODAL   = 100001;
 const Z_MENU    = 100020;
-const Z_PANEL   = 100030;
 const IS_CLIENT = typeof window !== 'undefined' && typeof document !== 'undefined';
-
-/* logos (fallback inline SVGs if you don't ship PNGs/SVGs in /public) */
-const BrandIcon = ({ provider }:{provider:'openai'|'anthropic'|'google'}) => {
-  if (provider === 'openai') {
-    return (
-      <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden className="shrink-0">
-        <path fill="currentColor" d="M12 2.2c-2.7 0-4.9 2.2-4.9 4.9v.3C5.2 8 4 9.8 4 11.8c0 2.7 2.2 4.9 4.9 4.9h.3c.6 1.9 2.4 3.2 4.5 3.2 2.7 0 4.9-2.2 4.9-4.9v-.3c1.9-.6 3.2-2.4 3.2-4.5 0-2.7-2.2-4.9-4.9-4.9h-.3C16 3.4 14.2 2.2 12 2.2z"/>
-      </svg>
-    );
-  }
-  if (provider === 'anthropic') {
-    return <span className="inline-block w-4 h-4 rounded-sm bg-white text-black grid place-items-center text-[9px]">A</span>;
-  }
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden className="shrink-0">
-      <path fill="#4285F4" d="M21.35 11.1H12v2.9h5.3c-.23 1.5-1.6 4.3-5.3 4.3-3.2 0-5.8-2.7-5.8-6s2.6-6 5.8-6c1.8 0 3 .8 3.7 1.5l2.5-2.4C17 3.5 14.8 2.5 12 2.5 6.9 2.5 2.7 6.7 2.7 11.9s4.2 9.4 9.3 9.4c5.3 0 8.8-3.7 8.8-8.9 0-.6-.07-1.2-.18-1.7z"/>
-    </svg>
-  );
-};
 
 /* phone icon */
 function PhoneFilled(props: React.SVGProps<SVGSVGElement>) {
@@ -82,11 +99,17 @@ function PhoneFilled(props: React.SVGProps<SVGSVGElement>) {
   );
 }
 
-/* helpers */
+/* OpenAI logo */
+const OpenAiLogo = ({className, size=14}:{className?:string; size?:number}) => (
+  <svg viewBox="0 0 64 64" width={size} height={size} className={className} aria-hidden>
+    <path fill="currentColor" d="M32 6c7.6 0 14.1 4.9 16.4 11.7c6.3 1 11.2 6.4 11.6 12.9c.4 7.7-5.3 14.3-12.8 15.3C45.6 53.5 39.3 58 32 58c-7.7 0-14.2-4.9-16.5-11.8C9.3 45.1 4.4 39.6 4 33.1C3.6 25.4 9.3 18.8 16.8 17.8C18.4 11.2 24.6 6 32 6z"/>
+  </svg>
+);
+
+/* ─────────── little helpers ─────────── */
 const isFn = (f: any): f is Function => typeof f === 'function';
 const isStr = (v: any): v is string => typeof v === 'string';
 const nonEmpty = (v: any): v is string => isStr(v) && v.trim().length > 0;
-const coerceStr = (v: any): string => (isStr(v) ? v : '');
 const safeTrim = (v: any): string => (nonEmpty(v) ? v.trim() : '');
 
 /* ─────────── theme tokens ─────────── */
@@ -97,8 +120,7 @@ const Tokens = () => (
 
       --s-2:8px; --s-3:12px; --s-4:16px; --s-5:20px; --s-6:24px;
       --radius-outer:10px;
-      --radius-ctrl:8px;           /* LESS ROUNDED */
-      --control-h:44px; --header-h:64px;
+      --control-h:44px; --header-h:88px;
       --fz-title:18px; --fz-sub:15px; --fz-body:14px; --fz-label:12.5px;
       --lh-body:1.45; --ease:cubic-bezier(.22,.61,.36,1);
 
@@ -117,7 +139,7 @@ const Tokens = () => (
                     0 0 0 1px ${GREEN_LINE};
 
       --green-weak: rgba(89,217,179,.12);
-      --red-weak: rgba(239,68,68,.14);
+      --green-strong: rgba(89,217,179,.22);
 
       --vs-input-bg:#101314;
       --vs-input-border:rgba(255,255,255,.14);
@@ -156,18 +178,6 @@ const Tokens = () => (
       border-bottom:1px solid rgba(255,255,255,.08);
       color:var(--text);
     }
-
-    .va-select-trigger{ border-radius:var(--radius-ctrl); }
-
-    @keyframes va-blink { 0%, 49% {opacity:1;} 50%, 100% {opacity:0;} }
-    .va-caret::after{
-      content:'';
-      display:inline-block;
-      width:8px; height:18px; margin-left:2px;
-      background: currentColor; opacity:.9; border-radius:1px;
-      animation: va-blink 1s step-end infinite;
-      transform: translateY(3px);
-    }
   `}</style>
 );
 
@@ -177,8 +187,8 @@ type ApiKey = { id: string; name: string; key: string };
 type AgentData = {
   name: string;
   provider: 'openai' | 'anthropic' | 'google';
-  model: string;               // from OPENAI_MODELS (with 5/4/3 keystrings)
-  firstMode: 'Assistant speaks first' | 'User speaks first' | 'Silent until tool required';
+  model: string;                // id of model (from OPENAI_MODELS)
+  firstMode: 'Assistant speaks first'|'User speaks first'|'Silent until tool required';
   firstMsg: string;
   systemPrompt: string;
   language?: string;
@@ -194,96 +204,13 @@ type AgentData = {
   numerals: boolean;
 };
 
-const PROMPT_SKELETON =
-`[Identity]
-
-[Style]
-
-[Response Guidelines]
-
-[Task & Goals]
-
-[Error Handling / Fallback]`;
-
-/* ─────────── prompt-engine shims ─────────── */
-const looksLikeFullPromptSafe = (raw: string) => {
-  const t = (raw || '').toLowerCase();
-  return ['[identity]', '[style]', '[response guidelines]', '[task & goals]', '[error handling', '[notes]'].some(h => t.includes(h));
-};
-const normalizeFullPromptSafe = (raw: string) => {
-  const sections = { identity:'', style:'', guidelines:'', tasks:'', errors:'', notes:'' };
-  const add = (k: keyof typeof sections, v: string) => { (sections as any)[k] = safeTrim(v); };
-  const pull = (label: string) => {
-    const rx = new RegExp(`\$begin:math:display$${label.replace(/[.*+?^${}()|[\\$end:math:display$\\\\]/g,'\\$&')}\\]\\s*([\\s\\S]*?)(?=\\n\\s*\\[|$)`, 'i');
-    const m = raw.match(rx);
-    return m ? m[1] : '';
-  };
-  add('identity', pull('Identity'));
-  add('style', pull('Style'));
-  add('guidelines', pull('Response Guidelines'));
-  add('tasks', pull('Task & Goals'));
-  add('errors', pull('Error Handling / Fallback'));
-  add('notes', pull('Notes'));
-  return (
-`[Identity]
-${sections.identity || '- You are a helpful, professional AI assistant for this business.'}
-
-[Style]
-${sections.style || '- Clear, concise, friendly.'}
-
-[Response Guidelines]
-${sections.guidelines || '- Ask one clarifying question when essential info is missing.'}
-
-[Task & Goals]
-${sections.tasks || '- Guide users to their next best action (booking, purchase, or escalation).'}
-
-[Error Handling / Fallback]
-${sections.errors || '- If unsure, ask a specific clarifying question first.'}
-
-${sections.notes ? `[Notes]\n${sections.notes}\n` : ''}`.trim());
-};
-const applyInstructionsSafe = (base: string, raw: string) => {
-  const text = (raw || '').trim();
-  const toneMatch = text.match(/tone\s*[:=]\s*([a-z,\s-]+)/i) || text.match(/\b(friendly|formal|casual|professional|empathetic|playful)\b/i);
-  const tone = toneMatch ? (toneMatch as any)[1]?.trim?.() || (toneMatch as any)[0] : '';
-  const goals = `- Qualify needs, answer FAQs, guide to scheduling/purchase/escalation.\n- Offer to collect name/contact/time when needed.`;
-  const merged =
-`[Identity]
-- You are a versatile AI assistant. Represent the brand professionally.
-
-[Style]
-- ${tone ? `${tone[0].toUpperCase()}${tone.slice(1)}` : 'Clear, concise, friendly'}. Prefer 2–4 short sentences per turn.
-
-[Response Guidelines]
-- Ask a clarifying question when essential info is missing.
-- Do not fabricate; say when you don’t know or need to check.
-
-[Task & Goals]
-${goals}
-
-[Error Handling / Fallback]
-- If uncertain, ask a specific clarifying question.
-- If a tool/endpoint fails, apologize briefly and offer an alternative or human handoff.`;
-  return { merged, summary: 'Updated.' };
-};
-
-const looksLikeFullPromptRT = (raw: string) =>
-  isFn(_looksLikeFullPrompt) ? !!_looksLikeFullPrompt(raw) : looksLikeFullPromptSafe(raw);
-const normalizeFullPromptRT = (raw: string) =>
-  isFn(_normalizeFullPrompt) ? coerceStr(_normalizeFullPrompt(raw)) : normalizeFullPromptSafe(raw);
-const applyInstructionsRT = (base: string, raw: string) =>
-  isFn(_applyInstructions) ? (_applyInstructions as any)(base, raw) : applyInstructionsSafe(base, raw);
-const DEFAULT_PROMPT_RT = nonEmpty(_DEFAULT_PROMPT) ? _DEFAULT_PROMPT! : PROMPT_SKELETON;
-
-/* ─────────── defaults ─────────── */
 const DEFAULT_AGENT: AgentData = {
   name: 'Assistant',
   provider: 'openai',
-  model: 'gpt-4o',                      // real keystring; you’ll map to labels from OPENAI_MODELS
+  model: OPENAI_MODELS[0]?.id || 'gpt-4o',
   firstMode: 'Assistant speaks first',
-  firstMsg: 'Hello. I can help with anything here.',
-  systemPrompt: normalizeFullPromptRT(`
-[Identity]
+  firstMsg: 'Hello.',
+  systemPrompt: `[Identity]
 - You are a helpful, professional AI assistant for this business.
 
 [Style]
@@ -297,7 +224,7 @@ const DEFAULT_AGENT: AgentData = {
 
 [Error Handling / Fallback]
 - If unsure, ask a specific clarifying question first.
-`).trim(),
+`,
   ttsProvider: 'openai',
   voiceName: 'Alloy (American)',
   apiKeyId: '',
@@ -311,78 +238,38 @@ const DEFAULT_AGENT: AgentData = {
 const keyFor = (id: string) => `va:agent:${id}`;
 const versKeyFor = (id: string) => `va:versions:${id}`;
 
+/* ─────────── storage helpers ─────────── */
 const loadAgentData = (id: string): AgentData => {
   try { const raw = IS_CLIENT ? localStorage.getItem(keyFor(id)) : null; if (raw) return { ...DEFAULT_AGENT, ...(JSON.parse(raw)||{}) }; }
   catch {}
   return { ...DEFAULT_AGENT };
 };
-const saveAgentData = (id: string, data: AgentData) => {
-  try { if (IS_CLIENT) localStorage.setItem(keyFor(id), JSON.stringify(data)); } catch {}
-};
-const pushVersion = (id:string, snapshot:any) => {
-  try {
-    if (!IS_CLIENT) return;
-    const raw = localStorage.getItem(versKeyFor(id));
-    const arr = raw ? JSON.parse(raw) : [];
-    arr.unshift({ id: `v_${Date.now()}`, ts: Date.now(), ...snapshot });
-    localStorage.setItem(versKeyFor(id), JSON.stringify(arr.slice(0, 50)));
-  } catch {}
-};
+const saveAgentData = (id: string, data: AgentData) => { try { if (IS_CLIENT) localStorage.setItem(keyFor(id), JSON.stringify(data)); } catch {} };
 
-/* ─────────── backend stubs ─────────── */
-async function apiSave(agentId: string, payload: AgentData){
-  const r = await fetch(`/api/voice/agent/${agentId}/save`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
-  }).catch(()=>null);
-  if (!r?.ok) throw new Error('Save failed');
-  return r.json();
-}
-async function apiPublish(agentId: string){
-  const r = await fetch(`/api/voice/agent/${agentId}/publish`, { method: 'POST' }).catch(()=>null);
-  if (!r?.ok) throw new Error('Publish failed');
-  return r.json();
-}
-
-/* ─────────── options built from OPENAI_MODELS ─────────── */
-type Opt = { value: string; label: string; disabled?: boolean; note?: string; badge?: string; left?: React.ReactNode };
+/* ─────────── option helpers ─────────── */
+type Opt = { value: string; label: string; disabled?: boolean; note?: string; left?: React.ReactNode; meta?: React.ReactNode };
 
 const providerOpts: Opt[] = [
-  { value: 'openai',     label: 'OpenAI', left: <BrandIcon provider="openai" /> },
-  { value: 'anthropic',  label: 'Anthropic — coming soon', disabled: true, note: 'soon', left: <BrandIcon provider="anthropic" /> },
-  { value: 'google',     label: 'Google — coming soon',    disabled: true, note: 'soon', left: <BrandIcon provider="google" /> },
+  { value: 'openai',     label: 'OpenAI', left: <OpenAiLogo className="opacity-90" /> },
+  { value: 'anthropic',  label: 'Anthropic — coming soon', disabled: true, note: 'soon' },
+  { value: 'google',     label: 'Google — coming soon',    disabled: true, note: 'soon' },
 ];
 
-const openaiModelOpts: Opt[] = (() => {
-  // Expecting OPENAI_MODELS like: [{key:'gpt-5', label:'GPT 5', badges:['Multimodal','Latest']}, ...]
-  const flat = (OPENAI_MODELS ?? [])
-    .flatMap((g:any) => g.models ?? g) // allow grouped or flat
-    .filter(Boolean);
-  if (!flat.length) {
-    // sensible fallbacks (with 5/4/3 “keystrings” you demanded)
-    return [
-      { value: 'gpt-5', label: 'GPT 5' },
-      { value: 'gpt-5-mini', label: 'GPT 5 Mini', badge: 'Mini' },
-      { value: 'gpt-4.1', label: 'GPT 4.1' },
-      { value: 'gpt-4o', label: 'GPT 4o Cluster', badge: 'Multimodal' },
-      { value: 'gpt-4o-realtime-preview', label: 'GPT Realtime Cluster', badge: 'Realtime' },
-      { value: 'gpt-3.5-turbo', label: 'GPT 3.5' },
-    ];
-  }
-  return flat.map((m:any) => ({
-    value: String(m.key || m.value || m.id),
-    label: String(m.label || m.name || m.key),
-    badge: Array.isArray(m.badges) && m.badges[0] ? String(m.badges[0]) : undefined,
-  }));
-})();
+const openAiModelOpts: Opt[] = OPENAI_MODELS.map(m => ({
+  value: m.id,
+  label: m.label,
+  left: <OpenAiLogo className="opacity-90" />,
+  meta: (
+    <div className="flex gap-1 justify-end">
+      {(m.tags || []).map(t => (
+        <span key={t} className="text-[10px] px-1.5 py-0.5 rounded border border-[rgba(255,255,255,.12)] opacity-80">{t}</span>
+      ))}
+    </div>
+  )
+}));
 
-const modelOptsFor = (provider: string): Opt[] =>
-  provider === 'openai'
-    ? openaiModelOpts
-    : [{ value: 'coming', label: 'Models coming soon', disabled: true }];
-
-/* TTS & ASR */
 const ttsProviders: Opt[] = [
-  { value: 'openai',    label: 'OpenAI', left: <BrandIcon provider="openai" /> },
+  { value: 'openai',    label: 'OpenAI', left: <OpenAiLogo className="opacity-90" /> },
   { value: 'elevenlabs', label: 'ElevenLabs — coming soon', disabled: true, note: 'soon' },
 ];
 
@@ -399,17 +286,6 @@ const asrModelsFor = (asr: string): Opt[] =>
         { value: 'Nova',   label: 'Nova' },
       ]
     : [{ value: 'coming', label: 'Models coming soon', disabled: true }];
-
-/* Voices with accents (same timbre, different accents) */
-const voiceOpts: Opt[] = [
-  { value: 'Alloy (American)', label: 'Alloy (American)' },
-  { value: 'Alloy (British)', label: 'Alloy (British)' },
-  { value: 'Alloy (Australian)', label: 'Alloy (Australian)' },
-  { value: 'Verse (American)', label: 'Verse (American)' },
-  { value: 'Verse (British)', label: 'Verse (British)' },
-  { value: 'Coral (British)', label: 'Coral (British)' },
-  { value: 'Amber (Australian)', label: 'Amber (Australian)' },
-];
 
 /* ─────────── UI atoms ─────────── */
 const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}) => (
@@ -433,15 +309,12 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
-/* Styled select with clamped portal */
+/* ─────────── Styled select (less rounded + viewport clamp) ─────────── */
 function StyledSelect({
-  value, onChange, options, placeholder, leftIcon, menuTop,
-  onPreview, isPreviewing
+  value, onChange, options, placeholder, leftIcon, menuTop
 }:{
   value: string; onChange: (v: string) => void;
   options: Opt[]; placeholder?: string; leftIcon?: React.ReactNode; menuTop?: React.ReactNode;
-  onPreview?: (v: string) => Promise<void>;
-  isPreviewing?: string | null;
 }) {
   const wrapRef = useRef<HTMLDivElement|null>(null);
   const btnRef = useRef<HTMLButtonElement|null>(null);
@@ -460,13 +333,9 @@ function StyledSelect({
   useLayoutEffect(() => {
     if (!open || !btnRef.current) return;
     const r = btnRef.current.getBoundingClientRect();
-    const width = Math.min(Math.max(220, r.width), 420);
     const vw = window.innerWidth;
-    const left = Math.min(Math.max(8, r.left), vw - width - 8);
-    const belowTop = r.bottom + 8;
-    const maxTop = window.innerHeight - 12; // clamp bottom
-    const top = Math.min(belowTop, maxTop);
-    setMenuPos({ left, top, width });
+    const left = Math.min(Math.max(8, r.left), vw - 8 - r.width);
+    setMenuPos({ left, top: r.bottom + 8, width: r.width });
   }, [open]);
 
   useEffect(() => {
@@ -478,7 +347,13 @@ function StyledSelect({
       setOpen(false);
     };
     const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
-    const onResize = () => setOpen(false);
+    const onResize = () => {
+      if (!btnRef.current) return;
+      const r = btnRef.current.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const left = Math.min(Math.max(8, r.left), vw - 8 - r.width);
+      setMenuPos({ left, top: r.bottom + 8, width: r.width });
+    };
     window.addEventListener('mousedown', off);
     window.addEventListener('keydown', onEsc);
     window.addEventListener('resize', onResize);
@@ -495,7 +370,7 @@ function StyledSelect({
         ref={btnRef}
         type="button"
         onClick={() => { setOpen(v=>!v); setTimeout(()=>searchRef.current?.focus(),0); }}
-        className="va-select-trigger w-full flex items-center justify-between gap-3 px-3 py-3 text-sm outline-none transition"
+        className="w-full flex items-center justify-between gap-3 px-3 py-3 rounded-[8px] text-sm outline-none transition"
         style={{
           background:'var(--vs-input-bg, #101314)',
           border:'1px solid var(--vs-input-border, rgba(255,255,255,.14))',
@@ -524,27 +399,27 @@ function StyledSelect({
             border:'1px solid var(--vs-menu-border, rgba(255,255,255,.16))',
             borderRadius:12,
             boxShadow:'0 28px 70px rgba(0,0,0,.60), 0 10px 26px rgba(0,0,0,.45), 0 0 0 1px rgba(0,255,194,.10)',
-            maxHeight:'60vh', overflow:'auto'
+            maxHeight:'70vh', overflowY:'auto'
           }}
         >
           {menuTop ? <div className="mb-2">{menuTop}</div> : null}
 
           <div
-            className="flex items-center gap-2 mb-3 px-2 py-2"
-            style={{ background:'var(--vs-input-bg, #101314)', border:'1px solid var(--vs-input-border, rgba(255,255,255,.14))', boxShadow:'var(--vs-input-shadow, none)', color:'var(--text)', borderRadius:10 }}
+            className="flex items-center gap-2 mb-3 px-2 py-2 rounded-[8px]"
+            style={{ background:'var(--vs-input-bg, #101314)', border:'1px solid var(--vs-input-border, rgba(255,255,255,.14))', color:'var(--text)' }}
           >
             <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
             <input
               ref={searchRef}
               value={query}
               onChange={(e)=>setQuery(e.target.value)}
-              placeholder="Search…"
+              placeholder="Type to filter…"
               className="w-full bg-transparent outline-none text-sm"
               style={{ color:'var(--text)' }}
             />
           </div>
 
-          <div className="pr-1" style={{ scrollbarWidth:'thin' }}>
+          <div className="max-h-[60vh] overflow-y-auto pr-1" style={{ scrollbarWidth:'thin' }}>
             {filtered.map(o => (
               <button
                 key={o.value}
@@ -557,23 +432,12 @@ function StyledSelect({
                   border:'1px solid transparent',
                   cursor:o.disabled?'not-allowed':'pointer',
                 }}
-                onMouseEnter={(e)=>{ if (o.disabled) return; const el=e.currentTarget as HTMLButtonElement; el.style.background = 'rgba(0,255,194,0.10)'; el.style.border = '1px solid rgba(0,255,194,0.28)'; }}
-                onMouseLeave={(e)=>{ const el=e.currentTarget as HTMLButtonElement; el.style.background = 'transparent'; el.style.border = '1px solid transparent'; }}
+                onMouseEnter={(e)=>{ if (o.disabled) return; const el=e.currentTarget as HTMLButtonElement; el.style.background = 'rgba(0,255,194,0.08)'; el.style.border = '1px solid rgba(0,255,194,0.28)'; }}
+                onMouseLeave={(e)=>{ const el=e.currentTarget as HTMLButtonButtonElement; (el as any).style.background = 'transparent'; (el as any).style.border = '1px solid transparent'; }}
               >
-                {o.disabled ? <Lock className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" style={{ opacity: o.value===value ? 1 : 0 }} />}
-                <span className="truncate flex items-center gap-2">{o.left}{o.label}{o.badge ? <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded border border-[rgba(255,255,255,.16)] opacity-80">{o.badge}</span> : null}</span>
-                {onPreview ? (
-                  <button
-                    type="button"
-                    onClick={async (e)=>{ e.stopPropagation(); await onPreview(o.value); }}
-                    className="w-7 h-7 rounded-full grid place-items-center"
-                    style={{ border:'1px solid var(--vs-input-border, rgba(255,255,255,.14))', background:'var(--vs-input-bg, #101314)' }}
-                    aria-label={isPreviewing === o.value ? 'Stop preview' : 'Play preview'}
-                    title={isPreviewing === o.value ? 'Stop' : 'Play'}
-                  >
-                    {isPreviewing === o.value ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-                  </button>
-                ) : <span />}
+                <span className="grid place-items-center opacity-90">{o.left ?? <span />}</span>
+                <span className="truncate">{o.label}</span>
+                <span>{o.meta}</span>
               </button>
             ))}
             {filtered.length===0 && (
@@ -587,7 +451,7 @@ function StyledSelect({
   );
 }
 
-/* ─────────── Section wrapper ─────────── */
+/* ─────────── Section (expand anim) ─────────── */
 function Section({
   title, icon, desc, children, defaultOpen = true
 }:{
@@ -606,7 +470,7 @@ function Section({
       <div className="va-card">
         <button onClick={()=>setOpen(v=>!v)} className="va-head w-full text-left" style={{ color:'var(--text)' }}>
           <span className="min-w-0 flex items-center gap-3">
-            <span className="inline-grid place-items-center w-7 h-7 rounded-md" style={{ background:'rgba(89,217,179,.10)' }}>
+            <span className="inline-grid place-items-center w-7 h-7 rounded-full" style={{ background:'rgba(89,217,179,.10)' }}>
               {icon}
             </span>
             <span className="min-w-0">
@@ -637,11 +501,36 @@ function Section({
   );
 }
 
-/* ─────────── Page ─────────── */
+/* ─────────── Transcript view ─────────── */
 type ChatMsg = { id: string; role: 'user'|'assistant'|'system'; text: string };
+function Transcript({ items }:{ items: ChatMsg[] }) {
+  return (
+    <div className="space-y-2 text-sm">
+      {items.filter(m=>m.role!=='system').map(m => (
+        <div key={m.id} className="max-w-[92%]">
+          <div className="text-[11px] mb-1 opacity-70">{m.role === 'assistant' ? 'Assistant' : 'You'}</div>
+          <div className="rounded-[10px] px-3 py-2" style={{ background:'rgba(255,255,255,.04)', border:'1px solid rgba(255,255,255,.08)' }}>
+            {m.text}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
+/* ─────────── realtime model mapping ─────────── */
+function pickRealtimeSibling(selectedId: string): UiModel {
+  const sel = OPENAI_MODELS.find(m => m.id === selectedId);
+  if (sel?.realtime) return sel;
+  // simple family-based mapping
+  const family = sel?.family || '';
+  const byFamily = OPENAI_MODELS.find(m => m.family === family && m.realtime);
+  return byFamily || OPENAI_MODELS.find(m => m.realtime) || { id:'gpt-4o-realtime', label:'GPT 4o Realtime', realtime:true };
+}
+
+/* ─────────── Page ─────────── */
 export default function VoiceAgentSection() {
-  /* align rail */
+  /* align rail to app sidebar */
   useEffect(() => {
     if (!IS_CLIENT) return;
     const candidates = ['[data-app-sidebar]','aside[aria-label="Sidebar"]','aside[class*="sidebar"]','#sidebar'];
@@ -668,21 +557,18 @@ export default function VoiceAgentSection() {
   const [toastKind, setToastKind] = useState<'info'|'error'>('info');
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
 
-  // panel + transcript
   const [showCall, setShowCall] = useState(false);
-  const [transcript, setTranscript] = useState<ChatMsg[]>([]);
+  const [callMounted, setCallMounted] = useState(false); // ensures panel content renders only when opened
 
-  // Generate overlay
-  const [showGenerate, setShowGenerate] = useState(false);
-  const [composerText, setComposerText] = useState('');
-  const [genPhase, setGenPhase] = useState<'idle'|'editing'|'loading'|'review'>('idle');
+  // files (under System Prompt)
+  const [files, setFiles] = useState<File[]>([]);
 
-  // prompt diff cache
-  const basePromptRef = useRef<string>('');
-  const [proposedPrompt, setProposedPrompt] = useState('');
-  const [changesSummary, setChangesSummary] = useState('');
+  // chat transcript (right panel)
+  const [msgs, setMsgs] = useState<ChatMsg[]>([
+    { id: 'sys', role: 'system', text: (DEFAULT_AGENT.systemPrompt || '').trim() },
+  ]);
 
-  // voice preview for quick checks
+  // voice preview (browser)
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   useEffect(() => {
     if (!IS_CLIENT || !('speechSynthesis' in window)) return;
@@ -693,30 +579,33 @@ export default function VoiceAgentSection() {
   }, []);
   function speakPreview(line?: string){
     if (!IS_CLIENT || !('speechSynthesis' in window)) return;
-    const u = new SpeechSynthesisUtterance(line || `Hi, I'm ${data.name || 'your assistant'}. This is a preview.`);
+    const u = new SpeechSynthesisUtterance(line || `Hi, I'm ${data.name || 'your assistant'}.`);
     const byName = voices.find(v => v.name.toLowerCase().includes((data.voiceName || '').split(' ')[0]?.toLowerCase() || ''));
     const en = voices.find(v => v.lang?.startsWith('en'));
     if (byName) u.voice = byName; else if (en) u.voice = en;
+    u.rate = 0.98;
+    u.pitch = 1.0;
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(u);
   }
   const stopPreview = () => { if (IS_CLIENT && 'speechSynthesis' in window) window.speechSynthesis.cancel(); };
 
-  // rail events
+  /* listen for active rail id */
   useEffect(() => {
     if (!IS_CLIENT) return;
     const handler = (e: Event) => setActiveId((e as CustomEvent<string>).detail);
     window.addEventListener('assistant:active', handler as EventListener);
     return () => window.removeEventListener('assistant:active', handler as EventListener);
   }, []);
+
   useEffect(() => {
     if (!activeId) return;
     setData(loadAgentData(activeId));
     try { if (IS_CLIENT) localStorage.setItem(ACTIVE_KEY, activeId); } catch {}
   }, [activeId]);
+
   useEffect(() => { if (activeId) saveAgentData(activeId, data); }, [activeId, data]);
 
-  // load keys (and make chosen id global)
   useEffect(() => {
     (async () => {
       try {
@@ -761,19 +650,25 @@ export default function VoiceAgentSection() {
     };
   }
 
-  const modelOpts = useMemo(()=>modelOptsFor(data.provider), [data.provider]);
-
   async function doSave(){
     if (!activeId) { setToastKind('error'); setToast('Select or create an agent'); return; }
     setSaving(true); setToast('');
-    try { await apiSave(activeId, data); setToastKind('info'); setToast('Saved'); }
+    try {
+      await fetch(`/api/voice/agent/${activeId}/save`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data)
+      });
+      setToastKind('info'); setToast('Saved');
+    }
     catch { setToastKind('error'); setToast('Save failed'); }
     finally { setSaving(false); setTimeout(()=>setToast(''), 1400); }
   }
   async function doPublish(){
     if (!activeId) { setToastKind('error'); setToast('Select or create an agent'); return; }
     setPublishing(true); setToast('');
-    try { await apiPublish(activeId); setToastKind('info'); setToast('Published'); }
+    try {
+      await fetch(`/api/voice/agent/${activeId}/publish`, { method: 'POST' });
+      setToastKind('info'); setToast('Published');
+    }
     catch { setToastKind('error'); setToast('Publish failed'); }
     finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
   }
@@ -787,13 +682,15 @@ export default function VoiceAgentSection() {
       setTimeout(()=>setToast(''), 2200);
       return;
     }
-    setTranscript([]); // clear previous call transcript
+    // seed "assistant speaks first" in transcript immediately
+    if (data.firstMode === 'Assistant speaks first' && nonEmpty(data.firstMsg)) {
+      setMsgs(prev => [...prev, { id: `a_${Date.now()}`, role:'assistant', text: data.firstMsg }]);
+    }
     setShowCall(true);
+    setCallMounted(true);
   };
 
   /* ─────────── UI ─────────── */
-  const inInlineReview = genPhase === 'review' && !showGenerate;
-
   return (
     <section className="va-scope" style={{ background:'var(--bg)', color:'var(--text)' }}>
       <Tokens />
@@ -804,7 +701,7 @@ export default function VoiceAgentSection() {
           <RailBoundary><AssistantRail /></RailBoundary>
         </div>
 
-        <div className="px-3 md:px-5 lg:px-6 py-5 pb-24 mx-auto w-full max-w-[1160px]" style={{ fontSize:'var(--fz-body)', lineHeight:'var(--lh-body)' }}>
+        <div className="px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w-[1160px]" style={{ fontSize:'var(--fz-body)', lineHeight:'var(--lh-body)' }}>
           <div className="mb-[var(--s-4)] flex flex-wrap items-center justify-end gap-[var(--s-3)]">
             <button
               onClick={doSave}
@@ -851,7 +748,27 @@ export default function VoiceAgentSection() {
             </div>
           ) : null}
 
-          {/* MODEL */}
+          {/* Metrics glance */}
+          <div className="grid gap-[12px] md:grid-cols-2 mb-[12px]">
+            <div className="va-card">
+              <div className="va-head" style={{ minHeight: 56 }}>
+                <div className="text-xs" style={{ color:'var(--text-muted)' }}>Cost</div><div />
+              </div>
+              <div className="p-[var(--s-4)]">
+                <div className="font-semibold" style={{ fontSize:'var(--fz-sub)' }}>~$0.1/min</div>
+              </div>
+            </div>
+            <div className="va-card">
+              <div className="va-head" style={{ minHeight: 56 }}>
+                <div className="text-xs" style={{ color:'var(--text-muted)' }}>Latency</div><div />
+              </div>
+              <div className="p-[var(--s-4)]">
+                <div className="font-semibold" style={{ fontSize:'var(--fz-sub)' }}>~1050 ms</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Model */}
           <Section
             title="Model"
             icon={<Gauge className="w-4 h-4" style={{ color: CTA }} />}
@@ -869,27 +786,16 @@ export default function VoiceAgentSection() {
                   placeholder="e.g., Riley"
                 />
               </div>
-
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]">Provider</div>
-                <StyledSelect
-                  value={data.provider}
-                  onChange={(v)=>setField('provider')(v as AgentData['provider'])}
-                  options={providerOpts}
-                  placeholder="Provider"
-                />
+                <StyledSelect value={data.provider} onChange={(v)=>setField('provider')(v as AgentData['provider'])} options={providerOpts}/>
               </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[12px] mt-[var(--s-4)]">
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]">Model</div>
-                <StyledSelect
-                  value={data.model}
-                  onChange={setField('model')}
-                  options={modelOpts}
-                  placeholder="Choose a model"
-                />
+                <StyledSelect value={data.model} onChange={setField('model')} options={openAiModelOpts}/>
               </div>
               <div>
                 <div className="mb-[var(--s-2)] text-[12.5px]">First Message Mode</div>
@@ -912,66 +818,52 @@ export default function VoiceAgentSection() {
                   placeholder="Hello."
                 />
               </div>
-              <div className="flex items-end">
-                <div className="text-xs opacity-70 mb-2">Tip: assistant will speak first if that mode is selected.</div>
-              </div>
             </div>
 
-            {/* System Prompt + Files */}
+            {/* System prompt + files */}
             <div className="grid grid-cols-1 gap-[12px] mt-[var(--s-4)]">
-              <div>
-                <div className="flex items-center justify-between mb-[var(--s-2)]">
-                  <div className="font-medium" style={{ fontSize:'var(--fz-label)' }}>System Prompt</div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      className="inline-flex items-center gap-2 rounded-[8px] text-sm"
-                      style={{ height:36, padding:'0 12px', background:CTA, color:'#fff', border:'1px solid rgba(255,255,255,.08)' }}
-                      onClick={()=>{ setComposerText(''); setProposedPrompt(''); setChangesSummary(''); setGenPhase('editing'); setShowGenerate(true); }}
-                    >
-                      <Wand2 className="w-4 h-4" /> Generate
-                    </button>
-                  </div>
-                </div>
-
-                <div style={{ position:'relative' }}>
-                  {!inInlineReview ? (
-                    <textarea
-                      className="w-full bg-transparent outline-none rounded-[8px] px-3 py-[12px]"
-                      style={{ minHeight: 280, background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                      value={data.systemPrompt}
-                      onChange={(e)=> setField('systemPrompt')(e.target.value)}
-                    />
-                  ) : (
-                    <div
-                      className="rounded-[8px]"
-                      style={{
-                        background:'var(--input-bg)',
-                        border:'1px solid var(--input-border)',
-                        color:'var(--text)',
-                        padding:'12px',
+              <div className="md:col-span-2">
+                <div className="font-medium mb-[var(--s-2)]" style={{ fontSize:'var(--fz-label)' }}>System Prompt</div>
+                <textarea
+                  className="w-full bg-transparent outline-none rounded-[8px] px-3 py-[12px]"
+                  style={{ minHeight: 240, background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+                  value={data.systemPrompt}
+                  onChange={(e)=> setField('systemPrompt')(e.target.value)}
+                />
+                <div className="mt-3">
+                  <label
+                    className="inline-flex items-center gap-2 px-3 py-2 rounded-[8px] cursor-pointer"
+                    style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
+                  >
+                    <UploadCloud className="w-4 h-4" />
+                    <span className="text-sm">Attach files (knowledge)</span>
+                    <input
+                      type="file"
+                      multiple
+                      hidden
+                      onChange={(e)=>{
+                        const list = Array.from(e.target.files || []);
+                        setFiles(prev => [...prev, ...list]);
                       }}
-                    >
-                      {/* simple inline diff summary */}
-                      <div className="text-xs mb-2 opacity-80">{changesSummary}</div>
-                      <pre className="text-sm whitespace-pre-wrap">{proposedPrompt}</pre>
+                    />
+                  </label>
+                  {files.length > 0 && (
+                    <div className="mt-2 grid gap-2">
+                      {files.map((f, i) => (
+                        <div key={`${f.name}-${i}`} className="flex items-center gap-2 text-xs opacity-90">
+                          <FileText className="w-3.5 h-3.5" />
+                          <span className="truncate">{f.name}</span>
+                          <span className="opacity-60">({Math.ceil(f.size/1024)} KB)</span>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
-
-                {/* File upload under prompt */}
-                <label
-                  className="mt-3 inline-flex items-center gap-2 rounded-[8px] px-3 py-2 cursor-pointer"
-                  style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)' }}
-                >
-                  <Upload className="w-4 h-4" />
-                  <span className="text-sm">Attach files (knowledge, FAQs, etc.)</span>
-                  <input type="file" multiple className="hidden" onChange={()=>{/* wire to your backend */}} />
-                </label>
               </div>
             </div>
           </Section>
 
-          {/* VOICE */}
+          {/* Voice */}
           <Section
             title="Voice"
             icon={<Volume2 className="w-4 h-4" style={{ color: CTA }} />}
@@ -996,7 +888,7 @@ export default function VoiceAgentSection() {
                   leftIcon={<KeyRound className="w-4 h-4" style={{ color: CTA }} />}
                 />
                 <div className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
-                  Keys are stored per-account via scoped storage.
+                  Keys are stored per-account via scoped storage. Manage them in the API Keys page.
                 </div>
               </div>
 
@@ -1005,7 +897,13 @@ export default function VoiceAgentSection() {
                 <StyledSelect
                   value={data.voiceName}
                   onChange={(v)=>setField('voiceName')(v)}
-                  options={voiceOpts}
+                  options={[
+                    { value: 'Alloy (American)', label: 'Alloy (American)' },
+                    { value: 'Alloy (British)',  label: 'Alloy (British)'  },
+                    { value: 'Alloy (Aussie)',   label: 'Alloy (Australian)' },
+                    { value: 'Alloy (Indian)',   label: 'Alloy (Indian)' },
+                    { value: 'Verse (American)', label: 'Verse (American)' },
+                  ]}
                   placeholder="— Choose —"
                   menuTop={
                     <div className="flex items-center justify-between px-3 py-2 rounded-[8px]"
@@ -1039,7 +937,7 @@ export default function VoiceAgentSection() {
             </div>
           </Section>
 
-          {/* TRANSCRIBER */}
+          {/* Transcriber (put at END) */}
           <Section
             title="Transcriber"
             icon={<Mic className="w-4 h-4" style={{ color: CTA }} />}
@@ -1066,187 +964,78 @@ export default function VoiceAgentSection() {
                 <Toggle checked={data.numerals} onChange={setField('numerals')} />
               </div>
             </div>
-
-            {/* spacer at end of the page like you asked */}
-            <div className="h-10" />
           </Section>
         </div>
       </div>
 
-      {/* ─────────── Generate overlay (no presets) ─────────── */}
-      {showGenerate && IS_CLIENT ? createPortal(
+      {/* ─────────── Assistant Call PANEL (side drawer) ─────────── */}
+      {IS_CLIENT ? createPortal(
         <>
+          {/* overlay */}
           <div
-            className="fixed inset-0"
+            className={`fixed inset-0 transition ${showCall ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
             style={{ zIndex: Z_OVERLAY, background:'rgba(6,8,10,.62)', backdropFilter:'blur(6px)' }}
-            onClick={()=>{ if (genPhase!=='loading') { setShowGenerate(false); setGenPhase('idle'); } }}
-          />
-          <div className="fixed inset-0 grid place-items-center px-4" style={{ zIndex: Z_MODAL }}>
-            <div
-              className="w-full max-w-[640px] rounded-[10px] overflow-hidden"
-              style={{
-                background: 'var(--panel)',
-                color: 'var(--text)',
-                border: `1px solid ${GREEN_LINE}`,
-                maxHeight: '86vh',
-                boxShadow:'0 22px 44px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px rgba(89,217,179,.20)'
-              }}
-            >
-              <div className="flex items-center justify-between px-6 py-4 va-head" style={{ minHeight:56 }}>
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-md grid place-items-center" style={{ background:'var(--green-weak)' }}>
-                    <Wand2 className="w-4 h-4" style={{ color: CTA }} />
-                  </div>
-                  <div className="text-base font-semibold">Generate Prompt</div>
-                </div>
-                <button
-                  onClick={()=> genPhase!=='loading' && setShowGenerate(false)}
-                  className="w-8 h-8 rounded-[8px] grid place-items-center"
-                  style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}` }}
-                  aria-label="Close"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              <div className="px-6 py-5 space-y-3">
-                <div className="text-xs" style={{ color:'var(--text-muted)' }}>
-                  Type something like “assistant for support; tone friendly; handle booking & FAQs”.
-                </div>
-                <div
-                  className="rounded-[8px]"
-                  style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)' }}
-                >
-                  <textarea
-                    value={composerText}
-                    onChange={(e)=>setComposerText(e.target.value)}
-                    className="w-full bg-transparent outline-none rounded-[8px] px-3 py-2"
-                    placeholder="Describe behavior…"
-                    style={{ minHeight: 160, maxHeight: '40vh', color:'var(--text)', resize:'vertical' }}
-                  />
-                </div>
-              </div>
-
-              <div className="px-6 pb-6 flex gap-3">
-                <button
-                  onClick={()=> genPhase!=='loading' && setShowGenerate(false)}
-                  className="w-full h-[44px] rounded-[8px]"
-                  style={{ background:'var(--panel)', border:'1px solid var(--input-border)', color:'var(--text)', fontWeight:600 }}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={()=>{
-                    const raw = safeTrim(composerText);
-                    if (!raw) return;
-                    try {
-                      const base = nonEmpty(data.systemPrompt) ? data.systemPrompt : DEFAULT_PROMPT_RT;
-                      (basePromptRef as any).current = base;
-                      let merged = '';
-                      let summary = '';
-                      if (looksLikeFullPromptRT(raw)) {
-                        const norm = normalizeFullPromptRT(raw);
-                        merged = nonEmpty(norm) ? norm : base;
-                        summary = 'Replaced prompt.';
-                      } else {
-                        const out = applyInstructionsRT(base, raw) || {};
-                        merged = nonEmpty(out.merged) ? out.merged : base;
-                        summary = nonEmpty(out.summary) ? out.summary : 'Updated.';
-                      }
-                      setShowGenerate(false);
-                      setProposedPrompt(merged);
-                      setChangesSummary(summary);
-                      setGenPhase('review');
-                      setField('systemPrompt')(merged);
-                    } catch {
-                      setToastKind('error');
-                      setToast('Generate failed — try simpler wording.');
-                      setTimeout(()=>setToast(''), 2200);
-                    }
-                  }}
-                  disabled={!composerText.trim()}
-                  className="w-full h-[44px] rounded-[8px] font-semibold inline-flex items-center justify-center gap-2"
-                  style={{ background:CTA, color:'#0a0f0d', opacity: (!composerText.trim() ? .6 : 1) }}
-                >
-                  <Wand2 className="w-4 h-4" /> Generate
-                </button>
-              </div>
-            </div>
-          </div>
-        </>,
-        document.body
-      ) : null}
-
-      {/* ─────────── Slide-in Call Panel (ONLY when opened) ─────────── */}
-      {IS_CLIENT && showCall ? createPortal(
-        <>
-          {/* dark scrim */}
-          <div
-            className="fixed inset-0"
-            style={{ zIndex: Z_PANEL, background:'rgba(8,10,12,.78)' }}
             onClick={()=> setShowCall(false)}
           />
-          {/* right panel */}
+          {/* panel */}
           <div
-            className="fixed right-0 top-0 h-screen w-[min(520px,100%)]"
+            className="fixed top-0 right-0 h-screen w-full sm:w-[520px] max-w-[92vw] transition-transform"
             style={{
-              zIndex: Z_PANEL + 1,
-              background:'var(--panel-bg)',
-              borderLeft:'1px solid rgba(255,255,255,.10)',
-              boxShadow:'-20px 0 40px rgba(0,0,0,.35)'
+              zIndex: Z_MODAL,
+              transform: showCall ? 'translateX(0)' : 'translateX(110%)',
+              background:'var(--panel-bg)', borderLeft:'1px solid rgba(255,255,255,.10)',
+              boxShadow:'-24px 0 60px rgba(0,0,0,.45)'
             }}
-            role="dialog"
-            aria-label="Assistant Call"
           >
-            {/* Header */}
-            <div className="px-4 py-3 flex items-center justify-between border-b border-[rgba(255,255,255,.08)]">
-              <div className="font-semibold">Assistant Call</div>
-              <button
-                onClick={()=> setShowCall(false)}
-                className="w-8 h-8 rounded-md grid place-items-center"
-                style={{ border:'1px solid rgba(255,255,255,.14)' }}
-                aria-label="Close"
-              >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-[rgba(255,255,255,.10)]">
+              <div className="flex items-center gap-2">
+                <OpenAiLogo />
+                <div className="text-sm font-semibold">Assistant Call</div>
+              </div>
+              <button onClick={()=> setShowCall(false)} className="w-8 h-8 rounded grid place-items-center" style={{ border:'1px solid rgba(255,255,255,.12)' }}>
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            {/* Transcript */}
-            <div className="p-4 grid gap-3" style={{ height:'calc(100vh - 56px)' }}>
-              <div className="text-xs opacity-70 flex items-center gap-2">
-                <MessageSquareText className="w-3.5 h-3.5" />
-                Live transcript
-              </div>
-              <div className="flex-1 overflow-auto rounded-md p-3" style={{ background:'rgba(255,255,255,.03)', border:'1px solid rgba(255,255,255,.08)' }}>
-                {transcript.length === 0 ? (
-                  <div className="text-sm opacity-70">Say hello! We’ll show the transcript here.</div>
-                ) : (
-                  <ul className="space-y-2">
-                    {transcript.map(m=>(
-                      <li key={m.id} className="text-sm">
-                        <span className="opacity-70 mr-2">{m.role === 'assistant' ? 'AI:' : 'You:'}</span>
-                        <span>{m.text}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+            <div className="grid grid-rows-[auto_1fr_auto] h-[calc(100vh-49px)]">
+              {/* system prompt preview */}
+              <div className="px-4 py-3 border-b border-[rgba(255,255,255,.06)]">
+                <div className="text-xs opacity-70 mb-1">System</div>
+                <div className="text-xs max-h-24 overflow-auto pr-1" style={{ whiteSpace:'pre-wrap' }}>
+                  {safeTrim(data.systemPrompt)}
+                </div>
               </div>
 
-              {/* WebCallButton embeds the actual realtime call */}
-              <div className="rounded-md border border-[rgba(255,255,255,.12)] p-3">
-                <WebCallButton
-                  model={data.model}                               // not forced to 4o realtime anymore
-                  systemPrompt={data.systemPrompt}
-                  voiceName={data.voiceName}
-                  assistantName={data.name || 'Assistant'}
-                  apiKey={apiKeys.find(k => k.id === data.apiKeyId)?.key || ''}
-                  firstMode={data.firstMode}
-                  firstMsg={data.firstMsg}
-                  onTranscript={(text:string, role:'user'|'assistant'='assistant')=>{
-                    setTranscript(t => t.concat([{ id: `${Date.now()}_${Math.random()}`, role, text }]));
-                  }}
-                  onClose={()=> setShowCall(false)}
-                />
+              {/* transcript */}
+              <div className="px-4 py-3 overflow-auto">
+                <div className="text-xs opacity-70 mb-2">Live transcript</div>
+                <Transcript items={msgs} />
+              </div>
+
+              {/* status + controls */}
+              <div className="px-4 py-3 border-t border-[rgba(255,255,255,.06)]">
+                <div className="text-xs opacity-75 mb-2">
+                  Status: {showCall ? 'Active' : 'Idle'} • Model: {OPENAI_MODELS.find(m=>m.id===data.model)?.label || data.model}
+                </div>
+
+                {/* mount WebRTC only when panel is open */}
+                {callMounted && showCall && (
+                  <WebCallButton
+                    model={pickRealtimeSibling(data.model).id}
+                    // keep your prompt & voice
+                    systemPrompt={data.systemPrompt}
+                    voiceName={data.voiceName}
+                    assistantName={data.name || 'Assistant'}
+                    apiKey={apiKeys.find(k => k.id === data.apiKeyId)?.key || ''}
+                    firstMessage={data.firstMode === 'Assistant speaks first' ? data.firstMsg : ''}
+                    onUserTranscript={(t:string)=> setMsgs(prev => [...prev, { id:`u_${Date.now()}`, role:'user', text:t }])}
+                    onAssistantTranscript={(t:string)=> setMsgs(prev => [...prev, { id:`a_${Date.now()}`, role:'assistant', text:t }])}
+                    onError={(err:any)=>{
+                      setMsgs(prev => [...prev, { id:`e_${Date.now()}`, role:'assistant', text:`(Error) ${err?.message || 'Call error'}` }]);
+                    }}
+                    onClose={()=> { setShowCall(false); setTimeout(()=>setCallMounted(false), 220); }}
+                  />
+                )}
               </div>
             </div>
           </div>
