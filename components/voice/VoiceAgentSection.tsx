@@ -11,10 +11,16 @@ import {
 import { scopedStorage } from '@/utils/scoped-storage';
 import WebCallButton from '@/components/voice/WebCallButton';
 
-// If your old working flow used Vapi (or your own RT gateway),
-// point this to your ephemeral route. Example: /api/realtime/token
-const EPHEMERAL_TOKEN_ENDPOINT = '/api/realtime/token';
-const FORCE_REALTIME_MODEL = 'gpt-4o-realtime-preview'; // force a RT-capable model for voice
+// ✅ use your real ephemeral route
+const EPHEMERAL_TOKEN_ENDPOINT = '/api/voice/ephemeral';
+
+const CTA = '#59d9b3';
+const CTA_HOVER = '#54cfa9';
+const GREEN_LINE = 'rgba(89,217,179,.20)';
+const ACTIVE_KEY = 'va:activeId';
+const Z_OVERLAY = 100000;
+const Z_MODAL   = 100001;
+const IS_CLIENT = typeof window !== 'undefined' && typeof document !== 'undefined';
 
 /* ───────────────── Assistant rail (fixed) ───────────────── */
 const AssistantRail = dynamic(
@@ -32,15 +38,6 @@ class RailBoundary extends React.Component<{children:React.ReactNode},{hasError:
   static getDerivedStateFromError(){ return {hasError:true}; }
   render(){ return this.state.hasError ? <div className="px-3 py-3 text-xs opacity-70">Rail crashed</div> : this.props.children; }
 }
-
-/* ─────────── constants ─────────── */
-const CTA = '#59d9b3';
-const CTA_HOVER = '#54cfa9';
-const GREEN_LINE = 'rgba(89,217,179,.20)';
-const ACTIVE_KEY = 'va:activeId';
-const Z_OVERLAY = 100000;
-const Z_MODAL   = 100001;
-const IS_CLIENT = typeof window !== 'undefined' && typeof document !== 'undefined';
 
 /* phone icon */
 function PhoneFilled(props: React.SVGProps<SVGSVGElement>) {
@@ -120,7 +117,8 @@ type AgentData = {
   model: string;
   firstMode: string;
   firstMsg: string;
-  systemPrompt: string;
+  systemPrompt: string;           // pretty (frontend) text
+  systemPromptBackend?: string;   // hidden compact backend string used for calls
   language?: string;
 
   ttsProvider: 'openai' | 'elevenlabs';
@@ -148,87 +146,23 @@ const PROMPT_SKELETON =
 
 [Error Handling / Fallback]`;
 
-/* ─────────── prompt-engine shims ─────────── */
+/* ─────────── prompt engine (dual-layer) ─────────── */
 import {
-  applyInstructions as _applyInstructions,
   DEFAULT_PROMPT as _DEFAULT_PROMPT,
   looksLikeFullPrompt as _looksLikeFullPrompt,
   normalizeFullPrompt as _normalizeFullPrompt,
+  applyInstructions as _applyInstructions,       // fallback
+  compilePrompt                                   // ✅ NEW: builds frontend + backend
 } from '@/lib/prompt-engine';
 
-const looksLikeFullPromptSafe = (raw: string) => {
-  const t = (raw || '').toLowerCase();
-  return ['[identity]', '[style]', '[response guidelines]', '[task & goals]', '[error handling', '[notes]'].some(h => t.includes(h));
-};
-const normalizeFullPromptSafe = (raw: string) => {
-  const sections = { identity:'', style:'', guidelines:'', tasks:'', errors:'', notes:'' };
-  const add = (k: keyof typeof sections, v: string) => { sections[k] = safeTrim(v); };
-  const pull = (label: string) => {
-    const rx = new RegExp(`\$begin:math:display$${label.replace(/[.*+?^${}()|[\\$end:math:display$\\\\]/g,'\\$&')}\\]\\s*([\\s\\S]*?)(?=\\n\\s*\\[|$)`, 'i');
-    const m = raw.match(rx);
-    return m ? m[1] : '';
-  };
-  add('identity', pull('Identity'));
-  add('style', pull('Style'));
-  add('guidelines', pull('Response Guidelines'));
-  add('tasks', pull('Task & Goals'));
-  add('errors', pull('Error Handling / Fallback'));
-  add('notes', pull('Notes'));
-
-  const out =
-`[Identity]
-${sections.identity || '- You are a helpful, professional AI assistant for this business.'}
-
-[Style]
-${sections.style || '- Clear, concise, friendly.'}
-
-[Response Guidelines]
-${sections.guidelines || '- Ask one clarifying question when essential info is missing.'}
-
-[Task & Goals]
-${sections.tasks || '- Guide users to their next best action (booking, purchase, or escalation).'}
-
-[Error Handling / Fallback]
-${sections.errors || '- If unsure, ask a specific clarifying question first.'}
-
-${sections.notes ? `[Notes]\n${sections.notes}\n` : ''}`.trim();
-
-  return out;
-};
-const applyInstructionsSafe = (base: string, raw: string) => {
-  const text = (raw || '').trim();
-  const industryMatch = text.match(/assistant\s+for\s+(a|an|the)?\s*([^.;:,]+?)(\s+(clinic|store|company|business))?(\.|;|,|$)/i);
-  const industry = industryMatch ? industryMatch[2].trim() : '';
-  const toneMatch = text.match(/tone\s*[:=]\s*([a-z,\s-]+)/i) || text.match(/\b(friendly|formal|casual|professional|empathetic|playful)\b/i);
-  const tone = toneMatch ? (toneMatch as any)[1]?.trim?.() || (toneMatch as any)[0] : '';
-  const tasksMatch = text.match(/tasks?\s*[:=]\s*([a-z0-9_,\-\s]+)/i);
-  const tasksRaw = tasksMatch ? (tasksMatch as any)[1] : '';
-  const tasks = tasksRaw
-    ? tasksRaw.split(/[,\s]+/).filter(Boolean)
-    : (text.includes('booking') || text.includes('schedule')) ? ['lead_qualification','booking','faq'] : [];
-  const channels = /voice|call|phone/i.test(text) && /chat|website|web/i.test(text) ? 'voice & chat'
-                  : /voice|call|phone/i.test(text) ? 'voice'
-                  : /chat|website|web/i.test(text) ? 'chat'
-                  : '';
-
-  const identity = `- You are a versatile AI assistant${industry ? ` for a ${industry}` : ''}. Represent the brand professionally and help users achieve their goals.`;
-  const style = `- ${tone ? `${tone[0].toUpperCase()}${tone.slice(1)}` : 'Clear, concise, friendly'}. Prefer 2–4 short sentences per turn.\n- Confirm understanding with a brief paraphrase when the request is complex.`;
-  const guidelines = `- Ask a clarifying question when essential info is missing.\n- Do not fabricate; say when you don’t know or need to check.\n- Summarize next steps when the user has a multi-step task.`;
-  const goals = `- Qualify the user’s need, answer relevant FAQs, and guide to scheduling, purchase, or escalation.${channels ? ` (${channels})` : ''}\n- Offer to collect structured info (name, contact, preferred time) when booking or follow-up is needed.${tasks.length ? ` Focus on: ${tasks.join(', ')}.` : ''}`;
-  const errors = `- If uncertain, ask a specific clarifying question.\n- If a tool/endpoint fails, apologize briefly and offer an alternative or human handoff.`;
-
-  const merged = `[Identity]\n${identity}\n\n[Style]\n${style}\n\n[Response Guidelines]\n${guidelines}\n\n[Task & Goals]\n${goals}\n\n[Error Handling / Fallback]\n${errors}`;
-  return { merged, summary: 'Updated.' };
-};
-
 const looksLikeFullPromptRT = (raw: string) =>
-  isFn(_looksLikeFullPrompt) ? !!_looksLikeFullPrompt(raw) : looksLikeFullPromptSafe(raw);
+  isFn(_looksLikeFullPrompt) ? !!_looksLikeFullPrompt(raw) : false;
 
 const normalizeFullPromptRT = (raw: string) =>
-  isFn(_normalizeFullPrompt) ? coerceStr(_normalizeFullPrompt(raw)) : normalizeFullPromptSafe(raw);
+  isFn(_normalizeFullPrompt) ? coerceStr(_normalizeFullPrompt(raw)) : raw;
 
 const applyInstructionsRT = (base: string, raw: string) =>
-  isFn(_applyInstructions) ? (_applyInstructions as any)(base, raw) : applyInstructionsSafe(base, raw);
+  isFn(_applyInstructions) ? (_applyInstructions as any)(base, raw) : { merged: base, summary: 'Updated.' };
 
 const DEFAULT_PROMPT_RT = nonEmpty(_DEFAULT_PROMPT) ? _DEFAULT_PROMPT! : PROMPT_SKELETON;
 
@@ -236,11 +170,11 @@ const DEFAULT_PROMPT_RT = nonEmpty(_DEFAULT_PROMPT) ? _DEFAULT_PROMPT! : PROMPT_
 const DEFAULT_AGENT: AgentData = {
   name: 'Assistant',
   provider: 'openai',
-  model: 'GPT-4o',
+  model: 'gpt-4o',
   firstMode: 'Assistant speaks first',
   firstMsg: 'Hello.',
   systemPrompt:
-    normalizeFullPromptRT(`
+    (normalizeFullPromptRT(`
 [Identity]
 - You are a helpful, professional AI assistant for this business.
 
@@ -255,7 +189,8 @@ const DEFAULT_AGENT: AgentData = {
 
 [Error Handling / Fallback]
 - If unsure, ask a specific clarifying question first.
-`).trim() + '\n\n' + `# ${BLANK_TEMPLATE_NOTE}\n`,
+`).trim() + '\n\n' + `# ${BLANK_TEMPLATE_NOTE}\n`),
+  systemPromptBackend: '',  // filled when user generates
   ttsProvider: 'openai',
   voiceName: 'Alloy (American)',
   apiKeyId: '',
@@ -310,14 +245,50 @@ const providerOpts: Opt[] = [
   { value: 'google',     label: 'Google — coming soon',    disabled: true, note: 'soon' },
 ];
 
-const modelOptsFor = (provider: string): Opt[] =>
-  provider === 'openai'
-    ? [
-        { value: 'GPT-4o',  label: 'GPT-4o' },
-        { value: 'GPT-4.1', label: 'GPT-4.1' },
-        { value: 'o4-mini', label: 'o4-mini' },
-      ]
-    : [{ value: 'coming', label: 'Models coming soon', disabled: true }];
+/** We fetch actual OpenAI models using your `/api/openai/models` route once an API key is chosen. */
+function useOpenAIModels(selectedKey: string|undefined){
+  const [opts, setOpts] = useState<Opt[]>([
+    { value: 'gpt-5', label: 'GPT 5' },
+    { value: 'gpt-5-mini', label: 'GPT 5 Mini' },
+    { value: 'gpt-4.1', label: 'GPT 4.1' },
+    { value: 'gpt-4.1-mini', label: 'GPT 4.1 Mini' },
+    { value: 'gpt-4o', label: 'GPT 4o' },
+    { value: 'gpt-4o-mini', label: 'GPT 4o Mini' },
+    { value: 'o4', label: 'o4' },
+    { value: 'o4-mini', label: 'o4 Mini' },
+    { value: 'gpt-4o-realtime-preview', label: 'GPT 4o Realtime Preview' },
+    { value: 'gpt-4o-realtime-preview-mini', label: 'GPT 4o Realtime Preview Mini' },
+  ]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    let aborted = false;
+    (async () => {
+      if (!selectedKey) return;
+      setLoading(true);
+      try {
+        const r = await fetch('/api/openai/models', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: selectedKey }),
+        });
+        if (!r.ok) throw new Error(await r.text());
+        const j = await r.json();
+        const models = Array.isArray(j?.models) ? j.models : [];
+        if (!aborted && models.length) {
+          setOpts(models.map((m:any) => ({ value: String(m.value), label: String(m.label) })));
+        }
+      } catch {
+        // keep defaults on failure
+      } finally {
+        if (!aborted) setLoading(false);
+      }
+    })();
+    return () => { aborted = true; };
+  }, [selectedKey]);
+
+  return { opts, loading };
+}
 
 const ttsProviders: Opt[] = [
   { value: 'openai',    label: 'OpenAI' },
@@ -360,7 +331,7 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
-/* ─────────── Styled select with portal (StepV2 look) ─────────── */
+/* ─────────── Styled select with portal ─────────── */
 function StyledSelect({
   value, onChange, options, placeholder, leftIcon, menuTop,
   onPreview, isPreviewing
@@ -594,11 +565,9 @@ export default function VoiceAgentSection() {
   const [proposedPrompt, setProposedPrompt] = useState('');
   const [changesSummary, setChangesSummary] = useState('');
 
-  // chat state (optional)
-  const [msgs] = useState<ChatMsg[]>(() => [
-    { id: 'sys', role: 'system', text: (DEFAULT_AGENT.systemPrompt || '').trim() },
-    { id: 'hello', role: 'assistant', text: 'Hi! Ready when you are.' }
-  ]);
+  // models list (live from API when key selected)
+  const selectedKey = apiKeys.find(k => k.id === data.apiKeyId)?.key;
+  const { opts: openaiModels, loading: loadingModels } = useOpenAIModels(selectedKey);
 
   // TTS preview using browser speech synthesis (just for quick checks)
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
@@ -636,7 +605,7 @@ export default function VoiceAgentSection() {
 
   useEffect(() => { if (activeId) saveAgentData(activeId, data); }, [activeId, data]);
 
-  // ✅ Non-blocking storage/auth load (prevents “Loading…” forever)
+  // load keys (best effort)
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -645,8 +614,7 @@ export default function VoiceAgentSection() {
         if (!mounted) return;
         if (!store) { setApiKeys([]); return; }
 
-        // best effort – don’t block UI if this throws in Safari/ITP/private windows
-        store.ensureOwnerGuard?.().catch(() => { /* ignore */ });
+        store.ensureOwnerGuard?.().catch(() => {});
 
         const v1 = await store.getJSON<ApiKey[]>('apiKeys.v1', []).catch(() => []);
         const legacy = await store.getJSON<ApiKey[]>('apiKeys', []).catch(() => []);
@@ -660,7 +628,7 @@ export default function VoiceAgentSection() {
         if (!mounted) return;
         setApiKeys(cleaned);
 
-        // pick selected key id (non-blocking)
+        // select a key if none set
         const globalSelected = await store.getJSON<string>('apiKeys.selectedId', '').catch(() => '');
         const chosen =
           (data.apiKeyId && cleaned.some((k) => k.id === data.apiKeyId)) ? data.apiKeyId! :
@@ -693,8 +661,6 @@ export default function VoiceAgentSection() {
     };
   }
 
-  const modelOpts = useMemo(()=>modelOptsFor(data.provider), [data.provider]);
-
   async function doSave(){
     if (!activeId) { setToastKind('error'); setToast('Select or create an agent'); return; }
     setSaving(true); setToast('');
@@ -722,7 +688,15 @@ export default function VoiceAgentSection() {
     setShowCall(true);
   };
 
-  /* ─────────── UI ─────────── */
+  // choose model for the call: prefer a realtime model if selected, else fallback
+  const callModel = useMemo(() => {
+    const m = (data.model || '').toLowerCase();
+    if (m.includes('realtime')) return data.model;
+    // let people pick a non-RT model for “Model” UI, but ensure calls work:
+    return 'gpt-4o-realtime-preview';
+  }, [data.model]);
+
+  // inline review?
   const inInlineReview = genPhase === 'review' && !showGenerate;
 
   return (
@@ -827,7 +801,12 @@ export default function VoiceAgentSection() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
               <div>
                 <div className="mb-2 text-[12.5px]">Model</div>
-                <StyledSelect value={data.model} onChange={setField('model')} options={modelOpts}/>
+                <StyledSelect
+                  value={data.model}
+                  onChange={setField('model')}
+                  options={openaiModels}
+                  placeholder={loadingModels ? 'Loading models…' : 'Choose a model'}
+                />
               </div>
               <div>
                 <div className="mb-2 text-[12.5px]">First Message Mode</div>
@@ -874,6 +853,32 @@ export default function VoiceAgentSection() {
                       }}
                     >
                       <DiffInline base={basePromptRef.current} next={proposedPrompt}/>
+                      <div className="mt-3 flex gap-2">
+                        <button
+                          className="h-9 px-3 rounded-[10px] font-semibold"
+                          style={{ background:CTA, color:'#0a0f0d' }}
+                          onClick={()=>{
+                            // ✅ Apply the generated prompt to BOTH layers
+                            setField('systemPrompt')(proposedPrompt);
+                            // build backend string too (hidden)
+                            const compiled = compilePrompt({
+                              basePrompt: proposedPrompt,
+                              userText: '', // nothing extra
+                            });
+                            setField('systemPromptBackend')(compiled.backendString);
+                            setGenPhase('idle');
+                          }}
+                        >
+                          Apply
+                        </button>
+                        <button
+                          className="h-9 px-3 rounded-[10px]"
+                          style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)' }}
+                          onClick={()=> setGenPhase('idle')}
+                        >
+                          Cancel
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -983,7 +988,7 @@ export default function VoiceAgentSection() {
         </div>
       </div>
 
-      {/* ─────────── Generate overlay (instructions / presets / configs) ─────────── */}
+      {/* ─────────── Generate overlay ─────────── */}
       {showGenerate && IS_CLIENT ? createPortal(
         <>
           <div
@@ -1031,7 +1036,7 @@ export default function VoiceAgentSection() {
               {/* Body */}
               <div className="px-6 py-5 space-y-3">
                 <div className="text-xs" style={{ color:'var(--text-muted)' }}>
-                  Tip: type something like “assistant for a dental clinic; tone friendly; handle booking and FAQs”.
+                  Tip: type “assistant for a dental clinic; tone friendly; handle booking and FAQs”.
                 </div>
                 <div
                   className="rounded-[10px]"
@@ -1050,7 +1055,7 @@ export default function VoiceAgentSection() {
               {/* Footer */}
               <div className="px-6 pb-6 flex gap-3">
                 <button
-                  onClick={()=> genPhase!=='loading' && setShowGenerate(false)}
+                  onClick={()=> { setShowGenerate(false); setGenPhase('idle'); }}
                   className="w-full h-[44px] rounded-[10px]"
                   style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)', color:'var(--text)', fontWeight:600 }}
                 >
@@ -1063,22 +1068,23 @@ export default function VoiceAgentSection() {
                     try {
                       const base = nonEmpty(data.systemPrompt) ? data.systemPrompt : DEFAULT_PROMPT_RT;
                       (basePromptRef as any).current = base;
-                      let merged = '';
-                      let summary = '';
-                      if (looksLikeFullPromptRT(raw)) {
-                        const norm = normalizeFullPromptRT(raw);
-                        merged = nonEmpty(norm) ? norm : base;
-                        summary = 'Replaced prompt (manual paste).';
-                      } else {
-                        const out = applyInstructionsRT(base, raw) || {};
-                        merged = nonEmpty(out.merged) ? out.merged : base;
-                        summary = nonEmpty(out.summary) ? out.summary : 'Updated.';
-                      }
-                      merged = merged.replace(/^\s*#\s*This is a blank template[\s\S]*?$/im, '').trim() + '\n';
+
+                      // ✅ Use the new engine to produce both layers
+                      const compiled = compilePrompt({
+                        basePrompt: base,
+                        userText: raw,
+                      });
+
+                      // stash for inline diff preview
+                      setProposedPrompt(compiled.frontendText);
+                      setChangesSummary(compiled.summary || 'Updated.');
+
+                      // apply immediately so user sees the updated (longer, pro) prompt
+                      setField('systemPrompt')(compiled.frontendText);
+                      setField('systemPromptBackend')(compiled.backendString);
+
                       setShowGenerate(false);
-                      setProposedPrompt(merged);
-                      setChangesSummary(summary);
-                      setGenPhase('review');
+                      setGenPhase('review'); // show diff view with “Apply/Cancel” still available
                     } catch {
                       setToastKind('error');
                       setToast('Generate failed — try simpler wording.');
@@ -1113,37 +1119,24 @@ export default function VoiceAgentSection() {
           />
           {showCall && (
             <WebCallButton
-              // Force a realtime-capable model for call UX regardless of left-side "Model" picker.
-              model={FORCE_REALTIME_MODEL}
-              systemPrompt={data.systemPrompt}
+              model={callModel}
+              systemPrompt={data.systemPromptBackend || data.systemPrompt}
               voiceName={data.voiceName}
               assistantName={data.name || 'Assistant'}
-              apiKey={apiKeys.find(k => k.id === data.apiKeyId)?.key || ''}
+              apiKey={selectedKey || ''}
 
-              // ▼ Either your component already accepts one of these.
-              //    Keep both — WebCallButton can ignore what it doesn’t use.
+              // Your button supports these extras:
               ephemeralEndpoint={EPHEMERAL_TOKEN_ENDPOINT}
-              // onError gets you out of the "Loading…" abyss and shows the reason
               onError={(err:any) => {
-                const msg =
-                  err?.message ||
-                  err?.error?.message ||
-                  (typeof err === 'string' ? err : '') ||
-                  'Call failed';
-                setToastKind('error');
-                setToast(msg.includes('SDP') ? `Realtime SDP failed: ${msg}` : msg);
+                const msg = err?.message || err?.error?.message || (typeof err === 'string' ? err : '') || 'Call failed';
+                setToastKind('error'); setToast(msg);
               }}
               onClose={()=> setShowCall(false)}
-
-              /**
-               * If you implemented “phone-call vibe” (light pauses, ums, phone-filter),
-               * expose the knobs here and let WebCallButton map them to your RT backend / Vapi.
-               */
               prosody={{
-                fillerWords: true,             // "um", "uh", tiny hesitations
-                microPausesMs: 200,           // ~0.2s between clauses
-                phoneFilter: true,            // band-limit to phone-like timbre
-                turnEndPauseMs: 120,          // tiny gap before next message
+                fillerWords: true,
+                microPausesMs: 200,
+                phoneFilter: true,
+                turnEndPauseMs: 120,
               }}
             />
           )}
