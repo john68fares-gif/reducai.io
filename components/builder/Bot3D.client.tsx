@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useMemo, useRef, useLayoutEffect } from 'react';
+import React, { useMemo, useRef, useLayoutEffect, useState } from 'react';
+import Image from 'next/image';
 import * as THREE from 'three';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 
@@ -349,7 +350,7 @@ function DragRotate({ children }:{ children: React.ReactNode }) {
   );
 }
 
-/* ------------ Exported component ------------ */
+/* ------------ Exported component (default) ------------ */
 export default function Bot3D({
   className = 'h-56 w-full',
   fitMargin = 0.02,
@@ -423,6 +424,56 @@ export default function Bot3D({
 
         <FitCamera target={fitGroup} margin={fitMargin} />
       </Canvas>
+    </div>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Card preview helper (same file, no new components/files).
+   Use this in your dashboard cards: it tries <Image>, falls back to Bot3D.
+   ────────────────────────────────────────────────────────────── */
+export function BotCardPreview({
+  src,
+  className = 'w-full h-[140px]',
+  alt = '',
+}: {
+  src?: string;
+  className?: string;
+  alt?: string;
+}) {
+  const [showImg, setShowImg] = useState(Boolean(src));
+
+  return (
+    <div
+      className={`relative overflow-hidden rounded-2xl ${className}`}
+      style={{ background: 'var(--panel)', border: '1px solid var(--border)' }}
+    >
+      {showImg && src ? (
+        <Image
+          src={src}
+          alt={alt}
+          fill
+          sizes="(max-width: 768px) 100vw, 33vw"
+          className="object-cover"
+          onError={() => setShowImg(false)}  // ← fallback if broken or 404
+          unoptimized
+        />
+      ) : (
+        <div className="absolute inset-0">
+          <Bot3D
+            className="h-full w-full pointer-events-none"
+            accent="var(--brand)"
+            head="round"
+            torso="capsule"
+            arms="segment"
+            legs="segment"
+            eyes="visor"
+            withBody
+            antenna
+            idle
+          />
+        </div>
+      )}
     </div>
   );
 }
