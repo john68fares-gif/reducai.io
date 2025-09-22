@@ -41,9 +41,7 @@ type Props = {
   ambienceLevel?: number;
 };
 
-/* ───────────────────────────── THEME ─────────────────────────────
-   Match VoiceAgentSection overlays; make panel/bubbles truly solid
-────────────────────────────────────────────────────────────────── */
+/* ─────────── THEME: match Generate overlay, less rounded ─────────── */
 const CTA = '#59d9b3';
 const GREEN_LINE = 'rgba(89,217,179,.20)';
 const IS_CLIENT = typeof window !== 'undefined' && typeof document !== 'undefined';
@@ -71,21 +69,22 @@ const Tokens = () => (
     }
     .va-card{
       border-radius:var(--radius-outer);
-      border:1px solid var(--border-weak);
-      background:var(--panel-bg); /* solid */
+      border:1px solid ${GREEN_LINE};
+      background:var(--panel-bg); /* solid, no translucency */
       box-shadow:var(--card-shadow);
       overflow:hidden; isolation:isolate;
     }
     .va-head{
       min-height:var(--header-h);
       display:grid; grid-template-columns:1fr auto; align-items:center;
-      padding:0 16px; border-bottom:1px solid rgba(255,255,255,.08); color:var(--text);
+      padding:0 16px; color:var(--text);
       background:linear-gradient(90deg,var(--panel-bg) 0%,color-mix(in oklab, var(--panel-bg) 97%, white 3%) 50%,var(--panel-bg) 100%);
+      border-bottom:1px solid ${GREEN_LINE}; /* ← match Generate overlay */
     }
   `}</style>
 );
 
-/* ───────────────────────── StyledSelect ───────────────────────── */
+/* ───────────────────────── StyledSelect (8px) ───────────────────────── */
 type Opt = { value: string; label: string; disabled?: boolean; iconLeft?: React.ReactNode };
 function StyledSelect({
   value, onChange, options, placeholder, leftIcon, menuTop
@@ -168,7 +167,7 @@ function StyledSelect({
             width: (menuPos?.width ?? (btnRef.current?.getBoundingClientRect().width ?? 280)),
             background:'var(--panel)',
             border:'1px solid rgba(255,255,255,.16)',
-            borderRadius:10,
+            borderRadius:8, /* less rounded */
             boxShadow:'0 24px 64px rgba(0,0,0,.60), 0 8px 20px rgba(0,0,0,.45), 0 0 0 1px rgba(0,255,194,.10)'
           }}
         >
@@ -441,7 +440,7 @@ export default function WebCallButton({
         ].filter(Boolean).join('\n\n');
         baseInstructionsRef.current = style;
 
-        // Enable *user* transcription + server VAD (explicit enabled:true)
+        // Enable user transcription + server VAD
         safeSend(dc,{ type:'session.update', session:{
           instructions: baseInstructionsRef.current,
           voice: voiceId,
@@ -476,7 +475,7 @@ export default function WebCallButton({
         }
       };
 
-      // 5) events — assistant + user, exhaustive + catch-all
+      // 5) events — assistant + user
       dc.onmessage=(ev)=>{
         let msg:any;
         try{ msg=JSON.parse(ev.data); }catch{ return; }
@@ -602,20 +601,19 @@ export default function WebCallButton({
   }
   function endCall(userIntent=true){ cleanup(); setConnected(false); setConnecting(false); if(userIntent) onClose?.(); }
 
-  // start on mount / when voice changes
   useEffect(()=>{ startCall(); return ()=>{ cleanup(); }; // eslint-disable-next-line
   },[voiceId]);
 
-  /* ─────────────────────────── UI (solid) ─────────────────────────── */
+  /* ─────────────────────────── UI (match overlay) ─────────────────────────── */
 
-  // OPAQUE BACKDROP (prevents any transparency feel)
+  // OPAQUE BACKDROP (same as Generate overlay family)
   const backdrop = (
     <div
       className="fixed inset-0"
       style={{
         zIndex: 100008,
-        background: '#0a0d0f',        // solid
-        opacity: 0.94,                // just a hint of dimming – no see-through panel
+        background: '#0a0d0f',   // solid
+        opacity: 0.94,
       }}
       onClick={()=>endCall(true)}
       aria-hidden
@@ -673,11 +671,11 @@ export default function WebCallButton({
 
   const body = (
     <div className="p-4" style={{ color:'var(--text)', background:'var(--panel-bg)' }}>
-      <div className="text-xs pb-2 mb-3 border-b" style={{ borderColor:'rgba(255,255,255,.10)', color:'var(--text-muted)' }}>
+      <div className="text-xs pb-2 mb-3" style={{ borderBottom:`1px solid ${GREEN_LINE}`, color:'var(--text-muted)' }}>
         Transcript
       </div>
 
-      {/* Transcript — bubbles for BOTH sides (user text visible while streaming) */}
+      {/* Transcript — bubbles for BOTH sides (less rounded 8px; solid) */}
       <div ref={scrollerRef} className="space-y-3 overflow-y-auto" style={{ maxHeight:'calc(100vh - 72px - 52px - 50px)', scrollbarWidth:'thin' }}>
         {log.length===0 && (
           <div
@@ -692,16 +690,16 @@ export default function WebCallButton({
         {log.map(row=>(
           <div key={row.id} className={`flex ${row.who==='user' ? 'justify-end' : 'justify-start'}`}>
             {row.who==='assistant' && (
-              <div className="mr-2 mt-[2px] shrink-0 rounded-full w-8 h-8 grid place-items-center"
+              <div className="mr-2 mt-[2px] shrink-0 rounded-[8px] w-8 h-8 grid place-items-center"
                    style={{ background:'rgba(89,217,179,.12)', border:'1px solid rgba(89,217,179,.25)' }}>
                 <Bot className="w-4 h-4" style={{ color: CTA }} />
               </div>
             )}
 
             <div
-              className="max-w-[78%] rounded-[12px] px-3 py-2 text-[0.95rem] leading-snug border"
+              className="max-w-[78%] rounded-[8px] px-3 py-2 text-[0.95rem] leading-snug border"
               style={{
-                background: row.who==='user' ? 'rgba(56,196,143,.26)' : 'rgba(255,255,255,.10)', // more solid
+                background: row.who==='user' ? 'rgba(56,196,143,.26)' : 'rgba(255,255,255,.10)',
                 borderColor: row.who==='user' ? 'rgba(56,196,143,.42)' : 'rgba(255,255,255,.18)',
               }}
             >
@@ -710,7 +708,7 @@ export default function WebCallButton({
             </div>
 
             {row.who==='user' && (
-              <div className="ml-2 mt-[2px] shrink-0 rounded-full w-8 h-8 grid place-items-center"
+              <div className="ml-2 mt-[2px] shrink-0 rounded-[8px] w-8 h-8 grid place-items-center"
                    style={{ background:'rgba(255,255,255,.10)', border:'1px solid rgba(255,255,255,.18)' }}>
                 <User className="w-4 h-4" />
               </div>
@@ -729,7 +727,7 @@ export default function WebCallButton({
   );
 
   const footer = (
-    <div className="px-3 py-2 border-t" style={{ borderColor:'rgba(255,255,255,.10)', color:'var(--text)', background:'var(--panel-bg)' }}>
+    <div className="px-3 py-2" style={{ borderTop:`1px solid ${GREEN_LINE}`, color:'var(--text)', background:'var(--panel-bg)' }}>
       <div className="flex items-center justify-between gap-2 text-xs">
         <div className="flex items-center gap-2">
           {connecting && <Loader2 className="w-4 h-4 animate-spin" />}
@@ -752,9 +750,7 @@ export default function WebCallButton({
           width:'clamp(380px, 34vw, 560px)',
           zIndex: 100012,
           background:'var(--panel-bg)', color:'var(--text)',
-          borderLeft: `1px solid ${GREEN_LINE}`,
-          borderTopLeftRadius: 8,
-          borderBottomLeftRadius: 8,
+          /* Match overlay’s border/shadow (done in .va-card), keep RHS dock */
           borderTopRightRadius: 0,
           borderBottomRightRadius: 0,
           display:'grid', gridTemplateRows:'72px 1fr 52px',
