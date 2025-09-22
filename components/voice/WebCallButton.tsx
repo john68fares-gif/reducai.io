@@ -1,13 +1,12 @@
-// components/voice/WebCallButton.tsx
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Bot, User, Mic, MicOff, X, Loader2, ChevronDown, Search, Check, Lock } from 'lucide-react';
+import {
+  Bot, User, Mic, MicOff, X, Loader2, ChevronDown, Search, Check, Lock,
+} from 'lucide-react';
 
-/* ──────────────────────────────────────────────────────────────────────────
-   PROPS
-────────────────────────────────────────────────────────────────────────── */
+/* ───────────────────────────── PROPS ───────────────────────────── */
 type ProsodyOpts = {
   fillerWords?: boolean;
   microPausesMs?: number;
@@ -31,7 +30,6 @@ type Props = {
 
   firstMode?: 'Assistant speaks first' | 'User speaks first' | 'Silent until tool required';
   firstMsg?: string;
-
   greetMode?: 'server' | 'client' | 'off';
 
   languageHint?: 'auto' | 'en' | 'de' | 'nl' | 'es' | 'ar';
@@ -43,25 +41,28 @@ type Props = {
   ambienceLevel?: number;
 };
 
-/* ──────────────────────────────────────────────────────────────────────────
-   THEME — match VoiceAgentSection overlays exactly (solid panel)
-────────────────────────────────────────────────────────────────────────── */
+/* ───────────────────────────── THEME ─────────────────────────────
+   Match VoiceAgentSection overlays; make panel/bubbles truly solid
+────────────────────────────────────────────────────────────────── */
 const CTA = '#59d9b3';
 const GREEN_LINE = 'rgba(89,217,179,.20)';
 const IS_CLIENT = typeof window !== 'undefined' && typeof document !== 'undefined';
 
-const HUMAN_LIKE = new Set(['alloy','verse','coral','amber','sage','juniper','opal','pebble','cobalt','ash','ballad','echo','shimmer','marin','cedar']);
+const HUMAN_LIKE = new Set([
+  'alloy','verse','coral','amber','sage','juniper','opal','pebble','cobalt','ash','ballad','echo','shimmer','marin','cedar'
+]);
 const DEFAULT_VOICES = ['alloy','verse','coral','amber','sage','juniper'];
 const FRIENDLY_TO_ID: Record<string,string> = {
   'Alloy (American)':'alloy','Verse (American)':'verse','Coral (British)':'coral','Amber (Australian)':'cedar',
-  Alloy:'alloy', Verse:'verse', Coral:'coral', Amber:'cedar', Sage:'sage', Juniper:'juniper', Ash:'ash', Echo:'echo', Ballad:'ballad', Shimmer:'shimmer', Marin:'marin', Cedar:'cedar'
+  Alloy:'alloy', Verse:'verse', Coral:'coral', Amber:'cedar', Sage:'sage', Juniper:'juniper',
+  Ash:'ash', Echo:'echo', Ballad:'ballad', Shimmer:'shimmer', Marin:'marin', Cedar:'cedar'
 };
 
 const Tokens = () => (
   <style jsx global>{`
     .va-scope{
       --bg:#0b0c10; --panel:#0d0f11; --text:#e6f1ef; --text-muted:#9fb4ad;
-      --radius-outer:8px; --radius-inner:8px; --control-h:40px; --header-h:80px;
+      --radius-outer:8px; --radius-inner:8px; --control-h:40px; --header-h:72px;
       --page-bg:var(--bg); --panel-bg:var(--panel);
       --input-bg:var(--panel); --input-border:rgba(255,255,255,.10);
       --input-shadow:0 0 0 1px rgba(255,255,255,.06) inset;
@@ -71,12 +72,12 @@ const Tokens = () => (
     .va-card{
       border-radius:var(--radius-outer);
       border:1px solid var(--border-weak);
-      background:var(--panel-bg);
+      background:var(--panel-bg); /* solid */
       box-shadow:var(--card-shadow);
       overflow:hidden; isolation:isolate;
     }
     .va-head{
-      min-height:72px;
+      min-height:var(--header-h);
       display:grid; grid-template-columns:1fr auto; align-items:center;
       padding:0 16px; border-bottom:1px solid rgba(255,255,255,.08); color:var(--text);
       background:linear-gradient(90deg,var(--panel-bg) 0%,color-mix(in oklab, var(--panel-bg) 97%, white 3%) 50%,var(--panel-bg) 100%);
@@ -84,11 +85,8 @@ const Tokens = () => (
   `}</style>
 );
 
-/* ──────────────────────────────────────────────────────────────────────────
-   StyledSelect — identical feel to your overlays (solid)
-────────────────────────────────────────────────────────────────────────── */
+/* ───────────────────────── StyledSelect ───────────────────────── */
 type Opt = { value: string; label: string; disabled?: boolean; iconLeft?: React.ReactNode };
-
 function StyledSelect({
   value, onChange, options, placeholder, leftIcon, menuTop
 }:{
@@ -163,7 +161,7 @@ function StyledSelect({
       {open && IS_CLIENT ? createPortal(
         <div
           ref={menuRef}
-          className="fixed z-[100001] p-2" // same z as overlay modal
+          className="fixed z-[100020] p-2"
           style={{
             left: (menuPos?.left ?? 0),
             top: (menuPos?.top ?? 0),
@@ -229,9 +227,7 @@ function StyledSelect({
   );
 }
 
-/* ──────────────────────────────────────────────────────────────────────────
-   TRANSCRIPT / UTILS
-────────────────────────────────────────────────────────────────────────── */
+/* ─────────────────────── Transcript / utils ─────────────────────── */
 type TranscriptRow = { id:string; who:'user'|'assistant'; text:string; at:number; done?:boolean };
 
 const RAW_ID = /^[a-z0-9._-]{3,}$/i;
@@ -255,7 +251,7 @@ const resolveVoiceId = (key:string) => {
   return FRIENDLY_TO_ID[k] || k || 'alloy';
 };
 
-/* ambience + mild “phone” EQ */
+/* ambience + mild phone EQ */
 function createSaturator(ac: AudioContext, drive=1.05){
   const sh=ac.createWaveShaper(); const curve=new Float32Array(1024);
   for(let i=0;i<curve.length;i++){ const x=(i/(curve.length-1))*2-1; curve[i]=Math.tanh(x*drive); }
@@ -294,9 +290,7 @@ async function attachProcessedAudio(audioEl:HTMLAudioElement, remote:MediaStream
   return ()=>{ [src,hp,lp,presence,body,sat,comp,wet,merge,dry].forEach(n=>{try{(n as any).disconnect()}catch{}}); try{ac.close()}catch{}; if(ambClean) try{ambClean()}catch{} };
 }
 
-/* ──────────────────────────────────────────────────────────────────────────
-   COMPONENT
-────────────────────────────────────────────────────────────────────────── */
+/* ─────────────────────────── COMPONENT ─────────────────────────── */
 export default function WebCallButton({
   className,
   model,
@@ -447,14 +441,14 @@ export default function WebCallButton({
         ].filter(Boolean).join('\n\n');
         baseInstructionsRef.current = style;
 
-        // enable server VAD + user transcription
+        // Enable *user* transcription + server VAD (explicit enabled:true)
         safeSend(dc,{ type:'session.update', session:{
           instructions: baseInstructionsRef.current,
           voice: voiceId,
           input_audio_format:'pcm16',
           output_audio_format:'pcm16',
           modalities:['audio','text'],
-          input_audio_transcription: { model: 'gpt-4o-transcribe', fallback_models:['whisper-1'] },
+          input_audio_transcription: { model: 'gpt-4o-transcribe', enabled: true, fallback_models:['whisper-1'] },
           turn_detection: {
             type: 'server_vad',
             threshold: 0.5,
@@ -463,7 +457,7 @@ export default function WebCallButton({
           },
         }});
 
-        // greeting (no dupes)
+        // Optional greeting (no dupes)
         const wantClientGreeting =
           greetMode==='client' ||
           (greetMode==='server' && firstMode==='Assistant speaks first');
@@ -482,7 +476,7 @@ export default function WebCallButton({
         }
       };
 
-      // 5) events — assistant + user (more exhaustive)
+      // 5) events — assistant + user, exhaustive + catch-all
       dc.onmessage=(ev)=>{
         let msg:any;
         try{ msg=JSON.parse(ev.data); }catch{ return; }
@@ -512,22 +506,22 @@ export default function WebCallButton({
           if (text) addLine('assistant', text);
         }
 
-        /* USER — handle all shapes */
+        /* USER */
         const appendUserDelta = (delta:string, id?:string) => {
           const useId = id || 'user_current';
           upsert(useId,'user',(prev)=>({ text:(prev?.text||'') + (delta || '') }));
         };
         const completeUser = (id?:string) => upsert(id||'user_current','user',{ done:true });
 
-        // 1) canonical transcript stream
+        // Canonical
         if (t==='transcript.delta'){ appendUserDelta(String(msg?.delta||''), msg?.transcript_id||msg?.id); return; }
         if (t==='transcript.completed'){ completeUser(msg?.transcript_id||msg?.id); return; }
 
-        // 2) conversation-scoped
+        // Conversation-scoped
         if (t==='conversation.item.input_audio_transcript.delta'){ appendUserDelta(String(msg?.delta||''), msg?.item_id||msg?.id); return; }
         if (t==='conversation.item.input_audio_transcript.completed' || t==='conversation.item.completed'){ completeUser(msg?.item_id||msg?.id); return; }
 
-        // 3) input buffer variants (both transcript.* and transcription.*)
+        // Input buffer (two spellings)
         if (t==='input_audio_buffer.transcript.delta' || t==='input_audio_buffer.transcription.delta'){
           appendUserDelta(String(msg?.delta||''), msg?.transcript_id||msg?.id); return;
         }
@@ -535,24 +529,26 @@ export default function WebCallButton({
           completeUser(msg?.transcript_id||msg?.id); return;
         }
 
-        // 4) additional variants seen in some runtimes
+        // Other runtimes / aliases
         if (t==='input_audio_transcript.delta' || t==='input_audio_transcription.delta' || t==='input_transcription.delta'){
           appendUserDelta(String(msg?.delta||''), msg?.id); return;
         }
-        if (t==='input_audio_transcript.completed' || t==='input_audio_transcription.completed' || t==='input_transcription.completed' || t==='input_audio_buffer.speech_finalized' || t==='transcript.final'){
+        if (t==='input_audio_transcript.completed' || t==='input_audio_transcription.completed'
+            || t==='input_transcription.completed' || t==='input_audio_buffer.speech_finalized'
+            || t==='transcript.final'){
           completeUser(msg?.id); return;
         }
 
-        // 5) single-shot fallback (no delta)
+        // Single-shot (no delta)
         if ((/transcript|transcription|input_audio_buffer/.test(t)) && typeof msg?.text==='string' && !msg?.delta){
           addLine('user', msg.text); return;
         }
 
-        // 6) speech boundaries
+        // Boundaries
         if (t==='input_audio_buffer.speech_started'){ upsert(msg?.id||'user_current','user',{ text:'', done:false }); return; }
         if (t==='input_audio_buffer.speech_ended'){ completeUser(msg?.id||'user_current'); return; }
 
-        // 7) ultimate catch-all: any *delta* field on a user-ish event name
+        // Catch-all for any user-ish delta
         if (!t.startsWith('response.') && /transcr|transcript|input_/.test(t) && typeof msg?.delta==='string'){
           appendUserDelta(String(msg.delta), msg?.id); return;
         }
@@ -610,14 +606,29 @@ export default function WebCallButton({
   useEffect(()=>{ startCall(); return ()=>{ cleanup(); }; // eslint-disable-next-line
   },[voiceId]);
 
-  /* ────────────────────────────────────────────────────────────────────────
-     UI — right overlay sheet (solid, same look as VoiceAgent overlays)
-  ───────────────────────────────────────────────────────────────────────── */
+  /* ─────────────────────────── UI (solid) ─────────────────────────── */
+
+  // OPAQUE BACKDROP (prevents any transparency feel)
+  const backdrop = (
+    <div
+      className="fixed inset-0"
+      style={{
+        zIndex: 100008,
+        background: '#0a0d0f',        // solid
+        opacity: 0.94,                // just a hint of dimming – no see-through panel
+      }}
+      onClick={()=>endCall(true)}
+      aria-hidden
+    />
+  );
+
   const header = (
-    <div className="va-head">
+    <div className="va-head" style={{ zIndex: 100011 }}>
       <div className="flex items-center gap-3 min-w-0">
-        <div className="inline-grid place-items-center w-9 h-9 rounded-[8px]"
-             style={{ background:'rgba(89,217,179,.12)', border:'1px solid rgba(89,217,179,.25)' }}>
+        <div
+          className="inline-grid place-items-center w-9 h-9 rounded-[8px]"
+          style={{ background:'rgba(89,217,179,.12)', border:'1px solid rgba(89,217,179,.25)' }}
+        >
           <Bot className="w-5 h-5" style={{ color: CTA }} />
         </div>
         <div className="min-w-0">
@@ -627,7 +638,6 @@ export default function WebCallButton({
       </div>
 
       <div className="ml-auto flex items-center gap-2">
-        {/* Voice dropdown */}
         <div style={{ width: 200 }}>
           <StyledSelect
             value={voiceId}
@@ -662,9 +672,13 @@ export default function WebCallButton({
   );
 
   const body = (
-    <div className="p-3 md:p-4" style={{ color:'var(--text)' }}>
+    <div className="p-4" style={{ color:'var(--text)', background:'var(--panel-bg)' }}>
+      <div className="text-xs pb-2 mb-3 border-b" style={{ borderColor:'rgba(255,255,255,.10)', color:'var(--text-muted)' }}>
+        Transcript
+      </div>
+
       {/* Transcript — bubbles for BOTH sides (user text visible while streaming) */}
-      <div ref={scrollerRef} className="space-y-3 overflow-y-auto" style={{ maxHeight:'calc(100vh - 72px - 52px)', scrollbarWidth:'thin' }}>
+      <div ref={scrollerRef} className="space-y-3 overflow-y-auto" style={{ maxHeight:'calc(100vh - 72px - 52px - 50px)', scrollbarWidth:'thin' }}>
         {log.length===0 && (
           <div
             className="text-sm rounded-[8px] px-3 py-2 border"
@@ -677,7 +691,6 @@ export default function WebCallButton({
 
         {log.map(row=>(
           <div key={row.id} className={`flex ${row.who==='user' ? 'justify-end' : 'justify-start'}`}>
-            {/* left avatar for assistant */}
             {row.who==='assistant' && (
               <div className="mr-2 mt-[2px] shrink-0 rounded-full w-8 h-8 grid place-items-center"
                    style={{ background:'rgba(89,217,179,.12)', border:'1px solid rgba(89,217,179,.25)' }}>
@@ -685,19 +698,17 @@ export default function WebCallButton({
               </div>
             )}
 
-            {/* bubble */}
             <div
               className="max-w-[78%] rounded-[12px] px-3 py-2 text-[0.95rem] leading-snug border"
               style={{
-                background: row.who==='user' ? 'rgba(56,196,143,.18)' : 'rgba(255,255,255,.06)',
-                borderColor: row.who==='user' ? 'rgba(56,196,143,.35)' : 'rgba(255,255,255,.14)',
+                background: row.who==='user' ? 'rgba(56,196,143,.26)' : 'rgba(255,255,255,.10)', // more solid
+                borderColor: row.who==='user' ? 'rgba(56,196,143,.42)' : 'rgba(255,255,255,.18)',
               }}
             >
-              <div>{row.text && row.text.trim().length ? row.text : <span style={{ opacity:.5 }}>…listening</span>}</div>
+              <div>{row.text && row.text.trim().length ? row.text : <span style={{ opacity:.55 }}>…listening</span>}</div>
               <div className="text-[10px] mt-1 opacity-60 text-right">{fmtTime(row.at)}</div>
             </div>
 
-            {/* right avatar for user */}
             {row.who==='user' && (
               <div className="ml-2 mt-[2px] shrink-0 rounded-full w-8 h-8 grid place-items-center"
                    style={{ background:'rgba(255,255,255,.10)', border:'1px solid rgba(255,255,255,.18)' }}>
@@ -718,7 +729,7 @@ export default function WebCallButton({
   );
 
   const footer = (
-    <div className="px-3 py-2 border-t" style={{ borderColor:'rgba(255,255,255,.10)', color:'var(--text)' }}>
+    <div className="px-3 py-2 border-t" style={{ borderColor:'rgba(255,255,255,.10)', color:'var(--text)', background:'var(--panel-bg)' }}>
       <div className="flex items-center justify-between gap-2 text-xs">
         <div className="flex items-center gap-2">
           {connecting && <Loader2 className="w-4 h-4 animate-spin" />}
@@ -732,30 +743,33 @@ export default function WebCallButton({
   );
 
   const panel = (
-    <aside
-      className={`va-card ${className||''}`}
-      style={{
-        position:'fixed', top:0, right:0, bottom:0,
-        width:'clamp(380px, 34vw, 560px)',
-        zIndex: 100010,
-        background:'var(--panel-bg)', color:'var(--text)',
-        borderLeft: `1px solid ${GREEN_LINE}`,
-        borderTopLeftRadius: 8,
-        borderBottomLeftRadius: 8,
-        borderTopRightRadius: 0,
-        borderBottomRightRadius: 0,
-        display:'grid', gridTemplateRows:'72px 1fr 52px',
-        overflow:'hidden',
-        boxShadow:'0 22px 44px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px rgba(89,217,179,.20)'
-      }}
-      role="dialog"
-      aria-label="Voice call panel"
-    >
-      <Tokens />
-      {header}
-      {body}
-      {footer}
-    </aside>
+    <>
+      {backdrop}
+      <aside
+        className={`va-card ${className||''}`}
+        style={{
+          position:'fixed', top:0, right:0, bottom:0,
+          width:'clamp(380px, 34vw, 560px)',
+          zIndex: 100012,
+          background:'var(--panel-bg)', color:'var(--text)',
+          borderLeft: `1px solid ${GREEN_LINE}`,
+          borderTopLeftRadius: 8,
+          borderBottomLeftRadius: 8,
+          borderTopRightRadius: 0,
+          borderBottomRightRadius: 0,
+          display:'grid', gridTemplateRows:'72px 1fr 52px',
+          overflow:'hidden',
+          boxShadow:'0 22px 44px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px rgba(89,217,179,.20)'
+        }}
+        role="dialog"
+        aria-label="Voice call panel"
+      >
+        <Tokens />
+        {header}
+        {body}
+        {footer}
+      </aside>
+    </>
   );
 
   if (!IS_CLIENT) return null;
