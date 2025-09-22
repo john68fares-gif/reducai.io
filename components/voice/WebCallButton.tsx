@@ -417,6 +417,9 @@ export default function WebCallButton({
   const scrollerRef=useRef<HTMLDivElement|null>(null);
   const sawAssistantDeltaRef=useRef<boolean>(false);
 
+  // For sentence rests
+  const lastRestRef=useRef<number>(0);
+
   useEffect(()=>{ const el=scrollerRef.current; if(!el) return; el.scrollTop=el.scrollHeight; },[log,connecting,connected]);
 
   // fetch voices (filter to human-like)
@@ -474,6 +477,19 @@ export default function WebCallButton({
     }catch{ return ()=>{}; }
   }
 
+  // Duck audio for ~500ms at sentence boundaries (simple, effective)
+  function restBetweenSentences(delta: string){
+    if(!audioRef.current) return;
+    if(!/[.!?…]\s*$/.test(delta)) return;
+    const now=Date.now();
+    if(now - lastRestRef.current < 700) return; // avoid over-trigger
+    lastRestRef.current = now;
+    const el = audioRef.current;
+    const prev = el.volume;
+    el.volume = 0.0;
+    setTimeout(()=>{ el.volume = prev || 1.0; }, 500);
+  }
+
   async function startCall(){
     setError('');
     if(!apiKey){ setError('No API key selected.'); onError?.('No API key'); return; }
@@ -519,18 +535,19 @@ export default function WebCallButton({
       const dc=pc.createDataChannel('oai-events'); dcRef.current=dc;
 
       dc.onopen=()=>{
-        const preDelay = Math.max(120, prosody?.preSpeechDelayMs ?? 220);
+        const preDelay = Math.max(300, prosody?.preSpeechDelayMs ?? 500);
         const style = [
           systemPrompt || '',
           languageNudge(languageHint),
           prosody?.fillerWords ? 'Use mild, natural disfluencies.' : '',
           prosody?.microPausesMs ? `Allow micro pauses (~${prosody.microPausesMs} ms).` : '',
-          `Before starting to speak, wait a brief thoughtful pause of about ${preDelay} ms.`,
-          (prosody?.turnEndPauseMs ? `Wait ~${prosody.turnEndPauseMs} ms of silence before replying.` : 'Wait ~160 ms of silence before replying.'),
+          `Before starting to speak, pause about ${preDelay} ms as if thinking.`,
+          `Between sentences, take a short breath and wait about 500 ms before continuing.`,
+          (prosody?.turnEndPauseMs ? `Wait ~${prosody.turnEndPauseMs} ms of silence before replying.` : 'Wait ~200 ms of silence before replying.'),
         ].filter(Boolean).join('\n\n');
         baseInstructionsRef.current = style;
 
-        // ✅ session config (TRANSCRIPTION ON + VAD)
+        // ✅ session config (TRANSCRIPTION ON + robust VAD)
         safeSend(dc,{ type:'session.update', session:{
           instructions: baseInstructionsRef.current,
           voice: voiceId,
@@ -547,22 +564,21 @@ export default function WebCallButton({
             type:'server_vad',
             threshold:0.5,
             prefix_silence_ms: 80,
-            silence_duration_ms: Math.max(120, prosody?.turnEndPauseMs ?? 160),
+            silence_duration_ms: Math.max(180, prosody?.turnEndPauseMs ?? 200),
           },
         }});
 
-        // Optional greeting (with pre-speech delay so it doesn't fire instantly)
+        // Optional greeting (respects pre-speech delay)
         const wantClientGreeting =
           greetMode==='client' || (greetMode==='server' && firstMode==='Assistant speaks first');
 
         const greet = () => {
           const lines=(firstMsg||'Hello.').split(/\r?\n|\|/g).map(s=>s.trim()).filter(Boolean).slice(0,6);
-          const preDelayMs = Math.max(120, prosody?.preSpeechDelayMs ?? 220);
           setTimeout(()=>{
             for(const ln of lines){
               safeSend(dc,{ type:'response.create', response:{ modalities:['audio','text'], instructions: ln }});
             }
-          }, preDelayMs);
+          }, preDelay);
         };
 
         if (greetMode==='client') {
@@ -572,81 +588,88 @@ export default function WebCallButton({
         }
       };
 
-      // 5) events — ASSISTANT + USER transcripts robustly
+      // 5) events — ASSISTANT + USER transcripts (normalize names)
       dc.onmessage=(ev)=>{
-        let msg:any;
-        try{ msg=JSON.parse(ev.data); }catch{ return; }
-        const t=String(msg?.type||'');
+        let raw:any;
+        try{ raw=JSON.parse(ev.data); }catch{ return; }
+        const t0=String(raw?.type||'');
+        const t=t0.replace(/^realtime\./,''); // normalize
 
-        /* ASSISTANT STREAM */
+        /* ASSISTANT STREAM — used only to trigger rests */
         if(t==='response.output_text.delta'){
           sawAssistantDeltaRef.current = true;
-          const id=msg?.response_id||msg?.id||'assistant_current';
-          upsert(id,'assistant',(prev)=>({ text:(prev?.text||'')+String(msg?.delta||'') }));
+          const id=raw?.response_id||raw?.id||'assistant_current';
+          const d=String(raw?.delta||'');
+          restBetweenSentences(d);
+          upsert(id,'assistant',(prev)=>({ text:(prev?.text||'')+d }));
         }
-        if(t==='response.output_text' && typeof msg?.text==='string'){ sawAssistantDeltaRef.current = true; addLine('assistant', msg.text); }
+        if(t==='response.output_text' && typeof raw?.text==='string'){
+          sawAssistantDeltaRef.current = true;
+          addLine('assistant', raw.text);
+        }
         if(t==='response.audio_transcript.delta'){
-          const id=msg?.response_id||msg?.id||'assistant_current';
-          upsert(id,'assistant',(prev)=>({ text:(prev?.text||'')+String(msg?.delta||'') }));
+          const id=raw?.response_id||raw?.id||'assistant_current';
+          const d=String(raw?.delta||'');
+          restBetweenSentences(d);
+          upsert(id,'assistant',(prev)=>({ text:(prev?.text||'')+d }));
         }
         if(t==='response.audio_transcript.completed' || t==='response.completed' || t==='response.stop'){
-          const id=msg?.response_id||msg?.id||'assistant_current';
+          const id=raw?.response_id||raw?.id||'assistant_current';
           upsert(id,'assistant',{ done:true });
         }
-        if (t==='conversation.item.created' && msg?.item?.type==='message' && msg?.item?.role==='assistant') {
-          const text=(msg?.item?.content||[]).map((c:any)=>c?.text||c?.transcript||'').join(' ').trim();
+        if (t==='conversation.item.created' && raw?.item?.type==='message' && raw?.item?.role==='assistant') {
+          const text=(raw?.item?.content||[]).map((c:any)=>c?.text||c?.transcript||'').join(' ').trim();
           if (text) addLine('assistant', text);
         }
 
-        /* USER TRANSCRIPT — handle every shape */
+        /* USER TRANSCRIPT — make this bulletproof */
         const appendUserDelta = (delta:string, id?:string) => {
           const useId = id || 'user_current';
           upsert(useId,'user',(prev)=>({ text:(prev?.text||'') + (delta || '') }));
         };
         const completeUser = (id?:string) => upsert(id||'user_current','user',{ done:true });
 
-        // Canonical
-        if (t==='transcript.delta'){ appendUserDelta(String(msg?.delta||''), msg?.transcript_id||msg?.id); return; }
-        if (t==='transcript.completed'){ completeUser(msg?.transcript_id||msg?.id); return; }
+        // Start/stop markers (make sure a row exists ASAP)
+        if (/^input_audio_buffer\.speech_started$/.test(t)) { upsert(raw?.id||'user_current','user',{ text:'', done:false }); return; }
+        if (/^input_audio_buffer\.speech_ended$/.test(t)) { completeUser(raw?.id||'user_current'); return; }
+
+        // Canonical incremental
+        if (t==='transcript.delta'){ appendUserDelta(String(raw?.delta||''), raw?.transcript_id||raw?.id); return; }
+        if (t==='transcript.completed'){ completeUser(raw?.transcript_id||raw?.id); return; }
 
         // Conversation-scoped
-        if (t==='conversation.item.input_audio_transcript.delta'){ appendUserDelta(String(msg?.delta||''), msg?.item_id||msg?.id); return; }
-        if (t==='conversation.item.input_audio_transcript.completed' || t==='conversation.item.completed'){ completeUser(msg?.item_id||msg?.id); return; }
+        if (t==='conversation.item.input_audio_transcript.delta'){ appendUserDelta(String(raw?.delta||''), raw?.item_id||raw?.id); return; }
+        if (t==='conversation.item.input_audio_transcript.completed' || t==='conversation.item.completed'){ completeUser(raw?.item_id||raw?.id); return; }
 
         // Some runtimes proxy as text items
-        if (t==='conversation.item.input_text.delta'){ appendUserDelta(String(msg?.delta||''), msg?.item_id||msg?.id); return; }
-        if (t==='conversation.item.input_text.completed'){ completeUser(msg?.item_id||msg?.id); return; }
+        if (t==='conversation.item.input_text.delta'){ appendUserDelta(String(raw?.delta||''), raw?.item_id||raw?.id); return; }
+        if (t==='conversation.item.input_text.completed'){ completeUser(raw?.item_id||raw?.id); return; }
 
         // Input buffer variants
         if (t==='input_audio_buffer.transcript.delta' || t==='input_audio_buffer.transcription.delta'){
-          appendUserDelta(String(msg?.delta||''), msg?.transcript_id||msg?.id); return;
+          appendUserDelta(String(raw?.delta||''), raw?.transcript_id||raw?.id); return;
         }
         if (t==='input_audio_buffer.transcript.completed' || t==='input_audio_buffer.transcription.completed'){
-          completeUser(msg?.transcript_id||msg?.id); return;
+          completeUser(raw?.transcript_id||raw?.id); return;
         }
 
         // Other aliases / finals
         if (t==='input_audio_transcript.delta' || t==='input_audio_transcription.delta' || t==='input_transcription.delta'){
-          appendUserDelta(String(msg?.delta||''), msg?.id); return;
+          appendUserDelta(String(raw?.delta||''), raw?.id); return;
         }
         if (t==='input_audio_transcript.completed' || t==='input_audio_transcription.completed'
-            || t==='input_transcription.completed' || t==='input_audio_buffer.speech_finalized'
-            || t==='transcript.final'){
-          completeUser(msg?.id); return;
+            || t==='input_transcription.completed' || t==='transcript.final'){
+          completeUser(raw?.id); return;
         }
 
         // Single-shot
-        if ((/transcript|transcription|input_audio_buffer|input_text/.test(t)) && typeof msg?.text==='string' && !msg?.delta){
-          addLine('user', msg.text); return;
+        if ((/transcript|transcription|input_audio_buffer|input_text/.test(t)) && typeof raw?.text==='string' && !raw?.delta){
+          addLine('user', raw.text); return;
         }
 
-        // Boundaries
-        if (t==='input_audio_buffer.speech_started'){ upsert(msg?.id||'user_current','user',{ text:'', done:false }); return; }
-        if (t==='input_audio_buffer.speech_ended'){ completeUser(msg?.id||'user_current'); return; }
-
-        // Catch-all
-        if (!t.startsWith('response.') && /transcr|transcript|input_/.test(t) && typeof msg?.delta==='string'){
-          appendUserDelta(String(msg.delta), msg?.id); return;
+        // Catch-all for any user-ish delta
+        if (!t.startsWith('response.') && /transcr|transcript|input_/.test(t) && typeof raw?.delta==='string'){
+          appendUserDelta(String(raw.delta), raw?.id); return;
         }
       };
 
@@ -688,7 +711,7 @@ export default function WebCallButton({
     if(vadLoopRef.current) cancelAnimationFrame(vadLoopRef.current);
     vadLoopRef.current=null;
     try{ dcRef.current?.close(); }catch{}
-    dcRef.current = null;           // ← do not reassign the ref object
+    dcRef.current = null;           // keep ref object, clear current
     try{ pcRef.current?.close(); }catch{}
     pcRef.current=null;
     try{ micStreamRef.current?.getTracks()?.forEach(t=>t.stop()); }catch{}
