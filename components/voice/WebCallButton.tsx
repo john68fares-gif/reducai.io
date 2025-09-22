@@ -18,9 +18,7 @@ type ProsodyOpts = {
 type Props = {
   className?: string;
 
-  // model is provided by parent; we do NOT show it in the UI
   model: string;
-
   systemPrompt: string;
   voiceName: string;         // friendly or OpenAI id (e.g. "Alloy (American)" or "alloy")
   assistantName: string;
@@ -31,14 +29,9 @@ type Props = {
   onClose?: () => void;
   onError?: (e: any) => void;
 
-  // pass these from VoiceAgentSection
   firstMode?: 'Assistant speaks first' | 'User speaks first' | 'Silent until tool required';
   firstMsg?: string;
 
-  // who should send the very first greeting?
-  // - 'server'  -> we wait; if server stays silent for 1200ms we send it (to avoid dupes)
-  // - 'client'  -> client sends immediately
-  // - 'off'     -> no client greeting
   greetMode?: 'server' | 'client' | 'off';
 
   languageHint?: 'auto' | 'en' | 'de' | 'nl' | 'es' | 'ar';
@@ -51,7 +44,7 @@ type Props = {
 };
 
 /* ──────────────────────────────────────────────────────────────────────────
-   THEME (match VoiceAgentSection overlays: less rounded)
+   THEME — match VoiceAgentSection overlays exactly (solid panel)
 ────────────────────────────────────────────────────────────────────────── */
 const CTA = '#59d9b3';
 const GREEN_LINE = 'rgba(89,217,179,.20)';
@@ -69,15 +62,33 @@ const Tokens = () => (
     .va-scope{
       --bg:#0b0c10; --panel:#0d0f11; --text:#e6f1ef; --text-muted:#9fb4ad;
       --radius-outer:8px; --radius-inner:8px; --control-h:40px; --header-h:80px;
-      --panel-bg:var(--panel);
+      --page-bg:var(--bg); --panel-bg:var(--panel);
+      --input-bg:var(--panel); --input-border:rgba(255,255,255,.10);
+      --input-shadow:0 0 0 1px rgba(255,255,255,.06) inset;
+      --border-weak:rgba(255,255,255,.10);
+      --card-shadow:0 22px 44px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px ${GREEN_LINE};
+    }
+    .va-card{
+      border-radius:var(--radius-outer);
+      border:1px solid var(--border-weak);
+      background:var(--panel-bg);
+      box-shadow:var(--card-shadow);
+      overflow:hidden; isolation:isolate;
+    }
+    .va-head{
+      min-height:72px;
+      display:grid; grid-template-columns:1fr auto; align-items:center;
+      padding:0 16px; border-bottom:1px solid rgba(255,255,255,.08); color:var(--text);
+      background:linear-gradient(90deg,var(--panel-bg) 0%,color-mix(in oklab, var(--panel-bg) 97%, white 3%) 50%,var(--panel-bg) 100%);
     }
   `}</style>
 );
 
 /* ──────────────────────────────────────────────────────────────────────────
-   StyledSelect (same look as VoiceAgentSection)
+   StyledSelect — identical feel to your overlays (solid)
 ────────────────────────────────────────────────────────────────────────── */
 type Opt = { value: string; label: string; disabled?: boolean; iconLeft?: React.ReactNode };
+
 function StyledSelect({
   value, onChange, options, placeholder, leftIcon, menuTop
 }:{
@@ -137,8 +148,8 @@ function StyledSelect({
         className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-[8px] text-sm outline-none transition"
         style={{
           height:'var(--control-h)',
-          background:'var(--vs-input-bg, #101314)',
-          border:'1px solid var(--vs-input-border, rgba(255,255,255,.14))',
+          background:'var(--panel)',
+          border:'1px solid rgba(255,255,255,.14)',
           color:'var(--text)'
         }}
       >
@@ -152,12 +163,12 @@ function StyledSelect({
       {open && IS_CLIENT ? createPortal(
         <div
           ref={menuRef}
-          className="fixed z-[100020] p-2"
+          className="fixed z-[100001] p-2" // same z as overlay modal
           style={{
             left: (menuPos?.left ?? 0),
             top: (menuPos?.top ?? 0),
             width: (menuPos?.width ?? (btnRef.current?.getBoundingClientRect().width ?? 280)),
-            background:'#101314',
+            background:'var(--panel)',
             border:'1px solid rgba(255,255,255,.16)',
             borderRadius:10,
             boxShadow:'0 24px 64px rgba(0,0,0,.60), 0 8px 20px rgba(0,0,0,.45), 0 0 0 1px rgba(0,255,194,.10)'
@@ -167,7 +178,7 @@ function StyledSelect({
 
           <div
             className="flex items-center gap-2 mb-2 px-2 py-1.5 rounded-[8px]"
-            style={{ background:'#101314', border:'1px solid rgba(255,255,255,.14)', color:'var(--text)' }}
+            style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.14)', color:'var(--text)' }}
           >
             <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
             <input
@@ -296,9 +307,9 @@ export default function WebCallButton({
   ephemeralEndpoint = '/api/voice/ephemeral',
   onClose,
   onError,
-  firstMode='User speaks first',        // default avoids auto-greet unless asked
+  firstMode='User speaks first',
   firstMsg='Hello.',
-  greetMode='server',                   // see note above
+  greetMode='server',
   languageHint='auto',
   prosody,
   phoneFilter=false,
@@ -330,12 +341,11 @@ export default function WebCallButton({
   const scrollerRef=useRef<HTMLDivElement|null>(null);
   const sawAssistantDeltaRef=useRef<boolean>(false);
 
-  // optional: window.__oaiDebug = true to log message types
   const debug = (typeof window !== 'undefined' && (window as any).__oaiDebug) ? console.log : (()=>{});
 
   useEffect(()=>{ const el=scrollerRef.current; if(!el) return; el.scrollTop=el.scrollHeight; },[log,connecting,connected]);
 
-  // fetch voices from OpenAI Platform
+  // fetch voices
   useEffect(()=>{
     let cancelled=false;
     const fallback = Array.from(new Set([voiceName,...DEFAULT_VOICES].filter(Boolean))) as string[];
@@ -396,7 +406,7 @@ export default function WebCallButton({
     try{
       setConnecting(true);
 
-      // 1) ephemeral token from your backend
+      // 1) ephemeral token
       const sessionRes=await fetch(ephemeralEndpoint,{
         method:'POST', headers:{ 'Content-Type':'application/json', 'X-OpenAI-Key':apiKey },
         body:JSON.stringify({ model, voiceName:voiceId, assistantName, systemPrompt }),
@@ -428,7 +438,6 @@ export default function WebCallButton({
       const dc=pc.createDataChannel('oai-events'); dcRef.current=dc;
 
       dc.onopen=()=>{
-        // base instructions (human-y)
         const style = [
           systemPrompt || '',
           languageNudge(languageHint),
@@ -438,18 +447,14 @@ export default function WebCallButton({
         ].filter(Boolean).join('\n\n');
         baseInstructionsRef.current = style;
 
-        // ── IMPORTANT: enable user transcription + server VAD ──
+        // enable server VAD + user transcription
         safeSend(dc,{ type:'session.update', session:{
           instructions: baseInstructionsRef.current,
           voice: voiceId,
           input_audio_format:'pcm16',
           output_audio_format:'pcm16',
           modalities:['audio','text'],
-
-          // prefer 4o transcriber; many runtimes still accept whisper-1
           input_audio_transcription: { model: 'gpt-4o-transcribe', fallback_models:['whisper-1'] },
-
-          // human turn-taking
           turn_detection: {
             type: 'server_vad',
             threshold: 0.5,
@@ -458,7 +463,7 @@ export default function WebCallButton({
           },
         }});
 
-        // ——— Greeting logic (no duplicates) ———
+        // greeting (no dupes)
         const wantClientGreeting =
           greetMode==='client' ||
           (greetMode==='server' && firstMode==='Assistant speaks first');
@@ -477,14 +482,14 @@ export default function WebCallButton({
         }
       };
 
-      // 5) events — handle BOTH transcripts (assistant + user) across variants
+      // 5) events — assistant + user (more exhaustive)
       dc.onmessage=(ev)=>{
         let msg:any;
         try{ msg=JSON.parse(ev.data); }catch{ return; }
         const t=String(msg?.type||'');
         debug('[oai]', t);
 
-        // ── ASSISTANT text stream
+        /* ASSISTANT */
         if(t==='response.output_text.delta'){
           sawAssistantDeltaRef.current = true;
           const id=msg?.response_id||msg?.id||'assistant_current';
@@ -502,65 +507,54 @@ export default function WebCallButton({
           const id=msg?.response_id||msg?.id||'assistant_current';
           upsert(id,'assistant',{ done:true });
         }
-        // fallback: assistant message created with inline text/transcript
         if (t==='conversation.item.created' && msg?.item?.type==='message' && msg?.item?.role==='assistant') {
           const text=(msg?.item?.content||[]).map((c:any)=>c?.text||c?.transcript||'').join(' ').trim();
           if (text) addLine('assistant', text);
         }
 
-        // ── USER transcript (catch ALL shapes I’ve seen)
-        // 1) canonical
-        if (t==='transcript.delta'){
-          const id=msg?.transcript_id||msg?.id||'user_current';
-          upsert(id,'user',(prev)=>({ text:(prev?.text||prev?.delta||'') + String(msg?.delta||'') }));
-          return;
-        }
-        if (t==='transcript.completed'){
-          const id=msg?.transcript_id||msg?.id||'user_current';
-          upsert(id,'user',{ done:true });
-          return;
-        }
+        /* USER — handle all shapes */
+        const appendUserDelta = (delta:string, id?:string) => {
+          const useId = id || 'user_current';
+          upsert(useId,'user',(prev)=>({ text:(prev?.text||'') + (delta || '') }));
+        };
+        const completeUser = (id?:string) => upsert(id||'user_current','user',{ done:true });
+
+        // 1) canonical transcript stream
+        if (t==='transcript.delta'){ appendUserDelta(String(msg?.delta||''), msg?.transcript_id||msg?.id); return; }
+        if (t==='transcript.completed'){ completeUser(msg?.transcript_id||msg?.id); return; }
 
         // 2) conversation-scoped
-        if (t==='conversation.item.input_audio_transcript.delta'){
-          const id=msg?.item_id||msg?.id||'user_current';
-          upsert(id,'user',(prev)=>({ text:(prev?.text||'') + String(msg?.delta||'') }));
-          return;
-        }
-        if (t==='conversation.item.input_audio_transcript.completed' || t==='conversation.item.completed'){
-          const id=msg?.item_id||msg?.id||'user_current';
-          upsert(id,'user',{ done:true });
-          return;
-        }
+        if (t==='conversation.item.input_audio_transcript.delta'){ appendUserDelta(String(msg?.delta||''), msg?.item_id||msg?.id); return; }
+        if (t==='conversation.item.input_audio_transcript.completed' || t==='conversation.item.completed'){ completeUser(msg?.item_id||msg?.id); return; }
 
-        // 3) input buffer variants
+        // 3) input buffer variants (both transcript.* and transcription.*)
         if (t==='input_audio_buffer.transcript.delta' || t==='input_audio_buffer.transcription.delta'){
-          const id=msg?.transcript_id||msg?.id||'user_current';
-          upsert(id,'user',(prev)=>({ text:(prev?.text||'') + String(msg?.delta||'') }));
-          return;
+          appendUserDelta(String(msg?.delta||''), msg?.transcript_id||msg?.id); return;
         }
         if (t==='input_audio_buffer.transcript.completed' || t==='input_audio_buffer.transcription.completed'){
-          const id=msg?.transcript_id||msg?.id||'user_current';
-          upsert(id,'user',{ done:true });
-          return;
+          completeUser(msg?.transcript_id||msg?.id); return;
         }
 
-        // 4) single-shot fallback (no delta)
-        if ((t.includes('transcript') || t.includes('transcription') || t.includes('input_audio_buffer')) && typeof msg?.text==='string' && !msg?.delta){
-          addLine('user', msg.text);
-          return;
+        // 4) additional variants seen in some runtimes
+        if (t==='input_audio_transcript.delta' || t==='input_audio_transcription.delta' || t==='input_transcription.delta'){
+          appendUserDelta(String(msg?.delta||''), msg?.id); return;
+        }
+        if (t==='input_audio_transcript.completed' || t==='input_audio_transcription.completed' || t==='input_transcription.completed' || t==='input_audio_buffer.speech_finalized' || t==='transcript.final'){
+          completeUser(msg?.id); return;
         }
 
-        // 5) speech boundary helpers (optional bubble anchoring)
-        if (t==='input_audio_buffer.speech_started'){
-          const id=msg?.id||'user_current';
-          upsert(id,'user',{ text:'', done:false });
-          return;
+        // 5) single-shot fallback (no delta)
+        if ((/transcript|transcription|input_audio_buffer/.test(t)) && typeof msg?.text==='string' && !msg?.delta){
+          addLine('user', msg.text); return;
         }
-        if (t==='input_audio_buffer.speech_ended'){
-          const id=msg?.id||'user_current';
-          upsert(id,'user',{ done:true });
-          return;
+
+        // 6) speech boundaries
+        if (t==='input_audio_buffer.speech_started'){ upsert(msg?.id||'user_current','user',{ text:'', done:false }); return; }
+        if (t==='input_audio_buffer.speech_ended'){ completeUser(msg?.id||'user_current'); return; }
+
+        // 7) ultimate catch-all: any *delta* field on a user-ish event name
+        if (!t.startsWith('response.') && /transcr|transcript|input_/.test(t) && typeof msg?.delta==='string'){
+          appendUserDelta(String(msg.delta), msg?.id); return;
         }
       };
 
@@ -612,15 +606,15 @@ export default function WebCallButton({
   }
   function endCall(userIntent=true){ cleanup(); setConnected(false); setConnecting(false); if(userIntent) onClose?.(); }
 
-  // start on mount / voice change
+  // start on mount / when voice changes
   useEffect(()=>{ startCall(); return ()=>{ cleanup(); }; // eslint-disable-next-line
   },[voiceId]);
 
   /* ────────────────────────────────────────────────────────────────────────
-     UI — right overlay sheet (match VoiceAgentSection, less rounded)
+     UI — right overlay sheet (solid, same look as VoiceAgent overlays)
   ───────────────────────────────────────────────────────────────────────── */
   const header = (
-    <div className="va-head" style={{ minHeight: 72 }}>
+    <div className="va-head">
       <div className="flex items-center gap-3 min-w-0">
         <div className="inline-grid place-items-center w-9 h-9 rounded-[8px]"
              style={{ background:'rgba(89,217,179,.12)', border:'1px solid rgba(89,217,179,.25)' }}>
@@ -629,13 +623,12 @@ export default function WebCallButton({
         <div className="min-w-0">
           <div className="text-xs" style={{ color:'var(--text-muted)' }}>Talking to</div>
           <div className="font-semibold truncate" style={{ color:'var(--text)' }}>{assistantName || 'Assistant'}</div>
-          {/* Model intentionally hidden per your request */}
         </div>
       </div>
 
       <div className="ml-auto flex items-center gap-2">
         {/* Voice dropdown */}
-        <div style={{ width: 180 }}>
+        <div style={{ width: 200 }}>
           <StyledSelect
             value={voiceId}
             onChange={(v)=>setSelectedVoice(v)}
@@ -670,7 +663,7 @@ export default function WebCallButton({
 
   const body = (
     <div className="p-3 md:p-4" style={{ color:'var(--text)' }}>
-      {/* Transcript — WhatsApp-style bubbles for BOTH sides */}
+      {/* Transcript — bubbles for BOTH sides (user text visible while streaming) */}
       <div ref={scrollerRef} className="space-y-3 overflow-y-auto" style={{ maxHeight:'calc(100vh - 72px - 52px)', scrollbarWidth:'thin' }}>
         {log.length===0 && (
           <div
@@ -700,7 +693,7 @@ export default function WebCallButton({
                 borderColor: row.who==='user' ? 'rgba(56,196,143,.35)' : 'rgba(255,255,255,.14)',
               }}
             >
-              <div>{row.text || <span style={{ opacity:.5 }}>…</span>}</div>
+              <div>{row.text && row.text.trim().length ? row.text : <span style={{ opacity:.5 }}>…listening</span>}</div>
               <div className="text-[10px] mt-1 opacity-60 text-right">{fmtTime(row.at)}</div>
             </div>
 
@@ -744,7 +737,8 @@ export default function WebCallButton({
       style={{
         position:'fixed', top:0, right:0, bottom:0,
         width:'clamp(380px, 34vw, 560px)',
-        zIndex: 100010, background:'var(--panel-bg)', color:'var(--text)',
+        zIndex: 100010,
+        background:'var(--panel-bg)', color:'var(--text)',
         borderLeft: `1px solid ${GREEN_LINE}`,
         borderTopLeftRadius: 8,
         borderBottomLeftRadius: 8,
