@@ -32,16 +32,21 @@ type Props = {
   firstMsg?: string;
   greetMode?: 'server' | 'client' | 'off';
 
+  /** 'auto' lets the model detect and reply in caller language */
   languageHint?: 'auto' | 'en' | 'de' | 'nl' | 'es' | 'ar';
+
   prosody?: ProsodyOpts;
 
+  /** Audio polish */
   phoneFilter?: boolean;
   farMic?: boolean;
   ambience?: 'off' | 'kitchen' | 'cafe';
   ambienceLevel?: number;
 };
 
-/* ─────────── THEME: match Generate overlay, less rounded ─────────── */
+/* ───────────────────────────── THEME ─────────────────────────────
+   Match Generate overlay (solid, less rounded, green line)
+────────────────────────────────────────────────────────────────── */
 const CTA = '#59d9b3';
 const GREEN_LINE = 'rgba(89,217,179,.20)';
 const IS_CLIENT = typeof window !== 'undefined' && typeof document !== 'undefined';
@@ -69,22 +74,21 @@ const Tokens = () => (
     }
     .va-card{
       border-radius:var(--radius-outer);
-      border:1px solid ${GREEN_LINE};
-      background:var(--panel-bg); /* solid, no translucency */
+      border:1px solid var(--border-weak);
+      background:var(--panel-bg); /* solid */
       box-shadow:var(--card-shadow);
       overflow:hidden; isolation:isolate;
     }
     .va-head{
       min-height:var(--header-h);
       display:grid; grid-template-columns:1fr auto; align-items:center;
-      padding:0 16px; color:var(--text);
+      padding:0 16px; border-bottom:1px solid ${GREEN_LINE}; color:var(--text);
       background:linear-gradient(90deg,var(--panel-bg) 0%,color-mix(in oklab, var(--panel-bg) 97%, white 3%) 50%,var(--panel-bg) 100%);
-      border-bottom:1px solid ${GREEN_LINE}; /* ← match Generate overlay */
     }
   `}</style>
 );
 
-/* ───────────────────────── StyledSelect (8px) ───────────────────────── */
+/* ───────────────────────── StyledSelect ───────────────────────── */
 type Opt = { value: string; label: string; disabled?: boolean; iconLeft?: React.ReactNode };
 function StyledSelect({
   value, onChange, options, placeholder, leftIcon, menuTop
@@ -167,7 +171,7 @@ function StyledSelect({
             width: (menuPos?.width ?? (btnRef.current?.getBoundingClientRect().width ?? 280)),
             background:'var(--panel)',
             border:'1px solid rgba(255,255,255,.16)',
-            borderRadius:8, /* less rounded */
+            borderRadius:10,
             boxShadow:'0 24px 64px rgba(0,0,0,.60), 0 8px 20px rgba(0,0,0,.45), 0 0 0 1px rgba(0,255,194,.10)'
           }}
         >
@@ -375,7 +379,7 @@ export default function WebCallButton({
     if(!dc||dc.readyState!=='open') return; try{ dc.send(JSON.stringify(payload)); }catch{}
   };
 
-  // minimal VAD ducking
+  // minimal VAD ducking (drops TTS volume when you speak)
   async function setupVAD(){
     try{
       const mic=micStreamRef.current; if(!mic) return;
@@ -440,14 +444,22 @@ export default function WebCallButton({
         ].filter(Boolean).join('\n\n');
         baseInstructionsRef.current = style;
 
-        // Enable user transcription + server VAD
+        // Enable *user* transcription + server VAD (explicit enabled:true)
         safeSend(dc,{ type:'session.update', session:{
           instructions: baseInstructionsRef.current,
           voice: voiceId,
           input_audio_format:'pcm16',
           output_audio_format:'pcm16',
           modalities:['audio','text'],
-          input_audio_transcription: { model: 'gpt-4o-transcribe', enabled: true, fallback_models:['whisper-1'] },
+          // ---- transcription FIX (explicit on + language hint) ----
+          input_audio_transcription: {
+            model: 'gpt-4o-transcribe',
+            enabled: true,
+            // some runtimes accept 'language' — harmless if ignored:
+            ...(languageHint && languageHint!=='auto' ? { language: languageHint } : {}),
+            fallback_models: ['whisper-1']
+          },
+          // --- reliable server VAD ---
           turn_detection: {
             type: 'server_vad',
             threshold: 0.5,
@@ -475,7 +487,7 @@ export default function WebCallButton({
         }
       };
 
-      // 5) events — assistant + user
+      // 5) events — assistant + user (handle *all* transcript shapes)
       dc.onmessage=(ev)=>{
         let msg:any;
         try{ msg=JSON.parse(ev.data); }catch{ return; }
@@ -488,10 +500,7 @@ export default function WebCallButton({
           const id=msg?.response_id||msg?.id||'assistant_current';
           upsert(id,'assistant',(prev)=>({ text:(prev?.text||'')+String(msg?.delta||'') }));
         }
-        if(t==='response.output_text' && typeof msg?.text==='string'){
-          sawAssistantDeltaRef.current = true;
-          addLine('assistant', msg.text);
-        }
+        if(t==='response.output_text' && typeof msg?.text==='string'){ sawAssistantDeltaRef.current = true; addLine('assistant', msg.text); }
         if(t==='response.audio_transcript.delta'){
           const id=msg?.response_id||msg?.id||'assistant_current';
           upsert(id,'assistant',(prev)=>({ text:(prev?.text||'')+String(msg?.delta||'') }));
@@ -591,7 +600,7 @@ export default function WebCallButton({
     if(vadLoopRef.current) cancelAnimationFrame(vadLoopRef.current);
     vadLoopRef.current=null;
     try{ dcRef.current?.close(); }catch{}
-    dcRef.current=null;
+    dcRef=null;
     try{ pcRef.current?.close(); }catch{}
     pcRef.current=null;
     try{ micStreamRef.current?.getTracks()?.forEach(t=>t.stop()); }catch{}
@@ -601,18 +610,19 @@ export default function WebCallButton({
   }
   function endCall(userIntent=true){ cleanup(); setConnected(false); setConnecting(false); if(userIntent) onClose?.(); }
 
+  // start on mount / when voice changes
   useEffect(()=>{ startCall(); return ()=>{ cleanup(); }; // eslint-disable-next-line
   },[voiceId]);
 
-  /* ─────────────────────────── UI (match overlay) ─────────────────────────── */
+  /* ─────────────────────────── UI (solid like Generate overlay) ─────────────────────────── */
 
-  // OPAQUE BACKDROP (same as Generate overlay family)
+  // OPAQUE BACKDROP
   const backdrop = (
     <div
       className="fixed inset-0"
       style={{
         zIndex: 100008,
-        background: '#0a0d0f',   // solid
+        background: '#0a0d0f',  // solid
         opacity: 0.94,
       }}
       onClick={()=>endCall(true)}
@@ -671,11 +681,11 @@ export default function WebCallButton({
 
   const body = (
     <div className="p-4" style={{ color:'var(--text)', background:'var(--panel-bg)' }}>
-      <div className="text-xs pb-2 mb-3" style={{ borderBottom:`1px solid ${GREEN_LINE}`, color:'var(--text-muted)' }}>
+      <div className="text-xs pb-2 mb-3 border-b" style={{ borderColor:'rgba(255,255,255,.10)', color:'var(--text-muted)' }}>
         Transcript
       </div>
 
-      {/* Transcript — bubbles for BOTH sides (less rounded 8px; solid) */}
+      {/* Transcript — bubbles for BOTH sides (user text visible while streaming) */}
       <div ref={scrollerRef} className="space-y-3 overflow-y-auto" style={{ maxHeight:'calc(100vh - 72px - 52px - 50px)', scrollbarWidth:'thin' }}>
         {log.length===0 && (
           <div
@@ -697,9 +707,9 @@ export default function WebCallButton({
             )}
 
             <div
-              className="max-w-[78%] rounded-[8px] px-3 py-2 text-[0.95rem] leading-snug border"
+              className="max-w-[78%] rounded-[10px] px-3 py-2 text-[0.95rem] leading-snug border"
               style={{
-                background: row.who==='user' ? 'rgba(56,196,143,.26)' : 'rgba(255,255,255,.10)',
+                background: row.who==='user' ? 'rgba(56,196,143,.26)' : 'rgba(255,255,255,.10)', // more solid
                 borderColor: row.who==='user' ? 'rgba(56,196,143,.42)' : 'rgba(255,255,255,.18)',
               }}
             >
@@ -727,7 +737,7 @@ export default function WebCallButton({
   );
 
   const footer = (
-    <div className="px-3 py-2" style={{ borderTop:`1px solid ${GREEN_LINE}`, color:'var(--text)', background:'var(--panel-bg)' }}>
+    <div className="px-3 py-2 border-t" style={{ borderColor:'rgba(255,255,255,.10)', color:'var(--text)', background:'var(--panel-bg)' }}>
       <div className="flex items-center justify-between gap-2 text-xs">
         <div className="flex items-center gap-2">
           {connecting && <Loader2 className="w-4 h-4 animate-spin" />}
@@ -750,7 +760,9 @@ export default function WebCallButton({
           width:'clamp(380px, 34vw, 560px)',
           zIndex: 100012,
           background:'var(--panel-bg)', color:'var(--text)',
-          /* Match overlay’s border/shadow (done in .va-card), keep RHS dock */
+          borderLeft: `1px solid ${GREEN_LINE}`,
+          borderTopLeftRadius: 8,
+          borderBottomLeftRadius: 8,
           borderTopRightRadius: 0,
           borderBottomRightRadius: 0,
           display:'grid', gridTemplateRows:'72px 1fr 52px',
