@@ -278,7 +278,7 @@ async function attachProcessedAudio(audioEl:HTMLAudioElement, remote:MediaStream
   const AC=(window.AudioContext||(window as any).webkitAudioContext); const ac=new AC();
   const src=ac.createMediaStreamSource(remote);
   const hp=ac.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=70;
-  const lp=ac.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=12000;
+  const lp=ac.createBiquadFilter(); lp.frequency.value=12000;
   const presence=ac.createBiquadFilter(); presence.type='peaking'; presence.frequency.value=2800; presence.Q.value=0.9; presence.gain.value=1.6;
   const body=ac.createBiquadFilter(); body.type='lowshelf'; body.frequency.value=160; body.gain.value=1.2;
   const sat=createSaturator(ac,1.05);
@@ -379,7 +379,7 @@ export default function WebCallButton({
     if(!dc||dc.readyState!=='open') return; try{ dc.send(JSON.stringify(payload)); }catch{}
   };
 
-  // minimal VAD ducking (drops TTS volume when you speak)
+  // minimal VAD ducking
   async function setupVAD(){
     try{
       const mic=micStreamRef.current; if(!mic) return;
@@ -444,22 +444,19 @@ export default function WebCallButton({
         ].filter(Boolean).join('\n\n');
         baseInstructionsRef.current = style;
 
-        // Enable *user* transcription + server VAD (explicit enabled:true)
+        // Enable *user* transcription + server VAD
         safeSend(dc,{ type:'session.update', session:{
           instructions: baseInstructionsRef.current,
           voice: voiceId,
           input_audio_format:'pcm16',
           output_audio_format:'pcm16',
           modalities:['audio','text'],
-          // ---- transcription FIX (explicit on + language hint) ----
           input_audio_transcription: {
             model: 'gpt-4o-transcribe',
             enabled: true,
-            // some runtimes accept 'language' — harmless if ignored:
             ...(languageHint && languageHint!=='auto' ? { language: languageHint } : {}),
             fallback_models: ['whisper-1']
           },
-          // --- reliable server VAD ---
           turn_detection: {
             type: 'server_vad',
             threshold: 0.5,
@@ -529,6 +526,10 @@ export default function WebCallButton({
         if (t==='conversation.item.input_audio_transcript.delta'){ appendUserDelta(String(msg?.delta||''), msg?.item_id||msg?.id); return; }
         if (t==='conversation.item.input_audio_transcript.completed' || t==='conversation.item.completed'){ completeUser(msg?.item_id||msg?.id); return; }
 
+        // Some runtimes send input_text deltas when ASR is proxied as text items
+        if (t==='conversation.item.input_text.delta'){ appendUserDelta(String(msg?.delta||''), msg?.item_id||msg?.id); return; }
+        if (t==='conversation.item.input_text.completed'){ completeUser(msg?.item_id||msg?.id); return; }
+
         // Input buffer (two spellings)
         if (t==='input_audio_buffer.transcript.delta' || t==='input_audio_buffer.transcription.delta'){
           appendUserDelta(String(msg?.delta||''), msg?.transcript_id||msg?.id); return;
@@ -548,7 +549,7 @@ export default function WebCallButton({
         }
 
         // Single-shot (no delta)
-        if ((/transcript|transcription|input_audio_buffer/.test(t)) && typeof msg?.text==='string' && !msg?.delta){
+        if ((/transcript|transcription|input_audio_buffer|input_text/.test(t)) && typeof msg?.text==='string' && !msg?.delta){
           addLine('user', msg.text); return;
         }
 
@@ -600,7 +601,7 @@ export default function WebCallButton({
     if(vadLoopRef.current) cancelAnimationFrame(vadLoopRef.current);
     vadLoopRef.current=null;
     try{ dcRef.current?.close(); }catch{}
-    dcRef=null;
+    dcRef.current = null;                // ✅ fixed (do NOT reassign ref)
     try{ pcRef.current?.close(); }catch{}
     pcRef.current=null;
     try{ micStreamRef.current?.getTracks()?.forEach(t=>t.stop()); }catch{}
@@ -752,7 +753,13 @@ export default function WebCallButton({
 
   const panel = (
     <>
-      {backdrop}
+      {/* SOLID backdrop to match Generate overlay */}
+      <div
+        className="fixed inset-0"
+        style={{ zIndex: 100008, background: '#0a0d0f', opacity: 0.94 }}
+        onClick={()=>endCall(true)}
+        aria-hidden
+      />
       <aside
         className={`va-card ${className||''}`}
         style={{
