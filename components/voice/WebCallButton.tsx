@@ -256,7 +256,7 @@ const resolveVoiceId = (key:string) => {
 };
 
 /* ──────────────────────────────────────────────────────────────────────────
-   AUDIO ENHANCERS (phone-ish polish + optional ambience + breathing)
+   AUDIO ENHANCERS (phone polish + ambience + breathing)
 ────────────────────────────────────────────────────────────────────────── */
 function createSaturator(ac: AudioContext, drive=1.05){
   const sh=ac.createWaveShaper(); const curve=new Float32Array(1024);
@@ -311,7 +311,6 @@ async function attachProcessedAudio(
 ){
   const { phoneFilter, farMic, ambience, ambienceLevel, breathing, breathingLevel } = opts;
 
-  // Simple case
   if(!phoneFilter && !breathing){
     (audioEl as any).srcObject=remote; await audioEl.play().catch(()=>{}); return ()=>{};
   }
@@ -343,7 +342,6 @@ async function attachProcessedAudio(
     const breathGain = ac.createGain(); breathGain.gain.value = breathingLevel * 0.9;
     node.connect(breathGain); breathGain.connect(merge);
 
-    // Gate: when assistant is loud, fade breath down; when silent, fade it up
     const an = ac.createAnalyser(); an.fftSize = 512; an.smoothingTimeConstant = 0.85;
     comp.connect(an);
     const buf = new Uint8Array(an.frequencyBinCount);
@@ -416,13 +414,11 @@ export default function WebCallButton({
   const baseInstructionsRef=useRef<string>('');
   const scrollerRef=useRef<HTMLDivElement|null>(null);
   const sawAssistantDeltaRef=useRef<boolean>(false);
-
-  // For sentence rests
   const lastRestRef=useRef<number>(0);
 
   useEffect(()=>{ const el=scrollerRef.current; if(!el) return; el.scrollTop=el.scrollHeight; },[log,connecting,connected]);
 
-  // fetch voices (filter to human-like)
+  // fetch voices
   useEffect(()=>{
     let cancelled=false;
     const fallback = Array.from(new Set([voiceName,...DEFAULT_VOICES].filter(Boolean))) as string[];
@@ -459,7 +455,7 @@ export default function WebCallButton({
     if(!dc||dc.readyState!=='open') return; try{ dc.send(JSON.stringify(payload)); }catch{}
   };
 
-  // minimal mic VAD ducking (drops TTS volume while user speaks)
+  // VAD ducking on mic energy (so you can talk over it)
   async function setupVAD(){
     try{
       const mic=micStreamRef.current; if(!mic) return;
@@ -477,17 +473,17 @@ export default function WebCallButton({
     }catch{ return ()=>{}; }
   }
 
-  // Duck audio for ~500ms at sentence boundaries (simple, effective)
+  // sentence rest (duck TTS ~500ms on punctuation)
   function restBetweenSentences(delta: string){
     if(!audioRef.current) return;
     if(!/[.!?…]\s*$/.test(delta)) return;
     const now=Date.now();
-    if(now - lastRestRef.current < 700) return; // avoid over-trigger
+    if(now - lastRestRef.current < 700) return;
     lastRestRef.current = now;
     const el = audioRef.current;
-    const prev = el.volume;
+    const prev = el.volume ?? 1;
     el.volume = 0.0;
-    setTimeout(()=>{ el.volume = prev || 1.0; }, 500);
+    setTimeout(()=>{ el.volume = prev; }, 500);
   }
 
   async function startCall(){
@@ -527,8 +523,9 @@ export default function WebCallButton({
           breathingLevel: clamp01(breathingLevel ?? 0.08)
         });
       };
-      const sendTrack=mic.getAudioTracks()[0];
-      pc.addTrack(sendTrack, mic);
+      // send mic
+      pc.addTrack(mic.getAudioTracks()[0], mic);
+      // ensure we also receive remote
       pc.addTransceiver('audio',{ direction:'recvonly' });
 
       // 4) data channel
@@ -547,7 +544,7 @@ export default function WebCallButton({
         ].filter(Boolean).join('\n\n');
         baseInstructionsRef.current = style;
 
-        // ✅ session config (TRANSCRIPTION ON + robust VAD)
+        // transcription + VAD
         safeSend(dc,{ type:'session.update', session:{
           instructions: baseInstructionsRef.current,
           voice: voiceId,
@@ -568,17 +565,15 @@ export default function WebCallButton({
           },
         }});
 
-        // Optional greeting (respects pre-speech delay)
+        // greeting (if we must)
         const wantClientGreeting =
           greetMode==='client' || (greetMode==='server' && firstMode==='Assistant speaks first');
 
         const greet = () => {
           const lines=(firstMsg||'Hello.').split(/\r?\n|\|/g).map(s=>s.trim()).filter(Boolean).slice(0,6);
-          setTimeout(()=>{
-            for(const ln of lines){
-              safeSend(dc,{ type:'response.create', response:{ modalities:['audio','text'], instructions: ln }});
-            }
-          }, preDelay);
+          setTimeout(()=>{ for(const ln of lines){
+            safeSend(dc,{ type:'response.create', response:{ modalities:['audio','text'], instructions: ln }});
+          }}, preDelay);
         };
 
         if (greetMode==='client') {
@@ -588,38 +583,37 @@ export default function WebCallButton({
         }
       };
 
-      // 5) events — ASSISTANT + USER transcripts (normalize names)
+      // 5) events — ASSISTANT + USER transcripts (robust)
       dc.onmessage=(ev)=>{
         let raw:any;
         try{ raw=JSON.parse(ev.data); }catch{ return; }
-        const t0=String(raw?.type||'');
-        const t=t0.replace(/^realtime\./,''); // normalize
+        const t=String(raw?.type||'').replace(/^realtime\./,'');
 
-        /* ASSISTANT STREAM — used only to trigger rests */
+        /* ASSISTANT STREAM — also drives rests */
         if(t==='response.output_text.delta'){
           sawAssistantDeltaRef.current = true;
           const id=raw?.response_id||raw?.id||'assistant_current';
           const d=String(raw?.delta||'');
           restBetweenSentences(d);
           upsert(id,'assistant',(prev)=>({ text:(prev?.text||'')+d }));
+          return;
         }
-        if(t==='response.output_text' && typeof raw?.text==='string'){
-          sawAssistantDeltaRef.current = true;
-          addLine('assistant', raw.text);
-        }
+        if(t==='response.output_text' && typeof raw?.text==='string'){ sawAssistantDeltaRef.current = true; addLine('assistant', raw.text); return; }
         if(t==='response.audio_transcript.delta'){
           const id=raw?.response_id||raw?.id||'assistant_current';
           const d=String(raw?.delta||'');
           restBetweenSentences(d);
           upsert(id,'assistant',(prev)=>({ text:(prev?.text||'')+d }));
+          return;
         }
         if(t==='response.audio_transcript.completed' || t==='response.completed' || t==='response.stop'){
           const id=raw?.response_id||raw?.id||'assistant_current';
-          upsert(id,'assistant',{ done:true });
+          upsert(id,'assistant',{ done:true }); return;
         }
         if (t==='conversation.item.created' && raw?.item?.type==='message' && raw?.item?.role==='assistant') {
           const text=(raw?.item?.content||[]).map((c:any)=>c?.text||c?.transcript||'').join(' ').trim();
           if (text) addLine('assistant', text);
+          return;
         }
 
         /* USER TRANSCRIPT — make this bulletproof */
@@ -629,21 +623,24 @@ export default function WebCallButton({
         };
         const completeUser = (id?:string) => upsert(id||'user_current','user',{ done:true });
 
-        // Start/stop markers (make sure a row exists ASAP)
-        if (/^input_audio_buffer\.speech_started$/.test(t)) { upsert(raw?.id||'user_current','user',{ text:'', done:false }); return; }
-        if (/^input_audio_buffer\.speech_ended$/.test(t)) { completeUser(raw?.id||'user_current'); return; }
+        // Speech markers (both spellings seen in the wild)
+        if (t==='input_audio_buffer.speech_started'){ upsert(raw?.id||'user_current','user',{ text:'', done:false }); return; }
+        if (t==='input_audio_buffer.speech_ended' || t==='input_audio_buffer.speech_stopped'){ completeUser(raw?.id||'user_current'); return; }
 
         // Canonical incremental
         if (t==='transcript.delta'){ appendUserDelta(String(raw?.delta||''), raw?.transcript_id||raw?.id); return; }
         if (t==='transcript.completed'){ completeUser(raw?.transcript_id||raw?.id); return; }
 
-        // Conversation-scoped
+        // Conversation-scoped incremental
         if (t==='conversation.item.input_audio_transcript.delta'){ appendUserDelta(String(raw?.delta||''), raw?.item_id||raw?.id); return; }
         if (t==='conversation.item.input_audio_transcript.completed' || t==='conversation.item.completed'){ completeUser(raw?.item_id||raw?.id); return; }
 
-        // Some runtimes proxy as text items
-        if (t==='conversation.item.input_text.delta'){ appendUserDelta(String(raw?.delta||''), raw?.item_id||raw?.id); return; }
-        if (t==='conversation.item.input_text.completed'){ completeUser(raw?.item_id||raw?.id); return; }
+        // Some runtimes proxy user final as conversation item (role:user)
+        if (t==='conversation.item.created' && raw?.item?.type==='message' && raw?.item?.role==='user') {
+          const text=(raw?.item?.content||[]).map((c:any)=>c?.text||c?.transcript||'').join(' ').trim();
+          if (text) addLine('user', text);
+          return;
+        }
 
         // Input buffer variants
         if (t==='input_audio_buffer.transcript.delta' || t==='input_audio_buffer.transcription.delta'){
@@ -662,12 +659,12 @@ export default function WebCallButton({
           completeUser(raw?.id); return;
         }
 
-        // Single-shot
+        // Single-shot user text
         if ((/transcript|transcription|input_audio_buffer|input_text/.test(t)) && typeof raw?.text==='string' && !raw?.delta){
           addLine('user', raw.text); return;
         }
 
-        // Catch-all for any user-ish delta
+        // Ultra-safe catch-all
         if (!t.startsWith('response.') && /transcr|transcript|input_/.test(t) && typeof raw?.delta==='string'){
           appendUserDelta(String(raw.delta), raw?.id); return;
         }
@@ -711,7 +708,7 @@ export default function WebCallButton({
     if(vadLoopRef.current) cancelAnimationFrame(vadLoopRef.current);
     vadLoopRef.current=null;
     try{ dcRef.current?.close(); }catch{}
-    dcRef.current = null;           // keep ref object, clear current
+    dcRef.current = null;        // clear, don't reassign the ref object
     try{ pcRef.current?.close(); }catch{}
     pcRef.current=null;
     try{ micStreamRef.current?.getTracks()?.forEach(t=>t.stop()); }catch{}
@@ -750,133 +747,4 @@ export default function WebCallButton({
         </div>
       </div>
 
-      <div className="ml-auto flex items-center gap-2">
-        <div style={{ width: 200 }}>
-          <StyledSelect
-            value={voiceId}
-            onChange={(v)=>setSelectedVoice(v)}
-            options={(voices.length?voices:DEFAULT_VOICES).map(v=>({ value:v, label:v }))}
-            placeholder="Voice"
-          />
-        </div>
-
-        <button
-          onClick={toggleMute}
-          className="w-9 h-9 rounded-[8px] grid place-items-center"
-          style={{
-            border:'1px solid rgba(255,255,255,.14)', color:'var(--text)',
-            background: muted ? 'rgba(239,68,68,.14)' : 'transparent'
-          }}
-          title={muted ? 'Unmute mic' : 'Mute mic'} aria-label={muted ? 'Unmute' : 'Mute'}
-        >
-          {muted ? <MicOff className="w-4 h-4"/> : <Mic className="w-4 h-4" />}
-        </button>
-
-        <button
-          onClick={()=>endCall(true)}
-          className="w-9 h-9 rounded-[8px] grid place-items-center"
-          style={{ border:'1px solid rgba(239,68,68,.38)', background:'rgba(239,68,68,.18)', color:'#ffd7d7' }}
-          title="End call"
-        >
-          <X className="w-4 h-4" />
-        </button>
-      </div>
-    </div>
-  );
-
-  const body = (
-    <div className="p-4" style={{ color:'var(--text)', background:'var(--panel-bg)' }}>
-      <div className="text-xs pb-2 mb-3 border-b" style={{ borderColor:'rgba(255,255,255,.10)', color:'var(--text-muted)' }}>
-        Transcript
-      </div>
-
-      <div ref={scrollerRef} className="space-y-3 overflow-y-auto" style={{ maxHeight:'calc(100vh - 72px - 52px - 50px)', scrollbarWidth:'thin' }}>
-        {log.length===0 && (
-          <div
-            className="text-sm rounded-[8px] px-3 py-2 border"
-            style={{ color:'var(--text-muted)', background:'var(--panel)', borderColor:'rgba(255,255,255,.10)' }}
-          >
-            {connecting ? 'Connecting to voice…' :
-             firstMode==='Assistant speaks first' ? 'Assistant will greet you shortly…' : 'Say something to start — your words will appear here.'}
-          </div>
-        )}
-
-        {log.map(row=>(
-          <div key={row.id} className={`flex ${row.who==='user' ? 'justify-end' : 'justify-start'}`}>
-            {row.who==='assistant' && (
-              <div className="mr-2 mt-[2px] shrink-0 rounded-[8px] w-8 h-8 grid place-items-center"
-                   style={{ background:'rgba(89,217,179,.12)', border:'1px solid rgba(89,217,179,.25)' }}>
-                <Bot className="w-4 h-4" style={{ color: CTA }} />
-              </div>
-            )}
-
-            <div
-              className="max-w-[78%] rounded-[10px] px-3 py-2 text-[0.95rem] leading-snug border"
-              style={{
-                background: row.who==='user' ? 'rgba(56,196,143,.26)' : 'rgba(255,255,255,.10)',
-                borderColor: row.who==='user' ? 'rgba(56,196,143,.42)' : 'rgba(255,255,255,.18)',
-              }}
-            >
-              <div>{row.text && row.text.trim().length ? row.text : <span style={{ opacity:.55 }}>…listening</span>}</div>
-              <div className="text-[10px] mt-1 opacity-60 text-right">{fmtTime(row.at)}</div>
-            </div>
-
-            {row.who==='user' && (
-              <div className="ml-2 mt-[2px] shrink-0 rounded-[8px] w-8 h-8 grid place-items-center"
-                   style={{ background:'rgba(255,255,255,.10)', border:'1px solid rgba(255,255,255,.18)' }}>
-                <User className="w-4 h-4" />
-              </div>
-            )}
-          </div>
-        ))}
-
-        {error && (
-          <div className="text-xs px-3 py-2 rounded-[8px] border"
-               style={{ background:'rgba(239,68,68,.12)', borderColor:'rgba(239,68,68,.25)', color:'#ffd7d7' }}>
-            {error}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-
-  const footer = (
-    <div className="px-3 py-2 border-t" style={{ borderColor:'rgba(255,255,255,.10)', color:'var(--text)', background:'var(--panel-bg)' }}>
-      <div className="flex items-center justify-between gap-2 text-xs">
-        <div className="flex items-center gap-2">
-          {connecting && <Loader2 className="w-4 h-4 animate-spin" />}
-          <span style={{ opacity:.85 }}>
-            {connected ? 'Connected' : (connecting ? 'Connecting…' : 'Idle')}
-          </span>
-        </div>
-        <audio ref={audioRef} autoPlay playsInline />
-      </div>
-    </div>
-  );
-
-  const panel = (
-    <>
-      {backdrop}
-      <aside
-        className={`va-card ${className||''}`}
-        style={{
-          position:'fixed', top:0, right:0, bottom:0,
-          width:'clamp(380px, 34vw, 560px)',
-          zIndex: 100012,
-          display:'grid', gridTemplateRows:'72px 1fr 52px',
-          borderTopLeftRadius: 8, borderBottomLeftRadius: 8,
-        }}
-        role="dialog"
-        aria-label="Voice call panel"
-      >
-        <Tokens />
-        {header}
-        {body}
-        {footer}
-      </aside>
-    </>
-  );
-
-  if (!IS_CLIENT) return null;
-  return createPortal(panel, document.body);
-}
+      <
