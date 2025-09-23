@@ -11,7 +11,7 @@ import {
 import { scopedStorage } from '@/utils/scoped-storage';
 import WebCallButton from '@/components/voice/WebCallButton';
 
-// ✅ real ephemeral route
+// ✅ ephemeral route
 const EPHEMERAL_TOKEN_ENDPOINT = '/api/voice/ephemeral';
 
 /* ─────────── theme + layout tokens ─────────── */
@@ -68,55 +68,36 @@ const isStr = (v: any): v is string => typeof v === 'string';
 const nonEmpty = (v: any): v is string => isStr(v) && v.trim().length > 0;
 const coerceStr = (v: any): string => (isStr(v) ? v : '');
 const safeTrim = (v: any): string => (nonEmpty(v) ? v.trim() : '');
-
 const sleep = (ms:number) => new Promise(r=>setTimeout(r,ms));
 
-/* ─────────── theme tokens (less rounded, tighter controls) ─────────── */
+/* ─────────── theme tokens + micro animations ─────────── */
 const Tokens = () => (
   <style jsx global>{`
     .va-scope{
       --bg:#0b0c10; --panel:#0d0f11; --text:#e6f1ef; --text-muted:#9fb4ad;
-
       --s-2:8px; --s-3:12px; --s-4:16px; --s-5:20px; --s-6:24px;
-      --radius-outer:8px;
-      --radius-inner:8px;
-      --control-h:40px;
-      --header-h:80px;
-
+      --radius-outer:8px; --radius-inner:8px; --control-h:40px; --header-h:80px;
       --fz-title:18px; --fz-sub:15px; --fz-body:14px; --fz-label:12.5px;
       --lh-body:1.45; --ease:cubic-bezier(.22,.61,.36,1);
-
-      --app-sidebar-w: 240px;
-      --rail-w: 260px;
-
-      --page-bg:var(--bg);
-      --panel-bg:var(--panel);
-      --input-bg:var(--panel);
-      --input-border:rgba(255,255,255,.10);
-      --input-shadow:0 0 0 1px rgba(255,255,255,.06) inset;
-
+      --app-sidebar-w:240px; --rail-w:260px;
+      --page-bg:var(--bg); --panel-bg:var(--panel); --input-bg:var(--panel);
+      --input-border:rgba(255,255,255,.10); --input-shadow:0 0 0 1px rgba(255,255,255,.06) inset;
       --border-weak:rgba(255,255,255,.10);
       --card-shadow:0 20px 40px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px ${GREEN_LINE};
-      --green-weak: rgba(89,217,179,.12);
-      --red-weak: rgba(239,68,68,.14);
+      --green-weak:rgba(89,217,179,.12); --red-weak:rgba(239,68,68,.14);
+      --good:#10b981; --bad:#ef4444;
     }
+    .va-card{ border-radius:var(--radius-outer); border:1px solid var(--border-weak); background:var(--panel-bg); box-shadow:var(--card-shadow); overflow:hidden; isolation:isolate; }
+    .va-head{ min-height:var(--header-h); display:grid; grid-template-columns:1fr auto; align-items:center; padding:0 16px; border-bottom:1px solid rgba(255,255,255,.08); color:var(--text);
+      background:linear-gradient(90deg,var(--panel-bg) 0%,color-mix(in oklab, var(--panel-bg) 97%, white 3%) 50%,var(--panel-bg) 100%); border-top-left-radius:var(--radius-outer); border-top-right-radius:var(--radius-outer); }
 
-    .va-card{
-      border-radius:var(--radius-outer);
-      border:1px solid var(--border-weak);
-      background:var(--panel-bg);
-      box-shadow:var(--card-shadow);
-      overflow:hidden; isolation:isolate;
-    }
+    /* add-row animation for First Messages */
+    @keyframes vaRowIn { from { transform: scale(0.98); opacity:.0; } to { transform: scale(1); opacity:1; } }
+    .va-row-add { animation: vaRowIn 220ms var(--ease); }
 
-    .va-head{
-      min-height:var(--header-h);
-      display:grid; grid-template-columns:1fr auto; align-items:center;
-      padding:0 16px; border-bottom:1px solid rgba(255,255,255,.08); color:var(--text);
-      background:linear-gradient(90deg,var(--panel-bg) 0%,color-mix(in oklab, var(--panel-bg) 97%, white 3%) 50%,var(--panel-bg) 100%);
-      border-top-left-radius:var(--radius-outer);
-      border-top-right-radius:var(--radius-outer);
-    }
+    /* inline diff colors (typing) */
+    .va-diff-add { background: rgba(16,185,129,.14); border-left:3px solid var(--good); display:block; padding:2px 6px; border-radius:6px; margin:2px 0 }
+    .va-diff-rem { background: rgba(239,68,68,.18); border-left:3px solid var(--bad); display:block; padding:2px 6px; border-radius:6px; margin:2px 0; text-decoration: line-through; }
   `}</style>
 );
 
@@ -129,16 +110,16 @@ type AgentData = {
   model: string;
 
   firstMode: string;
-  firstMsg: string;                 // legacy
-  firstMsgs?: string[];             // list shown in UI
+  firstMsg: string;
+  firstMsgs?: string[];
   greetPick?: 'sequence'|'random';
 
   systemPrompt: string;
   systemPromptBackend?: string;
   language?: string;
 
-  contextText?: string;             // concatenated text for AI
-  ctxFiles?: { name:string; text:string }[]; // UI list of files
+  contextText?: string;
+  ctxFiles?: { name:string; text:string }[];
 
   ttsProvider: 'openai' | 'elevenlabs';
   voiceName: string;
@@ -173,12 +154,8 @@ import {
   compilePrompt
 } from '@/lib/prompt-engine';
 
-const looksLikeFullPromptRT = (raw: string) =>
-  isFn(_looksLikeFullPrompt) ? !!_looksLikeFullPrompt(raw) : false;
-
-const normalizeFullPromptRT = (raw: string) =>
-  isFn(_normalizeFullPrompt) ? coerceStr(_normalizeFullPrompt(raw)) : raw;
-
+const looksLikeFullPromptRT = (raw: string) => isFn(_looksLikeFullPrompt) ? !!_looksLikeFullPrompt(raw) : false;
+const normalizeFullPromptRT = (raw: string) => isFn(_normalizeFullPrompt) ? coerceStr(_normalizeFullPrompt(raw)) : raw;
 const DEFAULT_PROMPT_RT = nonEmpty(_DEFAULT_PROMPT) ? _DEFAULT_PROMPT! : PROMPT_SKELETON;
 
 /* ─────────── defaults ─────────── */
@@ -188,7 +165,7 @@ const DEFAULT_AGENT: AgentData = {
   model: 'gpt-4o',
   firstMode: 'Assistant speaks first',
   firstMsg: '',
-  firstMsgs: [],                   // BLANK (user adds with +)
+  firstMsgs: [],
   greetPick: 'sequence',
   systemPrompt:
     (normalizeFullPromptRT(`
@@ -208,8 +185,8 @@ const DEFAULT_AGENT: AgentData = {
 - If unsure, ask a specific clarifying question first.
 `).trim() + '\n\n' + `# ${BLANK_TEMPLATE_NOTE}\n`),
   systemPromptBackend: '',
-  contextText: '',               // BLANK (files build this)
-  ctxFiles: [],                  // BLANK list
+  contextText: '',
+  ctxFiles: [],
   ttsProvider: 'openai',
   voiceName: 'Alloy (American)',
   apiKeyId: '',
@@ -513,8 +490,8 @@ function lineDiff(base:string, next:string){
   let i=0, j=0;
   while (i<a.length || j<b.length){
     if (a[i] === b[j]) { rows.push({ t:'same', text: a[i++] ?? '' }); j++; continue; }
-    if (b[j] && !a.includes(b[j])) { rows.push({ t:'add', text: b[j++] }); continue; } // additions (green)
-    if (a[i] && !b.includes(a[i])) { rows.push({ t:'rem', text: a[i++] }); continue; } // removals (red)
+    if (b[j] && !a.includes(b[j])) { rows.push({ t:'add', text: b[j++] }); continue; } // additions → green
+    if (a[i] && !b.includes(a[i])) { rows.push({ t:'rem', text: a[i++] }); continue; } // removals → red
     rows.push({ t:'same', text: b[j++] ?? '' }); i++;
   }
   return rows;
@@ -528,29 +505,24 @@ function DiffInline({ base, next }:{ base:string; next:string }){
     >
       {rows.map((r, i) => {
         if (r.t === 'same') return <span key={i}>{(r.text || ' ') + '\n'}</span>;
-        if (r.t === 'add') return (
-          <span
-            key={i}
-            style={{ background:'rgba(16,185,129,.14)', borderLeft:'3px solid #10b981', display:'block', padding:'2px 6px', borderRadius:6, margin:'2px 0' }}
-          >{(r.text || ' ') + '\n'}</span>
-        );
-        return (
-          <span
-            key={i}
-            style={{ background:'rgba(239,68,68,.18)', borderLeft:'3px solid #ef4444', display:'block', padding:'2px 6px', borderRadius:6, margin:'2px 0', textDecoration:'line-through' }}
-          >{(r.text || ' ') + '\n'}</span>
-        );
+        if (r.t === 'add') return <span key={i} className="va-diff-add">{(r.text || ' ') + '\n'}</span>;
+        return <span key={i} className="va-diff-rem">{(r.text || ' ') + '\n'}</span>;
       })}
     </pre>
   );
 }
 
-/* ─────────── File helpers (.docx via CDN JSZip; .doc best-effort) ─────────── */
+/* ─────────── File helpers (.docx via CDN JSZip; .doc best-effort; accept .docs) ─────────── */
 async function readFileAsText(f: File): Promise<string> {
   const name = f.name.toLowerCase();
 
-  // .docx — load jszip at runtime from a CDN to avoid bundling dependency
-  if (name.endsWith('.docx')) {
+  // Allow weird ".docs" extension by treating like .docx if it is actually a zip
+  const looksZip = async () => {
+    const buf = new Uint8Array(await f.slice(0,4).arrayBuffer());
+    return buf[0]===0x50 && buf[1]===0x4b; // PK..
+  };
+
+  if (name.endsWith('.docx') || name.endsWith('.docs') || await looksZip()) {
     try {
       // @ts-ignore
       const JSZipModule = await import(
@@ -569,7 +541,7 @@ async function readFileAsText(f: File): Promise<string> {
         .replace(/<w:p[^>]*>/g,'\n')
         .replace(/<w:tab\/>/g,'\t')
         .replace(/<w:br\/>/g,'\n')
-        .replace(/<(.|\n)*?>/g,'') // strip tags
+        .replace(/<(.|\n)*?>/g,'')
         .replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>');
       return text.trim();
     } catch {
@@ -577,24 +549,17 @@ async function readFileAsText(f: File): Promise<string> {
     }
   }
 
-  // .doc (binary) — best-effort: extract printable ASCII/UTF-8 sequences
   if (name.endsWith('.doc')) {
     try {
       const buf = new Uint8Array(await f.arrayBuffer());
-      let out = '';
-      let run: number[] = [];
+      let out = '', run:number[]=[];
       const flush = () => { if (run.length >= 3) out += String.fromCharCode(...run) + '\n'; run = []; };
-      for (const b of buf) {
-        if (b >= 32 && b <= 126) run.push(b); else flush();
-      }
+      for (const b of buf) { if (b >= 32 && b <= 126) run.push(b); else flush(); }
       flush();
       return out.trim();
-    } catch {
-      return '';
-    }
+    } catch { return ''; }
   }
 
-  // Plain text-ish
   return new Promise((res, rej) => {
     const r = new FileReader();
     r.onerror = () => rej(new Error('Read failed'));
@@ -633,7 +598,7 @@ export default function VoiceAgentSection() {
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [showCall, setShowCall] = useState(false);
 
-  // Generate flow
+  // Generate / type-into-prompt flow
   const [showGenerate, setShowGenerate] = useState(false);
   const [composerText, setComposerText] = useState('');
   const [isTypingIntoPrompt, setIsTypingIntoPrompt] = useState(false);
@@ -736,6 +701,18 @@ export default function VoiceAgentSection() {
     };
   }
 
+  // keep backend prompt synced when user types by hand
+  useEffect(() => {
+    if (!data.systemPrompt) return;
+    try {
+      const compiled = compilePrompt({ basePrompt: data.systemPrompt, userText: '' });
+      if (compiled?.backendString && compiled.backendString !== data.systemPromptBackend) {
+        setData(p => ({ ...p, systemPromptBackend: compiled.backendString }));
+      }
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.systemPrompt]);
+
   async function doSave(){
     if (!activeId) { setToastKind('error'); setToast('Select or create an agent'); return; }
     setSaving(true); setToast('');
@@ -751,7 +728,7 @@ export default function VoiceAgentSection() {
     finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
   }
 
-  /* File context: click-to-upload only, builds ctxFiles[], and contextText for AI */
+  /* Files: click-to-upload, show Import button to type-diff into prompt */
   const fileInputRef = useRef<HTMLInputElement|null>(null);
   const rebuildContextText = (files:{name:string;text:string}[]) => {
     const merged = files.map(f => `# File: ${f.name}\n${(f.text||'').trim()}`).join('\n\n');
@@ -770,11 +747,37 @@ export default function VoiceAgentSection() {
     setToastKind('info'); setToast('File(s) added'); setTimeout(()=>setToast(''), 1200);
   };
 
+  // Import files → prompt (typed diff)
+  const importFilesIntoPrompt = async () => {
+    const ctx  = (data.contextText || '').trim();
+    const base = (data.systemPromptBackend || data.systemPrompt || DEFAULT_PROMPT_RT).trim();
+    const next = ctx ? `${base}\n\n[Context]\n${ctx}`.trim() : base;
+    basePromptRef.current = data.systemPrompt || DEFAULT_PROMPT_RT;
+    setShowGenerate(false);
+    await sleep(80);
+    setIsTypingIntoPrompt(true);
+    setDiffCandidate(''); // will fill via RAF
+    if (typingRef.current) cancelAnimationFrame(typingRef.current as any);
+    let i = 0;
+    const step = () => {
+      i += Math.max(1, Math.round(next.length / 140));
+      setDiffCandidate(next.slice(0, i));
+      if (i < next.length) typingRef.current = requestAnimationFrame(step);
+    };
+    typingRef.current = requestAnimationFrame(step);
+
+    // also precompile backend so Accept applies instantly
+    try {
+      const compiled = compilePrompt({ basePrompt: next, userText: '' });
+      setField('systemPromptBackend')(compiled.backendString);
+    } catch {}
+  };
+
   /* Generate → type inside the prompt box with Accept/Decline + green/red diff */
   const startTypingIntoPrompt = async (targetText:string) => {
     basePromptRef.current = data.systemPrompt || DEFAULT_PROMPT_RT;
     setIsTypingIntoPrompt(true);
-    setDiffCandidate(''); // live typed content
+    setDiffCandidate('');
     if (typingRef.current) cancelAnimationFrame(typingRef.current as any);
     let i = 0;
     const step = () => {
@@ -788,10 +791,12 @@ export default function VoiceAgentSection() {
     typingRef.current = requestAnimationFrame(step);
   };
   const acceptGenerated = () => {
-    const chosen = diffCandidate || data.systemPrompt;
+    const chosen = (diffCandidate || data.systemPrompt).replace(/\u200b/g,'');
     setField('systemPrompt')(chosen);
-    const compiled = compilePrompt({ basePrompt: chosen, userText: '' });
-    setField('systemPromptBackend')(compiled.backendString);
+    try {
+      const compiled = compilePrompt({ basePrompt: chosen, userText: '' });
+      setField('systemPromptBackend')(compiled.backendString);
+    } catch {}
     setIsTypingIntoPrompt(false);
     setDiffCandidate('');
   };
@@ -811,6 +816,17 @@ export default function VoiceAgentSection() {
     const found = openaiModels.find(o => o.value === data.model);
     return found?.label || data.model || '—';
   }, [openaiModels, data.model]);
+
+  /* state for First Message add-row highlight */
+  const [justAddedIndex, setJustAddedIndex] = useState<number | null>(null);
+  const addFirstMessage = () => {
+    const next = [...(data.firstMsgs||[])];
+    if (next.length >= 20) return;
+    next.push('');
+    setField('firstMsgs')(next);
+    setJustAddedIndex(next.length - 1);
+    setTimeout(()=>setJustAddedIndex(null), 260);
+  };
 
   /* ─────────── UI ─────────── */
   return (
@@ -948,7 +964,7 @@ export default function VoiceAgentSection() {
               </div>
             </div>
 
-            {/* First messages (blank until Add) */}
+            {/* First messages */}
             <div className="mt-4">
               <div className="mb-2 flex items-center justify-between">
                 <div className="font-medium text-[12.5px]">First Messages</div>
@@ -963,12 +979,7 @@ export default function VoiceAgentSection() {
                   />
                   <button
                     type="button"
-                    onClick={()=>{
-                      const next = [...(data.firstMsgs||[])];
-                      if (next.length >= 20) return;
-                      next.push('');
-                      setField('firstMsgs')(next);
-                    }}
+                    onClick={addFirstMessage}
                     className="inline-flex items-center gap-2 text-sm rounded-[8px] px-3 py-1.5"
                     style={{ border:'1px solid rgba(255,255,255,.14)' }}
                   >
@@ -978,7 +989,7 @@ export default function VoiceAgentSection() {
               </div>
 
               {(data.firstMsgs?.length ? data.firstMsgs : []).map((msg, idx) => (
-                <div key={idx} className="flex items-center gap-2 mb-2">
+                <div key={idx} className={`flex items-center gap-2 mb-2 ${justAddedIndex===idx?'va-row-add':''}`}>
                   <input
                     value={msg}
                     onChange={(e)=>{
@@ -1044,14 +1055,14 @@ export default function VoiceAgentSection() {
                     <div className="mt-3 flex gap-2">
                       <button
                         className="h-9 px-3 rounded-[8px] font-semibold"
-                        style={{ background:'#10b981', color:'#0a0f0d' }}
+                        style={{ background:'#10b981', color:'#ffffff' }}
                         onClick={acceptGenerated}
                       >
                         Accept
                       </button>
                       <button
                         className="h-9 px-3 rounded-[8px] font-semibold"
-                        style={{ background:'#ef4444', color:'#0a0f0d' }}
+                        style={{ background:'#ef4444', color:'#ffffff' }}
                         onClick={declineGenerated}
                       >
                         Decline
@@ -1070,7 +1081,7 @@ export default function VoiceAgentSection() {
                       ref={fileInputRef}
                       type="file"
                       multiple
-                      accept=".txt,.md,.csv,.json,.docx,.doc,text/plain,text/markdown,text/csv,application/json,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword"
+                      accept=".txt,.md,.csv,.json,.docx,.doc,.docs,text/plain,text/markdown,text/csv,application/json,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,application/zip"
                       className="hidden"
                       onChange={async (e)=>{ const files = Array.from(e.target.files || []); await onPickFiles(files); if (fileInputRef.current) fileInputRef.current.value=''; }}
                     />
@@ -1083,14 +1094,24 @@ export default function VoiceAgentSection() {
                       Add file
                     </button>
                     {!!(data.ctxFiles && data.ctxFiles.length) && (
-                      <button
-                        type="button"
-                        onClick={()=>{ rebuildContextText([]); }}
-                        className="inline-flex items-center gap-2 text-sm rounded-[8px] px-3 py-1.5"
-                        style={{ border:'1px solid rgba(255,255,255,.14)' }}
-                      >
-                        Clear
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          onClick={importFilesIntoPrompt}
+                          className="inline-flex items-center gap-2 text-sm rounded-[8px] px-3 py-1.5"
+                          style={{ background:CTA, color:'#fff', border:'1px solid rgba(255,255,255,.10)' }}
+                        >
+                          Import to Prompt
+                        </button>
+                        <button
+                          type="button"
+                          onClick={()=>{ rebuildContextText([]); }}
+                          className="inline-flex items-center gap-2 text-sm rounded-[8px] px-3 py-1.5"
+                          style={{ border:'1px solid rgba(255,255,255,.14)' }}
+                        >
+                          Clear
+                        </button>
+                      </>
                     )}
                   </div>
                 </div>
@@ -1098,7 +1119,7 @@ export default function VoiceAgentSection() {
                 {/* List of files */}
                 {!(data.ctxFiles && data.ctxFiles.length) ? (
                   <div className="text-xs" style={{ color:'var(--text-muted)' }}>
-                    No files yet. Click <b>Add file</b> to upload (.txt, .md, .csv, .json, <b>.docx</b> or (best-effort) <b>.doc</b>).
+                    No files yet. Click <b>Add file</b> to upload (.txt, .md, .csv, .json, <b>.docx</b> or best-effort <b>.doc</b> / <b>.docs</b>).
                   </div>
                 ) : (
                   <div className="rounded-[8px] p-3" style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)' }}>
@@ -1232,7 +1253,7 @@ export default function VoiceAgentSection() {
         </div>
       </div>
 
-      {/* ─────────── Generate overlay (input only; typing happens in prompt box) ─────────── */}
+      {/* ─────────── Generate overlay (boxed input; typing is in prompt box) ─────────── */}
       {showGenerate && IS_CLIENT ? createPortal(
         <>
           <div
@@ -1278,13 +1299,18 @@ export default function VoiceAgentSection() {
                 <div className="text-xs" style={{ color:'var(--text-muted)' }}>
                   Tip: “assistant for a dental clinic; tone friendly; handle booking and FAQs”.
                 </div>
-                <textarea
-                  value={composerText}
-                  onChange={(e)=>setComposerText(e.target.value)}
-                  className="w-full bg-transparent outline-none rounded-[8px] px-3 py-2"
-                  placeholder="Describe changes…"
-                  style={{ minHeight: 160, maxHeight: '40vh', color:'var(--text)', resize:'vertical' }}
-                />
+                <div
+                  className="rounded-[8px] p-2"
+                  style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)' }}
+                >
+                  <textarea
+                    value={composerText}
+                    onChange={(e)=>setComposerText(e.target.value)}
+                    className="w-full bg-transparent outline-none rounded-[6px] px-3 py-2"
+                    placeholder="Describe changes…"
+                    style={{ minHeight: 160, maxHeight: '40vh', color:'var(--text)', resize:'vertical' }}
+                  />
+                </div>
               </div>
 
               <div className="px-6 pb-6 flex gap-3">
@@ -1303,7 +1329,7 @@ export default function VoiceAgentSection() {
                       const base = nonEmpty(data.systemPrompt) ? data.systemPrompt : DEFAULT_PROMPT_RT;
                       const compiled = compilePrompt({ basePrompt: base, userText: raw });
                       setShowGenerate(false);
-                      await sleep(150); // small UX pause
+                      await sleep(150);
                       await startTypingIntoPrompt(compiled.frontendText); // typing happens in the prompt box
                       setField('systemPromptBackend')(compiled.backendString);
                     } catch {
@@ -1313,7 +1339,7 @@ export default function VoiceAgentSection() {
                   }}
                   disabled={!composerText.trim()}
                   className="w-full h-[40px] rounded-[8px] font-semibold inline-flex items-center justify-center gap-2"
-                  style={{ background:CTA, color:'#0a0f0d', opacity: (!composerText.trim() ? .6 : 1) }}
+                  style={{ background:CTA, color:'#ffffff', opacity: (!composerText.trim() ? .6 : 1) }}
                 >
                   <Wand2 className="w-4 h-4" /> Generate
                 </button>
@@ -1359,7 +1385,7 @@ export default function VoiceAgentSection() {
               onClose={()=> setShowCall(false)}
               prosody={{ fillerWords: true, microPausesMs: 200, phoneFilter: true, turnEndPauseMs: 120 }}
 
-              // greetings: joined from list; blank by default
+              // greetings: joined from list
               firstMode={data.firstMode as any}
               firstMsg={
                 (data.greetPick==='random'
