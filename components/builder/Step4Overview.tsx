@@ -1,6 +1,7 @@
 // components/builder/Step4Overview.tsx
 'use client';
 
+import type { CSSProperties } from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import {
   Check, AlertCircle, Loader2, Sparkles, ArrowLeft,
@@ -17,14 +18,14 @@ const BTN_GREEN = '#10b981';
 const BTN_GREEN_HOVER = '#0ea473';
 const BTN_DISABLED = 'color-mix(in oklab, var(--text) 14%, transparent)';
 
-const CARD: React.CSSProperties = {
+const CARD: CSSProperties = {
   background: 'var(--card)',
   border: '1px solid var(--border)',
   boxShadow: 'var(--shadow-card)',
   borderRadius: 20,
 };
 
-const PANEL: React.CSSProperties = {
+const PANEL: CSSProperties = {
   background: 'var(--panel)',
   border: '1px solid var(--border)',
   boxShadow: 'var(--shadow-soft)',
@@ -75,7 +76,7 @@ function buildFinalPrompt() {
   const header = [st(s1?.name), st(s1?.industry), st(s1?.language)].filter(Boolean).join('\n');
 
   const languageText = s3?.languageText || s3?.language || '';
-  the const description = s(s3?.description) || '';
+  const description = s(s3?.description) || ''; // ← fixed: removed stray "the"
   const rules = s(s3?.rules) || '';
   const flow = s(s3?.flow) || '';
   const company = (s(s3?.company) || '').trim();
@@ -237,7 +238,6 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
 
       const parsed = await safeApi(resp);
       if (!parsed.ok) {
-        // Log raw for debugging and show a friendly error
         console.error('Save failed:', parsed.status, parsed.error, parsed.text);
         throw new Error(parsed.error || `Save failed (HTTP ${parsed.status})`);
       }
