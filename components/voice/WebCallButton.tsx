@@ -5,7 +5,9 @@ import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 're
 import { createPortal } from 'react-dom';
 import { Bot, User, Mic, MicOff, X, Loader2, ChevronDown, Search, Check, Lock } from 'lucide-react';
 
-/* ───────────── PROPS ───────────── */
+/* ──────────────────────────────────────────────────────────────────────────
+   PROPS
+────────────────────────────────────────────────────────────────────────── */
 type ProsodyOpts = {
   fillerWords?: boolean;
   microPausesMs?: number;
@@ -40,27 +42,38 @@ type Props = {
   ambience?: 'off' | 'kitchen' | 'cafe';
   ambienceLevel?: number;
 
+  // humanizing extras
   breathing?: boolean;
   breathingLevel?: number;
 
-  // local client ASR (optional)
+  // Client-side ASR so YOUR transcript always appears and supports multi-language
   clientASR?: 'off' | 'auto' | 'deepgram';
   deepgramKey?: string;
 };
 
-/* ───────────── THEME / CONSTS ───────────── */
+/* ──────────────────────────────────────────────────────────────────────────
+   THEME / CONSTANTS
+────────────────────────────────────────────────────────────────────────── */
 const CTA = '#59d9b3';
 const GREEN_LINE = 'rgba(89,217,179,.20)';
 const IS_CLIENT = typeof window !== 'undefined' && typeof document !== 'undefined';
-const HUMAN_LIKE = new Set(['alloy','verse','coral','amber','sage','juniper','opal','pebble','cobalt','ash','ballad','echo','shimmer','marin','cedar']);
-const DEFAULT_VOICES = ['alloy','verse','coral','amber','sage','juniper'];
+
+// Filter OUT the coral voice per your note
+const HUMAN_LIKE = new Set([
+  'alloy','verse', /* 'coral', */ 'amber','sage','juniper','opal','pebble','cobalt','ash','ballad','echo','shimmer','marin','cedar'
+]);
+const DEFAULT_VOICES = ['alloy','verse','amber','sage','juniper']; // coral removed
+
 const FRIENDLY_TO_ID: Record<string,string> = {
-  'Alloy (American)':'alloy','Verse (American)':'verse','Coral (British)':'coral','Amber (Australian)':'amber',
-  Alloy:'alloy', Verse:'verse', Coral:'coral', Amber:'amber', Sage:'sage', Juniper:'juniper',
-  Ash:'ash', Echo:'echo', Ballad:'ballad', Shimmer:'shimmer', Marin:'marin', Cedar:'cedar'
+  'Alloy (American)':'alloy','Verse (American)':'verse','Amber (Australian)':'amber',
+  Alloy:'alloy', Verse:'verse', Amber:'amber', Sage:'sage', Juniper:'juniper',
+  Ash:'ash', Echo:'echo', Ballad:'ballad', Shimmer:'shimmer', Marin:'marin', Cedar:'cedar',
+  // Coral intentionally not mapped
 };
 
-/* ───────────── SELECT ───────────── */
+/* ──────────────────────────────────────────────────────────────────────────
+   SELECT (same look)
+────────────────────────────────────────────────────────────────────────── */
 type Opt = { value: string; label: string; disabled?: boolean; iconLeft?: React.ReactNode };
 function StyledSelect({
   value, onChange, options, placeholder, leftIcon, menuTop
@@ -202,7 +215,10 @@ function StyledSelect({
   );
 }
 
-/* ───────────── TRANSCRIPT / UTILS ───────────── */
+/* ──────────────────────────────────────────────────────────────────────────
+   TRANSCRIPT / UTILS
+   (word-level handling: interim REPLACES, final COMMITS)
+────────────────────────────────────────────────────────────────────────── */
 type TranscriptRow = { id:string; who:'user'|'assistant'; text:string; at:number; done?:boolean };
 
 const RAW_ID = /^[a-z0-9._-]{3,}$/i;
@@ -226,7 +242,9 @@ const resolveVoiceId = (key:string) => {
   return FRIENDLY_TO_ID[k] || k || 'alloy';
 };
 
-/* ───────────── AUDIO FX ───────────── */
+/* ──────────────────────────────────────────────────────────────────────────
+   AUDIO ENHANCERS (phone-ish polish + optional ambience + breathing)
+────────────────────────────────────────────────────────────────────────── */
 function createSaturator(ac: AudioContext, drive=1.05){
   const sh=ac.createWaveShaper(); const curve=new Float32Array(1024);
   for(let i=0;i<curve.length;i++){ const x=(i/(curve.length-1))*2-1; curve[i]=Math.tanh(x*drive); }
@@ -244,7 +262,9 @@ function createAmbience(ac: AudioContext, kind:'kitchen'|'cafe', level=0.08){
   src.start();
   return ()=>{ try{src.stop()}catch{}; [src,band,hp,g].forEach(n=>{try{(n as any).disconnect()}catch{}}); };
 }
+
 function createBreather(ac: AudioContext, level=0.08){
+  // band-limited noise + slow LFO → breathy ambience (auto-gated)
   const noise = ac.createBufferSource();
   const len = ac.sampleRate * 2;
   const buf = ac.createBuffer(1, len, ac.sampleRate);
@@ -300,10 +320,10 @@ async function attachProcessedAudio(
   src.connect(hp); hp.connect(lp); lp.connect(presence); presence.connect(body); body.connect(sat); sat.connect(comp);
   comp.connect(dry); dry.connect(merge);
 
-  // optional breathing bed, auto-gated by loudness
+  // Breathing bed (auto-dips when speech is loud)
   let breathStop: null | (()=>void) = null;
   if (breathing){
-    const { node, stop } = createBreather(ac, breathingLevel);
+    const { node, stop } = createBreather(ac, breathingLevel ?? 0.08);
     breathStop = stop;
     const breathGain = ac.createGain(); breathGain.gain.value = clamp01(breathingLevel ?? 0.08) * 0.9;
     node.connect(breathGain); breathGain.connect(merge);
@@ -327,24 +347,26 @@ async function attachProcessedAudio(
   (audioEl as any).srcObject=dest.stream;
   await audioEl.play().catch(()=>{});
 
-  let ambClean:null|(()=>void)=null; if(opts.ambience!=='off') ambClean=createAmbience(ac,opts.ambience,ambienceLevel);
+  let ambClean:null|(()=>void)=null; if(ambience!=='off') ambClean=createAmbience(ac,ambience,ambienceLevel);
 
   return ()=>{ [src,hp,lp,presence,body,sat,comp,merge,dry].forEach(n=>{try{(n as any).disconnect()}catch{}}); try{ambClean&&ambClean()}catch{}; try{breathStop&&breathStop()}catch{}; try{ac.close()}catch{}; };
 }
 
-/* ───────────── LOCAL CLIENT ASR (optional) ───────────── */
+/* ──────────────────────────────────────────────────────────────────────────
+   LOCAL CLIENT ASR (so your words always show)
+────────────────────────────────────────────────────────────────────────── */
 const langToBCP47 = (hint: Props['languageHint']) => {
   switch (hint) {
     case 'nl': return 'nl-NL';
     case 'de': return 'de-DE';
     case 'es': return 'es-ES';
-    case 'ar': return 'ar';
+    case 'ar': return 'ar';      // Deepgram accepts 'ar' (modern standard); WebSpeech uses UA locale variants.
     case 'en': return 'en-US';
-    default:   return undefined;
+    default:   return undefined; // auto
   }
 };
 
-function startWebSpeechASR(opts: { lang?: string; onDelta: (t: string)=>void; onFinal: (t: string)=>void }) {
+function startWebSpeechASR(opts: { lang?: string; onInterim: (t: string)=>void; onFinal: (t: string)=>void }) {
   const W: any = window as any;
   const SR = W.SpeechRecognition || W.webkitSpeechRecognition;
   if (!SR) return null;
@@ -354,23 +376,16 @@ function startWebSpeechASR(opts: { lang?: string; onDelta: (t: string)=>void; on
   rec.interimResults = true;
   if (opts.lang) rec.lang = opts.lang;
 
-  let lastInterim = '';
   rec.onresult = (e: any) => {
     let interim = '';
     let finalText = '';
     for (let i = e.resultIndex; i < e.results.length; i++) {
       const res = e.results[i];
       if (res.isFinal) finalText += res[0].transcript;
-      else interim += res[0].transcript;
+      else interim = res[0].transcript; // REPLACE, don't accumulate
     }
-    if (interim && interim !== lastInterim) {
-      lastInterim = interim;
-      opts.onDelta(interim);
-    }
-    if (finalText) {
-      lastInterim = '';
-      opts.onFinal(finalText);
-    }
+    if (interim) opts.onInterim(interim);
+    if (finalText) opts.onFinal(finalText);
   };
 
   rec.onerror = () => {};
@@ -385,7 +400,7 @@ function startDeepgramASR(opts: {
   lang?: string;
   deepgramKey: string;
   stream: MediaStream;
-  onDelta: (t: string)=>void;
+  onInterim: (t: string)=>void;
   onFinal: (t: string)=>void;
 }) {
   const url = 'wss://api.deepgram.com/v1/listen?punctuate=true&interim_results=true' + (opts.lang ? `&language=${encodeURIComponent(opts.lang)}` : '');
@@ -405,8 +420,8 @@ function startDeepgramASR(opts: {
       const alt = data?.channel?.alternatives?.[0];
       const transcript = alt?.transcript || '';
       if (!transcript) return;
-      if (data.type === 'Results' && data.is_final) opts.onFinal(transcript);
-      else opts.onDelta(transcript);
+      if (data.is_final) opts.onFinal(transcript);
+      else opts.onInterim(transcript); // REPLACE, not append
     } catch {}
   };
 
@@ -418,7 +433,9 @@ function startDeepgramASR(opts: {
   return stop;
 }
 
-/* ───────────── COMPONENT ───────────── */
+/* ──────────────────────────────────────────────────────────────────────────
+   COMPONENT
+────────────────────────────────────────────────────────────────────────── */
 export default function WebCallButton({
   className,
   model,
@@ -463,20 +480,20 @@ export default function WebCallButton({
 
   const closeChainRef=useRef<null|(()=>void)>(null);
   const vadLoopRef=useRef<number|null>(null);
-  const baseInstructionsRef=useRef<string>('');
   const scrollerRef=useRef<HTMLDivElement|null>(null);
   const sawAssistantDeltaRef=useRef<boolean>(false);
 
-  // the fix → keep distinct rows per user turn and map server ids
+  // Per-turn mapping + interim buffers for word-level correctness
   const userTurnIdRef = useRef<string | null>(null);
   const serverToLocalUser = useRef<Map<string,string>>(new Map());
+  const userInterimRef = useRef<Map<string,{final:string; interim:string}>>(new Map()); // NEW
   const asrStopRef=useRef<null|(()=>void)>(null);
 
   const lastRestRef=useRef<number>(0);
 
   useEffect(()=>{ const el=scrollerRef.current; if(!el) return; el.scrollTop=el.scrollHeight; },[log,connecting,connected]);
 
-  /* voices */
+  // fetch voices (filter coral)
   useEffect(()=>{
     let cancelled=false;
     const fallback = Array.from(new Set([voiceName,...DEFAULT_VOICES].filter(Boolean))) as string[];
@@ -486,7 +503,7 @@ export default function WebCallButton({
         if(!r.ok) throw new Error(String(r.status));
         const j=await r.json();
         let ids:Array<string>=Array.isArray(j?.data)? j.data.map((v:any)=>v?.id).filter(Boolean):[];
-        ids=ids.filter(id=>HUMAN_LIKE.has(id)); if(!ids.length) ids=fallback;
+        ids=ids.filter(id=>HUMAN_LIKE.has(id) && id!=='coral'); if(!ids.length) ids=fallback;
         if(!cancelled){ setVoices(ids); setSelectedVoice(ids.includes(resolveVoiceId(voiceName))? resolveVoiceId(voiceName) : (ids[0]||'alloy')); }
       }catch{
         if(!cancelled){ setVoices(fallback); setSelectedVoice(resolveVoiceId(voiceName) || fallback[0]||'alloy'); }
@@ -495,38 +512,53 @@ export default function WebCallButton({
     return()=>{ cancelled=true; };
   },[apiKey, voiceName]);
 
-  /* ── helpers to guarantee new bubble per turn ── */
+  /* ── helpers to guarantee new bubble per turn + word-level interim ── */
   const newId = (p:'user'|'assistant') => `${p}_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
 
   const beginUserTurn = (serverId?:string) => {
     const id = newId('user');
     userTurnIdRef.current = id;
     if (serverId) serverToLocalUser.current.set(serverId, id);
+    userInterimRef.current.set(id, { final:'', interim:'' });
     setLog(prev => [...prev, { id, who:'user', text:'', at:Date.now(), done:false }]);
     return id;
   };
-  const appendUser = (delta:string, serverId?:string) => {
+
+  // Replace interim, commit final
+  const updateUserInterim = (txt:string, serverId?:string) => {
     let id = serverId ? serverToLocalUser.current.get(serverId) : userTurnIdRef.current;
     if (!id) id = beginUserTurn(serverId);
+    const buf = userInterimRef.current.get(id) || { final:'', interim:'' };
+    buf.interim = txt; // REPLACE (no duplications)
+    userInterimRef.current.set(id, buf);
+    const display = (buf.final + ' ' + buf.interim).replace(/\s+/g,' ').trim();
     setLog(prev=>{
       const i=prev.findIndex(r=>r.id===id);
-      if(i===-1) return [...prev,{ id, who:'user', text:delta, at:Date.now(), done:false }];
-      const next=[...prev]; next[i]={...next[i], text:(next[i].text||'')+delta, done:false}; return next;
+      if(i===-1) return [...prev,{ id, who:'user', text:display, at:Date.now(), done:false }];
+      const next=[...prev]; next[i]={...next[i], text:display, done:false}; return next;
     });
   };
-  const endUserTurn = (serverId?:string) => {
+
+  const commitUserFinal = (txt?:string, serverId?:string) => {
     const id = serverId ? (serverToLocalUser.current.get(serverId) || userTurnIdRef.current) : userTurnIdRef.current;
     if (!id) return;
+    const buf = userInterimRef.current.get(id) || { final:'', interim:'' };
+    if (txt) buf.final = (buf.final + ' ' + txt).replace(/\s+/g,' ').trim();
+    else if (buf.interim) buf.final = (buf.final + ' ' + buf.interim).replace(/\s+/g,' ').trim();
+    buf.interim = '';
+    userInterimRef.current.set(id, buf);
+    const display = buf.final;
     setLog(prev=>{
       const i=prev.findIndex(r=>r.id===id);
       if(i===-1) return prev;
-      const next=[...prev]; next[i]={...next[i], done:true}; return next;
+      const next=[...prev]; next[i]={...next[i], text:display, done:true}; return next;
     });
     if (serverId) serverToLocalUser.current.delete(serverId);
     userTurnIdRef.current = null;
   };
 
   const addAssistantDelta = (respId:string, delta:string) => {
+    // Same “replace interim” feel for assistant by soft-pausing volume at sentence ends
     setLog(prev=>{
       const i=prev.findIndex(r=>r.id===respId);
       if(i===-1){ return [...prev,{ id:respId, who:'assistant', text:delta, at:Date.now(), done:false }]; }
@@ -545,7 +577,7 @@ export default function WebCallButton({
     if(!dc||dc.readyState!=='open') return; try{ dc.send(JSON.stringify(payload)); }catch{}
   };
 
-  /* VAD ducking */
+  // minimal mic VAD ducking (drops TTS volume while user speaks)
   async function setupVAD(){
     try{
       const mic=micStreamRef.current; if(!mic) return;
@@ -563,7 +595,7 @@ export default function WebCallButton({
     }catch{ return ()=>{}; }
   }
 
-  /* sentence rest */
+  // Duck audio ~500ms at sentence boundaries (breath / rest)
   function restBetweenSentences(delta: string){
     if(!audioRef.current) return;
     if(!/[.!?…]\s*$/.test(delta)) return;
@@ -582,7 +614,7 @@ export default function WebCallButton({
     try{
       setConnecting(true);
 
-      // 1) ephemeral session
+      // 1) ephemeral token
       const sessionRes=await fetch(ephemeralEndpoint,{
         method:'POST', headers:{ 'Content-Type':'application/json', 'X-OpenAI-Key':apiKey },
         body:JSON.stringify({ model, voiceName:voiceId, assistantName, systemPrompt }),
@@ -596,25 +628,27 @@ export default function WebCallButton({
         audio: { echoCancellation:true, noiseSuppression:true, autoGainControl:true }
       }); micStreamRef.current=mic;
 
-      // 2.5) client ASR → writes new user bubble each turn
+      // 2.5) LOCAL ASR ⇒ interim replace + final commit
       try {
         const lang = langToBCP47(languageHint);
         if (asrStopRef.current) { try { asrStopRef.current(); } catch {} asrStopRef.current = null; }
         let started = false;
         const ensureStart = () => { if (!started) { beginUserTurn(); started = true; } };
-        const onDelta = (txt: string) => { ensureStart(); appendUser(txt.replace(/\s+$/,'')); };
-        const onFinal = () => { if (started) { endUserTurn(); started=false; } };
+        const onInterim = (txt: string) => { ensureStart(); updateUserInterim(txt); };
+        const onFinal = (txt: string) => { ensureStart(); commitUserFinal(txt); started=false; };
+
         if (clientASR === 'deepgram' && deepgramKey) {
-          const stop = startDeepgramASR({ lang, deepgramKey, stream: mic, onDelta, onFinal });
+          const stop = startDeepgramASR({ lang, deepgramKey, stream: mic, onInterim, onFinal });
           if (stop) asrStopRef.current = stop;
         } else if (clientASR === 'auto') {
-          const stop = startWebSpeechASR({ lang, onDelta, onFinal });
+          const stop = startWebSpeechASR({ lang, onInterim, onFinal });
           if (stop) asrStopRef.current = stop;
         }
       } catch {}
 
       // 3) peer
       const pc=new RTCPeerConnection({ iceServers:[{ urls:'stun:stun.l.google.com:19302' }] }); pcRef.current=pc;
+
       const remote=new MediaStream();
       pc.ontrack=async (e)=>{
         e.streams[0]?.getAudioTracks().forEach(t=>remote.addTrack(t));
@@ -630,6 +664,8 @@ export default function WebCallButton({
           breathingLevel: clamp01(breathingLevel ?? 0.08)
         });
       };
+
+      // push mic
       pc.addTrack(mic.getAudioTracks()[0], mic);
       pc.addTransceiver('audio',{ direction:'recvonly' });
 
@@ -637,48 +673,76 @@ export default function WebCallButton({
       const dc=pc.createDataChannel('oai-events'); dcRef.current=dc;
 
       dc.onopen=()=>{
-        const preDelay = Math.max(300, prosody?.preSpeechDelayMs ?? 500);
+        // Defaults to keep it human without overdoing filler words
+        const preDelay = Math.max(300, prosody?.preSpeechDelayMs ?? 550);
         const style = [
           systemPrompt || '',
           languageNudge(languageHint),
-          prosody?.fillerWords ? 'Use mild, natural disfluencies.' : '',
-          prosody?.microPausesMs ? `Allow micro pauses (~${prosody.microPausesMs} ms).` : '',
+          (prosody?.fillerWords ?? true) ? 'Use mild, natural disfluencies (“uh”, “um”, “like”) occasionally. Do not overuse.' : '',
+          `Allow micro pauses (~${prosody?.microPausesMs ?? 120} ms) inside sentences.`,
           `Before starting to speak, pause about ${preDelay} ms as if thinking.`,
-          `Between sentences, take a short breath and wait about 500 ms before continuing.`,
-          (prosody?.turnEndPauseMs ? `Wait ~${prosody.turnEndPauseMs} ms of silence before replying.` : 'Wait ~200 ms of silence before replying.'),
+          `Between sentences, take a light breath and wait ~500 ms before continuing.`,
+          (prosody?.turnEndPauseMs ? `Wait ~${prosody.turnEndPauseMs} ms of silence before replying.` : 'Wait ~220 ms of silence before replying.'),
         ].filter(Boolean).join('\n\n');
 
+        // If languageHint is 'auto' we omit language field for server ASR so it can detect Dutch/Arabic/Spanish/German.
+        const input_audio_transcription: any = {
+          enabled:true,
+          provider:'openai',
+          model:'gpt-4o-mini-transcribe',
+          fallback_models:['whisper-1']
+        };
+        if (languageHint && languageHint!=='auto') input_audio_transcription.language = languageHint;
+
         safeSend(dc,{ type:'session.update', session:{
-          instructions: style, voice: voiceId,
-          input_audio_format:'pcm16', output_audio_format:'pcm16',
+          instructions: style,
+          voice: voiceId,
+          input_audio_format:'pcm16',
+          output_audio_format:'pcm16',
           modalities:['audio','text'],
-          input_audio_transcription:{
-            enabled:true, provider:'openai', model:'gpt-4o-mini-transcribe',
-            ...(languageHint && languageHint!=='auto' ? { language: languageHint } : {}),
-            fallback_models:['whisper-1']
+          input_audio_transcription,
+          turn_detection:{
+            type:'server_vad',
+            threshold:0.5,
+            prefix_silence_ms: 80,
+            silence_duration_ms: Math.max(180, prosody?.turnEndPauseMs ?? 220),
           },
-          turn_detection:{ type:'server_vad', threshold:0.5, prefix_silence_ms:80, silence_duration_ms: Math.max(180, prosody?.turnEndPauseMs ?? 200) },
         }});
 
-        const wantClientGreeting = greetMode==='client' || (greetMode==='server' && firstMode==='Assistant speaks first');
+        // Optional greeting (respects pre-speech delay)
+        const wantClientGreeting =
+          greetMode==='client' || (greetMode==='server' && firstMode==='Assistant speaks first');
+
         const greet = () => {
           const lines=(firstMsg||'Hello.').split(/\r?\n|\|/g).map(s=>s.trim()).filter(Boolean).slice(0,6);
-          setTimeout(()=>{ for(const ln of lines){ safeSend(dc,{ type:'response.create', response:{ modalities:['audio','text'], instructions: ln }}); } }, preDelay);
+          setTimeout(()=>{
+            for(const ln of lines){
+              safeSend(dc,{ type:'response.create', response:{ modalities:['audio','text'], instructions: ln }});
+            }
+          }, preDelay);
         };
-        if (greetMode==='client') greet(); else if (wantClientGreeting) setTimeout(()=>{ if (!sawAssistantDeltaRef.current) greet(); }, 1200);
+
+        if (greetMode==='client') {
+          greet();
+        } else if (wantClientGreeting) {
+          setTimeout(()=>{ if (!sawAssistantDeltaRef.current) greet(); }, 1200);
+        }
       };
 
-      // 5) events → each turn = its own bubble
+      // 5) events — ASSISTANT + USER transcripts (word-level)
       dc.onmessage=(ev)=>{
-        let raw:any; try{ raw=JSON.parse(ev.data); }catch{ return; }
+        let raw:any;
+        try{ raw=JSON.parse(ev.data); }catch{ return; }
         const t=String(raw?.type||'').replace(/^realtime\./,'');
 
-        /* assistant */
+        /* ASSISTANT STREAM */
         if(t==='response.output_text.delta'){
           sawAssistantDeltaRef.current = true;
           const id=raw?.response_id||raw?.id||newId('assistant');
-          const d=String(raw?.delta||''); restBetweenSentences(d);
-          addAssistantDelta(id,d); return;
+          const d=String(raw?.delta||'');
+          restBetweenSentences(d);
+          addAssistantDelta(id,d);
+          return;
         }
         if(t==='response.audio_transcript.delta'){
           const id=raw?.response_id||raw?.id||newId('assistant');
@@ -697,45 +761,50 @@ export default function WebCallButton({
           return;
         }
 
-        /* user (server) */
+        /* USER (SERVER) — interim replace, final commit */
         if (/^input_audio_buffer\.speech_started$|^input_speech\.start$/.test(t)) { beginUserTurn(raw?.id); return; }
-        if (/^input_audio_buffer\.speech_ended$|^input_speech\.end$/.test(t))   { endUserTurn(raw?.id); return; }
+        if (/^input_audio_buffer\.speech_ended$|^input_speech\.end$/.test(t))   { commitUserFinal(undefined, raw?.id); return; }
 
-        const userDelta = (d:string, sid?:string)=>appendUser(d, sid);
-        const userDone  = (sid?:string)=>endUserTurn(sid);
+        if (t==='transcript.delta'){ updateUserInterim(String(raw?.delta||''), raw?.transcript_id||raw?.id); return; }
+        if (t==='transcript.completed'){ commitUserFinal(undefined, raw?.transcript_id||raw?.id); return; }
 
-        if (t==='transcript.delta'){ userDelta(String(raw?.delta||''), raw?.transcript_id||raw?.id); return; }
-        if (t==='transcript.completed'){ userDone(raw?.transcript_id||raw?.id); return; }
+        if (t==='conversation.item.input_audio_transcript.delta'){ updateUserInterim(String(raw?.delta||''), raw?.item_id||raw?.id); return; }
+        if (t==='conversation.item.input_audio_transcript.completed' || t==='conversation.item.completed'){ commitUserFinal(undefined, raw?.item_id||raw?.id); return; }
 
-        if (t==='conversation.item.input_audio_transcript.delta'){ userDelta(String(raw?.delta||''), raw?.item_id||raw?.id); return; }
-        if (t==='conversation.item.input_audio_transcript.completed' || t==='conversation.item.completed'){ userDone(raw?.item_id||raw?.id); return; }
-
-        if (t==='conversation.item.input_text.delta'){ userDelta(String(raw?.delta||''), raw?.item_id||raw?.id); return; }
-        if (t==='conversation.item.input_text.completed'){ userDone(raw?.item_id||raw?.id); return; }
+        if (t==='conversation.item.input_text.delta'){ updateUserInterim(String(raw?.delta||''), raw?.item_id||raw?.id); return; }
+        if (t==='conversation.item.input_text.completed'){ commitUserFinal(undefined, raw?.item_id||raw?.id); return; }
 
         if (t==='input_audio_buffer.transcript.delta' || t==='input_audio_buffer.transcription.delta'){
-          userDelta(String(raw?.delta||''), raw?.transcript_id||raw?.id); return;
+          updateUserInterim(String(raw?.delta||''), raw?.transcript_id||raw?.id); return;
         }
         if (t==='input_audio_buffer.transcript.completed' || t==='input_audio_buffer.transcription.completed'){
-          userDone(raw?.transcript_id||raw?.id); return;
+          commitUserFinal(undefined, raw?.transcript_id||raw?.id); return;
         }
 
         if (t==='input_audio_transcript.delta' || t==='input_audio_transcription.delta' || t==='input_transcription.delta'){
-          userDelta(String(raw?.delta||''), raw?.id); return;
+          updateUserInterim(String(raw?.delta||''), raw?.id); return;
         }
         if (t==='input_audio_transcript.completed' || t==='input_audio_transcription.completed'
             || t==='input_transcription.completed' || t==='transcript.final'){
-          userDone(raw?.id); return;
+          commitUserFinal(undefined, raw?.id); return;
         }
 
+        // Single-shot text
         if ((/transcript|transcription|input_audio_buffer|input_text/.test(t)) && typeof raw?.text==='string' && !raw?.delta){
-          setLog(prev=>[...prev,{ id:newId('user'), who:'user', text:raw.text, at:Date.now(), done:true }]); return;
+          // treat as final
+          beginUserTurn(); commitUserFinal(String(raw.text||'')); return;
         }
       };
 
       pc.onconnectionstatechange=()=>{
         if(pc.connectionState==='connected'){ setConnected(true); setConnecting(false); }
         else if(['disconnected','failed','closed'].includes(pc.connectionState)){ endCall(false); }
+      };
+      pc.oniceconnectionstatechange = () => {
+        const s = pc.iceConnectionState;
+        if (s==='failed' || s==='disconnected') {
+          setError('Network hiccup – reconnecting…');
+        }
       };
 
       // 6) SDP
@@ -786,9 +855,20 @@ export default function WebCallButton({
   useEffect(()=>{ startCall(); return ()=>{ cleanup(); }; // eslint-disable-next-line
   },[voiceId]);
 
-  /* ───────────── UI ───────────── */
+  /* ────────────────────────────────────────────────────────────────────────
+     UI — Slide-over panel (right) with lighter backdrop on the left
+  ───────────────────────────────────────────────────────────────────────── */
   const backdrop = (
-    <div className="fixed inset-0" style={{ zIndex: 100008, background:'#0a0d0f', opacity:0.94 }} onClick={()=>endCall(true)} aria-hidden />
+    <div
+      className="fixed inset-0"
+      style={{
+        zIndex: 100008,
+        // More transparent at the left so you can see the section near the sidebar
+        background: 'linear-gradient(90deg, rgba(10,13,15,0.35) 0%, rgba(10,13,15,0.6) 32%, rgba(10,13,15,0.88) 60%, rgba(10,13,15,0.94) 100%)'
+      }}
+      onClick={()=>endCall(true)}
+      aria-hidden
+    />
   );
 
   const header = (
@@ -809,15 +889,19 @@ export default function WebCallButton({
           <StyledSelect
             value={voiceId}
             onChange={(v)=>setSelectedVoice(v)}
-            options={(voices.length?voices:DEFAULT_VOICES).map(v=>({ value:v, label:v }))}
+            // Filter Coral out of the options
+            options={(voices.length?voices:DEFAULT_VOICES).filter(v=>v!=='coral').map(v=>({ value:v, label:v }))}
             placeholder="Voice"
           />
         </div>
 
         <button
           onClick={toggleMute}
-          className="w-9 h-9 rounded-[8px] grid place-items-center"
-          style={{ border:'1px solid rgba(255,255,255,.14)', color:'var(--text)', background: muted ? 'rgba(239,68,68,.14)' : 'transparent' }}
+          className="w-9 h-9 rounded-[8px] grid place-items-center transition"
+          style={{
+            border:'1px solid rgba(255,255,255,.14)', color:'var(--text)',
+            background: muted ? 'rgba(239,68,68,.14)' : 'transparent'
+          }}
           title={muted ? 'Unmute mic' : 'Mute mic'} aria-label={muted ? 'Unmute' : 'Mute'}
         >
           {muted ? <MicOff className="w-4 h-4"/> : <Mic className="w-4 h-4" />}
@@ -825,7 +909,7 @@ export default function WebCallButton({
 
         <button
           onClick={()=>endCall(true)}
-          className="w-9 h-9 rounded-[8px] grid place-items-center"
+          className="w-9 h-9 rounded-[8px] grid place-items-center transition"
           style={{ border:'1px solid rgba(239,68,68,.38)', background:'rgba(239,68,68,.18)', color:'#ffd7d7' }}
           title="End call"
         >
@@ -843,43 +927,50 @@ export default function WebCallButton({
 
       <div ref={scrollerRef} className="space-y-3 overflow-y-auto" style={{ maxHeight:'calc(100vh - 72px - 52px - 50px)', scrollbarWidth:'thin' }}>
         {log.length===0 && (
-          <div className="text-sm rounded-[8px] px-3 py-2 border" style={{ color:'var(--text-muted)', background:'var(--panel)', borderColor:'rgba(255,255,255,.10)' }}>
+          <div
+            className="text-sm rounded-[8px] px-3 py-2 border"
+            style={{ color:'var(--text-muted)', background:'var(--panel)', borderColor:'rgba(255,255,255,.10)' }}
+          >
             {connecting ? 'Connecting to voice…' :
              firstMode==='Assistant speaks first' ? 'Assistant will greet you shortly…' : 'Say something to start — your words will appear here.'}
           </div>
         )}
 
         {log.map(row=>(
-          <div key={row.id} className={`flex ${row.who==='user' ? 'justify-end' : 'justify-start'}`}>
-            {row.who==='assistant' && (
-              <div className="mr-2 mt-[2px] shrink-0 rounded-[8px] w-8 h-8 grid place-items-center"
-                   style={{ background:'rgba(89,217,179,.12)', border:'1px solid rgba(89,217,179,.25)' }}>
-                <Bot className="w-4 h-4" style={{ color: CTA }} />
-              </div>
-            )}
+          // If a row is empty (no text yet), we skip rendering to avoid “…listening”
+          row.text?.trim().length ? (
+            <div key={row.id} className={`flex ${row.who==='user' ? 'justify-end' : 'justify-start'}`}>
+              {row.who==='assistant' && (
+                <div className="mr-2 mt-[2px] shrink-0 rounded-[8px] w-8 h-8 grid place-items-center"
+                    style={{ background:'rgba(89,217,179,.12)', border:'1px solid rgba(89,217,179,.25)' }}>
+                  <Bot className="w-4 h-4" style={{ color: CTA }} />
+                </div>
+              )}
 
-            <div
-              className="max-w-[78%] rounded-[10px] px-3 py-2 text-[0.95rem] leading-snug border"
-              style={{
-                background: row.who==='user' ? 'rgba(56,196,143,.26)' : 'rgba(255,255,255,.10)',
-                borderColor: row.who==='user' ? 'rgba(56,196,143,.42)' : 'rgba(255,255,255,.18)',
-              }}
-            >
-              <div>{row.text && row.text.trim().length ? row.text : <span style={{ opacity:.55 }}>…listening</span>}</div>
-              <div className="text-[10px] mt-1 opacity-60 text-right">{fmtTime(row.at)}</div>
+              <div
+                className="max-w-[78%] rounded-[12px] px-3 py-2 text-[0.95rem] leading-snug border transition"
+                style={{
+                  background: row.who==='user' ? 'rgba(56,196,143,.26)' : 'rgba(255,255,255,.10)',
+                  borderColor: row.who==='user' ? 'rgba(56,196,143,.42)' : 'rgba(255,255,255,.18)',
+                }}
+              >
+                <div>{row.text}</div>
+                <div className="text-[10px] mt-1 opacity-60 text-right">{fmtTime(row.at)}</div>
+              </div>
+
+              {row.who==='user' && (
+                <div className="ml-2 mt-[2px] shrink-0 rounded-[8px] w-8 h-8 grid place-items-center"
+                    style={{ background:'rgba(255,255,255,.10)', border:'1px solid rgba(255,255,255,.18)' }}>
+                  <User className="w-4 h-4" />
+                </div>
+              )}
             </div>
-
-            {row.who==='user' && (
-              <div className="ml-2 mt-[2px] shrink-0 rounded-[8px] w-8 h-8 grid place-items-center"
-                   style={{ background:'rgba(255,255,255,.10)', border:'1px solid rgba(255,255,255,.18)' }}>
-                <User className="w-4 h-4" />
-              </div>
-            )}
-          </div>
+          ) : null
         ))}
 
         {error && (
-          <div className="text-xs px-3 py-2 rounded-[8px] border" style={{ background:'rgba(239,68,68,.12)', borderColor:'rgba(239,68,68,.25)', color:'#ffd7d7' }}>
+          <div className="text-xs px-3 py-2 rounded-[8px] border"
+               style={{ background:'rgba(239,68,68,.12)', borderColor:'rgba(239,68,68,.25)', color:'#ffd7d7' }}>
             {error}
           </div>
         )}
@@ -892,7 +983,9 @@ export default function WebCallButton({
       <div className="flex items-center justify-between gap-2 text-xs">
         <div className="flex items-center gap-2">
           {connecting && <Loader2 className="w-4 h-4 animate-spin" />}
-          <span style={{ opacity:.85 }}>{connected ? 'Connected' : (connecting ? 'Connecting…' : 'Idle')}</span>
+          <span style={{ opacity:.85 }}>
+            {connected ? 'Connected' : (connecting ? 'Connecting…' : 'Idle')}
+          </span>
         </div>
         <audio ref={audioRef} autoPlay playsInline />
       </div>
@@ -901,6 +994,7 @@ export default function WebCallButton({
 
   const panel = (
     <>
+      {/* plain CSS to avoid styled-jsx build issues */}
       <style>{`
         .va-card{
           --panel:#0d0f11; --text:#e6f1ef; --text-muted:#9fb4ad;
@@ -910,6 +1004,14 @@ export default function WebCallButton({
           color:var(--text);
           box-shadow:0 22px 44px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px ${GREEN_LINE};
           overflow:hidden; isolation:isolate;
+
+          /* Slide-in */
+          transform: translateX(100%);
+          animation: slideIn .42s cubic-bezier(.22,.87,.32,1) forwards;
+        }
+        @keyframes slideIn {
+          from { transform: translateX(100%); opacity: .85; }
+          to   { transform: translateX(0%);    opacity: 1; }
         }
         .va-head{
           min-height:72px;
@@ -927,7 +1029,7 @@ export default function WebCallButton({
           width:'clamp(380px, 34vw, 560px)',
           zIndex: 100012,
           display:'grid', gridTemplateRows:'72px 1fr 52px',
-          borderTopLeftRadius: 8, borderBottomLeftRadius: 8,
+          borderTopLeftRadius: 14, borderBottomLeftRadius: 14,
         }}
         role="dialog"
         aria-label="Voice call panel"
