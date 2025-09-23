@@ -514,10 +514,19 @@ export default function Improve() {
         }),
       });
 
-      const data = await resp.json().catch(() => null);
-      const reply = typeof data?.content === 'string'
-        ? sanitize(data.content)
-        : (data?.message ? String(data.message) : (resp.ok ? '[no response]' : 'Request failed.'));
+     const data = await resp.json().catch(() => null);
+
+let reply = '';
+if (resp.ok && typeof data?.content === 'string') {
+  reply = sanitize(data.content);
+} else {
+  const err =
+    data?.error ||
+    data?.message ||
+    (typeof data === 'string' ? data : '') ||
+    `Request failed (${resp.status})`;
+  reply = String(err);
+}
 
       if (which === 'A') {
         setMsgsA(cur => [...cur, { role: 'assistant', content: reply }]);
