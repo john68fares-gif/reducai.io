@@ -513,10 +513,8 @@ function lineDiff(base:string, next:string){
   let i=0, j=0;
   while (i<a.length || j<b.length){
     if (a[i] === b[j]) { rows.push({ t:'same', text: a[i++] ?? '' }); j++; continue; }
-    // additions
-    if (b[j] && !a.includes(b[j])) { rows.push({ t:'add', text: b[j++] }); continue; }
-    // removals
-    if (a[i] && !b.includes(a[i])) { rows.push({ t:'rem', text: a[i++] }); continue; }
+    if (b[j] && !a.includes(b[j])) { rows.push({ t:'add', text: b[j++] }); continue; } // additions (green)
+    if (a[i] && !b.includes(a[i])) { rows.push({ t:'rem', text: a[i++] }); continue; } // removals (red)
     rows.push({ t:'same', text: b[j++] ?? '' }); i++;
   }
   return rows;
@@ -526,7 +524,7 @@ function DiffInline({ base, next }:{ base:string; next:string }){
   return (
     <pre
       className="rounded-[8px] px-3 py-3 text-sm"
-      style={{ background:'var(--input-bg)', border:'1px solid var(--input-border)', color:'var(--text)', whiteSpace:'pre-wrap', lineHeight:'1.55' }}
+      style={{ background:'var(--panel)', border:'1px solid var(--input-border)', color:'var(--text)', whiteSpace:'pre-wrap', lineHeight:'1.55' }}
     >
       {rows.map((r, i) => {
         if (r.t === 'same') return <span key={i}>{(r.text || ' ') + '\n'}</span>;
@@ -547,17 +545,26 @@ function DiffInline({ base, next }:{ base:string; next:string }){
   );
 }
 
-/* ─────────── File helpers (add .docx support) ─────────── */
+/* ─────────── File helpers (.docx via CDN JSZip; .doc best-effort) ─────────── */
 async function readFileAsText(f: File): Promise<string> {
   const name = f.name.toLowerCase();
+
+  // .docx — load jszip at runtime from a CDN to avoid bundling dependency
   if (name.endsWith('.docx')) {
     try {
-      const { default: JSZip } = await import('jszip');
+      // @ts-ignore
+      const JSZipModule = await import(
+        /* webpackIgnore: true */
+        'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js'
+      );
+      const JSZip = (JSZipModule?.default || (window as any).JSZip);
+      if (!JSZip) throw new Error('JSZip not loaded');
+
       const buf = await f.arrayBuffer();
       const zip = await JSZip.loadAsync(buf);
       const docXml = await zip.file('word/document.xml')?.async('string');
       if (!docXml) return '';
-      // quick & simple text extraction from XML
+
       const text = docXml
         .replace(/<w:p[^>]*>/g,'\n')
         .replace(/<w:tab\/>/g,'\t')
@@ -569,9 +576,25 @@ async function readFileAsText(f: File): Promise<string> {
       return '';
     }
   }
-  // naive .doc (binary) → not supported reliably; return empty to skip
-  if (name.endsWith('.doc')) return '';
-  // plain text-ish
+
+  // .doc (binary) — best-effort: extract printable ASCII/UTF-8 sequences
+  if (name.endsWith('.doc')) {
+    try {
+      const buf = new Uint8Array(await f.arrayBuffer());
+      let out = '';
+      let run: number[] = [];
+      const flush = () => { if (run.length >= 3) out += String.fromCharCode(...run) + '\n'; run = []; };
+      for (const b of buf) {
+        if (b >= 32 && b <= 126) run.push(b); else flush();
+      }
+      flush();
+      return out.trim();
+    } catch {
+      return '';
+    }
+  }
+
+  // Plain text-ish
   return new Promise((res, rej) => {
     const r = new FileReader();
     r.onerror = () => rej(new Error('Read failed'));
@@ -752,7 +775,6 @@ export default function VoiceAgentSection() {
     basePromptRef.current = data.systemPrompt || DEFAULT_PROMPT_RT;
     setIsTypingIntoPrompt(true);
     setDiffCandidate(''); // live typed content
-    // type into diffCandidate gradually
     if (typingRef.current) cancelAnimationFrame(typingRef.current as any);
     let i = 0;
     const step = () => {
@@ -926,7 +948,7 @@ export default function VoiceAgentSection() {
               </div>
             </div>
 
-            {/* BLANK first messages + add via plus */}
+            {/* First messages (blank until Add) */}
             <div className="mt-4">
               <div className="mb-2 flex items-center justify-between">
                 <div className="font-medium text-[12.5px]">First Messages</div>
@@ -1007,7 +1029,7 @@ export default function VoiceAgentSection() {
                 </div>
               </div>
 
-              {/* Prompt box */}
+              {/* Prompt box with inline diff when generating */}
               <div className="relative">
                 {!isTypingIntoPrompt ? (
                   <textarea
@@ -1039,7 +1061,7 @@ export default function VoiceAgentSection() {
                 )}
               </div>
 
-              {/* Context: BLANK until clicking "Add file" */}
+              {/* Context files */}
               <div className="mt-6">
                 <div className="mb-2 flex items-center justify-between">
                   <div className="font-medium text-[12.5px]">Context Files</div>
@@ -1076,7 +1098,7 @@ export default function VoiceAgentSection() {
                 {/* List of files */}
                 {!(data.ctxFiles && data.ctxFiles.length) ? (
                   <div className="text-xs" style={{ color:'var(--text-muted)' }}>
-                    No files yet. Click <b>Add file</b> to upload (.txt, .md, .csv, .json, <b>.docx</b>).
+                    No files yet. Click <b>Add file</b> to upload (.txt, .md, .csv, .json, <b>.docx</b> or (best-effort) <b>.doc</b>).
                   </div>
                 ) : (
                   <div className="rounded-[8px] p-3" style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)' }}>
@@ -1281,9 +1303,8 @@ export default function VoiceAgentSection() {
                       const base = nonEmpty(data.systemPrompt) ? data.systemPrompt : DEFAULT_PROMPT_RT;
                       const compiled = compilePrompt({ basePrompt: base, userText: raw });
                       setShowGenerate(false);
-                      await sleep(150); // small pause for UX
-                      await startTypingIntoPrompt(compiled.frontendText);
-                      // also stash backend so Accept can apply without recompile mismatch
+                      await sleep(150); // small UX pause
+                      await startTypingIntoPrompt(compiled.frontendText); // typing happens in the prompt box
                       setField('systemPromptBackend')(compiled.backendString);
                     } catch {
                       setToastKind('error'); setToast('Generate failed — try simpler wording.');
