@@ -1403,4 +1403,3 @@ function Section({
       </div>
     </div>
   );
-}
