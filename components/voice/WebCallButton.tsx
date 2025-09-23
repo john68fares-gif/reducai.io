@@ -231,7 +231,7 @@ function languageNudge(lang: Props['languageHint']){
     en:'Reply in natural conversational English with gentle pauses.',
     de:'Antworte natürlich auf Deutsch mit sanften Pausen.',
     nl:'Antwoord in natuurlijk Nederlands met zachte pauzes.',
-    es:'Responde en español conversacional con pausas suaves.',
+    es:'Responde en español conversacional mit pausas suaves.',
     ar:'يرجى الرد بالعربية بأسلوب محادثة طبيعي مع توقفات لطيفة.',
   }; return map[lang||'auto']||'';
 }
@@ -360,7 +360,7 @@ const langToBCP47 = (hint: Props['languageHint']) => {
     case 'nl': return 'nl-NL';
     case 'de': return 'de-DE';
     case 'es': return 'es-ES';
-    case 'ar': return 'ar';      // Deepgram accepts 'ar' (modern standard); WebSpeech uses UA locale variants.
+    case 'ar': return 'ar';
     case 'en': return 'en-US';
     default:   return undefined; // auto
   }
@@ -382,7 +382,7 @@ function startWebSpeechASR(opts: { lang?: string; onInterim: (t: string)=>void; 
     for (let i = e.resultIndex; i < e.results.length; i++) {
       const res = e.results[i];
       if (res.isFinal) finalText += res[0].transcript;
-      else interim = res[0].transcript; // REPLACE, don't accumulate
+      else interim = res[0].transcript; // replace (no duplications)
     }
     if (interim) opts.onInterim(interim);
     if (finalText) opts.onFinal(finalText);
@@ -421,7 +421,7 @@ function startDeepgramASR(opts: {
       const transcript = alt?.transcript || '';
       if (!transcript) return;
       if (data.is_final) opts.onFinal(transcript);
-      else opts.onInterim(transcript); // REPLACE, not append
+      else opts.onInterim(transcript);
     } catch {}
   };
 
@@ -483,10 +483,19 @@ export default function WebCallButton({
   const scrollerRef=useRef<HTMLDivElement|null>(null);
   const sawAssistantDeltaRef=useRef<boolean>(false);
 
+  // Delay + language UI state
+  const [uiLang, setUiLang] = useState<Props['languageHint']>(languageHint || 'auto');
+  const [replyDelaySec, setReplyDelaySec] = useState<number>(2);
+
+  // Hold/Buffer assistant output during the chosen delay window
+  const holdUntilRef = useRef<number>(0);
+  const holdingRef = useRef<boolean>(false);
+  const assistantBufferRef = useRef<Map<string,string>>(new Map());
+
   // Per-turn mapping + interim buffers for word-level correctness
   const userTurnIdRef = useRef<string | null>(null);
   const serverToLocalUser = useRef<Map<string,string>>(new Map());
-  const userInterimRef = useRef<Map<string,{final:string; interim:string}>>(new Map()); // NEW
+  const userInterimRef = useRef<Map<string,{final:string; interim:string}>>(new Map());
   const asrStopRef=useRef<null|(()=>void)>(null);
 
   const lastRestRef=useRef<number>(0);
@@ -558,7 +567,12 @@ export default function WebCallButton({
   };
 
   const addAssistantDelta = (respId:string, delta:string) => {
-    // Same “replace interim” feel for assistant by soft-pausing volume at sentence ends
+    // If we're holding (reply delay), buffer deltas and mute audio
+    if (holdingRef.current) {
+      assistantBufferRef.current.set(respId, (assistantBufferRef.current.get(respId) || '') + delta);
+      if (audioRef.current) audioRef.current.muted = true;
+      return;
+    }
     setLog(prev=>{
       const i=prev.findIndex(r=>r.id===respId);
       if(i===-1){ return [...prev,{ id:respId, who:'assistant', text:delta, at:Date.now(), done:false }]; }
@@ -566,11 +580,38 @@ export default function WebCallButton({
     });
   };
   const endAssistantTurn = (respId:string) => {
+    if (holdingRef.current) {
+      // mark buffered as complete; we'll flush on release
+      return;
+    }
     setLog(prev=>{
       const i=prev.findIndex(r=>r.id===respId);
       if(i===-1) return prev;
       const next=[...prev]; next[i]={...next[i], done:true}; return next;
     });
+  };
+
+  const flushAssistantBuffer = () => {
+    if (!assistantBufferRef.current.size) return;
+    const now = Date.now();
+    assistantBufferRef.current.forEach((txt, id) => {
+      setLog(prev=>{
+        const i=prev.findIndex(r=>r.id===id);
+        if (i===-1) return [...prev, { id, who:'assistant', text:txt, at:now, done:false }];
+        const next=[...prev]; next[i]={...next[i], text:(next[i].text||'')+txt}; return next;
+      });
+    });
+    assistantBufferRef.current.clear();
+  };
+
+  const releaseHoldIfDue = () => {
+    if (!holdingRef.current) return;
+    const now = Date.now();
+    if (now >= holdUntilRef.current) {
+      holdingRef.current = false;
+      flushAssistantBuffer();
+      if (audioRef.current) audioRef.current.muted = false;
+    }
   };
 
   const safeSend=(dc:RTCDataChannel|null, payload:any)=>{
@@ -630,7 +671,7 @@ export default function WebCallButton({
 
       // 2.5) LOCAL ASR ⇒ interim replace + final commit
       try {
-        const lang = langToBCP47(languageHint);
+        const lang = langToBCP47(uiLang);
         if (asrStopRef.current) { try { asrStopRef.current(); } catch {} asrStopRef.current = null; }
         let started = false;
         const ensureStart = () => { if (!started) { beginUserTurn(); started = true; } };
@@ -673,11 +714,10 @@ export default function WebCallButton({
       const dc=pc.createDataChannel('oai-events'); dcRef.current=dc;
 
       dc.onopen=()=>{
-        // Defaults to keep it human without overdoing filler words
         const preDelay = Math.max(300, prosody?.preSpeechDelayMs ?? 550);
         const style = [
           systemPrompt || '',
-          languageNudge(languageHint),
+          languageNudge(uiLang),
           (prosody?.fillerWords ?? true) ? 'Use mild, natural disfluencies (“uh”, “um”, “like”) occasionally. Do not overuse.' : '',
           `Allow micro pauses (~${prosody?.microPausesMs ?? 120} ms) inside sentences.`,
           `Before starting to speak, pause about ${preDelay} ms as if thinking.`,
@@ -685,14 +725,13 @@ export default function WebCallButton({
           (prosody?.turnEndPauseMs ? `Wait ~${prosody.turnEndPauseMs} ms of silence before replying.` : 'Wait ~220 ms of silence before replying.'),
         ].filter(Boolean).join('\n\n');
 
-        // If languageHint is 'auto' we omit language field for server ASR so it can detect Dutch/Arabic/Spanish/German.
         const input_audio_transcription: any = {
           enabled:true,
           provider:'openai',
           model:'gpt-4o-mini-transcribe',
           fallback_models:['whisper-1']
         };
-        if (languageHint && languageHint!=='auto') input_audio_transcription.language = languageHint;
+        if (uiLang && uiLang!=='auto') input_audio_transcription.language = uiLang;
 
         safeSend(dc,{ type:'session.update', session:{
           instructions: style,
@@ -709,7 +748,7 @@ export default function WebCallButton({
           },
         }});
 
-        // Optional greeting (respects pre-speech delay)
+        // Optional greeting
         const wantClientGreeting =
           greetMode==='client' || (greetMode==='server' && firstMode==='Assistant speaks first');
 
@@ -729,11 +768,14 @@ export default function WebCallButton({
         }
       };
 
-      // 5) events — ASSISTANT + USER transcripts (word-level)
+      // 5) events — ASSISTANT + USER transcripts (word-level + reply delay hold)
       dc.onmessage=(ev)=>{
         let raw:any;
         try{ raw=JSON.parse(ev.data); }catch{ return; }
         const t=String(raw?.type||'').replace(/^realtime\./,'');
+
+        // Check if we should release hold (in case timer already elapsed)
+        releaseHoldIfDue();
 
         /* ASSISTANT STREAM */
         if(t==='response.output_text.delta'){
@@ -750,20 +792,50 @@ export default function WebCallButton({
           addAssistantDelta(id,d); return;
         }
         if(t==='response.audio_transcript.completed' || t==='response.completed' || t==='response.stop'){
+          if (holdingRef.current) return; // mark done on flush
           const id=raw?.response_id||raw?.id; if(id) endAssistantTurn(id); return;
         }
         if (t==='response.output_text' && typeof raw?.text==='string'){
-          setLog(prev=>[...prev,{ id:newId('assistant'), who:'assistant', text:raw.text, at:Date.now(), done:true }]); return;
+          if (holdingRef.current) {
+            const id=newId('assistant');
+            assistantBufferRef.current.set(id, (assistantBufferRef.current.get(id)||'') + raw.text);
+          } else {
+            setLog(prev=>[...prev,{ id:newId('assistant'), who:'assistant', text:raw.text, at:Date.now(), done:true }]);
+          }
+          return;
         }
         if (t==='conversation.item.created' && raw?.item?.type==='message' && raw?.item?.role==='assistant') {
           const text=(raw?.item?.content||[]).map((c:any)=>c?.text||c?.transcript||'').join(' ').trim();
-          if (text) setLog(prev=>[...prev,{ id:newId('assistant'), who:'assistant', text, at:Date.now(), done:true }]);
+          if (!text) return;
+          if (holdingRef.current) {
+            const id=newId('assistant');
+            assistantBufferRef.current.set(id, (assistantBufferRef.current.get(id)||'') + text);
+          } else {
+            setLog(prev=>[...prev,{ id:newId('assistant'), who:'assistant', text, at:Date.now(), done:true }]);
+          }
           return;
         }
 
         /* USER (SERVER) — interim replace, final commit */
-        if (/^input_audio_buffer\.speech_started$|^input_speech\.start$/.test(t)) { beginUserTurn(raw?.id); return; }
-        if (/^input_audio_buffer\.speech_ended$|^input_speech\.end$/.test(t))   { commitUserFinal(undefined, raw?.id); return; }
+        if (/^input_audio_buffer\.speech_started$|^input_speech\.start$/.test(t)) {
+          beginUserTurn(raw?.id);
+          // If assistant was previously on hold (rare overlap), release
+          releaseHoldIfDue();
+          return;
+        }
+        if (/^input_audio_buffer\.speech_ended$|^input_speech\.end$/.test(t))   {
+          commitUserFinal(undefined, raw?.id);
+
+          // START reply-delay hold: mute audio + buffer assistant for N seconds
+          if (replyDelaySec > 0 && audioRef.current) {
+            holdingRef.current = true;
+            holdUntilRef.current = Date.now() + replyDelaySec * 1000;
+            audioRef.current.muted = true;
+            // hard release after timeout
+            setTimeout(() => { releaseHoldIfDue(); }, replyDelaySec * 1000 + 10);
+          }
+          return;
+        }
 
         if (t==='transcript.delta'){ updateUserInterim(String(raw?.delta||''), raw?.transcript_id||raw?.id); return; }
         if (t==='transcript.completed'){ commitUserFinal(undefined, raw?.transcript_id||raw?.id); return; }
@@ -791,7 +863,6 @@ export default function WebCallButton({
 
         // Single-shot text
         if ((/transcript|transcription|input_audio_buffer|input_text/.test(t)) && typeof raw?.text==='string' && !raw?.delta){
-          // treat as final
           beginUserTurn(); commitUserFinal(String(raw.text||'')); return;
         }
       };
@@ -849,11 +920,14 @@ export default function WebCallButton({
     micStreamRef.current=null;
     try{ closeChainRef.current && closeChainRef.current(); }catch{}
     closeChainRef.current = null;
+    holdingRef.current = false;
+    assistantBufferRef.current.clear();
   }
   function endCall(userIntent=true){ cleanup(); setConnected(false); setConnecting(false); if(userIntent) onClose?.(); }
 
+  // Restart session when voice or language changes
   useEffect(()=>{ startCall(); return ()=>{ cleanup(); }; // eslint-disable-next-line
-  },[voiceId]);
+  },[voiceId, uiLang]);
 
   /* ────────────────────────────────────────────────────────────────────────
      UI — Slide-over panel (right) with lighter backdrop on the left
@@ -863,7 +937,6 @@ export default function WebCallButton({
       className="fixed inset-0"
       style={{
         zIndex: 100008,
-        // More transparent at the left so you can see the section near the sidebar
         background: 'linear-gradient(90deg, rgba(10,13,15,0.35) 0%, rgba(10,13,15,0.6) 32%, rgba(10,13,15,0.88) 60%, rgba(10,13,15,0.94) 100%)'
       }}
       onClick={()=>endCall(true)}
@@ -889,7 +962,6 @@ export default function WebCallButton({
           <StyledSelect
             value={voiceId}
             onChange={(v)=>setSelectedVoice(v)}
-            // Filter Coral out of the options
             options={(voices.length?voices:DEFAULT_VOICES).filter(v=>v!=='coral').map(v=>({ value:v, label:v }))}
             placeholder="Voice"
           />
@@ -925,7 +997,7 @@ export default function WebCallButton({
         Transcript
       </div>
 
-      <div ref={scrollerRef} className="space-y-3 overflow-y-auto" style={{ maxHeight:'calc(100vh - 72px - 52px - 50px)', scrollbarWidth:'thin' }}>
+      <div ref={scrollerRef} className="space-y-3 overflow-y-auto" style={{ maxHeight:'calc(100vh - 72px - 52px - 84px)', scrollbarWidth:'thin' }}>
         {log.length===0 && (
           <div
             className="text-sm rounded-[8px] px-3 py-2 border"
@@ -937,7 +1009,6 @@ export default function WebCallButton({
         )}
 
         {log.map(row=>(
-          // If a row is empty (no text yet), we skip rendering to avoid “…listening”
           row.text?.trim().length ? (
             <div key={row.id} className={`flex ${row.who==='user' ? 'justify-end' : 'justify-start'}`}>
               {row.who==='assistant' && (
@@ -980,21 +1051,62 @@ export default function WebCallButton({
 
   const footer = (
     <div className="px-3 py-2 border-t" style={{ borderColor:'rgba(255,255,255,.10)', color:'var(--text)', background:'var(--panel-bg)' }}>
-      <div className="flex items-center justify-between gap-2 text-xs">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 items-center text-xs">
         <div className="flex items-center gap-2">
           {connecting && <Loader2 className="w-4 h-4 animate-spin" />}
           <span style={{ opacity:.85 }}>
             {connected ? 'Connected' : (connecting ? 'Connecting…' : 'Idle')}
           </span>
         </div>
-        <audio ref={audioRef} autoPlay playsInline />
+
+        {/* Language picker (affects client+server ASR and reply language) */}
+        <div className="flex items-center gap-2">
+          <span style={{ opacity:.8, minWidth:70 }}>Language</span>
+          <div style={{ width: 160 }}>
+            <StyledSelect
+              value={uiLang || 'auto'}
+              onChange={(v)=> setUiLang(v as Props['languageHint'])}
+              options={[
+                { value:'auto', label:'Auto' },
+                { value:'en', label:'English' },
+                { value:'de', label:'Deutsch' },
+                { value:'nl', label:'Nederlands' },
+                { value:'es', label:'Español' },
+                { value:'ar', label:'العربية' },
+              ]}
+            />
+          </div>
+        </div>
+
+        {/* Reply delay (seconds) */}
+        <div className="flex items-center gap-2">
+          <span style={{ opacity:.8, minWidth:70 }}>Reply delay</span>
+          <div style={{ width: 120 }}>
+            <StyledSelect
+              value={String(replyDelaySec)}
+              onChange={(v)=> setReplyDelaySec(Number(v))}
+              options={[
+                { value:'0', label:'0s' },
+                { value:'1', label:'1s' },
+                { value:'2', label:'2s (default)' },
+                { value:'3', label:'3s' },
+                { value:'4', label:'4s' },
+                { value:'5', label:'5s' },
+                { value:'6', label:'6s' },
+              ]}
+            />
+          </div>
+        </div>
+
+        <div className="col-span-1 sm:col-span-3 flex justify-end">
+          <audio ref={audioRef} autoPlay playsInline />
+        </div>
       </div>
     </div>
   );
 
   const panel = (
     <>
-      {/* plain CSS to avoid styled-jsx build issues */}
       <style>{`
         .va-card{
           --panel:#0d0f11; --text:#e6f1ef; --text-muted:#9fb4ad;
@@ -1004,8 +1116,6 @@ export default function WebCallButton({
           color:var(--text);
           box-shadow:0 22px 44px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px ${GREEN_LINE};
           overflow:hidden; isolation:isolate;
-
-          /* Slide-in */
           transform: translateX(100%);
           animation: slideIn .42s cubic-bezier(.22,.87,.32,1) forwards;
         }
@@ -1028,7 +1138,7 @@ export default function WebCallButton({
           position:'fixed', top:0, right:0, bottom:0,
           width:'clamp(380px, 34vw, 560px)',
           zIndex: 100012,
-          display:'grid', gridTemplateRows:'72px 1fr 52px',
+          display:'grid', gridTemplateRows:'72px 1fr 84px',
           borderTopLeftRadius: 14, borderBottomLeftRadius: 14,
         }}
         role="dialog"
