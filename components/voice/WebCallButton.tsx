@@ -21,7 +21,7 @@ type Props = {
 
   model: string;
   systemPrompt: string;
-  voiceName: string;
+  voiceName: string;          // <- voice is ONLY taken from here now
   assistantName: string;
   apiKey: string;
 
@@ -58,28 +58,36 @@ const CTA = '#59d9b3';
 const GREEN_LINE = 'rgba(89,217,179,.20)';
 const IS_CLIENT = typeof window !== 'undefined' && typeof document !== 'undefined';
 
-// Filter OUT the coral voice per your note
-const HUMAN_LIKE = new Set([
-  'alloy','verse', /* 'coral', */ 'amber','sage','juniper','opal','pebble','cobalt','ash','ballad','echo','shimmer','marin','cedar'
-]);
-const DEFAULT_VOICES = ['alloy','verse','amber','sage','juniper']; // coral removed
+const RAW_ID = /^[a-z0-9._-]{3,}$/i;
+const clamp01 = (v:number)=>Math.max(0,Math.min(1,v));
+const fmtTime = (ts:number)=>new Date(ts).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
 
-const FRIENDLY_TO_ID: Record<string,string> = {
-  'Alloy (American)':'alloy','Verse (American)':'verse','Amber (Australian)':'amber',
-  Alloy:'alloy', Verse:'verse', Amber:'amber', Sage:'sage', Juniper:'juniper',
-  Ash:'ash', Echo:'echo', Ballad:'ballad', Shimmer:'shimmer', Marin:'marin', Cedar:'cedar',
-  // Coral intentionally not mapped
+function languageNudge(lang: Props['languageHint']){
+  if (lang==='auto') return 'Auto-detect and reply in the caller’s language (EN/DE/NL/ES/AR).';
+  const map:Record<string,string>={
+    en:'Reply in natural conversational English with gentle pauses.',
+    de:'Antworte natürlich auf Deutsch mit sanften Pausen.',
+    nl:'Antwoord in natuurlijk Nederlands met zachte pauzes.',
+    es:'Responde en español conversacional con pausas suaves.',
+    ar:'يرجى الرد بالعربية بأسلوب محادثة طبيعي مع توقفات لطيفة.',
+  }; return map[lang||'auto']||'';
+}
+
+const resolveVoiceId = (key:string) => {
+  const k = (key||'').trim();
+  return RAW_ID.test(k) ? k.toLowerCase() : k || 'alloy';
 };
 
 /* ──────────────────────────────────────────────────────────────────────────
-   SELECT (same look)
+   SELECT (same look)  — supports opening UPWARDS
 ────────────────────────────────────────────────────────────────────────── */
 type Opt = { value: string; label: string; disabled?: boolean; iconLeft?: React.ReactNode };
 function StyledSelect({
-  value, onChange, options, placeholder, leftIcon, menuTop
+  value, onChange, options, placeholder, leftIcon, menuTop, openUp=false
 }:{
   value: string; onChange: (v: string) => void;
   options: Opt[]; placeholder?: string; leftIcon?: React.ReactNode; menuTop?: React.ReactNode;
+  openUp?: boolean;
 }) {
   const wrapRef = useRef<HTMLDivElement|null>(null);
   const btnRef = useRef<HTMLButtonElement|null>(null);
@@ -90,7 +98,7 @@ function StyledSelect({
   const [menuPos, setMenuPos] = useState<{left:number; top:number; width:number} | null>(null);
 
   const current = options.find(o => o.value === value) || null;
-  const filtered = useMemo(() => {
+  const filtered = React.useMemo(() => {
     const q = query.trim().toLowerCase();
     return q ? options.filter(o => o.label.toLowerCase().includes(q)) : options;
   }, [options, query, value]);
@@ -98,8 +106,9 @@ function StyledSelect({
   useLayoutEffect(() => {
     if (!open || !btnRef.current) return;
     const r = btnRef.current.getBoundingClientRect();
-    setMenuPos({ left: r.left, top: r.bottom + 8, width: r.width });
-  }, [open]);
+    // position under the button, but if openUp we anchor to top edge and translateY(-100%)
+    setMenuPos({ left: r.left, top: openUp ? r.top - 8 : r.bottom + 8, width: r.width });
+  }, [open, openUp]);
 
   useEffect(() => {
     if (!open || !IS_CLIENT) return;
@@ -113,7 +122,7 @@ function StyledSelect({
     const onResize = () => {
       if (!btnRef.current) return;
       const r = btnRef.current.getBoundingClientRect();
-      setMenuPos({ left: r.left, top: r.bottom + 8, width: r.width });
+      setMenuPos({ left: r.left, top: openUp ? r.top - 8 : r.bottom + 8, width: r.width });
     };
     window.addEventListener('mousedown', off);
     window.addEventListener('keydown', onEsc);
@@ -123,7 +132,7 @@ function StyledSelect({
       window.removeEventListener('keydown', onEsc);
       window.removeEventListener('resize', onResize);
     };
-  }, [open]);
+  }, [open, openUp]);
 
   return (
     <div ref={wrapRef} className="relative">
@@ -154,6 +163,7 @@ function StyledSelect({
             left: (menuPos?.left ?? 0),
             top: (menuPos?.top ?? 0),
             width: (menuPos?.width ?? (btnRef.current?.getBoundingClientRect().width ?? 280)),
+            transform: openUp ? 'translateY(-100%)' : 'none',
             background:'#101314',
             border:'1px solid rgba(255,255,255,.16)',
             borderRadius:10,
@@ -216,34 +226,7 @@ function StyledSelect({
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
-   TRANSCRIPT / UTILS
-   (word-level handling: interim REPLACES, final COMMITS)
-────────────────────────────────────────────────────────────────────────── */
-type TranscriptRow = { id:string; who:'user'|'assistant'; text:string; at:number; done?:boolean };
-
-const RAW_ID = /^[a-z0-9._-]{3,}$/i;
-const clamp01 = (v:number)=>Math.max(0,Math.min(1,v));
-const fmtTime = (ts:number)=>new Date(ts).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
-
-function languageNudge(lang: Props['languageHint']){
-  if (lang==='auto') return 'Auto-detect and reply in the caller’s language (EN/DE/NL/ES/AR).';
-  const map:Record<string,string>={
-    en:'Reply in natural conversational English with gentle pauses.',
-    de:'Antworte natürlich auf Deutsch mit sanften Pausen.',
-    nl:'Antwoord in natuurlijk Nederlands met zachte pauzes.',
-    es:'Responde en español conversacional mit pausas suaves.',
-    ar:'يرجى الرد بالعربية بأسلوب محادثة طبيعي مع توقفات لطيفة.',
-  }; return map[lang||'auto']||'';
-}
-
-const resolveVoiceId = (key:string) => {
-  const k = (key||'').trim();
-  if (RAW_ID.test(k) && !FRIENDLY_TO_ID[k]) return k.toLowerCase();
-  return FRIENDLY_TO_ID[k] || k || 'alloy';
-};
-
-/* ──────────────────────────────────────────────────────────────────────────
-   AUDIO ENHANCERS (phone-ish polish + optional ambience + breathing)
+   AUDIO ENHANCERS (phone polish + ambience + breathing + voice envelope)
 ────────────────────────────────────────────────────────────────────────── */
 function createSaturator(ac: AudioContext, drive=1.05){
   const sh=ac.createWaveShaper(); const curve=new Float32Array(1024);
@@ -315,26 +298,62 @@ async function attachProcessedAudio(
 
   const dry=ac.createGain(); dry.gain.value=1.0;
   const merge=ac.createGain();
+
+  // NEW: gentle voice envelope (fade-in/out per phrase)
+  const master = ac.createGain(); master.gain.value = 0.9; // base level
+  const analyser = ac.createAnalyser(); analyser.fftSize = 512; analyser.smoothingTimeConstant = 0.88;
+
   const dest=ac.createMediaStreamDestination();
 
   src.connect(hp); hp.connect(lp); lp.connect(presence); presence.connect(body); body.connect(sat); sat.connect(comp);
   comp.connect(dry); dry.connect(merge);
+  merge.connect(master); master.connect(analyser); analyser.connect(dest);
 
-  // Breathing bed (auto-dips when speech is loud)
+  // Envelope logic: ramp up on onset, ramp down after ~300ms of silence
+  const buf = new Uint8Array(analyser.frequencyBinCount);
+  let speaking=false; let lastEnergy=0; let lastAbove=Date.now();
+  const base = 0.9, minFloor = 0.18; // keep a tiny tail instead of hard stop
+  const tick = ()=>{
+    analyser.getByteFrequencyData(buf);
+    const energy = buf.reduce((s,v)=>s+v,0)/(buf.length*255);
+    const now = ac.currentTime;
+    const ms = performance.now();
+    if (energy > 0.06 && lastEnergy <= 0.06){ // onset
+      speaking=true;
+      master.gain.cancelScheduledValues(now);
+      master.gain.setTargetAtTime(base, now, 0.18); // fade-in ~200ms
+      lastAbove = ms;
+    } else if (energy > 0.06){
+      lastAbove = ms;
+    }
+    if (speaking && ms - lastAbove > 320){ // offset
+      speaking=false;
+      master.gain.cancelScheduledValues(now);
+      master.gain.setTargetAtTime(minFloor, now, 0.22); // fade-out ~250ms
+    }
+    lastEnergy = energy;
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+
+  (audioEl as any).srcObject=dest.stream;
+  await audioEl.play().catch(()=>{});
+
+  let ambClean:null|(()=>void)=null; if(ambience!=='off') ambClean=createAmbience(ac,ambience,ambienceLevel);
+
+  // OPTIONAL: breathing bed (auto-dips when speech is loud)
   let breathStop: null | (()=>void) = null;
   if (breathing){
     const { node, stop } = createBreather(ac, breathingLevel ?? 0.08);
     breathStop = stop;
     const breathGain = ac.createGain(); breathGain.gain.value = clamp01(breathingLevel ?? 0.08) * 0.9;
-    node.connect(breathGain); breathGain.connect(merge);
-
+    node.connect(breathGain); breathGain.connect(master);
     const an = ac.createAnalyser(); an.fftSize = 512; an.smoothingTimeConstant = 0.85;
     comp.connect(an);
-    const buf = new Uint8Array(an.frequencyBinCount);
+    const buf2 = new Uint8Array(an.frequencyBinCount);
     const gate = ()=> {
-      an.getByteFrequencyData(buf);
-      let sum=0; for(let i=0;i<buf.length;i++) sum += buf[i];
-      const loud = sum / (buf.length*255);
+      an.getByteFrequencyData(buf2);
+      const loud = buf2.reduce((s,v)=>s+v,0) / (buf2.length*255);
       const target = loud > 0.08 ? 0.02 : (clamp01(breathingLevel ?? 0.08) * 0.9);
       const now = ac.currentTime;
       breathGain.gain.setTargetAtTime(target, now, 0.12);
@@ -343,13 +362,7 @@ async function attachProcessedAudio(
     requestAnimationFrame(gate);
   }
 
-  merge.connect(dest);
-  (audioEl as any).srcObject=dest.stream;
-  await audioEl.play().catch(()=>{});
-
-  let ambClean:null|(()=>void)=null; if(ambience!=='off') ambClean=createAmbience(ac,ambience,ambienceLevel);
-
-  return ()=>{ [src,hp,lp,presence,body,sat,comp,merge,dry].forEach(n=>{try{(n as any).disconnect()}catch{}}); try{ambClean&&ambClean()}catch{}; try{breathStop&&breathStop()}catch{}; try{ac.close()}catch{}; };
+  return ()=>{ [src,hp,lp,presence,body,sat,comp,merge,master,analyser,dry].forEach(n=>{try{(n as any).disconnect()}catch{}}); try{ambClean&&ambClean()}catch{}; try{breathStop&&breathStop()}catch{}; try{ac.close()}catch{}; };
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -382,7 +395,7 @@ function startWebSpeechASR(opts: { lang?: string; onInterim: (t: string)=>void; 
     for (let i = e.resultIndex; i < e.results.length; i++) {
       const res = e.results[i];
       if (res.isFinal) finalText += res[0].transcript;
-      else interim = res[0].transcript; // replace (no duplications)
+      else interim = res[0].transcript;
     }
     if (interim) opts.onInterim(interim);
     if (finalText) opts.onFinal(finalText);
@@ -465,12 +478,11 @@ export default function WebCallButton({
   const [muted,setMuted]=useState(false);
   const [error,setError]=useState<string>('');
 
-  const [voices,setVoices]=useState<string[]>([]);
-  const [selectedVoice,setSelectedVoice]=useState<string>('');
-  const voiceId = useMemo(()=> resolveVoiceId(selectedVoice || voiceName), [selectedVoice, voiceName]);
+  // voice now comes solely from props
+  const voiceId = useMemo(()=> resolveVoiceId(voiceName), [voiceName]);
 
-  const [log,setLog]=useState<TranscriptRow[]>([]);
-  const logRef=useRef<TranscriptRow[]>([]);
+  const [log,setLog]=useState<{ id:string; who:'user'|'assistant'; text:string; at:number; done?:boolean }[]>([]);
+  const logRef=useRef(log);
   useEffect(()=>{ logRef.current=log; },[log]);
 
   const audioRef=useRef<HTMLAudioElement|null>(null);
@@ -481,47 +493,27 @@ export default function WebCallButton({
   const closeChainRef=useRef<null|(()=>void)>(null);
   const vadLoopRef=useRef<number|null>(null);
   const scrollerRef=useRef<HTMLDivElement|null>(null);
-  const sawAssistantDeltaRef=useRef<boolean>(false);
 
-  // Delay + language UI state
-  const [uiLang, setUiLang] = useState<Props['languageHint']>(languageHint || 'auto');
-  const [replyDelaySec, setReplyDelaySec] = useState<number>(2);
+  // reply delay (no UI): small natural pause after you finish
+  const replyDelaySec = 2;
 
-  // Hold/Buffer assistant output during the chosen delay window
   const holdUntilRef = useRef<number>(0);
   const holdingRef = useRef<boolean>(false);
   const assistantBufferRef = useRef<Map<string,string>>(new Map());
 
-  // Per-turn mapping + interim buffers for word-level correctness
+  // user interim buffers
   const userTurnIdRef = useRef<string | null>(null);
   const serverToLocalUser = useRef<Map<string,string>>(new Map());
   const userInterimRef = useRef<Map<string,{final:string; interim:string}>>(new Map());
   const asrStopRef=useRef<null|(()=>void)>(null);
 
-  const lastRestRef=useRef<number>(0);
+  // barge-in dampener state
+  const assistantSpeakingRef = useRef<boolean>(false);
+  const protectGreetingUntilRef = useRef<number>(0);
 
   useEffect(()=>{ const el=scrollerRef.current; if(!el) return; el.scrollTop=el.scrollHeight; },[log,connecting,connected]);
 
-  // fetch voices (filter coral)
-  useEffect(()=>{
-    let cancelled=false;
-    const fallback = Array.from(new Set([voiceName,...DEFAULT_VOICES].filter(Boolean))) as string[];
-    (async()=>{
-      try{
-        const r=await fetch('https://api.openai.com/v1/voices',{ headers:{ Authorization:`Bearer ${apiKey}` }});
-        if(!r.ok) throw new Error(String(r.status));
-        const j=await r.json();
-        let ids:Array<string>=Array.isArray(j?.data)? j.data.map((v:any)=>v?.id).filter(Boolean):[];
-        ids=ids.filter(id=>HUMAN_LIKE.has(id) && id!=='coral'); if(!ids.length) ids=fallback;
-        if(!cancelled){ setVoices(ids); setSelectedVoice(ids.includes(resolveVoiceId(voiceName))? resolveVoiceId(voiceName) : (ids[0]||'alloy')); }
-      }catch{
-        if(!cancelled){ setVoices(fallback); setSelectedVoice(resolveVoiceId(voiceName) || fallback[0]||'alloy'); }
-      }
-    })();
-    return()=>{ cancelled=true; };
-  },[apiKey, voiceName]);
-
-  /* ── helpers to guarantee new bubble per turn + word-level interim ── */
+  /* ── helpers for transcript ── */
   const newId = (p:'user'|'assistant') => `${p}_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
 
   const beginUserTurn = (serverId?:string) => {
@@ -533,12 +525,11 @@ export default function WebCallButton({
     return id;
   };
 
-  // Replace interim, commit final
   const updateUserInterim = (txt:string, serverId?:string) => {
     let id = serverId ? serverToLocalUser.current.get(serverId) : userTurnIdRef.current;
     if (!id) id = beginUserTurn(serverId);
     const buf = userInterimRef.current.get(id) || { final:'', interim:'' };
-    buf.interim = txt; // REPLACE (no duplications)
+    buf.interim = txt;
     userInterimRef.current.set(id, buf);
     const display = (buf.final + ' ' + buf.interim).replace(/\s+/g,' ').trim();
     setLog(prev=>{
@@ -567,7 +558,7 @@ export default function WebCallButton({
   };
 
   const addAssistantDelta = (respId:string, delta:string) => {
-    // If we're holding (reply delay), buffer deltas and mute audio
+    assistantSpeakingRef.current = true;
     if (holdingRef.current) {
       assistantBufferRef.current.set(respId, (assistantBufferRef.current.get(respId) || '') + delta);
       if (audioRef.current) audioRef.current.muted = true;
@@ -580,10 +571,8 @@ export default function WebCallButton({
     });
   };
   const endAssistantTurn = (respId:string) => {
-    if (holdingRef.current) {
-      // mark buffered as complete; we'll flush on release
-      return;
-    }
+    assistantSpeakingRef.current = false;
+    if (holdingRef.current) return;
     setLog(prev=>{
       const i=prev.findIndex(r=>r.id===respId);
       if(i===-1) return prev;
@@ -636,19 +625,9 @@ export default function WebCallButton({
     }catch{ return ()=>{}; }
   }
 
-  // Duck audio ~500ms at sentence boundaries (breath / rest)
-  function restBetweenSentences(delta: string){
-    if(!audioRef.current) return;
-    if(!/[.!?…]\s*$/.test(delta)) return;
-    const now=Date.now();
-    if(now - lastRestRef.current < 700) return;
-    lastRestRef.current = now;
-    const el = audioRef.current;
-    const prev = el.volume;
-    el.volume = 0.0;
-    setTimeout(()=>{ el.volume = prev || 1.0; }, 500);
-  }
-
+  /* ────────────────────────────────────────────────────────────────────────
+     START CALL
+  ──────────────────────────────────────────────────────────────────────── */
   async function startCall(){
     setError('');
     if(!apiKey){ setError('No API key selected.'); onError?.('No API key'); return; }
@@ -669,15 +648,14 @@ export default function WebCallButton({
         audio: { echoCancellation:true, noiseSuppression:true, autoGainControl:true }
       }); micStreamRef.current=mic;
 
-      // 2.5) LOCAL ASR ⇒ interim replace + final commit
+      // 2.5) LOCAL ASR
       try {
-        const lang = langToBCP47(uiLang);
+        const lang = langToBCP47(uiLangRef.current);
         if (asrStopRef.current) { try { asrStopRef.current(); } catch {} asrStopRef.current = null; }
         let started = false;
         const ensureStart = () => { if (!started) { beginUserTurn(); started = true; } };
         const onInterim = (txt: string) => { ensureStart(); updateUserInterim(txt); };
         const onFinal = (txt: string) => { ensureStart(); commitUserFinal(txt); started=false; };
-
         if (clientASR === 'deepgram' && deepgramKey) {
           const stop = startDeepgramASR({ lang, deepgramKey, stream: mic, onInterim, onFinal });
           if (stop) asrStopRef.current = stop;
@@ -695,9 +673,8 @@ export default function WebCallButton({
         e.streams[0]?.getAudioTracks().forEach(t=>remote.addTrack(t));
         if(!audioRef.current) return;
         if(closeChainRef.current){ try{closeChainRef.current()}catch{}; closeChainRef.current=null; }
-        const usePhone = prosody?.phoneFilter ?? phoneFilter;
         closeChainRef.current=await attachProcessedAudio(audioRef.current, remote, {
-          phoneFilter: !!usePhone,
+          phoneFilter: !!(prosody?.phoneFilter),
           farMic,
           ambience,
           ambienceLevel,
@@ -717,8 +694,8 @@ export default function WebCallButton({
         const preDelay = Math.max(300, prosody?.preSpeechDelayMs ?? 550);
         const style = [
           systemPrompt || '',
-          languageNudge(uiLang),
-          (prosody?.fillerWords ?? true) ? 'Use mild, natural disfluencies (“uh”, “um”, “like”) occasionally. Do not overuse.' : '',
+          languageNudge(uiLangRef.current),
+          (prosody?.fillerWords ?? true) ? 'Use mild, natural disfluencies (“uh”, “um”) occasionally.' : '',
           `Allow micro pauses (~${prosody?.microPausesMs ?? 120} ms) inside sentences.`,
           `Before starting to speak, pause about ${preDelay} ms as if thinking.`,
           `Between sentences, take a light breath and wait ~500 ms before continuing.`,
@@ -731,7 +708,7 @@ export default function WebCallButton({
           model:'gpt-4o-mini-transcribe',
           fallback_models:['whisper-1']
         };
-        if (uiLang && uiLang!=='auto') input_audio_transcription.language = uiLang;
+        if (uiLangRef.current && uiLangRef.current!=='auto') input_audio_transcription.language = uiLangRef.current;
 
         safeSend(dc,{ type:'session.update', session:{
           instructions: style,
@@ -740,6 +717,7 @@ export default function WebCallButton({
           output_audio_format:'pcm16',
           modalities:['audio','text'],
           input_audio_transcription,
+          // NOTE: server_vad stays enabled; barge-in dampener is managed locally
           turn_detection:{
             type:'server_vad',
             threshold:0.5,
@@ -748,12 +726,13 @@ export default function WebCallButton({
           },
         }});
 
-        // Optional greeting
+        // Client-side greeting (protected from interruption)
         const wantClientGreeting =
           greetMode==='client' || (greetMode==='server' && firstMode==='Assistant speaks first');
 
         const greet = () => {
           const lines=(firstMsg||'Hello.').split(/\r?\n|\|/g).map(s=>s.trim()).filter(Boolean).slice(0,6);
+          protectGreetingUntilRef.current = Date.now() + Math.max(2200, 1200 + lines.join(' ').length*12);
           setTimeout(()=>{
             for(const ln of lines){
               safeSend(dc,{ type:'response.create', response:{ modalities:['audio','text'], instructions: ln }});
@@ -761,38 +740,26 @@ export default function WebCallButton({
           }, preDelay);
         };
 
-        if (greetMode==='client') {
-          greet();
-        } else if (wantClientGreeting) {
-          setTimeout(()=>{ if (!sawAssistantDeltaRef.current) greet(); }, 1200);
-        }
+        if (greetMode==='client') greet();
+        else if (wantClientGreeting) setTimeout(()=>{ greet(); }, 300);
       };
 
-      // 5) events — ASSISTANT + USER transcripts (word-level + reply delay hold)
+      // 5) events — ASSISTANT + USER + barge-in dampener
       dc.onmessage=(ev)=>{
         let raw:any;
         try{ raw=JSON.parse(ev.data); }catch{ return; }
         const t=String(raw?.type||'').replace(/^realtime\./,'');
 
-        // Check if we should release hold (in case timer already elapsed)
         releaseHoldIfDue();
 
         /* ASSISTANT STREAM */
-        if(t==='response.output_text.delta'){
-          sawAssistantDeltaRef.current = true;
+        if(t==='response.output_text.delta' || t==='response.audio_transcript.delta'){
           const id=raw?.response_id||raw?.id||newId('assistant');
           const d=String(raw?.delta||'');
-          restBetweenSentences(d);
           addAssistantDelta(id,d);
           return;
         }
-        if(t==='response.audio_transcript.delta'){
-          const id=raw?.response_id||raw?.id||newId('assistant');
-          const d=String(raw?.delta||''); restBetweenSentences(d);
-          addAssistantDelta(id,d); return;
-        }
         if(t==='response.audio_transcript.completed' || t==='response.completed' || t==='response.stop'){
-          if (holdingRef.current) return; // mark done on flush
           const id=raw?.response_id||raw?.id; if(id) endAssistantTurn(id); return;
         }
         if (t==='response.output_text' && typeof raw?.text==='string'){
@@ -818,20 +785,36 @@ export default function WebCallButton({
 
         /* USER (SERVER) — interim replace, final commit */
         if (/^input_audio_buffer\.speech_started$|^input_speech\.start$/.test(t)) {
+          // Barge-in dampener: sometimes ignore interjections while assistant talks,
+          // and ALWAYS protect the greeting window.
+          const now = Date.now();
+          const protectGreeting = now < protectGreetingUntilRef.current;
+          const assistantTalking = assistantSpeakingRef.current;
+          if ((assistantTalking || protectGreeting) && micStreamRef.current){
+            // 60% chance to ignore this interruption (and 100% during greeting)
+            const ignore = protectGreeting || Math.random() < 0.6;
+            if (ignore){
+              const track = micStreamRef.current.getAudioTracks()[0];
+              if (track){
+                const prev = track.enabled;
+                track.enabled = false;
+                setTimeout(()=>{ try{track.enabled = prev;}catch{}; }, protectGreeting ? 900 : 700);
+              }
+              // don't begin a turn; just return
+              return;
+            }
+          }
           beginUserTurn(raw?.id);
-          // If assistant was previously on hold (rare overlap), release
-          releaseHoldIfDue();
           return;
         }
-        if (/^input_audio_buffer\.speech_ended$|^input_speech\.end$/.test(t))   {
-          commitUserFinal(undefined, raw?.id);
 
-          // START reply-delay hold: mute audio + buffer assistant for N seconds
+        if (/^input_audio_buffer\.speech_ended$|^input_speech\.end$/.test(t)) {
+          commitUserFinal(undefined, raw?.id);
+          // reply-delay hold
           if (replyDelaySec > 0 && audioRef.current) {
             holdingRef.current = true;
             holdUntilRef.current = Date.now() + replyDelaySec * 1000;
             audioRef.current.muted = true;
-            // hard release after timeout
             setTimeout(() => { releaseHoldIfDue(); }, replyDelaySec * 1000 + 10);
           }
           return;
@@ -861,7 +844,6 @@ export default function WebCallButton({
           commitUserFinal(undefined, raw?.id); return;
         }
 
-        // Single-shot text
         if ((/transcript|transcription|input_audio_buffer|input_text/.test(t)) && typeof raw?.text==='string' && !raw?.delta){
           beginUserTurn(); commitUserFinal(String(raw.text||'')); return;
         }
@@ -870,12 +852,6 @@ export default function WebCallButton({
       pc.onconnectionstatechange=()=>{
         if(pc.connectionState==='connected'){ setConnected(true); setConnecting(false); }
         else if(['disconnected','failed','closed'].includes(pc.connectionState)){ endCall(false); }
-      };
-      pc.oniceconnectionstatechange = () => {
-        const s = pc.iceConnectionState;
-        if (s==='failed' || s==='disconnected') {
-          setError('Network hiccup – reconnecting…');
-        }
       };
 
       // 6) SDP
@@ -925,12 +901,17 @@ export default function WebCallButton({
   }
   function endCall(userIntent=true){ cleanup(); setConnected(false); setConnecting(false); if(userIntent) onClose?.(); }
 
+  // Language UI state (kept, opens upward)
+  const [uiLang, setUiLang] = useState<Props['languageHint']>(languageHint || 'auto');
+  const uiLangRef = useRef(uiLang);
+  useEffect(()=>{ uiLangRef.current = uiLang; },[uiLang]);
+
   // Restart session when voice or language changes
   useEffect(()=>{ startCall(); return ()=>{ cleanup(); }; // eslint-disable-next-line
   },[voiceId, uiLang]);
 
   /* ────────────────────────────────────────────────────────────────────────
-     UI — Slide-over panel (right) with lighter backdrop on the left
+     UI — Slide-over panel
   ───────────────────────────────────────────────────────────────────────── */
   const backdrop = (
     <div
@@ -958,14 +939,7 @@ export default function WebCallButton({
       </div>
 
       <div className="ml-auto flex items-center gap-2">
-        <div style={{ width: 200 }}>
-          <StyledSelect
-            value={voiceId}
-            onChange={(v)=>setSelectedVoice(v)}
-            options={(voices.length?voices:DEFAULT_VOICES).filter(v=>v!=='coral').map(v=>({ value:v, label:v }))}
-            placeholder="Voice"
-          />
-        </div>
+        {/* Voice dropdown REMOVED by request */}
 
         <button
           onClick={toggleMute}
@@ -1051,7 +1025,7 @@ export default function WebCallButton({
 
   const footer = (
     <div className="px-3 py-2 border-t" style={{ borderColor:'rgba(255,255,255,.10)', color:'var(--text)', background:'var(--panel-bg)' }}>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 items-center text-xs">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 items-center text-xs">
         <div className="flex items-center gap-2">
           {connecting && <Loader2 className="w-4 h-4 animate-spin" />}
           <span style={{ opacity:.85 }}>
@@ -1059,8 +1033,8 @@ export default function WebCallButton({
           </span>
         </div>
 
-        {/* Language picker (affects client+server ASR and reply language) */}
-        <div className="flex items-center gap-2">
+        {/* Language picker (kept). Menu opens UP now. */}
+        <div className="flex items-center gap-2 justify-end">
           <span style={{ opacity:.8, minWidth:70 }}>Language</span>
           <div style={{ width: 160 }}>
             <StyledSelect
@@ -1074,31 +1048,12 @@ export default function WebCallButton({
                 { value:'es', label:'Español' },
                 { value:'ar', label:'العربية' },
               ]}
+              openUp
             />
           </div>
         </div>
 
-        {/* Reply delay (seconds) */}
-        <div className="flex items-center gap-2">
-          <span style={{ opacity:.8, minWidth:70 }}>Reply delay</span>
-          <div style={{ width: 120 }}>
-            <StyledSelect
-              value={String(replyDelaySec)}
-              onChange={(v)=> setReplyDelaySec(Number(v))}
-              options={[
-                { value:'0', label:'0s' },
-                { value:'1', label:'1s' },
-                { value:'2', label:'2s (default)' },
-                { value:'3', label:'3s' },
-                { value:'4', label:'4s' },
-                { value:'5', label:'5s' },
-                { value:'6', label:'6s' },
-              ]}
-            />
-          </div>
-        </div>
-
-        <div className="col-span-1 sm:col-span-3 flex justify-end">
+        <div className="col-span-1 sm:col-span-2 flex justify-end">
           <audio ref={audioRef} autoPlay playsInline />
         </div>
       </div>
