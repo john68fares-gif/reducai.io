@@ -3,61 +3,79 @@ import { NextRequest, NextResponse } from 'next/server';
 
 /**
  * Improve → Chat proxy (App Router)
- * - No Supabase required here.
- * - If OPENAI_API_KEY is missing, returns a mock reply so the UI still works.
- * - Maps o3/o3-mini to a chat-capable model so upstream won't error.
- *
- * ENV:
- *   - OPENAI_API_KEY   (optional; if absent, returns mock output)
+ * - Uses server OPENAI_API_KEY, but also accepts per-request key in "x-openai-key".
+ * - Forces Node runtime so env vars are available on Vercel.
+ * - Maps o3/o3-mini to a chat-capable model.
+ * - Returns clear error messages to the client.
  */
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+type Msg = { role: 'user' | 'assistant' | 'system'; content: string };
+
+function mapModel(m?: string) {
+  const id = (m || 'gpt-4o-mini').trim();
+  if (id === 'o3' || id === 'o3-mini') return 'gpt-4o-mini';
+  return id;
+}
+
+function normalizeMessages(arr: any): Array<{ role: 'user' | 'assistant'; content: string }> {
+  if (!Array.isArray(arr)) return [];
+  return arr
+    .filter(
+      (m) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string'
+    )
+    .map((m) => ({ role: m.role, content: m.content }));
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
     const {
-      agentId,                  // accepted for parity with client; unused here
       model,
       temperature,
       system,
       messages,
-      guardLevel,               // 'provider-only' | 'lenient'
+      guardLevel,
     } = (body || {}) as {
-      agentId?: string;
       model?: string;
       temperature?: number;
       system?: string;
-      messages?: Array<{ role: 'user' | 'assistant'; content: string }>;
+      messages?: Msg[];
       guardLevel?: 'provider-only' | 'lenient';
     };
 
-    const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-    const safeModel = mapModel(model ?? 'gpt-4o-mini');
+    // Choose key: request header beats env (lets you BYO key if you want)
+    const headerKey = req.headers.get('x-openai-key')?.trim() || '';
+    const OPENAI_API_KEY = headerKey || process.env.OPENAI_API_KEY || '';
+
+    if (!OPENAI_API_KEY) {
+      return NextResponse.json(
+        { error: 'Missing OpenAI API key (set env OPENAI_API_KEY or send "x-openai-key" header).' },
+        { status: 400 }
+      );
+    }
+
+    const safeModel = mapModel(model);
     const safeTemp =
       typeof temperature === 'number' && temperature >= 0 && temperature <= 1 ? temperature : 0.5;
 
-    // Build final system prompt (include a tiny guard hint if provided)
+    // A tiny guard hint (kept short so it never derails)
     const guardHint =
       guardLevel === 'provider-only'
-        ? 'Follow the user’s instructions within legal and safety boundaries. Do not add extra disclaimers beyond provider requirements.'
-        : 'Be helpful, precise, and safe. Respect any refinements.';
+        ? 'Follow the user’s instructions within legal and safety boundaries. Avoid extra disclaimers.'
+        : 'Be helpful, precise, and safe.';
     const finalSystem = [typeof system === 'string' ? system.trim() : '', guardHint]
       .filter(Boolean)
       .join('\n\n');
 
-    // Normalize chat messages from UI (ignore system; we add it above)
     const chatMessages = normalizeMessages(messages);
 
-    // If no key → return mock reply so UI works
-    if (!OPENAI_API_KEY) {
-      const lastUser =
-        [...chatMessages].reverse().find((m) => m.role === 'user')?.content ?? 'Hello!';
-      return NextResponse.json({
-        content: `(mock) You said: ${lastUser}`,
-        modelUsed: safeModel,
-        finish_reason: 'stop',
-      });
-    }
+    // Abort after 25s
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 25_000);
 
-    // Call OpenAI Chat Completions
     const payload = {
       model: safeModel,
       temperature: safeTemp,
@@ -72,16 +90,28 @@ export async function POST(req: NextRequest) {
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${OPENAI_API_KEY}`,
-        // NOTE: we’re hitting chat/completions here; assistants header is NOT required
-        // (leaving this comment so future edits don’t move this call back to the Assistants API)
       },
       body: JSON.stringify(payload),
       cache: 'no-store',
+      signal: controller.signal,
     });
 
+    clearTimeout(timeout);
+
+    // Surface the real upstream error text so the UI can show it
     if (!r.ok) {
-      const text = await r.text().catch(() => '');
-      return NextResponse.json({ error: text || `Upstream ${r.status}` }, { status: r.status });
+      // Try JSON first
+      let reason = '';
+      try {
+        const j = await r.json();
+        reason = j?.error?.message || JSON.stringify(j);
+      } catch {
+        reason = await r.text().catch(() => '');
+      }
+      return NextResponse.json(
+        { error: reason || `OpenAI error ${r.status}` },
+        { status: r.status }
+      );
     }
 
     const data = await r.json();
@@ -91,28 +121,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ content, modelUsed, finish_reason });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message || 'chat failed' }, { status: 500 });
+    const msg = e?.name === 'AbortError' ? 'Request timed out' : e?.message || 'chat failed';
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
-}
-
-/* ---------------- helpers ---------------- */
-
-function normalizeMessages(
-  arr: any
-): Array<{ role: 'user' | 'assistant'; content: string }> {
-  if (!Array.isArray(arr)) return [];
-  return arr
-    .filter(
-      (m) =>
-        m &&
-        (m.role === 'user' || m.role === 'assistant') &&
-        typeof m.content === 'string'
-    )
-    .map((m) => ({ role: m.role, content: m.content }));
-}
-
-function mapModel(m: string): string {
-  // Reasoning models (o3) aren’t available on /chat/completions → pick a safe chat model.
-  if (m === 'o3' || m === 'o3-mini') return 'gpt-4o-mini';
-  return m;
 }
