@@ -6,16 +6,14 @@ import { createPortal } from 'react-dom';
 import { Bot, User, Mic, MicOff, X, Loader2, ChevronDown, Search, Check, Lock } from 'lucide-react';
 
 /* ──────────────────────────────────────────────────────────────────────────
-   PROPS
+   TYPES / PROPS
 ────────────────────────────────────────────────────────────────────────── */
 type ProsodyOpts = {
   fillerWords?: boolean;
   microPausesMs?: number;
   phoneFilter?: boolean;
-  /** Server VAD: minimum silence to detect turn end (we also enforce a stronger client hold) */
-  turnEndPauseMs?: number;
-  /** Natural think time before assistant starts first sentence */
-  preSpeechDelayMs?: number;
+  turnEndPauseMs?: number;       // server VAD pause
+  preSpeechDelayMs?: number;     // small "thinking" delay before assistant starts
 };
 
 type Props = {
@@ -39,25 +37,28 @@ type Props = {
   languageHint?: 'auto' | 'en' | 'de' | 'nl' | 'es' | 'ar';
   prosody?: ProsodyOpts;
 
+  // audio polish
   phoneFilter?: boolean;
   farMic?: boolean;
   ambience?: 'off' | 'kitchen' | 'cafe';
   ambienceLevel?: number;
 
-  // humanizing extras
   breathing?: boolean;
   breathingLevel?: number;
 
-  // Client-side ASR so YOUR transcript appears and supports multi-language
+  // local ASR so user transcript always shows
   clientASR?: 'off' | 'auto' | 'deepgram';
   deepgramKey?: string;
 
-  /** HARD client gate: wait this long of silence before assistant can speak */
-  minUserSilenceMs?: number; // <- NEW (defaults 3000)
+  // NEW: gate settings
+  /** How long the user must be silent before the bot is allowed to reply. */
+  minUserSilenceMs?: number;     // default 3000
+  /** A soft cap on bot verbosity; trims after this many characters during the greeting. */
+  maxGreetingChars?: number;     // default 220
 };
 
 /* ──────────────────────────────────────────────────────────────────────────
-   THEME / CONSTANTS
+   CONSTANTS
 ────────────────────────────────────────────────────────────────────────── */
 const CTA = '#59d9b3';
 const GREEN_LINE = 'rgba(89,217,179,.20)';
@@ -68,23 +69,20 @@ const clamp01 = (v:number)=>Math.max(0,Math.min(1,v));
 const fmtTime = (ts:number)=>new Date(ts).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
 
 const LANG_NAME = { auto:'Auto', en:'English', de:'Deutsch', nl:'Nederlands', es:'Español', ar:'العربية' } as const;
-type LangKey = keyof typeof LANG_NAME;
-
 const resolveVoiceId = (key:string) => {
   const k = (key||'').trim();
   return RAW_ID.test(k) ? k.toLowerCase() : k || 'alloy';
 };
 
 /* ──────────────────────────────────────────────────────────────────────────
-   SELECT (same look)  — supports opening UPWARDS
+   SMALL SELECT (for language)
 ────────────────────────────────────────────────────────────────────────── */
 type Opt = { value: string; label: string; disabled?: boolean; iconLeft?: React.ReactNode };
 function StyledSelect({
-  value, onChange, options, placeholder, leftIcon, menuTop, openUp=false
+  value, onChange, options, placeholder, leftIcon, openUp=false
 }:{
-  value: string; onChange: (v: string) => void;
-  options: Opt[]; placeholder?: string; leftIcon?: React.ReactNode; menuTop?: React.ReactNode;
-  openUp?: boolean;
+  value: string; onChange: (v: string) => void; options: Opt[];
+  placeholder?: string; leftIcon?: React.ReactNode; openUp?: boolean;
 }) {
   const wrapRef = useRef<HTMLDivElement|null>(null);
   const btnRef = useRef<HTMLButtonElement|null>(null);
@@ -166,8 +164,6 @@ function StyledSelect({
             boxShadow:'0 24px 64px rgba(0,0,0,.60), 0 8px 20px rgba(0,0,0,.45), 0 0 0 1px rgba(0,255,194,.10)'
           }}
         >
-          {menuTop ? <div className="mb-2">{menuTop}</div> : null}
-
           <div
             className="flex items-center gap-2 mb-2 px-2 py-1.5 rounded-[8px]"
             style={{ background:'#101314', border:'1px solid rgba(255,255,255,.14)', color:'var(--text)' }}
@@ -222,28 +218,28 @@ function StyledSelect({
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
-   AUDIO ENHANCERS (phone polish + ambience + breathing + voice envelope)
+   AUDIO POLISH (saturator, ambience, breath, envelope)
 ────────────────────────────────────────────────────────────────────────── */
 function createSaturator(ac: AudioContext, drive=1.05){
   const sh=ac.createWaveShaper(); const curve=new Float32Array(1024);
   for(let i=0;i<curve.length;i++){ const x=(i/(curve.length-1))*2-1; curve[i]=Math.tanh(x*drive); }
   sh.curve=curve; sh.oversample='2x'; return sh;
 }
-function createAmbience(ac: AudioContext, kind:'kitchen'|'cafe', level=0.08){
+
+function createAmbience(ac: AudioContext, kind:'kitchen'|'cafe', level=0.06){
   const src=ac.createBufferSource(); const len=ac.sampleRate*2;
   const buf=ac.createBuffer(1,len,ac.sampleRate); const d=buf.getChannelData(0); let prev=0;
   for(let i=0;i<len;i++){ const w=Math.random()*2-1; prev=prev*0.97+w*0.03; d[i]=prev; }
   src.buffer=buf; src.loop=true;
   const band=ac.createBiquadFilter(); band.type='bandpass'; band.frequency.value=kind==='kitchen'?950:350; band.Q.value=kind==='kitchen'?0.9:0.6;
   const hp=ac.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=120;
-  const g=ac.createGain(); g.gain.value=clamp01(level)*0.18;
+  const g=ac.createGain(); g.gain.value=clamp01(level)*0.14;
   src.connect(band); band.connect(hp); hp.connect(g); g.connect(ac.destination);
   src.start();
   return ()=>{ try{src.stop()}catch{}; [src,band,hp,g].forEach(n=>{try{(n as any).disconnect()}catch{}}); };
 }
 
 function createBreather(ac: AudioContext, level=0.08){
-  // band-limited noise + slow LFO → breathy ambience (auto-gated)
   const noise = ac.createBufferSource();
   const len = ac.sampleRate * 2;
   const buf = ac.createBuffer(1, len, ac.sampleRate);
@@ -255,9 +251,9 @@ function createBreather(ac: AudioContext, level=0.08){
   const bp = ac.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=380; bp.Q.value=0.6;
   const hp = ac.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=140;
 
-  const gain = ac.createGain(); gain.gain.value = clamp01(level) * 0.15;
-  const lfo = ac.createOscillator(); lfo.frequency.value = 0.24;
-  const lfoGain = ac.createGain(); lfoGain.gain.value = clamp01(level) * 0.12;
+  const gain = ac.createGain(); gain.gain.value = clamp01(level) * 0.10; // lower bed
+  const lfo = ac.createOscillator(); lfo.frequency.value = 0.22;
+  const lfoGain = ac.createGain(); lfoGain.gain.value = clamp01(level) * 0.10;
 
   lfo.connect(lfoGain); lfoGain.connect(gain.gain);
   noise.connect(bp); bp.connect(hp); hp.connect(gain);
@@ -286,17 +282,17 @@ async function attachProcessedAudio(
 
   const hp=ac.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=70;
   const lp=ac.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=12000;
-  const presence=ac.createBiquadFilter(); presence.type='peaking'; presence.frequency.value=2800; presence.Q.value=0.9; presence.gain.value=1.6;
-  const body=ac.createBiquadFilter(); body.type='lowshelf'; body.frequency.value=160; body.gain.value=1.2;
+  const presence=ac.createBiquadFilter(); presence.type='peaking'; presence.frequency.value=2800; presence.Q.value=0.9; presence.gain.value=1.5;
+  const body=ac.createBiquadFilter(); body.type='lowshelf'; body.frequency.value=160; body.gain.value=1.1;
   const sat=createSaturator(ac,1.05);
   const comp=ac.createDynamicsCompressor();
-  comp.threshold.value=-20; comp.knee.value=18; comp.ratio.value=1.7; comp.attack.value=0.008; comp.release.value=0.18;
+  comp.threshold.value=-22; comp.knee.value=18; comp.ratio.value=1.6; comp.attack.value=0.01; comp.release.value=0.18;
 
   const dry=ac.createGain(); dry.gain.value=1.0;
   const merge=ac.createGain();
 
-  // Gentle voice envelope (fade-in/out per phrase)
-  const master = ac.createGain(); master.gain.value = 0.9; // base level
+  // voice envelope (fade on/off per phrase)
+  const master = ac.createGain(); master.gain.value = 0.9;
   const analyser = ac.createAnalyser(); analyser.fftSize = 512; analyser.smoothingTimeConstant = 0.88;
 
   const dest=ac.createMediaStreamDestination();
@@ -305,10 +301,10 @@ async function attachProcessedAudio(
   comp.connect(dry); dry.connect(merge);
   merge.connect(master); master.connect(analyser); analyser.connect(dest);
 
-  // Envelope logic: ramp up on onset, ramp down after ~300ms of silence
+  // envelope
   const buf = new Uint8Array(analyser.frequencyBinCount);
   let speaking=false; let lastEnergy=0; let lastAbove=Date.now();
-  const base = 0.9, minFloor = 0.18;
+  const base = 0.9, minFloor = 0.15;
   const tick = ()=>{
     analyser.getByteFrequencyData(buf);
     const energy = buf.reduce((s,v)=>s+v,0)/(buf.length*255);
@@ -317,15 +313,15 @@ async function attachProcessedAudio(
     if (energy > 0.06 && lastEnergy <= 0.06){
       speaking=true;
       master.gain.cancelScheduledValues(now);
-      master.gain.setTargetAtTime(base, now, 0.18);
+      master.gain.setTargetAtTime(base, now, 0.16);
       lastAbove = ms;
     } else if (energy > 0.06){
       lastAbove = ms;
     }
-    if (speaking && ms - lastAbove > 320){
+    if (speaking && ms - lastAbove > 300){
       speaking=false;
       master.gain.cancelScheduledValues(now);
-      master.gain.setTargetAtTime(minFloor, now, 0.22);
+      master.gain.setTargetAtTime(minFloor, now, 0.20);
     }
     lastEnergy = energy;
     requestAnimationFrame(tick);
@@ -337,12 +333,12 @@ async function attachProcessedAudio(
 
   let ambClean:null|(()=>void)=null; if(ambience!=='off') ambClean=createAmbience(ac,ambience,ambienceLevel);
 
-  // OPTIONAL: breathing bed (auto-dips when speech is loud)
+  // optional breath bed
   let breathStop: null | (()=>void) = null;
   if (breathing){
-    const { node, stop } = createBreather(ac, breathingLevel ?? 0.18);
+    const { node, stop } = createBreather(ac, breathingLevel ?? 0.12);
     breathStop = stop;
-    const breathGain = ac.createGain(); breathGain.gain.value = clamp01(breathingLevel ?? 0.18) * 1.1;
+    const breathGain = ac.createGain(); breathGain.gain.value = clamp01(breathingLevel ?? 0.12) * 0.9;
     node.connect(breathGain); breathGain.connect(master);
     const an = ac.createAnalyser(); an.fftSize = 512; an.smoothingTimeConstant = 0.85;
     comp.connect(an);
@@ -350,9 +346,9 @@ async function attachProcessedAudio(
     const gate = ()=> {
       an.getByteFrequencyData(buf2);
       const loud = buf2.reduce((s,v)=>s+v,0) / (buf2.length*255);
-      const target = loud > 0.08 ? 0.02 : (clamp01(breathingLevel ?? 0.18) * 1.1);
+      const target = loud > 0.08 ? 0.02 : breathGain.gain.value;
       const now = ac.currentTime;
-      breathGain.gain.setTargetAtTime(target, now, 0.12);
+      breathGain.gain.setTargetAtTime(target, now, 0.10);
       requestAnimationFrame(gate);
     };
     requestAnimationFrame(gate);
@@ -362,9 +358,9 @@ async function attachProcessedAudio(
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
-   LOCAL CLIENT ASR
+   LOCAL ASR (for on-screen user transcript)
 ────────────────────────────────────────────────────────────────────────── */
-const langToBCP47 = (hint: LangKey) => {
+const langToBCP47 = (hint: Props['languageHint']) => {
   switch (hint) {
     case 'nl': return 'nl-NL';
     case 'de': return 'de-DE';
@@ -379,15 +375,11 @@ function startWebSpeechASR(opts: { lang?: string; onInterim: (t: string)=>void; 
   const W: any = window as any;
   const SR = W.SpeechRecognition || W.webkitSpeechRecognition;
   if (!SR) return null;
-
   const rec = new SR();
-  rec.continuous = true;
-  rec.interimResults = true;
+  rec.continuous = true; rec.interimResults = true;
   if (opts.lang) rec.lang = opts.lang;
-
   rec.onresult = (e: any) => {
-    let interim = '';
-    let finalText = '';
+    let interim = ''; let finalText = '';
     for (let i = e.resultIndex; i < e.results.length; i++) {
       const res = e.results[i];
       if (res.isFinal) finalText += res[0].transcript;
@@ -396,56 +388,17 @@ function startWebSpeechASR(opts: { lang?: string; onInterim: (t: string)=>void; 
     if (interim) opts.onInterim(interim);
     if (finalText) opts.onFinal(finalText);
   };
-
   rec.onerror = () => {};
   let stopped = false;
   rec.onend = () => { if (!stopped) { try { rec.start(); } catch {} } };
-
   try { rec.start(); } catch {}
   return () => { stopped = true; try { rec.stop(); } catch {} };
 }
 
-function startDeepgramASR(opts: {
-  lang?: string;
-  deepgramKey: string;
-  stream: MediaStream;
-  onInterim: (t: string)=>void;
-  onFinal: (t: string)=>void;
-}) {
-  const url = 'wss://api.deepgram.com/v1/listen?punctuate=true&interim_results=true' + (opts.lang ? `&language=${encodeURIComponent(opts.lang)}` : '');
-  const ws = new WebSocket(url, ['token', opts.deepgramKey]);
-
-  let recorder: MediaRecorder | null = null;
-
-  ws.onopen = () => {
-    recorder = new MediaRecorder(opts.stream, { mimeType: 'audio/webm;codecs=opus' });
-    recorder.ondataavailable = (e) => { if (e.data.size > 0 && ws.readyState === ws.OPEN) ws.send(e.data); };
-    recorder.start(250);
-  };
-
-  ws.onmessage = (ev) => {
-    try {
-      const data = JSON.parse(ev.data);
-      const alt = data?.channel?.alternatives?.[0];
-      const transcript = alt?.transcript || '';
-      if (!transcript) return;
-      if (data.is_final) opts.onFinal(transcript);
-      else opts.onInterim(transcript);
-    } catch {}
-  };
-
-  const stop = () => {
-    try { recorder?.stop(); } catch {}
-    try { ws.close(); } catch {}
-  };
-  ws.onerror = stop; ws.onclose = stop;
-  return stop;
-}
-
 /* ──────────────────────────────────────────────────────────────────────────
-   LANGUAGE DETECTION (first complete sentence only)
+   LANGUAGE DETECTION (first complete sentence)
 ────────────────────────────────────────────────────────────────────────── */
-function detectLangFromText(t:string): LangKey {
+function detectLangFromText(t:string): Props['languageHint'] {
   if (/[ء-ي]/.test(t)) return 'ar';
   if (/\b(de|und|ich|nicht|danke|hallo)\b/i.test(t)) return 'de';
   if (/\b(ik|en|de|met|dank|hallo|alsjeblieft)\b/i.test(t)) return 'nl';
@@ -474,12 +427,13 @@ export default function WebCallButton({
   phoneFilter=false,
   farMic=false,
   ambience='off',
-  ambienceLevel=0.08,
+  ambienceLevel=0.06,
   breathing=true,
-  breathingLevel=0.18,
+  breathingLevel=0.12,
   clientASR='auto',
   deepgramKey,
-  minUserSilenceMs = 3000, // <- 3s hard client gate
+  minUserSilenceMs=3000,
+  maxGreetingChars=220,
 }: Props){
   const [connecting,setConnecting]=useState(false);
   const [connected,setConnected]=useState(false);
@@ -489,9 +443,6 @@ export default function WebCallButton({
   const voiceId = useMemo(()=> resolveVoiceId(voiceName), [voiceName]);
 
   const [log,setLog]=useState<{ id:string; who:'user'|'assistant'; text:string; at:number; done?:boolean }[]>([]);
-  const logRef=useRef(log);
-  useEffect(()=>{ logRef.current=log; },[log]);
-
   const audioRef=useRef<HTMLAudioElement|null>(null);
   const pcRef=useRef<RTCPeerConnection|null>(null);
   const micStreamRef=useRef<MediaStream|null>(null);
@@ -501,147 +452,52 @@ export default function WebCallButton({
   const vadLoopRef=useRef<number|null>(null);
   const scrollerRef=useRef<HTMLDivElement|null>(null);
 
-  // Reply gating state
-  const holdingRef = useRef<boolean>(false);           // actively holding back assistant
-  const holdUntilRef = useRef<number>(0);              // timestamp when we may release
-  const userSpeakingRef = useRef<boolean>(false);      // true between speech_start & speech_end
-  const assistantBufferRef = useRef<Map<string,string>>(new Map()); // buffered assistant text
-  const assistantSpeakingRef = useRef<boolean>(false); // for barge-in UI only
+  // GATE: only reply when the user has been quiet long enough
+  const holdingRef = useRef<boolean>(false);
+  const holdUntilRef = useRef<number>(0);
+  const userSpeakingRef = useRef<boolean>(false);
+  const lastUserSpeechAtRef = useRef<number>(0);
+  const greetingProtectedUntilRef = useRef<number>(0);
 
-  // user interim buffers
-  const userTurnIdRef = useRef<string | null>(null);
-  const serverToLocalUser = useRef<Map<string,string>>(new Map());
-  const userInterimRef = useRef<Map<string,{final:string; interim:string}>>(new Map());
-  const asrStopRef=useRef<null|(()=>void)>(null);
-
-  // Greeting protection window (only used when greetMode='client')
-  const protectGreetingUntilRef = useRef<number>(0);
-
-  // Language UI state (+ hard lock for the session)
-  const [uiLang, setUiLang] = useState<LangKey>((languageHint as LangKey) || 'auto');
+  // language
+  const [uiLang, setUiLang] = useState<Props['languageHint']>(languageHint || 'auto');
   const uiLangRef = useRef(uiLang);
-  const langLockedRef = useRef<LangKey>(uiLang || 'auto');
+  const langLockedRef = useRef<Props['languageHint']>(uiLang || 'auto');
   useEffect(()=>{ uiLangRef.current = uiLang; langLockedRef.current = uiLang; },[uiLang]);
 
   useEffect(()=>{ const el=scrollerRef.current; if(!el) return; el.scrollTop=el.scrollHeight; },[log,connecting,connected]);
 
-  /* ── helpers for transcript ── */
   const newId = (p:'user'|'assistant') => `${p}_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
+  const safeSend=(dc:RTCDataChannel|null, payload:any)=>{
+    if(!dc||dc.readyState!=='open') return; try{ dc.send(JSON.stringify(payload)); }catch{}
+  };
 
-  const beginUserTurn = (serverId?:string) => {
+  /* ── transcript helpers ───────────────────────────────────────────────── */
+  const beginUserTurn = () => {
     const id = newId('user');
-    userTurnIdRef.current = id;
-    if (serverId) serverToLocalUser.current.set(serverId, id);
-    userInterimRef.current.set(id, { final:'', interim:'' });
     setLog(prev => [...prev, { id, who:'user', text:'', at:Date.now(), done:false }]);
     return id;
   };
-
-  const commitLanguageLock = (finalText:string) => {
-    if (langLockedRef.current === 'auto') {
-      const detected = detectLangFromText(finalText || '');
-      langLockedRef.current = detected || 'en';
-      // lock server transcription language + remind persona
-      safeSend(dcRef.current, { type:'session.update', session: {
-        input_audio_transcription: { enabled:true, provider:'openai', model:'whisper-1', language: langLockedRef.current }
-      }});
-      safeSend(dcRef.current, { type:'response.create', response:{
-        instructions:`From now on, speak ONLY ${LANG_NAME[langLockedRef.current]} unless I say "change language".`
-      }});
-    }
-  };
-
-  const updateUserInterim = (txt:string, serverId?:string) => {
-    let id = serverId ? serverToLocalUser.current.get(serverId) : userTurnIdRef.current;
-    if (!id) id = beginUserTurn(serverId);
-    const buf = userInterimRef.current.get(id) || { final:'', interim:'' };
-    buf.interim = txt;
-    userInterimRef.current.set(id, buf);
-    const display = (buf.final + ' ' + buf.interim).replace(/\s+/g,' ').trim();
+  const appendUser = (text:string, done=false)=>{
     setLog(prev=>{
-      const i=prev.findIndex(r=>r.id===id);
-      if(i===-1) return [...prev,{ id, who:'user', text:display, at:Date.now(), done:false }];
-      const next=[...prev]; next[i]={...next[i], text:display, done:false}; return next;
+      const idx=[...prev].reverse().findIndex(r=>r.who==='user');
+      if(idx===-1) return [...prev, { id:newId('user'), who:'user', text, at:Date.now(), done }];
+      const i=prev.length-1-idx; const next=[...prev];
+      next[i]={...next[i], text, done}; return next;
     });
-    // While user is still producing audio, extend the hold
-    holdNow(minUserSilenceMs);
   };
-
-  const commitUserFinal = (txt?:string, serverId?:string) => {
-    const id = serverId ? (serverToLocalUser.current.get(serverId) || userTurnIdRef.current) : userTurnIdRef.current;
-    if (!id) return;
-    const buf = userInterimRef.current.get(id) || { final:'', interim:'' };
-    if (txt) buf.final = (buf.final + ' ' + txt).replace(/\s+/g,' ').trim();
-    else if (buf.interim) buf.final = (buf.final + ' ' + buf.interim).replace(/\s+/g,' ').trim();
-    buf.interim = '';
-    userInterimRef.current.set(id, buf);
-    const display = buf.final;
-
-    if (display) commitLanguageLock(display);
-
-    setLog(prev=>{
-      const i=prev.findIndex(r=>r.id===id);
-      if(i===-1) return prev;
-      const next=[...prev]; next[i]={...next[i], text:display, done:true}; return next;
-    });
-    if (serverId) serverToLocalUser.current.delete(serverId);
-    userTurnIdRef.current = null;
-  };
-
-  /* ── HOLD/RELEASE LOGIC ─────────────────────────────────────────────── */
-  const holdNow = (ms:number) => {
-    holdingRef.current = true;
-    holdUntilRef.current = Date.now() + Math.max(0, ms|0);
-    if (audioRef.current) audioRef.current.muted = true;
-  };
-  const flushAssistantBuffer = () => {
-    if (!assistantBufferRef.current.size) return;
-    const now = Date.now();
-    assistantBufferRef.current.forEach((txt, id) => {
-      setLog(prev=>{
-        const i=prev.findIndex(r=>r.id===id);
-        if (i===-1) return [...prev, { id, who:'assistant', text:txt, at:now, done:false }];
-        const next=[...prev]; next[i]={...next[i], text:(next[i].text||'')+txt}; return next;
-      });
-    });
-    assistantBufferRef.current.clear();
-  };
-  const releaseIfQuiet = () => {
-    if (!holdingRef.current) return;
-    const now = Date.now();
-    if (now >= holdUntilRef.current && !userSpeakingRef.current) {
-      holdingRef.current = false;
-      if (audioRef.current) audioRef.current.muted = false;
-      flushAssistantBuffer();
-    }
-  };
-
-  function restBetweenSentences(delta: string){
-    if(!audioRef.current) return;
-    if(!/[.!?…]\s*$/.test(delta)) return;
-    const el = audioRef.current;
-    const pre = el.volume;
-    el.volume = 0.0;
-    setTimeout(()=>{ el.volume = pre || 1.0; }, 500);
-  }
-
   const addAssistantDelta = (respId:string, delta:string) => {
-    assistantSpeakingRef.current = true;
-    if (holdingRef.current) {
-      assistantBufferRef.current.set(respId, (assistantBufferRef.current.get(respId) || '') + delta);
-      if (audioRef.current) audioRef.current.muted = true;
-      return;
-    }
+    if (holdingRef.current) return; // don't show partials while held
     setLog(prev=>{
       const i=prev.findIndex(r=>r.id===respId);
       if(i===-1){ return [...prev,{ id:respId, who:'assistant', text:delta, at:Date.now(), done:false }]; }
       const next=[...prev]; next[i]={...next[i], text:(next[i].text||'')+delta}; return next;
     });
-    restBetweenSentences(delta);
+    if (/[.!?…]\s*$/.test(delta) && audioRef.current){
+      const el=audioRef.current; const v=el.volume; el.volume=0.0; setTimeout(()=>{ el.volume=v; }, 480);
+    }
   };
-
   const endAssistantTurn = (respId:string) => {
-    assistantSpeakingRef.current = false;
     if (holdingRef.current) return;
     setLog(prev=>{
       const i=prev.findIndex(r=>r.id===respId);
@@ -650,11 +506,24 @@ export default function WebCallButton({
     });
   };
 
-  const safeSend=(dc:RTCDataChannel|null, payload:any)=>{
-    if(!dc||dc.readyState!=='open') return; try{ dc.send(JSON.stringify(payload)); }catch{}
+  /* ── GATE helpers ────────────────────────────────────────────────────── */
+  const holdNow = (ms:number)=>{
+    holdingRef.current = true;
+    holdUntilRef.current = Date.now() + Math.max(0, ms);
+    if (audioRef.current) audioRef.current.muted = true;
+  };
+  const releaseIfQuiet = ()=>{
+    const now = Date.now();
+    const duringGreeting = now < greetingProtectedUntilRef.current;
+    const gateExpired = now >= holdUntilRef.current;
+    const userQuiet = (now - lastUserSpeechAtRef.current) >= minUserSilenceMs;
+    if (!duringGreeting && (gateExpired && userQuiet)){
+      holdingRef.current = false;
+      if (audioRef.current) audioRef.current.muted = false;
+    }
   };
 
-  // minimal mic VAD ducking (drops TTS volume while user speaks)
+  /* ── minimal mic VAD (client side) just to know if user talks ────────── */
   async function setupVAD(){
     try{
       const mic=micStreamRef.current; if(!mic) return;
@@ -662,9 +531,13 @@ export default function WebCallButton({
       const src=ac.createMediaStreamSource(mic); const an=ac.createAnalyser(); an.fftSize=512; an.smoothingTimeConstant=0.88;
       src.connect(an);
       const buf=new Uint8Array(an.frequencyBinCount);
-      const loop=()=>{ an.getByteFrequencyData(buf); let sum=0; for(let i=0;i<buf.length;i++) sum+=buf[i]*i;
-        const loud=sum/(buf.length*buf.length);
-        if(loud>0.5){ if(audioRef.current) audioRef.current.volume=0.35; } else { if(audioRef.current) audioRef.current.volume=1.0; }
+      const loop=()=>{ an.getByteFrequencyData(buf);
+        const energy = buf.reduce((s,v)=>s+v,0)/(buf.length*255);
+        const speaking = energy > 0.06;
+        if (speaking){ userSpeakingRef.current = true; lastUserSpeechAtRef.current = Date.now(); }
+        else { userSpeakingRef.current = false; }
+        // live ducking while user speaks
+        if (audioRef.current) audioRef.current.volume = speaking ? 0.35 : 1.0;
         vadLoopRef.current=requestAnimationFrame(loop);
       };
       vadLoopRef.current=requestAnimationFrame(loop);
@@ -681,7 +554,7 @@ export default function WebCallButton({
     try{
       setConnecting(true);
 
-      // 1) ephemeral token
+      // 1) ephemeral
       const sessionRes=await fetch(ephemeralEndpoint,{
         method:'POST', headers:{ 'Content-Type':'application/json', 'X-OpenAI-Key':apiKey },
         body:JSON.stringify({ model, voiceName:voiceId, assistantName, systemPrompt }),
@@ -695,22 +568,14 @@ export default function WebCallButton({
         audio: { echoCancellation:true, noiseSuppression:true, autoGainControl:true }
       }); micStreamRef.current=mic;
 
-      // 2.5) LOCAL ASR
+      // 2.5) local ASR for on-screen text
       try {
-        if (asrStopRef.current) { try { asrStopRef.current(); } catch {} asrStopRef.current = null; }
-        let started = false;
-        const ensureStart = () => { if (!started) { beginUserTurn(); started = true; } };
-        const onInterim = (txt: string) => { ensureStart(); updateUserInterim(txt); };
-        const onFinal = (txt: string) => { ensureStart(); commitUserFinal(txt); started=false; };
         const bcp = langToBCP47(langLockedRef.current==='auto' ? uiLangRef.current : langLockedRef.current);
-        const wantDeepgram = (clientASR === 'deepgram' || (!!deepgramKey && clientASR !== 'off'));
-        if (wantDeepgram && deepgramKey) {
-          const stop = startDeepgramASR({ lang: bcp, deepgramKey, stream: mic, onInterim, onFinal });
-          if (stop) asrStopRef.current = stop;
-        } else if (clientASR !== 'off') {
-          const stop = startWebSpeechASR({ lang: bcp, onInterim, onFinal });
-          if (stop) asrStopRef.current = stop;
-        }
+        if (clientASR !== 'off') startWebSpeechASR({
+          lang: bcp,
+          onInterim: (t)=>{ appendUser(t,false); },
+          onFinal:  (t)=>{ appendUser(t,true); lastUserSpeechAtRef.current = Date.now(); holdNow(minUserSilenceMs); }
+        });
       } catch {}
 
       // 3) peer
@@ -727,11 +592,10 @@ export default function WebCallButton({
           ambience,
           ambienceLevel,
           breathing: !!breathing,
-          breathingLevel: clamp01(breathingLevel ?? 0.18)
+          breathingLevel: clamp01(breathingLevel ?? 0.12)
         });
       };
 
-      // push mic
       pc.addTrack(mic.getAudioTracks()[0], mic);
       pc.addTransceiver('audio',{ direction:'recvonly' });
 
@@ -739,31 +603,26 @@ export default function WebCallButton({
       const dc=pc.createDataChannel('oai-events'); dcRef.current=dc;
 
       dc.onopen=()=>{
-        const preDelay = Math.max(300, prosody?.preSpeechDelayMs ?? 550);
+        // build style
+        const preDelay = Math.max(300, prosody?.preSpeechDelayMs ?? 600);
         const chosen = langLockedRef.current;
+        const style = [
+          systemPrompt || '',
+          chosen==='auto'
+            ? 'Auto-detect the caller’s language (EN/DE/NL/ES/AR) from their FIRST complete sentence, then use that language only. Change language only if the caller asks.'
+            : `Speak ONLY ${LANG_NAME[chosen]} for the entire call.`,
+          (prosody?.fillerWords ?? true) ? 'Use mild, natural disfluencies occasionally (don’t overuse).' : '',
+          `Allow micro pauses (~${prosody?.microPausesMs ?? 120} ms) inside sentences.`,
+          'Between sentences, breathe lightly and wait ~450–600 ms.',
+          'Keep answers concise; match the caller’s energy and speaking rate.',
+        ].filter(Boolean).join('\n\n');
 
         const input_audio_transcription: any = {
           enabled:true,
           provider:'openai',
-          model:'whisper-1',
-          fallback_models:['gpt-4o-mini-transcribe']
+          model:'whisper-1'
         };
         if (chosen && chosen!=='auto') input_audio_transcription.language = chosen;
-
-        // Human consultative sales style
-        const style = [
-          systemPrompt || '',
-          (chosen && chosen!=='auto')
-            ? `Speak ONLY ${LANG_NAME[chosen]} for the entire call.`
-            : 'Auto-detect the caller’s language (EN/DE/NL/ES/AR) from their FIRST complete sentence, then stick to it.',
-          // Conversational coaching
-          `Style: warm, concise, consultative. Mirror the caller’s energy.
-          Use short sentences. Vary cadence and pitch slightly. Use light breaths and natural 300–600 ms pauses between clauses.
-          Ask one question at a time. Confirm before moving on. No double replies in a row.`,
-          `Prosody: allow micro pauses (~${prosody?.microPausesMs ?? 140} ms) inside sentences; breathe softly between sentences (~500 ms).`,
-          `Disfluencies: ${(prosody?.fillerWords ?? true) ? 'light and occasional (“uh”, “hmm”), never back-to-back' : 'avoid fillers'}.`,
-          `Timing: do NOT speak if the caller is speaking. Wait for the client gate to allow talking.`,
-        ].filter(Boolean).join('\n\n');
 
         safeSend(dc,{ type:'session.update', session:{
           instructions: style,
@@ -772,115 +631,89 @@ export default function WebCallButton({
           output_audio_format:'pcm16',
           modalities:['audio','text'],
           input_audio_transcription,
-          // Server VAD a bit conservative; client gate enforces 3s
+          // Server VAD just to segment; we still gate locally for 3s silence
           turn_detection:{
             type:'server_vad',
-            threshold: 0.65,                      // was 0.5
-            prefix_silence_ms: 120,               // time before speech is treated as speaking
-            silence_duration_ms: Math.max(600,    // server thinks "end"; client still enforces 3s
-              prosody?.turnEndPauseMs ?? 800),
+            threshold:0.5,
+            prefix_silence_ms: 100,
+            silence_duration_ms: Math.max(260, prosody?.turnEndPauseMs ?? 280),
           },
         }});
 
-        // Optional client greeting (off by default when firstMode !== Assistant speaks first)
-        if (greetMode === 'client' && firstMode === 'Assistant speaks first') {
+        // Client-side greeting (protected window; no barge-in)
+        const wantClientGreeting =
+          greetMode==='client' || (greetMode==='server' && firstMode==='Assistant speaks first');
+
+        const greet = () => {
           const lines=(firstMsg||'Hello.').split(/\r?\n|\|/g).map(s=>s.trim()).filter(Boolean).slice(0,6);
-          protectGreetingUntilRef.current = Date.now() + Math.max(2200, 1200 + lines.join(' ').length*12);
+          const text = lines.join(' ').slice(0, maxGreetingChars);
+          greetingProtectedUntilRef.current = Date.now() + Math.max(1800, 1200 + text.length*10);
           setTimeout(()=>{
-            for(const ln of lines){
-              safeSend(dc,{ type:'response.create', response:{ modalities:['audio','text'], instructions: ln }});
-            }
+            safeSend(dc,{ type:'response.create', response:{ modalities:['audio','text'], instructions: text }});
           }, preDelay);
-        }
+        };
+
+        if (greetMode==='client') greet();
+        else if (wantClientGreeting) setTimeout(()=>{ greet(); }, 250);
+
+        // safety: check gate often
+        let gateTimer: number | null = null;
+        gateTimer = window.setInterval(() => releaseIfQuiet(), 250);
+        dc.onclose = () => { if (gateTimer) { clearInterval(gateTimer); gateTimer = null; } };
       };
 
-      // 5) events — ASSISTANT + USER + strict client gate
+      // 5) events
       dc.onmessage=(ev)=>{
         let raw:any;
         try{ raw=JSON.parse(ev.data); }catch{ return; }
         const t=String(raw?.type||'').replace(/^realtime\./,'');
 
-        // ── USER speech state (drives the hold) ───────────────────────────
+        // server speech boundaries -> mark last user speech, then hold
         if (/^input_audio_buffer\.speech_started$|^input_speech\.start$/.test(t)) {
           userSpeakingRef.current = true;
-          holdNow(minUserSilenceMs); // hold immediately while they talk
-          beginUserTurn(raw?.id);
+          lastUserSpeechAtRef.current = Date.now();
           return;
         }
         if (/^input_audio_buffer\.speech_ended$|^input_speech\.end$/.test(t)) {
           userSpeakingRef.current = false;
-          commitUserFinal(undefined, raw?.id);
-          holdNow(minUserSilenceMs); // set release time 3s from now
-          setTimeout(releaseIfQuiet, minUserSilenceMs + 20);
-          return;
-        }
-
-        // ── USER transcripts (extend the hold if text is still flowing) ──
-        if (t==='transcript.delta' || t==='conversation.item.input_audio_transcript.delta'
-            || t==='conversation.item.input_text.delta' || t==='input_audio_buffer.transcript.delta'
-            || t==='input_audio_buffer.transcription.delta' || t==='input_audio_transcript.delta'
-            || t==='input_audio_transcription.delta' || t==='input_transcription.delta'){
-          updateUserInterim(String(raw?.delta||''), raw?.transcript_id||raw?.item_id||raw?.id);
           holdNow(minUserSilenceMs);
-          return;
-        }
-        if (t==='transcript.completed' || t==='conversation.item.input_audio_transcript.completed'
-            || t==='conversation.item.input_text.completed' || t==='conversation.item.completed'
-            || t==='input_audio_buffer.transcript.completed' || t==='input_audio_buffer.transcription.completed'
-            || t==='input_audio_transcript.completed' || t==='input_audio_transcription.completed'
-            || t==='input_transcription.completed' || t==='transcript.final'){
-          commitUserFinal(undefined, raw?.transcript_id||raw?.item_id||raw?.id);
-          holdNow(minUserSilenceMs);
-          setTimeout(releaseIfQuiet, minUserSilenceMs + 20);
+          setTimeout(() => releaseIfQuiet(), minUserSilenceMs + 10);
           return;
         }
 
-        if ((/transcript|transcription|input_audio_buffer|input_text/.test(t)) && typeof raw?.text==='string' && !raw?.delta){
-          beginUserTurn(); commitUserFinal(String(raw.text||'')); holdNow(minUserSilenceMs); setTimeout(releaseIfQuiet, minUserSilenceMs+20); return;
-        }
-
-        // ── ASSISTANT stream (buffer while holding) ──────────────────────
-        if(t==='response.created'){
-          // don’t speak until the gate opens
-          holdNow(minUserSilenceMs);
-          setTimeout(releaseIfQuiet, minUserSilenceMs + 20);
-          return;
-        }
-
+        // assistant stream
         if(t==='response.output_text.delta' || t==='response.audio_transcript.delta'){
           const id=raw?.response_id||raw?.id||newId('assistant');
           const d=String(raw?.delta||'');
-          addAssistantDelta(id,d); // addAssistantDelta itself buffers if holding
+          addAssistantDelta(id,d);
           return;
         }
         if(t==='response.audio_transcript.completed' || t==='response.completed' || t==='response.stop'){
-          const id=raw?.response_id||raw?.id; if(id) endAssistantTurn(id); releaseIfQuiet(); return;
+          const id=raw?.response_id||raw?.id; if(id) endAssistantTurn(id); return;
         }
-        if (t==='response.output_text' && typeof raw?.text==='string'){
-          if (holdingRef.current) {
-            const id=newId('assistant');
-            assistantBufferRef.current.set(id, (assistantBufferRef.current.get(id)||'') + raw.text);
+
+        // created: only hold if we are currently talking (we don’t block greetings)
+        if (t==='response.created') {
+          if (userSpeakingRef.current) {
+            holdNow(minUserSilenceMs);
+            setTimeout(releaseIfQuiet, minUserSilenceMs + 15);
           } else {
-            setLog(prev=>[...prev,{ id:newId('assistant'), who:'assistant', text:raw.text, at:Date.now(), done:true }]);
+            // make sure not stuck
+            holdingRef.current = false; releaseIfQuiet();
           }
           return;
         }
-        if (t==='conversation.item.created' && raw?.item?.type==='message' && raw?.item?.role==='assistant') {
-          const text=(raw?.item?.content||[]).map((c:any)=>c?.text||c?.transcript||'').join(' ').trim();
-          if (!text) return;
-          if (holdingRef.current) {
-            const id=newId('assistant');
-            assistantBufferRef.current.set(id, (assistantBufferRef.current.get(id)||'') + text);
-          } else {
-            setLog(prev=>[...prev,{ id:newId('assistant'), who:'assistant', text, at:Date.now(), done:true }]);
-          }
-          return;
-        }
+
+        // server-side user transcript passthroughs (fallback)
+        if (t==='transcript.delta' && raw?.delta) { appendUser(String(raw.delta), false); return; }
+        if (t==='transcript.completed') { appendUser('', true); return; }
       };
 
       pc.onconnectionstatechange=()=>{
-        if(pc.connectionState==='connected'){ setConnected(true); setConnecting(false); }
-        else if(['disconnected','failed','closed'].includes(pc.connectionState)){ endCall(false); }
+        if(pc.connectionState==='connected'){
+          setConnected(true); setConnecting(false);
+          holdingRef.current = false; releaseIfQuiet();
+        }else if(['disconnected','failed','closed'].includes(pc.connectionState)){ endCall(false); }
       };
 
       // 6) SDP
@@ -915,8 +748,6 @@ export default function WebCallButton({
   function cleanup(){
     if(vadLoopRef.current) cancelAnimationFrame(vadLoopRef.current);
     vadLoopRef.current=null;
-    try{ asrStopRef.current && asrStopRef.current(); }catch{}
-    asrStopRef.current = null;
     try{ dcRef.current?.close(); }catch{}
     dcRef.current = null;
     try{ pcRef.current?.close(); }catch{}
@@ -926,7 +757,6 @@ export default function WebCallButton({
     try{ closeChainRef.current && closeChainRef.current(); }catch{}
     closeChainRef.current = null;
     holdingRef.current = false;
-    assistantBufferRef.current.clear();
   }
   function endCall(userIntent=true){ cleanup(); setConnected(false); setConnecting(false); if(userIntent) onClose?.(); }
 
@@ -935,7 +765,7 @@ export default function WebCallButton({
   },[voiceId, uiLang]);
 
   /* ────────────────────────────────────────────────────────────────────────
-     UI — Slide-over panel
+     UI
   ───────────────────────────────────────────────────────────────────────── */
   const header = (
     <div className="va-head" style={{ zIndex: 100011 }}>
@@ -1043,13 +873,12 @@ export default function WebCallButton({
           </span>
         </div>
 
-        {/* Language picker (opens up) */}
         <div className="flex items-center gap-2 justify-end">
           <span style={{ opacity:.8, minWidth:70 }}>Language</span>
           <div style={{ width: 160 }}>
             <StyledSelect
               value={uiLang || 'auto'}
-              onChange={(v)=> setUiLang(v as LangKey)}
+              onChange={(v)=> setUiLang(v as Props['languageHint'])}
               options={[
                 { value:'auto', label:'Auto' },
                 { value:'en', label:'English' },
