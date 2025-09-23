@@ -28,22 +28,9 @@ function getOwnerId(req: NextApiRequest): string {
   return 'anon';
 }
 
-function toClient(r: Row) {
-  return {
-    id: r.id,
-    ownerId: r.owner_id,
-    name: r.name,
-    model: r.model,
-    temperature: r.temperature,
-    system: r.system,
-    createdAt: r.created_at,
-    updatedAt: r.updated_at,
-  };
-}
-
 async function getById(id: string): Promise<Row | null> {
   const { data, error } = await sb.from('chatbots').select('*').eq('id', id).single();
-  if (error && error.code !== 'PGRST116') throw error; // PGRST116 = no rows
+  if (error && error.code !== 'PGRST116') throw error;
   return data || null;
 }
 
@@ -62,14 +49,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
     return res.status(500).json({ ok: false, error: e?.message || 'Lookup failed' });
   }
 
-  if (!existing) return res.status(404).json({ ok: false, error: 'Not found' });
-  if (existing.owner_id !== ownerId) return res.status(403).json({ ok: false, error: 'Forbidden' });
+  if (!existing) {
+    // 404 for GET/PATCH/DELETE
+    return res.status(404).json({ ok: false, error: 'Not found' });
+  }
+  if (existing.owner_id !== ownerId) {
+    return res.status(403).json({ ok: false, error: 'Forbidden' });
+  }
 
   if (req.method === 'GET') {
     return res.status(200).json({ ok: true, data: toClient(existing) });
   }
 
-  if (req.method === 'POST' || req.method === 'PATCH') {
+  if (req.method === 'PATCH' || req.method === 'POST') {
     const body = (req.body || {}) as Partial<Pick<Row, 'name' | 'model' | 'temperature' | 'system'>>;
     const patch: Partial<Row> = {};
     if (typeof body.name === 'string') patch.name = body.name;
@@ -104,4 +96,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
 
   res.setHeader('Allow', ['GET', 'POST', 'PATCH', 'DELETE']);
   return res.status(405).json({ ok: false, error: 'Method not allowed' });
+}
+
+function toClient(r: Row) {
+  return {
+    id: r.id,
+    ownerId: r.owner_id,
+    name: r.name,
+    model: r.model,
+    temperature: r.temperature,
+    system: r.system,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
 }
