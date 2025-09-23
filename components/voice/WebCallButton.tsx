@@ -5,15 +5,13 @@ import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 're
 import { createPortal } from 'react-dom';
 import { Bot, User, Mic, MicOff, X, Loader2, ChevronDown, Search, Check, Lock } from 'lucide-react';
 
-/* ──────────────────────────────────────────────────────────────────────────
-   PROPS
-────────────────────────────────────────────────────────────────────────── */
+/* ───────────── PROPS ───────────── */
 type ProsodyOpts = {
   fillerWords?: boolean;
-  microPausesMs?: number;    // tiny pauses inside sentences
+  microPausesMs?: number;
   phoneFilter?: boolean;
-  turnEndPauseMs?: number;   // pause after user stops
-  preSpeechDelayMs?: number; // delay before assistant starts speaking
+  turnEndPauseMs?: number;
+  preSpeechDelayMs?: number;
 };
 
 type Props = {
@@ -42,18 +40,15 @@ type Props = {
   ambience?: 'off' | 'kitchen' | 'cafe';
   ambienceLevel?: number;
 
-  // humanizing extras
-  breathing?: boolean;       // subtle breath noise
-  breathingLevel?: number;   // 0..1 (default 0.08)
+  breathing?: boolean;
+  breathingLevel?: number;
 
-  // NEW: local client ASR so YOUR transcript always appears
+  // local client ASR (optional)
   clientASR?: 'off' | 'auto' | 'deepgram';
-  deepgramKey?: string; // only needed if clientASR="deepgram"
+  deepgramKey?: string;
 };
 
-/* ──────────────────────────────────────────────────────────────────────────
-   THEME / CONSTANTS
-────────────────────────────────────────────────────────────────────────── */
+/* ───────────── THEME / CONSTS ───────────── */
 const CTA = '#59d9b3';
 const GREEN_LINE = 'rgba(89,217,179,.20)';
 const IS_CLIENT = typeof window !== 'undefined' && typeof document !== 'undefined';
@@ -65,9 +60,7 @@ const FRIENDLY_TO_ID: Record<string,string> = {
   Ash:'ash', Echo:'echo', Ballad:'ballad', Shimmer:'shimmer', Marin:'marin', Cedar:'cedar'
 };
 
-/* ──────────────────────────────────────────────────────────────────────────
-   SELECT (same look)
-────────────────────────────────────────────────────────────────────────── */
+/* ───────────── SELECT ───────────── */
 type Opt = { value: string; label: string; disabled?: boolean; iconLeft?: React.ReactNode };
 function StyledSelect({
   value, onChange, options, placeholder, leftIcon, menuTop
@@ -209,9 +202,7 @@ function StyledSelect({
   );
 }
 
-/* ──────────────────────────────────────────────────────────────────────────
-   TRANSCRIPT / UTILS
-────────────────────────────────────────────────────────────────────────── */
+/* ───────────── TRANSCRIPT / UTILS ───────────── */
 type TranscriptRow = { id:string; who:'user'|'assistant'; text:string; at:number; done?:boolean };
 
 const RAW_ID = /^[a-z0-9._-]{3,}$/i;
@@ -235,9 +226,7 @@ const resolveVoiceId = (key:string) => {
   return FRIENDLY_TO_ID[k] || k || 'alloy';
 };
 
-/* ──────────────────────────────────────────────────────────────────────────
-   AUDIO ENHANCERS (phone-ish polish + optional ambience + breathing)
-────────────────────────────────────────────────────────────────────────── */
+/* ───────────── AUDIO FX ───────────── */
 function createSaturator(ac: AudioContext, drive=1.05){
   const sh=ac.createWaveShaper(); const curve=new Float32Array(1024);
   for(let i=0;i<curve.length;i++){ const x=(i/(curve.length-1))*2-1; curve[i]=Math.tanh(x*drive); }
@@ -255,9 +244,7 @@ function createAmbience(ac: AudioContext, kind:'kitchen'|'cafe', level=0.08){
   src.start();
   return ()=>{ try{src.stop()}catch{}; [src,band,hp,g].forEach(n=>{try{(n as any).disconnect()}catch{}}); };
 }
-
 function createBreather(ac: AudioContext, level=0.08){
-  // Low, band-limited noise + slow LFO → breathy ambience
   const noise = ac.createBufferSource();
   const len = ac.sampleRate * 2;
   const buf = ac.createBuffer(1, len, ac.sampleRate);
@@ -289,7 +276,7 @@ async function attachProcessedAudio(
     breathing:boolean; breathingLevel:number;
   }
 ){
-  const { phoneFilter, farMic, ambience, ambienceLevel, breathing, breathingLevel } = opts;
+  const { phoneFilter, ambience, ambienceLevel, breathing, breathingLevel } = opts;
 
   if(!phoneFilter && !breathing){
     (audioEl as any).srcObject=remote; await audioEl.play().catch(()=>{}); return ()=>{};
@@ -313,12 +300,12 @@ async function attachProcessedAudio(
   src.connect(hp); hp.connect(lp); lp.connect(presence); presence.connect(body); body.connect(sat); sat.connect(comp);
   comp.connect(dry); dry.connect(merge);
 
-  // Breathing (auto-gated so it dips while speaking)
+  // optional breathing bed, auto-gated by loudness
   let breathStop: null | (()=>void) = null;
   if (breathing){
     const { node, stop } = createBreather(ac, breathingLevel);
     breathStop = stop;
-    const breathGain = ac.createGain(); breathGain.gain.value = breathingLevel * 0.9;
+    const breathGain = ac.createGain(); breathGain.gain.value = clamp01(breathingLevel ?? 0.08) * 0.9;
     node.connect(breathGain); breathGain.connect(merge);
 
     const an = ac.createAnalyser(); an.fftSize = 512; an.smoothingTimeConstant = 0.85;
@@ -328,7 +315,7 @@ async function attachProcessedAudio(
       an.getByteFrequencyData(buf);
       let sum=0; for(let i=0;i<buf.length;i++) sum += buf[i];
       const loud = sum / (buf.length*255);
-      const target = loud > 0.08 ? 0.02 : (breathingLevel * 0.9);
+      const target = loud > 0.08 ? 0.02 : (clamp01(breathingLevel ?? 0.08) * 0.9);
       const now = ac.currentTime;
       breathGain.gain.setTargetAtTime(target, now, 0.12);
       requestAnimationFrame(gate);
@@ -340,14 +327,12 @@ async function attachProcessedAudio(
   (audioEl as any).srcObject=dest.stream;
   await audioEl.play().catch(()=>{});
 
-  let ambClean:null|(()=>void)=null; if(ambience!=='off') ambClean=createAmbience(ac,ambience,ambienceLevel);
+  let ambClean:null|(()=>void)=null; if(opts.ambience!=='off') ambClean=createAmbience(ac,opts.ambience,ambienceLevel);
 
   return ()=>{ [src,hp,lp,presence,body,sat,comp,merge,dry].forEach(n=>{try{(n as any).disconnect()}catch{}}); try{ambClean&&ambClean()}catch{}; try{breathStop&&breathStop()}catch{}; try{ac.close()}catch{}; };
 }
 
-/* ──────────────────────────────────────────────────────────────────────────
-   LOCAL CLIENT ASR (so your words always show)
-────────────────────────────────────────────────────────────────────────── */
+/* ───────────── LOCAL CLIENT ASR (optional) ───────────── */
 const langToBCP47 = (hint: Props['languageHint']) => {
   switch (hint) {
     case 'nl': return 'nl-NL';
@@ -433,9 +418,7 @@ function startDeepgramASR(opts: {
   return stop;
 }
 
-/* ──────────────────────────────────────────────────────────────────────────
-   COMPONENT
-────────────────────────────────────────────────────────────────────────── */
+/* ───────────── COMPONENT ───────────── */
 export default function WebCallButton({
   className,
   model,
@@ -483,13 +466,17 @@ export default function WebCallButton({
   const baseInstructionsRef=useRef<string>('');
   const scrollerRef=useRef<HTMLDivElement|null>(null);
   const sawAssistantDeltaRef=useRef<boolean>(false);
-  const asrStopRef=useRef<null|(()=>void)>(null); // NEW: stop local ASR
+
+  // the fix → keep distinct rows per user turn and map server ids
+  const userTurnIdRef = useRef<string | null>(null);
+  const serverToLocalUser = useRef<Map<string,string>>(new Map());
+  const asrStopRef=useRef<null|(()=>void)>(null);
 
   const lastRestRef=useRef<number>(0);
 
   useEffect(()=>{ const el=scrollerRef.current; if(!el) return; el.scrollTop=el.scrollHeight; },[log,connecting,connected]);
 
-  // fetch voices (filter to human-like)
+  /* voices */
   useEffect(()=>{
     let cancelled=false;
     const fallback = Array.from(new Set([voiceName,...DEFAULT_VOICES].filter(Boolean))) as string[];
@@ -508,25 +495,57 @@ export default function WebCallButton({
     return()=>{ cancelled=true; };
   },[apiKey, voiceName]);
 
-  const upsert=(id:string, who:TranscriptRow['who'], patch:Partial<TranscriptRow>|((p?:TranscriptRow)=>Partial<TranscriptRow>))=>{
+  /* ── helpers to guarantee new bubble per turn ── */
+  const newId = (p:'user'|'assistant') => `${p}_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
+
+  const beginUserTurn = (serverId?:string) => {
+    const id = newId('user');
+    userTurnIdRef.current = id;
+    if (serverId) serverToLocalUser.current.set(serverId, id);
+    setLog(prev => [...prev, { id, who:'user', text:'', at:Date.now(), done:false }]);
+    return id;
+  };
+  const appendUser = (delta:string, serverId?:string) => {
+    let id = serverId ? serverToLocalUser.current.get(serverId) : userTurnIdRef.current;
+    if (!id) id = beginUserTurn(serverId);
     setLog(prev=>{
       const i=prev.findIndex(r=>r.id===id);
-      if(i===-1){ const base:TranscriptRow={ id, who, text:'', at:Date.now(), done:false };
-        const p=typeof patch==='function' ? (patch as any)(undefined) : patch;
-        return [...prev,{...base,...p}];
-      }
-      const next=[...prev]; const p=typeof patch==='function' ? (patch as any)(next[i]):patch; next[i]={...next[i],...p}; return next;
+      if(i===-1) return [...prev,{ id, who:'user', text:delta, at:Date.now(), done:false }];
+      const next=[...prev]; next[i]={...next[i], text:(next[i].text||'')+delta, done:false}; return next;
     });
   };
-  const addLine=(who:TranscriptRow['who'], text:string)=>{
-    const id=`${who}_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
-    setLog(prev=>[...prev,{id,who,text,at:Date.now(),done:true}]);
+  const endUserTurn = (serverId?:string) => {
+    const id = serverId ? (serverToLocalUser.current.get(serverId) || userTurnIdRef.current) : userTurnIdRef.current;
+    if (!id) return;
+    setLog(prev=>{
+      const i=prev.findIndex(r=>r.id===id);
+      if(i===-1) return prev;
+      const next=[...prev]; next[i]={...next[i], done:true}; return next;
+    });
+    if (serverId) serverToLocalUser.current.delete(serverId);
+    userTurnIdRef.current = null;
   };
+
+  const addAssistantDelta = (respId:string, delta:string) => {
+    setLog(prev=>{
+      const i=prev.findIndex(r=>r.id===respId);
+      if(i===-1){ return [...prev,{ id:respId, who:'assistant', text:delta, at:Date.now(), done:false }]; }
+      const next=[...prev]; next[i]={...next[i], text:(next[i].text||'')+delta}; return next;
+    });
+  };
+  const endAssistantTurn = (respId:string) => {
+    setLog(prev=>{
+      const i=prev.findIndex(r=>r.id===respId);
+      if(i===-1) return prev;
+      const next=[...prev]; next[i]={...next[i], done:true}; return next;
+    });
+  };
+
   const safeSend=(dc:RTCDataChannel|null, payload:any)=>{
     if(!dc||dc.readyState!=='open') return; try{ dc.send(JSON.stringify(payload)); }catch{}
   };
 
-  // minimal mic VAD ducking (drops TTS volume while user speaks)
+  /* VAD ducking */
   async function setupVAD(){
     try{
       const mic=micStreamRef.current; if(!mic) return;
@@ -544,7 +563,7 @@ export default function WebCallButton({
     }catch{ return ()=>{}; }
   }
 
-  // Duck audio ~500ms at sentence boundaries (breath / rest)
+  /* sentence rest */
   function restBetweenSentences(delta: string){
     if(!audioRef.current) return;
     if(!/[.!?…]\s*$/.test(delta)) return;
@@ -563,7 +582,7 @@ export default function WebCallButton({
     try{
       setConnecting(true);
 
-      // 1) ephemeral token
+      // 1) ephemeral session
       const sessionRes=await fetch(ephemeralEndpoint,{
         method:'POST', headers:{ 'Content-Type':'application/json', 'X-OpenAI-Key':apiKey },
         body:JSON.stringify({ model, voiceName:voiceId, assistantName, systemPrompt }),
@@ -577,21 +596,15 @@ export default function WebCallButton({
         audio: { echoCancellation:true, noiseSuppression:true, autoGainControl:true }
       }); micStreamRef.current=mic;
 
-      // 2.5) LOCAL FALLBACK ASR — writes YOUR words live
+      // 2.5) client ASR → writes new user bubble each turn
       try {
         const lang = langToBCP47(languageHint);
-        // stop any previous
         if (asrStopRef.current) { try { asrStopRef.current(); } catch {} asrStopRef.current = null; }
-
-        const onDelta = (txt: string) => {
-          upsert('user_local', 'user', (prev) => ({ text: txt, done: false, at: prev?.at || Date.now() }));
-        };
-        const onFinal = (txt: string) => {
-          upsert('user_local', 'user', (prev) => ({ text: (txt || prev?.text || '').trim(), done: true, at: prev?.at || Date.now() }));
-        };
-
-        if (clientASR === 'deepgram') {
-          if (!deepgramKey) throw new Error('Missing deepgramKey');
+        let started = false;
+        const ensureStart = () => { if (!started) { beginUserTurn(); started = true; } };
+        const onDelta = (txt: string) => { ensureStart(); appendUser(txt.replace(/\s+$/,'')); };
+        const onFinal = () => { if (started) { endUserTurn(); started=false; } };
+        if (clientASR === 'deepgram' && deepgramKey) {
           const stop = startDeepgramASR({ lang, deepgramKey, stream: mic, onDelta, onFinal });
           if (stop) asrStopRef.current = stop;
         } else if (clientASR === 'auto') {
@@ -617,8 +630,7 @@ export default function WebCallButton({
           breathingLevel: clamp01(breathingLevel ?? 0.08)
         });
       };
-      const sendTrack=mic.getAudioTracks()[0];
-      pc.addTrack(sendTrack, mic);
+      pc.addTrack(mic.getAudioTracks()[0], mic);
       pc.addTransceiver('audio',{ direction:'recvonly' });
 
       // 4) data channel
@@ -635,132 +647,89 @@ export default function WebCallButton({
           `Between sentences, take a short breath and wait about 500 ms before continuing.`,
           (prosody?.turnEndPauseMs ? `Wait ~${prosody.turnEndPauseMs} ms of silence before replying.` : 'Wait ~200 ms of silence before replying.'),
         ].filter(Boolean).join('\n\n');
-        baseInstructionsRef.current = style;
 
-        // TRANSCRIPTION + VAD
         safeSend(dc,{ type:'session.update', session:{
-          instructions: baseInstructionsRef.current,
-          voice: voiceId,
-          input_audio_format:'pcm16',
-          output_audio_format:'pcm16',
+          instructions: style, voice: voiceId,
+          input_audio_format:'pcm16', output_audio_format:'pcm16',
           modalities:['audio','text'],
           input_audio_transcription:{
-            enabled:true,
-            provider:'openai',
-            model:'gpt-4o-mini-transcribe',
+            enabled:true, provider:'openai', model:'gpt-4o-mini-transcribe',
             ...(languageHint && languageHint!=='auto' ? { language: languageHint } : {}),
             fallback_models:['whisper-1']
           },
-          turn_detection:{
-            type:'server_vad',
-            threshold:0.5,
-            prefix_silence_ms: 80,
-            silence_duration_ms: Math.max(180, prosody?.turnEndPauseMs ?? 200),
-          },
+          turn_detection:{ type:'server_vad', threshold:0.5, prefix_silence_ms:80, silence_duration_ms: Math.max(180, prosody?.turnEndPauseMs ?? 200) },
         }});
 
-        // Optional greeting (respects pre-speech delay)
-        const wantClientGreeting =
-          greetMode==='client' || (greetMode==='server' && firstMode==='Assistant speaks first');
-
+        const wantClientGreeting = greetMode==='client' || (greetMode==='server' && firstMode==='Assistant speaks first');
         const greet = () => {
           const lines=(firstMsg||'Hello.').split(/\r?\n|\|/g).map(s=>s.trim()).filter(Boolean).slice(0,6);
-          setTimeout(()=>{
-            for(const ln of lines){
-              safeSend(dc,{ type:'response.create', response:{ modalities:['audio','text'], instructions: ln }});
-            }
-          }, preDelay);
+          setTimeout(()=>{ for(const ln of lines){ safeSend(dc,{ type:'response.create', response:{ modalities:['audio','text'], instructions: ln }}); } }, preDelay);
         };
-
-        if (greetMode==='client') {
-          greet();
-        } else if (wantClientGreeting) {
-          setTimeout(()=>{ if (!sawAssistantDeltaRef.current) greet(); }, 1200);
-        }
+        if (greetMode==='client') greet(); else if (wantClientGreeting) setTimeout(()=>{ if (!sawAssistantDeltaRef.current) greet(); }, 1200);
       };
 
-      // 5) events — ASSISTANT + USER transcripts
+      // 5) events → each turn = its own bubble
       dc.onmessage=(ev)=>{
-        let raw:any;
-        try{ raw=JSON.parse(ev.data); }catch{ return; }
-        const t0=String(raw?.type||'');
-        const t=t0.replace(/^realtime\./,''); // normalize
+        let raw:any; try{ raw=JSON.parse(ev.data); }catch{ return; }
+        const t=String(raw?.type||'').replace(/^realtime\./,'');
 
-        /* ASSISTANT STREAM — used to trigger rests + show assistant text */
+        /* assistant */
         if(t==='response.output_text.delta'){
           sawAssistantDeltaRef.current = true;
-          const id=raw?.response_id||raw?.id||'assistant_current';
-          const d=String(raw?.delta||'');
-          restBetweenSentences(d);
-          upsert(id,'assistant',(prev)=>({ text:(prev?.text||'')+d }));
-        }
-        if(t==='response.output_text' && typeof raw?.text==='string'){
-          sawAssistantDeltaRef.current = true;
-          addLine('assistant', raw.text);
+          const id=raw?.response_id||raw?.id||newId('assistant');
+          const d=String(raw?.delta||''); restBetweenSentences(d);
+          addAssistantDelta(id,d); return;
         }
         if(t==='response.audio_transcript.delta'){
-          const id=raw?.response_id||raw?.id||'assistant_current';
-          const d=String(raw?.delta||'');
-          restBetweenSentences(d);
-          upsert(id,'assistant',(prev)=>({ text:(prev?.text||'')+d }));
+          const id=raw?.response_id||raw?.id||newId('assistant');
+          const d=String(raw?.delta||''); restBetweenSentences(d);
+          addAssistantDelta(id,d); return;
         }
         if(t==='response.audio_transcript.completed' || t==='response.completed' || t==='response.stop'){
-          const id=raw?.response_id||raw?.id||'assistant_current';
-          upsert(id,'assistant',{ done:true });
+          const id=raw?.response_id||raw?.id; if(id) endAssistantTurn(id); return;
+        }
+        if (t==='response.output_text' && typeof raw?.text==='string'){
+          setLog(prev=>[...prev,{ id:newId('assistant'), who:'assistant', text:raw.text, at:Date.now(), done:true }]); return;
         }
         if (t==='conversation.item.created' && raw?.item?.type==='message' && raw?.item?.role==='assistant') {
           const text=(raw?.item?.content||[]).map((c:any)=>c?.text||c?.transcript||'').join(' ').trim();
-          if (text) addLine('assistant', text);
+          if (text) setLog(prev=>[...prev,{ id:newId('assistant'), who:'assistant', text, at:Date.now(), done:true }]);
+          return;
         }
 
-        /* USER TRANSCRIPT — still listen to server events, but our client ASR already writes */
-        const appendUserDelta = (delta:string, id?:string) => {
-          const useId = id || 'user_current';
-          upsert(useId,'user',(prev)=>({ text:(prev?.text||'') + (delta || '') }));
-        };
-        const completeUser = (id?:string) => upsert(id||'user_current','user',{ done:true });
+        /* user (server) */
+        if (/^input_audio_buffer\.speech_started$|^input_speech\.start$/.test(t)) { beginUserTurn(raw?.id); return; }
+        if (/^input_audio_buffer\.speech_ended$|^input_speech\.end$/.test(t))   { endUserTurn(raw?.id); return; }
 
-        // Start/stop markers
-        if (/^input_audio_buffer\.speech_started$|^input_speech\.start$/.test(t)) { upsert(raw?.id||'user_current','user',{ text:'', done:false }); return; }
-        if (/^input_audio_buffer\.speech_ended$|^input_speech\.end$/.test(t))   { completeUser(raw?.id||'user_current'); return; }
+        const userDelta = (d:string, sid?:string)=>appendUser(d, sid);
+        const userDone  = (sid?:string)=>endUserTurn(sid);
 
-        // Canonical incremental
-        if (t==='transcript.delta'){ appendUserDelta(String(raw?.delta||''), raw?.transcript_id||raw?.id); return; }
-        if (t==='transcript.completed'){ completeUser(raw?.transcript_id||raw?.id); return; }
+        if (t==='transcript.delta'){ userDelta(String(raw?.delta||''), raw?.transcript_id||raw?.id); return; }
+        if (t==='transcript.completed'){ userDone(raw?.transcript_id||raw?.id); return; }
 
-        // Conversation-scoped
-        if (t==='conversation.item.input_audio_transcript.delta'){ appendUserDelta(String(raw?.delta||''), raw?.item_id||raw?.id); return; }
-        if (t==='conversation.item.input_audio_transcript.completed' || t==='conversation.item.completed'){ completeUser(raw?.item_id||raw?.id); return; }
+        if (t==='conversation.item.input_audio_transcript.delta'){ userDelta(String(raw?.delta||''), raw?.item_id||raw?.id); return; }
+        if (t==='conversation.item.input_audio_transcript.completed' || t==='conversation.item.completed'){ userDone(raw?.item_id||raw?.id); return; }
 
-        // Text variants
-        if (t==='conversation.item.input_text.delta'){ appendUserDelta(String(raw?.delta||''), raw?.item_id||raw?.id); return; }
-        if (t==='conversation.item.input_text.completed'){ completeUser(raw?.item_id||raw?.id); return; }
+        if (t==='conversation.item.input_text.delta'){ userDelta(String(raw?.delta||''), raw?.item_id||raw?.id); return; }
+        if (t==='conversation.item.input_text.completed'){ userDone(raw?.item_id||raw?.id); return; }
 
-        // Buffer variants
         if (t==='input_audio_buffer.transcript.delta' || t==='input_audio_buffer.transcription.delta'){
-          appendUserDelta(String(raw?.delta||''), raw?.transcript_id||raw?.id); return;
+          userDelta(String(raw?.delta||''), raw?.transcript_id||raw?.id); return;
         }
         if (t==='input_audio_buffer.transcript.completed' || t==='input_audio_buffer.transcription.completed'){
-          completeUser(raw?.transcript_id||raw?.id); return;
+          userDone(raw?.transcript_id||raw?.id); return;
         }
 
-        // Other aliases / finals
         if (t==='input_audio_transcript.delta' || t==='input_audio_transcription.delta' || t==='input_transcription.delta'){
-          appendUserDelta(String(raw?.delta||''), raw?.id); return;
+          userDelta(String(raw?.delta||''), raw?.id); return;
         }
         if (t==='input_audio_transcript.completed' || t==='input_audio_transcription.completed'
             || t==='input_transcription.completed' || t==='transcript.final'){
-          completeUser(raw?.id); return;
+          userDone(raw?.id); return;
         }
 
-        // Single-shot text
         if ((/transcript|transcription|input_audio_buffer|input_text/.test(t)) && typeof raw?.text==='string' && !raw?.delta){
-          addLine('user', raw.text); return;
-        }
-
-        // Catch-all
-        if (!t.startsWith('response.') && /transcr|transcript|input_/.test(t) && typeof raw?.delta==='string'){
-          appendUserDelta(String(raw.delta), raw?.id); return;
+          setLog(prev=>[...prev,{ id:newId('user'), who:'user', text:raw.text, at:Date.now(), done:true }]); return;
         }
       };
 
@@ -817,16 +786,9 @@ export default function WebCallButton({
   useEffect(()=>{ startCall(); return ()=>{ cleanup(); }; // eslint-disable-next-line
   },[voiceId]);
 
-  /* ────────────────────────────────────────────────────────────────────────
-     UI — Slide-over panel (right)
-  ───────────────────────────────────────────────────────────────────────── */
+  /* ───────────── UI ───────────── */
   const backdrop = (
-    <div
-      className="fixed inset-0"
-      style={{ zIndex: 100008, background:'#0a0d0f', opacity:0.94 }}
-      onClick={()=>endCall(true)}
-      aria-hidden
-    />
+    <div className="fixed inset-0" style={{ zIndex: 100008, background:'#0a0d0f', opacity:0.94 }} onClick={()=>endCall(true)} aria-hidden />
   );
 
   const header = (
@@ -855,10 +817,7 @@ export default function WebCallButton({
         <button
           onClick={toggleMute}
           className="w-9 h-9 rounded-[8px] grid place-items-center"
-          style={{
-            border:'1px solid rgba(255,255,255,.14)', color:'var(--text)',
-            background: muted ? 'rgba(239,68,68,.14)' : 'transparent'
-          }}
+          style={{ border:'1px solid rgba(255,255,255,.14)', color:'var(--text)', background: muted ? 'rgba(239,68,68,.14)' : 'transparent' }}
           title={muted ? 'Unmute mic' : 'Mute mic'} aria-label={muted ? 'Unmute' : 'Mute'}
         >
           {muted ? <MicOff className="w-4 h-4"/> : <Mic className="w-4 h-4" />}
@@ -884,10 +843,7 @@ export default function WebCallButton({
 
       <div ref={scrollerRef} className="space-y-3 overflow-y-auto" style={{ maxHeight:'calc(100vh - 72px - 52px - 50px)', scrollbarWidth:'thin' }}>
         {log.length===0 && (
-          <div
-            className="text-sm rounded-[8px] px-3 py-2 border"
-            style={{ color:'var(--text-muted)', background:'var(--panel)', borderColor:'rgba(255,255,255,.10)' }}
-          >
+          <div className="text-sm rounded-[8px] px-3 py-2 border" style={{ color:'var(--text-muted)', background:'var(--panel)', borderColor:'rgba(255,255,255,.10)' }}>
             {connecting ? 'Connecting to voice…' :
              firstMode==='Assistant speaks first' ? 'Assistant will greet you shortly…' : 'Say something to start — your words will appear here.'}
           </div>
@@ -923,8 +879,7 @@ export default function WebCallButton({
         ))}
 
         {error && (
-          <div className="text-xs px-3 py-2 rounded-[8px] border"
-               style={{ background:'rgba(239,68,68,.12)', borderColor:'rgba(239,68,68,.25)', color:'#ffd7d7' }}>
+          <div className="text-xs px-3 py-2 rounded-[8px] border" style={{ background:'rgba(239,68,68,.12)', borderColor:'rgba(239,68,68,.25)', color:'#ffd7d7' }}>
             {error}
           </div>
         )}
@@ -937,9 +892,7 @@ export default function WebCallButton({
       <div className="flex items-center justify-between gap-2 text-xs">
         <div className="flex items-center gap-2">
           {connecting && <Loader2 className="w-4 h-4 animate-spin" />}
-          <span style={{ opacity:.85 }}>
-            {connected ? 'Connected' : (connecting ? 'Connecting…' : 'Idle')}
-          </span>
+          <span style={{ opacity:.85 }}>{connected ? 'Connected' : (connecting ? 'Connecting…' : 'Idle')}</span>
         </div>
         <audio ref={audioRef} autoPlay playsInline />
       </div>
@@ -948,7 +901,6 @@ export default function WebCallButton({
 
   const panel = (
     <>
-      {/* plain CSS to avoid styled-jsx build issues */}
       <style>{`
         .va-card{
           --panel:#0d0f11; --text:#e6f1ef; --text-muted:#9fb4ad;
