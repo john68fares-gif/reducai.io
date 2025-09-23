@@ -75,7 +75,7 @@ function buildFinalPrompt() {
   const header = [st(s1?.name), st(s1?.industry), st(s1?.language)].filter(Boolean).join('\n');
 
   const languageText = s3?.languageText || s3?.language || '';
-  const description = s(s3?.description) || '';
+  the const description = s(s3?.description) || '';
   const rules = s(s3?.rules) || '';
   const flow = s(s3?.flow) || '';
   const company = (s(s3?.company) || '').trim();
@@ -95,6 +95,24 @@ function buildFinalPrompt() {
     .join('\n\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+}
+
+/** Read Response safely without throwing on empty/non-JSON bodies */
+async function safeApi<T = any>(resp: Response): Promise<{
+  ok: boolean; status: number; data?: T; error?: string; text?: string;
+}> {
+  const status = resp.status;
+  const ct = resp.headers.get('content-type') || '';
+  const raw = await resp.text(); // read once
+  let json: any = null;
+  if (ct.includes('application/json')) {
+    try { json = raw ? JSON.parse(raw) : null; } catch { /* ignore parse error */ }
+  }
+  if (!resp.ok) {
+    const msg = (json && (json.error || json.message)) || raw || `HTTP ${status}`;
+    return { ok: false, status, error: String(msg), text: raw };
+  }
+  return { ok: true, status, data: (json ?? (raw as any)), text: raw };
 }
 
 /* ───────────────────────────── Component ───────────────────────────── */
@@ -153,7 +171,6 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
     language: !!st(s1?.language),
     template: !!(s1?.type || s1?.botType || s1?.aiType),
     model: !!s2?.model,
-    // apiKey: optional now – we save per account, not per key
     description: !!st(s3?.description),
     flow: !!st(s3?.flow),
     rules: !!st(s3?.rules),
@@ -163,7 +180,6 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
   const ready = Object.values(checks).every(Boolean);
 
   async function saveBuildEverywhere(build: any) {
-    // Cloud (scopedStorage)
     try {
       const ss = await scopedStorage();
       await ss.ensureOwnerGuard();
@@ -176,7 +192,6 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
       await ss.setJSON('chatbots.v1', list);
     } catch {}
 
-    // Local
     try {
       const local = getLS<any[]>('chatbots', []);
       const list = Array.isArray(local) ? local : [];
@@ -197,48 +212,40 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
     setDone(false);
 
     try {
-      // 1) current user id (owner)
+      // 1) owner id
       const { data: u } = await supabase.auth.getUser();
       const userId = u?.user?.id;
-      if (!userId) throw new Error('No Supabase user session');
+      if (!userId) throw new Error('You must be signed in to save this AI.');
 
       const selectedModel = s2?.model || 'gpt-4o-mini';
       const temperature = Number(s2?.temperature ?? 0.5) || 0.5;
 
-      // 2) Persist per-account (no OpenAI calls)
+      // 2) Save to our API (per-account)
       const resp = await fetch('/api/chatbots', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-owner-id': userId, // 🔐 make it per account
+          'x-owner-id': userId,
         },
         body: JSON.stringify({
-          // If you support “edit and regenerate”, pass an existing id here.
-          // For first create, omit id and the store will generate.
           name: st(s1?.name, 'Untitled Agent'),
           model: selectedModel,
           temperature,
-          system: finalPrompt, // compiled personality/rules
+          system: finalPrompt,
         }),
       });
 
-      const json = await resp.json();
-      if (!resp.ok || !json?.ok || !json?.data?.id) {
-        throw new Error(json?.error || 'Failed to save AI build');
+      const parsed = await safeApi(resp);
+      if (!parsed.ok) {
+        // Log raw for debugging and show a friendly error
+        console.error('Save failed:', parsed.status, parsed.error, parsed.text);
+        throw new Error(parsed.error || `Save failed (HTTP ${parsed.status})`);
       }
 
-      const saved = json.data as {
-        id: string;
-        ownerId: string;
-        name: string;
-        model: string;
-        temperature: number;
-        system: string;
-        updatedAt?: string;
-        createdAt?: string;
-      };
-
       // 3) Mirror to cloud + local for instant UI
+      const saved = (parsed.data as any)?.data ?? parsed.data;
+      if (!saved?.id) throw new Error('Save succeeded but returned no id.');
+
       const build = {
         id: saved.id,
         name: saved.name,
@@ -259,7 +266,7 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
       onFinish?.();
     } catch (e: any) {
       setLoading(false);
-      alert(e?.message || 'Failed to generate the AI.');
+      alert(e?.message || 'Failed to save the AI (no response body).');
     }
   }
 
@@ -340,7 +347,6 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
                 <Req ok={!!checks.languageText} label="Language Instructions" />
                 <Req ok={!!checks.template} label="Template" />
                 <Req ok={!!checks.model} label="Model" />
-                {/* apiKey removed as a requirement for per-account saving */}
                 <Req ok={!!checks.description} label="Description" />
                 <Req ok={!!checks.flow} label="Conversation Flow" />
                 <Req ok={!!checks.rules} label="Rules" />
