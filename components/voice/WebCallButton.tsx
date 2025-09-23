@@ -285,6 +285,7 @@ async function attachProcessedAudio(
 ){
   const { phoneFilter, ambience, ambienceLevel, breathing, breathingLevel } = opts;
 
+  // If no phone polish and no breathing bed, just pipe the stream straight through
   if(!phoneFilter && !breathing){
     (audioEl as any).srcObject=remote; await audioEl.play().catch(()=>{}); return ()=>{};
   }
@@ -303,8 +304,8 @@ async function attachProcessedAudio(
   const dry=ac.createGain(); dry.gain.value=1.0;
   const merge=ac.createGain();
 
-  // NEW: gentle voice envelope (fade-in/out per phrase)
-  const master = ac.createGain(); master.gain.value = 0.9; // base level
+  // Gentle envelope (kept but safe)
+  const master = ac.createGain(); master.gain.value = 0.9;
   const analyser = ac.createAnalyser(); analyser.fftSize = 512; analyser.smoothingTimeConstant = 0.88;
 
   const dest=ac.createMediaStreamDestination();
@@ -316,7 +317,7 @@ async function attachProcessedAudio(
   // Envelope logic: ramp up on onset, ramp down after ~300ms of silence
   const buf = new Uint8Array(analyser.frequencyBinCount);
   let speaking=false; let lastEnergy=0; let lastAbove=Date.now();
-  const base = 0.9, minFloor = 0.18; // keep a tiny tail instead of hard stop
+  const base = 0.9, minFloor = 0.18; // tiny tail (no hard cut)
   const tick = ()=>{
     analyser.getByteFrequencyData(buf);
     const energy = buf.reduce((s,v)=>s+v,0)/(buf.length*255);
@@ -325,7 +326,7 @@ async function attachProcessedAudio(
     if (energy > 0.06 && lastEnergy <= 0.06){ // onset
       speaking=true;
       master.gain.cancelScheduledValues(now);
-      master.gain.setTargetAtTime(base, now, 0.18); // fade-in ~200ms
+      master.gain.setTargetAtTime(base, now, 0.18);
       lastAbove = ms;
     } else if (energy > 0.06){
       lastAbove = ms;
@@ -333,7 +334,7 @@ async function attachProcessedAudio(
     if (speaking && ms - lastAbove > 320){ // offset
       speaking=false;
       master.gain.cancelScheduledValues(now);
-      master.gain.setTargetAtTime(minFloor, now, 0.22); // fade-out ~250ms
+      master.gain.setTargetAtTime(minFloor, now, 0.22);
     }
     lastEnergy = energy;
     requestAnimationFrame(tick);
@@ -345,12 +346,12 @@ async function attachProcessedAudio(
 
   let ambClean:null|(()=>void)=null; if(ambience!=='off') ambClean=createAmbience(ac,ambience,ambienceLevel);
 
-  // OPTIONAL: breathing bed (auto-dips when speech is loud)
+  // OPTIONAL breathing bed (off by default in component props now)
   let breathStop: null | (()=>void) = null;
   if (breathing){
-    const { node, stop } = createBreather(ac, breathingLevel ?? 0.18); // louder default
+    const { node, stop } = createBreather(ac, breathingLevel ?? 0.18);
     breathStop = stop;
-    const breathGain = ac.createGain(); breathGain.gain.value = clamp01(breathingLevel ?? 0.18) * 1.1; // slight lift
+    const breathGain = ac.createGain(); breathGain.gain.value = clamp01(breathingLevel ?? 0.18) * 1.1;
     node.connect(breathGain); breathGain.connect(master);
     const an = ac.createAnalyser(); an.fftSize = 512; an.smoothingTimeConstant = 0.85;
     comp.connect(an);
@@ -483,8 +484,9 @@ export default function WebCallButton({
   farMic=false,
   ambience='off',
   ambienceLevel=0.08,
-  breathing=true,
-  breathingLevel=0.18, // louder default
+  // IMPORTANT: disable by default to avoid fades/stalls
+  breathing=false,              // was true
+  breathingLevel=0.18,
   clientASR='auto',
   deepgramKey,
 }: Props){
@@ -509,8 +511,8 @@ export default function WebCallButton({
   const vadLoopRef=useRef<number|null>(null);
   const scrollerRef=useRef<HTMLDivElement|null>(null);
 
-  // reply delay (no UI): small natural pause after you finish
-  const replyDelaySec = 3;
+  // reply delay (remove artificial pause)
+  const replyDelaySec = 0;
 
   const holdUntilRef = useRef<number>(0);
   const holdingRef = useRef<boolean>(false);
@@ -584,7 +586,6 @@ export default function WebCallButton({
     userInterimRef.current.set(id, buf);
     const display = buf.final;
 
-    // language lock on first complete sentence
     if (display) commitLanguageLock(display);
 
     setLog(prev=>{
@@ -595,15 +596,6 @@ export default function WebCallButton({
     if (serverId) serverToLocalUser.current.delete(serverId);
     userTurnIdRef.current = null;
   };
-
-  function restBetweenSentences(delta: string){
-    if(!audioRef.current) return;
-    if(!/[.!?…]\s*$/.test(delta)) return;
-    const el = audioRef.current;
-    const pre = el.volume;
-    el.volume = 0.0;
-    setTimeout(()=>{ el.volume = pre || 1.0; }, 500);
-  }
 
   const addAssistantDelta = (respId:string, delta:string) => {
     assistantSpeakingRef.current = true;
@@ -617,7 +609,6 @@ export default function WebCallButton({
       if(i===-1){ return [...prev,{ id:respId, who:'assistant', text:delta, at:Date.now(), done:false }]; }
       const next=[...prev]; next[i]={...next[i], text:(next[i].text||'')+delta}; return next;
     });
-    restBetweenSentences(delta);
   };
 
   const endAssistantTurn = (respId:string) => {
@@ -657,7 +648,7 @@ export default function WebCallButton({
     if(!dc||dc.readyState!=='open') return; try{ dc.send(JSON.stringify(payload)); }catch{}
   };
 
-  // minimal mic VAD ducking (drops TTS volume while user speaks)
+  // minimal mic VAD (ducking disabled while debugging)
   async function setupVAD(){
     try{
       const mic=micStreamRef.current; if(!mic) return;
@@ -665,9 +656,9 @@ export default function WebCallButton({
       const src=ac.createMediaStreamSource(mic); const an=ac.createAnalyser(); an.fftSize=512; an.smoothingTimeConstant=0.88;
       src.connect(an);
       const buf=new Uint8Array(an.frequencyBinCount);
-      const loop=()=>{ an.getByteFrequencyData(buf); let sum=0; for(let i=0;i<buf.length;i++) sum+=buf[i]*i;
-        const loud=sum/(buf.length*buf.length);
-        if(loud>0.5){ if(audioRef.current) audioRef.current.volume=0.35; } else { if(audioRef.current) audioRef.current.volume=1.0; }
+      const loop=()=>{ 
+        an.getByteFrequencyData(buf);
+        // (no runtime volume changes)
         vadLoopRef.current=requestAnimationFrame(loop);
       };
       vadLoopRef.current=requestAnimationFrame(loop);
@@ -698,7 +689,7 @@ export default function WebCallButton({
         audio: { echoCancellation:true, noiseSuppression:true, autoGainControl:true }
       }); micStreamRef.current=mic;
 
-      // 2.5) LOCAL ASR (prefer Deepgram if key present)
+      // 2.5) LOCAL ASR
       try {
         if (asrStopRef.current) { try { asrStopRef.current(); } catch {} asrStopRef.current = null; }
         let started = false;
@@ -770,12 +761,12 @@ export default function WebCallButton({
           output_audio_format:'pcm16',
           modalities:['audio','text'],
           input_audio_transcription,
-          // server VAD + conservative pause
+          // server VAD (snappier)
           turn_detection:{
             type:'server_vad',
-            threshold:0.5,
-            prefix_silence_ms: 80,
-            silence_duration_ms: Math.max(260, prosody?.turnEndPauseMs ?? 260),
+            threshold:0.4,            // was 0.5
+            prefix_silence_ms: 40,     // was 80
+            silence_duration_ms: 160,  // was >=260
           },
         }});
 
@@ -797,24 +788,13 @@ export default function WebCallButton({
         else if (wantClientGreeting) setTimeout(()=>{ greet(); }, 300);
       };
 
-      // 5) events — ASSISTANT + USER + barge-in dampener
+      // 5) events — ASSISTANT + USER + barge-in rules
       dc.onmessage=(ev)=>{
         let raw:any;
         try{ raw=JSON.parse(ev.data); }catch{ return; }
         const t=String(raw?.type||'').replace(/^realtime\./,'');
 
         releaseHoldIfDue();
-
-        // Ensure hard reply delay even if VAD misfires
-        if (t==='response.created') {
-          if (replyDelaySec > 0 && audioRef.current) {
-            holdingRef.current = true;
-            holdUntilRef.current = Date.now() + replyDelaySec * 1000;
-            audioRef.current.muted = true;
-            setTimeout(releaseHoldIfDue, replyDelaySec * 1000 + 15);
-          }
-          return;
-        }
 
         /* ASSISTANT STREAM */
         if(t==='response.output_text.delta' || t==='response.audio_transcript.delta'){
@@ -849,38 +829,17 @@ export default function WebCallButton({
 
         /* USER (SERVER) — interim replace, final commit */
         if (/^input_audio_buffer\.speech_started$|^input_speech\.start$/.test(t)) {
-          // Barge-in dampener: sometimes ignore interjections while assistant talks,
-          // and ALWAYS protect the greeting window.
+          // only protect the initial greeting; do not randomly disable mic
           const now = Date.now();
           const protectGreeting = now < protectGreetingUntilRef.current;
-          const assistantTalking = assistantSpeakingRef.current;
-          if ((assistantTalking || protectGreeting) && micStreamRef.current){
-            // 60% chance to ignore this interruption (and 100% during greeting)
-            const ignore = protectGreeting || Math.random() < 0.6;
-            if (ignore){
-              const track = micStreamRef.current.getAudioTracks()[0];
-              if (track){
-                const prev = track.enabled;
-                track.enabled = false;
-                setTimeout(()=>{ try{track.enabled = prev;}catch{}; }, protectGreeting ? 900 : 700);
-              }
-              // don't begin a turn; just return
-              return;
-            }
-          }
+          if (protectGreeting) return;
           beginUserTurn(raw?.id);
           return;
         }
 
         if (/^input_audio_buffer\.speech_ended$|^input_speech\.end$/.test(t)) {
           commitUserFinal(undefined, raw?.id);
-          // reply-delay hold (secondary guard)
-          if (replyDelaySec > 0 && audioRef.current) {
-            holdingRef.current = true;
-            holdUntilRef.current = Date.now() + replyDelaySec * 1000;
-            audioRef.current.muted = true;
-            setTimeout(() => { releaseHoldIfDue(); }, replyDelaySec * 1000 + 10);
-          }
+          // no artificial reply hold anymore
           return;
         }
 
