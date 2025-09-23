@@ -1,9 +1,13 @@
-// pages/api/chatbots/create.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { upsert } from '@/lib/chatbots-store'; // ← ADD THIS
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY!;
+import { createClient } from '@supabase/supabase-js';
 
-/** Resolve owner from header → query → cookie → 'anon' (don’t trust body) */
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY!;
+const SUPABASE_URL = process.env.SUPABASE_URL as string;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY as string;
+const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
+
+type Out = { ok: true; data: any } | { ok: false; error: string };
+
 function getOwnerId(req: NextApiRequest): string {
   const h = ((req.headers['x-owner-id'] || req.headers['x-user-id']) ?? '') as string;
   if (h && h.trim()) return h.trim();
@@ -14,28 +18,23 @@ function getOwnerId(req: NextApiRequest): string {
   return 'anon';
 }
 
-/**
- * POST /api/chatbots/create
- * Body: { name, model, instructions?, temperature? }
- * NOTE: ownerId is taken from request context, not the body.
- */
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+export default async function handler(req: NextApiRequest, res: NextApiResponse<Out>) {
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Method not allowed' });
 
   try {
-    const ownerId = getOwnerId(req);              // ← use consistent owner resolution
+    const ownerId = getOwnerId(req);
     const { name, model, instructions = '', temperature } = req.body || {};
-    if (!ownerId || !name || !model) {
-      return res.status(400).json({ error: 'ownerId (context), name and model are required' });
+    if (!ownerId || ownerId === 'anon' || !name || !model) {
+      return res.status(400).json({ ok: false, error: 'ownerId (context), name and model are required' });
     }
-    if (!OPENAI_API_KEY) return res.status(500).json({ error: 'OPENAI_API_KEY missing' });
+    if (!OPENAI_API_KEY) return res.status(500).json({ ok: false, error: 'OPENAI_API_KEY missing' });
 
     const payload: any = {
       name: String(name),
       model: String(model),
       instructions: String(instructions ?? ''),
       metadata: {
-        ownerId, // ← record owner in OpenAI metadata too
+        ownerId,
         ...(typeof temperature === 'number' ? { temperature: String(temperature) } : {}),
       },
     };
@@ -52,26 +51,48 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     if (!r.ok) {
       const text = await r.text().catch(() => '');
-      return res.status(r.status).json({ error: text || `Upstream ${r.status}` });
+      return res.status(r.status).json({ ok: false, error: text || `Upstream ${r.status}` });
     }
 
     const a = await r.json();
 
-    // ← PERSIST to your local store so Improve can list it
-    const saved = upsert({
-      id: a.id, // keep the OpenAI id so you can use it later
-      ownerId,
-      name: a.name ?? name,
-      model: a.model ?? model,
-      temperature:
-        typeof temperature === 'number'
-          ? temperature
-          : parseFloat(a?.metadata?.temperature ?? '0.5') || 0.5,
-      system: String(instructions ?? ''), // store instructions into system for Improve editor
-    });
+    // Mirror to Supabase (persistent, cross-device)
+    const temp =
+      typeof temperature === 'number'
+        ? Number(temperature)
+        : Number.parseFloat(a?.metadata?.temperature ?? '0.5') || 0.5;
 
-    return res.status(200).json({ ok: true, data: saved }); // ← matches Improve’s expected shape
+    const now = new Date().toISOString();
+    const { data, error } = await sb
+      .from('chatbots')
+      .upsert({
+        id: a.id, // keep OpenAI id
+        owner_id: ownerId,
+        name: a.name ?? name,
+        model: a.model ?? model,
+        temperature: temp,
+        system: String(instructions ?? ''),
+        created_at: now,
+        updated_at: now,
+      })
+      .select()
+      .single();
+    if (error) throw error;
+
+    return res.status(200).json({
+      ok: true,
+      data: {
+        id: data.id,
+        ownerId: data.owner_id,
+        name: data.name,
+        model: data.model,
+        temperature: data.temperature,
+        system: data.system,
+        createdAt: data.created_at,
+        updatedAt: data.updated_at,
+      },
+    });
   } catch (e: any) {
-    return res.status(500).json({ error: e?.message || 'create failed' });
+    return res.status(500).json({ ok: false, error: e?.message || 'create failed' });
   }
 }
