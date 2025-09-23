@@ -6,7 +6,7 @@ import dynamic from 'next/dynamic';
 import { createPortal } from 'react-dom';
 import {
   Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Rocket, Search, Check, Lock,
-  KeyRound, Play, Square, X
+  KeyRound, Play, Square, X, Plus, Trash2
 } from 'lucide-react';
 import { scopedStorage } from '@/utils/scoped-storage';
 import WebCallButton from '@/components/voice/WebCallButton';
@@ -56,10 +56,7 @@ function PhoneFilled(props: React.SVGProps<SVGSVGElement>) {
 function OpenAIStamp({size=14}:{size?:number}) {
   return (
     <svg width={size} height={size} viewBox="0 0 40 40" aria-hidden>
-      <path
-        d="M37.532 16.37a8.9 8.9 0 00-.77-7.3 8.96 8.96 0 00-11.87-3.42A8.99 8.99 0 007.53 9.63a8.9 8.9 0 00.77 7.3 8.96 8.96 0 0011.87 3.42 8.99 8.99 0 0017.36-3.99z"
-        fill="currentColor" opacity=".18"
-      />
+      <path d="M37.532 16.37a8.9 8.9 0 00-.77-7.3 8.96 8.96 0 00-11.87-3.42A8.99 8.99 0 007.53 9.63a8.9 8.9 0 00.77 7.3 8.96 8.96 0 0011.87 3.42 8.99 8.99 0 0017.36-3.99z" fill="currentColor" opacity=".18"/>
       <path d="M20.5 6.5l-8 4.6v9.3l8 4.6 8-4.6v-9.3l-8-4.6z" fill="currentColor" />
     </svg>
   );
@@ -71,6 +68,8 @@ const isStr = (v: any): v is string => typeof v === 'string';
 const nonEmpty = (v: any): v is string => isStr(v) && v.trim().length > 0;
 const coerceStr = (v: any): string => (isStr(v) ? v : '');
 const safeTrim = (v: any): string => (nonEmpty(v) ? v.trim() : '');
+
+const sleep = (ms:number) => new Promise(r=>setTimeout(r,ms));
 
 /* ─────────── theme tokens (less rounded, tighter controls) ─────────── */
 const Tokens = () => (
@@ -129,19 +128,17 @@ type AgentData = {
   provider: 'openai' | 'anthropic' | 'google';
   model: string;
 
-  // CHANGED — greetings
   firstMode: string;
-  firstMsg: string;                 // legacy single
-  firstMsgs?: string[];             // NEW up to 20
-  greetPick?: 'sequence'|'random';  // NEW
+  firstMsg: string;                 // legacy
+  firstMsgs?: string[];             // list shown in UI
+  greetPick?: 'sequence'|'random';
 
-  // prompts (frontend + backend)
   systemPrompt: string;
   systemPromptBackend?: string;
   language?: string;
 
-  // NEW — uploaded/entered context that the AI should use
-  contextText?: string;
+  contextText?: string;             // concatenated text for AI
+  ctxFiles?: { name:string; text:string }[]; // UI list of files
 
   ttsProvider: 'openai' | 'elevenlabs';
   voiceName: string;
@@ -173,7 +170,6 @@ import {
   DEFAULT_PROMPT as _DEFAULT_PROMPT,
   looksLikeFullPrompt as _looksLikeFullPrompt,
   normalizeFullPrompt as _normalizeFullPrompt,
-  applyInstructions as _applyInstructions,
   compilePrompt
 } from '@/lib/prompt-engine';
 
@@ -191,9 +187,9 @@ const DEFAULT_AGENT: AgentData = {
   provider: 'openai',
   model: 'gpt-4o',
   firstMode: 'Assistant speaks first',
-  firstMsg: '',                 // CHANGED — blank by default
-  firstMsgs: [''],              // NEW — blank list starter
-  greetPick: 'sequence',        // NEW
+  firstMsg: '',
+  firstMsgs: [],                   // BLANK (user adds with +)
+  greetPick: 'sequence',
   systemPrompt:
     (normalizeFullPromptRT(`
 [Identity]
@@ -212,7 +208,8 @@ const DEFAULT_AGENT: AgentData = {
 - If unsure, ask a specific clarifying question first.
 `).trim() + '\n\n' + `# ${BLANK_TEMPLATE_NOTE}\n`),
   systemPromptBackend: '',
-  contextText: '',              // NEW
+  contextText: '',               // BLANK (files build this)
+  ctxFiles: [],                  // BLANK list
   ttsProvider: 'openai',
   voiceName: 'Alloy (American)',
   apiKeyId: '',
@@ -226,15 +223,15 @@ const DEFAULT_AGENT: AgentData = {
 const keyFor = (id: string) => `va:agent:${id}`;
 const versKeyFor = (id: string) => `va:versions:${id}`;
 
-// NEW — migrate old saved data safely
 function migrateAgent(d: AgentData): AgentData {
-  const msgs = Array.isArray(d.firstMsgs) ? d.firstMsgs : [d.firstMsg ?? ''];
+  const msgs = Array.isArray(d.firstMsgs) ? d.firstMsgs : (d.firstMsg ? [d.firstMsg] : []);
   return {
     ...d,
-    firstMsg: d.firstMsg ?? '',
     firstMsgs: msgs.slice(0, 20),
+    firstMsg: msgs[0] || '',
     greetPick: d.greetPick || 'sequence',
     contextText: typeof d.contextText === 'string' ? d.contextText : '',
+    ctxFiles: Array.isArray(d.ctxFiles) ? d.ctxFiles : [],
   };
 }
 
@@ -367,7 +364,7 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
-/* ─────────── Styled select with portal (leaner look, icons in menu) ─────────── */
+/* ─────────── Styled select with portal ─────────── */
 function StyledSelect({
   value, onChange, options, placeholder, leftIcon, menuTop
 }:{
@@ -508,31 +505,24 @@ function StyledSelect({
   );
 }
 
-/* ─────────── Diff helpers (unchanged) ─────────── */
-function computeDiff(base:string, next:string){
+/* ─────────── Diff helpers ─────────── */
+function lineDiff(base:string, next:string){
   const a = (base || '').split('\n');
   const b = (next || '').split('\n');
-  const setA = new Set(a);
-  const setB = new Set(b);
   const rows: Array<{t:'same'|'add'|'rem', text:string}> = [];
-  const max = Math.max(a.length, b.length);
-  for (let i=0;i<max;i++){
-    const la = a[i]; const lb = b[i];
-    if (la === lb && la !== undefined){ rows.push({ t:'same', text: la! }); continue; }
-    if (lb !== undefined && !setA.has(lb)) rows.push({ t:'add', text: lb });
-    if (la !== undefined && !setB.has(la)) rows.push({ t:'rem', text: la });
-  }
-  for (let j=a.length;j>b.length;j++){
-    const la=a[j]; if (la!==undefined && !setB.has(la)) rows.push({ t:'rem', text: la });
-  }
-  for (let j=a.length;j<b.length;j++){
-    const lb=b[j]; if (lb!==undefined && !setA.has(lb)) rows.push({ t:'add', text: lb });
+  let i=0, j=0;
+  while (i<a.length || j<b.length){
+    if (a[i] === b[j]) { rows.push({ t:'same', text: a[i++] ?? '' }); j++; continue; }
+    // additions
+    if (b[j] && !a.includes(b[j])) { rows.push({ t:'add', text: b[j++] }); continue; }
+    // removals
+    if (a[i] && !b.includes(a[i])) { rows.push({ t:'rem', text: a[i++] }); continue; }
+    rows.push({ t:'same', text: b[j++] ?? '' }); i++;
   }
   return rows;
 }
-
 function DiffInline({ base, next }:{ base:string; next:string }){
-  const rows = computeDiff(base, next);
+  const rows = lineDiff(base, next);
   return (
     <pre
       className="rounded-[8px] px-3 py-3 text-sm"
@@ -543,13 +533,13 @@ function DiffInline({ base, next }:{ base:string; next:string }){
         if (r.t === 'add') return (
           <span
             key={i}
-            style={{ background:'rgba(89,217,179,.12)', borderLeft:'3px solid '+CTA, display:'block', padding:'2px 6px', borderRadius:6, margin:'2px 0' }}
+            style={{ background:'rgba(16,185,129,.14)', borderLeft:'3px solid #10b981', display:'block', padding:'2px 6px', borderRadius:6, margin:'2px 0' }}
           >{(r.text || ' ') + '\n'}</span>
         );
         return (
           <span
             key={i}
-            style={{ background:'rgba(239,68,68,.14)', borderLeft:'3px solid #ef4444', display:'block', padding:'2px 6px', borderRadius:6, margin:'2px 0', textDecoration:'line-through', opacity:.9 }}
+            style={{ background:'rgba(239,68,68,.18)', borderLeft:'3px solid #ef4444', display:'block', padding:'2px 6px', borderRadius:6, margin:'2px 0', textDecoration:'line-through' }}
           >{(r.text || ' ') + '\n'}</span>
         );
       })}
@@ -557,8 +547,31 @@ function DiffInline({ base, next }:{ base:string; next:string }){
   );
 }
 
-/* ─────────── helpers for file context (NEW) ─────────── */
+/* ─────────── File helpers (add .docx support) ─────────── */
 async function readFileAsText(f: File): Promise<string> {
+  const name = f.name.toLowerCase();
+  if (name.endsWith('.docx')) {
+    try {
+      const { default: JSZip } = await import('jszip');
+      const buf = await f.arrayBuffer();
+      const zip = await JSZip.loadAsync(buf);
+      const docXml = await zip.file('word/document.xml')?.async('string');
+      if (!docXml) return '';
+      // quick & simple text extraction from XML
+      const text = docXml
+        .replace(/<w:p[^>]*>/g,'\n')
+        .replace(/<w:tab\/>/g,'\t')
+        .replace(/<w:br\/>/g,'\n')
+        .replace(/<(.|\n)*?>/g,'') // strip tags
+        .replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>');
+      return text.trim();
+    } catch {
+      return '';
+    }
+  }
+  // naive .doc (binary) → not supported reliably; return empty to skip
+  if (name.endsWith('.doc')) return '';
+  // plain text-ish
   return new Promise((res, rej) => {
     const r = new FileReader();
     r.onerror = () => rej(new Error('Read failed'));
@@ -568,8 +581,6 @@ async function readFileAsText(f: File): Promise<string> {
 }
 
 /* ─────────── Page ─────────── */
-type ChatMsg = { id: string; role: 'user'|'assistant'|'system'; text: string };
-
 export default function VoiceAgentSection() {
   /* align rail to app sidebar */
   useEffect(() => {
@@ -597,28 +608,21 @@ export default function VoiceAgentSection() {
   const [toast, setToast] = useState<string>('');
   const [toastKind, setToastKind] = useState<'info'|'error'>('info');
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
-
   const [showCall, setShowCall] = useState(false);
 
-  // Generate overlay
+  // Generate flow
   const [showGenerate, setShowGenerate] = useState(false);
   const [composerText, setComposerText] = useState('');
-  const [genPhase, setGenPhase] = useState<'idle'|'editing'|'loading'|'review'>('idle');
-
-  // typing inside prompt box
+  const [isTypingIntoPrompt, setIsTypingIntoPrompt] = useState(false);
+  const [diffCandidate, setDiffCandidate] = useState<string>('');
   const basePromptRef = useRef<string>('');
-  const [proposedPrompt, setProposedPrompt] = useState('');
-  const [changesSummary, setChangesSummary] = useState('');
-
-  // NEW — typing animation state for overlay preview
-  const [typingPreview, setTypingPreview] = useState('');     // what we “type” on screen
-  const typingTimerRef = useRef<number | null>(null);
+  const typingRef = useRef<number | null>(null);
 
   // models list (live from API when key selected)
   const selectedKey = apiKeys.find(k => k.id === data.apiKeyId)?.key;
   const { opts: openaiModels, loading: loadingModels } = useOpenAIModels(selectedKey);
 
-  // TTS preview using browser speech synthesis (quick check)
+  // TTS preview (quick)
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   useEffect(() => {
     if (!IS_CLIENT || !('speechSynthesis' in window)) return;
@@ -633,8 +637,7 @@ export default function VoiceAgentSection() {
     const byName = voices.find(v => v.name.toLowerCase().includes((data.voiceName || '').split(' ')[0]?.toLowerCase() || ''));
     const en = voices.find(v => v.lang?.startsWith('en'));
     if (byName) u.voice = byName; else if (en) u.voice = en;
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(u);
+    window.speechSynthesis.cancel(); window.speechSynthesis.speak(u);
   }
   const stopPreview = () => { if (IS_CLIENT && 'speechSynthesis' in window) window.speechSynthesis.cancel(); };
 
@@ -725,43 +728,67 @@ export default function VoiceAgentSection() {
     finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
   }
 
-  /* file context importer (NEW) */
-  const importFilesAsContext = async (files: File[]) => {
+  /* File context: click-to-upload only, builds ctxFiles[], and contextText for AI */
+  const fileInputRef = useRef<HTMLInputElement|null>(null);
+  const rebuildContextText = (files:{name:string;text:string}[]) => {
+    const merged = files.map(f => `# File: ${f.name}\n${(f.text||'').trim()}`).join('\n\n');
+    setField('ctxFiles')(files);
+    setField('contextText')(merged.trim());
+  };
+  const onPickFiles = async (files: File[]) => {
     if (!files?.length) return;
-    const allow = new Set([
-      'text/plain','text/markdown','text/csv','application/json'
-    ]);
-    const okExt = (n:string)=>/\.(txt|md|csv|json)$/i.test(n);
-    let merged = '';
+    const out: {name:string;text:string}[] = [...(data.ctxFiles||[])];
     for (const f of files) {
-      if (!allow.has(f.type) && !okExt(f.name)) continue;
-      try {
-        const txt = await readFileAsText(f);
-        merged += `\n\n# File: ${f.name}\n${String(txt || '').trim()}\n`;
-      } catch {}
+      const txt = await readFileAsText(f);
+      if (!txt) continue;
+      out.push({ name: f.name, text: txt });
     }
-    if (merged.trim()) {
-      setField('contextText')(
-        ((data.contextText || '') + '\n' + merged).trim()
-      );
-    }
+    rebuildContextText(out);
+    setToastKind('info'); setToast('File(s) added'); setTimeout(()=>setToast(''), 1200);
   };
 
-  /* ─────────── CALL MODEL (fallback to RT if needed) ─────────── */
+  /* Generate → type inside the prompt box with Accept/Decline + green/red diff */
+  const startTypingIntoPrompt = async (targetText:string) => {
+    basePromptRef.current = data.systemPrompt || DEFAULT_PROMPT_RT;
+    setIsTypingIntoPrompt(true);
+    setDiffCandidate(''); // live typed content
+    // type into diffCandidate gradually
+    if (typingRef.current) cancelAnimationFrame(typingRef.current as any);
+    let i = 0;
+    const step = () => {
+      i += Math.max(1, Math.round(targetText.length / 140));
+      const slice = targetText.slice(0, i);
+      setDiffCandidate(slice);
+      if (i < targetText.length) {
+        typingRef.current = requestAnimationFrame(step);
+      }
+    };
+    typingRef.current = requestAnimationFrame(step);
+  };
+  const acceptGenerated = () => {
+    const chosen = diffCandidate || data.systemPrompt;
+    setField('systemPrompt')(chosen);
+    const compiled = compilePrompt({ basePrompt: chosen, userText: '' });
+    setField('systemPromptBackend')(compiled.backendString);
+    setIsTypingIntoPrompt(false);
+    setDiffCandidate('');
+  };
+  const declineGenerated = () => {
+    setIsTypingIntoPrompt(false);
+    setDiffCandidate('');
+  };
+
+  /* ─────────── CALL MODEL ─────────── */
   const callModel = useMemo(() => {
     const m = (data.model || '').toLowerCase();
     if (m.includes('realtime')) return data.model;
     return 'gpt-4o-realtime-preview';
   }, [data.model]);
 
-  // what label to show user in UI (their selection)
   const selectedModelLabel = useMemo(() => {
     const found = openaiModels.find(o => o.value === data.model);
     return found?.label || data.model || '—';
   }, [openaiModels, data.model]);
-
-  // inline review?
-  const inInlineReview = genPhase === 'review' && !showGenerate;
 
   /* ─────────── UI ─────────── */
   return (
@@ -899,11 +926,11 @@ export default function VoiceAgentSection() {
               </div>
             </div>
 
-            {/* NEW — Multi greetings editor */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
-              <div className="md:col-span-2">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="font-medium" style={{ fontSize:'12.5px' }}>First Messages (one per line, max 20)</div>
+            {/* BLANK first messages + add via plus */}
+            <div className="mt-4">
+              <div className="mb-2 flex items-center justify-between">
+                <div className="font-medium text-[12.5px]">First Messages</div>
+                <div className="flex items-center gap-2">
                   <StyledSelect
                     value={data.greetPick || 'sequence'}
                     onChange={(v)=>setField('greetPick')(v as AgentData['greetPick'])}
@@ -912,147 +939,169 @@ export default function VoiceAgentSection() {
                       { value: 'random',   label: 'Randomize'   },
                     ]}
                   />
+                  <button
+                    type="button"
+                    onClick={()=>{
+                      const next = [...(data.firstMsgs||[])];
+                      if (next.length >= 20) return;
+                      next.push('');
+                      setField('firstMsgs')(next);
+                    }}
+                    className="inline-flex items-center gap-2 text-sm rounded-[8px] px-3 py-1.5"
+                    style={{ border:'1px solid rgba(255,255,255,.14)' }}
+                  >
+                    <Plus className="w-4 h-4" /> Add
+                  </button>
                 </div>
-                <textarea
-                  value={(Array.isArray(data.firstMsgs) ? data.firstMsgs : [data.firstMsg || '']).join('\n')}
-                  onChange={(e)=>{
-                    const arr = e.target.value.split('\n').map(s=>s.trim()).slice(0,20);
-                    setField('firstMsgs')(arr);
-                    setField('firstMsg')(arr[0] || ''); // keep legacy in sync
-                  }}
-                  className="w-full bg-transparent outline-none rounded-[8px] px-3 py-[10px]"
-                  style={{ minHeight: 120, background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)', color:'var(--text)' }}
-                  placeholder="(leave empty for silence)…"
-                />
               </div>
+
+              {(data.firstMsgs?.length ? data.firstMsgs : []).map((msg, idx) => (
+                <div key={idx} className="flex items-center gap-2 mb-2">
+                  <input
+                    value={msg}
+                    onChange={(e)=>{
+                      const next = [...(data.firstMsgs || [])];
+                      next[idx] = e.target.value;
+                      setField('firstMsgs')(next);
+                      setField('firstMsg')(next[0] || '');
+                    }}
+                    className="w-full bg-transparent outline-none rounded-[8px] px-3"
+                    style={{ height:'var(--control-h)', background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)', color:'var(--text)' }}
+                    placeholder={`Message ${idx+1}`}
+                  />
+                  <button
+                    onClick={()=>{
+                      const next = [...(data.firstMsgs||[])];
+                      next.splice(idx,1);
+                      setField('firstMsgs')(next);
+                      setField('firstMsg')((next[0]||''));
+                    }}
+                    className="w-10 h-10 grid place-items-center rounded-[8px]"
+                    style={{ border:'1px solid rgba(255,255,255,.12)' }}
+                    aria-label="Remove"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+
+              {!(data.firstMsgs && data.firstMsgs.length) && (
+                <div className="text-xs" style={{ color:'var(--text-muted)' }}>
+                  No greetings yet. Click <b>Add</b> to create the first one. If you keep this empty, the assistant will not auto-greet.
+                </div>
+              )}
             </div>
 
             {/* Prompt + Generate */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
-              <div className="md:col-span-2">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="font-medium" style={{ fontSize:'12.5px' }}>System Prompt</div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      className="inline-flex items-center gap-2 rounded-[8px] text-sm"
-                      style={{ height:34, padding:'0 12px', background:CTA, color:'#fff', border:'1px solid rgba(255,255,255,.08)' }}
-                      onClick={()=>{
-                        setComposerText('');
-                        setProposedPrompt('');
-                        setTypingPreview('');
-                        setChangesSummary('');
-                        setGenPhase('editing');
-                        setShowGenerate(true);
-                      }}
-                    >
-                      <Wand2 className="w-4 h-4" /> Generate
-                    </button>
-                  </div>
-                </div>
-
-                <div style={{ position:'relative' }}>
-                  {!inInlineReview ? (
-                    <textarea
-                      className="w-full bg-transparent outline-none rounded-[8px] px-3 py-[10px]"
-                      style={{ minHeight: 320, background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)', color:'var(--text)' }}
-                      value={data.systemPrompt}
-                      onChange={(e)=> setField('systemPrompt')(e.target.value)}
-                    />
-                  ) : (
-                    <div
-                      className="rounded-[8px]"
-                      style={{
-                        background:'var(--panel)',
-                        border:'1px solid rgba(255,255,255,.10)',
-                        color:'var(--text)',
-                        padding:'12px',
-                        maxHeight:'unset'
-                      }}
-                    >
-                      <DiffInline base={basePromptRef.current} next={proposedPrompt}/>
-                      <div className="mt-3 flex gap-2">
-                        <button
-                          className="h-9 px-3 rounded-[8px] font-semibold"
-                          style={{ background:CTA, color:'#0a0f0d' }}
-                          onClick={()=>{
-                            setField('systemPrompt')(proposedPrompt);
-                            const compiled = compilePrompt({ basePrompt: proposedPrompt, userText: '' });
-                            setField('systemPromptBackend')(compiled.backendString);
-                            setGenPhase('idle');
-                          }}
-                        >
-                          Apply
-                        </button>
-                        <button
-                          className="h-9 px-3 rounded-[8px]"
-                          style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)' }}
-                          onClick={()=> setGenPhase('idle')}
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* NEW — Context upload + preview */}
-                <div className="mt-3">
-                  <div className="mb-2 text-[12.5px] font-medium">Context (optional)</div>
-                  <div
-                    onDragOver={(e)=>{ e.preventDefault(); }}
-                    onDrop={async (e)=>{ e.preventDefault(); const files = Array.from(e.dataTransfer.files || []); await importFilesAsContext(files); }}
-                    className="rounded-[8px] px-3 py-3 text-sm"
-                    style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)', color:'var(--text)' }}
+            <div className="mt-6">
+              <div className="flex items-center justify-between mb-2">
+                <div className="font-medium" style={{ fontSize:'12.5px' }}>System Prompt</div>
+                <div className="flex items-center gap-2">
+                  <button
+                    className="inline-flex items-center gap-2 rounded-[8px] text-sm"
+                    style={{ height:34, padding:'0 12px', background:CTA, color:'#fff', border:'1px solid rgba(255,255,255,.08)' }}
+                    onClick={()=>{ setComposerText(''); setShowGenerate(true); }}
                   >
-                    <div className="flex items-center gap-2">
-                      <input
-                        id="ctx-file"
-                        type="file"
-                        multiple
-                        accept=".txt,.md,.csv,.json,text/plain,text/markdown,text/csv,application/json"
-                        className="hidden"
-                        onChange={async (e)=>{ const files = Array.from(e.target.files || []); await importFilesAsContext(files); e.currentTarget.value=''; }}
-                      />
-                      <label
-                        htmlFor="ctx-file"
-                        className="inline-flex items-center gap-2 rounded-[8px] px-3 py-1.5 cursor-pointer"
-                        style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.14)' }}
-                      >
-                        Upload files
-                      </label>
-                      <span className="text-xs" style={{ color:'var(--text-muted)' }}>
-                        Drop or choose .txt / .md / .csv / .json (merged into a [Context] section)
-                      </span>
-                      <div className="ml-auto flex gap-2">
-                        <button
-                          type="button"
-                          className="text-xs rounded-[8px] px-2 py-1"
-                          style={{ border:'1px solid rgba(255,255,255,.14)', background:'var(--panel)' }}
-                          onClick={()=> setField('contextText')('')}
-                        >
-                          Clear context
-                        </button>
-                      </div>
-                    </div>
+                    <Wand2 className="w-4 h-4" /> Generate
+                  </button>
+                </div>
+              </div>
 
-                    <div className="mt-3">
-                      <div className="text-xs mb-1" style={{ color:'var(--text-muted)' }}>
-                        Context preview (trimmed):
-                      </div>
-                      <textarea
-                        value={(data.contextText || '').slice(0, 4000)}
-                        onChange={(e)=> setField('contextText')(e.target.value)}
-                        className="w-full bg-transparent outline-none rounded-[8px] px-3 py-2"
-                        style={{ minHeight: 120, background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)', color:'var(--text)', resize:'vertical' }}
-                        placeholder="(empty)"
-                      />
-                      <div className="mt-1 text-[11px]" style={{ color:'var(--text-muted)' }}>
-                        {Math.min((data.contextText || '').length, 4000)} / {(data.contextText || '').length} chars shown
-                      </div>
+              {/* Prompt box */}
+              <div className="relative">
+                {!isTypingIntoPrompt ? (
+                  <textarea
+                    className="w-full bg-transparent outline-none rounded-[8px] px-3 py-[10px]"
+                    style={{ minHeight: 320, background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)', color:'var(--text)' }}
+                    value={data.systemPrompt}
+                    onChange={(e)=> setField('systemPrompt')(e.target.value)}
+                  />
+                ) : (
+                  <>
+                    <DiffInline base={basePromptRef.current} next={diffCandidate || data.systemPrompt} />
+                    <div className="mt-3 flex gap-2">
+                      <button
+                        className="h-9 px-3 rounded-[8px] font-semibold"
+                        style={{ background:'#10b981', color:'#0a0f0d' }}
+                        onClick={acceptGenerated}
+                      >
+                        Accept
+                      </button>
+                      <button
+                        className="h-9 px-3 rounded-[8px] font-semibold"
+                        style={{ background:'#ef4444', color:'#0a0f0d' }}
+                        onClick={declineGenerated}
+                      >
+                        Decline
+                      </button>
                     </div>
+                  </>
+                )}
+              </div>
+
+              {/* Context: BLANK until clicking "Add file" */}
+              <div className="mt-6">
+                <div className="mb-2 flex items-center justify-between">
+                  <div className="font-medium text-[12.5px]">Context Files</div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      multiple
+                      accept=".txt,.md,.csv,.json,.docx,.doc,text/plain,text/markdown,text/csv,application/json,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword"
+                      className="hidden"
+                      onChange={async (e)=>{ const files = Array.from(e.target.files || []); await onPickFiles(files); if (fileInputRef.current) fileInputRef.current.value=''; }}
+                    />
+                    <button
+                      type="button"
+                      onClick={()=>fileInputRef.current?.click()}
+                      className="inline-flex items-center gap-2 text-sm rounded-[8px] px-3 py-1.5"
+                      style={{ border:'1px solid rgba(255,255,255,.14)' }}
+                    >
+                      Add file
+                    </button>
+                    {!!(data.ctxFiles && data.ctxFiles.length) && (
+                      <button
+                        type="button"
+                        onClick={()=>{ rebuildContextText([]); }}
+                        className="inline-flex items-center gap-2 text-sm rounded-[8px] px-3 py-1.5"
+                        style={{ border:'1px solid rgba(255,255,255,.14)' }}
+                      >
+                        Clear
+                      </button>
+                    )}
                   </div>
                 </div>
-                {/* /Context */}
+
+                {/* List of files */}
+                {!(data.ctxFiles && data.ctxFiles.length) ? (
+                  <div className="text-xs" style={{ color:'var(--text-muted)' }}>
+                    No files yet. Click <b>Add file</b> to upload (.txt, .md, .csv, .json, <b>.docx</b>).
+                  </div>
+                ) : (
+                  <div className="rounded-[8px] p-3" style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)' }}>
+                    {(data.ctxFiles||[]).map((f, idx) => (
+                      <div key={idx} className="mb-3 last:mb-0">
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="text-sm font-medium truncate">{f.name}</div>
+                          <button
+                            onClick={()=>{
+                              const next = [...(data.ctxFiles||[])]; next.splice(idx,1);
+                              rebuildContextText(next);
+                            }}
+                            className="text-xs rounded-[6px] px-2 py-1"
+                            style={{ border:'1px solid rgba(255,255,255,.14)' }}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                        <div className="text-xs" style={{ color:'var(--text-muted)' }}>
+                          {(f.text || '').slice(0, 240) || '(empty)'}{(f.text||'').length>240?'…':''}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </Section>
@@ -1161,13 +1210,13 @@ export default function VoiceAgentSection() {
         </div>
       </div>
 
-      {/* ─────────── Generate overlay (with typing animation) ─────────── */}
+      {/* ─────────── Generate overlay (input only; typing happens in prompt box) ─────────── */}
       {showGenerate && IS_CLIENT ? createPortal(
         <>
           <div
             className="fixed inset-0"
             style={{ zIndex: Z_OVERLAY, background:'rgba(6,8,10,.62)', backdropFilter:'blur(6px)' }}
-            onClick={()=>{ if (genPhase!=='loading') { setShowGenerate(false); setGenPhase('idle'); } }}
+            onClick={()=> setShowGenerate(false)}
           />
           <div className="fixed inset-0 grid place-items-center px-4" style={{ zIndex: Z_MODAL }}>
             <div
@@ -1180,7 +1229,6 @@ export default function VoiceAgentSection() {
                 boxShadow:'0 22px 44px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px rgba(89,217,179,.20)'
               }}
             >
-              {/* Header */}
               <div
                 className="flex items-center justify-between px-6 py-4"
                 style={{
@@ -1190,16 +1238,12 @@ export default function VoiceAgentSection() {
               >
                 <div className="flex items-center gap-3">
                   <div className="w-9 h-9 rounded-lg grid place-items-center" style={{ background:'rgba(89,217,179,.12)' }}>
-                    <span style={{ color: CTA }}>
-                      <Wand2 className="w-5 h-5" />
-                    </span>
+                    <span style={{ color: CTA }}><Wand2 className="w-5 h-5" /></span>
                   </div>
-                  <div className="text-lg font-semibold">
-                    {genPhase==='loading' ? 'Generating…' : 'Generate Prompt'}
-                  </div>
+                  <div className="text-lg font-semibold">Describe how to update the prompt</div>
                 </div>
                 <button
-                  onClick={()=> genPhase!=='loading' && setShowGenerate(false)}
+                  onClick={()=> setShowGenerate(false)}
                   className="w-8 h-8 rounded-[6px] grid place-items-center"
                   style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}` }}
                   aria-label="Close"
@@ -1208,109 +1252,50 @@ export default function VoiceAgentSection() {
                 </button>
               </div>
 
-              {/* Body */}
               <div className="px-6 py-5 space-y-3">
                 <div className="text-xs" style={{ color:'var(--text-muted)' }}>
-                  Tip: type “assistant for a dental clinic; tone friendly; handle booking and FAQs”.
+                  Tip: “assistant for a dental clinic; tone friendly; handle booking and FAQs”.
                 </div>
-
-                {/* Editor */}
-                {genPhase!=='loading' && (
-                  <div
-                    className="rounded-[8px]"
-                    style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)' }}
-                  >
-                    <textarea
-                      value={composerText}
-                      onChange={(e)=>setComposerText(e.target.value)}
-                      className="w-full bg-transparent outline-none rounded-[8px] px-3 py-2"
-                      placeholder="Describe your business and how the assistant should behave…"
-                      style={{ minHeight: 160, maxHeight: '40vh', color:'var(--text)', resize:'vertical' }}
-                    />
-                  </div>
-                )}
-
-                {/* Typing animation preview */}
-                {genPhase==='loading' && (
-                  <div
-                    className="rounded-[8px] px-3 py-3 text-sm"
-                    style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)', minHeight: 160, whiteSpace:'pre-wrap' }}
-                  >
-                    {typingPreview || '…'}
-                    <span className="animate-pulse">▌</span>
-                  </div>
-                )}
+                <textarea
+                  value={composerText}
+                  onChange={(e)=>setComposerText(e.target.value)}
+                  className="w-full bg-transparent outline-none rounded-[8px] px-3 py-2"
+                  placeholder="Describe changes…"
+                  style={{ minHeight: 160, maxHeight: '40vh', color:'var(--text)', resize:'vertical' }}
+                />
               </div>
 
-              {/* Footer */}
               <div className="px-6 pb-6 flex gap-3">
-                {genPhase!=='loading' ? (
-                  <>
-                    <button
-                      onClick={()=> { setShowGenerate(false); setGenPhase('idle'); }}
-                      className="w-full h-[40px] rounded-[8px]"
-                      style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)', color:'var(--text)', fontWeight:600 }}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={()=>{
-                        const raw = safeTrim(composerText);
-                        if (!raw) return;
-                        try {
-                          const base = nonEmpty(data.systemPrompt) ? data.systemPrompt : DEFAULT_PROMPT_RT;
-                          (basePromptRef as any).current = base;
-
-                          const compiled = compilePrompt({ basePrompt: base, userText: raw });
-
-                          // visual typing animation of the FULL frontend prompt (not just [Identity])
-                          setGenPhase('loading');
-                          setProposedPrompt(compiled.frontendText);
-                          setChangesSummary(compiled.summary || 'Updated.');
-
-                          let i = 0;
-                          const text = compiled.frontendText;
-                          setTypingPreview('');
-                          if (typingTimerRef.current) cancelAnimationFrame(typingTimerRef.current as any);
-                          const step = () => {
-                            i += Math.max(1, Math.round(text.length / 120)); // ~120 steps
-                            setTypingPreview(text.slice(0, i));
-                            if (i < text.length) {
-                              typingTimerRef.current = requestAnimationFrame(step);
-                            } else {
-                              // when done typing, move to review and apply inlined diff view
-                              setGenPhase('review');
-                              // also set both fields so it's ready if user applies
-                              setField('systemPrompt')(compiled.frontendText);
-                              setField('systemPromptBackend')(compiled.backendString);
-                            }
-                          };
-                          typingTimerRef.current = requestAnimationFrame(step);
-                        } catch {
-                          setToastKind('error');
-                          setToast('Generate failed — try simpler wording.');
-                          setTimeout(()=>setToast(''), 2200);
-                        }
-                      }}
-                      disabled={!composerText.trim()}
-                      className="w-full h-[40px] rounded-[8px] font-semibold inline-flex items-center justify-center gap-2"
-                      style={{ background:CTA, color:'#0a0f0d', opacity: (!composerText.trim() ? .6 : 1) }}
-                    >
-                      <Wand2 className="w-4 h-4" /> Generate
-                    </button>
-                  </>
-                ) : (
-                  <button
-                    onClick={()=>{
-                      if (typingTimerRef.current) cancelAnimationFrame(typingTimerRef.current as any);
-                      setGenPhase('review');
-                    }}
-                    className="w-full h-[40px] rounded-[8px]"
-                    style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)', color:'var(--text)', fontWeight:600 }}
-                  >
-                    Skip typing
-                  </button>
-                )}
+                <button
+                  onClick={()=> setShowGenerate(false)}
+                  className="w-full h-[40px] rounded-[8px]"
+                  style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)', color:'var(--text)', fontWeight:600 }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={async ()=>{
+                    const raw = safeTrim(composerText);
+                    if (!raw) return;
+                    try {
+                      const base = nonEmpty(data.systemPrompt) ? data.systemPrompt : DEFAULT_PROMPT_RT;
+                      const compiled = compilePrompt({ basePrompt: base, userText: raw });
+                      setShowGenerate(false);
+                      await sleep(150); // small pause for UX
+                      await startTypingIntoPrompt(compiled.frontendText);
+                      // also stash backend so Accept can apply without recompile mismatch
+                      setField('systemPromptBackend')(compiled.backendString);
+                    } catch {
+                      setToastKind('error'); setToast('Generate failed — try simpler wording.');
+                      setTimeout(()=>setToast(''), 2200);
+                    }
+                  }}
+                  disabled={!composerText.trim()}
+                  className="w-full h-[40px] rounded-[8px] font-semibold inline-flex items-center justify-center gap-2"
+                  style={{ background:CTA, color:'#0a0f0d', opacity: (!composerText.trim() ? .6 : 1) }}
+                >
+                  <Wand2 className="w-4 h-4" /> Generate
+                </button>
               </div>
             </div>
           </div>
@@ -1351,19 +1336,14 @@ export default function VoiceAgentSection() {
                 setToastKind('error'); setToast(msg);
               }}
               onClose={()=> setShowCall(false)}
-              prosody={{
-                fillerWords: true,
-                microPausesMs: 200,
-                phoneFilter: true,
-                turnEndPauseMs: 120,
-              }}
+              prosody={{ fillerWords: true, microPausesMs: 200, phoneFilter: true, turnEndPauseMs: 120 }}
 
-              // NEW — greetings: blank default; up to 20; random/sequence
+              // greetings: joined from list; blank by default
               firstMode={data.firstMode as any}
               firstMsg={
                 (data.greetPick==='random'
-                  ? [...(data.firstMsgs||[''])].filter(Boolean).sort(()=>Math.random()-0.5)
-                  : (data.firstMsgs||['']).filter(Boolean)
+                  ? [...(data.firstMsgs||[])].filter(Boolean).sort(()=>Math.random()-0.5)
+                  : (data.firstMsgs||[]).filter(Boolean)
                 ).join('\n')
               }
             />
