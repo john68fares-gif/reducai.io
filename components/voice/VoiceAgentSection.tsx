@@ -79,9 +79,9 @@ const Tokens = () => (
       --bg:#0b0c10; --panel:#0d0f11; --text:#e6f1ef; --text-muted:#9fb4ad;
 
       --s-2:8px; --s-3:12px; --s-4:16px; --s-5:20px; --s-6:24px;
-      --radius-outer:8px;               /* less rounded */
+      --radius-outer:8px;
       --radius-inner:8px;
-      --control-h:40px;                 /* shorter controls */
+      --control-h:40px;
       --header-h:80px;
 
       --fz-title:18px; --fz-sub:15px; --fz-body:14px; --fz-label:12.5px;
@@ -128,11 +128,20 @@ type AgentData = {
   name: string;
   provider: 'openai' | 'anthropic' | 'google';
   model: string;
+
+  // CHANGED — greetings
   firstMode: string;
-  firstMsg: string;
-  systemPrompt: string;           // pretty (frontend)
-  systemPromptBackend?: string;   // hidden compact backend
+  firstMsg: string;                 // legacy single
+  firstMsgs?: string[];             // NEW up to 20
+  greetPick?: 'sequence'|'random';  // NEW
+
+  // prompts (frontend + backend)
+  systemPrompt: string;
+  systemPromptBackend?: string;
   language?: string;
+
+  // NEW — uploaded/entered context that the AI should use
+  contextText?: string;
 
   ttsProvider: 'openai' | 'elevenlabs';
   voiceName: string;
@@ -182,7 +191,9 @@ const DEFAULT_AGENT: AgentData = {
   provider: 'openai',
   model: 'gpt-4o',
   firstMode: 'Assistant speaks first',
-  firstMsg: 'Hello.',
+  firstMsg: '',                 // CHANGED — blank by default
+  firstMsgs: [''],              // NEW — blank list starter
+  greetPick: 'sequence',        // NEW
   systemPrompt:
     (normalizeFullPromptRT(`
 [Identity]
@@ -201,6 +212,7 @@ const DEFAULT_AGENT: AgentData = {
 - If unsure, ask a specific clarifying question first.
 `).trim() + '\n\n' + `# ${BLANK_TEMPLATE_NOTE}\n`),
   systemPromptBackend: '',
+  contextText: '',              // NEW
   ttsProvider: 'openai',
   voiceName: 'Alloy (American)',
   apiKeyId: '',
@@ -214,10 +226,24 @@ const DEFAULT_AGENT: AgentData = {
 const keyFor = (id: string) => `va:agent:${id}`;
 const versKeyFor = (id: string) => `va:versions:${id}`;
 
+// NEW — migrate old saved data safely
+function migrateAgent(d: AgentData): AgentData {
+  const msgs = Array.isArray(d.firstMsgs) ? d.firstMsgs : [d.firstMsg ?? ''];
+  return {
+    ...d,
+    firstMsg: d.firstMsg ?? '',
+    firstMsgs: msgs.slice(0, 20),
+    greetPick: d.greetPick || 'sequence',
+    contextText: typeof d.contextText === 'string' ? d.contextText : '',
+  };
+}
+
 const loadAgentData = (id: string): AgentData => {
-  try { const raw = IS_CLIENT ? localStorage.getItem(keyFor(id)) : null; if (raw) return { ...DEFAULT_AGENT, ...(JSON.parse(raw)||{}) }; }
-  catch {}
-  return { ...DEFAULT_AGENT };
+  try {
+    const raw = IS_CLIENT ? localStorage.getItem(keyFor(id)) : null;
+    if (raw) return migrateAgent({ ...DEFAULT_AGENT, ...(JSON.parse(raw)||{}) });
+  } catch {}
+  return migrateAgent({ ...DEFAULT_AGENT });
 };
 const saveAgentData = (id: string, data: AgentData) => {
   try { if (IS_CLIENT) localStorage.setItem(keyFor(id), JSON.stringify(data)); } catch {}
@@ -398,7 +424,7 @@ function StyledSelect({
         ref={btnRef}
         type="button"
         onClick={() => { setOpen(v=>!v); setTimeout(()=>searchRef.current?.focus(),0); }}
-        className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-[8px] text-sm outline-none transition" // ← less rounded & shorter
+        className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-[8px] text-sm outline-none transition"
         style={{
           height:'var(--control-h)',
           background:'var(--vs-input-bg, #101314)',
@@ -423,7 +449,7 @@ function StyledSelect({
             width: (menuPos?.width ?? (btnRef.current?.getBoundingClientRect().width ?? 280)),
             background:'var(--vs-menu-bg, #101314)',
             border:'1px solid var(--vs-menu-border, rgba(255,255,255,.16))',
-            borderRadius:10,                                    // ← less rounded
+            borderRadius:10,
             boxShadow:'0 24px 64px rgba(0,0,0,.60), 0 8px 20px rgba(0,0,0,.45), 0 0 0 1px rgba(0,255,194,.10)'
           }}
         >
@@ -531,6 +557,16 @@ function DiffInline({ base, next }:{ base:string; next:string }){
   );
 }
 
+/* ─────────── helpers for file context (NEW) ─────────── */
+async function readFileAsText(f: File): Promise<string> {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onerror = () => rej(new Error('Read failed'));
+    r.onload = () => res(String(r.result || ''));
+    r.readAsText(f);
+  });
+}
+
 /* ─────────── Page ─────────── */
 type ChatMsg = { id: string; role: 'user'|'assistant'|'system'; text: string };
 
@@ -573,6 +609,10 @@ export default function VoiceAgentSection() {
   const basePromptRef = useRef<string>('');
   const [proposedPrompt, setProposedPrompt] = useState('');
   const [changesSummary, setChangesSummary] = useState('');
+
+  // NEW — typing animation state for overlay preview
+  const [typingPreview, setTypingPreview] = useState('');     // what we “type” on screen
+  const typingTimerRef = useRef<number | null>(null);
 
   // models list (live from API when key selected)
   const selectedKey = apiKeys.find(k => k.id === data.apiKeyId)?.key;
@@ -685,6 +725,28 @@ export default function VoiceAgentSection() {
     finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
   }
 
+  /* file context importer (NEW) */
+  const importFilesAsContext = async (files: File[]) => {
+    if (!files?.length) return;
+    const allow = new Set([
+      'text/plain','text/markdown','text/csv','application/json'
+    ]);
+    const okExt = (n:string)=>/\.(txt|md|csv|json)$/i.test(n);
+    let merged = '';
+    for (const f of files) {
+      if (!allow.has(f.type) && !okExt(f.name)) continue;
+      try {
+        const txt = await readFileAsText(f);
+        merged += `\n\n# File: ${f.name}\n${String(txt || '').trim()}\n`;
+      } catch {}
+    }
+    if (merged.trim()) {
+      setField('contextText')(
+        ((data.contextText || '') + '\n' + merged).trim()
+      );
+    }
+  };
+
   /* ─────────── CALL MODEL (fallback to RT if needed) ─────────── */
   const callModel = useMemo(() => {
     const m = (data.model || '').toLowerCase();
@@ -796,7 +858,7 @@ export default function VoiceAgentSection() {
           <Section
             title="Model"
             icon={<Gauge className="w-4 h-4" style={{ color: CTA }} />}
-            desc="Configure the model, assistant name, and first message."
+            desc="Configure the model, assistant name, and first message(s)."
             defaultOpen={true}
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -837,6 +899,35 @@ export default function VoiceAgentSection() {
               </div>
             </div>
 
+            {/* NEW — Multi greetings editor */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
+              <div className="md:col-span-2">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="font-medium" style={{ fontSize:'12.5px' }}>First Messages (one per line, max 20)</div>
+                  <StyledSelect
+                    value={data.greetPick || 'sequence'}
+                    onChange={(v)=>setField('greetPick')(v as AgentData['greetPick'])}
+                    options={[
+                      { value: 'sequence', label: 'Play in order' },
+                      { value: 'random',   label: 'Randomize'   },
+                    ]}
+                  />
+                </div>
+                <textarea
+                  value={(Array.isArray(data.firstMsgs) ? data.firstMsgs : [data.firstMsg || '']).join('\n')}
+                  onChange={(e)=>{
+                    const arr = e.target.value.split('\n').map(s=>s.trim()).slice(0,20);
+                    setField('firstMsgs')(arr);
+                    setField('firstMsg')(arr[0] || ''); // keep legacy in sync
+                  }}
+                  className="w-full bg-transparent outline-none rounded-[8px] px-3 py-[10px]"
+                  style={{ minHeight: 120, background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)', color:'var(--text)' }}
+                  placeholder="(leave empty for silence)…"
+                />
+              </div>
+            </div>
+
+            {/* Prompt + Generate */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
               <div className="md:col-span-2">
                 <div className="flex items-center justify-between mb-2">
@@ -845,7 +936,14 @@ export default function VoiceAgentSection() {
                     <button
                       className="inline-flex items-center gap-2 rounded-[8px] text-sm"
                       style={{ height:34, padding:'0 12px', background:CTA, color:'#fff', border:'1px solid rgba(255,255,255,.08)' }}
-                      onClick={()=>{ setComposerText(''); setProposedPrompt(''); setChangesSummary(''); setGenPhase('editing'); setShowGenerate(true); }}
+                      onClick={()=>{
+                        setComposerText('');
+                        setProposedPrompt('');
+                        setTypingPreview('');
+                        setChangesSummary('');
+                        setGenPhase('editing');
+                        setShowGenerate(true);
+                      }}
                     >
                       <Wand2 className="w-4 h-4" /> Generate
                     </button>
@@ -896,6 +994,65 @@ export default function VoiceAgentSection() {
                     </div>
                   )}
                 </div>
+
+                {/* NEW — Context upload + preview */}
+                <div className="mt-3">
+                  <div className="mb-2 text-[12.5px] font-medium">Context (optional)</div>
+                  <div
+                    onDragOver={(e)=>{ e.preventDefault(); }}
+                    onDrop={async (e)=>{ e.preventDefault(); const files = Array.from(e.dataTransfer.files || []); await importFilesAsContext(files); }}
+                    className="rounded-[8px] px-3 py-3 text-sm"
+                    style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)', color:'var(--text)' }}
+                  >
+                    <div className="flex items-center gap-2">
+                      <input
+                        id="ctx-file"
+                        type="file"
+                        multiple
+                        accept=".txt,.md,.csv,.json,text/plain,text/markdown,text/csv,application/json"
+                        className="hidden"
+                        onChange={async (e)=>{ const files = Array.from(e.target.files || []); await importFilesAsContext(files); e.currentTarget.value=''; }}
+                      />
+                      <label
+                        htmlFor="ctx-file"
+                        className="inline-flex items-center gap-2 rounded-[8px] px-3 py-1.5 cursor-pointer"
+                        style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.14)' }}
+                      >
+                        Upload files
+                      </label>
+                      <span className="text-xs" style={{ color:'var(--text-muted)' }}>
+                        Drop or choose .txt / .md / .csv / .json (merged into a [Context] section)
+                      </span>
+                      <div className="ml-auto flex gap-2">
+                        <button
+                          type="button"
+                          className="text-xs rounded-[8px] px-2 py-1"
+                          style={{ border:'1px solid rgba(255,255,255,.14)', background:'var(--panel)' }}
+                          onClick={()=> setField('contextText')('')}
+                        >
+                          Clear context
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="mt-3">
+                      <div className="text-xs mb-1" style={{ color:'var(--text-muted)' }}>
+                        Context preview (trimmed):
+                      </div>
+                      <textarea
+                        value={(data.contextText || '').slice(0, 4000)}
+                        onChange={(e)=> setField('contextText')(e.target.value)}
+                        className="w-full bg-transparent outline-none rounded-[8px] px-3 py-2"
+                        style={{ minHeight: 120, background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)', color:'var(--text)', resize:'vertical' }}
+                        placeholder="(empty)"
+                      />
+                      <div className="mt-1 text-[11px]" style={{ color:'var(--text-muted)' }}>
+                        {Math.min((data.contextText || '').length, 4000)} / {(data.contextText || '').length} chars shown
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                {/* /Context */}
               </div>
             </div>
           </Section>
@@ -1004,7 +1161,7 @@ export default function VoiceAgentSection() {
         </div>
       </div>
 
-      {/* ─────────── Generate overlay ─────────── */}
+      {/* ─────────── Generate overlay (with typing animation) ─────────── */}
       {showGenerate && IS_CLIENT ? createPortal(
         <>
           <div
@@ -1037,7 +1194,9 @@ export default function VoiceAgentSection() {
                       <Wand2 className="w-5 h-5" />
                     </span>
                   </div>
-                  <div className="text-lg font-semibold">Generate Prompt</div>
+                  <div className="text-lg font-semibold">
+                    {genPhase==='loading' ? 'Generating…' : 'Generate Prompt'}
+                  </div>
                 </div>
                 <button
                   onClick={()=> genPhase!=='loading' && setShowGenerate(false)}
@@ -1054,58 +1213,104 @@ export default function VoiceAgentSection() {
                 <div className="text-xs" style={{ color:'var(--text-muted)' }}>
                   Tip: type “assistant for a dental clinic; tone friendly; handle booking and FAQs”.
                 </div>
-                <div
-                  className="rounded-[8px]"
-                  style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)' }}
-                >
-                  <textarea
-                    value={composerText}
-                    onChange={(e)=>setComposerText(e.target.value)}
-                    className="w-full bg-transparent outline-none rounded-[8px] px-3 py-2"
-                    placeholder="Describe your business and how the assistant should behave…"
-                    style={{ minHeight: 160, maxHeight: '40vh', color:'var(--text)', resize:'vertical' }}
-                  />
-                </div>
+
+                {/* Editor */}
+                {genPhase!=='loading' && (
+                  <div
+                    className="rounded-[8px]"
+                    style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)' }}
+                  >
+                    <textarea
+                      value={composerText}
+                      onChange={(e)=>setComposerText(e.target.value)}
+                      className="w-full bg-transparent outline-none rounded-[8px] px-3 py-2"
+                      placeholder="Describe your business and how the assistant should behave…"
+                      style={{ minHeight: 160, maxHeight: '40vh', color:'var(--text)', resize:'vertical' }}
+                    />
+                  </div>
+                )}
+
+                {/* Typing animation preview */}
+                {genPhase==='loading' && (
+                  <div
+                    className="rounded-[8px] px-3 py-3 text-sm"
+                    style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)', minHeight: 160, whiteSpace:'pre-wrap' }}
+                  >
+                    {typingPreview || '…'}
+                    <span className="animate-pulse">▌</span>
+                  </div>
+                )}
               </div>
 
               {/* Footer */}
               <div className="px-6 pb-6 flex gap-3">
-                <button
-                  onClick={()=> { setShowGenerate(false); setGenPhase('idle'); }}
-                  className="w-full h-[40px] rounded-[8px]"
-                  style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)', color:'var(--text)', fontWeight:600 }}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={()=>{
-                    const raw = safeTrim(composerText);
-                    if (!raw) return;
-                    try {
-                      const base = nonEmpty(data.systemPrompt) ? data.systemPrompt : DEFAULT_PROMPT_RT;
-                      (basePromptRef as any).current = base;
+                {genPhase!=='loading' ? (
+                  <>
+                    <button
+                      onClick={()=> { setShowGenerate(false); setGenPhase('idle'); }}
+                      className="w-full h-[40px] rounded-[8px]"
+                      style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)', color:'var(--text)', fontWeight:600 }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={()=>{
+                        const raw = safeTrim(composerText);
+                        if (!raw) return;
+                        try {
+                          const base = nonEmpty(data.systemPrompt) ? data.systemPrompt : DEFAULT_PROMPT_RT;
+                          (basePromptRef as any).current = base;
 
-                      const compiled = compilePrompt({ basePrompt: base, userText: raw });
-                      setProposedPrompt(compiled.frontendText);
-                      setChangesSummary(compiled.summary || 'Updated.');
+                          const compiled = compilePrompt({ basePrompt: base, userText: raw });
 
-                      setField('systemPrompt')(compiled.frontendText);
-                      setField('systemPromptBackend')(compiled.backendString);
+                          // visual typing animation of the FULL frontend prompt (not just [Identity])
+                          setGenPhase('loading');
+                          setProposedPrompt(compiled.frontendText);
+                          setChangesSummary(compiled.summary || 'Updated.');
 
-                      setShowGenerate(false);
+                          let i = 0;
+                          const text = compiled.frontendText;
+                          setTypingPreview('');
+                          if (typingTimerRef.current) cancelAnimationFrame(typingTimerRef.current as any);
+                          const step = () => {
+                            i += Math.max(1, Math.round(text.length / 120)); // ~120 steps
+                            setTypingPreview(text.slice(0, i));
+                            if (i < text.length) {
+                              typingTimerRef.current = requestAnimationFrame(step);
+                            } else {
+                              // when done typing, move to review and apply inlined diff view
+                              setGenPhase('review');
+                              // also set both fields so it's ready if user applies
+                              setField('systemPrompt')(compiled.frontendText);
+                              setField('systemPromptBackend')(compiled.backendString);
+                            }
+                          };
+                          typingTimerRef.current = requestAnimationFrame(step);
+                        } catch {
+                          setToastKind('error');
+                          setToast('Generate failed — try simpler wording.');
+                          setTimeout(()=>setToast(''), 2200);
+                        }
+                      }}
+                      disabled={!composerText.trim()}
+                      className="w-full h-[40px] rounded-[8px] font-semibold inline-flex items-center justify-center gap-2"
+                      style={{ background:CTA, color:'#0a0f0d', opacity: (!composerText.trim() ? .6 : 1) }}
+                    >
+                      <Wand2 className="w-4 h-4" /> Generate
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    onClick={()=>{
+                      if (typingTimerRef.current) cancelAnimationFrame(typingTimerRef.current as any);
                       setGenPhase('review');
-                    } catch {
-                      setToastKind('error');
-                      setToast('Generate failed — try simpler wording.');
-                      setTimeout(()=>setToast(''), 2200);
-                    }
-                  }}
-                  disabled={!composerText.trim()}
-                  className="w-full h-[40px] rounded-[8px] font-semibold inline-flex items-center justify-center gap-2"
-                  style={{ background:CTA, color:'#0a0f0d', opacity: (!composerText.trim() ? .6 : 1) }}
-                >
-                  <Wand2 className="w-4 h-4" /> Generate
-                </button>
+                    }}
+                    className="w-full h-[40px] rounded-[8px]"
+                    style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)', color:'var(--text)', fontWeight:600 }}
+                  >
+                    Skip typing
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -1129,7 +1334,13 @@ export default function VoiceAgentSection() {
           {showCall && (
             <WebCallButton
               model={callModel}
-              systemPrompt={data.systemPromptBackend || data.systemPrompt}
+              systemPrompt={
+                (() => {
+                  const base = data.systemPromptBackend || data.systemPrompt || '';
+                  const ctx  = (data.contextText || '').trim();
+                  return ctx ? `${base}\n\n[Context]\n${ctx}`.trim() : base;
+                })()
+              }
               voiceName={data.voiceName}
               assistantName={data.name || 'Assistant'}
               apiKey={selectedKey || ''}
@@ -1146,6 +1357,15 @@ export default function VoiceAgentSection() {
                 phoneFilter: true,
                 turnEndPauseMs: 120,
               }}
+
+              // NEW — greetings: blank default; up to 20; random/sequence
+              firstMode={data.firstMode as any}
+              firstMsg={
+                (data.greetPick==='random'
+                  ? [...(data.firstMsgs||[''])].filter(Boolean).sort(()=>Math.random()-0.5)
+                  : (data.firstMsgs||['']).filter(Boolean)
+                ).join('\n')
+              }
             />
           )}
         </>,
