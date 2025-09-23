@@ -6,6 +6,7 @@ type Json = Record<string, any>;
 
 const SUPABASE_URL = process.env.SUPABASE_URL as string;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY as string;
+
 const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 
 type Row = {
@@ -38,8 +39,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
   }
 
   const ownerId = getOwnerId(req);
-  const { id, name, model = 'gpt-4o-mini', temperature = 0.5, system = '' } =
-    (req.body || {}) as Partial<Row> & { system?: string };
+  const {
+    id,
+    name,
+    model = 'gpt-4o-mini',
+    temperature = 0.5,
+    system = '',
+  } = (req.body || {}) as Partial<Row> & { system?: string };
 
   if (!name && !id) {
     return res.status(400).json({ ok: false, error: 'Missing "name" or existing "id".' });
@@ -56,8 +62,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
     }
   }
 
-  const newId =
-    (id && id.trim()) || `cbot_${crypto.randomUUID?.() || Math.random().toString(36).slice(2)}`;
+  const newId = (id && id.trim()) || `cbot_${crypto.randomUUID?.() || Math.random().toString(36).slice(2)}`;
   const now = new Date().toISOString();
 
   try {
@@ -75,6 +80,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
       })
       .select()
       .single();
+
     if (error) throw error;
 
     const saved = data as Row;
