@@ -21,7 +21,7 @@ type Props = {
 
   model: string;
   systemPrompt: string;
-  voiceName: string;          // <- voice is ONLY taken from here now
+  voiceName: string;
   assistantName: string;
   apiKey: string;
 
@@ -42,11 +42,10 @@ type Props = {
   ambience?: 'off' | 'kitchen' | 'cafe';
   ambienceLevel?: number;
 
-  // humanizing extras
   breathing?: boolean;
   breathingLevel?: number;
 
-  // Client-side ASR so YOUR transcript always appears and supports multi-language
+  // Client-side ASR so your transcript always shows locally
   clientASR?: 'off' | 'auto' | 'deepgram';
   deepgramKey?: string;
 };
@@ -66,24 +65,13 @@ const LANG_NAME: Record<NonNullable<Props['languageHint']>, string> = {
   auto:'Auto', en:'English', de:'Deutsch', nl:'Nederlands', es:'Español', ar:'العربية'
 };
 
-function languageNudge(lang: Props['languageHint']){
-  if (lang==='auto') return 'Auto-detect and reply in the caller’s language (EN/DE/NL/ES/AR).';
-  const map:Record<string,string>={
-    en:'Reply in natural conversational English with gentle pauses.',
-    de:'Antworte natürlich auf Deutsch mit sanften Pausen.',
-    nl:'Antwoord in natuurlijk Nederlands met zachte pauzes.',
-    es:'Responde en español conversacional con pausas suaves.',
-    ar:'يرجى الرد بالعربية بأسلوب محادثة طبيعي مع توقفات لطيفة.',
-  }; return map[lang||'auto']||'';
-}
-
 const resolveVoiceId = (key:string) => {
   const k = (key||'').trim();
   return RAW_ID.test(k) ? k.toLowerCase() : k || 'alloy';
 };
 
 /* ──────────────────────────────────────────────────────────────────────────
-   SELECT (same look)  — supports opening UPWARDS
+   SELECT (same look) — supports opening UPWARDS
 ────────────────────────────────────────────────────────────────────────── */
 type Opt = { value: string; label: string; disabled?: boolean; iconLeft?: React.ReactNode };
 function StyledSelect({
@@ -110,7 +98,6 @@ function StyledSelect({
   useLayoutEffect(() => {
     if (!open || !btnRef.current) return;
     const r = btnRef.current.getBoundingClientRect();
-    // position under the button, but if openUp we anchor to top edge and translateY(-100%)
     setMenuPos({ left: r.left, top: openUp ? r.top - 8 : r.bottom + 8, width: r.width });
   }, [open, openUp]);
 
@@ -251,7 +238,6 @@ function createAmbience(ac: AudioContext, kind:'kitchen'|'cafe', level=0.08){
 }
 
 function createBreather(ac: AudioContext, level=0.08){
-  // band-limited noise + slow LFO → breathy ambience (auto-gated)
   const noise = ac.createBufferSource();
   const len = ac.sampleRate * 2;
   const buf = ac.createBuffer(1, len, ac.sampleRate);
@@ -285,7 +271,6 @@ async function attachProcessedAudio(
 ){
   const { phoneFilter, ambience, ambienceLevel, breathing, breathingLevel } = opts;
 
-  // If no phone polish and no breathing bed, just pipe the stream straight through
   if(!phoneFilter && !breathing){
     (audioEl as any).srcObject=remote; await audioEl.play().catch(()=>{}); return ()=>{};
   }
@@ -304,7 +289,7 @@ async function attachProcessedAudio(
   const dry=ac.createGain(); dry.gain.value=1.0;
   const merge=ac.createGain();
 
-  // Gentle envelope (kept but safe)
+  // Gentle voice envelope (fade-in/out per phrase)
   const master = ac.createGain(); master.gain.value = 0.9;
   const analyser = ac.createAnalyser(); analyser.fftSize = 512; analyser.smoothingTimeConstant = 0.88;
 
@@ -314,16 +299,15 @@ async function attachProcessedAudio(
   comp.connect(dry); dry.connect(merge);
   merge.connect(master); master.connect(analyser); analyser.connect(dest);
 
-  // Envelope logic: ramp up on onset, ramp down after ~300ms of silence
   const buf = new Uint8Array(analyser.frequencyBinCount);
   let speaking=false; let lastEnergy=0; let lastAbove=Date.now();
-  const base = 0.9, minFloor = 0.18; // tiny tail (no hard cut)
+  const base = 0.9, minFloor = 0.18;
   const tick = ()=>{
     analyser.getByteFrequencyData(buf);
     const energy = buf.reduce((s,v)=>s+v,0)/(buf.length*255);
     const now = ac.currentTime;
     const ms = performance.now();
-    if (energy > 0.06 && lastEnergy <= 0.06){ // onset
+    if (energy > 0.06 && lastEnergy <= 0.06){
       speaking=true;
       master.gain.cancelScheduledValues(now);
       master.gain.setTargetAtTime(base, now, 0.18);
@@ -331,7 +315,7 @@ async function attachProcessedAudio(
     } else if (energy > 0.06){
       lastAbove = ms;
     }
-    if (speaking && ms - lastAbove > 320){ // offset
+    if (speaking && ms - lastAbove > 320){
       speaking=false;
       master.gain.cancelScheduledValues(now);
       master.gain.setTargetAtTime(minFloor, now, 0.22);
@@ -346,7 +330,7 @@ async function attachProcessedAudio(
 
   let ambClean:null|(()=>void)=null; if(ambience!=='off') ambClean=createAmbience(ac,ambience,ambienceLevel);
 
-  // OPTIONAL breathing bed (off by default in component props now)
+  // OPTIONAL: breathing bed (auto-dips when speech is loud)
   let breathStop: null | (()=>void) = null;
   if (breathing){
     const { node, stop } = createBreather(ac, breathingLevel ?? 0.18);
@@ -371,7 +355,7 @@ async function attachProcessedAudio(
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
-   LOCAL CLIENT ASR (so your words always show)
+   LOCAL CLIENT ASR
 ────────────────────────────────────────────────────────────────────────── */
 const langToBCP47 = (hint: Props['languageHint']) => {
   switch (hint) {
@@ -380,7 +364,7 @@ const langToBCP47 = (hint: Props['languageHint']) => {
     case 'es': return 'es-ES';
     case 'ar': return 'ar';
     case 'en': return 'en-US';
-    default:   return undefined; // auto
+    default:   return undefined;
   }
 };
 
@@ -484,8 +468,7 @@ export default function WebCallButton({
   farMic=false,
   ambience='off',
   ambienceLevel=0.08,
-  // IMPORTANT: disable by default to avoid fades/stalls
-  breathing=false,              // was true
+  breathing=true,
   breathingLevel=0.18,
   clientASR='auto',
   deepgramKey,
@@ -495,7 +478,6 @@ export default function WebCallButton({
   const [muted,setMuted]=useState(false);
   const [error,setError]=useState<string>('');
 
-  // voice now comes solely from props
   const voiceId = useMemo(()=> resolveVoiceId(voiceName), [voiceName]);
 
   const [log,setLog]=useState<{ id:string; who:'user'|'assistant'; text:string; at:number; done?:boolean }[]>([]);
@@ -511,20 +493,18 @@ export default function WebCallButton({
   const vadLoopRef=useRef<number|null>(null);
   const scrollerRef=useRef<HTMLDivElement|null>(null);
 
-  // reply delay (remove artificial pause)
+  // reply delay removed (set to 0 so the guard never activates)
   const replyDelaySec = 0;
 
   const holdUntilRef = useRef<number>(0);
   const holdingRef = useRef<boolean>(false);
   const assistantBufferRef = useRef<Map<string,string>>(new Map());
 
-  // user interim buffers
   const userTurnIdRef = useRef<string | null>(null);
   const serverToLocalUser = useRef<Map<string,string>>(new Map());
   const userInterimRef = useRef<Map<string,{final:string; interim:string}>>(new Map());
   const asrStopRef=useRef<null|(()=>void)>(null);
 
-  // barge-in dampener state
   const assistantSpeakingRef = useRef<boolean>(false);
   const protectGreetingUntilRef = useRef<number>(0);
 
@@ -536,7 +516,7 @@ export default function WebCallButton({
 
   useEffect(()=>{ const el=scrollerRef.current; if(!el) return; el.scrollTop=el.scrollHeight; },[log,connecting,connected]);
 
-  /* ── helpers for transcript ── */
+  /* transcript helpers */
   const newId = (p:'user'|'assistant') => `${p}_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
 
   const beginUserTurn = (serverId?:string) => {
@@ -597,23 +577,28 @@ export default function WebCallButton({
     userTurnIdRef.current = null;
   };
 
+  function restBetweenSentences(delta: string){
+    if(!audioRef.current) return;
+    if(!/[.!?…]\s*$/.test(delta)) return;
+    const el = audioRef.current;
+    const pre = el.volume;
+    el.volume = 0.0;
+    setTimeout(()=>{ el.volume = pre || 1.0; }, 500);
+  }
+
   const addAssistantDelta = (respId:string, delta:string) => {
     assistantSpeakingRef.current = true;
-    if (holdingRef.current) {
-      assistantBufferRef.current.set(respId, (assistantBufferRef.current.get(respId) || '') + delta);
-      if (audioRef.current) audioRef.current.muted = true;
-      return;
-    }
+    // reply-delay buffering disabled by setting replyDelaySec=0; just render live
     setLog(prev=>{
       const i=prev.findIndex(r=>r.id===respId);
       if(i===-1){ return [...prev,{ id:respId, who:'assistant', text:delta, at:Date.now(), done:false }]; }
       const next=[...prev]; next[i]={...next[i], text:(next[i].text||'')+delta}; return next;
     });
+    restBetweenSentences(delta);
   };
 
   const endAssistantTurn = (respId:string) => {
     assistantSpeakingRef.current = false;
-    if (holdingRef.current) return;
     setLog(prev=>{
       const i=prev.findIndex(r=>r.id===respId);
       if(i===-1) return prev;
@@ -621,34 +606,11 @@ export default function WebCallButton({
     });
   };
 
-  const flushAssistantBuffer = () => {
-    if (!assistantBufferRef.current.size) return;
-    const now = Date.now();
-    assistantBufferRef.current.forEach((txt, id) => {
-      setLog(prev=>{
-        const i=prev.findIndex(r=>r.id===id);
-        if (i===-1) return [...prev, { id, who:'assistant', text:txt, at:now, done:false }];
-        const next=[...prev]; next[i]={...next[i], text:(next[i].text||'')+txt}; return next;
-      });
-    });
-    assistantBufferRef.current.clear();
-  };
-
-  const releaseHoldIfDue = () => {
-    if (!holdingRef.current) return;
-    const now = Date.now();
-    if (now >= holdUntilRef.current) {
-      holdingRef.current = false;
-      flushAssistantBuffer();
-      if (audioRef.current) audioRef.current.muted = false;
-    }
-  };
-
   const safeSend=(dc:RTCDataChannel|null, payload:any)=>{
     if(!dc||dc.readyState!=='open') return; try{ dc.send(JSON.stringify(payload)); }catch{}
   };
 
-  // minimal mic VAD (ducking disabled while debugging)
+  // minimal mic VAD ducking (drops TTS volume while user speaks)
   async function setupVAD(){
     try{
       const mic=micStreamRef.current; if(!mic) return;
@@ -656,9 +618,9 @@ export default function WebCallButton({
       const src=ac.createMediaStreamSource(mic); const an=ac.createAnalyser(); an.fftSize=512; an.smoothingTimeConstant=0.88;
       src.connect(an);
       const buf=new Uint8Array(an.frequencyBinCount);
-      const loop=()=>{ 
-        an.getByteFrequencyData(buf);
-        // (no runtime volume changes)
+      const loop=()=>{ an.getByteFrequencyData(buf); let sum=0; for(let i=0;i<buf.length;i++) sum+=buf[i]*i;
+        const loud=sum/(buf.length*buf.length);
+        if(loud>0.5){ if(audioRef.current) audioRef.current.volume=0.35; } else { if(audioRef.current) audioRef.current.volume=1.0; }
         vadLoopRef.current=requestAnimationFrame(loop);
       };
       vadLoopRef.current=requestAnimationFrame(loop);
@@ -734,25 +696,26 @@ export default function WebCallButton({
 
       dc.onopen=()=>{
         const preDelay = Math.max(300, prosody?.preSpeechDelayMs ?? 550);
-        const chosen = langLockedRef.current;
-        const style = [
-          systemPrompt || '',
-          chosen==='auto'
-            ? 'Auto-detect the caller’s language (EN/DE/NL/ES/AR) from their FIRST complete sentence, then stay in that single language for the rest of the call unless the caller explicitly says “change language” or the UI language is changed.'
-            : `Speak ONLY ${LANG_NAME[chosen]} for the entire call. Do not code-switch unless the caller explicitly says “change language” or the UI language is changed.`,
-          (prosody?.fillerWords ?? true) ? 'Use mild, natural disfluencies (“uh”, “um”) occasionally (do NOT overuse).' : '',
-          `Allow micro pauses (~${prosody?.microPausesMs ?? 120} ms) inside sentences.`,
-          `Before starting to speak, pause about ${preDelay} ms as if thinking.`,
-          'Between sentences, take a light breath and wait ~500 ms before continuing.',
-        ].filter(Boolean).join('\n\n');
 
+        const locked = (langLockedRef.current || uiLangRef.current);
         const input_audio_transcription: any = {
           enabled:true,
           provider:'openai',
           model:'whisper-1',
           fallback_models:['gpt-4o-mini-transcribe']
         };
-        if (chosen && chosen!=='auto') input_audio_transcription.language = chosen;
+        if (locked && locked!=='auto') input_audio_transcription.language = locked;
+
+        const style = [
+          systemPrompt || '',
+          (locked && locked!=='auto')
+            ? `Speak ONLY ${LANG_NAME[locked]} for the entire call.`
+            : 'Auto-detect the caller’s language (EN/DE/NL/ES/AR) from their FIRST complete sentence and then stick to it.',
+          (prosody?.fillerWords ?? true) ? 'Use mild, natural disfluencies (“uh”, “um”) occasionally (do NOT overuse).' : '',
+          `Allow micro pauses (~${prosody?.microPausesMs ?? 120} ms) inside sentences.`,
+          `Before starting to speak, pause about ${preDelay} ms as if thinking.`,
+          'Between sentences, take a light breath and wait ~500 ms before continuing.',
+        ].filter(Boolean).join('\n\n');
 
         safeSend(dc,{ type:'session.update', session:{
           instructions: style,
@@ -761,20 +724,17 @@ export default function WebCallButton({
           output_audio_format:'pcm16',
           modalities:['audio','text'],
           input_audio_transcription,
-          // server VAD (snappier)
+          // Less jumpy server VAD
           turn_detection:{
             type:'server_vad',
-            threshold:0.4,            // was 0.5
-            prefix_silence_ms: 40,     // was 80
-            silence_duration_ms: 160,  // was >=260
+            threshold: 0.7, // was 0.5
+            prefix_silence_ms: 120, // was 80
+            silence_duration_ms: Math.max(380, prosody?.turnEndPauseMs ?? 380), // was 260
           },
         }});
 
-        // Client-side greeting (protected from interruption)
-        const wantClientGreeting =
-          greetMode==='client' || (greetMode==='server' && firstMode==='Assistant speaks first');
-
-        const greet = () => {
+        // Client-side greeting ONLY when explicitly requested
+        if (greetMode === 'client') {
           const lines=(firstMsg||'Hello.').split(/\r?\n|\|/g).map(s=>s.trim()).filter(Boolean).slice(0,6);
           protectGreetingUntilRef.current = Date.now() + Math.max(2200, 1200 + lines.join(' ').length*12);
           setTimeout(()=>{
@@ -782,19 +742,18 @@ export default function WebCallButton({
               safeSend(dc,{ type:'response.create', response:{ modalities:['audio','text'], instructions: ln }});
             }
           }, preDelay);
-        };
-
-        if (greetMode==='client') greet();
-        else if (wantClientGreeting) setTimeout(()=>{ greet(); }, 300);
+        }
+        // If greetMode === 'server', let your backend "First Messages" do it.
+        // If greetMode === 'off', no greeting at all.
       };
 
-      // 5) events — ASSISTANT + USER + barge-in rules
+      // 5) events — assistant + user
       dc.onmessage=(ev)=>{
         let raw:any;
         try{ raw=JSON.parse(ev.data); }catch{ return; }
         const t=String(raw?.type||'').replace(/^realtime\./,'');
 
-        releaseHoldIfDue();
+        /* DO NOT buffer/mute on response.created anymore (replyDelaySec=0) */
 
         /* ASSISTANT STREAM */
         if(t==='response.output_text.delta' || t==='response.audio_transcript.delta'){
@@ -807,39 +766,25 @@ export default function WebCallButton({
           const id=raw?.response_id||raw?.id; if(id) endAssistantTurn(id); return;
         }
         if (t==='response.output_text' && typeof raw?.text==='string'){
-          if (holdingRef.current) {
-            const id=newId('assistant');
-            assistantBufferRef.current.set(id, (assistantBufferRef.current.get(id)||'') + raw.text);
-          } else {
-            setLog(prev=>[...prev,{ id:newId('assistant'), who:'assistant', text:raw.text, at:Date.now(), done:true }]);
-          }
+          setLog(prev=>[...prev,{ id:newId('assistant'), who:'assistant', text:raw.text, at:Date.now(), done:true }]);
           return;
         }
         if (t==='conversation.item.created' && raw?.item?.type==='message' && raw?.item?.role==='assistant') {
           const text=(raw?.item?.content||[]).map((c:any)=>c?.text||c?.transcript||'').join(' ').trim();
           if (!text) return;
-          if (holdingRef.current) {
-            const id=newId('assistant');
-            assistantBufferRef.current.set(id, (assistantBufferRef.current.get(id)||'') + text);
-          } else {
-            setLog(prev=>[...prev,{ id:newId('assistant'), who:'assistant', text, at:Date.now(), done:true }]);
-          }
+          setLog(prev=>[...prev,{ id:newId('assistant'), who:'assistant', text, at:Date.now(), done:true }]);
           return;
         }
 
         /* USER (SERVER) — interim replace, final commit */
         if (/^input_audio_buffer\.speech_started$|^input_speech\.start$/.test(t)) {
-          // only protect the initial greeting; do not randomly disable mic
-          const now = Date.now();
-          const protectGreeting = now < protectGreetingUntilRef.current;
-          if (protectGreeting) return;
+          // No mic disabling / random ignore anymore
           beginUserTurn(raw?.id);
           return;
         }
 
         if (/^input_audio_buffer\.speech_ended$|^input_speech\.end$/.test(t)) {
           commitUserFinal(undefined, raw?.id);
-          // no artificial reply hold anymore
           return;
         }
 
@@ -931,18 +876,6 @@ export default function WebCallButton({
   /* ────────────────────────────────────────────────────────────────────────
      UI — Slide-over panel
   ───────────────────────────────────────────────────────────────────────── */
-  const backdrop = (
-    <div
-      className="fixed inset-0"
-      style={{
-        zIndex: 100008,
-        background: 'linear-gradient(90deg, rgba(10,13,15,0.35) 0%, rgba(10,13,15,0.6) 32%, rgba(10,13,15,0.88) 60%, rgba(10,13,15,0.94) 100%)'
-      }}
-      onClick={()=>endCall(true)}
-      aria-hidden
-    />
-  );
-
   const header = (
     <div className="va-head" style={{ zIndex: 100011 }}>
       <div className="flex items-center gap-3 min-w-0">
@@ -957,8 +890,6 @@ export default function WebCallButton({
       </div>
 
       <div className="ml-auto flex items-center gap-2">
-        {/* Voice dropdown REMOVED by request */}
-
         <button
           onClick={toggleMute}
           className="w-9 h-9 rounded-[8px] grid place-items-center transition"
@@ -1051,7 +982,7 @@ export default function WebCallButton({
           </span>
         </div>
 
-        {/* Language picker (kept). Menu opens UP now. */}
+        {/* Language picker (menu opens up) */}
         <div className="flex items-center gap-2 justify-end">
           <span style={{ opacity:.8, minWidth:70 }}>Language</span>
           <div style={{ width: 160 }}>
@@ -1126,7 +1057,7 @@ export default function WebCallButton({
         aria-label="Voice call panel"
       >
         {header}
-        {body}
+        <div className="p-0">{body}</div>
         {footer}
       </aside>
     </>
