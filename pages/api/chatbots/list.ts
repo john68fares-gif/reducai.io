@@ -9,7 +9,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   const userId = await requireUserId(req, res);
-  if (!userId) return; // response already sent
+  if (!userId) return;
 
   try {
     const { data, error } = await sb
@@ -20,19 +20,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     if (error) throw error;
 
-    return res.status(200).json({
+    res.status(200).json({
       ok: true,
       items: (data || []).map((row) => ({
         id: row.id,
         assistant_id: row.assistant_id,
         user_id: row.user_id,
         name: row.name,
-        payload: row.payload,       // contains model/language/industry/prompt/appearance/etc
+        payload: row.payload,
         created_at: row.created_at,
         updated_at: row.updated_at,
       })),
     });
   } catch (e: any) {
-    return res.status(500).json({ ok: false, error: e?.message || 'List failed' });
+    res.status(500).json({ ok: false, error: e?.message || 'List failed' });
   }
 }
