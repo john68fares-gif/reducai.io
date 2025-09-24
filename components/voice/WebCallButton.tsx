@@ -47,8 +47,8 @@ type Props = {
   breathingLevel?: number;
 
   // local ASR so user transcript always shows
-  clientASR?: 'off' | 'auto' | 'deepgram';
-  deepgramKey?: string; // (not used in this minimal drop but kept for API parity)
+  clientASR?: 'off' | 'auto';
+  deepgramKey?: string; // kept for parity; not used here
 
   // gate settings
   minUserSilenceMs?: number;     // default 3000
@@ -249,7 +249,7 @@ function createBreather(ac: AudioContext, level=0.08){
   const bp = ac.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=380; bp.Q.value=0.6;
   const hp = ac.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=140;
 
-  const gain = ac.createGain(); gain.gain.value = clamp01(level) * 0.10; // lower bed
+  const gain = ac.createGain(); gain.gain.value = clamp01(level) * 0.10;
   const lfo = ac.createOscillator(); lfo.frequency.value = 0.22;
   const lfoGain = ac.createGain(); lfoGain.gain.value = clamp01(level) * 0.10;
 
@@ -303,6 +303,7 @@ async function attachProcessedAudio(
   const buf = new Uint8Array(analyser.frequencyBinCount);
   let speaking=false; let lastEnergy=0; let lastAbove=Date.now();
   const base = 0.9, minFloor = 0.15;
+  let envRAF = 0;
   const tick = ()=>{
     analyser.getByteFrequencyData(buf);
     const energy = buf.reduce((s,v)=>s+v,0)/(buf.length*255);
@@ -322,9 +323,9 @@ async function attachProcessedAudio(
       master.gain.setTargetAtTime(minFloor, now, 0.20);
     }
     lastEnergy = energy;
-    requestAnimationFrame(tick);
+    envRAF = requestAnimationFrame(tick);
   };
-  requestAnimationFrame(tick);
+  envRAF = requestAnimationFrame(tick);
 
   (audioEl as any).srcObject=dest.stream;
   await audioEl.play().catch(()=>{});
@@ -341,18 +342,29 @@ async function attachProcessedAudio(
     const an = ac.createAnalyser(); an.fftSize = 512; an.smoothingTimeConstant = 0.85;
     comp.connect(an);
     const buf2 = new Uint8Array(an.frequencyBinCount);
+    let gateRAF = 0;
     const gate = ()=> {
       an.getByteFrequencyData(buf2);
       const loud = buf2.reduce((s,v)=>s+v,0) / (buf2.length*255);
       const target = loud > 0.08 ? 0.02 : breathGain.gain.value;
       const now = ac.currentTime;
       breathGain.gain.setTargetAtTime(target, now, 0.10);
-      requestAnimationFrame(gate);
+      gateRAF = requestAnimationFrame(gate);
     };
-    requestAnimationFrame(gate);
+    gateRAF = requestAnimationFrame(gate);
+
+    // augment stop to cancel RAFs too
+    const origStop = breathStop;
+    breathStop = ()=>{ try{origStop()}catch{}; try{cancelAnimationFrame(gateRAF)}catch{}; };
   }
 
-  return ()=>{ [src,hp,lp,presence,body,sat,comp,merge,master,analyser,dry].forEach(n=>{try{(n as any).disconnect()}catch{}}); try{ambClean&&ambClean()}catch{}; try{breathStop&&breathStop()}catch{}; try{ac.close()}catch{}; };
+  return ()=>{
+    try{cancelAnimationFrame(envRAF)}catch{}
+    ;[src,hp,lp,presence,body,sat,comp,merge,master,analyser,dry].forEach(n=>{try{(n as any).disconnect()}catch{}});
+    try{ambClean&&ambClean()}catch{}
+    try{breathStop&&breathStop()}catch{}
+    try{ac.close()}catch{}
+  };
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -418,7 +430,7 @@ export default function WebCallButton({
   breathing=true,
   breathingLevel=0.12,
   clientASR='auto',
-  deepgramKey, // eslint-disable-line @typescript-eslint/no-unused-vars
+  deepgramKey, // not used
   minUserSilenceMs=3000,
   maxGreetingChars=220,
 }: Props){
@@ -432,6 +444,8 @@ export default function WebCallButton({
   const [log,setLog]=useState<{ id:string; who:'user'|'assistant'; text:string; at:number; done?:boolean }[]>([]);
   const logRef=useRef(log);
   useEffect(()=>{ logRef.current=log; },[log]);
+  const mountedRef = useRef(true);
+  useEffect(()=>()=>{ mountedRef.current=false; },[]);
 
   const audioRef=useRef<HTMLAudioElement|null>(null);
   const pcRef=useRef<RTCPeerConnection|null>(null);
@@ -441,6 +455,10 @@ export default function WebCallButton({
   const closeChainRef=useRef<null|(()=>void)>(null);
   const vadLoopRef=useRef<number|null>(null);
   const scrollerRef=useRef<HTMLDivElement|null>(null);
+
+  // timers to clean up
+  const timersRef = useRef<number[]>([]);
+  const addTimer = (id:number)=>{ timersRef.current.push(id); };
 
   // GATE: only play assistant audio after enough user silence
   const holdingRef = useRef<boolean>(false);
@@ -457,6 +475,11 @@ export default function WebCallButton({
   // assistant turn id
   const currentAssistantIdRef = useRef<string | null>(null);
 
+  // delta buffers (reduce re-renders)
+  const userDeltaBufRef = useRef<string>('');
+  const asstDeltaBufRef = useRef<string>('');
+  const rafFlushRef = useRef<number | null>(null);
+
   // language UI state
   const [uiLang, setUiLang] = useState<Props['languageHint']>(languageHint || 'auto');
   const uiLangRef = useRef(uiLang);
@@ -471,7 +494,7 @@ export default function WebCallButton({
 
   /* ── transcript helpers — single bubble per user/assistant turn ───────── */
   const beginUserTurn = (serverId?:string) => {
-    let id = newId('user');
+    const id = newId('user');
     userTurnIdRef.current = id;
     if (serverId) serverToLocalUser.current.set(serverId, id);
     userInterimRef.current.set(id, { final:'', interim:'' });
@@ -479,30 +502,60 @@ export default function WebCallButton({
     return id;
   };
 
-  const updateUserInterim = (txt:string, serverId?:string) => {
-    let id = serverId ? serverToLocalUser.current.get(serverId) : userTurnIdRef.current;
-    if (!id) id = beginUserTurn(serverId);
-    const buf = userInterimRef.current.get(id) || { final:'', interim:'' };
-    buf.interim = txt;
-    userInterimRef.current.set(id, buf);
-    const display = (buf.final + ' ' + buf.interim).replace(/\s+/g,' ').trim();
-    setLog(prev=>{
-      const i=prev.findIndex(r=>r.id===id);
-      if(i===-1) return [...prev,{ id, who:'user', text:display, at:Date.now(), done:false }];
-      const next=[...prev]; next[i]={...next[i], text:display, done:false}; return next;
+  const flushRaf = ()=>{
+    if (rafFlushRef.current) return; // already scheduled
+    rafFlushRef.current = requestAnimationFrame(()=>{
+      rafFlushRef.current = null;
+      if (!mountedRef.current) return;
+      // flush user interim
+      if (userDeltaBufRef.current && userTurnIdRef.current){
+        const id = userTurnIdRef.current;
+        const buf = userInterimRef.current.get(id) || {final:'', interim:''};
+        buf.interim = userDeltaBufRef.current;
+        userInterimRef.current.set(id, buf);
+        const display = (buf.final + ' ' + buf.interim).replace(/\s+/g,' ').trim();
+        setLog(prev=>{
+          const i=prev.findIndex(r=>r.id===id);
+          if(i===-1) return [...prev,{ id, who:'user', text:display, at:Date.now(), done:false }];
+          const next=[...prev]; next[i]={...next[i], text:display, done:false}; return next;
+        });
+        userDeltaBufRef.current = '';
+      }
+      // flush assistant interim
+      if (asstDeltaBufRef.current){
+        if (!currentAssistantIdRef.current) {
+          currentAssistantIdRef.current = newId('assistant');
+          setLog(prev=>[...prev,{ id:currentAssistantIdRef.current!, who:'assistant', text:'', at:Date.now(), done:false }]);
+        }
+        const id = currentAssistantIdRef.current!;
+        const chunk = asstDeltaBufRef.current;
+        asstDeltaBufRef.current = '';
+        setLog(prev=>{
+          const i=prev.findIndex(r=>r.id===id);
+          if(i===-1){ return [...prev,{ id, who:'assistant', text:chunk, at:Date.now(), done:false }]; }
+          const next=[...prev]; next[i]={...next[i], text:(next[i].text||'')+chunk}; return next;
+        });
+      }
     });
+  };
+
+  const updateUserInterim = (txt:string, serverId?:string) => {
+    if (serverId && !serverToLocalUser.current.get(serverId)) beginUserTurn(serverId);
+    if (!userTurnIdRef.current) beginUserTurn(serverId);
+    userDeltaBufRef.current = txt;
+    flushRaf();
   };
 
   const commitUserFinal = (txt?:string, serverId?:string) => {
     const id = serverId ? (serverToLocalUser.current.get(serverId) || userTurnIdRef.current) : userTurnIdRef.current;
     if (!id) return;
     const buf = userInterimRef.current.get(id) || { final:'', interim:'' };
+    if (userDeltaBufRef.current) { buf.interim = userDeltaBufRef.current; userDeltaBufRef.current=''; }
     if (txt) buf.final = (buf.final + ' ' + txt).replace(/\s+/g,' ').trim();
     else if (buf.interim) buf.final = (buf.final + ' ' + buf.interim).replace(/\s+/g,' ').trim();
     buf.interim = '';
     userInterimRef.current.set(id, buf);
     const display = buf.final;
-
     setLog(prev=>{
       const i=prev.findIndex(r=>r.id===id);
       if(i===-1) return prev;
@@ -513,20 +566,12 @@ export default function WebCallButton({
   };
 
   const addAssistantDelta = (delta:string) => {
-    if (!currentAssistantIdRef.current) {
-      currentAssistantIdRef.current = newId('assistant');
-      setLog(prev=>[...prev,{ id:currentAssistantIdRef.current!, who:'assistant', text:'', at:Date.now(), done:false }]);
-    }
-    const id = currentAssistantIdRef.current!;
-    setLog(prev=>{
-      const i=prev.findIndex(r=>r.id===id);
-      if(i===-1){ return [...prev,{ id, who:'assistant', text:delta, at:Date.now(), done:false }]; }
-      const next=[...prev]; next[i]={...next[i], text:(next[i].text||'')+delta}; return next;
-    });
+    asstDeltaBufRef.current += String(delta || '');
+    flushRaf();
   };
   const endAssistantTurn = () => {
-    const id = currentAssistantIdRef.current;
-    if (!id) return;
+    if (!currentAssistantIdRef.current) return;
+    const id = currentAssistantIdRef.current!;
     setLog(prev=>{
       const i=prev.findIndex(r=>r.id===id);
       if(i===-1) return prev;
@@ -555,7 +600,7 @@ export default function WebCallButton({
   /* ── mic VAD: track if the user is talking (for gating/ducking only) ─── */
   async function setupVAD(){
     try{
-      const mic=micStreamRef.current; if(!mic) return;
+      const mic=micStreamRef.current; if(!mic) return ()=>{};
       const AC=(window.AudioContext||(window as any).webkitAudioContext); const ac=new AC();
       const src=ac.createMediaStreamSource(mic); const an=ac.createAnalyser(); an.fftSize=512; an.smoothingTimeConstant=0.88;
       src.connect(an);
@@ -569,9 +614,12 @@ export default function WebCallButton({
         vadLoopRef.current=requestAnimationFrame(loop);
       };
       vadLoopRef.current=requestAnimationFrame(loop);
-      return ()=>{ try{ac.close()}catch{} };
+      return ()=>{ try{ac.close()}catch{}; if(vadLoopRef.current){ cancelAnimationFrame(vadLoopRef.current); vadLoopRef.current=null; } };
     }catch{ return ()=>{}; }
   }
+
+  // local ASR stop handle
+  const asrStopRef = useRef<null | (()=>void)>(null);
 
   /* ────────────────────────────────────────────────────────────────────────
      START CALL
@@ -598,12 +646,16 @@ export default function WebCallButton({
 
       // 2.5) local ASR to populate the UI immediately
       try {
+        if (asrStopRef.current) { try{asrStopRef.current()}catch{}; asrStopRef.current=null; }
         const bcp = langToBCP47(uiLangRef.current);
-        if (clientASR !== 'off') startWebSpeechASR({
-          lang: bcp,
-          onInterim: (t)=>{ updateUserInterim(t); },
-          onFinal:  (t)=>{ commitUserFinal(t); lastUserSpeechAtRef.current = Date.now(); holdNow(minUserSilenceMs); }
-        });
+        if (clientASR !== 'off') {
+          const stop = startWebSpeechASR({
+            lang: bcp,
+            onInterim: (t)=>{ updateUserInterim(t); },
+            onFinal:  (t)=>{ commitUserFinal(t); lastUserSpeechAtRef.current = Date.now(); holdNow(minUserSilenceMs); }
+          });
+          if (stop) asrStopRef.current = stop;
+        }
       } catch {}
 
       // 3) peer
@@ -631,8 +683,10 @@ export default function WebCallButton({
       const dc=pc.createDataChannel('oai-events'); dcRef.current=dc;
 
       dc.onopen=()=>{
+        // Build strict instructions so the model follows YOUR prompt.
         const preDelay = Math.max(300, prosody?.preSpeechDelayMs ?? 600);
         const style = [
+          'You MUST follow the following system instructions exactly. Do not override them with defaults.',
           systemPrompt || '',
           uiLangRef.current==='auto'
             ? 'Auto-detect the caller’s language from their first complete sentence and stick to it unless they ask to change.'
@@ -640,9 +694,10 @@ export default function WebCallButton({
           (prosody?.fillerWords ?? true) ? 'Use mild, natural disfluencies occasionally (don’t overuse).' : '',
           `Allow micro pauses (~${prosody?.microPausesMs ?? 120} ms) inside sentences.`,
           'Between sentences, breathe lightly and wait ~450–600 ms.',
-          'Keep answers concise; match the caller’s pace and energy.',
+          'Keep answers concise; match the caller’s pace and energy. Never talk over the caller.',
         ].filter(Boolean).join('\n\n');
 
+        // Apply instructions and configuration
         safeSend(dc,{ type:'session.update', session:{
           instructions: style,
           voice: voiceId,
@@ -658,7 +713,12 @@ export default function WebCallButton({
           },
         }});
 
-        // single client-side greeting (optional, never duplicated)
+        // Re-assert instructions shortly after connect to avoid platform default messages overriding it
+        addTimer(window.setTimeout(()=>{
+          safeSend(dc,{ type:'session.update', session:{ instructions: style }});
+        }, 800));
+
+        // Optional single client-side greeting (never duplicated)
         const wantClientGreeting =
           greetMode==='client' ||
           (greetMode==='server' && firstMode==='Assistant speaks first');
@@ -666,18 +726,19 @@ export default function WebCallButton({
         const greet = () => {
           const text = (firstMsg||'Hello.').split(/\r?\n|\|/g).map(s=>s.trim()).filter(Boolean).slice(0,6).join(' ').slice(0, maxGreetingChars);
           greetingProtectedUntilRef.current = Date.now() + Math.max(1800, 1200 + text.length*10);
-          setTimeout(()=>{
+          addTimer(window.setTimeout(()=>{
             safeSend(dc,{ type:'response.create', response:{ modalities:['audio','text'], instructions: text }});
-          }, preDelay);
+          }, preDelay));
         };
 
         if (greetMode==='client') greet();
-        else if (wantClientGreeting) setTimeout(()=>{ // only if server stays quiet
+        else if (wantClientGreeting) addTimer(window.setTimeout(()=>{ // only if server hasn’t started
           if (!currentAssistantIdRef.current) greet();
-        }, 1200);
+        }, 1200));
 
         // check the gate often
         const timer = window.setInterval(releaseIfQuiet, 250);
+        addTimer(timer as unknown as number);
         dc.onclose = () => { clearInterval(timer); };
       };
 
@@ -698,7 +759,7 @@ export default function WebCallButton({
           userSpeakingRef.current = false;
           commitUserFinal(undefined, raw?.id);
           holdNow(minUserSilenceMs);
-          setTimeout(releaseIfQuiet, minUserSilenceMs + 12);
+          addTimer(window.setTimeout(releaseIfQuiet, minUserSilenceMs + 12));
           return;
         }
 
@@ -731,6 +792,7 @@ export default function WebCallButton({
 
       pc.onconnectionstatechange=()=>{
         if(pc.connectionState==='connected'){
+          if (!mountedRef.current) return;
           setConnected(true); setConnecting(false);
           holdingRef.current = false; releaseIfQuiet();
         }else if(['disconnected','failed','closed'].includes(pc.connectionState)){ endCall(false); }
@@ -754,6 +816,7 @@ export default function WebCallButton({
       const prevClean=closeChainRef.current;
       closeChainRef.current=()=>{ try{prevClean&&prevClean()}catch{}; try{stopVad&&stopVad()}catch{} };
     }catch(e:any){
+      if (!mountedRef.current) return;
       setConnecting(false); setConnected(false);
       const msg = e?.message || 'Failed to start call.';
       setError(msg); onError?.(e);
@@ -765,24 +828,40 @@ export default function WebCallButton({
     const tracks=micStreamRef.current?.getAudioTracks()||[];
     const next=!muted; tracks.forEach(t=>t.enabled=!next); setMuted(next);
   }
+
   function cleanup(){
+    // stop timers
+    for(const t of timersRef.current){ try{ clearInterval(t); clearTimeout(t);}catch{} }
+    timersRef.current = [];
+
+    // stop ASR
+    try{ asrStopRef.current && asrStopRef.current(); }catch{}; asrStopRef.current=null;
+
+    // RAF flush
+    try{ if (rafFlushRef.current) cancelAnimationFrame(rafFlushRef.current); }catch{}; rafFlushRef.current=null;
+
+    // VAD
     if(vadLoopRef.current) cancelAnimationFrame(vadLoopRef.current);
     vadLoopRef.current=null;
-    try{ dcRef.current?.close(); }catch{}
-    dcRef.current = null;
-    try{ pcRef.current?.close(); }catch{}
-    pcRef.current=null;
-    try{ micStreamRef.current?.getTracks()?.forEach(t=>t.stop()); }catch{}
-    micStreamRef.current=null;
-    try{ closeChainRef.current && closeChainRef.current(); }catch{}
-    closeChainRef.current = null;
+
+    // DC/PC/MIC
+    try{ dcRef.current?.close(); }catch{}; dcRef.current = null;
+    try{ pcRef.current?.close(); }catch{}; pcRef.current=null;
+    try{ micStreamRef.current?.getTracks()?.forEach(t=>t.stop()); }catch{}; micStreamRef.current=null;
+
+    // audio processing chain
+    try{ closeChainRef.current && closeChainRef.current(); }catch{}; closeChainRef.current = null;
+
     holdingRef.current = false;
     currentAssistantIdRef.current = null;
     userTurnIdRef.current = null;
     serverToLocalUser.current.clear();
     userInterimRef.current.clear();
+    userDeltaBufRef.current = '';
+    asstDeltaBufRef.current = '';
   }
-  function endCall(userIntent=true){ cleanup(); setConnected(false); setConnecting(false); if(userIntent) onClose?.(); }
+
+  function endCall(userIntent=true){ cleanup(); if (!mountedRef.current) return; setConnected(false); setConnecting(false); if(userIntent) onClose?.(); }
 
   // Restart session when voice or language changes
   useEffect(()=>{ startCall(); return ()=>{ cleanup(); }; // eslint-disable-next-line
