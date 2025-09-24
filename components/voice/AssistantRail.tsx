@@ -9,10 +9,8 @@ import {
 import { AnimatePresence, motion } from 'framer-motion';
 import { createPortal } from 'react-dom';
 
-/* Optional scoped storage helper */
-type Scoped = { getJSON<T>(k:string,f:T):Promise<T>; setJSON(k:string,v:unknown):Promise<void> };
-let scopedStorageFn: undefined | (() => Promise<Scoped>);
-try { scopedStorageFn = require('@/utils/scoped-storage').scopedStorage; } catch {}
+/* Scoped storage helper (your implementation) */
+import { scopedStorage, type Scoped } from '@/utils/scoped-storage';
 
 /* Types */
 export type AssistantLite = {
@@ -20,16 +18,21 @@ export type AssistantLite = {
 };
 type FolderLite = { id: string; name: string; createdAt?: number };
 
-/* Keys */
+/* Keys (now saved in scoped storage, not global) */
 const STORAGE_KEY       = 'agents';
 const FOLDERS_KEY       = 'agentFolders';
 const ACTIVE_KEY        = 'va:activeId';
 const ACTIVE_FOLDER_KEY = 'va:activeFolderId';
 
 /* Brand */
-const CTA       = '#59d9b3';                  // bright brand green (icons/glow)
-const GREEN_LINE = 'rgba(89,217,179,.20)';    // hairline borders
-const GREEN_ICON = CTA;                        // <— make icons shiny/bright
+const CTA        = '#59d9b3';
+const GREEN_LINE = 'rgba(89,217,179,.20)';
+const GREEN_ICON = CTA;
+
+/* Radius tweaks (less rounded) */
+const R_SM = 6;   // small corners
+const R_MD = 8;   // medium corners
+const R_LG = 10;  // large corners (trimmed down from 12/14)
 
 /* Row glow overlays */
 const HOVER_OPACITY  = 0.20;
@@ -39,27 +42,32 @@ const ACTIVE_OPACITY = 0.34;
 function uid() {
   return `a_${Date.now().toString(36)}_${crypto.getRandomValues(new Uint32Array(1))[0].toString(36)}`;
 }
-async function loadAssistants(): Promise<AssistantLite[]> {
-  try { if (scopedStorageFn) { const ss = await scopedStorageFn(); return await ss.getJSON<AssistantLite[]>(STORAGE_KEY, []); } } catch {}
-  try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) return JSON.parse(raw); } catch {}
-  return [];
+
+async function loadAssistants(ss: Scoped): Promise<AssistantLite[]> {
+  return ss.getJSON<AssistantLite[]>(STORAGE_KEY, []);
 }
-async function saveAssistants(list: AssistantLite[]) {
-  try { if (scopedStorageFn) { const ss = await scopedStorageFn(); await ss.setJSON(STORAGE_KEY, list); } } catch {}
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); } catch {}
+async function saveAssistants(ss: Scoped, list: AssistantLite[]) {
+  await ss.setJSON(STORAGE_KEY, list);
 }
-async function loadFolders(): Promise<FolderLite[]> {
-  try { if (scopedStorageFn) { const ss = await scopedStorageFn(); return await ss.getJSON<FolderLite[]>(FOLDERS_KEY, []); } } catch {}
-  try { const raw = localStorage.getItem(FOLDERS_KEY); if (raw) return JSON.parse(raw); } catch {}
-  return [];
+async function loadFolders(ss: Scoped): Promise<FolderLite[]> {
+  return ss.getJSON<FolderLite[]>(FOLDERS_KEY, []);
 }
-async function saveFolders(list: FolderLite[]) {
-  try { if (scopedStorageFn) { const ss = await scopedStorageFn(); await ss.setJSON(FOLDERS_KEY, list); } } catch {}
-  try { localStorage.setItem(FOLDERS_KEY, JSON.stringify(list)); } catch {}
+async function saveFolders(ss: Scoped, list: FolderLite[]) {
+  await ss.setJSON(FOLDERS_KEY, list);
 }
-function writeActive(id:string){
-  try { localStorage.setItem(ACTIVE_KEY, id); } catch {}
+
+async function readActiveId(ss: Scoped): Promise<string> {
+  return ss.getJSON<string>(ACTIVE_KEY, '');
+}
+async function writeActiveId(ss: Scoped, id: string) {
+  await ss.setJSON(ACTIVE_KEY, id);
   try { window.dispatchEvent(new CustomEvent('assistant:active', { detail: id })); } catch {}
+}
+async function readActiveFolderId(ss: Scoped): Promise<string> {
+  return ss.getJSON<string>(ACTIVE_FOLDER_KEY, '');
+}
+async function writeActiveFolderId(ss: Scoped, id: string) {
+  await ss.setJSON(ACTIVE_FOLDER_KEY, id);
 }
 
 /* ---------- Modal shells (PORTALED + blur + entrance anim) ---------- */
@@ -78,12 +86,13 @@ function ModalShell({ children }:{ children:React.ReactNode }) {
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: 8, scale: 0.98 }}
           transition={{ duration: .18, ease: 'easeOut' }}
-          className="w-full max-w-[560px] rounded-[10px] overflow-hidden"
+          className="w-full max-w-[560px] overflow-hidden"
           style={{
             background: 'var(--panel)',
             color: 'var(--text)',
             border: `1px solid ${GREEN_LINE}`,
-            maxHeight: '86vh'
+            maxHeight: '86vh',
+            borderRadius: R_MD
           }}
         >
           {children}
@@ -106,9 +115,10 @@ function ModalHeader({ icon, title, subtitle }:{
       }}
     >
       <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-xl grid place-items-center"
-             style={{ background:'var(--brand-weak)' }}>
-          {/* brighter + subtle glow */}
+        <div
+          className="grid place-items-center"
+          style={{ width: 40, height: 40, borderRadius: R_LG, background:'var(--brand-weak)' }}
+        >
           <span style={{ color: GREEN_ICON, filter:'drop-shadow(0 0 8px rgba(89,217,179,.35))' }}>
             {icon}
           </span>
@@ -118,8 +128,7 @@ function ModalHeader({ icon, title, subtitle }:{
           {subtitle && <div className="text-xs" style={{ color:'var(--text-muted)' }}>{subtitle}</div>}
         </div>
       </div>
-      {/* no X */}
-      <span className="w-5 h-5" />
+      <span style={{ width:20, height:20 }} />
     </div>
   );
 }
@@ -139,23 +148,23 @@ function CreateModal({ open, onClose, onCreate }:{
         <label className="block text-xs mb-1" style={{ color:'var(--text-muted)' }}>Name</label>
         <input
           value={name} onChange={(e)=>setName(e.target.value)}
-          className="w-full h-[44px] rounded-[10px] px-3 text-sm outline-none"
-          style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)' }}
+          className="w-full h-[44px] px-3 text-sm outline-none"
+          style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)', borderRadius: R_MD }}
           placeholder="e.g., Sales Bot" autoFocus
         />
       </div>
       <div className="px-6 pb-6 flex gap-3">
         <button
           onClick={onClose}
-          className="w-full h-[44px] rounded-[10px] font-semibold"
-          style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.9)', color:'var(--text)' }}>
+          className="w-full h-[44px] font-semibold"
+          style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.9)', color:'var(--text)', borderRadius: R_MD }}>
           Cancel
         </button>
         <button
           disabled={!can}
           onClick={()=> can && onCreate(name.trim())}
-          className="w-full h-[44px] rounded-[10px] font-semibold disabled:opacity-60"
-          style={{ background:CTA, color:'#fff' }}
+          className="w-full h-[44px] font-semibold disabled:opacity-60"
+          style={{ background:CTA, color:'#fff', borderRadius: R_MD }}
         >
           Create
         </button>
@@ -176,20 +185,20 @@ function RenameModal({ open, initial, onClose, onSave }:{
       <div className="px-6 py-5">
         <label className="block text-xs mb-1" style={{ color:'var(--text-muted)' }}>Name</label>
         <input value={val} onChange={(e)=>setVal(e.target.value)}
-               className="w-full h-[44px] rounded-[10px] px-3 text-sm outline-none"
-               style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)' }} />
+               className="w-full h-[44px] px-3 text-sm outline-none"
+               style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)', borderRadius: R_MD }} />
       </div>
       <div className="px-6 pb-6 flex gap-3">
         <button onClick={onClose}
-                className="w-full h-[44px] rounded-[10px] font-semibold"
-                style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.9)', color:'var(--text)' }}>
+                className="w-full h-[44px] font-semibold"
+                style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.9)', color:'var(--text)', borderRadius: R_MD }}>
           Cancel
         </button>
         <button
           disabled={!can}
           onClick={()=> can && onSave(val.trim())}
-          className="w-full h-[44px] rounded-[10px] font-semibold disabled:opacity-60"
-          style={{ background:CTA, color:'#fff' }}
+          className="w-full h-[44px] font-semibold disabled:opacity-60"
+          style={{ background:CTA, color:'#fff', borderRadius: R_MD }}
         >
           Save
         </button>
@@ -212,13 +221,13 @@ function ConfirmDelete({ open, name, onClose, onConfirm }:{
       </div>
       <div className="px-6 pb-6 flex gap-3">
         <button onClick={onClose}
-                className="w-full h-[44px] rounded-[10px] font-semibold"
-                style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.9)', color:'var(--text)' }}>
+                className="w-full h-[44px] font-semibold"
+                style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.9)', color:'var(--text)', borderRadius: R_MD }}>
           Cancel
         </button>
         <button onClick={onConfirm}
-                className="w-full h-[44px] rounded-[10px] font-semibold"
-                style={{ background:'#ef4444', color:'#fff', border:'1px solid #ef4444' }}>
+                className="w-full h-[44px] font-semibold"
+                style={{ background:'#ef4444', color:'#fff', border:'1px solid #ef4444', borderRadius: R_MD }}>
           Delete
         </button>
       </div>
@@ -230,16 +239,16 @@ function ConfirmDelete({ open, name, onClose, onConfirm }:{
 function AssistantRow({
   a, active, onClick, onRename, onDelete, onDragStart
 }:{
-  a:AssistantLite; active:boolean; onClick:()=>void; onRename:()=>void; onDelete:()=>void; onDragStart:(id:string)=>void;
+  a:AssistantLite; active:boolean; onClick:(e:React.MouseEvent)=>void; onRename:()=>void; onDelete:()=>void; onDragStart:(id:string,e:React.DragEvent)=>void;
 }) {
   return (
     <button
       draggable
-      onDragStart={()=>onDragStart(a.id)}
+      onDragStart={(e)=>onDragStart(a.id, e)}
       onClick={onClick}
-      className={`ai-row group w-full text-left rounded-[12px] px-3 py-3 flex items-center gap-2 transition`}
+      className={`ai-row group w-full text-left px-3 py-3 flex items-center gap-2 transition`}
       data-active={active ? 'true' : 'false'}
-      style={{ background:'transparent', color:'var(--text)', position:'relative' }}
+      style={{ background:'transparent', color:'var(--text)', position:'relative', borderRadius: R_MD }}
     >
       {/* icons = bright CTA */}
       <Bot className="w-4 h-4" style={{ color: GREEN_ICON }} />
@@ -255,8 +264,8 @@ function AssistantRow({
         {/* Rename = WHITE */}
         <button
           onClick={(e)=>{ e.stopPropagation(); onRename(); }}
-          className="px-2 h-[28px] rounded-[8px]"
-          style={{ background:'#ffffff', border:`1px solid ${GREEN_LINE}`, color:'#0b0f0e' }}
+          className="px-2 h-[28px]"
+          style={{ background:'#ffffff', border:`1px solid ${GREEN_LINE}`, color:'#0b0f0e', borderRadius: R_SM }}
           aria-label="Rename"
         >
           <Edit3 className="w-4 h-4" style={{ color: GREEN_ICON }} />
@@ -264,8 +273,8 @@ function AssistantRow({
         {/* Delete = RED */}
         <button
           onClick={(e)=>{ e.stopPropagation(); onDelete(); }}
-          className="px-2 h-[28px] rounded-[8px]"
-          style={{ background:'#ef4444', border:'1px solid #ef4444', color:'#ffffff' }}
+          className="px-2 h-[28px]"
+          style={{ background:'#ef4444', border:'1px solid #ef4444', color:'#ffffff', borderRadius: R_SM }}
           aria-label="Delete"
         >
           <Trash2 className="w-4 h-4" />
@@ -277,7 +286,7 @@ function AssistantRow({
         .ai-row::after{
           content:'';
           position:absolute; inset:0;
-          border-radius:12px;
+          border-radius:${R_MD}px;
           background:${CTA};
           opacity:0;
           pointer-events:none;
@@ -288,7 +297,7 @@ function AssistantRow({
         .ai-row::before{
           content:'';
           position:absolute; left:8px; right:8px; top:-6px;
-          height:16px; border-radius:12px;
+          height:16px; border-radius:${R_MD}px;
           background:radial-gradient(60% 80% at 50% 100%, rgba(89,217,179,.45) 0%, rgba(89,217,179,0) 100%);
           opacity:0; pointer-events:none;
           transition:opacity .18s ease;
@@ -319,8 +328,8 @@ function FolderRow({
         const ids = (e.dataTransfer.getData('text/plain')||'').split(',').filter(Boolean);
         if (ids.length) onDropIds(ids);
       }}
-      className="w-full text-left rounded-[12px] px-3 py-2 flex items-center gap-2 transition"
-      style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)' }}
+      className="w-full text-left px-3 py-2 flex items-center gap-2 transition"
+      style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)', borderRadius: R_MD }}
     >
       <Folder className="w-4 h-4" style={{ color: GREEN_ICON }} />
       <div className="min-w-0 flex-1 truncate">{f.name}</div>
@@ -330,10 +339,12 @@ function FolderRow({
 
 /* ---------- Main Rail ---------- */
 export default function AssistantRail() {
+  const [ss, setSS] = useState<Scoped | null>(null);
+
   const [assistants,setAssistants] = useState<AssistantLite[]>([]);
   const [folders,setFolders] = useState<FolderLite[]>([]);
   const [activeId,setActiveId] = useState('');
-  const [activeFolderId,setActiveFolderId] = useState<string|''>('');
+  const [activeFolderId,setActiveFolderId] = useState<string>('');
   const [veil,setVeil] = useState(false);
   const [initialLoading,setInitialLoading] = useState(true);
   const [q,setQ] = useState('');
@@ -353,20 +364,33 @@ export default function AssistantRail() {
     return () => { document.body.style.background = prev; };
   }, []);
 
+  /* Init scoped storage + load everything from scoped namespace */
   useEffect(()=>{ (async()=>{
-    const [list,flds] = await Promise.all([loadAssistants(), loadFolders()]);
+    const scoped = await scopedStorage();
+    setSS(scoped);
+    await scoped.ensureOwnerGuard();
+
+    const [list, flds, savedActive, savedFolder] = await Promise.all([
+      loadAssistants(scoped),
+      loadFolders(scoped),
+      readActiveId(scoped),
+      readActiveFolderId(scoped)
+    ]);
+
     setAssistants(list);
     setFolders(flds);
 
-    const savedActive = (()=>{ try { return localStorage.getItem(ACTIVE_KEY) || ''; } catch { return ''; } })();
-    const savedFolder = (()=>{ try { return localStorage.getItem(ACTIVE_FOLDER_KEY) || ''; } catch { return ''; } })();
-
-    const firstId = savedActive && list.find(a=>a.id===savedActive) ? savedActive : (list[0]?.id || '');
+    // choose a valid active assistant
+    const firstId =
+      (savedActive && list.find(a=>a.id===savedActive)?.id) ||
+      (list[0]?.id || '');
     setActiveId(firstId);
-    if (firstId) writeActive(firstId);
+    if (firstId) await writeActiveId(scoped, firstId);
 
     setActiveFolderId(savedFolder || '');
-    setTimeout(()=>setInitialLoading(false), 280);
+
+    // slightly delayed to avoid flashing the skeleton too fast
+    setTimeout(()=>setInitialLoading(false), 220);
   })(); },[]);
 
   const filtered = useMemo(()=>{
@@ -378,7 +402,7 @@ export default function AssistantRail() {
     });
   },[assistants,q,activeFolderId]);
 
-  /* freeze helpers */
+  /* freeze helpers (keep look; just smaller radius already applied) */
   function freezePage(on:boolean){
     const html = document.documentElement;
     const body = document.body;
@@ -393,50 +417,57 @@ export default function AssistantRail() {
     }
   }
 
-  function select(id:string){
+  async function select(id:string){
+    if (!ss) return;
     freezePage(true);
     setVeil(true);
     setActiveId(id);
-    writeActive(id);
+    await writeActiveId(ss, id);
     window.setTimeout(()=> { setVeil(false); freezePage(false); }, 800);
   }
 
-  /* Assistant CRUD */
-  function addAssistant(name:string){
+  /* Assistant CRUD (scoped storage) */
+  async function addAssistant(name:string){
+    if (!ss) return;
     const a:AssistantLite = { id: uid(), name, createdAt: Date.now(), purpose:'', folderId: activeFolderId||null };
     const next=[a, ...assistants];
-    setAssistants(next); saveAssistants(next);
+    setAssistants(next); await saveAssistants(ss, next);
     setCreateOpen(false);
-    select(a.id);
+    await select(a.id);
   }
-  function saveRename(name:string){
+  async function saveRename(name:string){
+    if (!ss) return;
     const next=assistants.map(x=> x.id===renId ? {...x, name} : x);
-    setAssistants(next); saveAssistants(next); setRenId(null);
+    setAssistants(next); await saveAssistants(ss, next); setRenId(null);
   }
-  function confirmDelete(){
+  async function confirmDelete(){
+    if (!ss) return;
     const next = assistants.filter(x=> x.id!==delId);
     const deletedActive = activeId===delId;
-    setAssistants(next); saveAssistants(next);
+    setAssistants(next); await saveAssistants(ss, next);
     if (deletedActive) {
       const nid = next.find(a=> activeFolderId ? a.folderId===activeFolderId : !a.folderId)?.id || '';
-      setActiveId(nid); if (nid) writeActive(nid);
+      setActiveId(nid);
+      await writeActiveId(ss, nid);
     }
     setDelId(null);
   }
 
   /* Folders */
-  function createFolder(name:string){
+  async function createFolder(name:string){
+    if (!ss) return;
     const f:FolderLite = { id: uid(), name, createdAt: Date.now() };
     const next=[f, ...folders];
-    setFolders(next); saveFolders(next);
+    setFolders(next); await saveFolders(ss, next);
   }
-  function moveAssistantsToFolder(ids:string[], folderId:string|null){
+  async function moveAssistantsToFolder(ids:string[], folderId:string|null){
+    if (!ss) return;
     const next = assistants.map(a => ids.includes(a.id) ? { ...a, folderId } : a);
-    setAssistants(next); saveAssistants(next);
+    setAssistants(next); await saveAssistants(ss, next);
   }
 
-  function onRowDragStart(id:string){
-    try { (event as DragEvent)?.dataTransfer?.setData('text/plain', id); } catch {}
+  function onRowDragStart(id:string, e:React.DragEvent){
+    try { e.dataTransfer?.setData('text/plain', id); } catch {}
   }
 
   const renName = assistants.find(a=>a.id===renId)?.name || '';
@@ -466,8 +497,13 @@ export default function AssistantRail() {
           <div className="grid grid-cols-2 gap-0">
             <button
               type="button"
-              className="inline-flex items-center justify-center gap-2 font-semibold px-3 rounded-l-[10px] border-r"
-              style={{ height:36, background:CTA, color:'#fff', border:`1px solid ${GREEN_LINE}`, borderRightColor: 'transparent' }}
+              className="inline-flex items-center justify-center gap-2 font-semibold px-3"
+              style={{
+                height:36, background:CTA, color:'#fff',
+                border:`1px solid ${GREEN_LINE}`,
+                borderRightColor: 'transparent',
+                borderTopLeftRadius: R_MD, borderBottomLeftRadius: R_MD
+              }}
               onClick={()=> setCreateOpen(true)}
             >
               <Plus className="w-4 h-4" style={{ color:'#fff' }} />
@@ -475,8 +511,12 @@ export default function AssistantRail() {
             </button>
             <button
               type="button"
-              className="inline-flex items-center justify-center px-0 rounded-r-[10px]"
-              style={{ height:36, background:'var(--panel)', color:'var(--text)', border:`1px solid ${GREEN_LINE}` }}
+              className="inline-flex items-center justify-center px-0"
+              style={{
+                height:36, background:'var(--panel)', color:'var(--text)',
+                border:`1px solid ${GREEN_LINE}`,
+                borderTopRightRadius: R_MD, borderBottomRightRadius: R_MD
+              }}
               onClick={()=>{ setNewFolderName(''); setNewFolderOpen(true); }}
               aria-label="New Folder"
             >
@@ -490,8 +530,8 @@ export default function AssistantRail() {
               value={q}
               onChange={(e)=>setQ(e.target.value)}
               placeholder="Search assistants"
-              className="w-full h-[34px] rounded-[10px] pl-8 pr-3 text-sm outline-none"
-              style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)' }}
+              className="w-full h-[34px] pl-8 pr-3 text-sm outline-none"
+              style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)', borderRadius: R_MD }}
             />
             <Search className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color:'var(--text-muted)' }} />
           </div>
@@ -502,9 +542,12 @@ export default function AssistantRail() {
             </div>
             {!inAllScope && (
               <button
-                onClick={()=>{ setActiveFolderId(''); try{ localStorage.setItem(ACTIVE_FOLDER_KEY,''); }catch{} }}
-                className="inline-flex items-center gap-1 px-2 py-1 rounded-[8px]"
-                style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)' }}
+                onClick={async ()=>{
+                  setActiveFolderId('');
+                  if (ss) await writeActiveFolderId(ss, '');
+                }}
+                className="inline-flex items-center gap-1 px-2 py-1"
+                style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)', borderRadius: R_SM }}
               >
                 <ArrowLeft className="w-4 h-4" style={{ color: GREEN_ICON }} /> Back to All
               </button>
@@ -524,9 +567,9 @@ export default function AssistantRail() {
                   <FolderRow
                     key={f.id}
                     f={f}
-                    onOpen={()=>{
+                    onOpen={async ()=>{
                       setActiveFolderId(f.id);
-                      try{ localStorage.setItem(ACTIVE_FOLDER_KEY, f.id); }catch{}
+                      if (ss) await writeActiveFolderId(ss, f.id);
                     }}
                     onDropIds={(ids)=> moveAssistantsToFolder(ids, f.id)}
                   />
@@ -540,8 +583,8 @@ export default function AssistantRail() {
           {initialLoading ? (
             <div className="space-y-3">
               {[0,1,2,3].map(i=>(
-                <div key={i} className="h-[42px] rounded-[10px] animate-pulse"
-                     style={{ background:'color-mix(in oklab, var(--panel) 90%, white 10%)', opacity:.55 }} />
+                <div key={i} className="h-[42px] animate-pulse"
+                     style={{ background:'color-mix(in oklab, var(--panel) 90%, white 10%)', opacity:.55, borderRadius: R_MD }} />
               ))}
             </div>
           ) : (
@@ -553,7 +596,7 @@ export default function AssistantRail() {
                     <AssistantRow
                       a={a}
                       active={a.id===activeId}
-                      onClick={()=>select(a.id)}
+                      onClick={()=>{ void select(a.id); }}
                       onRename={()=>setRenId(a.id)}
                       onDelete={()=>setDelId(a.id)}
                       onDragStart={onRowDragStart}
@@ -572,9 +615,9 @@ export default function AssistantRail() {
         </div>
 
         {/* Assistant modals */}
-        <CreateModal  open={createOpen} onClose={()=>setCreateOpen(false)} onCreate={addAssistant} />
-        <RenameModal  open={!!renId} initial={renName} onClose={()=>setRenId(null)} onSave={saveRename} />
-        <ConfirmDelete open={!!delId} name={delName} onClose={()=>setDelId(null)} onConfirm={confirmDelete} />
+        <CreateModal  open={createOpen} onClose={()=>setCreateOpen(false)} onCreate={(name)=>{ void addAssistant(name); }} />
+        <RenameModal  open={!!renId} initial={renName} onClose={()=>setRenId(null)} onSave={(v)=>{ void saveRename(v); }} />
+        <ConfirmDelete open={!!delId} name={delName} onClose={()=>setDelId(null)} onConfirm={()=>{ void confirmDelete(); }} />
 
         {/* New Folder modal (overlay) */}
         <AnimatePresence>
@@ -586,8 +629,8 @@ export default function AssistantRail() {
                 <input
                   value={newFolderName}
                   onChange={(e)=>setNewFolderName(e.target.value)}
-                  className="w-full h-[44px] rounded-[10px] px-3 text-sm outline-none"
-                  style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)' }}
+                  className="w-full h-[44px] px-3 text-sm outline-none"
+                  style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)', borderRadius: R_MD }}
                   placeholder="e.g., Sales Team"
                   autoFocus
                 />
@@ -595,20 +638,20 @@ export default function AssistantRail() {
               <div className="px-6 pb-6 flex gap-3">
                 <button
                   onClick={()=>setNewFolderOpen(false)}
-                  className="w-full h-[44px] rounded-[10px] font-semibold"
-                  style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.9)', color:'var(--text)' }}
+                  className="w-full h-[44px] font-semibold"
+                  style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.9)', color:'var(--text)', borderRadius: R_MD }}
                 >
                   Cancel
                 </button>
                 <button
-                  onClick={()=>{
+                  onClick={async ()=>{
                     const v=newFolderName.trim();
                     if(!v) return;
-                    createFolder(v);
+                    await createFolder(v);
                     setNewFolderOpen(false);
                   }}
-                  className="w-full h-[44px] rounded-[10px] font-semibold"
-                  style={{ background:CTA, color:'#fff' }}
+                  className="w-full h-[44px] font-semibold"
+                  style={{ background:CTA, color:'#fff', borderRadius: R_MD }}
                 >
                   Create
                 </button>
