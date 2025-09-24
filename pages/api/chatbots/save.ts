@@ -1,69 +1,84 @@
-// pages/api/chatbots/save.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { createServerSupabaseClient } from '@supabase/auth-helpers-nextjs';
+import { sb, requireUserId } from './_utils';
 
-type Body = {
-  assistantId: string;
-  name: string;
-  model: string;
-  industry?: string | null;
-  language?: string | null;
-  prompt: string;
-  appearance?: any;
-  type?: string | null;
-  createdAt?: string;
-  updatedAt?: string;
-};
-
+/**
+ * Body:
+ * {
+ *   assistantId: string,
+ *   name: string,
+ *   model?: string,
+ *   industry?: string | null,
+ *   language?: string | null,
+ *   prompt?: string,
+ *   appearance?: any
+ * }
+ * Upserts by (user_id, assistant_id) — requires your unique constraint.
+ */
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const method = (req.method || 'GET').toUpperCase();
-  if (!['POST', 'PUT', 'PATCH'].includes(method)) {
-    res.setHeader('Allow', 'POST, PUT, PATCH');
-    return res.status(405).json({ ok: false, error: 'Method Not Allowed' });
+  res.setHeader('Cache-Control', 'no-store');
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', 'POST');
+    return res.status(405).json({ ok: false, error: 'Method not allowed' });
   }
 
-  const supabase = createServerSupabaseClient({ req, res });
-  const { data: auth } = await supabase.auth.getUser();
-  if (!auth?.user) return res.status(401).json({ ok: false, error: 'Not authenticated' });
+  const userId = await requireUserId(req, res);
+  if (!userId) return;
 
-  const b = (req.body ?? {}) as Body;
-  if (!b.assistantId) return res.status(400).json({ ok: false, error: 'assistantId is required' });
-  if (!b.name)        return res.status(400).json({ ok: false, error: 'name is required' });
-  if (!b.model)       return res.status(400).json({ ok: false, error: 'model is required' });
-  if (!b.prompt?.trim()) return res.status(400).json({ ok: false, error: 'prompt is required' });
+  const {
+    assistantId,
+    name,
+    model,
+    industry = null,
+    language = 'English',
+    prompt = '',
+    appearance = null,
+  } = (req.body || {}) as Record<string, any>;
 
-  const nowISO = new Date().toISOString();
+  if (!assistantId || !name) {
+    return res.status(400).json({ ok: false, error: 'Missing assistantId or name' });
+  }
+
+  const now = new Date().toISOString();
   const payload = {
-    id: b.assistantId,
-    assistantId: b.assistantId,
-    name: b.name,
-    type: b.type || 'ai automation',
-    industry: b.industry ?? null,
-    language: b.language ?? 'English',
-    model: b.model,
-    prompt: b.prompt,
-    appearance: b.appearance ?? null,
-    createdAt: b.createdAt || nowISO,
-    updatedAt: b.updatedAt || nowISO,
+    model: model || 'gpt-4o-mini',
+    industry,
+    language,
+    prompt,
+    appearance,
+    createdAt: now,
+    updatedAt: now,
   };
 
-  const { data, error } = await supabase
-    .from('chatbots')
-    .upsert(
-      [
+  try {
+    const { data, error } = await sb
+      .from('chatbots')
+      .upsert(
         {
-          user_id: auth.user.id,
-          assistant_id: b.assistantId,
-          name: b.name,
+          user_id: userId,
+          assistant_id: String(assistantId),
+          name: String(name),
           payload,
-          // created_at uses default on first insert; updated_at is handled by trigger
         },
-      ],
-      { onConflict: 'user_id,assistant_id' }
-    )
-    .select('*')
-    .single();
+        { onConflict: 'user_id,assistant_id' }
+      )
+      .select('id, assistant_id, user_id, name, payload, created_at, updated_at')
+      .single();
 
-  if (error) return res.status(500).json({ ok: false, error: error.message });
-  return res.status(200).json({ ok: true, item: data });
+    if (error) throw error;
+
+    res.status(200).json({
+      ok: true,
+      item: {
+        id: data.id,
+        assistant_id: data.assistant_id,
+        user_id: data.user_id,
+        name: data.name,
+        payload: data.payload,
+        created_at: data.created_at,
+        updated_at: data.updated_at,
+      },
+    });
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e?.message || 'Save failed' });
+  }
 }
