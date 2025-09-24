@@ -18,19 +18,25 @@ const GREEN_LINE = 'rgba(89,217,179,.20)';
 const BTN_GREEN = '#10b981';
 const BTN_GREEN_HOVER = '#0ea473';
 const BTN_DISABLED = 'color-mix(in oklab, var(--text) 14%, transparent)';
-const RADIUS = 8;
+const RADIUS = 10;
 
 const CARD: React.CSSProperties = {
   background: 'var(--panel)',
   border: `1px solid ${GREEN_LINE}`,
-  boxShadow: '0 20px 40px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px rgba(89,217,179,.20)',
+  boxShadow:
+    '0 20px 40px rgba(0,0,0,.28),' +
+    '0 0 0 1px rgba(255,255,255,.06) inset,' +
+    '0 0 0 1px rgba(89,217,179,.20)',
   borderRadius: RADIUS,
 };
 
 const PANEL: React.CSSProperties = {
   background: 'var(--panel)',
   border: `1px solid ${GREEN_LINE}`,
-  boxShadow: '0 20px 40px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px rgba(89,217,179,.20)',
+  boxShadow:
+    '0 20px 40px rgba(0,0,0,.28),' +
+    '0 0 0 1px rgba(255,255,255,.06) inset,' +
+    '0 0 0 1px rgba(89,217,179,.20)',
   borderRadius: RADIUS,
 };
 
@@ -39,14 +45,18 @@ function PanelHead({ icon, title }:{ icon:React.ReactNode; title:string }) {
     <div
       className="flex items-center justify-between px-4 md:px-5 py-3"
       style={{
-        background:`linear-gradient(90deg,var(--panel) 0%,color-mix(in oklab,var(--panel) 97%, white 3%) 50%,var(--panel) 100%)`,
+        background:
+          `linear-gradient(90deg,var(--panel) 0%,
+           color-mix(in oklab,var(--panel) 97%, white 3%) 50%,
+           var(--panel) 100%)`,
         borderBottom:`1px solid ${GREEN_LINE}`,
         borderTopLeftRadius: RADIUS,
         borderTopRightRadius: RADIUS,
       }}
     >
       <div className="flex items-center gap-3">
-        <div className="w-7 h-7 rounded-full grid place-items-center" style={{ background:'rgba(89,217,179,.12)' }}>
+        <div className="w-7 h-7 rounded-full grid place-items-center"
+             style={{ background:'rgba(89,217,179,.12)', border:`1px solid ${GREEN_LINE}` }}>
           <span style={{ color: CTA }}>{icon}</span>
         </div>
         <div className="text-[15px] font-semibold" style={{ color:'var(--text)' }}>{title}</div>
@@ -99,6 +109,7 @@ function buildFinalPrompt() {
 
   const languageText = s3?.languageText || s3?.language || '';
   const description = s(s3?.description) || '';
+  the_rules:
   const rules = s(s3?.rules) || '';
   const flow = s(s3?.flow) || '';
   const company = (s(s3?.company) || '').trim();
@@ -120,7 +131,7 @@ function buildFinalPrompt() {
     .trim();
 }
 
-/* ───────────── Robust JSON + negotiation helpers (like before) ───────────── */
+/* ───────────── Robust JSON + negotiation helpers ───────────── */
 
 async function safeJson<T = any>(resp: Response): Promise<{ ok: boolean; json?: T; text?: string; status: number; allow?: string }> {
   const ct = resp.headers.get('content-type') || '';
@@ -159,7 +170,6 @@ async function negotiateAndWriteJSON(
         const opt = await fetch(url, { method: 'OPTIONS' });
         allow = opt.headers.get('allow') || opt.headers.get('Allow') || '';
       } catch {}
-
       const allowList = allow.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
       const methods = allowList.length ? preferred.filter(p => allowList.includes(p)) : preferred;
 
@@ -190,7 +200,8 @@ async function negotiateAndWriteJSON(
 
 export default function Step4Overview({ onBack, onFinish }: Props) {
   const [loading, setLoading] = useState(false);
-  const [loadingMsg, setLoadingMsg] = useState('Generating AI…');
+  const [loadingIdx, setLoadingIdx] = useState(0);
+  const [loadingMsg, setLoadingMsg] = useState('Preparing…');
   const [done, setDone] = useState(false);
 
   const [s1] = useState<any>(getLS('builder:step1', {}));
@@ -203,6 +214,16 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
   const estTokens = Math.max(1, Math.round(chars / 4));
   const inputCostPerMTok = 2.5;
   const outputCostPerMTok = 10.0;
+
+  // Loading steps (for overlay)
+  const steps = [
+    'Compiling prompt blocks…',
+    'Linking company knowledge…',
+    'Warming up the model…',
+    'Shaping tone & rules…',
+    'Final checks & safety…',
+  ];
+  const progressPct = Math.round(((loadingIdx + 1) / steps.length) * 100);
 
   useEffect(() => {
     let mounted = true;
@@ -222,16 +243,14 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
 
   useEffect(() => {
     if (!loading) return;
-    const msgs = [
-      'Compiling prompt blocks…',
-      'Linking company knowledge…',
-      'Warming up the model…',
-      'Shaping tone & rules…',
-      'Final checks & safety…',
-    ];
     let i = 0;
-    setLoadingMsg(msgs[i]);
-    const id = setInterval(() => { i = (i + 1) % msgs.length; setLoadingMsg(msgs[i]); }, 1200);
+    setLoadingIdx(0);
+    setLoadingMsg(steps[0]);
+    const id = setInterval(() => {
+      i = (i + 1) % steps.length;
+      setLoadingIdx(i);
+      setLoadingMsg(steps[i]);
+    }, 1100);
     return () => clearInterval(id);
   }, [loading]);
 
@@ -251,12 +270,11 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
   const ready = Object.values(checks).every(Boolean);
 
   async function saveBuildEverywhere(build: any) {
-    // 1) Per-account (Supabase) fallback to guarantee cross-device
+    // 1) Supabase (account-level) — guarantees cross-device
     try {
       const { data: user } = await supabase.auth.getUser();
       const userId = user?.user?.id;
       if (userId) {
-        // Upsert into a "chatbots" table (user_id + assistant_id as unique key is ideal)
         await supabase
           .from('chatbots')
           .upsert({
@@ -267,16 +285,14 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
             industry: build.industry || null,
             language: build.language || 'English',
             prompt: build.prompt,
-            appearance: null,
+            appearance: build.appearance ?? null,
             created_at: build.createdAt,
             updated_at: build.updatedAt,
           }, { onConflict: 'user_id,assistant_id' });
       }
-    } catch {
-      // ignore fallback errors — the API route (below) or local mirrors will still keep the UI functional
-    }
+    } catch { /* ignore – UI still mirrors */ }
 
-    // 2) Cloud (scopedStorage) – per-account namespace on-device
+    // 2) Cloud (scopedStorage) — per-user workspace
     try {
       const ss = await scopedStorage();
       await ss.ensureOwnerGuard();
@@ -289,7 +305,7 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
       await ss.setJSON('chatbots.v1', list);
     } catch {}
 
-    // 3) Local legacy mirror
+    // 3) Local mirror
     try {
       const local = getLS<any[]>('chatbots', []);
       const list = Array.isArray(local) ? local : [];
@@ -320,12 +336,11 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
         const sel = (keys || []).find(k => k.id === s2?.apiKeyId);
         apiKeyPlain = sel?.key || '';
       } catch {}
-
       if (!apiKeyPlain) throw new Error('No API key value found for the selected key. Re-select your API key in Step 2.');
       if (!finalPrompt?.trim()) throw new Error('Final prompt is empty. Please fill the description/rules/flow in previous steps.');
 
       // 2) create assistant on OpenAI
-      setLoadingMsg('Creating assistant on OpenAI…');
+      setLoadingIdx(0); setLoadingMsg('Creating assistant on OpenAI…');
       const createResp = await fetch('/api/assistants/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Accept':'application/json' },
@@ -347,8 +362,8 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
       const userId = u?.user?.id;
       if (!userId) throw new Error('No Supabase user session');
 
-      // 4) save to your backend (negotiated), else Supabase fallback in saveBuildEverywhere
-      setLoadingMsg('Saving build to your account…');
+      // 4) save to your backend (negotiated)
+      setLoadingIdx(1); setLoadingMsg('Saving build to your account…');
       const savePayload = {
         userId,
         assistantId,
@@ -361,15 +376,13 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
       };
 
       const saveTargets = ['/api/chatbots/save','/api/chatbots','/api/builds/save','/api/builds'];
-      let routed = await negotiateAndWriteJSON(saveTargets, savePayload, ['POST','PUT','PATCH']);
-
-      // We still do a DB upsert fallback inside saveBuildEverywhere, so we do not hard-fail here if API says 405/404.
+      const routed = await negotiateAndWriteJSON(saveTargets, savePayload, ['POST','PUT','PATCH']);
       if (!routed.ok && routed.status !== 405 && routed.status !== 404) {
-        // show server message, but continue to mirror to Supabase directly
         console.warn('Save route failed:', explainHttp('Save build failed', routed));
       }
 
-      // 5) mirror + guaranteed Supabase upsert fallback
+      // 5) mirror + guaranteed Supabase/scopedStorage/local
+      setLoadingIdx(2); setLoadingMsg('Mirroring to workspace…');
       const nowISO = new Date().toISOString();
       const build = {
         id: assistantId,
@@ -492,16 +505,16 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
         <div className="flex justify-between mt-8">
           <button
             onClick={onBack}
-            className="inline-flex items-center gap-2 rounded-[8px] px-4 py-2 text-sm transition"
+            className="inline-flex items-center gap-2 rounded-[10px] px-4 py-2 text-sm transition"
             style={{ background: 'var(--panel)', border: `1px solid ${GREEN_LINE}`, color: 'var(--text)', boxShadow: '0 10px 22px rgba(89,217,179,.20)' }}
           >
             <ArrowLeft className="w-4 h-4" /> Previous
           </button>
 
-        <button
+          <button
             onClick={handleGenerate}
             disabled={!ready || loading}
-            className="inline-flex items-center gap-2 px-8 h-[40px] rounded-[8px] font-semibold select-none disabled:cursor-not-allowed"
+            className="inline-flex items-center gap-2 px-8 h-[42px] rounded-[10px] font-semibold select-none disabled:cursor-not-allowed"
             style={{ background: ready && !loading ? BTN_GREEN : BTN_DISABLED, color: '#fff' }}
             onMouseEnter={(e) => {
               if (!ready || loading) return;
@@ -521,10 +534,29 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
       {/* Loading overlay */}
       {loading && (
         <div className="fixed inset-0 z-50 bg-black/70 grid place-items-center px-4">
-          <div className="w-full max-w-md rounded-[8px] p-6 text-center" style={{ background: 'var(--panel)', border: `1px solid ${GREEN_LINE}`, boxShadow: '0 22px 44px rgba(0,0,0,.28), 0 8px 20px rgba(0,0,0,.45), 0 0 0 1px rgba(0,255,194,.10)' }}>
-            <Loader2 className="w-7 h-7 mx-auto animate-spin mb-3" style={{ color: CTA }} />
-            <div className="text-lg font-semibold" style={{ color: 'var(--text)' }}>Generating AI…</div>
-            <div className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>{loadingMsg}</div>
+          <div className="w-full max-w-md rounded-[12px] p-6 text-center"
+               style={{ background: 'var(--panel)', border: `1px solid ${GREEN_LINE}`, boxShadow: '0 22px 44px rgba(0,0,0,.28), 0 8px 20px rgba(0,0,0,.45), 0 0 0 1px rgba(0,255,194,.10)' }}>
+            <div className="mb-4 flex items-center justify-center gap-2">
+              {steps.map((_, i) => (
+                <span key={i} className="inline-block w-2 h-2 rounded-full"
+                      style={{
+                        background: i <= loadingIdx ? CTA : 'rgba(255,255,255,.12)',
+                        opacity: i === loadingIdx ? 1 : .55,
+                        transform: i === loadingIdx ? 'scale(1.15)' : 'scale(1)',
+                        transition: 'all .25s ease',
+                      }} />
+              ))}
+            </div>
+            <div className="w-full h-1 rounded-full overflow-hidden"
+                 style={{ background: 'rgba(255,255,255,.08)' }}>
+              <div className="h-1" style={{ width: `${progressPct}%`, background: CTA, transition: 'width .35s ease' }} />
+            </div>
+
+            <Loader2 className="w-7 h-7 mx-auto animate-spin my-4" style={{ color: CTA }} />
+            <div className="text-base font-semibold" style={{ color: 'var(--text)' }}>{loadingMsg}</div>
+            <div className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+              Do not close this tab.
+            </div>
           </div>
         </div>
       )}
@@ -532,7 +564,7 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
       {/* Done toast */}
       {done && (
         <div
-          className="fixed bottom-6 right-6 z-50 rounded-[8px] px-4 py-3"
+          className="fixed bottom-6 right-6 z-50 rounded-[10px] px-4 py-3"
           style={{ background: 'var(--panel)', border: `1px solid ${GREEN_LINE}`, boxShadow: '0 10px 22px rgba(89,217,179,.20)', color: 'var(--text)' }}
         >
           <div className="flex items-center gap-2">
@@ -549,9 +581,10 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
 
 function Info({ label, value, icon }: { label: string; value: string; icon?: React.ReactNode }) {
   return (
-    <div style={CARD} className="p-3 rounded-[8px]">
+    <div style={CARD} className="p-3 rounded-[10px]">
       <div className="text-xs flex items-center gap-1.5" style={{ color: 'var(--text-muted)' }}>
-        <span className="inline-grid place-items-center w-4 h-4 rounded-[6px]" style={{ background:'rgba(89,217,179,.12)', color: CTA, border:`1px solid ${GREEN_LINE}` }}>
+        <span className="inline-grid place-items-center w-4 h-4 rounded-[6px]"
+              style={{ background:'rgba(89,217,179,.12)', color: CTA, border:`1px solid ${GREEN_LINE}` }}>
           {icon}
         </span>
         {label}
@@ -575,6 +608,3 @@ function Req({ ok, label }: { ok: boolean; label: string }) {
         {ok ? <Check className="w-3 h-3" /> : <AlertCircle className="w-3 h-3" />}
       </span>
       <span style={{ color: ok ? 'var(--text)' : 'var(--text-muted)' }}>{label}</span>
-    </div>
-  );
-}
