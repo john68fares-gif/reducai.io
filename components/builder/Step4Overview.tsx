@@ -6,34 +6,59 @@ import {
   Check, AlertCircle, Loader2, Sparkles, ArrowLeft,
   Cpu, BookText, FileText, KeyRound, Library, Settings2
 } from 'lucide-react';
-import { scopedStorage } from '@/utils/scoped-storage';
-import { supabase } from '@/lib/supabase-client';
 import StepProgress from './StepProgress';
 import { s, st } from '@/utils/safe';
+import { scopedStorage } from '@/utils/scoped-storage';
+import { supabase } from '@/lib/supabase-client';
 
-/* ─────────────────────────── Visual tokens to match VoiceAgentSection ─────────────────────────── */
-const CTA = '#59d9b3';
-const GREEN_LINE = 'rgba(89,217,179,.20)';
+/* ─────────────────────────── Shared visuals (same as Step 1) ─────────────────────────── */
 
-const Tokens = () => (
-  <style jsx global>{`
-    .va-scope{
-      --bg:#0b0c10; --panel:#0d0f11; --text:#e6f1ef; --text-muted:#9fb4ad;
-      --card:#0f1214; --border:rgba(255,255,255,.10);
-      --shadow-card:0 20px 40px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px ${GREEN_LINE};
-      --shadow-soft:0 10px 22px rgba(0,0,0,.22);
-      --radius:8px;
-    }
-    .va-card{ border-radius:var(--radius); border:1px solid var(--border); background:var(--panel); box-shadow:var(--shadow-card); overflow:hidden; }
-    .va-head{
-      display:grid; grid-template-columns:1fr auto; align-items:center;
-      min-height:56px; padding:0 12px; border-bottom:1px solid rgba(255,255,255,.08);
-      background:linear-gradient(90deg,var(--panel) 0%,color-mix(in oklab,var(--panel) 97%, white 3%) 50%,var(--panel) 100%);
-      color:var(--text);
-    }
-    .chip{ border:1px solid rgba(255,255,255,.12); border-radius:8px; padding:4px 8px; }
-  `}</style>
-);
+const BTN_GREEN = '#10b981';
+const BTN_GREEN_HOVER = '#0ea473';
+const BTN_DISABLED = 'color-mix(in oklab, var(--text) 14%, transparent)';
+
+const CARD: React.CSSProperties = {
+  background: 'var(--card)',
+  border: '1px solid var(--border)',
+  boxShadow: 'var(--shadow-card)',
+  borderRadius: 20,
+};
+
+const PANEL: React.CSSProperties = {
+  background: 'var(--panel)',
+  border: '1px solid var(--border)',
+  boxShadow: 'var(--shadow-soft)',
+  borderRadius: 28,
+};
+
+function Orb() {
+  return (
+    <div
+      aria-hidden
+      className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
+      style={{
+        background:
+          'radial-gradient(circle, color-mix(in oklab, var(--brand) 14%, transparent) 0%, transparent 70%)',
+        filter: 'blur(38px)',
+      }}
+    />
+  );
+}
+
+function SubtleGrid() {
+  return (
+    <div
+      aria-hidden
+      className="pointer-events-none absolute inset-0 opacity-[.07]"
+      style={{
+        background:
+          'linear-gradient(transparent 31px, color-mix(in oklab, var(--text) 7%, transparent) 32px), linear-gradient(90deg, transparent 31px, color-mix(in oklab, var(--text) 7%, transparent) 32px)',
+        backgroundSize: '32px 32px',
+        maskImage: 'radial-gradient(circle at 30% 20%, black, transparent 70%)',
+      }}
+    />
+  );
+}
 
 /* ───────────────────────────── Data helpers ───────────────────────────── */
 
@@ -72,50 +97,30 @@ function buildFinalPrompt() {
     .trim();
 }
 
-/* Robust HTTP helpers (no JSON crashes) */
-async function safeJson<T = any>(resp: Response): Promise<{ ok: boolean; status: number; json?: T; text?: string }> {
-  const status = resp.status;
+/* Robust JSON helpers */
+async function safeJson<T = any>(resp: Response): Promise<{ ok: boolean; json?: T; text?: string }> {
   const ct = resp.headers.get('content-type') || '';
   const body = await resp.text(); // read once
   if (ct.includes('application/json')) {
-    try { return { ok: resp.ok, status, json: body ? JSON.parse(body) : {} }; }
-    catch { return { ok: resp.ok, status, text: body }; }
-  }
-  return { ok: resp.ok, status, text: body };
-}
-function httpExplain(label: string, pack: { ok: boolean; status: number; json?: any; text?: string }) {
-  if (pack.ok) return '';
-  const msg = (pack.json && (pack.json.error || pack.json.message)) || (pack.text || '').slice(0, 600) || 'No response body';
-  return `${label} (HTTP ${pack.status}): ${msg}`;
-}
-
-/* Try multiple save routes/methods to dodge 405s transparently */
-async function resilientSaveBuild(payload: any) {
-  const trials: Array<{ url: string; method: 'POST' | 'PUT' }> = [
-    { url: '/api/chatbots/save', method: 'POST' },
-    { url: '/api/chatbots/save', method: 'PUT'  },     // handle servers that expect PUT
-    { url: '/api/builds/save',   method: 'POST' },     // legacy/fallback path
-  ];
-
-  let lastError = 'Unknown error';
-  for (const t of trials) {
     try {
-      const r = await fetch(t.url, {
-        method: t.method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const pack = await safeJson(r);
-      if (pack.ok && (pack.json?.ok !== false)) return pack.json || { ok: true };
-      // if method not allowed, keep trying
-      if (pack.status === 405) { lastError = httpExplain('Save build failed', pack); continue; }
-      // other server-side errors – stop early with explanation
-      throw new Error(httpExplain('Save build failed', pack));
-    } catch (e:any) {
-      lastError = e?.message || String(e);
+      const json = body ? JSON.parse(body) : {};
+      return { ok: resp.ok, json };
+    } catch {
+      // fall through to text pathway with explicit flag
+      return { ok: resp.ok, text: body };
     }
   }
-  throw new Error(lastError);
+  return { ok: resp.ok, text: body };
+}
+
+function explainHttp(label: string, pack: { ok: boolean; json?: any; text?: string; status?: number }) {
+  const code = pack.status ? ` (HTTP ${pack.status})` : '';
+  if (pack.ok) return '';
+  const serverMsg =
+    (pack.json && (pack.json.error || pack.json.message)) ||
+    (pack.text && pack.text.slice(0, 600)) ||
+    'No response body';
+  return `${label}${code}: ${serverMsg}`;
 }
 
 /* ───────────────────────────── Component ───────────────────────────── */
@@ -124,8 +129,6 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
   const [loading, setLoading] = useState(false);
   const [loadingMsg, setLoadingMsg] = useState('Generating AI…');
   const [done, setDone] = useState(false);
-  const [toast, setToast] = useState<string>('');
-  const [toastKind, setToastKind] = useState<'info'|'error'>('info');
 
   const [s1] = useState<any>(getLS('builder:step1', {}));
   const [s3] = useState<any>(getLS('builder:step3', {}));
@@ -198,7 +201,7 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
       await ss.setJSON('chatbots.v1', list);
     } catch {}
 
-    // Local mirror (legacy)
+    // Local (legacy mirror)
     try {
       const local = getLS<any[]>('chatbots', []);
       const list = Array.isArray(local) ? local : [];
@@ -217,7 +220,6 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
 
     setLoading(true);
     setDone(false);
-    setToast('');
 
     try {
       // 1) read selected API key value from scopedStorage
@@ -234,11 +236,12 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
       if (!apiKeyPlain) {
         throw new Error('No API key value found for the selected key. Re-select your API key in Step 2.');
       }
+
       if (!finalPrompt || finalPrompt.trim().length === 0) {
         throw new Error('Final prompt is empty. Please fill the description/rules/flow in previous steps.');
       }
 
-      // 2) create assistant via server route
+      // 2) create assistant via server route (robust JSON handling)
       setLoadingMsg('Creating assistant on OpenAI…');
       const createResp = await fetch('/api/assistants/create', {
         method: 'POST',
@@ -250,29 +253,46 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
           apiKeyPlain,
         }),
       });
+
       const createPack = await safeJson(createResp);
-      if (!createPack.ok) throw new Error(httpExplain('Assistant create failed', createPack));
+      (createPack as any).status = createResp.status;
+
+      if (!createPack.ok) {
+        throw new Error(explainHttp('Assistant create failed', createPack));
+      }
 
       const assistantId: string | undefined = createPack.json?.assistant?.id;
-      if (!assistantId) throw new Error('Assistant created but no ID returned from server.');
+      if (!assistantId) {
+        throw new Error('Assistant created but no ID returned from server.');
+      }
 
       // 3) current user id
       const { data: u } = await supabase.auth.getUser();
       const userId = u?.user?.id;
       if (!userId) throw new Error('No Supabase user session');
 
-      // 4) persist to your DB via resilient saver (handles 405)
+      // 4) persist to Supabase through API (robust JSON)
       setLoadingMsg('Saving build to your account…');
-      await resilientSaveBuild({
-        userId,
-        assistantId,
-        name: st(s1?.name, 'Untitled Assistant'),
-        model: selectedModel,
-        industry: st(s1?.industry, null),
-        language: st(s1?.language, 'English'),
-        prompt: finalPrompt,
-        appearance: null,
+      const saveRes = await fetch('/api/chatbots/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          assistantId,
+          name: st(s1?.name, 'Untitled Assistant'),
+          model: selectedModel,
+          industry: st(s1?.industry, null),
+          language: st(s1?.language, 'English'),
+          prompt: finalPrompt,
+          appearance: null,
+        }),
       });
+      const savePack = await safeJson(saveRes);
+      (savePack as any).status = saveRes.status;
+
+      if (!savePack.ok || (savePack.json && savePack.json.ok === false)) {
+        throw new Error(explainHttp('Save build failed', savePack) || 'Saved to OpenAI, but storing the build failed.');
+      }
 
       // 5) mirror to cloud + local
       const nowISO = new Date().toISOString();
@@ -294,79 +314,88 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
 
       setLoading(false);
       setDone(true);
-      setToastKind('info'); setToast('AI generated and saved to your Builds.');
-      setTimeout(()=>setToast(''), 2200);
       onFinish?.();
     } catch (e: any) {
       setLoading(false);
+      // Better surfaced error
       const msg = e?.message || 'Failed to generate the AI.';
+      // Optional: persist last error to help debugging
       try { localStorage.setItem('builder:lastError', msg); } catch {}
-      setToastKind('error'); setToast(msg);
-      setTimeout(()=>setToast(''), 4000);
       alert(msg);
     }
   }
 
   return (
-    <section className="va-scope" style={{ background:'var(--bg)', color:'var(--text)' }}>
-      <Tokens />
-
+    <div className="min-h-screen w-full font-movatif" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
       <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 pt-8 pb-24">
         <StepProgress current={4} />
 
-        {/* Top summary card — matches va-card/va-head */}
-        <div className="va-card mb-6">
-          <div className="va-head">
-            <div className="flex items-center gap-2">
-              <span className="w-7 h-7 rounded-lg grid place-items-center" style={{ background:'rgba(89,217,179,.12)' }}>
-                <Settings2 className="w-4 h-4" style={{ color: CTA }} />
-              </span>
-              <span className="font-semibold">Final Review</span>
-            </div>
-            <div className="text-xs" style={{ color:'var(--text-muted)' }}>{loading ? loadingMsg : ''}</div>
+        {/* Top summary card */}
+        <section className="relative p-6 md:p-7 mb-8" style={PANEL}>
+          <Orb /><SubtleGrid />
+          <div className="flex items-center gap-2 mb-5 font-semibold">
+            <Settings2 className="w-4 h-4" style={{ color: 'var(--brand)' }} />
+            Final Review
           </div>
-          <div className="p-4">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <Info label="AI Name" value={s1?.name || '—'} icon={<FileText className="w-3.5 h-3.5" />} />
-              <Info label="Industry" value={s1?.industry || '—'} icon={<Library className="w-3.5 h-3.5" />} />
-              <Info label="Template" value={s1?.type || s1?.botType || s1?.aiType || '—'} icon={<BookText className="w-3.5 h-3.5" />} />
-              <Info label="Model" value={s2?.model || '—'} icon={<Cpu className="w-3.5 h-3.5" />} />
-            </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <Info label="AI Name" value={s1?.name || '—'} icon={<FileText className="w-3.5 h-3.5" />} />
+            <Info label="Industry" value={s1?.industry || '—'} icon={<Library className="w-3.5 h-3.5" />} />
+            <Info label="Template" value={s1?.type || s1?.botType || s1?.aiType || '—'} icon={<BookText className="w-3.5 h-3.5" />} />
+            <Info label="Model" value={s2?.model || '—'} icon={<Cpu className="w-3.5 h-3.5" />} />
           </div>
-        </div>
+        </section>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left column */}
           <div className="lg:col-span-2 space-y-6">
-            <Panel title="Content Length">
-              <div className="p-4 rounded-[8px]" style={{ background:'var(--card)', border:'1px solid var(--border)' }}>
-                <div className="text-sm mb-2">Characters</div>
+            <div style={PANEL} className="relative p-6 rounded-[28px]">
+              <Orb />
+              <div className="flex items-center gap-2 mb-4 font-semibold">
+                <FileText className="w-4 h-4" style={{ color: 'var(--brand)' }} /> Content Length
+              </div>
+              <div style={CARD} className="p-4 rounded-2xl">
+                <div className="text-sm mb-2" style={{ color: 'var(--text)' }}>Characters</div>
                 <div className="w-full h-2 rounded-full" style={{ background: 'color-mix(in oklab, var(--text) 10%, transparent)' }}>
-                  <div className="h-2 rounded-full" style={{ background: CTA, width: `${Math.min(100, (chars / maxChars) * 100)}%` }} />
+                  <div className="h-2 rounded-full" style={{ background: 'var(--brand)', width: `${Math.min(100, (chars / maxChars) * 100)}%` }} />
                 </div>
                 <div className="text-xs mt-2" style={{ color: 'var(--text-muted)' }}>{chars.toLocaleString()} / {maxChars.toLocaleString()}</div>
               </div>
-            </Panel>
+            </div>
 
-            <Panel title="API Configuration" icon={<KeyRound className="w-4 h-4" style={{ color: CTA }} />}>
+            <div style={PANEL} className="relative p-6 rounded-[28px]">
+              <Orb />
+              <div className="flex items-center gap-2 mb-4 font-semibold">
+                <KeyRound className="w-4 h-4" style={{ color: 'var(--brand)' }} /> API Configuration
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="p-4 rounded-[8px]" style={{ background:'var(--card)', border:'1px solid var(--border)' }}>
+                <div style={CARD} className="p-4 rounded-2xl">
                   <div style={{ color: 'var(--text-muted)' }}>Input Cost</div>
-                  <div className="mt-1">${inputCostPerMTok.toFixed(2)} <span style={{ color: 'var(--text-muted)' }}>/ 1M tokens</span></div>
+                  <div style={{ color: 'var(--text)' }} className="mt-1">
+                    ${inputCostPerMTok.toFixed(2)} <span style={{ color: 'var(--text-muted)' }}>/ 1M tokens</span>
+                  </div>
                   <div className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>Est. tokens: {estTokens.toLocaleString()}</div>
                 </div>
-                <div className="p-4 rounded-[8px]" style={{ background:'var(--card)', border:'1px solid var(--border)' }}>
+                <div style={CARD} className="p-4 rounded-2xl">
                   <div style={{ color: 'var(--text-muted)' }}>Output Cost</div>
-                  <div className="mt-1">${outputCostPerMTok.toFixed(2)} <span style={{ color: 'var(--text-muted)' }}>/ 1M tokens</span></div>
+                  <div style={{ color: 'var(--text)' }} className="mt-1">
+                    ${outputCostPerMTok.toFixed(2)} <span style={{ color: 'var(--text-muted)' }}>/ 1M tokens</span>
+                  </div>
                 </div>
               </div>
-            </Panel>
+            </div>
           </div>
 
           {/* Right column */}
           <div className="space-y-6">
-            <Panel title="Requirements">
-              <div className="p-4 rounded-[8px] mb-4" style={{ background:'var(--card)', border:'1px solid var(--border)' }}>
+            <div style={PANEL} className="relative p-6 rounded-[28px]">
+              <Orb />
+              <div className="flex items-center gap-2 mb-4 font-semibold">
+                <div className="w-4 h-4 rounded-[6px] border flex items-center justify-center" style={{ borderColor: 'var(--brand)', color: 'var(--brand)' }}>✓</div>
+                Requirements
+              </div>
+
+              <div style={CARD} className="p-4 rounded-2xl mb-4">
                 <Req ok={!!checks.name} label="AI Name" />
                 <Req ok={!!checks.industry} label="Industry" />
                 <Req ok={!!checks.language} label="Language" />
@@ -380,8 +409,8 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
                 <Req ok={!!checks.company} label="Company Info" />
               </div>
 
-              <div className="rounded-[8px] p-4" style={{ background:'var(--panel)', border:'1px solid var(--border)' }}>
-                <div className="flex items-center gap-2 font-semibold" style={{ color: CTA }}>
+              <div className="rounded-2xl p-4" style={{ ...CARD }}>
+                <div className="flex items-center gap-2 font-semibold" style={{ color: 'var(--brand)' }}>
                   <Sparkles className="w-4 h-4" />
                   {ready ? 'Ready to Generate' : 'Missing Requirements'}
                 </div>
@@ -389,7 +418,7 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
                   {ready ? 'Your AI will be created now using your selected API key.' : 'Please complete the missing items above.'}
                 </div>
               </div>
-            </Panel>
+            </div>
           </div>
         </div>
 
@@ -397,8 +426,8 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
         <div className="flex justify-between mt-10">
           <button
             onClick={onBack}
-            className="inline-flex items-center gap-2 rounded-[8px] px-4 py-2 text-sm transition"
-            style={{ background: 'var(--panel)', border: '1px solid var(--border)', color: 'var(--text)' }}
+            className="inline-flex items-center gap-2 rounded-[18px] px-4 py-2 text-sm transition"
+            style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)', boxShadow: 'var(--shadow-soft)' }}
           >
             <ArrowLeft className="w-4 h-4" /> Previous
           </button>
@@ -406,8 +435,16 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
           <button
             onClick={handleGenerate}
             disabled={!ready || loading}
-            className="inline-flex items-center gap-2 h-[40px] rounded-[8px] font-semibold select-none px-5 disabled:opacity-60 disabled:cursor-not-allowed"
-            style={{ background: ready && !loading ? CTA : 'color-mix(in oklab, var(--text) 14%, transparent)', color: '#0b0f0e', boxShadow:'0 10px 22px rgba(89,217,179,.20)' }}
+            className="inline-flex items-center gap-2 px-8 h-[46px] rounded-[18px] font-semibold select-none disabled:cursor-not-allowed"
+            style={{ background: ready && !loading ? BTN_GREEN : BTN_DISABLED, color: '#fff' }}
+            onMouseEnter={(e) => {
+              if (!ready || loading) return;
+              (e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN_HOVER;
+            }}
+            onMouseLeave={(e) => {
+              if (!ready || loading) return;
+              (e.currentTarget as HTMLButtonElement).style.background = BTN_GREEN;
+            }}
           >
             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
             Generate AI
@@ -418,56 +455,54 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
       {/* Loading overlay */}
       {loading && (
         <div className="fixed inset-0 z-50 bg-black/70 grid place-items-center px-4">
-          <div className="w-full max-w-md rounded-[8px] p-6 text-center" style={{ background: 'var(--panel)', border: '1px solid var(--border)' }}>
-            <Loader2 className="w-7 h-7 mx-auto animate-spin mb-3" style={{ color: CTA }} />
+          <div className="w-full max-w-md rounded-[24px] p-6 text-center" style={{ background: 'var(--panel)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-soft)' }}>
+            <Loader2 className="w-7 h-7 mx-auto animate-spin mb-3" style={{ color: 'var(--brand)' }} />
             <div className="text-lg font-semibold" style={{ color: 'var(--text)' }}>Generating AI…</div>
             <div className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>{loadingMsg}</div>
           </div>
         </div>
       )}
 
-      {/* Toast */}
-      {toast && (
-        <div className="fixed bottom-6 right-6 z-50 rounded-[8px] px-4 py-3"
-             style={{
-               background:'var(--panel)', border:'1px solid var(--border)', color:'var(--text)',
-               boxShadow:'0 10px 22px rgba(0,0,0,.22)'
-             }}>
+      {/* Done toast */}
+      {done && (
+        <div
+          className="fixed bottom-6 right-6 z-50 rounded-[16px] px-4 py-3"
+          style={{ background: 'var(--panel)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-soft)', color: 'var(--text)' }}
+        >
           <div className="flex items-center gap-2">
-            {toastKind === 'error'
-              ? <AlertCircle className="w-4 h-4" style={{ color:'#ef4444' }} />
-              : <Check className="w-4 h-4" style={{ color: CTA }} />
-            }
-            <div className="text-sm">{toast}</div>
+            <Check className="w-4 h-4" style={{ color: 'var(--brand)' }} />
+            <div className="text-sm">AI generated and saved to your Builds.</div>
           </div>
         </div>
       )}
-    </section>
-  );
-}
-
-/* ─────────────────────────── UI bits (match VA style) ─────────────────────────── */
-
-function Panel({ title, icon, children }:{
-  title:string; icon?:React.ReactNode; children:React.ReactNode;
-}) {
-  return (
-    <div className="va-card">
-      <div className="va-head">
-        <div className="flex items-center gap-2">
-          <span className="w-7 h-7 rounded-lg grid place-items-center" style={{ background:'rgba(89,217,179,.12)' }}>
-            {icon ?? <div className="w-3 h-3 rounded-full" style={{ background: CTA }} />}
-          </span>
-          <span className="font-semibold">{title}</span>
-        </div>
-        <div />
-      </div>
-      <div className="p-4">{children}</div>
     </div>
   );
 }
 
+/* ─────────────────────────── UI bits ─────────────────────────── */
+
 function Info({ label, value, icon }: { label: string; value: string; icon?: React.ReactNode }) {
   return (
-    <div className="p-3 rounded-[8px]" style={{ background:'var(--card)', border:'1px solid var(--border)' }}>
-      <div className="text-xs flex items-center gap-1.5" style={{ color: 'var(--text-muted)'
+    <div style={CARD} className="p-3 rounded-2xl">
+      <div className="text-xs flex items-center gap-1.5" style={{ color: 'var(--text-muted)' }}>{icon}{label}</div>
+      <div className="mt-0.5 truncate" style={{ color: 'var(--text)' }}>{value || '—'}</div>
+    </div>
+  );
+}
+
+function Req({ ok, label }: { ok: boolean; label: string }) {
+  return (
+    <div className="flex items-center gap-2 py-1.5 text-sm">
+      <span
+        className="inline-flex items-center justify-center w-4 h-4 rounded-[6px]"
+        style={{
+          background: ok ? 'color-mix(in oklab, var(--brand) 15%, transparent)' : 'rgba(255,120,120,0.12)',
+          border: `1px solid ${ok ? 'color-mix(in oklab, var(--brand) 40%, transparent)' : 'rgba(255,120,120,0.4)'}`,
+        }}
+      >
+        {ok ? <Check className="w-3 h-3" style={{ color: 'var(--brand)' }} /> : <AlertCircle className="w-3 h-3" style={{ color: 'salmon' }} />}
+      </span>
+      <span style={{ color: ok ? 'var(--text)' : 'var(--text-muted)' }}>{label}</span>
+    </div>
+  );
+}
