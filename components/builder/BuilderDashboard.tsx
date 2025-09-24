@@ -1,7 +1,6 @@
 // components/builder/BuilderDashboard.tsx
 'use client';
 
-import type React from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
@@ -185,7 +184,7 @@ async function readCloud(): Promise<Bot[]> {
   }
 }
 
-/** Account-level fetch so builds are cross-device */
+/** Account fetch from your API so builds are cross-device */
 async function readAccount(): Promise<Bot[]> {
   try {
     const resp = await fetch('/api/chatbots/list', {
@@ -234,7 +233,7 @@ async function saveBuildEverywhere(build: Bot) {
     else local.unshift(build);
     writeLocal(local);
   } catch {}
-  // DB handled server-side
+  // DB handled server-side by /api/chatbots/save
   try {
     window.dispatchEvent(new Event('builds:updated'));
   } catch {}
@@ -312,7 +311,6 @@ export default function BuilderDashboard() {
   const searchParams = useSearchParams();
 
   const rawStep = searchParams.get('step');
-  the_step:
   const step = rawStep && ['1', '2', '3', '4'].includes(rawStep) ? rawStep : null;
 
   const [query, setQuery] = useState('');
@@ -359,7 +357,7 @@ export default function BuilderDashboard() {
     (async () => {
       const local = readLocal();
       const cloud = await readCloud();
-      const account = await readAccount(); // ← NEW
+      const account = await readAccount(); // account/DB
       const merged = mergeByAssistantId(mergeByAssistantId(local, cloud), account);
 
       if (alive) {
@@ -382,7 +380,9 @@ export default function BuilderDashboard() {
       if (['chatbots', 'agents', 'builds'].includes(e.key)) refresh();
     };
     const onSignal = () => refresh();
-    const onFocusOrVisible = () => refresh();
+    const onFocusOrVisible = () => {
+      if (document.visibilityState === 'visible') refresh();
+    };
 
     if (typeof window !== 'undefined') {
       window.addEventListener('storage', onStorage);
