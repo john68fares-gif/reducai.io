@@ -195,7 +195,6 @@ const DEFAULT_AGENT: AgentData = {
 };
 
 const keyFor = (id: string) => `va:agent:${id}`;
-const versKeyFor = (id: string) => `va:versions:${id}`;
 
 function migrateAgent(d: AgentData): AgentData {
   const msgs = Array.isArray(d.firstMsgs) ? d.firstMsgs : (d.firstMsg ? [d.firstMsg] : []);
@@ -442,20 +441,22 @@ function StyledSelect({
   );
 }
 
-/* ─────────── File helpers (.docx via CDN JSZip; .doc best-effort; accept .docs) ─────────── */
+/* ─────────── File helpers (.docx via npm jszip; .doc best-effort; accept .docs) ─────────── */
 async function readFileAsText(f: File): Promise<string> {
   const name = f.name.toLowerCase();
+
+  // Peek magic bytes to detect zip
   const looksZip = async () => {
     const buf = new Uint8Array(await f.slice(0,4).arrayBuffer());
-    return buf[0]===0x50 && buf[1]===0x4b;
+    return buf[0]===0x50 && buf[1]===0x4b; // "PK"
   };
 
+  // --- .docx / .docs (zip) ---
   if (name.endsWith('.docx') || name.endsWith('.docs') || await looksZip()) {
     try {
-      // @ts-ignore
-      const JSZipModule = await import('https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js');
-      const JSZip = (JSZipModule?.default || (window as any).JSZip);
-      if (!JSZip) throw new Error('JSZip not loaded');
+      // ✅ use npm package & lazy-import it at runtime (no CDN, no webpack error)
+      const mod = await import('jszip');
+      const JSZip = (mod as any)?.default || mod;
 
       const buf = await f.arrayBuffer();
       const zip = await JSZip.loadAsync(buf);
@@ -463,12 +464,19 @@ async function readFileAsText(f: File): Promise<string> {
       if (!docXml) return '';
 
       const text = docXml
-        .replace(/<w:p[^>]*>/g,'\n').replace(/<w:tab\/>/g,'\t').replace(/<w:br\/>/g,'\n')
-        .replace(/<(.|\n)*?>/g,'').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>');
+        .replace(/<w:p[^>]*>/g,'\n')
+        .replace(/<w:tab\/>/g,'\t')
+        .replace(/<w:br\/>/g,'\n')
+        .replace(/<(.|\n)*?>/g,'')
+        .replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>');
+
       return text.trim();
-    } catch { return ''; }
+    } catch {
+      return '';
+    }
   }
 
+  // --- legacy .doc (best-effort) ---
   if (name.endsWith('.doc')) {
     try {
       const buf = new Uint8Array(await f.arrayBuffer());
@@ -480,6 +488,7 @@ async function readFileAsText(f: File): Promise<string> {
     } catch { return ''; }
   }
 
+  // --- plain text types ---
   return new Promise((res, rej) => {
     const r = new FileReader();
     r.onerror = () => rej(new Error('Read failed'));
@@ -573,6 +582,7 @@ export default function VoiceAgentSection() {
         store.ensureOwnerGuard?.().catch(() => {});
 
         const v1 = await store.getJSON<ApiKey[]>('apiKeys.v1', []).catch(() => []);
+        the:
         const legacy = await store.getJSON<ApiKey[]>('apiKeys', []).catch(() => []);
         const merged = Array.isArray(v1) && v1.length ? v1 : Array.isArray(legacy) ? legacy : [];
 
