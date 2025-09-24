@@ -10,7 +10,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   User as UserIcon, Mail, Calendar, Sun, Moon, LogOut, KeyRound,
   CheckCircle2, AlertCircle, Crown, Zap, ShieldCheck, Loader2, LockKeyhole,
-  ShieldAlert, ChevronRight, Palette, Shield, CreditCard
+  ShieldAlert, ChevronRight, Palette, Shield, CreditCard, Eye, EyeOff, BadgeCheck, Globe
 } from 'lucide-react';
 
 /* ───────────────── Tokens to match Voice Agent ───────────────── */
@@ -56,13 +56,34 @@ const Tokens = () => (
       display: inline-block;
     }
     @keyframes shimmer { from { background-position: -200% 0; } to { background-position: 200% 0; } }
+    input.va-input {
+      height: var(--control-h);
+      border-radius: 8px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 0 12px;
+      outline: none;
+    }
+    .row {
+      display: grid;
+      grid-template-columns: 140px 1fr auto;
+      align-items: center;
+      gap: 10px;
+    }
+    .chip{
+      display:inline-flex; align-items:center; gap:6px;
+      padding:6px 10px; border-radius:999px;
+      background: color-mix(in oklab, var(--brand) 8%, var(--panel));
+      border: 1px solid color-mix(in oklab, var(--brand) 35%, var(--border));
+      color: var(--text); font-size: 12px;
+    }
   `}</style>
 );
 
 /* ───────────────── Small helpers ───────────────── */
 type ThemeMode = 'dark' | 'light';
 type PlanTier = 'Free' | 'Pro';
-const IS_CLIENT = typeof window !== 'undefined';
 
 function fmtDate(iso?: string) {
   if (!iso) return '—';
@@ -140,7 +161,6 @@ export default function AccountPage() {
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [userName, setUserName] = useState<string | null>(null);
   const [userCreated, setUserCreated] = useState<string | null>(null);
-  const [userUpdated, setUserUpdated] = useState<string | null>(null);
 
   // Providers
   const [providers, setProviders] = useState<string[]>([]);
@@ -148,22 +168,25 @@ export default function AccountPage() {
   const hasEmailPassword = providers.includes('email') || passwordEnabled;
   const hasGoogle = providers.includes('google');
 
-  // Plan + usage (placeholder)
+  // Plan + usage (kept, but minimal)
   const [plan, setPlan] = useState<PlanTier>('Free');
   const [usage, setUsage] = useState({ requests: 0, limit: 10000 });
 
-  // Theme (instant apply; no save button)
+  // Theme (instant apply)
   const [theme, setTheme] = useState<ThemeMode>('dark');
   const [saveMsg, setSaveMsg] = useState<'idle' | 'ok' | 'err'>('idle');
+
+  // Profile editing
+  const [nameInput, setNameInput] = useState('');
+  const [savingName, setSavingName] = useState(false);
+  const [nameMsg, setNameMsg] = useState<'idle' | 'ok' | 'err'>('idle');
 
   // Password flows
   const [resetLoading, setResetLoading] = useState(false);
   const [resetMsg, setResetMsg] = useState<'idle' | 'sent' | 'err'>('idle');
-  const [createPwLoading, setCreatePwLoading] = useState(false);
-  const [createPwMsg, setCreatePwMsg] = useState<'idle' | 'ok' | 'err'>('idle');
   const [pw1, setPw1] = useState('');
   const [pw2, setPw2] = useState('');
-
+  const [showPw, setShowPw] = useState(false);
   const pwStrength = useMemo(() => {
     let s = 0;
     if (pw1.length >= 8) s++;
@@ -179,7 +202,6 @@ export default function AccountPage() {
 
     (async () => {
       const { data: { session} } = await supabase.auth.getSession();
-
       if (!session) {
         setAuthChecked(true);
         setBooting(false);
@@ -190,15 +212,16 @@ export default function AccountPage() {
 
       const u = session.user;
       setUserId(u?.id ?? null);
+      const fullName = (u?.user_metadata as any)?.full_name ?? u?.user_metadata?.name ?? '';
+      setUserName(fullName || null);
+      setNameInput(fullName || '');
       setUserEmail(u?.email ?? null);
-      setUserName((u?.user_metadata as any)?.full_name ?? u?.user_metadata?.name ?? null);
       setUserCreated(u?.created_at ?? null);
-      setUserUpdated(u?.updated_at ?? null);
 
+      // Providers
       const ids = ((u as any)?.identities || []) as Array<{ provider?: string }>;
       const provs = Array.from(new Set(ids.map(i => i?.provider).filter(Boolean))) as string[];
       setProviders(provs);
-
       const pwdMeta = (u?.user_metadata as any)?.password_enabled;
       setPasswordEnabled(Boolean(pwdMeta));
 
@@ -212,20 +235,20 @@ export default function AccountPage() {
       setBooting(false);
       setAuthChecked(true);
 
+      // React to session changes
       sub = supabase.auth.onAuthStateChange((_evt, sess) => {
         const u2 = sess?.user;
         if (!u2) { router.replace('/login'); return; }
-
         setUserId(u2?.id ?? null);
+        const fullName2 = (u2?.user_metadata as any)?.full_name ?? u2?.user_metadata?.name ?? '';
+        setUserName(fullName2 || null);
+        setNameInput(fullName2 || '');
         setUserEmail(u2?.email ?? null);
-        setUserName((u2?.user_metadata as any)?.full_name ?? u2?.user_metadata?.name ?? null);
         setUserCreated(u2?.created_at ?? null);
-        setUserUpdated(u2?.updated_at ?? null);
 
         const ids2 = ((u2 as any)?.identities || []) as Array<{ provider?: string }>;
         const provs2 = Array.from(new Set(ids2.map(i => i?.provider).filter(Boolean))) as string[];
         setProviders(provs2);
-
         const pwdMeta2 = (u2?.user_metadata as any)?.password_enabled;
         setPasswordEnabled(Boolean(pwdMeta2));
 
@@ -246,8 +269,10 @@ export default function AccountPage() {
     } catch {}
     try {
       const owner = localStorage.getItem('workspace:owner');
-      if (userId && owner && owner !== userId) localStorage.clear();
-      if (userId) localStorage.setItem('workspace:owner', userId);
+      if (userId) {
+        if (owner && owner !== userId) localStorage.clear();
+        localStorage.setItem('workspace:owner', userId);
+      }
     } catch {}
   }, [userId]);
 
@@ -257,15 +282,12 @@ export default function AccountPage() {
     return 'Account';
   }, [userName, userEmail]);
 
-  /* Instant theme switch (no save button) */
+  /* Instant theme switch */
   const setThemeInstant = async (mode: ThemeMode) => {
     try {
       setTheme(mode);
-      // apply to DOM immediately
       document.documentElement.dataset.theme = mode;
-      // persist locally
       localStorage.setItem('ui:theme', mode);
-      // best-effort persist to user profile
       const { error } = await supabase.auth.updateUser({ data: { ui_theme: mode } });
       if (error) throw error;
       setSaveMsg('ok');
@@ -276,10 +298,44 @@ export default function AccountPage() {
     }
   };
 
+  /* Save display name */
+  const saveName = async () => {
+    if (savingName) return;
+    setSavingName(true); setNameMsg('idle');
+    try {
+      const { error } = await supabase.auth.updateUser({ data: { full_name: nameInput } });
+      if (error) throw error;
+      setUserName(nameInput);
+      setNameMsg('ok');
+    } catch {
+      setNameMsg('err');
+    } finally {
+      setSavingName(false);
+      setTimeout(()=>setNameMsg('idle'), 1800);
+    }
+  };
+
+  /* Password helpers */
+  const createPassword = async () => {
+    if (!pw1 || pw1 !== pw2) { setNameMsg('idle'); setResetMsg('idle'); return setPwError('Passwords don’t match'); }
+    if (pwStrength < 3) return setPwError('Use at least 8 chars with numbers & symbols');
+    setPwError('');
+    try {
+      const { error } = await supabase.auth.updateUser({ password: pw1 });
+      if (error) throw error;
+      await supabase.auth.updateUser({ data: { password_enabled: true } });
+      setPasswordEnabled(true);
+      setPw1(''); setPw2('');
+      setProviders(prev => Array.from(new Set([...prev, 'email'])));
+    } catch {
+      setPwError('Could not set password. Try again.');
+    }
+  };
+  const [pwError, setPwError] = useState('');
+
   const sendReset = async () => {
     if (!userEmail) return;
-    setResetLoading(true);
-    setResetMsg('idle');
+    setResetLoading(true); setResetMsg('idle');
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(userEmail, {
         redirectTo: `${window.location.origin}/auth/callback`,
@@ -290,37 +346,7 @@ export default function AccountPage() {
       setResetMsg('err');
     } finally {
       setResetLoading(false);
-      setTimeout(() => setResetMsg('idle'), 3200);
-    }
-  };
-
-  const refreshProviders = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    const ids = ((user as any)?.identities || []) as Array<{ provider?: string }>;
-    const provs = Array.from(new Set(ids.map(i => i?.provider).filter(Boolean))) as string[];
-    setProviders(provs);
-    const pwdMeta = (user?.user_metadata as any)?.password_enabled;
-    setPasswordEnabled(Boolean(pwdMeta));
-  };
-
-  const createPassword = async () => {
-    if (!pw1 || pw1 !== pw2) {
-      setCreatePwMsg('err'); setTimeout(() => setCreatePwMsg('idle'), 2000);
-      return;
-    }
-    setCreatePwLoading(true); setCreatePwMsg('idle');
-    try {
-      const { error } = await supabase.auth.updateUser({ password: pw1 });
-      if (error) throw error;
-      await supabase.auth.updateUser({ data: { password_enabled: true } });
-      setPasswordEnabled(true);
-      await refreshProviders();
-      setCreatePwMsg('ok'); setPw1(''); setPw2('');
-    } catch {
-      setCreatePwMsg('err');
-    } finally {
-      setCreatePwLoading(false);
-      setTimeout(() => setCreatePwMsg('idle'), 2800);
+      setTimeout(() => setResetMsg('idle'), 4000);
     }
   };
 
@@ -339,7 +365,7 @@ export default function AccountPage() {
       <Head><title>Account • Reduc AI</title></Head>
       <Tokens />
 
-      {/* Loader (voice-agent look) */}
+      {/* Loader */}
       <AnimatePresence>
         {(booting || loading) && (
           <motion.div
@@ -349,8 +375,7 @@ export default function AccountPage() {
             style={{
               background:
                 'radial-gradient(1000px 500px at 50% -10%, var(--brand-weak), transparent 60%), var(--bg)',
-              backdropFilter: 'blur(2px)',
-              color: 'var(--text)'
+              backdropFilter: 'blur(2px)', color: 'var(--text)'
             }}
           >
             <motion.div
@@ -377,6 +402,8 @@ export default function AccountPage() {
             <div className="text-xl font-semibold mb-4">Settings</div>
             <nav className="space-y-2">
               <SettingsLink icon={<UserIcon className="w-4 h-4" />} label="Profile" href="#profile" />
+              <SettingsLink icon={<Shield className="w-4 h-4" />} label="Security" href="#security" />
+              <SettingsLink icon={<Palette className="w-4 h-4" />} label="Appearance" href="#appearance" />
               <SettingsLink icon={<CreditCard className="w-4 h-4" />} label="Plan & Billing" href="#billing" />
             </nav>
           </aside>
@@ -384,59 +411,236 @@ export default function AccountPage() {
           {/* Right content */}
           <section className="space-y-6">
 
-            {/* Profile */}
+            {/* Profile (trimmed down, editable name) */}
             <div id="profile" className="scroll-mt-16">
               <Section
                 title="Profile"
                 icon={<UserIcon className="w-4 h-4" style={{ color: 'var(--brand)' }} />}
-                desc="Manage your account info, theme, and security"
+                desc="Your basic account info"
                 defaultOpen
               >
-                <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
-                  <div className="flex items-center gap-4 mb-6">
-                    <div className="w-12 h-12 rounded-full grid place-items-center"
-                         style={{ background: 'color-mix(in oklab, var(--brand) 25%, transparent)' }}>
-                      <UserIcon className="w-6 h-6" style={{ color: 'var(--text)' }} />
+                <div className="flex items-center gap-4 mb-6">
+                  <div className="w-12 h-12 rounded-full grid place-items-center"
+                       style={{ background: 'color-mix(in oklab, var(--brand) 25%, transparent)' }}>
+                    <UserIcon className="w-6 h-6" style={{ color: 'var(--text)' }} />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-lg font-semibold truncate">
+                      {loading ? <span className="inline-block h-5 w-40 rounded skeleton" /> : (displayName)}
                     </div>
-                    <div className="min-w-0">
-                      <div className="text-lg font-semibold truncate">
-                        {loading ? <span className="inline-block h-5 w-40 rounded skeleton" /> : (displayName)}
-                      </div>
-                      <div className="text-sm truncate" style={{ color: 'var(--text-muted)' }}>
-                        {loading ? <span className="inline-block h-4 w-56 rounded skeleton" /> : (userEmail || '—')}
-                      </div>
+                    <div className="text-sm truncate" style={{ color: 'var(--text-muted)' }}>
+                      {loading ? <span className="inline-block h-4 w-56 rounded skeleton" /> : (userEmail || '—')}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid gap-4">
+                  <div className="row">
+                    <span className="text-sm" style={{ color:'var(--text-muted)' }}>Display name</span>
+                    <div className="flex items-center gap-2">
+                      <input
+                        className="va-input w-full"
+                        placeholder="Your name"
+                        value={nameInput}
+                        onChange={(e)=>setNameInput(e.target.value)}
+                        onKeyDown={(e)=> e.key==='Enter' && saveName()}
+                      />
+                    </div>
+                    <div className="justify-self-end">
+                      <button
+                        onClick={saveName}
+                        disabled={savingName}
+                        className="inline-flex items-center gap-2 px-3 h-[36px] rounded-[8px] border disabled:opacity-60 hover:translate-y-[-1px] transition"
+                        style={{ borderColor:'var(--border)', background:'var(--panel)', color:'var(--text)' }}
+                      >
+                        {savingName ? <Loader2 className="w-4 h-4 animate-spin" /> : <BadgeCheck className="w-4 h-4" />}
+                        Save
+                      </button>
                     </div>
                   </div>
 
-                  <div className="grid sm:grid-cols-3 gap-3 text-sm" style={{ color: 'var(--text)' }}>
-                    <InfoRow icon={<Mail className="w-4 h-4" />}     label="Email"   value={userEmail || '—'} />
-                    <InfoRow icon={<Calendar className="w-4 h-4" />} label="Created" value={fmtDate(userCreated || undefined)} />
-                    <InfoRow icon={<Calendar className="w-4 h-4" />} label="Updated" value={fmtDate(userUpdated || undefined)} />
+                  <div className="row">
+                    <span className="text-sm" style={{ color:'var(--text-muted)' }}>Email</span>
+                    <span className="text-sm truncate">{userEmail || '—'}</span>
+                    <span />
                   </div>
 
-                  <div className="mt-6 flex flex-wrap gap-3">
+                  <div className="row">
+                    <span className="text-sm" style={{ color:'var(--text-muted)' }}>Created</span>
+                    <span className="text-sm">{fmtDate(userCreated || undefined)}</span>
+                    <span />
+                  </div>
+
+                  <AnimatePresence>
+                    {nameMsg === 'ok' && (
+                      <motion.div initial={{opacity:0, y:4}} animate={{opacity:1, y:0}} exit={{opacity:0, y:-4}}
+                                  className="text-sm inline-flex items-center gap-2"
+                                  style={{ color: 'color-mix(in oklab, var(--brand) 75%, var(--text))' }}>
+                        <CheckCircle2 className="w-4 h-4" /> Name updated
+                      </motion.div>
+                    )}
+                    {nameMsg === 'err' && (
+                      <motion.div initial={{opacity:0, y:4}} animate={{opacity:1, y:0}} exit={{opacity:0, y:-4}}
+                                  className="text-sm inline-flex items-center gap-2"
+                                  style={{ color: 'crimson' }}>
+                        <AlertCircle className="w-4 h-4" /> Couldn’t save name
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  <div className="mt-4">
                     <button
                       onClick={signOut}
-                      className="inline-flex items-center gap-2 px-4 h-[40px] rounded-[8px] border transition hover:translate-y-[-1px]"
+                      className="inline-flex items-center gap-2 px-4 h-[40px] rounded-[8px] border hover:translate-y-[-1px] transition"
                       style={{ borderColor: 'var(--border)', background: 'var(--panel)', color: 'var(--text)' }}
                     >
                       <LogOut className="w-4 h-4" />
                       Sign out
                     </button>
-
-                    <div className="inline-flex items-center gap-2 text-xs" style={{ color: 'var(--text-muted)' }}>
-                      <ShieldCheck className="w-4 h-4" />
-                      Your workspace is private. After sign-in, everything starts from zero in your own space.
-                    </div>
                   </div>
-                </motion.div>
+                </div>
               </Section>
+            </div>
 
-              {/* Appearance (instant theme switch) */}
+            {/* Security (single clean card, shows actual sign-in methods) */}
+            <div id="security" className="scroll-mt-16">
+              <Section
+                title="Account & Security"
+                icon={<Shield className="w-4 h-4" style={{ color: 'var(--brand)' }} />}
+                desc="Sign-in methods and password"
+                defaultOpen
+              >
+                <div className="grid gap-4">
+
+                  {/* How they actually signed in */}
+                  <div className="row">
+                    <span className="text-sm" style={{ color:'var(--text-muted)' }}>Signed in with</span>
+                    <div className="flex flex-wrap items-center gap-6">
+                      {hasGoogle && (
+                        <span className="chip">
+                          <Globe className="w-4 h-4" />
+                          Google
+                        </span>
+                      )}
+                      {hasEmailPassword ? (
+                        <span className="chip">
+                          <KeyRound className="w-4 h-4" />
+                          Email & Password
+                        </span>
+                      ) : (
+                        <span className="text-xs" style={{ color:'var(--text-muted)' }}>
+                          No password set yet
+                        </span>
+                      )}
+                    </div>
+                    <span />
+                  </div>
+
+                  {/* Password area */}
+                  {hasEmailPassword ? (
+                    <>
+                      <div className="row">
+                        <span className="text-sm" style={{ color:'var(--text-muted)' }}>Change password</span>
+                        <div className="text-xs" style={{ color:'var(--text-muted)' }}>
+                          For security, we can’t display your current password. Use a reset link to change it.
+                        </div>
+                        <div className="justify-self-end">
+                          <button
+                            onClick={sendReset}
+                            disabled={!userEmail || resetLoading}
+                            className="inline-flex items-center gap-2 px-4 h-[36px] rounded-[8px] border hover:translate-y-[-1px] transition disabled:opacity-60"
+                            style={{ borderColor: 'var(--border)', background: 'var(--panel)', color: 'var(--text)' }}
+                          >
+                            {resetLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
+                            Send reset link
+                          </button>
+                        </div>
+                      </div>
+
+                      <AnimatePresence>
+                        {resetMsg === 'sent' && (
+                          <motion.div
+                            initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }}
+                            className="text-sm inline-flex items-center gap-2"
+                            style={{ color: 'color-mix(in oklab, var(--brand) 75%, var(--text))' }}
+                          >
+                            <CheckCircle2 className="w-4 h-4" />
+                            Reset email sent to <span className="font-semibold">{userEmail}</span>. Check your inbox.
+                          </motion.div>
+                        )}
+                        {resetMsg === 'err' && (
+                          <motion.div
+                            initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }}
+                            className="text-sm inline-flex items-center gap-2"
+                            style={{ color: 'crimson' }}
+                          >
+                            <AlertCircle className="w-4 h-4" />
+                            Couldn’t send reset link. Try again.
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </>
+                  ) : (
+                    <>
+                      <div className="row">
+                        <span className="text-sm" style={{ color:'var(--text-muted)' }}>Create password</span>
+                        <div className="flex flex-col gap-3">
+                          <div className="flex items-center gap-2">
+                            <input
+                              type={showPw ? 'text' : 'password'}
+                              className="va-input w-full"
+                              placeholder="New password"
+                              value={pw1}
+                              onChange={(e)=>setPw1(e.target.value)}
+                            />
+                            <button
+                              onClick={()=>setShowPw(s=>!s)}
+                              className="inline-grid place-items-center w-[40px] h-[40px] rounded-[8px] border"
+                              style={{ borderColor:'var(--border)', background:'var(--panel)', color:'var(--text)' }}
+                              title={showPw ? 'Hide' : 'Show'}
+                            >
+                              {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                            </button>
+                          </div>
+                          <input
+                            type={showPw ? 'text' : 'password'}
+                            className="va-input w-full"
+                            placeholder="Confirm password"
+                            value={pw2}
+                            onChange={(e)=>setPw2(e.target.value)}
+                          />
+                          <div className="h-1 w-full rounded overflow-hidden" style={{ background: 'var(--border)' }}>
+                            <div className="h-full" style={{
+                              width: `${(pwStrength / 4) * 100}%`,
+                              background: 'linear-gradient(90deg, var(--brand), color-mix(in oklab, var(--brand) 50%, white))',
+                              transition: 'width 220ms var(--ease)'
+                            }} />
+                          </div>
+                          {pwError && <div className="text-xs" style={{ color:'crimson' }}>{pwError}</div>}
+                        </div>
+                        <div className="justify-self-end">
+                          <button
+                            onClick={createPassword}
+                            className="inline-flex items-center gap-2 px-4 h-[36px] rounded-[8px] border hover:translate-y-[-1px] transition"
+                            style={{ borderColor:'var(--border)', background:'var(--panel)', color:'var(--text)' }}
+                          >
+                            <KeyRound className="w-4 h-4" />
+                            Save password
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </Section>
+            </div>
+
+            {/* Appearance (instant switch; keep both, defaults dark) */}
+            <div id="appearance" className="scroll-mt-16">
               <Section
                 title="Appearance"
                 icon={<Palette className="w-4 h-4" style={{ color: 'var(--brand)' }} />}
-                desc="Customize how the app looks"
+                desc="Switch theme"
                 defaultOpen
               >
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -465,152 +669,15 @@ export default function AccountPage() {
                   )}
                 </AnimatePresence>
               </Section>
-
-              {/* Account & Security */}
-              <Section
-                title="Account & Security"
-                icon={<Shield className="w-4 h-4" style={{ color: 'var(--brand)' }} />}
-                desc="Sign-in methods and password"
-                defaultOpen
-              >
-                <div className="grid gap-4">
-                  {/* Sign-in methods */}
-                  <Band>
-                    <div className="text-sm font-semibold mb-2">Sign-in methods</div>
-                    <div className="flex flex-wrap items-center gap-2 text-xs" style={{ color: 'var(--text)' }}>
-                      {hasEmailPassword ? (
-                        <Badge>EMAIL &amp; PASSWORD</Badge>
-                      ) : (
-                        <BadgeMuted>
-                          EMAIL &amp; PASSWORD <span className="ml-1 px-1 rounded"
-                            style={{ background: 'color-mix(in oklab, var(--brand) 60%, transparent)', color: 'var(--text)' }}>
-                            NOT SET
-                          </span>
-                        </BadgeMuted>
-                      )}
-                      {hasGoogle && <Badge>GOOGLE</Badge>}
-                    </div>
-                  </Band>
-
-                  {/* Create password */}
-                  {!hasEmailPassword && (
-                    <Band accent>
-                      <div className="flex items-center gap-2 mb-2">
-                        <LockKeyhole className="w-4 h-4" />
-                        <div className="text-sm font-semibold">Create a password</div>
-                      </div>
-                      <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>
-                        Add a password so you can also sign in with email + password.
-                      </p>
-
-                      <div className="grid gap-3">
-                        <input
-                          type="password"
-                          className="w-full rounded-[8px] px-3 py-2 border outline-none"
-                          style={{ background: 'var(--panel)', borderColor: 'var(--border)', color: 'var(--text)' }}
-                          placeholder="New password"
-                          value={pw1}
-                          onChange={(e) => setPw1(e.target.value)}
-                        />
-                        <input
-                          type="password"
-                          className="w-full rounded-[8px] px-3 py-2 border outline-none"
-                          style={{ background: 'var(--panel)', borderColor: 'var(--border)', color: 'var(--text)' }}
-                          placeholder="Confirm password"
-                          value={pw2}
-                          onChange={(e) => setPw2(e.target.value)}
-                        />
-                        <div className="h-1 w-full rounded overflow-hidden" style={{ background: 'var(--border)' }}>
-                          <div className="h-full" style={{
-                            width: `${(pwStrength / 4) * 100}%`,
-                            background: 'linear-gradient(90deg, var(--brand), color-mix(in oklab, var(--brand) 50%, white))',
-                            transition: 'width 220ms var(--ease)'
-                          }} />
-                        </div>
-
-                        <div className="flex items-center gap-3">
-                          <button
-                            onClick={createPassword}
-                            disabled={createPwLoading}
-                            className="inline-flex items-center gap-2 px-4 h-[40px] rounded-[8px] border transition hover:translate-y-[-1px] disabled:opacity-60"
-                            style={{ borderColor: 'var(--border)', background: 'var(--panel)', color: 'var(--text)' }}
-                          >
-                            {createPwLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
-                            Create password
-                          </button>
-
-                          <AnimatePresence>
-                            {createPwMsg === 'ok' && (
-                              <motion.span initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }}
-                                           className="inline-flex items-center gap-1"
-                                           style={{ color: 'color-mix(in oklab, var(--brand) 75%, var(--text))' }}>
-                                <CheckCircle2 className="w-4 h-4" /> Saved
-                              </motion.span>
-                            )}
-                            {createPwMsg === 'err' && (
-                              <motion.span initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }}
-                                           className="inline-flex items-center gap-1"
-                                           style={{ color: 'crimson' }}>
-                                <ShieldAlert className="w-4 h-4" /> Check passwords
-                              </motion.span>
-                            )}
-                          </AnimatePresence>
-                        </div>
-                      </div>
-                    </Band>
-                  )}
-
-                  {/* Change password */}
-                  {hasEmailPassword && (
-                    <Band>
-                      <div className="flex items-center gap-2 mb-1">
-                        <LockKeyhole className="w-4 h-4" />
-                        <div className="text-sm font-semibold">Change password</div>
-                      </div>
-                      <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>
-                        We’ll send a secure link to your email to update your password.
-                      </p>
-                      <div className="flex items-center gap-3">
-                        <button
-                          onClick={sendReset}
-                          disabled={!userEmail || resetLoading}
-                          className="inline-flex items-center gap-2 px-4 h-[40px] rounded-[8px] border transition hover:translate-y-[-1px] disabled:opacity-60"
-                          style={{ borderColor: 'var(--border)', background: 'var(--panel)', color: 'var(--text)' }}
-                        >
-                          {resetLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
-                          Send reset link
-                        </button>
-
-                        <AnimatePresence>
-                          {resetMsg === 'sent' && (
-                            <motion.span initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }}
-                                         className="inline-flex items-center gap-1"
-                                         style={{ color: 'color-mix(in oklab, var(--brand) 75%, var(--text))' }}>
-                              <CheckCircle2 className="w-4 h-4" /> Sent
-                            </motion.span>
-                          )}
-                          {resetMsg === 'err' && (
-                            <motion.span initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }}
-                                         className="inline-flex items-center gap-1"
-                                         style={{ color: 'crimson' }}>
-                              <AlertCircle className="w-4 h-4" /> Failed
-                            </motion.span>
-                          )}
-                        </AnimatePresence>
-                      </div>
-                    </Band>
-                  )}
-                </div>
-              </Section>
             </div>
 
-            {/* Plan & Billing */}
+            {/* Plan & Billing (unchanged minimal) */}
             <div id="billing" className="scroll-mt-16">
               <Section
                 title="Plan & Billing"
                 icon={<CreditCard className="w-4 h-4" style={{ color: 'var(--brand)' }} />}
                 desc="Your current subscription plan"
-                defaultOpen
+                defaultOpen={false}
               >
                 <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
                   <div className="flex items-center gap-3 mb-2">
@@ -628,10 +695,6 @@ export default function AccountPage() {
 
                   <div className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>
                     Usage: {usage.requests.toLocaleString()} / {usage.limit.toLocaleString()} requests
-                  </div>
-
-                  <div className="text-xs mb-6 flex items-center gap-2" style={{ color: 'var(--text-muted)' }}>
-                    <ShieldCheck className="w-4 h-4" /> Free is demo-only. Upgrade to Pro for full features.
                   </div>
 
                   <div className="flex flex-wrap gap-3">
@@ -666,17 +729,7 @@ export default function AccountPage() {
   );
 }
 
-/* ───────────────── UI atoms (styled to match Voice Agent) ───────────────── */
-
-function InfoRow({ icon, label, value }: { icon: React.ReactNode; label: string; value: React.ReactNode }) {
-  return (
-    <div className="flex items-center gap-2 text-sm">
-      {icon}
-      <span className="w-28 shrink-0" style={{ color: 'var(--text-muted)' }}>{label}</span>
-      <span className="truncate" style={{ color: 'var(--text)' }}>{value}</span>
-    </div>
-  );
-}
+/* ───────────────── UI atoms ───────────────── */
 
 function ThemeTile({ label, active, onClick, icon }: { label: string; active: boolean; onClick: () => void; icon: React.ReactNode; }) {
   return (
@@ -715,38 +768,5 @@ function SettingsLink({ icon, label, href }: { icon: React.ReactNode; label: str
       <span className="flex items-center gap-2 text-sm">{icon}{label}</span>
       <ChevronRight className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
     </a>
-  );
-}
-
-function Band({ children, accent = false }:{ children: React.ReactNode; accent?: boolean }) {
-  return (
-    <div
-      className="rounded-[8px] p-4"
-      style={{
-        background: accent ? 'color-mix(in oklab, var(--brand) 6%, var(--panel))' : 'var(--panel)',
-        border: accent ? `1px solid color-mix(in oklab, var(--brand) 35%, var(--border))` : '1px solid var(--border)',
-        boxShadow: 'var(--shadow-card)',
-        color: 'var(--text)',
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-function Badge({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="px-2.5 py-1 rounded-[6px] border text-[11px] uppercase tracking-wide"
-      style={{ borderColor: 'color-mix(in oklab, var(--brand) 35%, var(--border))', background: 'color-mix(in oklab, var(--brand) 8%, var(--panel))', color: 'var(--text)' }}>
-      {children}
-    </span>
-  );
-}
-function BadgeMuted({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="px-2.5 py-1 rounded-[6px] border text-[11px] uppercase tracking-wide"
-      style={{ borderColor: 'var(--border)', background: 'var(--panel)', color: 'var(--text-muted)' }}>
-      {children}
-    </span>
   );
 }
