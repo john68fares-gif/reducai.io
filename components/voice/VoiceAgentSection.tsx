@@ -132,6 +132,8 @@ type AgentData = {
   numerals: boolean;
 };
 
+type SetFieldFn = <K extends keyof AgentData>(k: K) => (v: AgentData[K]) => void;
+
 const PROMPT_SKELETON =
 `[Identity]
 
@@ -648,7 +650,7 @@ export default function VoiceAgentSection() {
         setData(p => ({ ...p, systemPromptBackend: compiled.backendString }));
       }
     } catch {}
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data.systemPrompt]);
 
   async function doSave(){
@@ -1188,7 +1190,7 @@ function ApiKeySelect({
 
 function ContextFiles({ data, setField }:{
   data:AgentData;
-  setField:<K extends keyof AgentData>(k:K)=> (v:AgentData[K])=>void;
+  setField: SetFieldFn;
 }) {
   const fileInputRef = useRef<HTMLInputElement|null>(null);
   const rebuildContextText = (files:{name:string;text:string}[]) => {
@@ -1259,4 +1261,32 @@ function ContextFiles({ data, setField }:{
       {/* List of files */}
       {!(data.ctxFiles && data.ctxFiles.length) ? (
         <div className="text-xs" style={{ color:'var(--text-muted)' }}>
-          No files yet.
+          No files yet. Click <b>Add file</b> to upload (.txt, .md, .csv, .json, <b>.docx</b> or best-effort <b>.doc</b> / <b>.docs</b>).
+        </div>
+      ) : (
+        <div className="rounded-[8px] p-3" style={{ background:'var(--panel)', border:'1px solid var(--border)' }}>
+          {(data.ctxFiles||[]).map((f, idx) => (
+            <div key={idx} className="mb-3 last:mb-0">
+              <div className="flex items-center justify-between mb-1">
+                <div className="text-sm font-medium truncate">{f.name}</div>
+                <button
+                  onClick={()=>{
+                    const next = [...(data.ctxFiles||[])]; next.splice(idx,1);
+                    rebuildContextText(next);
+                  }}
+                  className="text-xs rounded-[6px] px-2 py-1"
+                  style={{ border:'1px solid var(--border)', background:'var(--panel)', color:'var(--text)' }}
+                >
+                  Remove
+                </button>
+              </div>
+              <div className="text-xs" style={{ color:'var(--text-muted)' }}>
+                {(f.text || '').slice(0, 240) || '(empty)'}{(f.text||'').length>240?'…':''}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
