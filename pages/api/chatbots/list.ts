@@ -1,5 +1,6 @@
+// pages/api/chatbots/list.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { supabaseServer } from '@/lib/supabase-server';
+import { createServerSupabaseClient } from '@supabase/auth-helpers-nextjs';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'GET') {
@@ -7,33 +8,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(405).json({ ok: false, error: 'Method Not Allowed' });
   }
 
-  try {
-    const supabase = supabaseServer(req, res);
-    const { data: { user }, error: userErr } = await supabase.auth.getUser();
-    if (userErr) throw userErr;
-    if (!user) return res.status(401).json({ ok: false, error: 'Not authenticated' });
+  const supabase = createServerSupabaseClient({ req, res });
+  const { data: auth } = await supabase.auth.getUser();
+  if (!auth?.user) return res.status(401).json({ ok: false, error: 'Not authenticated' });
 
-    const { data, error } = await supabase
-      .from('chatbots')
-      .select('id, user_id, assistant_id, name, model, payload, created_at, updated_at')
-      .eq('user_id', user.id)
-      .order('updated_at', { ascending: false });
+  const { data, error } = await supabase
+    .from('chatbots')
+    .select('id, assistant_id, user_id, name, payload, created_at, updated_at')
+    .eq('user_id', auth.user.id)
+    .order('updated_at', { ascending: false });
 
-    if (error) throw error;
+  if (error) return res.status(500).json({ ok: false, error: error.message });
 
-    return res.status(200).json({
-      ok: true,
-      items: (data || []).map((r) => ({
-        id: r.id,
-        assistant_id: r.assistant_id,
-        name: r.name,
-        model: r.model,
-        payload: r.payload || null,
-        created_at: r.created_at,
-        updated_at: r.updated_at,
-      })),
-    });
-  } catch (e: any) {
-    return res.status(500).json({ ok: false, error: e?.message || 'Server error' });
-  }
+  // Dashboard expects an array named items
+  return res.status(200).json({ ok: true, items: data || [] });
 }
