@@ -3,10 +3,10 @@
 
 import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Bot, User, Mic, MicOff, X, Loader2, ChevronDown, Search, Check, Lock } from 'lucide-react';
+import { Bot, Mic, MicOff, X, Loader2, ChevronDown, Search, Check, Lock } from 'lucide-react';
 
 /* ──────────────────────────────────────────────────────────────────────────
-   PROPS (logic unchanged)
+   PROPS  (AI logic untouched)
 ────────────────────────────────────────────────────────────────────────── */
 type ProsodyOpts = {
   fillerWords?: boolean;
@@ -23,9 +23,12 @@ type ScopedLike = {
 
 type Props = {
   className?: string;
+
+  // provided by parent; not shown in UI
   model: string;
+
   systemPrompt: string;
-  voiceName: string;         // friendly or id
+  voiceName: string;           // friendly or OpenAI id (e.g. "Alloy (American)" or "alloy")
   assistantName: string;
   apiKey: string;
 
@@ -34,9 +37,10 @@ type Props = {
   onClose?: () => void;
   onError?: (e: any) => void;
 
+  // from parent; we won't auto-greet anymore
   firstMode?: 'Assistant speaks first' | 'User speaks first' | 'Silent until tool required';
   firstMsg?: string;
-  greetMode?: 'server' | 'client' | 'off';
+  greetMode?: 'server' | 'client' | 'off'; // we force 'off' behavior below
 
   languageHint?: 'auto' | 'en' | 'de' | 'nl' | 'es' | 'ar';
   prosody?: ProsodyOpts;
@@ -46,21 +50,23 @@ type Props = {
   ambience?: 'off' | 'kitchen' | 'cafe';
   ambienceLevel?: number;
 
-  /** NEW (optional): which account/agent to store under (so it syncs across devices). */
+  // NEW: account-scoped persistence
   accountId?: string;
   agentId?: string;
-  /** NEW (optional): pass your scoped storage client. If omitted, we try window.scopedStorage, else localStorage. */
-  scoped?: ScopedLike;
+  scoped?: ScopedLike;           // required for cross-device persistence
 };
 
 /* ──────────────────────────────────────────────────────────────────────────
-   STYLE / CONSTANTS
+   THEME / CONSTANTS
 ────────────────────────────────────────────────────────────────────────── */
 const CTA = '#59d9b3';
 const GREEN_LINE = 'rgba(89,217,179,.20)';
 const IS_CLIENT = typeof window !== 'undefined' && typeof document !== 'undefined';
 
 const RAW_ID = /^[a-z0-9._-]{3,}$/i;
+const clamp01 = (v:number)=>Math.max(0,Math.min(1,v));
+const fmtTime = (ts:number)=>new Date(ts).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
+
 const HUMAN_LIKE = new Set(['alloy','verse','coral','amber','sage','juniper','opal','pebble','cobalt']);
 const DEFAULT_VOICES = ['alloy','verse','coral','amber','sage','juniper'];
 const FRIENDLY_TO_ID: Record<string,string> = {
@@ -70,9 +76,6 @@ const FRIENDLY_TO_ID: Record<string,string> = {
 
 type TranscriptRow = { id:string; who:'user'|'assistant'; text:string; at:number; done?:boolean };
 
-const clamp01 = (v:number)=>Math.max(0,Math.min(1,v));
-const fmtTime = (ts:number)=>new Date(ts).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
-
 const resolveVoiceId = (key:string) => {
   const k = (key||'').trim();
   if (RAW_ID.test(k) && !FRIENDLY_TO_ID[k]) return k.toLowerCase();
@@ -80,7 +83,7 @@ const resolveVoiceId = (key:string) => {
 };
 
 /* ──────────────────────────────────────────────────────────────────────────
-   SMALL SELECT (unchanged appearance)
+   SELECT (same look)
 ────────────────────────────────────────────────────────────────────────── */
 type Opt = { value: string; label: string; disabled?: boolean; iconLeft?: React.ReactNode };
 function StyledSelect({
@@ -99,7 +102,7 @@ function StyledSelect({
   const [menuPos, setMenuPos] = useState<{left:number; top:number; width:number} | null>(null);
 
   const current = options.find(o => o.value === value) || null;
-  const filtered = useMemo(() => {
+  const filtered = React.useMemo(() => {
     const q = query.trim().toLowerCase();
     return q ? options.filter(o => o.label.toLowerCase().includes(q)) : options;
   }, [options, query, value]);
@@ -226,7 +229,7 @@ function StyledSelect({
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
-   AUDIO POLISH — add subtle envelope + optional breath (no logic changes)
+   AUDIO POLISH (gentle phone filter + envelope)
 ────────────────────────────────────────────────────────────────────────── */
 function createSaturator(ac: AudioContext, drive=1.05){
   const sh=ac.createWaveShaper(); const curve=new Float32Array(1024);
@@ -245,25 +248,6 @@ function createAmbience(ac: AudioContext, kind:'kitchen'|'cafe', level=0.08){
   src.start();
   return ()=>{ try{src.stop()}catch{}; [src,band,hp,g].forEach(n=>{try{(n as any).disconnect()}catch{}}); };
 }
-function createBreather(ac: AudioContext, level=0.08){
-  const noise = ac.createBufferSource();
-  const len = ac.sampleRate * 2;
-  const buf = ac.createBuffer(1, len, ac.sampleRate);
-  const d = buf.getChannelData(0);
-  let prev=0;
-  for (let i=0;i<len;i++){ const w=Math.random()*2-1; prev=prev*0.98 + w*0.02; d[i]=prev; }
-  noise.buffer = buf; noise.loop = true;
-  const bp = ac.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=380; bp.Q.value=0.6;
-  const hp = ac.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=140;
-  const gain = ac.createGain(); gain.gain.value = clamp01(level) * 0.10;
-  const lfo = ac.createOscillator(); lfo.frequency.value = 0.22;
-  const lfoGain = ac.createGain(); lfoGain.gain.value = clamp01(level) * 0.10;
-  lfo.connect(lfoGain); lfoGain.connect(gain.gain);
-  noise.connect(bp); bp.connect(hp); hp.connect(gain);
-  noise.start(); lfo.start();
-  return { node: gain, stop: ()=>{ try{noise.stop()}catch{}; try{lfo.stop()}catch{}; [bp,hp,lfoGain,noise,gain].forEach(n=>{try{(n as any).disconnect()}catch{}}); } };
-}
-
 async function attachProcessedAudio(
   audioEl:HTMLAudioElement,
   remote:MediaStream,
@@ -271,13 +255,10 @@ async function attachProcessedAudio(
 ){
   const { phoneFilter, ambience, ambienceLevel } = opts;
 
-  // Early attach (prevents "site crash" from unmet autoplay)
-  (audioEl as any).srcObject = remote;
-  await audioEl.play().catch(()=>{});
+  // Early attach to avoid autoplay crash
+  (audioEl as any).srcObject=remote; await audioEl.play().catch(()=>{});
 
-  if(!phoneFilter){
-    return ()=>{};
-  }
+  if(!phoneFilter) return ()=>{};
 
   const AC=(window.AudioContext||(window as any).webkitAudioContext); const ac=new AC();
   const src=ac.createMediaStreamSource(remote);
@@ -290,7 +271,7 @@ async function attachProcessedAudio(
   const comp=ac.createDynamicsCompressor();
   comp.threshold.value=-22; comp.knee.value=18; comp.ratio.value=1.6; comp.attack.value=0.01; comp.release.value=0.18;
 
-  // Envelope + breathing (subtle, non-invasive)
+  // Envelope: light fade on/off around phrase edges
   const master = ac.createGain(); master.gain.value = 0.9;
   const analyser = ac.createAnalyser(); analyser.fftSize = 512; analyser.smoothingTimeConstant = 0.88;
 
@@ -301,34 +282,25 @@ async function attachProcessedAudio(
   comp.connect(dry); dry.connect(merge);
   merge.connect(master); master.connect(analyser); analyser.connect(dest);
 
-  // Replace audio element with processed output
-  (audioEl as any).srcObject = dest.stream;
+  (audioEl as any).srcObject=dest.stream;
   await audioEl.play().catch(()=>{});
 
-  // Light ambience (optional)
-  let ambClean: null | (()=>void) = null;
-  if(ambience!=='off') ambClean = createAmbience(ac, ambience, ambienceLevel);
+  // ambience (optional)
+  let ambClean:null|(()=>void)=null; if(ambience!=='off') ambClean=createAmbience(ac,ambience,ambienceLevel);
 
-  // Envelope: fade in/out on phrase boundaries
   const buf = new Uint8Array(analyser.frequencyBinCount);
   let speaking=false; let lastEnergy=0; let lastAbove=performance.now();
   const base = 0.9, minFloor = 0.16;
   const tick = ()=>{
     analyser.getByteFrequencyData(buf);
     const energy = buf.reduce((s,v)=>s+v,0)/(buf.length*255);
-    const now = ac.currentTime;
-    const ms = performance.now();
+    const now = ac.currentTime; const ms = performance.now();
     if (energy > 0.06 && lastEnergy <= 0.06){
-      speaking=true;
-      master.gain.cancelScheduledValues(now);
-      master.gain.setTargetAtTime(base, now, 0.16);
-      lastAbove = ms;
-    } else if (energy > 0.06){
-      lastAbove = ms;
-    }
+      speaking=true; master.gain.cancelScheduledValues(now);
+      master.gain.setTargetAtTime(base, now, 0.16); lastAbove = ms;
+    } else if (energy > 0.06){ lastAbove = ms; }
     if (speaking && ms - lastAbove > 320){
-      speaking=false;
-      master.gain.cancelScheduledValues(now);
+      speaking=false; master.gain.cancelScheduledValues(now);
       master.gain.setTargetAtTime(minFloor, now, 0.20);
     }
     lastEnergy = energy;
@@ -336,42 +308,26 @@ async function attachProcessedAudio(
   };
   requestAnimationFrame(tick);
 
-  return ()=>{ try{ambClean && ambClean();}catch{}; [src,hp,lp,presence,body,sat,comp,merge,master,analyser,dry].forEach(n=>{try{(n as any).disconnect()}catch{}}); try{ac.close()}catch{}; };
+  return ()=>{ [src,hp,lp,presence,body,sat,comp,merge,master,analyser,dry].forEach(n=>{try{(n as any).disconnect()}catch{}}); try{ambClean&&ambClean()}catch{}; try{ac.close()}catch{}; };
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
-   PERSISTENCE — save every call to *scoped storage* (account-wide)
+   SCOPED STORAGE (no device/local fallback per your request)
 ────────────────────────────────────────────────────────────────────────── */
 function makeScopedAdapter(scoped?: ScopedLike){
-  // Priority: explicit prop -> window.scopedStorage -> localStorage (dev)
-  const winAny: any = (typeof window !== 'undefined') ? window : {};
-  const globalScoped = winAny.scopedStorage;
-  const client = scoped || globalScoped;
-
-  const get = async (key:string) => {
-    try{
-      if (client?.get) return await client.get(key);
-      const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : null;
-    }catch{ return null; }
-  };
-  const set = async (key:string, value:any) => {
-    try{
-      if (client?.set) return await client.set(key, value);
-      localStorage.setItem(key, JSON.stringify(value));
-    }catch{}
-  };
+  const client = scoped || (typeof window!=='undefined' ? (window as any).scopedStorage : undefined);
+  const get = async (key:string) => { if(!client) return null; return client.get(key); };
+  const set = async (key:string, value:any) => { if(!client) return; return client.set(key,value); };
   const merge = async (key:string, patch:any) => {
-    try{
-      if (client?.merge) return await client.merge(key, patch);
-      const cur = await get(key) || {};
-      await set(key, { ...cur, ...patch });
-    }catch{}
+    if(!client) return;
+    if (client.merge) return client.merge(key, patch);
+    const cur = await client.get(key); await client.set(key, { ...(cur||{}), ...patch });
   };
-  return { get, set, merge };
+  return { get, set, merge, hasClient: !!client };
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
-   COMPONENT  — AI logic preserved; panel + transcript + persistence added
+   COMPONENT — AI logic untouched; no transcript UI; save to scoped storage
 ────────────────────────────────────────────────────────────────────────── */
 export default function WebCallButton({
   className,
@@ -385,7 +341,7 @@ export default function WebCallButton({
   onError,
   firstMode='User speaks first',
   firstMsg='Hello.',
-  greetMode='server',
+  greetMode='off',                    // force OFF so it never starts with "ola"
   languageHint='auto',
   prosody,
   phoneFilter=false,
@@ -401,27 +357,20 @@ export default function WebCallButton({
   const [muted,setMuted]=useState(false);
   const [error,setError]=useState<string>('');
 
-  // voice list (unchanged)
+  // voices (unchanged)
   const [voices,setVoices]=useState<string[]>([]);
   const [selectedVoice,setSelectedVoice]=useState<string>('');
   const voiceId = useMemo(()=> resolveVoiceId(selectedVoice || voiceName), [selectedVoice, voiceName]);
 
+  // internal transcript (NOT rendered)
   const [log,setLog]=useState<TranscriptRow[]>([]);
-  const logRef=useRef<TranscriptRow[]>([]);
-  useEffect(()=>{ logRef.current=log; },[log]);
-
   const audioRef=useRef<HTMLAudioElement|null>(null);
   const pcRef=useRef<RTCPeerConnection|null>(null);
   const micStreamRef=useRef<MediaStream|null>(null);
   const dcRef=useRef<RTCDataChannel|null>(null);
-
   const closeChainRef=useRef<null|(()=>void)>(null);
   const vadLoopRef=useRef<number|null>(null);
-  const baseInstructionsRef=useRef<string>('');
-  const scrollerRef=useRef<HTMLDivElement|null>(null);
-  const sawAssistantDeltaRef=useRef<boolean>(false);
 
-  // persistence per-call
   const scopedStore = useMemo(()=> makeScopedAdapter(scoped), [scoped]);
   const STORE_KEY = `calls:${accountId}:${agentId}`;
   const callRef = useRef<{ id:string; startedAt:number; endedAt?:number; transcript: TranscriptRow[] }>({
@@ -430,9 +379,7 @@ export default function WebCallButton({
     transcript: []
   });
 
-  useEffect(()=>{ const el=scrollerRef.current; if(!el) return; el.scrollTop=el.scrollHeight; },[log,connecting,connected]);
-
-  // voices fetch (unchanged behavior)
+  // voices list
   useEffect(()=>{
     let cancelled=false;
     const fallback = Array.from(new Set([voiceName,...DEFAULT_VOICES].filter(Boolean))) as string[];
@@ -454,19 +401,15 @@ export default function WebCallButton({
   const upsert=(id:string, who:TranscriptRow['who'], patch:Partial<TranscriptRow>|((p?:TranscriptRow)=>Partial<TranscriptRow>))=>{
     setLog(prev=>{
       const i=prev.findIndex(r=>r.id===id);
-      if(i===-1){
-        const base:TranscriptRow={ id, who, text:'', at:Date.now(), done:false };
-        const p=typeof patch==='function' ? (patch as any)(undefined) : patch;
-        const nextRow={...base,...p};
-        const next=[...prev,nextRow];
-        // persist partials lightly (only every few chars)
-        if (nextRow.done || (nextRow.text && nextRow.text.length%48===0)) persistTranscript(next);
-        return next;
-      }
-      const next=[...prev];
-      const p=typeof patch==='function' ? (patch as any)(next[i]):patch;
-      next[i]={...next[i],...p};
-      if (next[i].done || (next[i].text && next[i].text.length%48===0)) persistTranscript(next);
+      const nowRow = (base?:TranscriptRow)=> {
+        const src = base || { id, who, text:'', at:Date.now(), done:false };
+        const p=typeof patch==='function' ? (patch as any)(base) : patch;
+        return { ...src, ...p };
+      };
+      let next:TranscriptRow[];
+      if(i===-1){ next=[...prev, nowRow()]; }
+      else { next=[...prev]; next[i]=nowRow(next[i]); }
+      persistTranscript(next);
       return next;
     });
   };
@@ -476,12 +419,8 @@ export default function WebCallButton({
     setLog(prev=>{ const next=[...prev,row]; persistTranscript(next); return next; });
   };
 
-  const safeSend=(dc:RTCDataChannel|null, payload:any)=>{
-    if(!dc||dc.readyState!=='open') return; try{ dc.send(JSON.stringify(payload)); }catch{}
-  };
-
-  // Save transcript to scoped storage (append under account+agent)
   async function persistTranscript(rows: TranscriptRow[]){
+    if (!scopedStore.hasClient) return; // do nothing if no scoped client
     callRef.current.transcript = rows;
     try{
       const list = (await scopedStore.get(STORE_KEY)) || [];
@@ -489,10 +428,10 @@ export default function WebCallButton({
       if (idx === -1) list.push(callRef.current);
       else list[idx] = callRef.current;
       await scopedStore.set(STORE_KEY, list);
-    }catch{/* ignore */}
+    }catch{}
   }
 
-  // minimal output ducking while you speak (unchanged)
+  // VAD ducking (no change)
   async function setupVAD(){
     try{
       const mic=micStreamRef.current; if(!mic) return;
@@ -511,10 +450,7 @@ export default function WebCallButton({
   }
 
   /* ────────────────────────────────────────────────────────────────────────
-     START CALL — same logic, tiny additions:
-     - remove languageNudge (so systemPrompt rules language)
-     - longer server VAD pause
-     - pre-speech delay in instructions hint (soft)
+     START CALL (kept your logic; removed client greeting)
   ──────────────────────────────────────────────────────────────────────── */
   async function startCall(){
     setError('');
@@ -548,70 +484,47 @@ export default function WebCallButton({
           phoneFilter: !!usePhone, farMic, ambience, ambienceLevel
         });
       };
-      pc.addTrack(mic.getAudioTracks()[0], mic);
+      const sendTrack=mic.getAudioTracks()[0];
+      pc.addTrack(sendTrack, mic);
       pc.addTransceiver('audio',{ direction:'recvonly' });
 
-      // 4) data channel (unchanged)
+      // 4) data channel
       const dc=pc.createDataChannel('oai-events'); dcRef.current=dc;
 
       dc.onopen=()=>{
-        // Build instructions from your systemPrompt only
+        // Use your systemPrompt only; add tiny human timing hints that don’t change logic
         const style = [
           systemPrompt || '',
-          // soft human touches; these are stylistic and non-breaking
           'Before speaking, pause ~450ms as if thinking.',
           `Use gentle micro-pauses (~${prosody?.microPausesMs ?? 120}ms) within sentences.`,
           'Between sentences, breathe lightly and keep a natural pace.',
         ].filter(Boolean).join('\n\n');
-        baseInstructionsRef.current = style;
 
-        // session config (same, but with longer turn_end silence)
-        safeSend(dc,{ type:'session.update', session:{
-          instructions: baseInstructionsRef.current,
+        // session config (unchanged modalities; longer VAD stop so it waits a bit)
+        dc.send(JSON.stringify({ type:'session.update', session:{
+          instructions: style,
           voice: voiceId,
           input_audio_format:'pcm16',
           output_audio_format:'pcm16',
           modalities:['audio','text'],
-          // Let the server wait longer before it replies (less barge-in)
           turn_detection:{
             type:'server_vad',
             threshold:0.5,
             prefix_silence_ms: 100,
-            silence_duration_ms: Math.max(900, prosody?.turnEndPauseMs ?? 1600), // ← longer pause by default
+            silence_duration_ms: Math.max(900, prosody?.turnEndPauseMs ?? 1600),
           },
-        }});
+        }}));
 
-        // ——— Greeting logic (kept as-is) ———
-        const wantClientGreeting =
-          greetMode==='client' ||
-          (greetMode==='server' && firstMode==='Assistant speaks first');
-
-        if (wantClientGreeting) {
-          const greet = () => {
-            const lines=(firstMsg||'Hello.').split(/\r?\n|\|/g).map(s=>s.trim()).filter(Boolean).slice(0,6);
-            for(const ln of lines){
-              safeSend(dc,{ type:'response.create', response:{ modalities:['audio','text'], instructions: ln }});
-            }
-          };
-
-          if (greetMode==='client') {
-            greet();
-          } else {
-            setTimeout(()=>{
-              if (!sawAssistantDeltaRef.current) greet();
-            }, 1200);
-          }
-        }
+        // NO CLIENT GREETING — prevents “ola” or any auto-start
       };
 
-      // 5) events — EXACTLY your logic; plus persistence
+      // 5) events — capture to scoped storage only (no on-screen transcript)
       dc.onmessage=(ev)=>{
         try{
           const msg=JSON.parse(ev.data); const t=msg?.type as string;
 
           // assistant stream
           if(t==='response.output_text.delta'){
-            sawAssistantDeltaRef.current = true;
             const id=msg?.response_id||msg?.id||'assistant_current';
             const delta=String(msg?.delta||'');
             upsert(id,'assistant',(prev)=>({ text:(prev?.text||'')+delta }));
@@ -621,8 +534,9 @@ export default function WebCallButton({
             upsert(id,'assistant',{ done:true });
           }
           if(t==='response.output_text' && typeof msg?.text==='string'){
-            sawAssistantDeltaRef.current = true;
-            addLine('assistant', msg.text);
+            const text=String(msg.text||'');
+            const id=`assistant_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
+            upsert(id,'assistant',{ text, done:true, at:Date.now() } as any);
           }
 
           // user transcript
@@ -636,7 +550,8 @@ export default function WebCallButton({
             upsert(id,'user',{ done:true });
           }
           if(t==='input_audio_buffer.transcript' && typeof msg?.text==='string'){
-            addLine('user', msg.text);
+            const id=`user_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
+            upsert(id,'user',{ text:String(msg.text||''), done:true, at:Date.now() } as any);
           }
         }catch{}
       };
@@ -687,9 +602,10 @@ export default function WebCallButton({
     try{ closeChainRef.current && closeChainRef.current(); }catch{}
     closeChainRef.current = null;
 
-    // finalize and persist call end
+    // persist call end
     (async()=>{
       try{
+        if (!scopedStore.hasClient) return;
         callRef.current.endedAt = Date.now();
         const list = (await scopedStore.get(STORE_KEY)) || [];
         const idx = list.findIndex((c:any)=>c?.id===callRef.current.id);
@@ -705,7 +621,7 @@ export default function WebCallButton({
   },[voiceId]);
 
   /* ────────────────────────────────────────────────────────────────────────
-     UI — full-height slide-over panel (top → bottom)
+     UI — full-height slide-over (NO transcript list)
   ───────────────────────────────────────────────────────────────────────── */
   const header = (
     <div className="va-head" style={{ zIndex: 100011 }}>
@@ -721,7 +637,6 @@ export default function WebCallButton({
       </div>
 
       <div className="ml-auto flex items-center gap-2">
-        {/* Voice dropdown left in (your logic chooses actual voice id) */}
         <div style={{ width: 180 }}>
           <StyledSelect
             value={voiceId}
@@ -758,57 +673,19 @@ export default function WebCallButton({
   const body = (
     <div className="p-4" style={{ color:'var(--text)', background:'var(--panel-bg)' }}>
       <div className="text-xs pb-2 mb-3 border-b" style={{ borderColor:'rgba(255,255,255,.10)', color:'var(--text-muted)' }}>
-        Transcript
+        Status
       </div>
 
-      <div ref={scrollerRef} className="space-y-3 overflow-y-auto" style={{ maxHeight:'calc(100vh - 72px - 52px - 84px)', scrollbarWidth:'thin' }}>
-        {log.length===0 && (
-          <div
-            className="text-sm rounded-[8px] px-3 py-2 border"
-            style={{ color:'var(--text-muted)', background:'var(--panel)', borderColor:'rgba(255,255,255,.10)' }}
-          >
-            {connecting ? 'Connecting to voice…' :
-             firstMode==='Assistant speaks first' ? 'Assistant will greet you shortly…' : 'Say something to start — your words will appear here.'}
-          </div>
-        )}
-
-        {log.map(row=>(
-          row.text?.trim().length ? (
-            <div key={row.id} className={`flex ${row.who==='user' ? 'justify-end' : 'justify-start'}`}>
-              {row.who==='assistant' && (
-                <div className="mr-2 mt-[2px] shrink-0 rounded-[8px] w-8 h-8 grid place-items-center"
-                    style={{ background:'rgba(89,217,179,.12)', border:'1px solid rgba(89,217,179,.25)' }}>
-                  <Bot className="w-4 h-4" style={{ color: CTA }} />
-                </div>
-              )}
-
-              <div
-                className="max-w-[78%] rounded-[12px] px-3 py-2 text-[0.95rem] leading-snug border transition"
-                style={{
-                  background: row.who==='user' ? 'rgba(56,196,143,.26)' : 'rgba(255,255,255,.10)',
-                  borderColor: row.who==='user' ? 'rgba(56,196,143,.42)' : 'rgba(255,255,255,.18)',
-                }}
-              >
-                <div>{row.text}</div>
-                <div className="text-[10px] mt-1 opacity-60 text-right">{fmtTime(row.at)}</div>
-              </div>
-
-              {row.who==='user' && (
-                <div className="ml-2 mt-[2px] shrink-0 rounded-[8px] w-8 h-8 grid place-items-center"
-                    style={{ background:'rgba(255,255,255,.10)', border:'1px solid rgba(255,255,255,.18)' }}>
-                  <User className="w-4 h-4" />
-                </div>
-              )}
-            </div>
-          ) : null
-        ))}
-
-        {error && (
-          <div className="text-xs px-3 py-2 rounded-[8px] border"
-               style={{ background:'rgba(239,68,68,.12)', borderColor:'rgba(239,68,68,.25)', color:'#ffd7d7' }}>
-            {error}
-          </div>
-        )}
+      <div className="space-y-3">
+        <div
+          className="text-sm rounded-[8px] px-3 py-2 border"
+          style={{ color:'var(--text-muted)', background:'var(--panel)', borderColor:'rgba(255,255,255,.10)' }}
+        >
+          {error
+            ? <span style={{ color:'#ffd7d7' }}>{error}</span>
+            : (connecting ? 'Connecting to voice…' : (connected ? 'Connected. Speak when ready.' : 'Idle.'))
+          }
+        </div>
       </div>
     </div>
   );
@@ -822,7 +699,6 @@ export default function WebCallButton({
             {connected ? 'Connected' : (connecting ? 'Connecting…' : 'Idle')}
           </span>
         </div>
-
         <div className="col-span-1 sm:col-span-2 flex justify-end">
           <audio ref={audioRef} autoPlay playsInline />
         </div>
