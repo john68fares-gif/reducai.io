@@ -97,6 +97,32 @@ function buildFinalPrompt() {
     .trim();
 }
 
+/* Robust JSON helpers */
+async function safeJson<T = any>(resp: Response): Promise<{ ok: boolean; json?: T; text?: string }> {
+  const ct = resp.headers.get('content-type') || '';
+  const body = await resp.text(); // read once
+  if (ct.includes('application/json')) {
+    try {
+      const json = body ? JSON.parse(body) : {};
+      return { ok: resp.ok, json };
+    } catch {
+      // fall through to text pathway with explicit flag
+      return { ok: resp.ok, text: body };
+    }
+  }
+  return { ok: resp.ok, text: body };
+}
+
+function explainHttp(label: string, pack: { ok: boolean; json?: any; text?: string; status?: number }) {
+  const code = pack.status ? ` (HTTP ${pack.status})` : '';
+  if (pack.ok) return '';
+  const serverMsg =
+    (pack.json && (pack.json.error || pack.json.message)) ||
+    (pack.text && pack.text.slice(0, 600)) ||
+    'No response body';
+  return `${label}${code}: ${serverMsg}`;
+}
+
 /* ───────────────────────────── Component ───────────────────────────── */
 
 export default function Step4Overview({ onBack, onFinish }: Props) {
@@ -175,7 +201,7 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
       await ss.setJSON('chatbots.v1', list);
     } catch {}
 
-    // Local
+    // Local (legacy mirror)
     try {
       const local = getLS<any[]>('chatbots', []);
       const list = Array.isArray(local) ? local : [];
@@ -207,8 +233,17 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
         apiKeyPlain = sel?.key || '';
       } catch {}
 
-      // 2) create assistant via server route
-      const resp = await fetch('/api/assistants/create', {
+      if (!apiKeyPlain) {
+        throw new Error('No API key value found for the selected key. Re-select your API key in Step 2.');
+      }
+
+      if (!finalPrompt || finalPrompt.trim().length === 0) {
+        throw new Error('Final prompt is empty. Please fill the description/rules/flow in previous steps.');
+      }
+
+      // 2) create assistant via server route (robust JSON handling)
+      setLoadingMsg('Creating assistant on OpenAI…');
+      const createResp = await fetch('/api/assistants/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -219,18 +254,25 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
         }),
       });
 
-      const data = await resp.json();
-      if (!resp.ok || !data?.ok || !data?.assistant?.id) {
-        throw new Error(data?.error || 'Failed to create assistant');
+      const createPack = await safeJson(createResp);
+      (createPack as any).status = createResp.status;
+
+      if (!createPack.ok) {
+        throw new Error(explainHttp('Assistant create failed', createPack));
       }
-      const assistantId = data.assistant.id as string;
+
+      const assistantId: string | undefined = createPack.json?.assistant?.id;
+      if (!assistantId) {
+        throw new Error('Assistant created but no ID returned from server.');
+      }
 
       // 3) current user id
       const { data: u } = await supabase.auth.getUser();
       const userId = u?.user?.id;
       if (!userId) throw new Error('No Supabase user session');
 
-      // 4) persist to Supabase through API
+      // 4) persist to Supabase through API (robust JSON)
+      setLoadingMsg('Saving build to your account…');
       const saveRes = await fetch('/api/chatbots/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -245,12 +287,15 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
           appearance: null,
         }),
       });
-      const saveJson = await saveRes.json();
-      if (!saveRes.ok || !saveJson?.ok) {
-        throw new Error(saveJson?.error || 'Saved to OpenAI but failed to store build');
+      const savePack = await safeJson(saveRes);
+      (savePack as any).status = saveRes.status;
+
+      if (!savePack.ok || (savePack.json && savePack.json.ok === false)) {
+        throw new Error(explainHttp('Save build failed', savePack) || 'Saved to OpenAI, but storing the build failed.');
       }
 
       // 5) mirror to cloud + local
+      const nowISO = new Date().toISOString();
       const build = {
         id: assistantId,
         assistantId,
@@ -260,8 +305,8 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
         language: st(s1?.language, 'English'),
         model: selectedModel,
         prompt: finalPrompt,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        createdAt: nowISO,
+        updatedAt: nowISO,
       };
       await saveBuildEverywhere(build);
 
@@ -272,7 +317,11 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
       onFinish?.();
     } catch (e: any) {
       setLoading(false);
-      alert(e?.message || 'Failed to generate the AI.');
+      // Better surfaced error
+      const msg = e?.message || 'Failed to generate the AI.';
+      // Optional: persist last error to help debugging
+      try { localStorage.setItem('builder:lastError', msg); } catch {}
+      alert(msg);
     }
   }
 
