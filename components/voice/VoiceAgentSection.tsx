@@ -11,12 +11,12 @@ import {
 import { scopedStorage } from '@/utils/scoped-storage';
 import WebCallButton from '@/components/voice/WebCallButton';
 
-// ✅ ephemeral route
+// Ephemeral route
 const EPHEMERAL_TOKEN_ENDPOINT = '/api/voice/ephemeral';
 
 const ACTIVE_KEY = 'va:activeId';
 const Z_OVERLAY = 100000;
-const Z_MODAL   = 100001;
+const Z_MODAL = 100001;
 const IS_CLIENT = typeof window !== 'undefined' && typeof document !== 'undefined';
 
 /* ───────────────── Assistant rail (fixed) ───────────────── */
@@ -30,10 +30,10 @@ const AssistantRail = dynamic(
   { ssr: false, loading: () => <div className="px-3 py-3 text-xs opacity-70">Loading…</div> }
 );
 
-class RailBoundary extends React.Component<{children:React.ReactNode},{hasError:boolean}> {
-  constructor(p:any){ super(p); this.state={hasError:false}; }
-  static getDerivedStateFromError(){ return {hasError:true}; }
-  render(){ return this.state.hasError ? <div className="px-3 py-3 text-xs opacity-70">Rail crashed</div> : this.props.children; }
+class RailBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean }> {
+  constructor(p: any) { super(p); this.state = { hasError: false }; }
+  static getDerivedStateFromError() { return { hasError: true }; }
+  render() { return this.state.hasError ? <div className="px-3 py-3 text-xs opacity-70">Rail crashed</div> : this.props.children; }
 }
 
 /* ─────────── tiny helpers ─────────── */
@@ -42,7 +42,7 @@ const isStr = (v: any): v is string => typeof v === 'string';
 const nonEmpty = (v: any): v is string => isStr(v) && v.trim().length > 0;
 const coerceStr = (v: any): string => (isStr(v) ? v : '');
 const safeTrim = (v: any): string => (nonEmpty(v) ? v.trim() : '');
-const sleep = (ms:number) => new Promise(r=>setTimeout(r,ms));
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 /* ─────────── shared tokens to MATCH Account page ─────────── */
 const Tokens = () => (
@@ -112,14 +112,14 @@ type AgentData = {
   firstMode: string;
   firstMsg: string;
   firstMsgs?: string[];
-  greetPick?: 'sequence'|'random';
+  greetPick?: 'sequence' | 'random';
 
   systemPrompt: string;
   systemPromptBackend?: string;
   language?: string;
 
   contextText?: string;
-  ctxFiles?: { name:string; text:string }[];
+  ctxFiles?: { name: string; text: string }[];
 
   ttsProvider: 'openai' | 'elevenlabs';
   voiceName: string;
@@ -133,7 +133,7 @@ type AgentData = {
 };
 
 const PROMPT_SKELETON =
-`[Identity]
+  `[Identity]
 
 [Style]
 
@@ -211,20 +211,22 @@ function migrateAgent(d: AgentData): AgentData {
 const loadAgentData = (id: string): AgentData => {
   try {
     const raw = IS_CLIENT ? localStorage.getItem(keyFor(id)) : null;
-    if (raw) return migrateAgent({ ...DEFAULT_AGENT, ...(JSON.parse(raw)||{}) });
-  } catch {}
+    if (raw) return migrateAgent({ ...DEFAULT_AGENT, ...(JSON.parse(raw) || {}) });
+  } catch { }
   return migrateAgent({ ...DEFAULT_AGENT });
 };
-const saveAgentData = (id: string, data: AgentData) => { try { if (IS_CLIENT) localStorage.setItem(keyFor(id), JSON.stringify(data)); } catch {} };
+const saveAgentData = (id: string, data: AgentData) => { try { if (IS_CLIENT) localStorage.setItem(keyFor(id), JSON.stringify(data)); } catch { } };
 
 /* ─────────── mock backend (save/publish) ─────────── */
-async function apiSave(agentId: string, payload: AgentData){
-  const r = await fetch(`/api/voice/agent/${agentId}/save`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).catch(()=>null as any);
+async function apiSave(agentId: string, payload: AgentData) {
+  const r = await fetch(`/api/voice/agent/${agentId}/save`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+  }).catch(() => null as any);
   if (!r?.ok) throw new Error('Save failed');
   return r.json();
 }
-async function apiPublish(agentId: string){
-  const r = await fetch(`/api/voice/agent/${agentId}/publish`, { method: 'POST' }).catch(()=>null as any);
+async function apiPublish(agentId: string) {
+  const r = await fetch(`/api/voice/agent/${agentId}/publish`, { method: 'POST' }).catch(() => null as any);
   if (!r?.ok) throw new Error('Publish failed');
   return r.json();
 }
@@ -233,12 +235,12 @@ async function apiPublish(agentId: string){
 type Opt = { value: string; label: string; disabled?: boolean; note?: string; iconLeft?: React.ReactNode };
 
 const providerOpts: Opt[] = [
-  { value: 'openai',     label: 'OpenAI' },
-  { value: 'anthropic',  label: 'Anthropic — coming soon', disabled: true, note: 'soon' },
-  { value: 'google',     label: 'Google — coming soon',    disabled: true, note: 'soon' },
+  { value: 'openai', label: 'OpenAI' },
+  { value: 'anthropic', label: 'Anthropic — coming soon', disabled: true, note: 'soon' },
+  { value: 'google', label: 'Google — coming soon', disabled: true, note: 'soon' },
 ];
 
-function useOpenAIModels(selectedKey: string|undefined){
+function useOpenAIModels(selectedKey: string | undefined) {
   const [opts, setOpts] = useState<Opt[]>([
     { value: 'gpt-5', label: 'GPT-5' },
     { value: 'gpt-5-mini', label: 'GPT-5 Mini' },
@@ -259,12 +261,14 @@ function useOpenAIModels(selectedKey: string|undefined){
       if (!selectedKey) return;
       setLoading(true);
       try {
-        const r = await fetch('/api/openai/models', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: selectedKey }) });
+        const r = await fetch('/api/openai/models', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: selectedKey })
+        });
         if (!r.ok) throw new Error(await r.text());
         const j = await r.json();
         const models = Array.isArray(j?.models) ? j.models : [];
-        if (!aborted && models.length) setOpts(models.map((m:any) => ({ value: String(m.value), label: String(m.label) })));
-      } catch {} finally { if (!aborted) setLoading(false); }
+        if (!aborted && models.length) setOpts(models.map((m: any) => ({ value: String(m.value), label: String(m.label) })));
+      } catch { } finally { if (!aborted) setLoading(false); }
     })();
     return () => { aborted = true; };
   }, [selectedKey]);
@@ -278,8 +282,8 @@ const ttsProviders: Opt[] = [
 ];
 
 const asrProviders: Opt[] = [
-  { value: 'deepgram',   label: 'Deepgram' },
-  { value: 'whisper',    label: 'Whisper — coming soon', disabled: true, note: 'soon' },
+  { value: 'deepgram', label: 'Deepgram' },
+  { value: 'whisper', label: 'Whisper — coming soon', disabled: true, note: 'soon' },
   { value: 'assemblyai', label: 'AssemblyAI — coming soon', disabled: true, note: 'soon' },
 ];
 
@@ -289,22 +293,22 @@ const asrModelsFor = (asr: string): Opt[] =>
     : [{ value: 'coming', label: 'Models coming soon', disabled: true }];
 
 /* ─────────── UI atoms (styled to match Account) ─────────── */
-const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}) => (
+const Toggle = ({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) => (
   <button
-    onClick={()=>onChange(!checked)}
+    onClick={() => onChange(!checked)}
     className="inline-flex items-center"
     style={{
-      height:26, width:46, padding:'0 6px', borderRadius:999, justifyContent:'flex-start',
+      height: 26, width: 46, padding: '0 6px', borderRadius: 999, justifyContent: 'flex-start',
       background: checked ? 'color-mix(in oklab, var(--brand) 18%, var(--panel))' : 'var(--panel)',
-      border:'1px solid var(--border)', boxShadow:'var(--shadow-card)'
+      border: '1px solid var(--border)', boxShadow: 'var(--shadow-card)'
     }}
     aria-pressed={checked}
   >
     <span
       style={{
-        width:16, height:16, borderRadius:999,
+        width: 16, height: 16, borderRadius: 999,
         background: checked ? 'var(--brand)' : 'rgba(255,255,255,.12)',
-        transform:`translateX(${checked?20:0}px)`, transition:'transform .18s var(--ease)'
+        transform: `translateX(${checked ? 20 : 0}px)`, transition: 'transform .18s var(--ease)'
       }}
     />
   </button>
@@ -312,17 +316,17 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
 
 function StyledSelect({
   value, onChange, options, placeholder, leftIcon, menuTop
-}:{
+}: {
   value: string; onChange: (v: string) => void;
   options: Opt[]; placeholder?: string; leftIcon?: React.ReactNode; menuTop?: React.ReactNode;
 }) {
-  const wrapRef = useRef<HTMLDivElement|null>(null);
-  const btnRef = useRef<HTMLButtonElement|null>(null);
-  const menuRef = useRef<HTMLDivElement|null>(null);
-  const searchRef = useRef<HTMLInputElement|null>(null);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const btnRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const searchRef = useRef<HTMLInputElement | null>(null);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const [menuPos, setMenuPos] = useState<{left:number; top:number; width:number} | null>(null);
+  const [menuPos, setMenuPos] = useState<{ left: number; top: number; width: number } | null>(null);
 
   const current = options.find(o => o.value === value) || null;
   const filtered = useMemo(() => {
@@ -365,15 +369,15 @@ function StyledSelect({
       <button
         ref={btnRef}
         type="button"
-        onClick={() => { setOpen(v=>!v); setTimeout(()=>searchRef.current?.focus(),0); }}
+        onClick={() => { setOpen(v => !v); setTimeout(() => searchRef.current?.focus(), 0); }}
         className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-[8px] text-sm outline-none transition"
-        style={{ height:'var(--control-h)', background:'var(--panel)', border:'1px solid var(--border)', color:'var(--text)' }}
+        style={{ height: 'var(--control-h)', background: 'var(--panel)', border: '1px solid var(--border)', color: 'var(--text)' }}
       >
         <span className="flex items-center gap-2 truncate">
           {leftIcon}
           <span className="truncate">{current ? current.label : (placeholder || '— Choose —')}</span>
         </span>
-        <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)' }} />
+        <ChevronDown className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
       </button>
 
       {open && IS_CLIENT ? createPortal(
@@ -385,53 +389,62 @@ function StyledSelect({
             left: (menuPos?.left ?? 0),
             top: (menuPos?.top ?? 0),
             width: (menuPos?.width ?? (btnRef.current?.getBoundingClientRect().width ?? 280)),
-            background:'var(--panel)', border:'1px solid var(--border)',
-            borderRadius:10, boxShadow:'var(--shadow-card)'
+            background: 'var(--panel)', border: '1px solid var(--border)',
+            borderRadius: 10, boxShadow: 'var(--shadow-card)'
           }}
         >
           {menuTop ? <div className="mb-2">{menuTop}</div> : null}
 
           <div
             className="flex items-center gap-2 mb-2 px-2 py-1.5 rounded-[8px]"
-            style={{ background:'var(--panel)', border:'1px solid var(--border)', color:'var(--text)' }}
+            style={{ background: 'var(--panel)', border: '1px solid var(--border)', color: 'var(--text)' }}
           >
             <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
             <input
               ref={searchRef}
               value={query}
-              onChange={(e)=>setQuery(e.target.value)}
+              onChange={(e) => setQuery(e.target.value)}
               placeholder="Filter…"
               className="w-full bg-transparent outline-none text-sm"
-              style={{ color:'var(--text)' }}
+              style={{ color: 'var(--text)' }}
             />
           </div>
 
-          <div className="max-h-72 overflow-y-auto pr-1" style={{ scrollbarWidth:'thin' }}>
+          <div className="max-h-72 overflow-y-auto pr-1" style={{ scrollbarWidth: 'thin' }}>
             {filtered.map(o => (
               <button
                 key={o.value}
                 disabled={!!o.disabled}
-                onClick={()=>{ if (o.disabled) return; onChange(o.value); setOpen(false); }}
+                onClick={() => { if (o.disabled) return; onChange(o.value); setOpen(false); }}
                 className="w-full text-left text-sm px-2.5 py-2 rounded-[8px] transition grid grid-cols-[18px_1fr_auto] items-center gap-2 disabled:opacity-60"
                 style={{
                   color: o.disabled ? 'var(--text-muted)' : 'var(--text)',
-                  background:'transparent',
-                  border:'1px solid transparent',
-                  cursor:o.disabled?'not-allowed':'pointer',
+                  background: 'transparent',
+                  border: '1px solid transparent',
+                  cursor: o.disabled ? 'not-allowed' : 'pointer',
                 }}
-                onMouseEnter={(e)=>{ if (o.disabled) return; const el=e.currentTarget as HTMLButtonElement; el.style.background = 'color-mix(in oklab, var(--brand) 8%, transparent)'; el.style.border = '1px solid color-mix(in oklab, var(--brand) 35%, var(--border))'; }}
-                onMouseLeave={(e)=>{ const el=e.currentTarget as HTMLButtonElement; el.style.background = 'transparent'; el.style.border = '1px solid transparent'; }}
+                onMouseEnter={(e) => {
+                  if (o.disabled) return;
+                  const el = e.currentTarget as HTMLButtonElement;
+                  el.style.background = 'color-mix(in oklab, var(--brand) 8%, transparent)';
+                  el.style.border = '1px solid color-mix(in oklab, var(--brand) 35%, var(--border))';
+                }}
+                onMouseLeave={(e) => {
+                  const el = e.currentTarget as HTMLButtonElement;
+                  el.style.background = 'transparent';
+                  el.style.border = '1px solid transparent';
+                }}
               >
                 {o.disabled ? <Lock className="w-3.5 h-3.5" /> :
                   <span className="inline-flex items-center justify-center w-3.5 h-3.5">
-                    <Check className="w-3.5 h-3.5" style={{ opacity: o.value===value ? 1 : 0 }} />
+                    <Check className="w-3.5 h-3.5" style={{ opacity: o.value === value ? 1 : 0 }} />
                   </span>}
                 <span className="truncate">{o.label}</span>
                 <span />
               </button>
             ))}
-            {filtered.length===0 && (
-              <div className="px-3 py-6 text-sm" style={{ color:'var(--text-muted)' }}>No matches.</div>
+            {filtered.length === 0 && (
+              <div className="px-3 py-6 text-sm" style={{ color: 'var(--text-muted)' }}>No matches.</div>
             )}
           </div>
         </div>,
@@ -441,22 +454,22 @@ function StyledSelect({
   );
 }
 
-/* ─────────── File helpers (.docx via npm jszip; .doc best-effort; accept .docs) ─────────── */
+/* ─────────── File helpers (.docx/.docs via jszip npm; .doc best-effort) ─────────── */
 async function readFileAsText(f: File): Promise<string> {
   const name = f.name.toLowerCase();
 
-  // Peek magic bytes to detect zip
   const looksZip = async () => {
-    const buf = new Uint8Array(await f.slice(0,4).arrayBuffer());
-    return buf[0]===0x50 && buf[1]===0x4b; // "PK"
+    const buf = new Uint8Array(await f.slice(0, 4).arrayBuffer());
+    return buf[0] === 0x50 && buf[1] === 0x4b; // PK..
   };
 
-  // --- .docx / .docs (zip) ---
+  // Handle .docx / .docs (or anything that looks like a zip OOXML) with jszip NPM (no CDN)
   if (name.endsWith('.docx') || name.endsWith('.docs') || await looksZip()) {
     try {
-      // ✅ use npm package & lazy-import it at runtime (no CDN, no webpack error)
-      const mod = await import('jszip');
-      const JSZip = (mod as any)?.default || mod;
+      // IMPORTANT: uses npm package, not https: import
+      const mod: any = await import('jszip');
+      const JSZip = mod?.default || mod;
+      if (!JSZip) throw new Error('JSZip not loaded');
 
       const buf = await f.arrayBuffer();
       const zip = await JSZip.loadAsync(buf);
@@ -464,23 +477,22 @@ async function readFileAsText(f: File): Promise<string> {
       if (!docXml) return '';
 
       const text = docXml
-        .replace(/<w:p[^>]*>/g,'\n')
-        .replace(/<w:tab\/>/g,'\t')
-        .replace(/<w:br\/>/g,'\n')
-        .replace(/<(.|\n)*?>/g,'')
-        .replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>');
-
+        .replace(/<w:p[^>]*>/g, '\n')
+        .replace(/<w:tab\/>/g, '\t')
+        .replace(/<w:br\/>/g, '\n')
+        .replace(/<(.|\n)*?>/g, '')
+        .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
       return text.trim();
     } catch {
       return '';
     }
   }
 
-  // --- legacy .doc (best-effort) ---
+  // best-effort legacy .doc (scan ASCII runs)
   if (name.endsWith('.doc')) {
     try {
       const buf = new Uint8Array(await f.arrayBuffer());
-      let out = '', run:number[]=[];
+      let out = '', run: number[] = [];
       const flush = () => { if (run.length >= 3) out += String.fromCharCode(...run) + '\n'; run = []; };
       for (const b of buf) { if (b >= 32 && b <= 126) run.push(b); else flush(); }
       flush();
@@ -488,7 +500,7 @@ async function readFileAsText(f: File): Promise<string> {
     } catch { return ''; }
   }
 
-  // --- plain text types ---
+  // default: read as text
   return new Promise((res, rej) => {
     const r = new FileReader();
     r.onerror = () => rej(new Error('Read failed'));
@@ -502,9 +514,9 @@ export default function VoiceAgentSection() {
   /* align rail to app sidebar */
   useEffect(() => {
     if (!IS_CLIENT) return;
-    const candidates = ['[data-app-sidebar]','aside[aria-label="Sidebar"]','aside[class*="sidebar"]','#sidebar'];
+    const candidates = ['[data-app-sidebar]', 'aside[aria-label="Sidebar"]', 'aside[class*="sidebar"]', '#sidebar'];
     const el = document.querySelector<HTMLElement>(candidates.join(', '));
-    const setW = (w:number) => document.documentElement.style.setProperty('--app-sidebar-w', `${Math.round(w)}px`);
+    const setW = (w: number) => document.documentElement.style.setProperty('--app-sidebar-w', `${Math.round(w)}px`);
     if (!el) { setW(240); return; }
     setW(el.getBoundingClientRect().width);
     const ro = new ResizeObserver((entries) => {
@@ -523,11 +535,11 @@ export default function VoiceAgentSection() {
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [toast, setToast] = useState<string>('');
-  const [toastKind, setToastKind] = useState<'info'|'error'>('info');
+  const [toastKind, setToastKind] = useState<'info' | 'error'>('info');
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [showCall, setShowCall] = useState(false);
 
-  // Generate / type-into-prompt flow
+  // Generate flow
   const [showGenerate, setShowGenerate] = useState(false);
   const [composerText, setComposerText] = useState('');
 
@@ -544,7 +556,7 @@ export default function VoiceAgentSection() {
     (window.speechSynthesis as any).onvoiceschanged = load;
     return () => { (window.speechSynthesis as any).onvoiceschanged = null; };
   }, []);
-  function speakPreview(line?: string){
+  function speakPreview(line?: string) {
     if (!IS_CLIENT || !('speechSynthesis' in window)) return;
     const u = new SpeechSynthesisUtterance(line || `Hi, I'm ${data.name || 'your assistant'}. This is a preview.`);
     const byName = voices.find(v => v.name.toLowerCase().includes((data.voiceName || '').split(' ')[0]?.toLowerCase() || ''));
@@ -565,7 +577,7 @@ export default function VoiceAgentSection() {
   useEffect(() => {
     if (!activeId) return;
     setData(loadAgentData(activeId));
-    try { if (IS_CLIENT) localStorage.setItem(ACTIVE_KEY, activeId); } catch {}
+    try { if (IS_CLIENT) localStorage.setItem(ACTIVE_KEY, activeId); } catch { }
   }, [activeId]);
 
   useEffect(() => { if (activeId) saveAgentData(activeId, data); }, [activeId, data]);
@@ -579,7 +591,7 @@ export default function VoiceAgentSection() {
         if (!mounted) return;
         if (!store) { setApiKeys([]); return; }
 
-        store.ensureOwnerGuard?.().catch(() => {});
+        store.ensureOwnerGuard?.().catch(() => { });
 
         const v1 = await store.getJSON<ApiKey[]>('apiKeys.v1', []).catch(() => []);
         const legacy = await store.getJSON<ApiKey[]>('apiKeys', []).catch(() => []);
@@ -597,12 +609,12 @@ export default function VoiceAgentSection() {
         const globalSelected = await store.getJSON<string>('apiKeys.selectedId', '').catch(() => '');
         const chosen =
           (data.apiKeyId && cleaned.some((k) => k.id === data.apiKeyId)) ? data.apiKeyId! :
-          (globalSelected && cleaned.some((k) => k.id === globalSelected)) ? globalSelected :
-          (cleaned[0]?.id || '');
+            (globalSelected && cleaned.some((k) => k.id === globalSelected)) ? globalSelected :
+              (cleaned[0]?.id || '');
 
         if (chosen && chosen !== data.apiKeyId) {
           setData(prev => ({ ...prev, apiKeyId: chosen }));
-          await store.setJSON('apiKeys.selectedId', chosen).catch(() => {});
+          await store.setJSON('apiKeys.selectedId', chosen).catch(() => { });
         }
       } catch {
         if (!mounted) return;
@@ -618,8 +630,8 @@ export default function VoiceAgentSection() {
       setData(prev => {
         const next = { ...prev, [k]: v };
         if (k === 'name' && activeId) {
-          try { if (IS_CLIENT) localStorage.setItem(keyFor(activeId), JSON.stringify(next)); } catch {}
-          try { if (IS_CLIENT) window.dispatchEvent(new CustomEvent('assistant:update', { detail: { id: activeId, name: String(v) } })); } catch {}
+          try { if (IS_CLIENT) localStorage.setItem(keyFor(activeId), JSON.stringify(next)); } catch { }
+          try { if (IS_CLIENT) window.dispatchEvent(new CustomEvent('assistant:update', { detail: { id: activeId, name: String(v) } })); } catch { }
         }
         return next;
       });
@@ -634,23 +646,23 @@ export default function VoiceAgentSection() {
       if (compiled?.backendString && compiled.backendString !== data.systemPromptBackend) {
         setData(p => ({ ...p, systemPromptBackend: compiled.backendString }));
       }
-    } catch {}
+    } catch { }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data.systemPrompt]);
 
-  async function doSave(){
+  async function doSave() {
     if (!activeId) { setToastKind('error'); setToast('Select or create an agent'); return; }
     setSaving(true); setToast('');
     try { await apiSave(activeId, data); setToastKind('info'); setToast('Saved'); }
     catch { setToastKind('error'); setToast('Save failed'); }
-    finally { setSaving(false); setTimeout(()=>setToast(''), 1400); }
+    finally { setSaving(false); setTimeout(() => setToast(''), 1400); }
   }
-  async function doPublish(){
+  async function doPublish() {
     if (!activeId) { setToastKind('error'); setToast('Select or create an agent'); return; }
     setPublishing(true); setToast('');
     try { await apiPublish(activeId); setToastKind('info'); setToast('Published'); }
     catch { setToastKind('error'); setToast('Publish failed'); }
-    finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
+    finally { setPublishing(false); setTimeout(() => setToast(''), 1400); }
   }
 
   const callModel = useMemo(() => {
@@ -666,23 +678,23 @@ export default function VoiceAgentSection() {
 
   /* ─────────── UI ─────────── */
   return (
-    <section className="va-scope" style={{ background:'var(--bg)', color:'var(--text)' }}>
+    <section className="va-scope" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
       <Tokens />
 
       {/* rail + content */}
       <div className="grid w-full" style={{ gridTemplateColumns: '260px 1fr' }}>
-        <div className="sticky top-0 h-screen" style={{ borderRight:'1px solid rgba(255,255,255,.06)' }}>
+        <div className="sticky top-0 h-screen" style={{ borderRight: '1px solid rgba(255,255,255,.06)' }}>
           <RailBoundary><AssistantRail /></RailBoundary>
         </div>
 
-        <div className="px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w-[1160px]" style={{ fontSize:14, lineHeight:1.45 }}>
+        <div className="px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w-[1160px]" style={{ fontSize: 14, lineHeight: 1.45 }}>
           {/* Top actions */}
           <div className="mb-4 flex flex-wrap items-center justify-end gap-3">
             <button
               onClick={doSave}
               disabled={saving}
               className="inline-flex items-center gap-2 rounded-[8px] px-4 text-sm transition hover:-translate-y-[1px] disabled:opacity-60"
-              style={{ height:'var(--control-h)', background:'var(--panel)', border:'1px solid var(--border)', color:'var(--text)' }}
+              style={{ height: 'var(--control-h)', background: 'var(--panel)', border: '1px solid var(--border)', color: 'var(--text)' }}
             >
               {saving ? 'Saving…' : 'Save'}
             </button>
@@ -691,7 +703,7 @@ export default function VoiceAgentSection() {
               onClick={doPublish}
               disabled={publishing}
               className="inline-flex items-center gap-2 rounded-[8px] px-4 text-sm transition hover:-translate-y-[1px] disabled:opacity-60"
-              style={{ height:'var(--control-h)', background:'var(--panel)', border:'1px solid var(--border)', color:'var(--text)' }}
+              style={{ height: 'var(--control-h)', background: 'var(--panel)', border: '1px solid var(--border)', color: 'var(--text)' }}
             >
               <Rocket className="w-4 h-4" /> {publishing ? 'Publishing…' : 'Publish'}
             </button>
@@ -701,23 +713,23 @@ export default function VoiceAgentSection() {
             </div>
 
             <button
-              onClick={()=>{
+              onClick={() => {
                 const key = apiKeys.find(k => k.id === data.apiKeyId)?.key || '';
                 if (!key) {
                   setToastKind('error'); setToast('Select an OpenAI API key first.');
-                  setTimeout(()=>setToast(''), 2200);
+                  setTimeout(() => setToast(''), 2200);
                   return;
                 }
                 setShowCall(true);
               }}
               className="inline-flex items-center gap-2 rounded-[8px] select-none"
               style={{
-                height:'var(--control-h)', padding:'0 16px',
-                background:'var(--brand)', color:'#0a0f0d', fontWeight:700,
-                boxShadow:'0 10px 22px rgba(89,217,179,.20)'
+                height: 'var(--control-h)', padding: '0 16px',
+                background: 'var(--brand)', color: '#0a0f0d', fontWeight: 700,
+                boxShadow: '0 10px 22px rgba(89,217,179,.20)'
               }}
-              onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = 'color-mix(in oklab, var(--brand) 90%, white)')}
-              onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = 'var(--brand)')}
+              onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = 'color-mix(in oklab, var(--brand) 90%, white)')}
+              onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = 'var(--brand)')}
             >
               <Phone className="w-4 h-4" />
               <span>Talk to Assistant</span>
@@ -730,7 +742,7 @@ export default function VoiceAgentSection() {
               style={{
                 background: toastKind === 'error' ? 'rgba(239,68,68,.12)' : 'rgba(89,217,179,.10)',
                 color: 'var(--text)',
-                boxShadow:'var(--shadow-card)', border:'1px solid var(--border)'
+                boxShadow: 'var(--shadow-card)', border: '1px solid var(--border)'
               }}
             >
               <CheckCircle2 className="w-4 h-4" /> {toast}
@@ -740,19 +752,19 @@ export default function VoiceAgentSection() {
           {/* Metrics */}
           <div className="grid gap-3 md:grid-cols-2 mb-3">
             <div className="va-card">
-              <div className="va-head"><div className="text-xs" style={{ color:'var(--text-muted)' }}>Cost</div><div /></div>
-              <div className="p-4"><div className="font-semibold" style={{ fontSize:'15px' }}>~$0.1/min</div></div>
+              <div className="va-head"><div className="text-xs" style={{ color: 'var(--text-muted)' }}>Cost</div><div /></div>
+              <div className="p-4"><div className="font-semibold" style={{ fontSize: '15px' }}>~$0.1/min</div></div>
             </div>
             <div className="va-card">
-              <div className="va-head"><div className="text-xs" style={{ color:'var(--text-muted)' }}>Latency</div><div /></div>
-              <div className="p-4"><div className="font-semibold" style={{ fontSize:'15px' }}>~1050 ms</div></div>
+              <div className="va-head"><div className="text-xs" style={{ color: 'var(--text-muted)' }}>Latency</div><div /></div>
+              <div className="p-4"><div className="font-semibold" style={{ fontSize: '15px' }}>~1050 ms</div></div>
             </div>
           </div>
 
           {/* Model config */}
           <Section
             title="Model"
-            icon={<Gauge className="w-4 h-4" style={{ color:'var(--brand)' }} />}
+            icon={<Gauge className="w-4 h-4" style={{ color: 'var(--brand)' }} />}
             desc="Configure the model, assistant name, and first message(s)."
             defaultOpen
           >
@@ -761,14 +773,14 @@ export default function VoiceAgentSection() {
                 <div className="mb-2 text-[12.5px]">Assistant Name</div>
                 <input
                   value={data.name}
-                  onChange={(e)=>setField('name')(e.target.value)}
+                  onChange={(e) => setField('name')(e.target.value)}
                   className="va-input w-full"
                   placeholder="e.g., Riley"
                 />
               </div>
               <div>
                 <div className="mb-2 text-[12.5px]">Provider</div>
-                <StyledSelect value={data.provider} onChange={(v)=>setField('provider')(v as AgentData['provider'])} options={providerOpts}
+                <StyledSelect value={data.provider} onChange={(v) => setField('provider')(v as AgentData['provider'])} options={providerOpts}
                   placeholder="Choose a provider" />
               </div>
             </div>
@@ -789,7 +801,7 @@ export default function VoiceAgentSection() {
                   { value: 'Assistant speaks first', label: 'Assistant speaks first' },
                   { value: 'User speaks first', label: 'User speaks first' },
                   { value: 'Silent until tool required', label: 'Silent until tool required' },
-                ]}/>
+                ]} />
               </div>
             </div>
 
@@ -800,43 +812,43 @@ export default function VoiceAgentSection() {
                 <div className="flex items-center gap-2">
                   <StyledSelect
                     value={data.greetPick || 'sequence'}
-                    onChange={(v)=>setField('greetPick')(v as AgentData['greetPick'])}
-                    options={[{ value: 'sequence', label: 'Play in order' },{ value: 'random', label: 'Randomize' }]}
+                    onChange={(v) => setField('greetPick')(v as AgentData['greetPick'])}
+                    options={[{ value: 'sequence', label: 'Play in order' }, { value: 'random', label: 'Randomize' }]}
                   />
                   <button
                     type="button"
-                    onClick={()=>{
-                      const next = [...(data.firstMsgs||[])]; if (next.length>=20) return; next.push('');
-                      setField('firstMsgs')(next); setField('firstMsg')(next[0]||'');
+                    onClick={() => {
+                      const next = [...(data.firstMsgs || [])]; if (next.length >= 20) return; next.push('');
+                      setField('firstMsgs')(next); setField('firstMsg')(next[0] || '');
                     }}
                     className="inline-flex items-center gap-2 text-sm rounded-[8px] px-3 py-1.5"
-                    style={{ border:'1px solid var(--border)', background:'var(--panel)', color:'var(--text)' }}
+                    style={{ border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--text)' }}
                   >
                     <Plus className="w-4 h-4" /> Add
                   </button>
                 </div>
               </div>
 
-              {(data.firstMsgs||[]).map((msg, idx) => (
+              {(data.firstMsgs || []).map((msg, idx) => (
                 <div key={idx} className="flex items-center gap-2 mb-2">
                   <input
                     value={msg}
-                    onChange={(e)=>{
+                    onChange={(e) => {
                       const next = [...(data.firstMsgs || [])];
                       next[idx] = e.target.value;
                       setField('firstMsgs')(next);
                       setField('firstMsg')(next[0] || '');
                     }}
                     className="va-input w-full"
-                    placeholder={`Message ${idx+1}`}
+                    placeholder={`Message ${idx + 1}`}
                   />
                   <button
-                    onClick={()=>{
-                      const next = [...(data.firstMsgs||[])]; next.splice(idx,1);
-                      setField('firstMsgs')(next); setField('firstMsg')(next[0]||'');
+                    onClick={() => {
+                      const next = [...(data.firstMsgs || [])]; next.splice(idx, 1);
+                      setField('firstMsgs')(next); setField('firstMsg')(next[0] || '');
                     }}
                     className="w-10 h-10 grid place-items-center rounded-[8px]"
-                    style={{ border:'1px solid var(--border)', background:'var(--panel)' }}
+                    style={{ border: '1px solid var(--border)', background: 'var(--panel)' }}
                     aria-label="Remove"
                   >
                     <Trash2 className="w-4 h-4" />
@@ -845,7 +857,7 @@ export default function VoiceAgentSection() {
               ))}
 
               {!(data.firstMsgs && data.firstMsgs.length) && (
-                <div className="text-xs" style={{ color:'var(--text-muted)' }}>
+                <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
                   No greetings yet. Click <b>Add</b> to create the first one. If you keep this empty, the assistant will not auto-greet.
                 </div>
               )}
@@ -854,11 +866,11 @@ export default function VoiceAgentSection() {
             {/* Prompt + Generate */}
             <div className="mt-6">
               <div className="flex items-center justify-between mb-2">
-                <div className="font-medium" style={{ fontSize:'12.5px' }}>System Prompt</div>
+                <div className="font-medium" style={{ fontSize: '12.5px' }}>System Prompt</div>
                 <button
                   className="inline-flex items-center gap-2 rounded-[8px] text-sm"
-                  style={{ height:34, padding:'0 12px', background:'var(--brand)', color:'#0a0f0d', border:'1px solid var(--border)' }}
-                  onClick={()=>{ setComposerText(''); setShowGenerate(true); }}
+                  style={{ height: 34, padding: '0 12px', background: 'var(--brand)', color: '#0a0f0d', border: '1px solid var(--border)' }}
+                  onClick={() => { setComposerText(''); setShowGenerate(true); }}
                 >
                   <Wand2 className="w-4 h-4" /> Generate
                 </button>
@@ -868,7 +880,7 @@ export default function VoiceAgentSection() {
                 className="va-input w-full"
                 style={{ minHeight: 320 }}
                 value={data.systemPrompt}
-                onChange={(e)=> setField('systemPrompt')(e.target.value)}
+                onChange={(e) => setField('systemPrompt')(e.target.value)}
               />
 
               {/* Context files */}
@@ -879,7 +891,7 @@ export default function VoiceAgentSection() {
           {/* Voice */}
           <Section
             title="Voice"
-            icon={<Volume2 className="w-4 h-4" style={{ color:'var(--brand)' }} />}
+            icon={<Volume2 className="w-4 h-4" style={{ color: 'var(--brand)' }} />}
             desc="Choose TTS and preview the voice."
             defaultOpen
           >
@@ -887,16 +899,16 @@ export default function VoiceAgentSection() {
               <ApiKeySelect
                 apiKeys={apiKeys}
                 selectedId={data.apiKeyId || ''}
-                onChange={async (val)=>{
+                onChange={async (val) => {
                   setField('apiKeyId')(val);
-                  try { const store = await scopedStorage(); await store.ensureOwnerGuard?.(); await store.setJSON('apiKeys.selectedId', val); } catch {}
+                  try { const store = await scopedStorage(); await store.ensureOwnerGuard?.(); await store.setJSON('apiKeys.selectedId', val); } catch { }
                 }}
               />
               <div>
                 <div className="mb-2 text-[12.5px]">Voice</div>
                 <StyledSelect
                   value={data.voiceName}
-                  onChange={(v)=>setField('voiceName')(v)}
+                  onChange={(v) => setField('voiceName')(v)}
                   options={[
                     { value: 'Alloy (American)', label: 'Alloy' },
                     { value: 'Verse (American)', label: 'Verse' },
@@ -906,16 +918,16 @@ export default function VoiceAgentSection() {
                   placeholder="— Choose —"
                   menuTop={
                     <div className="flex items-center justify-between px-3 py-2 rounded-[8px]"
-                         style={{ background:'var(--panel)', border:'1px solid var(--border)' }}
+                      style={{ background: 'var(--panel)', border: '1px solid var(--border)' }}
                     >
-                      <div className="text-xs" style={{ color:'var(--text-muted)' }}>Preview</div>
+                      <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Preview</div>
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
-                          onClick={()=>speakPreview(`This is ${data.voiceName || 'the selected'} voice preview.`)}
+                          onClick={() => speakPreview(`This is ${data.voiceName || 'the selected'} voice preview.`)}
                           className="w-8 h-8 rounded-full grid place-items-center"
                           aria-label="Play voice"
-                          style={{ background:'var(--brand)', color:'#0a0f0d' }}
+                          style={{ background: 'var(--brand)', color: '#0a0f0d' }}
                         >
                           <Play className="w-4 h-4" />
                         </button>
@@ -924,7 +936,7 @@ export default function VoiceAgentSection() {
                           onClick={stopPreview}
                           className="w-8 h-8 rounded-full grid place-items-center border"
                           aria-label="Stop preview"
-                          style={{ background: 'var(--panel)', color:'var(--text)', borderColor:'var(--border)' }}
+                          style={{ background: 'var(--panel)', color: 'var(--text)', borderColor: 'var(--border)' }}
                         >
                           <Square className="w-4 h-4" />
                         </button>
@@ -939,18 +951,18 @@ export default function VoiceAgentSection() {
           {/* Transcriber */}
           <Section
             title="Transcriber"
-            icon={<Mic className="w-4 h-4" style={{ color:'var(--brand)' }} />}
+            icon={<Mic className="w-4 h-4" style={{ color: 'var(--brand)' }} />}
             desc="Transcription settings"
             defaultOpen
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
                 <div className="mb-2 text-[12.5px]">Provider</div>
-                <StyledSelect value={data.asrProvider} onChange={(v)=>setField('asrProvider')(v as AgentData['asrProvider'])} options={asrProviders}/>
+                <StyledSelect value={data.asrProvider} onChange={(v) => setField('asrProvider')(v as AgentData['asrProvider'])} options={asrProviders} />
               </div>
               <div>
                 <div className="mb-2 text-[12.5px]">Model</div>
-                <StyledSelect value={data.asrModel} onChange={setField('asrModel')} options={asrModelsFor(data.asrProvider)}/>
+                <StyledSelect value={data.asrModel} onChange={setField('asrModel')} options={asrModelsFor(data.asrProvider)} />
               </div>
             </div>
             <div className="mt-4 grid sm:grid-cols-2 gap-3">
@@ -966,22 +978,22 @@ export default function VoiceAgentSection() {
         <>
           <div
             className="fixed inset-0"
-            style={{ zIndex: Z_OVERLAY, background:'rgba(6,8,10,.62)', backdropFilter:'blur(6px)' }}
-            onClick={()=> setShowGenerate(false)}
+            style={{ zIndex: Z_OVERLAY, background: 'rgba(6,8,10,.62)', backdropFilter: 'blur(6px)' }}
+            onClick={() => setShowGenerate(false)}
           />
           <div className="fixed inset-0 grid place-items-center px-4" style={{ zIndex: Z_MODAL }}>
-            <div className="w-full max-w-[640px] rounded-[8px] overflow-hidden va-card" style={{ maxHeight:'86vh' }}>
-              <div className="va-head" style={{ minHeight:56 }}>
+            <div className="w-full max-w-[640px] rounded-[8px] overflow-hidden va-card" style={{ maxHeight: '86vh' }}>
+              <div className="va-head" style={{ minHeight: 56 }}>
                 <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-lg grid place-items-center" style={{ background:'rgba(89,217,179,.12)' }}>
-                    <Wand2 className="w-5 h-5" style={{ color:'var(--brand)' }} />
+                  <div className="w-9 h-9 rounded-lg grid place-items-center" style={{ background: 'rgba(89,217,179,.12)' }}>
+                    <Wand2 className="w-5 h-5" style={{ color: 'var(--brand)' }} />
                   </div>
                   <div className="text-lg font-semibold">Describe how to update the prompt</div>
                 </div>
                 <button
-                  onClick={()=> setShowGenerate(false)}
+                  onClick={() => setShowGenerate(false)}
                   className="w-8 h-8 rounded-[6px] grid place-items-center"
-                  style={{ background:'var(--panel)', border:'1px solid var(--border)' }}
+                  style={{ background: 'var(--panel)', border: '1px solid var(--border)' }}
                   aria-label="Close"
                 >
                   <X className="w-4 h-4" />
@@ -989,30 +1001,30 @@ export default function VoiceAgentSection() {
               </div>
 
               <div className="px-6 py-5 space-y-3">
-                <div className="text-xs" style={{ color:'var(--text-muted)' }}>
+                <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
                   Tip: “assistant for a dental clinic; tone friendly; handle booking and FAQs”.
                 </div>
-                <div className="rounded-[8px] p-2" style={{ background:'var(--panel)', border:'1px solid var(--border)' }}>
+                <div className="rounded-[8px] p-2" style={{ background: 'var(--panel)', border: '1px solid var(--border)' }}>
                   <textarea
                     value={composerText}
-                    onChange={(e)=>setComposerText(e.target.value)}
+                    onChange={(e) => setComposerText(e.target.value)}
                     className="va-input w-full"
                     placeholder="Describe changes…"
-                    style={{ minHeight: 160, maxHeight: '40vh', resize:'vertical' }}
+                    style={{ minHeight: 160, maxHeight: '40vh', resize: 'vertical' }}
                   />
                 </div>
               </div>
 
               <div className="px-6 pb-6 flex gap-3">
                 <button
-                  onClick={()=> setShowGenerate(false)}
+                  onClick={() => setShowGenerate(false)}
                   className="w-full h-[40px] rounded-[8px]"
-                  style={{ background:'var(--panel)', border:'1px solid var(--border)', color:'var(--text)', fontWeight:600 }}
+                  style={{ background: 'var(--panel)', border: '1px solid var(--border)', color: 'var(--text)', fontWeight: 600 }}
                 >
                   Cancel
                 </button>
                 <button
-                  onClick={async ()=>{
+                  onClick={async () => {
                     const raw = safeTrim(composerText);
                     if (!raw) return;
                     try {
@@ -1024,12 +1036,12 @@ export default function VoiceAgentSection() {
                       setField('systemPromptBackend')(compiled.backendString);
                     } catch {
                       setToastKind('error'); setToast('Generate failed — try simpler wording.');
-                      setTimeout(()=>setToast(''), 2200);
+                      setTimeout(() => setToast(''), 2200);
                     }
                   }}
                   disabled={!composerText.trim()}
                   className="w-full h-[40px] rounded-[8px] font-semibold inline-flex items-center justify-center gap-2"
-                  style={{ background:'var(--brand)', color:'#0a0f0d', opacity: (!composerText.trim() ? .6 : 1) }}
+                  style={{ background: 'var(--brand)', color: '#0a0f0d', opacity: (!composerText.trim() ? .6 : 1) }}
                 >
                   <Wand2 className="w-4 h-4" /> Generate
                 </button>
@@ -1051,7 +1063,7 @@ export default function VoiceAgentSection() {
               opacity: showCall ? 1 : 0,
               transition: 'opacity .2s var(--ease)'
             }}
-            onClick={()=> setShowCall(false)}
+            onClick={() => setShowCall(false)}
           />
           {showCall && (
             <WebCallButton
@@ -1059,7 +1071,7 @@ export default function VoiceAgentSection() {
               systemPrompt={
                 (() => {
                   const base = data.systemPromptBackend || data.systemPrompt || '';
-                  const ctx  = (data.contextText || '').trim();
+                  const ctx = (data.contextText || '').trim();
                   return ctx ? `${base}\n\n[Context]\n${ctx}`.trim() : base;
                 })()
               }
@@ -1068,18 +1080,18 @@ export default function VoiceAgentSection() {
               apiKey={selectedKey || ''}
 
               ephemeralEndpoint={EPHEMERAL_TOKEN_ENDPOINT}
-              onError={(err:any) => {
+              onError={(err: any) => {
                 const msg = err?.message || err?.error?.message || (typeof err === 'string' ? err : '') || 'Call failed';
                 setToastKind('error'); setToast(msg);
               }}
-              onClose={()=> setShowCall(false)}
+              onClose={() => setShowCall(false)}
               prosody={{ fillerWords: true, microPausesMs: 200, phoneFilter: true, turnEndPauseMs: 120 }}
 
               firstMode={data.firstMode as any}
               firstMsg={
-                (data.greetPick==='random'
-                  ? [...(data.firstMsgs||[])].filter(Boolean).sort(()=>Math.random()-0.5)
-                  : (data.firstMsgs||[]).filter(Boolean)
+                (data.greetPick === 'random'
+                  ? [...(data.firstMsgs || [])].filter(Boolean).sort(() => Math.random() - 0.5)
+                  : (data.firstMsgs || []).filter(Boolean)
                 ).join('\n')
               }
             />
@@ -1094,33 +1106,33 @@ export default function VoiceAgentSection() {
 /* ─────────── Section (exact same expand/collapse atoms as Account) ─────────── */
 function Section({
   title, icon, desc, children, defaultOpen = true
-}:{
+}: {
   title: string; icon: React.ReactNode; desc?: string; children: React.ReactNode; defaultOpen?: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
-  const innerRef = useRef<HTMLDivElement|null>(null);
+  const innerRef = useRef<HTMLDivElement | null>(null);
   const [h, setH] = useState<number>(0);
   const measure = () => { if (innerRef.current) setH(innerRef.current.offsetHeight); };
   useLayoutEffect(() => { measure(); }, [children, open]);
 
   return (
     <div className="mb-3">
-      <div className="mb-[6px] text-sm font-medium" style={{ color:'var(--text-muted)' }}>{title}</div>
+      <div className="mb-[6px] text-sm font-medium" style={{ color: 'var(--text-muted)' }}>{title}</div>
 
       <div className="va-card">
-        <button onClick={()=>setOpen(v=>!v)} className="va-head w-full text-left" style={{ color:'var(--text)' }}>
+        <button onClick={() => setOpen(v => !v)} className="va-head w-full text-left" style={{ color: 'var(--text)' }}>
           <span className="min-w-0 flex items-center gap-3">
-            <span className="inline-grid place-items-center w-7 h-7 rounded-full" style={{ background:'rgba(89,217,179,.12)' }}>
+            <span className="inline-grid place-items-center w-7 h-7 rounded-full" style={{ background: 'rgba(89,217,179,.12)' }}>
               {icon}
             </span>
             <span className="min-w-0">
-              <span className="block font-semibold truncate" style={{ fontSize:'18px' }}>{title}</span>
-              {desc ? <span className="block text-xs truncate" style={{ color:'var(--text-muted)' }}>{desc}</span> : null}
+              <span className="block font-semibold truncate" style={{ fontSize: '18px' }}>{title}</span>
+              {desc ? <span className="block text-xs truncate" style={{ color: 'var(--text-muted)' }}>{desc}</span> : null}
             </span>
           </span>
           <span className="justify-self-end">
-            {open ? <ChevronUp className="w-4 h-4" style={{ color:'var(--text-muted)' }}/> :
-                    <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)' }}/>}
+            {open ? <ChevronUp className="w-4 h-4" style={{ color: 'var(--text-muted)' }} /> :
+              <ChevronDown className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />}
           </span>
         </button>
 
@@ -1130,7 +1142,7 @@ function Section({
             opacity: open ? 1 : 0,
             transform: open ? 'translateY(0)' : 'translateY(-4px)',
             transition: 'height 260ms var(--ease), opacity 230ms var(--ease), transform 260ms var(--ease)',
-            overflow:'hidden'
+            overflow: 'hidden'
           }}
           onTransitionEnd={() => { if (open) measure(); }}
         >
@@ -1142,10 +1154,10 @@ function Section({
 }
 
 /* ─────────── small pieces ─────────── */
-function ToggleRow({label, checked, onChange}:{label:string; checked:boolean; onChange:(v:boolean)=>void}) {
+function ToggleRow({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
     <div className="flex items-center justify-between p-3 rounded-[8px]"
-         style={{ background:'var(--panel)', border:'1px solid var(--border)' }}>
+      style={{ background: 'var(--panel)', border: '1px solid var(--border)' }}>
       <span className="text-sm">{label}</span>
       <Toggle checked={checked} onChange={onChange} />
     </div>
@@ -1154,7 +1166,7 @@ function ToggleRow({label, checked, onChange}:{label:string; checked:boolean; on
 
 function ApiKeySelect({
   apiKeys, selectedId, onChange
-}:{ apiKeys:ApiKey[]; selectedId:string; onChange:(id:string)=>void }) {
+}: { apiKeys: ApiKey[]; selectedId: string; onChange: (id: string) => void }) {
   return (
     <div>
       <div className="mb-2 text-[12.5px]">OpenAI API Key</div>
@@ -1163,7 +1175,7 @@ function ApiKeySelect({
         onChange={onChange}
         options={[
           { value: '', label: 'Select an API key…' },
-          ...apiKeys.map(k=>({ value: k.id, label: `${k.name} ••••${(k.key||'').slice(-4).toUpperCase()}` }))
+          ...apiKeys.map(k => ({ value: k.id, label: `${k.name} ••••${(k.key || '').slice(-4).toUpperCase()}` }))
         ]}
       />
       <div className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
@@ -1173,19 +1185,19 @@ function ApiKeySelect({
   );
 }
 
-function ContextFiles({ data, setField }:{
-  data:AgentData;
-  setField:<K extends keyof AgentData>(k:K)=> (v:AgentData[K])=>void;
+function ContextFiles({ data, setField }: {
+  data: AgentData;
+  setField: <K extends keyof AgentData>(k: K) => (v: AgentData[K]) => void;
 }) {
-  const fileInputRef = useRef<HTMLInputElement|null>(null);
-  const rebuildContextText = (files:{name:string;text:string}[]) => {
-    const merged = files.map(f => `# File: ${f.name}\n${(f.text||'').trim()}`).join('\n\n');
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const rebuildContextText = (files: { name: string; text: string }[]) => {
+    const merged = files.map(f => `# File: ${f.name}\n${(f.text || '').trim()}`).join('\n\n');
     setField('ctxFiles')(files);
     setField('contextText')(merged.trim());
   };
   const onPickFiles = async (files: File[]) => {
     if (!files?.length) return;
-    const out: {name:string;text:string}[] = [...(data.ctxFiles||[])];
+    const out: { name: string; text: string }[] = [...(data.ctxFiles || [])];
     for (const f of files) {
       const txt = await readFileAsText(f);
       if (!txt) continue;
@@ -1205,13 +1217,13 @@ function ContextFiles({ data, setField }:{
             multiple
             accept=".txt,.md,.csv,.json,.docx,.doc,.docs,text/plain,text/markdown,text/csv,application/json,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,application/zip"
             className="hidden"
-            onChange={async (e)=>{ const files = Array.from(e.target.files || []); await onPickFiles(files); if (fileInputRef.current) fileInputRef.current.value=''; }}
+            onChange={async (e) => { const files = Array.from(e.target.files || []); await onPickFiles(files); if (fileInputRef.current) fileInputRef.current.value = ''; }}
           />
           <button
             type="button"
-            onClick={()=>fileInputRef.current?.click()}
+            onClick={() => fileInputRef.current?.click()}
             className="inline-flex items-center gap-2 text-sm rounded-[8px] px-3 py-1.5"
-            style={{ border:'1px solid var(--border)', background:'var(--panel)', color:'var(--text)' }}
+            style={{ border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--text)' }}
           >
             Add file
           </button>
@@ -1219,22 +1231,22 @@ function ContextFiles({ data, setField }:{
             <>
               <button
                 type="button"
-                onClick={()=>{
-                  const ctx  = (data.contextText || '').trim();
+                onClick={() => {
+                  const ctx = (data.contextText || '').trim();
                   const base = (data.systemPromptBackend || data.systemPrompt || DEFAULT_PROMPT_RT).trim();
                   const next = ctx ? `${base}\n\n[Context]\n${ctx}`.trim() : base;
                   setField('systemPrompt')(next);
                 }}
                 className="inline-flex items-center gap-2 text-sm rounded-[8px] px-3 py-1.5"
-                style={{ background:'var(--brand)', color:'#0a0f0d', border:'1px solid var(--border)' }}
+                style={{ background: 'var(--brand)', color: '#0a0f0d', border: '1px solid var(--border)' }}
               >
                 Import to Prompt
               </button>
               <button
                 type="button"
-                onClick={()=>{ rebuildContextText([]); }}
+                onClick={() => { rebuildContextText([]); }}
                 className="inline-flex items-center gap-2 text-sm rounded-[8px] px-3 py-1.5"
-                style={{ border:'1px solid var(--border)', background:'var(--panel)', color:'var(--text)' }}
+                style={{ border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--text)' }}
               >
                 Clear
               </button>
@@ -1245,28 +1257,28 @@ function ContextFiles({ data, setField }:{
 
       {/* List of files */}
       {!(data.ctxFiles && data.ctxFiles.length) ? (
-        <div className="text-xs" style={{ color:'var(--text-muted)' }}>
+        <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
           No files yet. Click <b>Add file</b> to upload (.txt, .md, .csv, .json, <b>.docx</b> or best-effort <b>.doc</b> / <b>.docs</b>).
         </div>
       ) : (
-        <div className="rounded-[8px] p-3" style={{ background:'var(--panel)', border:'1px solid var(--border)' }}>
-          {(data.ctxFiles||[]).map((f, idx) => (
+        <div className="rounded-[8px] p-3" style={{ background: 'var(--panel)', border: '1px solid var(--border)' }}>
+          {(data.ctxFiles || []).map((f, idx) => (
             <div key={idx} className="mb-3 last:mb-0">
               <div className="flex items-center justify-between mb-1">
                 <div className="text-sm font-medium truncate">{f.name}</div>
                 <button
-                  onClick={()=>{
-                    const next = [...(data.ctxFiles||[])]; next.splice(idx,1);
+                  onClick={() => {
+                    const next = [...(data.ctxFiles || [])]; next.splice(idx, 1);
                     rebuildContextText(next);
                   }}
                   className="text-xs rounded-[6px] px-2 py-1"
-                  style={{ border:'1px solid var(--border)', background:'var(--panel)', color:'var(--text)' }}
+                  style={{ border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--text)' }}
                 >
                   Remove
                 </button>
               </div>
-              <div className="text-xs" style={{ color:'var(--text-muted)' }}>
-                {(f.text || '').slice(0, 240) || '(empty)'}{(f.text||'').length>240?'…':''}
+              <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                {(f.text || '').slice(0, 240) || '(empty)'}{(f.text || '').length > 240 ? '…' : ''}
               </div>
             </div>
           ))}
