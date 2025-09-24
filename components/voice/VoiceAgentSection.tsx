@@ -582,7 +582,6 @@ export default function VoiceAgentSection() {
         store.ensureOwnerGuard?.().catch(() => {});
 
         const v1 = await store.getJSON<ApiKey[]>('apiKeys.v1', []).catch(() => []);
-        the:
         const legacy = await store.getJSON<ApiKey[]>('apiKeys', []).catch(() => []);
         const merged = Array.isArray(v1) && v1.length ? v1 : Array.isArray(legacy) ? legacy : [];
 
