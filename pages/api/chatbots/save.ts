@@ -1,103 +1,69 @@
+// pages/api/chatbots/save.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { createClient } from '@supabase/supabase-js';
-import crypto from 'crypto';
+import { createServerSupabaseClient } from '@supabase/auth-helpers-nextjs';
 
-type Json = Record<string, any>;
-
-const SUPABASE_URL = process.env.SUPABASE_URL as string;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY as string;
-
-const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
-
-type Row = {
-  id: string;
-  owner_id: string;
+type Body = {
+  assistantId: string;
   name: string;
   model: string;
-  temperature: number;
-  system: string;
-  created_at?: string;
-  updated_at?: string;
+  industry?: string | null;
+  language?: string | null;
+  prompt: string;
+  appearance?: any;
+  type?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
-function getOwnerId(req: NextApiRequest): string {
-  const h = (req.headers['x-owner-id'] || req.headers['x-user-id'] || '') as string;
-  if (h && h.trim()) return h.trim();
-  if (typeof req.query.ownerId === 'string' && req.query.ownerId.trim()) return req.query.ownerId.trim();
-  const cookie = req.headers.cookie || '';
-  const m = cookie.match(/(?:^|;\s*)ra_uid=([^;]+)/);
-  if (m) return decodeURIComponent(m[1]);
-  return 'anon';
-}
-
-export default async function handler(req: NextApiRequest, res: NextApiResponse<Json>) {
-  res.setHeader('Cache-Control', 'no-store');
-
-  if (req.method !== 'POST') {
-    res.setHeader('Allow', ['POST']);
-    return res.status(405).json({ ok: false, error: 'Method not allowed' });
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  const method = (req.method || 'GET').toUpperCase();
+  if (!['POST', 'PUT', 'PATCH'].includes(method)) {
+    res.setHeader('Allow', 'POST, PUT, PATCH');
+    return res.status(405).json({ ok: false, error: 'Method Not Allowed' });
   }
 
-  const ownerId = getOwnerId(req);
-  const {
-    id,
-    name,
-    model = 'gpt-4o-mini',
-    temperature = 0.5,
-    system = '',
-  } = (req.body || {}) as Partial<Row> & { system?: string };
+  const supabase = createServerSupabaseClient({ req, res });
+  const { data: auth } = await supabase.auth.getUser();
+  if (!auth?.user) return res.status(401).json({ ok: false, error: 'Not authenticated' });
 
-  if (!name && !id) {
-    return res.status(400).json({ ok: false, error: 'Missing "name" or existing "id".' });
-  }
+  const b = (req.body ?? {}) as Body;
+  if (!b.assistantId) return res.status(400).json({ ok: false, error: 'assistantId is required' });
+  if (!b.name)        return res.status(400).json({ ok: false, error: 'name is required' });
+  if (!b.model)       return res.status(400).json({ ok: false, error: 'model is required' });
+  if (!b.prompt?.trim()) return res.status(400).json({ ok: false, error: 'prompt is required' });
 
-  // If updating an existing bot, verify ownership
-  if (id) {
-    const { data: ex, error: exErr } = await sb.from('chatbots').select('owner_id').eq('id', id).single();
-    if (exErr && exErr.code !== 'PGRST116') {
-      return res.status(500).json({ ok: false, error: exErr.message || 'Lookup failed' });
-    }
-    if (ex && ex.owner_id !== ownerId) {
-      return res.status(403).json({ ok: false, error: 'Forbidden' });
-    }
-  }
+  const nowISO = new Date().toISOString();
+  const payload = {
+    id: b.assistantId,
+    assistantId: b.assistantId,
+    name: b.name,
+    type: b.type || 'ai automation',
+    industry: b.industry ?? null,
+    language: b.language ?? 'English',
+    model: b.model,
+    prompt: b.prompt,
+    appearance: b.appearance ?? null,
+    createdAt: b.createdAt || nowISO,
+    updatedAt: b.updatedAt || nowISO,
+  };
 
-  const newId = (id && id.trim()) || `cbot_${crypto.randomUUID?.() || Math.random().toString(36).slice(2)}`;
-  const now = new Date().toISOString();
+  const { data, error } = await supabase
+    .from('chatbots')
+    .upsert(
+      [
+        {
+          user_id: auth.user.id,
+          assistant_id: b.assistantId,
+          name: b.name,
+          payload,
+          // created_at uses default on first insert; updated_at is handled by trigger
+        },
+      ],
+      { onConflict: 'user_id,assistant_id' }
+    )
+    .select('*')
+    .single();
 
-  try {
-    const { data, error } = await sb
-      .from('chatbots')
-      .upsert({
-        id: newId,
-        owner_id: ownerId,
-        name: name || 'Untitled Agent',
-        model,
-        temperature: Number(temperature) || 0.5,
-        system: system || '',
-        updated_at: now,
-        created_at: now,
-      })
-      .select()
-      .single();
-
-    if (error) throw error;
-
-    const saved = data as Row;
-    return res.status(200).json({
-      ok: true,
-      data: {
-        id: saved.id,
-        ownerId: saved.owner_id,
-        name: saved.name,
-        model: saved.model,
-        temperature: saved.temperature,
-        system: saved.system,
-        createdAt: saved.created_at,
-        updatedAt: saved.updated_at,
-      },
-    });
-  } catch (e: any) {
-    return res.status(500).json({ ok: false, error: e?.message || 'Save failed' });
-  }
+  if (error) return res.status(500).json({ ok: false, error: error.message });
+  return res.status(200).json({ ok: true, item: data });
 }
