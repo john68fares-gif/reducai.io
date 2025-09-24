@@ -16,6 +16,7 @@ import Step3PromptEditor from './Step3PromptEditor';
 import Step4Overview from './Step4Overview';
 import { s } from '@/utils/safe';
 import { scopedStorage } from '@/utils/scoped-storage';
+import { supabase } from '@/lib/supabase-client'; // ← added: account persistence
 
 const Bot3D = dynamic(() => import('./Bot3D.client'), {
   ssr: false,
@@ -154,38 +155,104 @@ function writeLocal(bots: Bot[]) {
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(sortByNewest(bots))); } catch {}
 }
 
+/** Read from scopedStorage + Supabase (account) */
 async function readCloud(): Promise<Bot[]> {
+  const out: Bot[] = [];
+
+  // 1) scopedStorage (workspace-level)
   try {
     const ss = await scopedStorage();
     await ss.ensureOwnerGuard();
     const cloud = await ss.getJSON<any[]>('chatbots.v1', []);
-    if (!Array.isArray(cloud)) return [];
-    return sortByNewest(cloud.map(normalize));
-  } catch {
-    return [];
-  }
+    if (Array.isArray(cloud)) out.push(...cloud.map(normalize));
+  } catch {}
+
+  // 2) Supabase (account-level) — cross-device source of truth
+  try {
+    const { data: u } = await supabase.auth.getUser();
+    const userId = u?.user?.id;
+    if (userId) {
+      // Adjust table/columns if your schema differs
+      const { data, error } = await supabase
+        .from('chatbots')
+        .select('*')
+        .eq('user_id', userId);
+
+      if (!error && Array.isArray(data)) {
+        for (const row of data) {
+          out.push(
+            normalize({
+              id: row.assistant_id,         // ← map your columns here
+              assistantId: row.assistant_id,
+              name: row.name,
+              model: row.model,
+              language: row.language,
+              industry: row.industry,
+              prompt: row.prompt,
+              appearance: row.appearance ?? undefined,
+              createdAt: row.created_at,
+              updatedAt: row.updated_at,
+            })
+          );
+        }
+      }
+    }
+  } catch {}
+
+  return sortByNewest(out);
 }
 
+/** Save to Supabase (account), scopedStorage (workspace), and localStorage (cache) */
 async function saveBuildEverywhere(build: Bot) {
-  // cloud
+  const updated = { ...build, updatedAt: nowISO() };
+
+  // 1) Supabase (account)
+  try {
+    const { data: u } = await supabase.auth.getUser();
+    const userId = u?.user?.id;
+    if (userId) {
+      // If you use triggers for timestamps, you can omit created_at/updated_at
+      await supabase
+        .from('chatbots')
+        .upsert(
+          {
+            user_id: userId,
+            assistant_id: updated.assistantId,
+            name: updated.name,
+            model: updated.model,
+            industry: updated.industry,
+            language: updated.language,
+            prompt: updated.prompt,
+            appearance: updated.appearance ?? null,
+            created_at: updated.createdAt,
+            updated_at: updated.updatedAt,
+          },
+          { onConflict: 'user_id,assistant_id' }
+        );
+    }
+  } catch {}
+
+  // 2) scopedStorage (workspace)
   try {
     const ss = await scopedStorage();
     await ss.ensureOwnerGuard();
     const cloud = await ss.getJSON<any[]>('chatbots.v1', []);
     const arr = Array.isArray(cloud) ? cloud : [];
-    const key = build.assistantId || build.id;
+    const key = updated.assistantId || updated.id;
     const i = arr.findIndex((b) => (b.assistantId || b.id) === key);
-    if (i >= 0) arr[i] = build; else arr.unshift(build);
+    if (i >= 0) arr[i] = updated; else arr.unshift(updated);
     await ss.setJSON('chatbots.v1', arr);
   } catch {}
-  // local
+
+  // 3) localStorage (device)
   try {
     const local = readLocal();
-    const key = build.assistantId || build.id;
+    const key = updated.assistantId || updated.id;
     const i = local.findIndex((b) => (b.assistantId || b.id) === key);
-    if (i >= 0) local[i] = build; else local.unshift(build);
+    if (i >= 0) local[i] = updated; else local.unshift(updated);
     writeLocal(local);
   } catch {}
+
   try { window.dispatchEvent(new Event('builds:updated')); } catch {}
 }
 
@@ -294,25 +361,8 @@ export default function BuilderDashboard() {
     let alive = true;
     (async () => {
       const local = readLocal();
-      const cloud = await readCloud();
-      let merged = mergeByAssistantId(local, cloud);
-
-      // optional DB layer
-      try {
-        const { fetchBuildsFromSupabase } = await import('@/utils/builds-store');
-        const rows = await fetchBuildsFromSupabase();
-        const dbBots = (rows || []).map((r: any) =>
-          normalize({
-            id: r.id,
-            assistantId: r.assistant_id,
-            name: r.name,
-            ...(r.payload || {}),
-            createdAt: (r.payload?.createdAt ?? r.created_at),
-            updatedAt: (r.payload?.updatedAt ?? r.updated_at),
-          })
-        );
-        merged = mergeByAssistantId(merged, dbBots);
-      } catch {}
+      const cloud = await readCloud(); // ← now includes Supabase
+      const merged = mergeByAssistantId(local, cloud);
 
       if (alive) {
         setBots(merged);
@@ -396,7 +446,7 @@ export default function BuilderDashboard() {
       const items: any[] = data.items || [];
       setSyncMsg(`Fetched ${items.length} assistants. Saving…`);
 
-      // Map OpenAI assistants -> Bot shape, save both storages
+      // Map OpenAI assistants -> Bot shape, save everywhere (includes Supabase)
       for (const a of items) {
         const build: Bot = normalize({
           id: a.id,
@@ -435,6 +485,7 @@ export default function BuilderDashboard() {
     writeLocal(sorted);
 
     (async () => {
+      // scopedStorage
       try {
         const ss = await scopedStorage();
         await ss.ensureOwnerGuard();
@@ -444,6 +495,19 @@ export default function BuilderDashboard() {
           await ss.setJSON('chatbots.v1', pruned);
         }
       } catch {}
+
+      // Supabase (account)
+      try {
+        const { data: u } = await supabase.auth.getUser();
+        const userId = u?.user?.id;
+        if (userId) {
+          await supabase
+            .from('chatbots')
+            .delete()
+            .match({ user_id: userId, assistant_id: bot.assistantId || bot.id });
+        }
+      } catch {}
+
       try { window.dispatchEvent(new Event('builds:updated')); } catch {}
     })();
   };
@@ -533,12 +597,12 @@ export default function BuilderDashboard() {
         )}
       </main>
 
-      {/* Customize modal (unchanged logic) */}
+      {/* Customize modal */}
       {selectedBot && (
         <CustomizeModal
           bot={selectedBot}
           onClose={() => setCustomizingId(null)}
-          onApply={(ap) => {
+          onApply={async (ap) => {
             if (!customizingId) return;
             const next = bots.map((b) =>
               b.id === customizingId
@@ -548,6 +612,8 @@ export default function BuilderDashboard() {
             const sorted = sortByNewest(next);
             setBots(sorted);
             writeLocal(sorted);
+
+            // scopedStorage mirror
             (async () => {
               try {
                 const ss = await scopedStorage();
@@ -561,11 +627,36 @@ export default function BuilderDashboard() {
                   }
                 }
               } catch {}
+              // Supabase mirror
+              try {
+                const { data: u } = await supabase.auth.getUser();
+                const userId = u?.user?.id;
+                if (userId) {
+                  await supabase
+                    .from('chatbots')
+                    .upsert(
+                      {
+                        user_id: userId,
+                        assistant_id: selectedBot.assistantId || selectedBot.id,
+                        name: selectedBot.name,
+                        model: selectedBot.model,
+                        industry: selectedBot.industry,
+                        language: selectedBot.language,
+                        prompt: selectedBot.prompt,
+                        appearance: { ...(selectedBot.appearance ?? {}), ...ap },
+                        updated_at: nowISO(),
+                        created_at: selectedBot.createdAt || nowISO(),
+                      },
+                      { onConflict: 'user_id,assistant_id' }
+                    );
+                }
+              } catch {}
               try { window.dispatchEvent(new Event('builds:updated')); } catch {}
             })();
+
             setCustomizingId(null);
           }}
-          onReset={() => {
+          onReset={async () => {
             if (!customizingId) return;
             const next = bots.map((b) =>
               b.id === customizingId ? { ...b, appearance: undefined, updatedAt: nowISO() } : b
@@ -573,7 +664,9 @@ export default function BuilderDashboard() {
             const sorted = sortByNewest(next);
             setBots(sorted);
             writeLocal(sorted);
+
             (async () => {
+              // scopedStorage
               try {
                 const ss = await scopedStorage();
                 await ss.ensureOwnerGuard();
@@ -586,8 +679,33 @@ export default function BuilderDashboard() {
                   }
                 }
               } catch {}
+              // Supabase
+              try {
+                const { data: u } = await supabase.auth.getUser();
+                const userId = u?.user?.id;
+                if (userId) {
+                  await supabase
+                    .from('chatbots')
+                    .upsert(
+                      {
+                        user_id: userId,
+                        assistant_id: selectedBot.assistantId || selectedBot.id,
+                        name: selectedBot.name,
+                        model: selectedBot.model,
+                        industry: selectedBot.industry,
+                        language: selectedBot.language,
+                        prompt: selectedBot.prompt,
+                        appearance: null,
+                        updated_at: nowISO(),
+                        created_at: selectedBot.createdAt || nowISO(),
+                      },
+                      { onConflict: 'user_id,assistant_id' }
+                    );
+                }
+              } catch {}
               try { window.dispatchEvent(new Event('builds:updated')); } catch {}
             })();
+
             setCustomizingId(null);
           }}
           onSaveDraft={(name, ap) => {
@@ -937,7 +1055,7 @@ function BuildsInspector() {
         setLocal(JSON.parse(raw));
       } catch { setLocal([]); }
 
-      // cloud
+      // cloud (scopedStorage only; Supabase shows up in the merged dashboard already)
       try {
         const ss = await scopedStorage();
         await ss.ensureOwnerGuard();
