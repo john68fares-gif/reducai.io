@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 export const SUPABASE_URL = process.env.SUPABASE_URL as string;
 export const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY as string;
 
-// single service client (server only)
+// Service role client for server-side routes only
 export const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   auth: { persistSession: false },
 });
@@ -15,14 +15,14 @@ function readCookie(req: NextApiRequest, name: string): string | undefined {
   return m ? decodeURIComponent(m[1]) : undefined;
 }
 
-/** Get the current user_id by verifying a Supabase access token. */
+/** Verify a Supabase access token and return user_id. Responds 401 if invalid/missing. */
 export async function requireUserId(req: NextApiRequest, res: NextApiResponse): Promise<string | null> {
-  // Prefer Authorization: Bearer <access_token>
+  // Prefer Authorization: Bearer <token>
   const auth = (req.headers.authorization || '').trim();
   let token = '';
   if (auth.toLowerCase().startsWith('bearer ')) token = auth.slice(7).trim();
 
-  // Fallback: cookie set by @supabase/auth-ui / your auth flow
+  // Fallback to cookie (sb-access-token) if present
   if (!token) token = readCookie(req, 'sb-access-token') || '';
 
   if (!token) {
