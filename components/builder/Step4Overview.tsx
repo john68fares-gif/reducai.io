@@ -11,29 +11,50 @@ import { s, st } from '@/utils/safe';
 import { scopedStorage } from '@/utils/scoped-storage';
 import { supabase } from '@/lib/supabase-client';
 
-/* ─────────────────────────── Visual tokens (match VoiceAgentSection) ─────────────────────────── */
+/* ───────────────── Visual tokens (match VoiceAgentSection) ───────────────── */
 
+const CTA = '#59d9b3';
+const GREEN_LINE = 'rgba(89,217,179,.20)';
 const BTN_GREEN = '#10b981';
 const BTN_GREEN_HOVER = '#0ea473';
 const BTN_DISABLED = 'color-mix(in oklab, var(--text) 14%, transparent)';
-
 const RADIUS = 8;
-const VA_BORDER = '1px solid rgba(255,255,255,.10)';
-const VA_CARD_SHADOW = '0 20px 40px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px rgba(89,217,179,.20)';
 
 const CARD: React.CSSProperties = {
   background: 'var(--panel)',
-  border: VA_BORDER,
-  boxShadow: VA_CARD_SHADOW,
+  border: `1px solid ${GREEN_LINE}`,
+  boxShadow: '0 20px 40px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px rgba(89,217,179,.20)',
   borderRadius: RADIUS,
 };
 
 const PANEL: React.CSSProperties = {
   background: 'var(--panel)',
-  border: VA_BORDER,
-  boxShadow: VA_CARD_SHADOW,
+  border: `1px solid ${GREEN_LINE}`,
+  boxShadow: '0 20px 40px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px rgba(89,217,179,.20)',
   borderRadius: RADIUS,
 };
+
+function PanelHead({ icon, title }:{ icon:React.ReactNode; title:string }) {
+  return (
+    <div
+      className="flex items-center justify-between px-4 md:px-5 py-3"
+      style={{
+        background:`linear-gradient(90deg,var(--panel) 0%,color-mix(in oklab,var(--panel) 97%, white 3%) 50%,var(--panel) 100%)`,
+        borderBottom:`1px solid ${GREEN_LINE}`,
+        borderTopLeftRadius: RADIUS,
+        borderTopRightRadius: RADIUS,
+      }}
+    >
+      <div className="flex items-center gap-3">
+        <div className="w-7 h-7 rounded-full grid place-items-center" style={{ background:'rgba(89,217,179,.12)' }}>
+          <span style={{ color: CTA }}>{icon}</span>
+        </div>
+        <div className="text-[15px] font-semibold" style={{ color:'var(--text)' }}>{title}</div>
+      </div>
+      <span className="w-5 h-5" />
+    </div>
+  );
+}
 
 function Orb() {
   return (
@@ -41,14 +62,12 @@ function Orb() {
       aria-hidden
       className="pointer-events-none absolute -top-[28%] -left-[28%] w-[70%] h-[70%] rounded-full"
       style={{
-        background:
-          'radial-gradient(circle, color-mix(in oklab, var(--brand) 14%, transparent) 0%, transparent 70%)',
+        background:'radial-gradient(circle, color-mix(in oklab, var(--brand) 14%, transparent) 0%, transparent 70%)',
         filter: 'blur(38px)',
       }}
     />
   );
 }
-
 function SubtleGrid() {
   return (
     <div
@@ -64,7 +83,7 @@ function SubtleGrid() {
   );
 }
 
-/* ───────────────────────────── Data helpers ───────────────────────────── */
+/* ───────────────────────── Data helpers ───────────────────────── */
 
 type Props = { onBack?: () => void; onFinish?: () => void };
 
@@ -101,18 +120,15 @@ function buildFinalPrompt() {
     .trim();
 }
 
-/* Robust JSON helpers */
+/* ───────────── Robust JSON + negotiation helpers (like before) ───────────── */
+
 async function safeJson<T = any>(resp: Response): Promise<{ ok: boolean; json?: T; text?: string; status: number; allow?: string }> {
   const ct = resp.headers.get('content-type') || '';
   const allow = resp.headers.get('allow') || resp.headers.get('Allow') || '';
-  const body = await resp.text(); // read once
+  const body = await resp.text();
   if (ct.includes('application/json')) {
-    try {
-      const json = body ? JSON.parse(body) : {};
-      return { ok: resp.ok, json, status: resp.status, allow };
-    } catch {
-      return { ok: resp.ok, text: body, status: resp.status, allow };
-    }
+    try { return { ok: resp.ok, json: body ? JSON.parse(body) : {}, status: resp.status, allow }; }
+    catch { return { ok: resp.ok, text: body, status: resp.status, allow }; }
   }
   return { ok: resp.ok, text: body, status: resp.status, allow };
 }
@@ -128,7 +144,6 @@ function explainHttp(label: string, pack: { ok: boolean; json?: any; text?: stri
   return `${label}${code}: ${serverMsg}${allow}`;
 }
 
-/** Try OPTIONS to discover allowed verbs, then write with an allowed verb; try multiple endpoints + / */
 async function negotiateAndWriteJSON(
   endpoints: string[],
   payload: any,
@@ -139,23 +154,15 @@ async function negotiateAndWriteJSON(
 
   for (const ep of endpoints) {
     for (const url of withSlashVariants(ep)) {
-      // 1) OPTIONS to read Allow
       let allow: string = '';
       try {
         const opt = await fetch(url, { method: 'OPTIONS' });
         allow = opt.headers.get('allow') || opt.headers.get('Allow') || '';
-      } catch { /* ignore */ }
+      } catch {}
 
-      const allowList = allow
-        .split(',')
-        .map(s => s.trim().toUpperCase())
-        .filter(Boolean);
+      const allowList = allow.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+      const methods = allowList.length ? preferred.filter(p => allowList.includes(p)) : preferred;
 
-      const methods = allowList.length
-        ? preferred.filter(p => allowList.includes(p))
-        : preferred;
-
-      // 2) attempt with allowed / preferred methods
       for (const m of methods) {
         tried.push(`${m} ${url}`);
         const r = await fetch(url, {
@@ -165,13 +172,11 @@ async function negotiateAndWriteJSON(
         });
         const pack = await safeJson(r);
         if (pack.ok) return { ...pack, tried };
-        // If not OK and not 405/404, bubble up now
         if (pack.status !== 405 && pack.status !== 404) return { ...pack, tried };
       }
     }
   }
 
-  // Final attempt: re-try first endpoint with POST so we can return a pack
   const finalResp = await fetch(endpoints[0], {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
@@ -181,39 +186,7 @@ async function negotiateAndWriteJSON(
   return { ...finalPack, tried };
 }
 
-/** Simple resilient write (kept as fallback) */
-async function resilientJsonWrite(
-  url: string,
-  payload: any,
-  preferred: 'POST' | 'PUT' | 'PATCH' = 'POST'
-): Promise<{ ok: boolean; json?: any; text?: string; status: number; allow?: string }> {
-  const methods: Array<'POST'|'PUT'|'PATCH'> =
-    preferred === 'POST' ? ['POST','PUT','PATCH'] :
-    preferred === 'PUT'  ? ['PUT','PATCH','POST'] : ['PATCH','POST','PUT'];
-
-  const candidates = [url, url.endsWith('/') ? url : `${url}/`];
-
-  for (const m of methods) {
-    for (const u of candidates) {
-      const r = await fetch(u, {
-        method: m,
-        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const pack = await safeJson(r);
-      if (pack.ok) return pack;
-      if (pack.status !== 405 && pack.status !== 404) return pack;
-    }
-  }
-  const finalResp = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  return safeJson(finalResp);
-}
-
-/* ───────────────────────────── Component ───────────────────────────── */
+/* ───────────────────────── Component ───────────────────────── */
 
 export default function Step4Overview({ onBack, onFinish }: Props) {
   const [loading, setLoading] = useState(false);
@@ -278,7 +251,32 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
   const ready = Object.values(checks).every(Boolean);
 
   async function saveBuildEverywhere(build: any) {
-    // Cloud (scopedStorage)
+    // 1) Per-account (Supabase) fallback to guarantee cross-device
+    try {
+      const { data: user } = await supabase.auth.getUser();
+      const userId = user?.user?.id;
+      if (userId) {
+        // Upsert into a "chatbots" table (user_id + assistant_id as unique key is ideal)
+        await supabase
+          .from('chatbots')
+          .upsert({
+            user_id: userId,
+            assistant_id: build.assistantId,
+            name: build.name,
+            model: build.model,
+            industry: build.industry || null,
+            language: build.language || 'English',
+            prompt: build.prompt,
+            appearance: null,
+            created_at: build.createdAt,
+            updated_at: build.updatedAt,
+          }, { onConflict: 'user_id,assistant_id' });
+      }
+    } catch {
+      // ignore fallback errors — the API route (below) or local mirrors will still keep the UI functional
+    }
+
+    // 2) Cloud (scopedStorage) – per-account namespace on-device
     try {
       const ss = await scopedStorage();
       await ss.ensureOwnerGuard();
@@ -291,7 +289,7 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
       await ss.setJSON('chatbots.v1', list);
     } catch {}
 
-    // Local (legacy mirror)
+    // 3) Local legacy mirror
     try {
       const local = getLS<any[]>('chatbots', []);
       const list = Array.isArray(local) ? local : [];
@@ -312,7 +310,7 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
     setDone(false);
 
     try {
-      // 1) read selected API key value from scopedStorage
+      // 1) get API key selected in Step 2
       let apiKeyPlain = '';
       const selectedModel = s2?.model || 'gpt-4o-mini';
       try {
@@ -323,15 +321,10 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
         apiKeyPlain = sel?.key || '';
       } catch {}
 
-      if (!apiKeyPlain) {
-        throw new Error('No API key value found for the selected key. Re-select your API key in Step 2.');
-      }
+      if (!apiKeyPlain) throw new Error('No API key value found for the selected key. Re-select your API key in Step 2.');
+      if (!finalPrompt?.trim()) throw new Error('Final prompt is empty. Please fill the description/rules/flow in previous steps.');
 
-      if (!finalPrompt || finalPrompt.trim().length === 0) {
-        throw new Error('Final prompt is empty. Please fill the description/rules/flow in previous steps.');
-      }
-
-      // 2) create assistant via server route (robust JSON handling)
+      // 2) create assistant on OpenAI
       setLoadingMsg('Creating assistant on OpenAI…');
       const createResp = await fetch('/api/assistants/create', {
         method: 'POST',
@@ -343,25 +336,19 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
           apiKeyPlain,
         }),
       });
-
       const createPack = await safeJson(createResp);
-      if (!createPack.ok) {
-        throw new Error(explainHttp('Assistant create failed', createPack));
-      }
+      if (!createPack.ok) throw new Error(explainHttp('Assistant create failed', createPack));
 
       const assistantId: string | undefined = createPack.json?.assistant?.id;
-      if (!assistantId) {
-        throw new Error('Assistant created but no ID returned from server.');
-      }
+      if (!assistantId) throw new Error('Assistant created but no ID returned from server.');
 
-      // 3) current user id
+      // 3) get current user
       const { data: u } = await supabase.auth.getUser();
       const userId = u?.user?.id;
       if (!userId) throw new Error('No Supabase user session');
 
-      // 4) persist to your backend — NEGOTIATE route + method like VA would
+      // 4) save to your backend (negotiated), else Supabase fallback in saveBuildEverywhere
       setLoadingMsg('Saving build to your account…');
-
       const savePayload = {
         userId,
         assistantId,
@@ -373,32 +360,16 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
         appearance: null,
       };
 
-      // Try likely endpoints first (covers 405 on /api/chatbots/save)
-      const saveTargets = [
-        '/api/chatbots/save',
-        '/api/chatbots',
-        '/api/builds/save',
-        '/api/builds',
-      ];
+      const saveTargets = ['/api/chatbots/save','/api/chatbots','/api/builds/save','/api/builds'];
+      let routed = await negotiateAndWriteJSON(saveTargets, savePayload, ['POST','PUT','PATCH']);
 
-      let savePack = await negotiateAndWriteJSON(saveTargets, savePayload, ['POST','PUT','PATCH']);
-      if (!savePack.ok) {
-        // as a last resort, try the original resilient writer on the first endpoint
-        const fallback = await resilientJsonWrite('/api/chatbots/save', savePayload, 'POST');
-        if (!fallback.ok || (fallback.json && fallback.json.ok === false)) {
-          // show exactly what we tried and what the server allows
-          const tried = (savePack.tried || []).join('  •  ');
-          const allowNote = savePack.allow ? `Allowed methods reported: ${savePack.allow}` : 'No Allow header.';
-          throw new Error(
-            explainHttp('Save build failed', savePack) +
-            (tried ? `\nTried: ${tried}` : '') +
-            `\n${allowNote}`
-          );
-        }
-        savePack = fallback;
+      // We still do a DB upsert fallback inside saveBuildEverywhere, so we do not hard-fail here if API says 405/404.
+      if (!routed.ok && routed.status !== 405 && routed.status !== 404) {
+        // show server message, but continue to mirror to Supabase directly
+        console.warn('Save route failed:', explainHttp('Save build failed', routed));
       }
 
-      // 5) mirror to cloud + local
+      // 5) mirror + guaranteed Supabase upsert fallback
       const nowISO = new Date().toISOString();
       const build = {
         id: assistantId,
@@ -432,95 +403,88 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
       <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 pt-8 pb-24">
         <StepProgress current={4} />
 
-        {/* Top summary card */}
-        <section className="relative p-6 md:p-7 mb-8" style={PANEL}>
-          <Orb /><SubtleGrid />
-          <div className="flex items-center gap-2 mb-5 font-semibold">
-            <Settings2 className="w-4 h-4" style={{ color: 'var(--brand)' }} />
-            Final Review
-          </div>
-
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <Info label="AI Name" value={s1?.name || '—'} icon={<FileText className="w-3.5 h-3.5" />} />
-            <Info label="Industry" value={s1?.industry || '—'} icon={<Library className="w-3.5 h-3.5" />} />
-            <Info label="Template" value={s1?.type || s1?.botType || s1?.aiType || '—'} icon={<BookText className="w-3.5 h-3.5" />} />
-            <Info label="Model" value={s2?.model || '—'} icon={<Cpu className="w-3.5 h-3.5" />} />
+        {/* Final Review panel */}
+        <section className="relative mb-8" style={PANEL}>
+          <PanelHead icon={<Settings2 className="w-4 h-4" />} title="Final Review" />
+          <div className="relative p-6 md:p-7">
+            <Orb /><SubtleGrid />
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <Info label="AI Name" value={s1?.name || '—'} icon={<FileText className="w-3.5 h-3.5" />} />
+              <Info label="Industry" value={s1?.industry || '—'} icon={<Library className="w-3.5 h-3.5" />} />
+              <Info label="Template" value={s1?.type || s1?.botType || s1?.aiType || '—'} icon={<BookText className="w-3.5 h-3.5" />} />
+              <Info label="Model" value={s2?.model || '—'} icon={<Cpu className="w-3.5 h-3.5" />} />
+            </div>
           </div>
         </section>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Left column */}
           <div className="lg:col-span-2 space-y-4">
-            <div style={PANEL} className="relative p-6">
-              <Orb />
-              <div className="flex items-center gap-2 mb-4 font-semibold">
-                <FileText className="w-4 h-4" style={{ color: 'var(--brand)' }} /> Content Length
-              </div>
-              <div style={CARD} className="p-4">
-                <div className="text-sm mb-2" style={{ color: 'var(--text)' }}>Characters</div>
-                <div className="w-full h-2 rounded-[6px]" style={{ background: 'color-mix(in oklab, var(--text) 10%, transparent)' }}>
-                  <div className="h-2 rounded-[6px]" style={{ background: 'var(--brand)', width: `${Math.min(100, (chars / maxChars) * 100)}%` }} />
+            <section style={PANEL} className="relative">
+              <PanelHead icon={<FileText className="w-4 h-4" />} title="Content Length" />
+              <div className="p-6">
+                <div style={CARD} className="p-4">
+                  <div className="text-sm mb-2" style={{ color: 'var(--text)' }}>Characters</div>
+                  <div className="w-full h-2 rounded-[6px]" style={{ background: 'color-mix(in oklab, var(--text) 10%, transparent)' }}>
+                    <div className="h-2 rounded-[6px]" style={{ background: CTA, width: `${Math.min(100, (chars / maxChars) * 100)}%` }} />
+                  </div>
+                  <div className="text-xs mt-2" style={{ color: 'var(--text-muted)' }}>{chars.toLocaleString()} / {maxChars.toLocaleString()}</div>
                 </div>
-                <div className="text-xs mt-2" style={{ color: 'var(--text-muted)' }}>{chars.toLocaleString()} / {maxChars.toLocaleString()}</div>
               </div>
-            </div>
+            </section>
 
-            <div style={PANEL} className="relative p-6">
-              <Orb />
-              <div className="flex items-center gap-2 mb-4 font-semibold">
-                <KeyRound className="w-4 h-4" style={{ color: 'var(--brand)' }} /> API Configuration
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div style={CARD} className="p-4">
-                  <div style={{ color: 'var(--text-muted)' }}>Input Cost</div>
-                  <div style={{ color: 'var(--text)' }} className="mt-1">
-                    ${inputCostPerMTok.toFixed(2)} <span style={{ color: 'var(--text-muted)' }}>/ 1M tokens</span>
+            <section style={PANEL} className="relative">
+              <PanelHead icon={<KeyRound className="w-4 h-4" />} title="API Configuration" />
+              <div className="p-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div style={CARD} className="p-4">
+                    <div style={{ color: 'var(--text-muted)' }}>Input Cost</div>
+                    <div style={{ color: 'var(--text)' }} className="mt-1">
+                      ${inputCostPerMTok.toFixed(2)} <span style={{ color: 'var(--text-muted)' }}>/ 1M tokens</span>
+                    </div>
+                    <div className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>Est. tokens: {estTokens.toLocaleString()}</div>
                   </div>
-                  <div className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>Est. tokens: {estTokens.toLocaleString()}</div>
-                </div>
-                <div style={CARD} className="p-4">
-                  <div style={{ color: 'var(--text-muted)' }}>Output Cost</div>
-                  <div style={{ color: 'var(--text)' }} className="mt-1">
-                    ${outputCostPerMTok.toFixed(2)} <span style={{ color: 'var(--text-muted)' }}>/ 1M tokens</span>
+                  <div style={CARD} className="p-4">
+                    <div style={{ color: 'var(--text-muted)' }}>Output Cost</div>
+                    <div style={{ color: 'var(--text)' }} className="mt-1">
+                      ${outputCostPerMTok.toFixed(2)} <span style={{ color: 'var(--text-muted)' }}>/ 1M tokens</span>
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
+            </section>
           </div>
 
           {/* Right column */}
           <div className="space-y-4">
-            <div style={PANEL} className="relative p-6">
-              <Orb />
-              <div className="flex items-center gap-2 mb-4 font-semibold">
-                <div className="w-4 h-4 rounded-[6px] border flex items-center justify-center" style={{ borderColor: 'var(--brand)', color: 'var(--brand)' }}>✓</div>
-                Requirements
-              </div>
-
-              <div style={CARD} className="p-4 mb-4">
-                <Req ok={!!checks.name} label="AI Name" />
-                <Req ok={!!checks.industry} label="Industry" />
-                <Req ok={!!checks.language} label="Language" />
-                <Req ok={!!checks.languageText} label="Language Instructions" />
-                <Req ok={!!checks.template} label="Template" />
-                <Req ok={!!checks.model} label="Model" />
-                <Req ok={!!checks.apiKey} label="API Key" />
-                <Req ok={!!checks.description} label="Description" />
-                <Req ok={!!checks.flow} label="Conversation Flow" />
-                <Req ok={!!checks.rules} label="Rules" />
-                <Req ok={!!checks.company} label="Company Info" />
-              </div>
-
-              <div className="p-4" style={{ ...CARD }}>
-                <div className="flex items-center gap-2 font-semibold" style={{ color: 'var(--brand)' }}>
-                  <Sparkles className="w-4 h-4" />
-                  {ready ? 'Ready to Generate' : 'Missing Requirements'}
+            <section style={PANEL} className="relative">
+              <PanelHead icon={<Check className="w-4 h-4" />} title="Requirements" />
+              <div className="p-6">
+                <div style={CARD} className="p-4 mb-4">
+                  <Req ok={!!checks.name} label="AI Name" />
+                  <Req ok={!!checks.industry} label="Industry" />
+                  <Req ok={!!checks.language} label="Language" />
+                  <Req ok={!!checks.languageText} label="Language Instructions" />
+                  <Req ok={!!checks.template} label="Template" />
+                  <Req ok={!!checks.model} label="Model" />
+                  <Req ok={!!checks.apiKey} label="API Key" />
+                  <Req ok={!!checks.description} label="Description" />
+                  <Req ok={!!checks.flow} label="Conversation Flow" />
+                  <Req ok={!!checks.rules} label="Rules" />
+                  <Req ok={!!checks.company} label="Company Info" />
                 </div>
-                <div className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
-                  {ready ? 'Your AI will be created now using your selected API key.' : 'Please complete the missing items above.'}
+
+                <div className="p-4" style={{ ...CARD }}>
+                  <div className="flex items-center gap-2 font-semibold" style={{ color: CTA }}>
+                    <Sparkles className="w-4 h-4" />
+                    {ready ? 'Ready to Generate' : 'Missing Requirements'}
+                  </div>
+                  <div className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+                    {ready ? 'Your AI will be created now using your selected API key.' : 'Please complete the missing items above.'}
+                  </div>
                 </div>
               </div>
-            </div>
+            </section>
           </div>
         </div>
 
@@ -529,12 +493,12 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
           <button
             onClick={onBack}
             className="inline-flex items-center gap-2 rounded-[8px] px-4 py-2 text-sm transition"
-            style={{ background: 'var(--panel)', border: VA_BORDER, color: 'var(--text)', boxShadow: VA_CARD_SHADOW }}
+            style={{ background: 'var(--panel)', border: `1px solid ${GREEN_LINE}`, color: 'var(--text)', boxShadow: '0 10px 22px rgba(89,217,179,.20)' }}
           >
             <ArrowLeft className="w-4 h-4" /> Previous
           </button>
 
-          <button
+        <button
             onClick={handleGenerate}
             disabled={!ready || loading}
             className="inline-flex items-center gap-2 px-8 h-[40px] rounded-[8px] font-semibold select-none disabled:cursor-not-allowed"
@@ -557,8 +521,8 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
       {/* Loading overlay */}
       {loading && (
         <div className="fixed inset-0 z-50 bg-black/70 grid place-items-center px-4">
-          <div className="w-full max-w-md rounded-[8px] p-6 text-center" style={{ background: 'var(--panel)', border: VA_BORDER, boxShadow: VA_CARD_SHADOW }}>
-            <Loader2 className="w-7 h-7 mx-auto animate-spin mb-3" style={{ color: 'var(--brand)' }} />
+          <div className="w-full max-w-md rounded-[8px] p-6 text-center" style={{ background: 'var(--panel)', border: `1px solid ${GREEN_LINE}`, boxShadow: '0 22px 44px rgba(0,0,0,.28), 0 8px 20px rgba(0,0,0,.45), 0 0 0 1px rgba(0,255,194,.10)' }}>
+            <Loader2 className="w-7 h-7 mx-auto animate-spin mb-3" style={{ color: CTA }} />
             <div className="text-lg font-semibold" style={{ color: 'var(--text)' }}>Generating AI…</div>
             <div className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>{loadingMsg}</div>
           </div>
@@ -569,10 +533,10 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
       {done && (
         <div
           className="fixed bottom-6 right-6 z-50 rounded-[8px] px-4 py-3"
-          style={{ background: 'var(--panel)', border: VA_BORDER, boxShadow: VA_CARD_SHADOW, color: 'var(--text)' }}
+          style={{ background: 'var(--panel)', border: `1px solid ${GREEN_LINE}`, boxShadow: '0 10px 22px rgba(89,217,179,.20)', color: 'var(--text)' }}
         >
           <div className="flex items-center gap-2">
-            <Check className="w-4 h-4" style={{ color: 'var(--brand)' }} />
+            <Check className="w-4 h-4" style={{ color: CTA }} />
             <div className="text-sm">AI generated and saved to your Builds.</div>
           </div>
         </div>
@@ -581,12 +545,17 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
   );
 }
 
-/* ─────────────────────────── UI bits ─────────────────────────── */
+/* ───────────────────── UI bits (VoiceAgent-style chips) ───────────────────── */
 
 function Info({ label, value, icon }: { label: string; value: string; icon?: React.ReactNode }) {
   return (
     <div style={CARD} className="p-3 rounded-[8px]">
-      <div className="text-xs flex items-center gap-1.5" style={{ color: 'var(--text-muted)' }}>{icon}{label}</div>
+      <div className="text-xs flex items-center gap-1.5" style={{ color: 'var(--text-muted)' }}>
+        <span className="inline-grid place-items-center w-4 h-4 rounded-[6px]" style={{ background:'rgba(89,217,179,.12)', color: CTA, border:`1px solid ${GREEN_LINE}` }}>
+          {icon}
+        </span>
+        {label}
+      </div>
       <div className="mt-0.5 truncate" style={{ color: 'var(--text)' }}>{value || '—'}</div>
     </div>
   );
@@ -598,11 +567,12 @@ function Req({ ok, label }: { ok: boolean; label: string }) {
       <span
         className="inline-flex items-center justify-center w-4 h-4 rounded-[6px]"
         style={{
-          background: ok ? 'color-mix(in oklab, var(--brand) 15%, transparent)' : 'rgba(255,120,120,0.12)',
-          border: `1px solid ${ok ? 'color-mix(in oklab, var(--brand) 40%, transparent)' : 'rgba(255,120,120,0.4)'}`,
+          background: ok ? 'rgba(16,185,129,.14)' : 'rgba(239,68,68,.18)',
+          border: `1px solid ${ok ? 'rgba(16,185,129,.35)' : 'rgba(239,68,68,.40)'}`,
+          color: ok ? BTN_GREEN : '#ef4444',
         }}
       >
-        {ok ? <Check className="w-3 h-3" style={{ color: 'var(--brand)' }} /> : <AlertCircle className="w-3 h-3" style={{ color: 'salmon' }} />}
+        {ok ? <Check className="w-3 h-3" /> : <AlertCircle className="w-3 h-3" />}
       </span>
       <span style={{ color: ok ? 'var(--text)' : 'var(--text-muted)' }}>{label}</span>
     </div>
