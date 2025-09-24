@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
+import { useRouter } from 'next/router';
 import { supabase } from '@/lib/supabase-client';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -12,30 +13,19 @@ import {
   ShieldAlert, ChevronRight, Palette, Shield, CreditCard, Box
 } from 'lucide-react';
 
-/**
- * UI helpers that read from your global theme tokens.
- * No hardcoded dark-only colors anymore.
- */
+/** ─────────────────── Theme tokens (no hardcoded colors) ─────────────────── */
 const UI = {
   brand: 'var(--brand)',
   brandWeak: 'var(--brand-weak)',
-
-  // Surfaces
   bg: 'var(--bg)',
   text: 'var(--text)',
   textMuted: 'var(--text-muted)',
-
-  // Card/panel (match Phone Numbers / API Keys)
   cardBg: 'var(--panel)',
   cardBorder: '1px solid var(--border)',
   cardShadow: 'var(--shadow-soft)',
-
-  // Smaller “band” blocks inside cards
   subBg: 'var(--card)',
   subBorder: '1px solid var(--border)',
   subShadow: 'var(--shadow-card)',
-
-  // Soft right-side separator halo when needed
   rightEdgeShadow: '14px 0 28px rgba(0,0,0,.08)',
 };
 
@@ -48,10 +38,14 @@ function fmtDate(iso?: string) {
 }
 
 export default function AccountPage() {
+  const router = useRouter();
+
+  // boot & auth
   const [booting, setBooting] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [authChecked, setAuthChecked] = useState(false);
 
   // User
-  const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [userName, setUserName] = useState<string | null>(null);
@@ -90,57 +84,78 @@ export default function AccountPage() {
     return s;
   }, [pw1]);
 
-  // Fetch user (unchanged logic)
+  /** ─────────────────── Auth boot: redirect if not signed in ───────────────────
+   * - Keeps this page fully client-side.
+   * - If there's no session, we push to /login and stop.
+   */
   useEffect(() => {
-    let unsub: any;
+    let sub: { data?: { subscription?: { unsubscribe?: () => void } } } | null = null;
+
     (async () => {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { session } } = await supabase.auth.getSession();
 
-      setUserId(user?.id ?? null);
-      setUserEmail(user?.email ?? null);
-      setUserName((user?.user_metadata as any)?.full_name ?? user?.user_metadata?.name ?? null);
-      setUserCreated(user?.created_at ?? null);
-      setUserUpdated(user?.updated_at ?? null);
+      if (!session) {
+        setAuthChecked(true);
+        setBooting(false);
+        setLoading(false);
+        router.replace('/login');
+        return;
+      }
 
-      const ids = (user as any)?.identities || [];
-      const provs = Array.from(new Set(ids.map((i: any) => i?.provider).filter(Boolean)));
+      const u = session.user;
+      setUserId(u?.id ?? null);
+      setUserEmail(u?.email ?? null);
+      setUserName((u?.user_metadata as any)?.full_name ?? u?.user_metadata?.name ?? null);
+      setUserCreated(u?.created_at ?? null);
+      setUserUpdated(u?.updated_at ?? null);
+
+      // Provider list (defensive: identities may be undefined)
+      const ids = ((u as any)?.identities || []) as Array<{ provider?: string }>;
+      const provs = Array.from(new Set(ids.map(i => i?.provider).filter(Boolean))) as string[];
       setProviders(provs);
 
-      const pwdMeta = (user?.user_metadata as any)?.password_enabled;
+      const pwdMeta = (u?.user_metadata as any)?.password_enabled;
       setPasswordEnabled(Boolean(pwdMeta));
 
-      const p = (user?.user_metadata as any)?.plan_tier as PlanTier | undefined;
-      if (p && (p === 'Free' || p === 'Pro')) setPlan(p);
+      const pt = (u?.user_metadata as any)?.plan_tier as PlanTier | undefined;
+      if (pt && (pt === 'Free' || pt === 'Pro')) setPlan(pt);
 
-      const u = (user?.user_metadata as any)?.requests_used;
-      setUsage({ requests: typeof u === 'number' ? u : 0, limit: 10000 });
+      const used = (u?.user_metadata as any)?.requests_used;
+      setUsage({ requests: typeof used === 'number' ? used : 0, limit: 10000 });
 
       setLoading(false);
-      setTimeout(() => setBooting(false), 420);
+      setBooting(false);
+      setAuthChecked(true);
 
-      unsub = supabase.auth.onAuthStateChange((_e, session) => {
-        const u2 = session?.user;
+      // React to session changes
+      sub = supabase.auth.onAuthStateChange((_evt, sess) => {
+        const u2 = sess?.user;
+        if (!u2) {
+          router.replace('/login');
+          return;
+        }
         setUserId(u2?.id ?? null);
         setUserEmail(u2?.email ?? null);
         setUserName((u2?.user_metadata as any)?.full_name ?? u2?.user_metadata?.name ?? null);
         setUserCreated(u2?.created_at ?? null);
         setUserUpdated(u2?.updated_at ?? null);
 
-        const ids2 = (u2 as any)?.identities || [];
-        const provs2 = Array.from(new Set(ids2.map((i: any) => i?.provider).filter(Boolean)));
+        const ids2 = ((u2 as any)?.identities || []) as Array<{ provider?: string }>;
+        const provs2 = Array.from(new Set(ids2.map(i => i?.provider).filter(Boolean))) as string[];
         setProviders(provs2);
 
         const pwdMeta2 = (u2?.user_metadata as any)?.password_enabled;
         setPasswordEnabled(Boolean(pwdMeta2));
 
-        const pt = (u2?.user_metadata as any)?.plan_tier as PlanTier | undefined;
-        if (pt && (pt === 'Free' || pt === 'Pro')) setPlan(pt);
+        const pt2 = (u2?.user_metadata as any)?.plan_tier as PlanTier | undefined;
+        if (pt2 && (pt2 === 'Free' || pt2 === 'Pro')) setPlan(pt2);
       });
     })();
-    return () => unsub?.data?.subscription?.unsubscribe?.();
-  }, []);
 
-  // Theme init + guard (unchanged)
+    return () => sub?.data?.subscription?.unsubscribe?.();
+  }, [router]);
+
+  /** Theme init + owner guard (client-only) */
   useEffect(() => {
     try {
       const ls = (localStorage.getItem('ui:theme') as ThemeMode) || 'dark';
@@ -197,8 +212,8 @@ export default function AccountPage() {
 
   const refreshProviders = async () => {
     const { data: { user } } = await supabase.auth.getUser();
-    const ids = (user as any)?.identities || [];
-    const provs = Array.from(new Set(ids.map((i: any) => i?.provider).filter(Boolean)));
+    const ids = ((user as any)?.identities || []) as Array<{ provider?: string }>;
+    const provs = Array.from(new Set(ids.map(i => i?.provider).filter(Boolean))) as string[];
     setProviders(provs);
     const pwdMeta = (user?.user_metadata as any)?.password_enabled;
     setPasswordEnabled(Boolean(pwdMeta));
@@ -225,13 +240,23 @@ export default function AccountPage() {
     }
   };
 
-  const signOut = async () => { try { await supabase.auth.signOut(); } catch {} };
+  const signOut = async () => {
+    try {
+      await supabase.auth.signOut();
+      router.replace('/login');
+    } catch {}
+  };
+
+  // If we already checked auth and redirected, render nothing to avoid flashing
+  if (authChecked && !userId) {
+    return null;
+  }
 
   return (
     <>
       <Head><title>Account • Reduc AI</title></Head>
 
-      {/* Loader (theme-aware) */}
+      {/* Loader */}
       <AnimatePresence>
         {(booting || loading) && (
           <motion.div
@@ -279,7 +304,6 @@ export default function AccountPage() {
             <div id="profile" className="scroll-mt-16">
               <Header icon={<UserIcon className="w-5 h-5" />} title="Profile" subtitle="Manage your account info, theme, and security" />
 
-              {/* Profile Card */}
               <Card>
                 <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
                   <div className="flex items-center gap-4 mb-6">
@@ -529,7 +553,6 @@ export default function AccountPage() {
         </main>
       </div>
 
-      {/* subtle right-edge separation like the sidebar uses in dark mode */}
       <style jsx>{`
         main { box-shadow: ${UI.rightEdgeShadow}; }
         .skeleton {
@@ -544,7 +567,7 @@ export default function AccountPage() {
   );
 }
 
-/* ---------- small building blocks (theme-aware) ---------- */
+/* ---------------- UI bits ---------------- */
 
 function Header({ icon, title, subtitle }:{ icon: React.ReactNode; title: string; subtitle?: string }) {
   return (
