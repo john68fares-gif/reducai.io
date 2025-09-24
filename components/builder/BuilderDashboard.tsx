@@ -16,6 +16,7 @@ import Step3PromptEditor from './Step3PromptEditor';
 import Step4Overview from './Step4Overview';
 import { s } from '@/utils/safe';
 import { scopedStorage } from '@/utils/scoped-storage';
+import { supabase } from '@/lib/supabase-client'; // ← NEW
 
 /* 3D preview (unchanged) */
 const Bot3D = dynamic(() => import('./Bot3D.client'), {
@@ -184,12 +185,21 @@ async function readCloud(): Promise<Bot[]> {
   }
 }
 
+/* ───────────────────────────────── Authenticated API helpers ───────────────────────────────── */
+
+async function fetchWithAuth(input: RequestInfo | URL, init: RequestInit = {}) {
+  const { data: { session } } = await supabase.auth.getSession();
+  const headers = new Headers(init.headers as HeadersInit);
+  headers.set('Accept', 'application/json');
+  if (session?.access_token) headers.set('Authorization', `Bearer ${session.access_token}`);
+  return fetch(input, { ...init, headers });
+}
+
 /** Account fetch from your API so builds are cross-device */
 async function readAccount(): Promise<Bot[]> {
   try {
-    const resp = await fetch('/api/chatbots/list', {
+    const resp = await fetchWithAuth('/api/chatbots/list', {
       method: 'GET',
-      headers: { Accept: 'application/json' },
       cache: 'no-store',
     });
     const data = await resp.json();
@@ -357,7 +367,7 @@ export default function BuilderDashboard() {
     (async () => {
       const local = readLocal();
       const cloud = await readCloud();
-      const account = await readAccount(); // account/DB
+      const account = await readAccount(); // account/DB with auth
       const merged = mergeByAssistantId(mergeByAssistantId(local, cloud), account);
 
       if (alive) {
@@ -442,9 +452,9 @@ export default function BuilderDashboard() {
           await ss.setJSON('chatbots.v1', pruned);
         }
       } catch {}
-      // remove in your DB (best-effort)
+      // remove in your DB (best-effort) — WITH AUTH
       try {
-        await fetch('/api/chatbots/delete', {
+        await fetchWithAuth('/api/chatbots/delete', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ assistantId: bot.assistantId || bot.id }),
@@ -1034,7 +1044,7 @@ function BuildsInspector() {
         setCloud([]);
       }
       try {
-        const r = await fetch('/api/chatbots/list');
+        const r = await fetchWithAuth('/api/chatbots/list', { method: 'GET', cache: 'no-store' });
         const j = await r.json();
         setAccount(Array.isArray(j?.items) ? j.items : []);
       } catch {
