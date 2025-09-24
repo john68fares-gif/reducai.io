@@ -6,7 +6,7 @@ import { createPortal } from 'react-dom';
 import { Bot, User, Mic, MicOff, X, Loader2, ChevronDown, Search, Check, Lock } from 'lucide-react';
 
 /* ──────────────────────────────────────────────────────────────────────────
-   PROPS
+   PROPS (unchanged)
 ────────────────────────────────────────────────────────────────────────── */
 type ProsodyOpts = {
   fillerWords?: boolean;
@@ -18,11 +18,9 @@ type ProsodyOpts = {
 type Props = {
   className?: string;
 
-  // model is provided by parent; we do NOT show it in the UI
-  model: string;
-
+  model: string;               // not shown in UI
   systemPrompt: string;
-  voiceName: string;         // friendly or OpenAI id (e.g. "Alloy (American)" or "alloy")
+  voiceName: string;           // friendly or id
   assistantName: string;
   apiKey: string;
 
@@ -31,14 +29,8 @@ type Props = {
   onClose?: () => void;
   onError?: (e: any) => void;
 
-  // pass these from VoiceAgentSection (see small patch under this file)
   firstMode?: 'Assistant speaks first' | 'User speaks first' | 'Silent until tool required';
   firstMsg?: string;
-
-  // who should send the very first greeting?
-  // - 'server'  -> we wait; if server stays silent for 1200ms we send it (to avoid dupes)
-  // - 'client'  -> client sends immediately
-  // - 'off'     -> no client greeting
   greetMode?: 'server' | 'client' | 'off';
 
   languageHint?: 'auto' | 'en' | 'de' | 'nl' | 'es' | 'ar';
@@ -51,7 +43,7 @@ type Props = {
 };
 
 /* ──────────────────────────────────────────────────────────────────────────
-   STYLE TOKENS (match VoiceAgentSection)
+   STYLE / CONST (panel touch-ups only)
 ────────────────────────────────────────────────────────────────────────── */
 const CTA = '#59d9b3';
 const IS_CLIENT = typeof window !== 'undefined' && typeof document !== 'undefined';
@@ -63,7 +55,7 @@ const FRIENDLY_TO_ID: Record<string,string> = {
 };
 
 /* ──────────────────────────────────────────────────────────────────────────
-   StyledSelect clone (identical look)
+   Small Select (unchanged visuals)
 ────────────────────────────────────────────────────────────────────────── */
 type Opt = { value: string; label: string; disabled?: boolean; iconLeft?: React.ReactNode };
 function StyledSelect({
@@ -207,7 +199,7 @@ function StyledSelect({
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
-   TRANSCRIPT / UTILS
+   TRANSCRIPT / UTILS (only UI/buffering fixes)
 ────────────────────────────────────────────────────────────────────────── */
 type TranscriptRow = { id:string; who:'user'|'assistant'; text:string; at:number; done?:boolean };
 
@@ -232,7 +224,9 @@ const resolveVoiceId = (key:string) => {
   return FRIENDLY_TO_ID[k] || k || 'alloy';
 };
 
-/* light phone-ish filter + ambience (optional) */
+/* ──────────────────────────────────────────────────────────────────────────
+   Audio polish: keep your chain, add tiny envelope (pause/voice up & low)
+────────────────────────────────────────────────────────────────────────── */
 function createSaturator(ac: AudioContext, drive=1.05){
   const sh=ac.createWaveShaper(); const curve=new Float32Array(1024);
   for(let i=0;i<curve.length;i++){ const x=(i/(curve.length-1))*2-1; curve[i]=Math.tanh(x*drive); }
@@ -250,9 +244,45 @@ function createAmbience(ac: AudioContext, kind:'kitchen'|'cafe', level=0.08){
   src.start();
   return ()=>{ try{src.stop()}catch{}; [src,band,hp,g].forEach(n=>{try{(n as any).disconnect()}catch{}}); };
 }
-async function attachProcessedAudio(audioEl:HTMLAudioElement, remote:MediaStream, opts:{phoneFilter:boolean;farMic:boolean;ambience:'off'|'kitchen'|'cafe';ambienceLevel:number}){
+
+/** Attach voice with gentle envelope so sentences “breathe” (no AI logic touched). */
+async function attachProcessedAudio(
+  audioEl:HTMLAudioElement,
+  remote:MediaStream,
+  opts:{phoneFilter:boolean;farMic:boolean;ambience:'off'|'kitchen'|'cafe';ambienceLevel:number}
+){
   const { phoneFilter, farMic, ambience, ambienceLevel } = opts;
-  if(!phoneFilter){ (audioEl as any).srcObject=remote; await audioEl.play().catch(()=>{}); return ()=>{}; }
+  if(!phoneFilter){
+    // Even with no filter, add a super light envelope using an analyser.
+    const AC=(window.AudioContext||(window as any).webkitAudioContext); const ac=new AC();
+    const src=ac.createMediaStreamSource(remote);
+    const comp=ac.createDynamicsCompressor(); comp.threshold.value=-22; comp.knee.value=18; comp.ratio.value=1.6; comp.attack.value=0.01; comp.release.value=0.18;
+    const master=ac.createGain(); master.gain.value=0.95;
+    const an=ac.createAnalyser(); an.fftSize=512; an.smoothingTimeConstant=0.9;
+    const dest=ac.createMediaStreamDestination();
+
+    src.connect(comp); comp.connect(master); master.connect(an); an.connect(dest);
+
+    // tiny envelope (pause/voice up & low)
+    const buf=new Uint8Array(an.frequencyBinCount);
+    let lastAbove=performance.now(); let speaking=false; let raf=0;
+    const base=0.95, floor=0.18;
+    const tick=()=>{
+      an.getByteFrequencyData(buf);
+      const energy = buf.reduce((s,v)=>s+v,0)/(buf.length*255);
+      const now=ac.currentTime; const ms=performance.now();
+      if (energy>0.06){ speaking=true; lastAbove=ms; master.gain.setTargetAtTime(base, now, 0.12); }
+      else if (speaking && ms-lastAbove>320){ speaking=false; master.gain.setTargetAtTime(floor, now, 0.18); }
+      raf=requestAnimationFrame(tick);
+    };
+    raf=requestAnimationFrame(tick);
+
+    (audioEl as any).srcObject=dest.stream; await audioEl.play().catch(()=>{});
+    let ambClean:null|(()=>void)=null; if(ambience!=='off') ambClean=createAmbience(ac,ambience,ambienceLevel);
+    return ()=>{ try{cancelAnimationFrame(raf)}catch{}; [src,comp,master,an].forEach(n=>{try{(n as any).disconnect()}catch{}}); try{ambClean&&ambClean()}catch{}; try{ac.close()}catch{}; };
+  }
+
+  // original “phone-ish” chain (unchanged), plus same envelope added after comp
   const AC=(window.AudioContext||(window as any).webkitAudioContext); const ac=new AC();
   const src=ac.createMediaStreamSource(remote);
   const hp=ac.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=70;
@@ -262,17 +292,39 @@ async function attachProcessedAudio(audioEl:HTMLAudioElement, remote:MediaStream
   const sat=createSaturator(ac,1.05);
   const comp=ac.createDynamicsCompressor();
   comp.threshold.value=-20; comp.knee.value=18; comp.ratio.value=1.7; comp.attack.value=0.008; comp.release.value=0.18;
+
   const wet=ac.createGain(); wet.gain.value=farMic?0.01:0.0;
-  const merge=ac.createGain(); const dry=ac.createGain(); dry.gain.value=1.0; const dest=ac.createMediaStreamDestination();
+  const merge=ac.createGain(); const dry=ac.createGain(); dry.gain.value=1.0;
+
+  const master=ac.createGain(); master.gain.value=0.95;
+  const an=ac.createAnalyser(); an.fftSize=512; an.smoothingTimeConstant=0.9;
+
+  const dest=ac.createMediaStreamDestination();
+
   src.connect(hp); hp.connect(lp); lp.connect(presence); presence.connect(body); body.connect(sat); sat.connect(comp);
-  comp.connect(dry); dry.connect(merge); comp.connect(wet); wet.connect(merge); merge.connect(dest);
+  comp.connect(dry); dry.connect(merge); comp.connect(wet); wet.connect(merge); merge.connect(master); master.connect(an); an.connect(dest);
+
+  // tiny envelope
+  const buf=new Uint8Array(an.frequencyBinCount);
+  let lastAbove=performance.now(); let speaking=false; let raf=0;
+  const base=0.95, floor=0.18;
+  const tick=()=>{
+    an.getByteFrequencyData(buf);
+    const energy = buf.reduce((s,v)=>s+v,0)/(buf.length*255);
+    const now=ac.currentTime; const ms=performance.now();
+    if (energy>0.06){ speaking=true; lastAbove=ms; master.gain.setTargetAtTime(base, now, 0.12); }
+    else if (speaking && ms-lastAbove>320){ speaking=false; master.gain.setTargetAtTime(floor, now, 0.18); }
+    raf=requestAnimationFrame(tick);
+  };
+  raf=requestAnimationFrame(tick);
+
   (audioEl as any).srcObject=dest.stream; await audioEl.play().catch(()=>{});
   let ambClean:null|(()=>void)=null; if(ambience!=='off') ambClean=createAmbience(ac,ambience,ambienceLevel);
-  return ()=>{ [src,hp,lp,presence,body,sat,comp,wet,merge,dry].forEach(n=>{try{(n as any).disconnect()}catch{}}); try{ac.close()}catch{}; if(ambClean) try{ambClean()}catch{} };
+  return ()=>{ try{cancelAnimationFrame(raf)}catch{}; [src,hp,lp,presence,body,sat,comp,wet,merge,dry,master,an].forEach(n=>{try{(n as any).disconnect()}catch{}}); try{ac.close()}catch{}; if(ambClean) try{ambClean()}catch{} };
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
-   COMPONENT
+   COMPONENT (AI logic untouched; transcript + panel fixes only)
 ────────────────────────────────────────────────────────────────────────── */
 export default function WebCallButton({
   className,
@@ -284,9 +336,9 @@ export default function WebCallButton({
   ephemeralEndpoint = '/api/voice/ephemeral',
   onClose,
   onError,
-  firstMode='User speaks first',        // default avoids auto-greet unless asked
+  firstMode='User speaks first',
   firstMsg='Hello.',
-  greetMode='server',                   // see note above
+  greetMode='server',
   languageHint='auto',
   prosody,
   phoneFilter=false,
@@ -303,6 +355,7 @@ export default function WebCallButton({
   const [selectedVoice,setSelectedVoice]=useState<string>('');
   const voiceId = useMemo(()=> resolveVoiceId(selectedVoice || voiceName), [selectedVoice, voiceName]);
 
+  // ── Transcript state (single bubble per turn + delta buffering)
   const [log,setLog]=useState<TranscriptRow[]>([]);
   const logRef=useRef<TranscriptRow[]>([]);
   useEffect(()=>{ logRef.current=log; },[log]);
@@ -318,9 +371,55 @@ export default function WebCallButton({
   const scrollerRef=useRef<HTMLDivElement|null>(null);
   const sawAssistantDeltaRef=useRef<boolean>(false);
 
+  // track current user/assistant turn IDs for clean bubbles
+  const currentUserIdRef = useRef<string | null>(null);
+  const currentAsstIdRef = useRef<string | null>(null);
+
+  // delta buffers to reduce re-renders
+  const userDeltaRef = useRef<string>('');
+  const asstDeltaRef = useRef<string>('');
+  const rafRef = useRef<number | null>(null);
+
+  const scheduleFlush = ()=>{
+    if (rafRef.current) return;
+    rafRef.current = requestAnimationFrame(()=>{
+      rafRef.current = null;
+      // flush user
+      if (userDeltaRef.current){
+        const id = currentUserIdRef.current || `user_${Date.now()}`;
+        if (!currentUserIdRef.current){
+          currentUserIdRef.current = id;
+          setLog(prev=>[...prev,{ id, who:'user', text:userDeltaRef.current, at:Date.now(), done:false }]);
+        } else {
+          setLog(prev=>{
+            const i=prev.findIndex(r=>r.id===id);
+            if(i===-1) return [...prev,{ id, who:'user', text:userDeltaRef.current, at:Date.now(), done:false }];
+            const next=[...prev]; next[i]={...next[i], text:userDeltaRef.current, done:false}; return next;
+          });
+        }
+        userDeltaRef.current='';
+      }
+      // flush assistant
+      if (asstDeltaRef.current){
+        const id = currentAsstIdRef.current || `assistant_${Date.now()}`;
+        if (!currentAsstIdRef.current){
+          currentAsstIdRef.current = id;
+          setLog(prev=>[...prev,{ id, who:'assistant', text:asstDeltaRef.current, at:Date.now(), done:false }]);
+        } else {
+          setLog(prev=>{
+            const i=prev.findIndex(r=>r.id===id);
+            if(i===-1) return [...prev,{ id, who:'assistant', text:asstDeltaRef.current, at:Date.now(), done:false }];
+            const next=[...prev]; next[i]={...next[i], text:(next[i].text||'')+asstDeltaRef.current, done:false}; return next;
+          });
+        }
+        asstDeltaRef.current='';
+      }
+    });
+  };
+
   useEffect(()=>{ const el=scrollerRef.current; if(!el) return; el.scrollTop=el.scrollHeight; },[log,connecting,connected]);
 
-  // fetch voices from OpenAI Platform
+  // fetch voices (unchanged)
   useEffect(()=>{
     let cancelled=false;
     const fallback = Array.from(new Set([voiceName,...DEFAULT_VOICES].filter(Boolean))) as string[];
@@ -339,25 +438,53 @@ export default function WebCallButton({
     return()=>{ cancelled=true; };
   },[apiKey, voiceName]);
 
+  // helpers: keep your original upsert/addLine API, but route through buffers
   const upsert=(id:string, who:TranscriptRow['who'], patch:Partial<TranscriptRow>|((p?:TranscriptRow)=>Partial<TranscriptRow>))=>{
+    // When called from deltas we buffer instead of setState each keystroke
+    if (typeof patch==='function'){
+      const p = patch(undefined as any);
+      const text = String((p as any).text ?? '');
+      if (who==='assistant'){
+        asstDeltaRef.current += text;
+        scheduleFlush();
+        return;
+      } else {
+        userDeltaRef.current = text;          // replace user interim with latest
+        scheduleFlush();
+        return;
+      }
+    } else if (patch && 'done' in patch && patch.done){
+      // mark turn completed
+      if (who==='assistant' && currentAsstIdRef.current===id){
+        setLog(prev=>{ const i=prev.findIndex(r=>r.id===id); if(i===-1) return prev; const next=[...prev]; next[i]={...next[i], done:true}; return next; });
+        currentAsstIdRef.current=null;
+      }
+      if (who==='user' && currentUserIdRef.current===id){
+        setLog(prev=>{ const i=prev.findIndex(r=>r.id===id); if(i===-1) return prev; const next=[...prev]; next[i]={...next[i], done:true}; return next; });
+        currentUserIdRef.current=null;
+      }
+      return;
+    }
+    // fallback (rare)
     setLog(prev=>{
       const i=prev.findIndex(r=>r.id===id);
       if(i===-1){ const base:TranscriptRow={ id, who, text:'', at:Date.now(), done:false };
-        const p=typeof patch==='function' ? (patch as any)(undefined) : patch;
-        return [...prev,{...base,...p}];
+        return [...prev,{...base,...patch}];
       }
-      const next=[...prev]; const p=typeof patch==='function' ? (patch as any)(next[i]):patch; next[i]={...next[i],...p}; return next;
+      const next=[...prev]; next[i]={...next[i],...patch}; return next;
     });
   };
   const addLine=(who:TranscriptRow['who'], text:string)=>{
     const id=`${who}_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
+    if (who==='assistant'){ currentAsstIdRef.current=id; }
+    if (who==='user'){ currentUserIdRef.current=id; }
     setLog(prev=>[...prev,{id,who,text,at:Date.now(),done:true}]);
   };
   const safeSend=(dc:RTCDataChannel|null, payload:any)=>{
     if(!dc||dc.readyState!=='open') return; try{ dc.send(JSON.stringify(payload)); }catch{}
   };
 
-  // minimal VAD ducking
+  // minimal VAD ducking (unchanged)
   async function setupVAD(){
     try{
       const mic=micStreamRef.current; if(!mic) return;
@@ -375,6 +502,9 @@ export default function WebCallButton({
     }catch{ return ()=>{}; }
   }
 
+  /* ────────────────────────────────────────────────────────────────────────
+     START CALL (AI logic UNTOUCHED)
+  ──────────────────────────────────────────────────────────────────────── */
   async function startCall(){
     setError('');
     if(!apiKey){ setError('No API key selected.'); onError?.('No API key'); return; }
@@ -413,7 +543,7 @@ export default function WebCallButton({
       const dc=pc.createDataChannel('oai-events'); dcRef.current=dc;
 
       dc.onopen=()=>{
-        // base instructions
+        // base instructions (unchanged)
         const style = [
           systemPrompt || '',
           languageNudge(languageHint),
@@ -423,7 +553,7 @@ export default function WebCallButton({
         ].filter(Boolean).join('\n\n');
         baseInstructionsRef.current = style;
 
-        // session config
+        // session config (unchanged)
         safeSend(dc,{ type:'session.update', session:{
           instructions: baseInstructionsRef.current,
           voice: voiceId,
@@ -432,7 +562,7 @@ export default function WebCallButton({
           modalities:['audio','text']
         }});
 
-        // ——— Greeting logic (no duplicates) ———
+        // ——— Greeting logic (unchanged) ———
         const wantClientGreeting =
           greetMode==='client' ||
           (greetMode==='server' && firstMode==='Assistant speaks first');
@@ -448,7 +578,6 @@ export default function WebCallButton({
           if (greetMode==='client') {
             greet();
           } else {
-            // greetMode==='server' -> wait briefly; only greet if server stays silent
             setTimeout(()=>{
               if (!sawAssistantDeltaRef.current) greet();
             }, 1200);
@@ -456,40 +585,52 @@ export default function WebCallButton({
         }
       };
 
-      // 5) events — BOTH transcripts
+      // 5) events — SAME logic, but routed through buffered transcript helpers
       dc.onmessage=(ev)=>{
         try{
           const msg=JSON.parse(ev.data); const t=msg?.type as string;
 
-          // assistant text stream
+          // assistant text stream → buffered single bubble
           if(t==='response.output_text.delta'){
             sawAssistantDeltaRef.current = true;
-            const id=msg?.response_id||msg?.id||'assistant_current';
             const delta=msg?.delta||'';
-            upsert(id,'assistant',(prev)=>({ text:(prev?.text||'')+String(delta) }));
+            asstDeltaRef.current += String(delta);
+            scheduleFlush();
           }
           if(t==='response.completed'||t==='response.stop'){
-            const id=msg?.response_id||msg?.id||'assistant_current';
-            upsert(id,'assistant',{ done:true });
+            // flush and mark done
+            if (asstDeltaRef.current) { scheduleFlush(); }
+            const id=currentAsstIdRef.current||'assistant_current';
+            setTimeout(()=>{ if (id) {
+              setLog(prev=>{ const i=prev.findIndex(r=>r.id===id); if(i===-1) return prev; const n=[...prev]; n[i]={...n[i], done:true}; return n; });
+              currentAsstIdRef.current=null;
+            }},0);
           }
           if(t==='response.output_text' && typeof msg?.text==='string'){
             sawAssistantDeltaRef.current = true;
             addLine('assistant', msg.text);
+            currentAsstIdRef.current=null;
           }
 
-          // USER transcript (incremental)
+          // USER transcript (incremental) → buffered single bubble
           if(t==='transcript.delta'){
-            const id=msg?.transcript_id||msg?.id||'user_current';
             const d=msg?.delta||'';
-            upsert(id,'user',(prev)=>({ text:(prev?.text||'')+String(d) }));
+            userDeltaRef.current = (userDeltaRef.current ? userDeltaRef.current + d : d);
+            if (!currentUserIdRef.current) currentUserIdRef.current = msg?.transcript_id||msg?.id||`user_${Date.now()}`;
+            scheduleFlush();
           }
           if(t==='transcript.completed'){
-            const id=msg?.transcript_id||msg?.id||'user_current';
-            upsert(id,'user',{ done:true });
+            const id=currentUserIdRef.current || msg?.transcript_id || msg?.id || 'user_current';
+            // make sure latest interim is shown as final
+            if (userDeltaRef.current){ scheduleFlush(); }
+            setTimeout(()=>{ setLog(prev=>{ const i=prev.findIndex(r=>r.id===id); if(i===-1) return prev; const n=[...prev]; n[i]={...n[i], done:true}; return n; }); },0);
+            currentUserIdRef.current=null;
           }
+
           // fallback shape some runtimes emit
           if(t==='input_audio_buffer.transcript' && typeof msg?.text==='string'){
             addLine('user', msg.text);
+            currentUserIdRef.current=null;
           }
         }catch{}
       };
@@ -499,7 +640,7 @@ export default function WebCallButton({
         else if(['disconnected','failed','closed'].includes(pc.connectionState)){ endCall(false); }
       };
 
-      // 6) SDP
+      // 6) SDP (unchanged)
       const offer=await pc.createOffer(); await pc.setLocalDescription(offer);
       const url=`https://api.openai.com/v1/realtime?model=${encodeURIComponent(model)}`;
       const answerRes=await fetch(url,{
@@ -529,6 +670,7 @@ export default function WebCallButton({
     const next=!muted; tracks.forEach(t=>t.enabled=!next); setMuted(next);
   }
   function cleanup(){
+    if (rafRef.current) { try{cancelAnimationFrame(rafRef.current)}catch{}; rafRef.current=null; }
     if(vadLoopRef.current) cancelAnimationFrame(vadLoopRef.current);
     vadLoopRef.current=null;
     try{ dcRef.current?.close(); }catch{}
@@ -539,6 +681,8 @@ export default function WebCallButton({
     micStreamRef.current=null;
     try{ closeChainRef.current && closeChainRef.current(); }catch{}
     closeChainRef.current = null;
+    currentUserIdRef.current=null; currentAsstIdRef.current=null;
+    userDeltaRef.current=''; asstDeltaRef.current='';
   }
   function endCall(userIntent=true){ cleanup(); setConnected(false); setConnecting(false); if(userIntent) onClose?.(); }
 
@@ -547,7 +691,7 @@ export default function WebCallButton({
   },[voiceId]);
 
   /* ────────────────────────────────────────────────────────────────────────
-     UI — same “va-card / va-head” style
+     UI — same layout, with small panel robustness tweaks
   ───────────────────────────────────────────────────────────────────────── */
   const header = (
     <div className="va-head" style={{ minHeight: 72 }}>
@@ -559,12 +703,10 @@ export default function WebCallButton({
         <div className="min-w-0">
           <div className="text-xs" style={{ color:'var(--text-muted)' }}>Talking to</div>
           <div className="font-semibold truncate" style={{ color:'var(--text)' }}>{assistantName || 'Assistant'}</div>
-          {/* Model intentionally hidden per your request */}
         </div>
       </div>
 
       <div className="ml-auto flex items-center gap-2">
-        {/* Voice dropdown (matching style) */}
         <div style={{ width: 180 }}>
           <StyledSelect
             value={voiceId}
@@ -600,8 +742,17 @@ export default function WebCallButton({
 
   const body = (
     <div className="p-3 md:p-4" style={{ color:'var(--text)' }}>
-      {/* Transcript — WhatsApp-style bubbles for BOTH sides */}
-      <div ref={scrollerRef} className="space-y-3 overflow-y-auto" style={{ maxHeight:'52vh', scrollbarWidth:'thin' }}>
+      {/* Transcript — single bubble for each side with smooth deltas */}
+      <div
+        ref={scrollerRef}
+        className="space-y-3 overflow-y-auto"
+        style={{
+          maxHeight:'52vh',
+          scrollbarWidth:'thin',
+          overscrollBehavior:'contain',
+          willChange:'transform'
+        }}
+      >
         {log.length===0 && (
           <div
             className="text-sm rounded-[8px] px-3 py-2 border"
@@ -614,7 +765,6 @@ export default function WebCallButton({
 
         {log.map(row=>(
           <div key={row.id} className={`flex ${row.who==='user' ? 'justify-end' : 'justify-start'}`}>
-            {/* left avatar for assistant */}
             {row.who==='assistant' && (
               <div className="mr-2 mt-[2px] shrink-0 rounded-full w-8 h-8 grid place-items-center"
                    style={{ background:'rgba(89,217,179,.12)', border:'1px solid rgba(89,217,179,.25)' }}>
@@ -622,7 +772,6 @@ export default function WebCallButton({
               </div>
             )}
 
-            {/* bubble */}
             <div
               className="max-w-[78%] rounded-2xl px-3 py-2 text-[0.95rem] leading-snug border"
               style={{
@@ -634,7 +783,6 @@ export default function WebCallButton({
               <div className="text-[10px] mt-1 opacity-60 text-right">{fmtTime(row.at)}</div>
             </div>
 
-            {/* right avatar for user */}
             {row.who==='user' && (
               <div className="ml-2 mt-[2px] shrink-0 rounded-full w-8 h-8 grid place-items-center"
                    style={{ background:'rgba(255,255,255,.10)', border:'1px solid rgba(255,255,255,.18)' }}>
@@ -669,19 +817,33 @@ export default function WebCallButton({
   );
 
   const panel = (
-    <aside
-      className={`va-card ${className||''}`}
-      style={{
-        position:'fixed', right:16, bottom:16, width:'min(520px, 95vw)',
-        zIndex: 100010, background:'var(--panel-bg)', color:'var(--text)'
-      }}
-      role="dialog"
-      aria-label="Voice call panel"
-    >
-      {header}
-      {body}
-      {footer}
-    </aside>
+    <>
+      <style>{`
+        .va-card{
+          --panel:#0d0f11; --text:#e6f1ef; --text-muted:#9fb4ad;
+          --panel-bg:var(--panel);
+          background:var(--panel-bg);
+          color:var(--text);
+          border-radius:12px;
+          box-shadow:
+            0 18px 40px rgba(0,0,0,.35),
+            0 0 0 1px rgba(255,255,255,.06);
+        }
+      `}</style>
+      <aside
+        className={`va-card ${className||''}`}
+        style={{
+          position:'fixed', right:16, bottom:16, width:'min(520px, 95vw)',
+          zIndex: 100010, background:'var(--panel-bg)', color:'var(--text)'
+        }}
+        role="dialog"
+        aria-label="Voice call panel"
+      >
+        {header}
+        {body}
+        {footer}
+      </aside>
+    </>
   );
 
   if (!IS_CLIENT) return null;
