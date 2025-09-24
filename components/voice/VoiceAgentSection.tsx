@@ -5,8 +5,8 @@ import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 're
 import dynamic from 'next/dynamic';
 import { createPortal } from 'react-dom';
 import {
-  Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Rocket, Search, Check, Lock,
-  KeyRound, Play, Square, X, Plus, Trash2, Phone, CheckCircle2
+  Wand2, ChevronRight, Gauge, Mic, Volume2, Rocket, Search, Check, Lock,
+  Play, Square, X, Plus, Trash2, Phone, CheckCircle2
 } from 'lucide-react';
 import { scopedStorage } from '@/utils/scoped-storage';
 import WebCallButton from '@/components/voice/WebCallButton';
@@ -44,7 +44,7 @@ const coerceStr = (v: any): string => (isStr(v) ? v : '');
 const safeTrim = (v: any): string => (nonEmpty(v) ? v.trim() : '');
 const sleep = (ms:number) => new Promise(r=>setTimeout(r,ms));
 
-/* ─────────── shared tokens to MATCH Account page ─────────── */
+/* ─────────── shared tokens (dark + light) to MATCH Account page ─────────── */
 const Tokens = () => (
   <style jsx global>{`
     .va-scope{
@@ -56,7 +56,30 @@ const Tokens = () => (
       --radius-outer:8px; --radius-inner:8px;
       --ease:cubic-bezier(.22,.61,.36,1);
       --control-h:40px;
+
+      /* Buttons (force white fg per your ask) */
+      --btn-bg: #1a1f1d;
+      --btn-fg: #ffffff;
+      --btn-border: var(--border);
+      --brand-btn-bg: var(--brand);
+      --brand-btn-fg: #ffffff;
     }
+
+    :root[data-theme='light'] .va-scope{
+      --bg:#f7f9fb; --panel:#ffffff; --card:#ffffff; --text:#0b0c10; --text-muted:#4b5a57;
+      --brand:#2cbf9a; --brand-weak:rgba(44,191,154,.16);
+      --border:rgba(0,0,0,.12); --border-weak:rgba(0,0,0,.08);
+      --shadow-soft:0 18px 48px rgba(0,0,0,.10);
+      --shadow-card:0 8px 24px rgba(0,0,0,.10), 0 0 0 1px rgba(0,0,0,.06) inset;
+
+      /* keep buttons dark so white text always readable */
+      --btn-bg: #1a1f1d;
+      --btn-fg: #ffffff;
+      --btn-border: rgba(0,0,0,.18);
+      --brand-btn-bg: var(--brand);
+      --brand-btn-fg: #ffffff;
+    }
+
     .va-card{
       border-radius:var(--radius-outer);
       border:1px solid var(--border-weak);
@@ -66,12 +89,12 @@ const Tokens = () => (
       isolation:isolate;
     }
     .va-head{
-      min-height:56px;
+      min-height:64px; /* taller header like Account */
       display:grid;
       grid-template-columns:1fr auto;
       align-items:center;
       padding:0 16px;
-      border-bottom:1px solid rgba(255,255,255,.08);
+      border-bottom:1px solid var(--border);
       color:var(--text);
       background:linear-gradient(
         90deg,
@@ -80,6 +103,7 @@ const Tokens = () => (
         var(--panel) 100%
       );
     }
+
     .skeleton {
       background: linear-gradient(90deg, var(--card) 25%, var(--panel) 37%, var(--card) 63%);
       background-size: 200% 100%;
@@ -376,7 +400,7 @@ function StyledSelect({
           {leftIcon}
           <span className="truncate">{current ? current.label : (placeholder || '— Choose —')}</span>
         </span>
-        <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)' }} />
+        <ChevronRight className="w-4 h-4" style={{ color:'var(--text-muted)', transform: open ? 'rotate(90deg)' : 'rotate(0deg)', transition:'transform 200ms var(--ease)' }} />
       </button>
 
       {open && IS_CLIENT ? createPortal(
@@ -467,17 +491,14 @@ async function loadJSZipRuntime(): Promise<any | null> {
 /* ─────────── File helpers (.docx via runtime JSZip; .doc best-effort) ─────────── */
 async function readFileAsText(f: File): Promise<string> {
   const name = f.name.toLowerCase();
-
-  // quick magic-byte peek
   const looksZip = async () => {
     try {
       const buf = new Uint8Array(await f.slice(0,4).arrayBuffer());
-      return buf[0]===0x50 && buf[1]===0x4b; // 'PK'
+      return buf[0]===0x50 && buf[1]===0x4b;
     } catch { return false; }
   };
 
   if (name.endsWith('.docx') || name.endsWith('.docs') || await looksZip()) {
-    // try runtime JSZip; if it fails, we gracefully skip
     const JSZip = await loadJSZipRuntime();
     if (!JSZip) return '';
     try {
@@ -503,7 +524,6 @@ async function readFileAsText(f: File): Promise<string> {
     } catch { return ''; }
   }
 
-  // fall back to plain text
   return new Promise((res, rej) => {
     const r = new FileReader();
     r.onerror = () => rej(new Error('Read failed'));
@@ -608,7 +628,6 @@ export default function VoiceAgentSection() {
         if (!mounted) return;
         setApiKeys(cleaned);
 
-        // select a key if none set
         const globalSelected = await store.getJSON<string>('apiKeys.selectedId', '').catch(() => '');
         const chosen =
           (data.apiKeyId && cleaned.some((k) => k.id === data.apiKeyId)) ? data.apiKeyId! :
@@ -686,7 +705,7 @@ export default function VoiceAgentSection() {
 
       {/* rail + content */}
       <div className="grid w-full" style={{ gridTemplateColumns: '260px 1fr' }}>
-        <div className="sticky top-0 h-screen" style={{ borderRight:'1px solid rgba(255,255,255,.06)' }}>
+        <div className="sticky top-0 h-screen" style={{ borderRight:'1px solid var(--border)' }}>
           <RailBoundary><AssistantRail /></RailBoundary>
         </div>
 
@@ -697,7 +716,7 @@ export default function VoiceAgentSection() {
               onClick={doSave}
               disabled={saving}
               className="inline-flex items-center gap-2 rounded-[8px] px-4 text-sm transition hover:-translate-y-[1px] disabled:opacity-60"
-              style={{ height:'var(--control-h)', background:'var(--panel)', border:'1px solid var(--border)', color:'var(--text)' }}
+              style={{ height:'var(--control-h)', background:'var(--btn-bg)', border:'1px solid var(--btn-border)', color:'var(--btn-fg)' }}
             >
               {saving ? 'Saving…' : 'Save'}
             </button>
@@ -706,7 +725,7 @@ export default function VoiceAgentSection() {
               onClick={doPublish}
               disabled={publishing}
               className="inline-flex items-center gap-2 rounded-[8px] px-4 text-sm transition hover:-translate-y-[1px] disabled:opacity-60"
-              style={{ height:'var(--control-h)', background:'var(--panel)', border:'1px solid var(--border)', color:'var(--text)' }}
+              style={{ height:'var(--control-h)', background:'var(--btn-bg)', border:'1px solid var(--btn-border)', color:'var(--btn-fg)' }}
             >
               <Rocket className="w-4 h-4" /> {publishing ? 'Publishing…' : 'Publish'}
             </button>
@@ -728,11 +747,11 @@ export default function VoiceAgentSection() {
               className="inline-flex items-center gap-2 rounded-[8px] select-none"
               style={{
                 height:'var(--control-h)', padding:'0 16px',
-                background:'var(--brand)', color:'#0a0f0d', fontWeight:700,
+                background:'var(--brand-btn-bg)', color:'var(--brand-btn-fg)', fontWeight:700,
                 boxShadow:'0 10px 22px rgba(89,217,179,.20)'
               }}
-              onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = 'color-mix(in oklab, var(--brand) 90%, white)')}
-              onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = 'var(--brand)')}
+              onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.filter = 'brightness(1.05)')}
+              onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.filter = 'none')}
             >
               <Phone className="w-4 h-4" />
               <span>Talk to Assistant</span>
@@ -825,7 +844,7 @@ export default function VoiceAgentSection() {
                       setField('firstMsgs')(next); setField('firstMsg')(next[0]||'');
                     }}
                     className="inline-flex items-center gap-2 text-sm rounded-[8px] px-3 py-1.5"
-                    style={{ border:'1px solid var(--border)', background:'var(--panel)', color:'var(--text)' }}
+                    style={{ border:'1px solid var(--btn-border)', background:'var(--btn-bg)', color:'var(--btn-fg)' }}
                   >
                     <Plus className="w-4 h-4" /> Add
                   </button>
@@ -851,7 +870,7 @@ export default function VoiceAgentSection() {
                       setField('firstMsgs')(next); setField('firstMsg')(next[0]||'');
                     }}
                     className="w-10 h-10 grid place-items-center rounded-[8px]"
-                    style={{ border:'1px solid var(--border)', background:'var(--panel)' }}
+                    style={{ border:'1px solid var(--btn-border)', background:'var(--btn-bg)', color:'var(--btn-fg)' }}
                     aria-label="Remove"
                   >
                     <Trash2 className="w-4 h-4" />
@@ -872,7 +891,7 @@ export default function VoiceAgentSection() {
                 <div className="font-medium" style={{ fontSize:'12.5px' }}>System Prompt</div>
                 <button
                   className="inline-flex items-center gap-2 rounded-[8px] text-sm"
-                  style={{ height:34, padding:'0 12px', background:'var(--brand)', color:'#0a0f0d', border:'1px solid var(--border)' }}
+                  style={{ height:34, padding:'0 12px', background:'var(--brand-btn-bg)', color:'var(--brand-btn-fg)', border:'1px solid var(--border)' }}
                   onClick={()=>{ setComposerText(''); setShowGenerate(true); }}
                 >
                   <Wand2 className="w-4 h-4" /> Generate
@@ -930,7 +949,7 @@ export default function VoiceAgentSection() {
                           onClick={()=>speakPreview(`This is ${data.voiceName || 'the selected'} voice preview.`)}
                           className="w-8 h-8 rounded-full grid place-items-center"
                           aria-label="Play voice"
-                          style={{ background:'var(--brand)', color:'#0a0f0d' }}
+                          style={{ background:'var(--brand-btn-bg)', color:'var(--brand-btn-fg)' }}
                         >
                           <Play className="w-4 h-4" />
                         </button>
@@ -939,7 +958,7 @@ export default function VoiceAgentSection() {
                           onClick={stopPreview}
                           className="w-8 h-8 rounded-full grid place-items-center border"
                           aria-label="Stop preview"
-                          style={{ background: 'var(--panel)', color:'var(--text)', borderColor:'var(--border)' }}
+                          style={{ background: 'var(--btn-bg)', color:'var(--btn-fg)', borderColor:'var(--btn-border)' }}
                         >
                           <Square className="w-4 h-4" />
                         </button>
@@ -986,7 +1005,7 @@ export default function VoiceAgentSection() {
           />
           <div className="fixed inset-0 grid place-items-center px-4" style={{ zIndex: Z_MODAL }}>
             <div className="w-full max-w-[640px] rounded-[8px] overflow-hidden va-card" style={{ maxHeight:'86vh' }}>
-              <div className="va-head" style={{ minHeight:56 }}>
+              <div className="va-head" style={{ minHeight:64 }}>
                 <div className="flex items-center gap-3">
                   <div className="w-9 h-9 rounded-lg grid place-items-center" style={{ background:'rgba(89,217,179,.12)' }}>
                     <Wand2 className="w-5 h-5" style={{ color:'var(--brand)' }} />
@@ -996,7 +1015,7 @@ export default function VoiceAgentSection() {
                 <button
                   onClick={()=> setShowGenerate(false)}
                   className="w-8 h-8 rounded-[6px] grid place-items-center"
-                  style={{ background:'var(--panel)', border:'1px solid var(--border)' }}
+                  style={{ background:'var(--btn-bg)', border:'1px solid var(--btn-border)', color:'var(--btn-fg)' }}
                   aria-label="Close"
                 >
                   <X className="w-4 h-4" />
@@ -1022,7 +1041,7 @@ export default function VoiceAgentSection() {
                 <button
                   onClick={()=> setShowGenerate(false)}
                   className="w-full h-[40px] rounded-[8px]"
-                  style={{ background:'var(--panel)', border:'1px solid var(--border)', color:'var(--text)', fontWeight:600 }}
+                  style={{ background:'var(--btn-bg)', border:'1px solid var(--btn-border)', color:'var(--btn-fg)', fontWeight:600 }}
                 >
                   Cancel
                 </button>
@@ -1044,7 +1063,7 @@ export default function VoiceAgentSection() {
                   }}
                   disabled={!composerText.trim()}
                   className="w-full h-[40px] rounded-[8px] font-semibold inline-flex items-center justify-center gap-2"
-                  style={{ background:'var(--brand)', color:'#0a0f0d', opacity: (!composerText.trim() ? .6 : 1) }}
+                  style={{ background:'var(--brand-btn-bg)', color:'var(--brand-btn-fg)', opacity: (!composerText.trim() ? .6 : 1) }}
                 >
                   <Wand2 className="w-4 h-4" /> Generate
                 </button>
@@ -1106,7 +1125,7 @@ export default function VoiceAgentSection() {
   );
 }
 
-/* ─────────── Section (exact same expand/collapse atoms as Account) ─────────── */
+/* ─────────── Section (match Account: ChevronRight rotate, bigger title) ─────────── */
 function Section({
   title, icon, desc, children, defaultOpen = true
 }:{
@@ -1129,13 +1148,18 @@ function Section({
               {icon}
             </span>
             <span className="min-w-0">
-              <span className="block font-semibold truncate" style={{ fontSize:'18px' }}>{title}</span>
+              <span className="block font-semibold truncate" style={{ fontSize:'20px' }}>{title}</span>
               {desc ? <span className="block text-xs truncate" style={{ color:'var(--text-muted)' }}>{desc}</span> : null}
             </span>
           </span>
           <span className="justify-self-end">
-            {open ? <ChevronUp className="w-4 h-4" style={{ color:'var(--text-muted)' }}/> :
-                    <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)' }}/>}
+            <ChevronRight className="w-4 h-4"
+              style={{
+                color:'var(--text-muted)',
+                transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
+                transition:'transform 220ms var(--ease)'
+              }}
+            />
           </span>
         </button>
 
@@ -1226,7 +1250,7 @@ function ContextFiles({ data, setField }:{
             type="button"
             onClick={()=>fileInputRef.current?.click()}
             className="inline-flex items-center gap-2 text-sm rounded-[8px] px-3 py-1.5"
-            style={{ border:'1px solid var(--border)', background:'var(--panel)', color:'var(--text)' }}
+            style={{ border:'1px solid var(--btn-border)', background:'var(--btn-bg)', color:'var(--btn-fg)' }}
           >
             Add file
           </button>
@@ -1241,7 +1265,7 @@ function ContextFiles({ data, setField }:{
                   setField('systemPrompt')(next);
                 }}
                 className="inline-flex items-center gap-2 text-sm rounded-[8px] px-3 py-1.5"
-                style={{ background:'var(--brand)', color:'#0a0f0d', border:'1px solid var(--border)' }}
+                style={{ background:'var(--brand-btn-bg)', color:'var(--brand-btn-fg)', border:'1px solid var(--border)' }}
               >
                 Import to Prompt
               </button>
@@ -1249,7 +1273,7 @@ function ContextFiles({ data, setField }:{
                 type="button"
                 onClick={()=>{ rebuildContextText([]); }}
                 className="inline-flex items-center gap-2 text-sm rounded-[8px] px-3 py-1.5"
-                style={{ border:'1px solid var(--border)', background:'var(--panel)', color:'var(--text)' }}
+                style={{ border:'1px solid var(--btn-border)', background:'var(--btn-bg)', color:'var(--btn-fg)' }}
               >
                 Clear
               </button>
@@ -1275,7 +1299,7 @@ function ContextFiles({ data, setField }:{
                     rebuildContextText(next);
                   }}
                   className="text-xs rounded-[6px] px-2 py-1"
-                  style={{ border:'1px solid var(--border)', background:'var(--panel)', color:'var(--text)' }}
+                  style={{ border:'1px solid var(--btn-border)', background:'var(--btn-bg)', color:'var(--btn-fg)' }}
                 >
                   Remove
                 </button>
