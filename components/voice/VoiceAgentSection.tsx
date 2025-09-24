@@ -89,7 +89,7 @@ const Tokens = () => (
       isolation:isolate;
     }
     .va-head{
-      min-height:64px; /* taller header like Account */
+      min-height:64px; /* taller header */
       display:grid;
       grid-template-columns:1fr auto;
       align-items:center;
@@ -891,7 +891,7 @@ export default function VoiceAgentSection() {
                 <div className="font-medium" style={{ fontSize:'12.5px' }}>System Prompt</div>
                 <button
                   className="inline-flex items-center gap-2 rounded-[8px] text-sm"
-                  style={{ height:34, padding:'0 12px', background:'var(--brand-btn-bg)', color:'var(--brand-btn-fg)', border:'1px solid var(--border)' }}
+                  style={{ height:34, padding:'0 12px', background:'var(--btn-bg)', color:'var(--btn-fg)', border:'1px solid var(--btn-border)' }}
                   onClick={()=>{ setComposerText(''); setShowGenerate(true); }}
                 >
                   <Wand2 className="w-4 h-4" /> Generate
@@ -1063,7 +1063,7 @@ export default function VoiceAgentSection() {
                   }}
                   disabled={!composerText.trim()}
                   className="w-full h-[40px] rounded-[8px] font-semibold inline-flex items-center justify-center gap-2"
-                  style={{ background:'var(--brand-btn-bg)', color:'var(--brand-btn-fg)', opacity: (!composerText.trim() ? .6 : 1) }}
+                  style={{ background:'var(--btn-bg)', color:'var(--btn-fg)', border:'1px solid var(--btn-border)', opacity: (!composerText.trim() ? .6 : 1) }}
                 >
                   <Wand2 className="w-4 h-4" /> Generate
                 </button>
