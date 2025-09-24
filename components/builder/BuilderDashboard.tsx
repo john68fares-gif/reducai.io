@@ -1,6 +1,7 @@
 // components/builder/BuilderDashboard.tsx
 'use client';
 
+import type React from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
@@ -184,7 +185,7 @@ async function readCloud(): Promise<Bot[]> {
   }
 }
 
-/** NEW: normalized account fetch from your API so builds are cross-device */
+/** Account-level fetch so builds are cross-device */
 async function readAccount(): Promise<Bot[]> {
   try {
     const resp = await fetch('/api/chatbots/list', {
@@ -233,7 +234,7 @@ async function saveBuildEverywhere(build: Bot) {
     else local.unshift(build);
     writeLocal(local);
   } catch {}
-  // no-op: DB is handled server-side by /api/chatbots/save
+  // DB handled server-side
   try {
     window.dispatchEvent(new Event('builds:updated'));
   } catch {}
@@ -311,6 +312,7 @@ export default function BuilderDashboard() {
   const searchParams = useSearchParams();
 
   const rawStep = searchParams.get('step');
+  the_step:
   const step = rawStep && ['1', '2', '3', '4'].includes(rawStep) ? rawStep : null;
 
   const [query, setQuery] = useState('');
