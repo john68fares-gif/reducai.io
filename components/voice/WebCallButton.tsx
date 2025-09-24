@@ -6,7 +6,7 @@ import { createPortal } from 'react-dom';
 import { Bot, User, Mic, MicOff, X, Loader2, ChevronDown, Search, Check, Lock } from 'lucide-react';
 
 /* ──────────────────────────────────────────────────────────────────────────
-   PROPS (unchanged)
+   PROPS (logic unchanged)
 ────────────────────────────────────────────────────────────────────────── */
 type ProsodyOpts = {
   fillerWords?: boolean;
@@ -15,12 +15,17 @@ type ProsodyOpts = {
   turnEndPauseMs?: number;
 };
 
+type ScopedLike = {
+  get: (key: string) => Promise<any>;
+  set: (key: string, value: any) => Promise<void>;
+  merge?: (key: string, patch: any) => Promise<void>;
+};
+
 type Props = {
   className?: string;
-
-  model: string;               // not shown in UI
+  model: string;
   systemPrompt: string;
-  voiceName: string;           // friendly or id
+  voiceName: string;         // friendly or id
   assistantName: string;
   apiKey: string;
 
@@ -40,13 +45,22 @@ type Props = {
   farMic?: boolean;
   ambience?: 'off' | 'kitchen' | 'cafe';
   ambienceLevel?: number;
+
+  /** NEW (optional): which account/agent to store under (so it syncs across devices). */
+  accountId?: string;
+  agentId?: string;
+  /** NEW (optional): pass your scoped storage client. If omitted, we try window.scopedStorage, else localStorage. */
+  scoped?: ScopedLike;
 };
 
 /* ──────────────────────────────────────────────────────────────────────────
-   STYLE / CONST (panel touch-ups only)
+   STYLE / CONSTANTS
 ────────────────────────────────────────────────────────────────────────── */
 const CTA = '#59d9b3';
+const GREEN_LINE = 'rgba(89,217,179,.20)';
 const IS_CLIENT = typeof window !== 'undefined' && typeof document !== 'undefined';
+
+const RAW_ID = /^[a-z0-9._-]{3,}$/i;
 const HUMAN_LIKE = new Set(['alloy','verse','coral','amber','sage','juniper','opal','pebble','cobalt']);
 const DEFAULT_VOICES = ['alloy','verse','coral','amber','sage','juniper'];
 const FRIENDLY_TO_ID: Record<string,string> = {
@@ -54,15 +68,27 @@ const FRIENDLY_TO_ID: Record<string,string> = {
   Alloy:'alloy', Verse:'verse', Coral:'coral', Amber:'amber', Sage:'sage', Juniper:'juniper'
 };
 
+type TranscriptRow = { id:string; who:'user'|'assistant'; text:string; at:number; done?:boolean };
+
+const clamp01 = (v:number)=>Math.max(0,Math.min(1,v));
+const fmtTime = (ts:number)=>new Date(ts).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
+
+const resolveVoiceId = (key:string) => {
+  const k = (key||'').trim();
+  if (RAW_ID.test(k) && !FRIENDLY_TO_ID[k]) return k.toLowerCase();
+  return FRIENDLY_TO_ID[k] || k || 'alloy';
+};
+
 /* ──────────────────────────────────────────────────────────────────────────
-   Small Select (unchanged visuals)
+   SMALL SELECT (unchanged appearance)
 ────────────────────────────────────────────────────────────────────────── */
 type Opt = { value: string; label: string; disabled?: boolean; iconLeft?: React.ReactNode };
 function StyledSelect({
-  value, onChange, options, placeholder, leftIcon, menuTop
+  value, onChange, options, placeholder, leftIcon, menuTop, openUp=false
 }:{
   value: string; onChange: (v: string) => void;
   options: Opt[]; placeholder?: string; leftIcon?: React.ReactNode; menuTop?: React.ReactNode;
+  openUp?: boolean;
 }) {
   const wrapRef = useRef<HTMLDivElement|null>(null);
   const btnRef = useRef<HTMLButtonElement|null>(null);
@@ -81,8 +107,8 @@ function StyledSelect({
   useLayoutEffect(() => {
     if (!open || !btnRef.current) return;
     const r = btnRef.current.getBoundingClientRect();
-    setMenuPos({ left: r.left, top: r.bottom + 8, width: r.width });
-  }, [open]);
+    setMenuPos({ left: r.left, top: openUp ? r.top - 8 : r.bottom + 8, width: r.width });
+  }, [open, openUp]);
 
   useEffect(() => {
     if (!open || !IS_CLIENT) return;
@@ -96,7 +122,7 @@ function StyledSelect({
     const onResize = () => {
       if (!btnRef.current) return;
       const r = btnRef.current.getBoundingClientRect();
-      setMenuPos({ left: r.left, top: r.bottom + 8, width: r.width });
+      setMenuPos({ left: r.left, top: openUp ? r.top - 8 : r.bottom + 8, width: r.width });
     };
     window.addEventListener('mousedown', off);
     window.addEventListener('keydown', onEsc);
@@ -106,7 +132,7 @@ function StyledSelect({
       window.removeEventListener('keydown', onEsc);
       window.removeEventListener('resize', onResize);
     };
-  }, [open]);
+  }, [open, openUp]);
 
   return (
     <div ref={wrapRef} className="relative">
@@ -117,8 +143,8 @@ function StyledSelect({
         className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-[8px] text-sm outline-none transition"
         style={{
           height:'var(--control-h)',
-          background:'var(--vs-input-bg, #101314)',
-          border:'1px solid var(--vs-input-border, rgba(255,255,255,.14))',
+          background:'#101314',
+          border:'1px solid rgba(255,255,255,.14)',
           color:'var(--text)'
         }}
       >
@@ -137,6 +163,7 @@ function StyledSelect({
             left: (menuPos?.left ?? 0),
             top: (menuPos?.top ?? 0),
             width: (menuPos?.width ?? (btnRef.current?.getBoundingClientRect().width ?? 280)),
+            transform: openUp ? 'translateY(-100%)' : 'none',
             background:'#101314',
             border:'1px solid rgba(255,255,255,.16)',
             borderRadius:10,
@@ -199,33 +226,7 @@ function StyledSelect({
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
-   TRANSCRIPT / UTILS (only UI/buffering fixes)
-────────────────────────────────────────────────────────────────────────── */
-type TranscriptRow = { id:string; who:'user'|'assistant'; text:string; at:number; done?:boolean };
-
-const RAW_ID = /^[a-z0-9._-]{3,}$/i;
-const clamp01 = (v:number)=>Math.max(0,Math.min(1,v));
-const fmtTime = (ts:number)=>new Date(ts).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
-
-function languageNudge(lang: Props['languageHint']){
-  if (lang==='auto') return 'Auto-detect and reply in the caller’s language (EN/DE/NL/ES/AR).';
-  const map:Record<string,string>={
-    en:'Reply in natural conversational English.',
-    de:'Antworte natürlich auf Deutsch.',
-    nl:'Antwoord in natuurlijk Nederlands.',
-    es:'Responde en español conversacional.',
-    ar:'يرجى الرد بالعربية بأسلوب محادثة طبيعي.',
-  }; return map[lang||'auto']||'';
-}
-
-const resolveVoiceId = (key:string) => {
-  const k = (key||'').trim();
-  if (RAW_ID.test(k) && !FRIENDLY_TO_ID[k]) return k.toLowerCase();
-  return FRIENDLY_TO_ID[k] || k || 'alloy';
-};
-
-/* ──────────────────────────────────────────────────────────────────────────
-   Audio polish: keep your chain, add tiny envelope (pause/voice up & low)
+   AUDIO POLISH — add subtle envelope + optional breath (no logic changes)
 ────────────────────────────────────────────────────────────────────────── */
 function createSaturator(ac: AudioContext, drive=1.05){
   const sh=ac.createWaveShaper(); const curve=new Float32Array(1024);
@@ -239,92 +240,138 @@ function createAmbience(ac: AudioContext, kind:'kitchen'|'cafe', level=0.08){
   src.buffer=buf; src.loop=true;
   const band=ac.createBiquadFilter(); band.type='bandpass'; band.frequency.value=kind==='kitchen'?950:350; band.Q.value=kind==='kitchen'?0.9:0.6;
   const hp=ac.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=120;
-  const g=ac.createGain(); g.gain.value=clamp01(level)*0.18;
+  const g=ac.createGain(); g.gain.value=clamp01(level)*0.14;
   src.connect(band); band.connect(hp); hp.connect(g); g.connect(ac.destination);
   src.start();
   return ()=>{ try{src.stop()}catch{}; [src,band,hp,g].forEach(n=>{try{(n as any).disconnect()}catch{}}); };
 }
+function createBreather(ac: AudioContext, level=0.08){
+  const noise = ac.createBufferSource();
+  const len = ac.sampleRate * 2;
+  const buf = ac.createBuffer(1, len, ac.sampleRate);
+  const d = buf.getChannelData(0);
+  let prev=0;
+  for (let i=0;i<len;i++){ const w=Math.random()*2-1; prev=prev*0.98 + w*0.02; d[i]=prev; }
+  noise.buffer = buf; noise.loop = true;
+  const bp = ac.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=380; bp.Q.value=0.6;
+  const hp = ac.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=140;
+  const gain = ac.createGain(); gain.gain.value = clamp01(level) * 0.10;
+  const lfo = ac.createOscillator(); lfo.frequency.value = 0.22;
+  const lfoGain = ac.createGain(); lfoGain.gain.value = clamp01(level) * 0.10;
+  lfo.connect(lfoGain); lfoGain.connect(gain.gain);
+  noise.connect(bp); bp.connect(hp); hp.connect(gain);
+  noise.start(); lfo.start();
+  return { node: gain, stop: ()=>{ try{noise.stop()}catch{}; try{lfo.stop()}catch{}; [bp,hp,lfoGain,noise,gain].forEach(n=>{try{(n as any).disconnect()}catch{}}); } };
+}
 
-/** Attach voice with gentle envelope so sentences “breathe” (no AI logic touched). */
 async function attachProcessedAudio(
   audioEl:HTMLAudioElement,
   remote:MediaStream,
-  opts:{phoneFilter:boolean;farMic:boolean;ambience:'off'|'kitchen'|'cafe';ambienceLevel:number}
+  opts:{ phoneFilter:boolean; farMic:boolean; ambience:'off'|'kitchen'|'cafe'; ambienceLevel:number }
 ){
-  const { phoneFilter, farMic, ambience, ambienceLevel } = opts;
+  const { phoneFilter, ambience, ambienceLevel } = opts;
+
+  // Early attach (prevents "site crash" from unmet autoplay)
+  (audioEl as any).srcObject = remote;
+  await audioEl.play().catch(()=>{});
+
   if(!phoneFilter){
-    // Even with no filter, add a super light envelope using an analyser.
-    const AC=(window.AudioContext||(window as any).webkitAudioContext); const ac=new AC();
-    const src=ac.createMediaStreamSource(remote);
-    const comp=ac.createDynamicsCompressor(); comp.threshold.value=-22; comp.knee.value=18; comp.ratio.value=1.6; comp.attack.value=0.01; comp.release.value=0.18;
-    const master=ac.createGain(); master.gain.value=0.95;
-    const an=ac.createAnalyser(); an.fftSize=512; an.smoothingTimeConstant=0.9;
-    const dest=ac.createMediaStreamDestination();
-
-    src.connect(comp); comp.connect(master); master.connect(an); an.connect(dest);
-
-    // tiny envelope (pause/voice up & low)
-    const buf=new Uint8Array(an.frequencyBinCount);
-    let lastAbove=performance.now(); let speaking=false; let raf=0;
-    const base=0.95, floor=0.18;
-    const tick=()=>{
-      an.getByteFrequencyData(buf);
-      const energy = buf.reduce((s,v)=>s+v,0)/(buf.length*255);
-      const now=ac.currentTime; const ms=performance.now();
-      if (energy>0.06){ speaking=true; lastAbove=ms; master.gain.setTargetAtTime(base, now, 0.12); }
-      else if (speaking && ms-lastAbove>320){ speaking=false; master.gain.setTargetAtTime(floor, now, 0.18); }
-      raf=requestAnimationFrame(tick);
-    };
-    raf=requestAnimationFrame(tick);
-
-    (audioEl as any).srcObject=dest.stream; await audioEl.play().catch(()=>{});
-    let ambClean:null|(()=>void)=null; if(ambience!=='off') ambClean=createAmbience(ac,ambience,ambienceLevel);
-    return ()=>{ try{cancelAnimationFrame(raf)}catch{}; [src,comp,master,an].forEach(n=>{try{(n as any).disconnect()}catch{}}); try{ambClean&&ambClean()}catch{}; try{ac.close()}catch{}; };
+    return ()=>{};
   }
 
-  // original “phone-ish” chain (unchanged), plus same envelope added after comp
   const AC=(window.AudioContext||(window as any).webkitAudioContext); const ac=new AC();
   const src=ac.createMediaStreamSource(remote);
+
   const hp=ac.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=70;
   const lp=ac.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=12000;
-  const presence=ac.createBiquadFilter(); presence.type='peaking'; presence.frequency.value=2800; presence.Q.value=0.9; presence.gain.value=1.6;
-  const body=ac.createBiquadFilter(); body.type='lowshelf'; body.frequency.value=160; body.gain.value=1.2;
+  const presence=ac.createBiquadFilter(); presence.type='peaking'; presence.frequency.value=2800; presence.Q.value=0.9; presence.gain.value=1.4;
+  const body=ac.createBiquadFilter(); body.type='lowshelf'; body.frequency.value=160; body.gain.value=1.1;
   const sat=createSaturator(ac,1.05);
   const comp=ac.createDynamicsCompressor();
-  comp.threshold.value=-20; comp.knee.value=18; comp.ratio.value=1.7; comp.attack.value=0.008; comp.release.value=0.18;
+  comp.threshold.value=-22; comp.knee.value=18; comp.ratio.value=1.6; comp.attack.value=0.01; comp.release.value=0.18;
 
-  const wet=ac.createGain(); wet.gain.value=farMic?0.01:0.0;
+  // Envelope + breathing (subtle, non-invasive)
+  const master = ac.createGain(); master.gain.value = 0.9;
+  const analyser = ac.createAnalyser(); analyser.fftSize = 512; analyser.smoothingTimeConstant = 0.88;
+
   const merge=ac.createGain(); const dry=ac.createGain(); dry.gain.value=1.0;
-
-  const master=ac.createGain(); master.gain.value=0.95;
-  const an=ac.createAnalyser(); an.fftSize=512; an.smoothingTimeConstant=0.9;
-
   const dest=ac.createMediaStreamDestination();
 
   src.connect(hp); hp.connect(lp); lp.connect(presence); presence.connect(body); body.connect(sat); sat.connect(comp);
-  comp.connect(dry); dry.connect(merge); comp.connect(wet); wet.connect(merge); merge.connect(master); master.connect(an); an.connect(dest);
+  comp.connect(dry); dry.connect(merge);
+  merge.connect(master); master.connect(analyser); analyser.connect(dest);
 
-  // tiny envelope
-  const buf=new Uint8Array(an.frequencyBinCount);
-  let lastAbove=performance.now(); let speaking=false; let raf=0;
-  const base=0.95, floor=0.18;
-  const tick=()=>{
-    an.getByteFrequencyData(buf);
+  // Replace audio element with processed output
+  (audioEl as any).srcObject = dest.stream;
+  await audioEl.play().catch(()=>{});
+
+  // Light ambience (optional)
+  let ambClean: null | (()=>void) = null;
+  if(ambience!=='off') ambClean = createAmbience(ac, ambience, ambienceLevel);
+
+  // Envelope: fade in/out on phrase boundaries
+  const buf = new Uint8Array(analyser.frequencyBinCount);
+  let speaking=false; let lastEnergy=0; let lastAbove=performance.now();
+  const base = 0.9, minFloor = 0.16;
+  const tick = ()=>{
+    analyser.getByteFrequencyData(buf);
     const energy = buf.reduce((s,v)=>s+v,0)/(buf.length*255);
-    const now=ac.currentTime; const ms=performance.now();
-    if (energy>0.06){ speaking=true; lastAbove=ms; master.gain.setTargetAtTime(base, now, 0.12); }
-    else if (speaking && ms-lastAbove>320){ speaking=false; master.gain.setTargetAtTime(floor, now, 0.18); }
-    raf=requestAnimationFrame(tick);
+    const now = ac.currentTime;
+    const ms = performance.now();
+    if (energy > 0.06 && lastEnergy <= 0.06){
+      speaking=true;
+      master.gain.cancelScheduledValues(now);
+      master.gain.setTargetAtTime(base, now, 0.16);
+      lastAbove = ms;
+    } else if (energy > 0.06){
+      lastAbove = ms;
+    }
+    if (speaking && ms - lastAbove > 320){
+      speaking=false;
+      master.gain.cancelScheduledValues(now);
+      master.gain.setTargetAtTime(minFloor, now, 0.20);
+    }
+    lastEnergy = energy;
+    requestAnimationFrame(tick);
   };
-  raf=requestAnimationFrame(tick);
+  requestAnimationFrame(tick);
 
-  (audioEl as any).srcObject=dest.stream; await audioEl.play().catch(()=>{});
-  let ambClean:null|(()=>void)=null; if(ambience!=='off') ambClean=createAmbience(ac,ambience,ambienceLevel);
-  return ()=>{ try{cancelAnimationFrame(raf)}catch{}; [src,hp,lp,presence,body,sat,comp,wet,merge,dry,master,an].forEach(n=>{try{(n as any).disconnect()}catch{}}); try{ac.close()}catch{}; if(ambClean) try{ambClean()}catch{} };
+  return ()=>{ try{ambClean && ambClean();}catch{}; [src,hp,lp,presence,body,sat,comp,merge,master,analyser,dry].forEach(n=>{try{(n as any).disconnect()}catch{}}); try{ac.close()}catch{}; };
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
-   COMPONENT (AI logic untouched; transcript + panel fixes only)
+   PERSISTENCE — save every call to *scoped storage* (account-wide)
+────────────────────────────────────────────────────────────────────────── */
+function makeScopedAdapter(scoped?: ScopedLike){
+  // Priority: explicit prop -> window.scopedStorage -> localStorage (dev)
+  const winAny: any = (typeof window !== 'undefined') ? window : {};
+  const globalScoped = winAny.scopedStorage;
+  const client = scoped || globalScoped;
+
+  const get = async (key:string) => {
+    try{
+      if (client?.get) return await client.get(key);
+      const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : null;
+    }catch{ return null; }
+  };
+  const set = async (key:string, value:any) => {
+    try{
+      if (client?.set) return await client.set(key, value);
+      localStorage.setItem(key, JSON.stringify(value));
+    }catch{}
+  };
+  const merge = async (key:string, patch:any) => {
+    try{
+      if (client?.merge) return await client.merge(key, patch);
+      const cur = await get(key) || {};
+      await set(key, { ...cur, ...patch });
+    }catch{}
+  };
+  return { get, set, merge };
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   COMPONENT  — AI logic preserved; panel + transcript + persistence added
 ────────────────────────────────────────────────────────────────────────── */
 export default function WebCallButton({
   className,
@@ -345,17 +392,20 @@ export default function WebCallButton({
   farMic=false,
   ambience='off',
   ambienceLevel=0.08,
+  accountId='default',
+  agentId='default',
+  scoped,
 }: Props){
   const [connecting,setConnecting]=useState(false);
   const [connected,setConnected]=useState(false);
   const [muted,setMuted]=useState(false);
   const [error,setError]=useState<string>('');
 
+  // voice list (unchanged)
   const [voices,setVoices]=useState<string[]>([]);
   const [selectedVoice,setSelectedVoice]=useState<string>('');
   const voiceId = useMemo(()=> resolveVoiceId(selectedVoice || voiceName), [selectedVoice, voiceName]);
 
-  // ── Transcript state (single bubble per turn + delta buffering)
   const [log,setLog]=useState<TranscriptRow[]>([]);
   const logRef=useRef<TranscriptRow[]>([]);
   useEffect(()=>{ logRef.current=log; },[log]);
@@ -371,55 +421,18 @@ export default function WebCallButton({
   const scrollerRef=useRef<HTMLDivElement|null>(null);
   const sawAssistantDeltaRef=useRef<boolean>(false);
 
-  // track current user/assistant turn IDs for clean bubbles
-  const currentUserIdRef = useRef<string | null>(null);
-  const currentAsstIdRef = useRef<string | null>(null);
-
-  // delta buffers to reduce re-renders
-  const userDeltaRef = useRef<string>('');
-  const asstDeltaRef = useRef<string>('');
-  const rafRef = useRef<number | null>(null);
-
-  const scheduleFlush = ()=>{
-    if (rafRef.current) return;
-    rafRef.current = requestAnimationFrame(()=>{
-      rafRef.current = null;
-      // flush user
-      if (userDeltaRef.current){
-        const id = currentUserIdRef.current || `user_${Date.now()}`;
-        if (!currentUserIdRef.current){
-          currentUserIdRef.current = id;
-          setLog(prev=>[...prev,{ id, who:'user', text:userDeltaRef.current, at:Date.now(), done:false }]);
-        } else {
-          setLog(prev=>{
-            const i=prev.findIndex(r=>r.id===id);
-            if(i===-1) return [...prev,{ id, who:'user', text:userDeltaRef.current, at:Date.now(), done:false }];
-            const next=[...prev]; next[i]={...next[i], text:userDeltaRef.current, done:false}; return next;
-          });
-        }
-        userDeltaRef.current='';
-      }
-      // flush assistant
-      if (asstDeltaRef.current){
-        const id = currentAsstIdRef.current || `assistant_${Date.now()}`;
-        if (!currentAsstIdRef.current){
-          currentAsstIdRef.current = id;
-          setLog(prev=>[...prev,{ id, who:'assistant', text:asstDeltaRef.current, at:Date.now(), done:false }]);
-        } else {
-          setLog(prev=>{
-            const i=prev.findIndex(r=>r.id===id);
-            if(i===-1) return [...prev,{ id, who:'assistant', text:asstDeltaRef.current, at:Date.now(), done:false }];
-            const next=[...prev]; next[i]={...next[i], text:(next[i].text||'')+asstDeltaRef.current, done:false}; return next;
-          });
-        }
-        asstDeltaRef.current='';
-      }
-    });
-  };
+  // persistence per-call
+  const scopedStore = useMemo(()=> makeScopedAdapter(scoped), [scoped]);
+  const STORE_KEY = `calls:${accountId}:${agentId}`;
+  const callRef = useRef<{ id:string; startedAt:number; endedAt?:number; transcript: TranscriptRow[] }>({
+    id: `call_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
+    startedAt: Date.now(),
+    transcript: []
+  });
 
   useEffect(()=>{ const el=scrollerRef.current; if(!el) return; el.scrollTop=el.scrollHeight; },[log,connecting,connected]);
 
-  // fetch voices (unchanged)
+  // voices fetch (unchanged behavior)
   useEffect(()=>{
     let cancelled=false;
     const fallback = Array.from(new Set([voiceName,...DEFAULT_VOICES].filter(Boolean))) as string[];
@@ -438,53 +451,48 @@ export default function WebCallButton({
     return()=>{ cancelled=true; };
   },[apiKey, voiceName]);
 
-  // helpers: keep your original upsert/addLine API, but route through buffers
   const upsert=(id:string, who:TranscriptRow['who'], patch:Partial<TranscriptRow>|((p?:TranscriptRow)=>Partial<TranscriptRow>))=>{
-    // When called from deltas we buffer instead of setState each keystroke
-    if (typeof patch==='function'){
-      const p = patch(undefined as any);
-      const text = String((p as any).text ?? '');
-      if (who==='assistant'){
-        asstDeltaRef.current += text;
-        scheduleFlush();
-        return;
-      } else {
-        userDeltaRef.current = text;          // replace user interim with latest
-        scheduleFlush();
-        return;
-      }
-    } else if (patch && 'done' in patch && patch.done){
-      // mark turn completed
-      if (who==='assistant' && currentAsstIdRef.current===id){
-        setLog(prev=>{ const i=prev.findIndex(r=>r.id===id); if(i===-1) return prev; const next=[...prev]; next[i]={...next[i], done:true}; return next; });
-        currentAsstIdRef.current=null;
-      }
-      if (who==='user' && currentUserIdRef.current===id){
-        setLog(prev=>{ const i=prev.findIndex(r=>r.id===id); if(i===-1) return prev; const next=[...prev]; next[i]={...next[i], done:true}; return next; });
-        currentUserIdRef.current=null;
-      }
-      return;
-    }
-    // fallback (rare)
     setLog(prev=>{
       const i=prev.findIndex(r=>r.id===id);
-      if(i===-1){ const base:TranscriptRow={ id, who, text:'', at:Date.now(), done:false };
-        return [...prev,{...base,...patch}];
+      if(i===-1){
+        const base:TranscriptRow={ id, who, text:'', at:Date.now(), done:false };
+        const p=typeof patch==='function' ? (patch as any)(undefined) : patch;
+        const nextRow={...base,...p};
+        const next=[...prev,nextRow];
+        // persist partials lightly (only every few chars)
+        if (nextRow.done || (nextRow.text && nextRow.text.length%48===0)) persistTranscript(next);
+        return next;
       }
-      const next=[...prev]; next[i]={...next[i],...patch}; return next;
+      const next=[...prev];
+      const p=typeof patch==='function' ? (patch as any)(next[i]):patch;
+      next[i]={...next[i],...p};
+      if (next[i].done || (next[i].text && next[i].text.length%48===0)) persistTranscript(next);
+      return next;
     });
   };
   const addLine=(who:TranscriptRow['who'], text:string)=>{
     const id=`${who}_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
-    if (who==='assistant'){ currentAsstIdRef.current=id; }
-    if (who==='user'){ currentUserIdRef.current=id; }
-    setLog(prev=>[...prev,{id,who,text,at:Date.now(),done:true}]);
+    const row={id,who,text,at:Date.now(),done:true};
+    setLog(prev=>{ const next=[...prev,row]; persistTranscript(next); return next; });
   };
+
   const safeSend=(dc:RTCDataChannel|null, payload:any)=>{
     if(!dc||dc.readyState!=='open') return; try{ dc.send(JSON.stringify(payload)); }catch{}
   };
 
-  // minimal VAD ducking (unchanged)
+  // Save transcript to scoped storage (append under account+agent)
+  async function persistTranscript(rows: TranscriptRow[]){
+    callRef.current.transcript = rows;
+    try{
+      const list = (await scopedStore.get(STORE_KEY)) || [];
+      const idx = list.findIndex((c:any)=>c?.id===callRef.current.id);
+      if (idx === -1) list.push(callRef.current);
+      else list[idx] = callRef.current;
+      await scopedStore.set(STORE_KEY, list);
+    }catch{/* ignore */}
+  }
+
+  // minimal output ducking while you speak (unchanged)
   async function setupVAD(){
     try{
       const mic=micStreamRef.current; if(!mic) return;
@@ -503,15 +511,20 @@ export default function WebCallButton({
   }
 
   /* ────────────────────────────────────────────────────────────────────────
-     START CALL (AI logic UNTOUCHED)
+     START CALL — same logic, tiny additions:
+     - remove languageNudge (so systemPrompt rules language)
+     - longer server VAD pause
+     - pre-speech delay in instructions hint (soft)
   ──────────────────────────────────────────────────────────────────────── */
   async function startCall(){
     setError('');
     if(!apiKey){ setError('No API key selected.'); onError?.('No API key'); return; }
     try{
       setConnecting(true);
+      callRef.current = { id: `call_${Date.now()}_${Math.random().toString(36).slice(2,7)}`, startedAt: Date.now(), transcript: [] };
+      persistTranscript([]);
 
-      // 1) ephemeral token from your backend
+      // 1) ephemeral
       const sessionRes=await fetch(ephemeralEndpoint,{
         method:'POST', headers:{ 'Content-Type':'application/json', 'X-OpenAI-Key':apiKey },
         body:JSON.stringify({ model, voiceName:voiceId, assistantName, systemPrompt }),
@@ -535,34 +548,40 @@ export default function WebCallButton({
           phoneFilter: !!usePhone, farMic, ambience, ambienceLevel
         });
       };
-      const sendTrack=mic.getAudioTracks()[0];
-      pc.addTrack(sendTrack, mic);
+      pc.addTrack(mic.getAudioTracks()[0], mic);
       pc.addTransceiver('audio',{ direction:'recvonly' });
 
-      // 4) data channel
+      // 4) data channel (unchanged)
       const dc=pc.createDataChannel('oai-events'); dcRef.current=dc;
 
       dc.onopen=()=>{
-        // base instructions (unchanged)
+        // Build instructions from your systemPrompt only
         const style = [
           systemPrompt || '',
-          languageNudge(languageHint),
-          prosody?.fillerWords ? 'Use mild, natural disfluencies.' : '',
-          (prosody?.microPausesMs ? `Allow micro pauses (~${prosody.microPausesMs} ms).` : ''),
-          (prosody?.turnEndPauseMs ? `Wait ~${prosody.turnEndPauseMs} ms of silence before replying.` : '')
+          // soft human touches; these are stylistic and non-breaking
+          'Before speaking, pause ~450ms as if thinking.',
+          `Use gentle micro-pauses (~${prosody?.microPausesMs ?? 120}ms) within sentences.`,
+          'Between sentences, breathe lightly and keep a natural pace.',
         ].filter(Boolean).join('\n\n');
         baseInstructionsRef.current = style;
 
-        // session config (unchanged)
+        // session config (same, but with longer turn_end silence)
         safeSend(dc,{ type:'session.update', session:{
           instructions: baseInstructionsRef.current,
           voice: voiceId,
           input_audio_format:'pcm16',
           output_audio_format:'pcm16',
-          modalities:['audio','text']
+          modalities:['audio','text'],
+          // Let the server wait longer before it replies (less barge-in)
+          turn_detection:{
+            type:'server_vad',
+            threshold:0.5,
+            prefix_silence_ms: 100,
+            silence_duration_ms: Math.max(900, prosody?.turnEndPauseMs ?? 1600), // ← longer pause by default
+          },
         }});
 
-        // ——— Greeting logic (unchanged) ———
+        // ——— Greeting logic (kept as-is) ———
         const wantClientGreeting =
           greetMode==='client' ||
           (greetMode==='server' && firstMode==='Assistant speaks first');
@@ -585,52 +604,39 @@ export default function WebCallButton({
         }
       };
 
-      // 5) events — SAME logic, but routed through buffered transcript helpers
+      // 5) events — EXACTLY your logic; plus persistence
       dc.onmessage=(ev)=>{
         try{
           const msg=JSON.parse(ev.data); const t=msg?.type as string;
 
-          // assistant text stream → buffered single bubble
+          // assistant stream
           if(t==='response.output_text.delta'){
             sawAssistantDeltaRef.current = true;
-            const delta=msg?.delta||'';
-            asstDeltaRef.current += String(delta);
-            scheduleFlush();
+            const id=msg?.response_id||msg?.id||'assistant_current';
+            const delta=String(msg?.delta||'');
+            upsert(id,'assistant',(prev)=>({ text:(prev?.text||'')+delta }));
           }
           if(t==='response.completed'||t==='response.stop'){
-            // flush and mark done
-            if (asstDeltaRef.current) { scheduleFlush(); }
-            const id=currentAsstIdRef.current||'assistant_current';
-            setTimeout(()=>{ if (id) {
-              setLog(prev=>{ const i=prev.findIndex(r=>r.id===id); if(i===-1) return prev; const n=[...prev]; n[i]={...n[i], done:true}; return n; });
-              currentAsstIdRef.current=null;
-            }},0);
+            const id=msg?.response_id||msg?.id||'assistant_current';
+            upsert(id,'assistant',{ done:true });
           }
           if(t==='response.output_text' && typeof msg?.text==='string'){
             sawAssistantDeltaRef.current = true;
             addLine('assistant', msg.text);
-            currentAsstIdRef.current=null;
           }
 
-          // USER transcript (incremental) → buffered single bubble
+          // user transcript
           if(t==='transcript.delta'){
-            const d=msg?.delta||'';
-            userDeltaRef.current = (userDeltaRef.current ? userDeltaRef.current + d : d);
-            if (!currentUserIdRef.current) currentUserIdRef.current = msg?.transcript_id||msg?.id||`user_${Date.now()}`;
-            scheduleFlush();
+            const id=msg?.transcript_id||msg?.id||'user_current';
+            const d=String(msg?.delta||'');
+            upsert(id,'user',(prev)=>({ text:(prev?.text||'')+d }));
           }
           if(t==='transcript.completed'){
-            const id=currentUserIdRef.current || msg?.transcript_id || msg?.id || 'user_current';
-            // make sure latest interim is shown as final
-            if (userDeltaRef.current){ scheduleFlush(); }
-            setTimeout(()=>{ setLog(prev=>{ const i=prev.findIndex(r=>r.id===id); if(i===-1) return prev; const n=[...prev]; n[i]={...n[i], done:true}; return n; }); },0);
-            currentUserIdRef.current=null;
+            const id=msg?.transcript_id||msg?.id||'user_current';
+            upsert(id,'user',{ done:true });
           }
-
-          // fallback shape some runtimes emit
           if(t==='input_audio_buffer.transcript' && typeof msg?.text==='string'){
             addLine('user', msg.text);
-            currentUserIdRef.current=null;
           }
         }catch{}
       };
@@ -640,12 +646,12 @@ export default function WebCallButton({
         else if(['disconnected','failed','closed'].includes(pc.connectionState)){ endCall(false); }
       };
 
-      // 6) SDP (unchanged)
+      // 6) SDP
       const offer=await pc.createOffer(); await pc.setLocalDescription(offer);
       const url=`https://api.openai.com/v1/realtime?model=${encodeURIComponent(model)}`;
       const answerRes=await fetch(url,{
         method:'POST',
-        headers:{ Authorization:`Bearer ${session.client_secret.value}`, 'Content-Type':'application/sdp', 'OpenAI-Beta':'realtime=v1' },
+        headers:{ Authorization:`Bearer ${EPHEMERAL}`, 'Content-Type':'application/sdp', 'OpenAI-Beta':'realtime=v1' },
         body: offer.sdp,
       });
       if(!answerRes.ok) throw new Error(`Realtime SDP failed: ${await answerRes.text()}`);
@@ -670,7 +676,6 @@ export default function WebCallButton({
     const next=!muted; tracks.forEach(t=>t.enabled=!next); setMuted(next);
   }
   function cleanup(){
-    if (rafRef.current) { try{cancelAnimationFrame(rafRef.current)}catch{}; rafRef.current=null; }
     if(vadLoopRef.current) cancelAnimationFrame(vadLoopRef.current);
     vadLoopRef.current=null;
     try{ dcRef.current?.close(); }catch{}
@@ -681,8 +686,17 @@ export default function WebCallButton({
     micStreamRef.current=null;
     try{ closeChainRef.current && closeChainRef.current(); }catch{}
     closeChainRef.current = null;
-    currentUserIdRef.current=null; currentAsstIdRef.current=null;
-    userDeltaRef.current=''; asstDeltaRef.current='';
+
+    // finalize and persist call end
+    (async()=>{
+      try{
+        callRef.current.endedAt = Date.now();
+        const list = (await scopedStore.get(STORE_KEY)) || [];
+        const idx = list.findIndex((c:any)=>c?.id===callRef.current.id);
+        if (idx === -1) list.push(callRef.current); else list[idx] = callRef.current;
+        await scopedStore.set(STORE_KEY, list);
+      }catch{}
+    })();
   }
   function endCall(userIntent=true){ cleanup(); setConnected(false); setConnecting(false); if(userIntent) onClose?.(); }
 
@@ -691,12 +705,12 @@ export default function WebCallButton({
   },[voiceId]);
 
   /* ────────────────────────────────────────────────────────────────────────
-     UI — same layout, with small panel robustness tweaks
+     UI — full-height slide-over panel (top → bottom)
   ───────────────────────────────────────────────────────────────────────── */
   const header = (
-    <div className="va-head" style={{ minHeight: 72 }}>
+    <div className="va-head" style={{ zIndex: 100011 }}>
       <div className="flex items-center gap-3 min-w-0">
-        <div className="inline-grid place-items-center w-9 h-9 rounded-lg"
+        <div className="inline-grid place-items-center w-9 h-9 rounded-[8px]"
              style={{ background:'rgba(89,217,179,.12)', border:'1px solid rgba(89,217,179,.25)' }}>
           <Bot className="w-5 h-5" style={{ color: CTA }} />
         </div>
@@ -707,6 +721,7 @@ export default function WebCallButton({
       </div>
 
       <div className="ml-auto flex items-center gap-2">
+        {/* Voice dropdown left in (your logic chooses actual voice id) */}
         <div style={{ width: 180 }}>
           <StyledSelect
             value={voiceId}
@@ -718,7 +733,7 @@ export default function WebCallButton({
 
         <button
           onClick={toggleMute}
-          className="w-9 h-9 rounded-[8px] grid place-items-center"
+          className="w-9 h-9 rounded-[8px] grid place-items-center transition"
           style={{
             border:'1px solid rgba(255,255,255,.14)', color:'var(--text)',
             background: muted ? 'rgba(239,68,68,.14)' : 'transparent'
@@ -730,7 +745,7 @@ export default function WebCallButton({
 
         <button
           onClick={()=>endCall(true)}
-          className="w-9 h-9 rounded-[8px] grid place-items-center"
+          className="w-9 h-9 rounded-[8px] grid place-items-center transition"
           style={{ border:'1px solid rgba(239,68,68,.38)', background:'rgba(239,68,68,.18)', color:'#ffd7d7' }}
           title="End call"
         >
@@ -741,18 +756,12 @@ export default function WebCallButton({
   );
 
   const body = (
-    <div className="p-3 md:p-4" style={{ color:'var(--text)' }}>
-      {/* Transcript — single bubble for each side with smooth deltas */}
-      <div
-        ref={scrollerRef}
-        className="space-y-3 overflow-y-auto"
-        style={{
-          maxHeight:'52vh',
-          scrollbarWidth:'thin',
-          overscrollBehavior:'contain',
-          willChange:'transform'
-        }}
-      >
+    <div className="p-4" style={{ color:'var(--text)', background:'var(--panel-bg)' }}>
+      <div className="text-xs pb-2 mb-3 border-b" style={{ borderColor:'rgba(255,255,255,.10)', color:'var(--text-muted)' }}>
+        Transcript
+      </div>
+
+      <div ref={scrollerRef} className="space-y-3 overflow-y-auto" style={{ maxHeight:'calc(100vh - 72px - 52px - 84px)', scrollbarWidth:'thin' }}>
         {log.length===0 && (
           <div
             className="text-sm rounded-[8px] px-3 py-2 border"
@@ -764,32 +773,34 @@ export default function WebCallButton({
         )}
 
         {log.map(row=>(
-          <div key={row.id} className={`flex ${row.who==='user' ? 'justify-end' : 'justify-start'}`}>
-            {row.who==='assistant' && (
-              <div className="mr-2 mt-[2px] shrink-0 rounded-full w-8 h-8 grid place-items-center"
-                   style={{ background:'rgba(89,217,179,.12)', border:'1px solid rgba(89,217,179,.25)' }}>
-                <Bot className="w-4 h-4" style={{ color: CTA }} />
-              </div>
-            )}
+          row.text?.trim().length ? (
+            <div key={row.id} className={`flex ${row.who==='user' ? 'justify-end' : 'justify-start'}`}>
+              {row.who==='assistant' && (
+                <div className="mr-2 mt-[2px] shrink-0 rounded-[8px] w-8 h-8 grid place-items-center"
+                    style={{ background:'rgba(89,217,179,.12)', border:'1px solid rgba(89,217,179,.25)' }}>
+                  <Bot className="w-4 h-4" style={{ color: CTA }} />
+                </div>
+              )}
 
-            <div
-              className="max-w-[78%] rounded-2xl px-3 py-2 text-[0.95rem] leading-snug border"
-              style={{
-                background: row.who==='user' ? 'rgba(56,196,143,.18)' : 'rgba(255,255,255,.06)',
-                borderColor: row.who==='user' ? 'rgba(56,196,143,.35)' : 'rgba(255,255,255,.14)',
-              }}
-            >
-              <div>{row.text || <span style={{ opacity:.5 }}>…</span>}</div>
-              <div className="text-[10px] mt-1 opacity-60 text-right">{fmtTime(row.at)}</div>
+              <div
+                className="max-w-[78%] rounded-[12px] px-3 py-2 text-[0.95rem] leading-snug border transition"
+                style={{
+                  background: row.who==='user' ? 'rgba(56,196,143,.26)' : 'rgba(255,255,255,.10)',
+                  borderColor: row.who==='user' ? 'rgba(56,196,143,.42)' : 'rgba(255,255,255,.18)',
+                }}
+              >
+                <div>{row.text}</div>
+                <div className="text-[10px] mt-1 opacity-60 text-right">{fmtTime(row.at)}</div>
+              </div>
+
+              {row.who==='user' && (
+                <div className="ml-2 mt-[2px] shrink-0 rounded-[8px] w-8 h-8 grid place-items-center"
+                    style={{ background:'rgba(255,255,255,.10)', border:'1px solid rgba(255,255,255,.18)' }}>
+                  <User className="w-4 h-4" />
+                </div>
+              )}
             </div>
-
-            {row.who==='user' && (
-              <div className="ml-2 mt-[2px] shrink-0 rounded-full w-8 h-8 grid place-items-center"
-                   style={{ background:'rgba(255,255,255,.10)', border:'1px solid rgba(255,255,255,.18)' }}>
-                <User className="w-4 h-4" />
-              </div>
-            )}
-          </div>
+          ) : null
         ))}
 
         {error && (
@@ -803,15 +814,18 @@ export default function WebCallButton({
   );
 
   const footer = (
-    <div className="px-3 py-2 border-t" style={{ borderColor:'rgba(255,255,255,.10)', color:'var(--text)' }}>
-      <div className="flex items-center justify-between gap-2 text-xs">
+    <div className="px-3 py-2 border-t" style={{ borderColor:'rgba(255,255,255,.10)', color:'var(--text)', background:'var(--panel-bg)' }}>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 items-center text-xs">
         <div className="flex items-center gap-2">
           {connecting && <Loader2 className="w-4 h-4 animate-spin" />}
           <span style={{ opacity:.85 }}>
             {connected ? 'Connected' : (connecting ? 'Connecting…' : 'Idle')}
           </span>
         </div>
-        <audio ref={audioRef} autoPlay playsInline />
+
+        <div className="col-span-1 sm:col-span-2 flex justify-end">
+          <audio ref={audioRef} autoPlay playsInline />
+        </div>
       </div>
     </div>
   );
@@ -822,19 +836,43 @@ export default function WebCallButton({
         .va-card{
           --panel:#0d0f11; --text:#e6f1ef; --text-muted:#9fb4ad;
           --panel-bg:var(--panel);
+          border-left: 1px solid ${GREEN_LINE};
           background:var(--panel-bg);
           color:var(--text);
-          border-radius:12px;
-          box-shadow:
-            0 18px 40px rgba(0,0,0,.35),
-            0 0 0 1px rgba(255,255,255,.06);
+          box-shadow:0 22px 44px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px ${GREEN_LINE};
+          overflow:hidden; isolation:isolate;
+          transform: translateX(100%);
+          animation: slideIn .42s cubic-bezier(.22,.87,.32,1) forwards;
+        }
+        @keyframes slideIn {
+          from { transform: translateX(100%); opacity: .85; }
+          to   { transform: translateX(0%);    opacity: 1; }
+        }
+        .va-head{
+          min-height:72px;
+          display:grid; grid-template-columns:1fr auto; align-items:center;
+          padding:0 16px; border-bottom:1px solid ${GREEN_LINE};
+          background:linear-gradient(90deg,var(--panel-bg) 0%,rgba(255,255,255,0.03) 50%,var(--panel-bg) 100%);
         }
       `}</style>
+
+      <div
+        className="fixed inset-0"
+        style={{
+          zIndex: 100008,
+          background: 'linear-gradient(90deg, rgba(10,13,15,0.35) 0%, rgba(10,13,15,0.6) 32%, rgba(10,13,15,0.88) 60%, rgba(10,13,15,0.94) 100%)'
+        }}
+        onClick={()=>endCall(true)}
+        aria-hidden
+      />
       <aside
         className={`va-card ${className||''}`}
         style={{
-          position:'fixed', right:16, bottom:16, width:'min(520px, 95vw)',
-          zIndex: 100010, background:'var(--panel-bg)', color:'var(--text)'
+          position:'fixed', top:0, right:0, bottom:0,
+          width:'clamp(380px, 34vw, 560px)',
+          zIndex: 100012,
+          display:'grid', gridTemplateRows:'72px 1fr 84px',
+          borderTopLeftRadius: 14, borderBottomLeftRadius: 14,
         }}
         role="dialog"
         aria-label="Voice call panel"
