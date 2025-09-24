@@ -1,7 +1,6 @@
 // components/builder/Step4Overview.tsx
 'use client';
 
-import type { CSSProperties } from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import {
   Check, AlertCircle, Loader2, Sparkles, ArrowLeft,
@@ -12,20 +11,20 @@ import { s, st } from '@/utils/safe';
 import { scopedStorage } from '@/utils/scoped-storage';
 import { supabase } from '@/lib/supabase-client';
 
-/* ─────────────────────────── Shared visuals ─────────────────────────── */
+/* ─────────────────────────── Shared visuals (same as Step 1) ─────────────────────────── */
 
 const BTN_GREEN = '#10b981';
 const BTN_GREEN_HOVER = '#0ea473';
 const BTN_DISABLED = 'color-mix(in oklab, var(--text) 14%, transparent)';
 
-const CARD: CSSProperties = {
+const CARD: React.CSSProperties = {
   background: 'var(--card)',
   border: '1px solid var(--border)',
   boxShadow: 'var(--shadow-card)',
   borderRadius: 20,
 };
 
-const PANEL: CSSProperties = {
+const PANEL: React.CSSProperties = {
   background: 'var(--panel)',
   border: '1px solid var(--border)',
   boxShadow: 'var(--shadow-soft)',
@@ -76,7 +75,7 @@ function buildFinalPrompt() {
   const header = [st(s1?.name), st(s1?.industry), st(s1?.language)].filter(Boolean).join('\n');
 
   const languageText = s3?.languageText || s3?.language || '';
-  const description = s(s3?.description) || ''; // ← fixed: removed stray "the"
+  const description = s(s3?.description) || '';
   const rules = s(s3?.rules) || '';
   const flow = s(s3?.flow) || '';
   const company = (s(s3?.company) || '').trim();
@@ -96,24 +95,6 @@ function buildFinalPrompt() {
     .join('\n\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
-}
-
-/** Read Response safely without throwing on empty/non-JSON bodies */
-async function safeApi<T = any>(resp: Response): Promise<{
-  ok: boolean; status: number; data?: T; error?: string; text?: string;
-}> {
-  const status = resp.status;
-  const ct = resp.headers.get('content-type') || '';
-  const raw = await resp.text(); // read once
-  let json: any = null;
-  if (ct.includes('application/json')) {
-    try { json = raw ? JSON.parse(raw) : null; } catch { /* ignore parse error */ }
-  }
-  if (!resp.ok) {
-    const msg = (json && (json.error || json.message)) || raw || `HTTP ${status}`;
-    return { ok: false, status, error: String(msg), text: raw };
-  }
-  return { ok: true, status, data: (json ?? (raw as any)), text: raw };
 }
 
 /* ───────────────────────────── Component ───────────────────────────── */
@@ -165,13 +146,13 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
     return () => clearInterval(id);
   }, [loading]);
 
-  // ✅ Per-account saving (no API key requirement)
   const checks = {
     name: !!st(s1?.name),
     industry: !!st(s1?.industry),
     language: !!st(s1?.language),
     template: !!(s1?.type || s1?.botType || s1?.aiType),
     model: !!s2?.model,
+    apiKey: !!s2?.apiKeyId,
     description: !!st(s3?.description),
     flow: !!st(s3?.flow),
     rules: !!st(s3?.rules),
@@ -181,23 +162,25 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
   const ready = Object.values(checks).every(Boolean);
 
   async function saveBuildEverywhere(build: any) {
+    // Cloud (scopedStorage)
     try {
       const ss = await scopedStorage();
       await ss.ensureOwnerGuard();
       const cloud = await ss.getJSON<any[]>('chatbots.v1', []);
       const list = Array.isArray(cloud) ? cloud : [];
-      const key = build.id || build.assistantId;
-      const idx = list.findIndex((b) => (b.id || b.assistantId) === key);
+      const key = build.assistantId || build.id;
+      const idx = list.findIndex((b) => (b.assistantId || b.id) === key);
       if (idx >= 0) list[idx] = build;
       else list.unshift(build);
       await ss.setJSON('chatbots.v1', list);
     } catch {}
 
+    // Local
     try {
       const local = getLS<any[]>('chatbots', []);
       const list = Array.isArray(local) ? local : [];
-      const key = build.id || build.assistantId;
-      const idx = list.findIndex((b) => (b.id || b.assistantId) === key);
+      const key = build.assistantId || build.id;
+      const idx = list.findIndex((b) => (b.assistantId || b.id) === key);
       if (idx >= 0) list[idx] = build;
       else list.unshift(build);
       localStorage.setItem('chatbots', JSON.stringify(list));
@@ -213,49 +196,72 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
     setDone(false);
 
     try {
-      // 1) owner id
-      const { data: u } = await supabase.auth.getUser();
-      const userId = u?.user?.id;
-      if (!userId) throw new Error('You must be signed in to save this AI.');
-
+      // 1) read selected API key value from scopedStorage
+      let apiKeyPlain = '';
       const selectedModel = s2?.model || 'gpt-4o-mini';
-      const temperature = Number(s2?.temperature ?? 0.5) || 0.5;
+      try {
+        const ss = await scopedStorage();
+        await ss.ensureOwnerGuard();
+        const keys = await ss.getJSON<any[]>('apiKeys.v1', []);
+        const sel = (keys || []).find(k => k.id === s2?.apiKeyId);
+        apiKeyPlain = sel?.key || '';
+      } catch {}
 
-      // 2) Save to our API (per-account)
-      const resp = await fetch('/api/chatbots', {
+      // 2) create assistant via server route
+      const resp = await fetch('/api/assistants/create', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-owner-id': userId,
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: st(s1?.name, 'Untitled Agent'),
+          name: st(s1?.name, 'Untitled Assistant'),
           model: selectedModel,
-          temperature,
-          system: finalPrompt,
+          prompt: finalPrompt,
+          apiKeyPlain,
         }),
       });
 
-      const parsed = await safeApi(resp);
-      if (!parsed.ok) {
-        console.error('Save failed:', parsed.status, parsed.error, parsed.text);
-        throw new Error(parsed.error || `Save failed (HTTP ${parsed.status})`);
+      const data = await resp.json();
+      if (!resp.ok || !data?.ok || !data?.assistant?.id) {
+        throw new Error(data?.error || 'Failed to create assistant');
+      }
+      const assistantId = data.assistant.id as string;
+
+      // 3) current user id
+      const { data: u } = await supabase.auth.getUser();
+      const userId = u?.user?.id;
+      if (!userId) throw new Error('No Supabase user session');
+
+      // 4) persist to Supabase through API
+      const saveRes = await fetch('/api/chatbots/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          assistantId,
+          name: st(s1?.name, 'Untitled Assistant'),
+          model: selectedModel,
+          industry: st(s1?.industry, null),
+          language: st(s1?.language, 'English'),
+          prompt: finalPrompt,
+          appearance: null,
+        }),
+      });
+      const saveJson = await saveRes.json();
+      if (!saveRes.ok || !saveJson?.ok) {
+        throw new Error(saveJson?.error || 'Saved to OpenAI but failed to store build');
       }
 
-      // 3) Mirror to cloud + local for instant UI
-      const saved = (parsed.data as any)?.data ?? parsed.data;
-      if (!saved?.id) throw new Error('Save succeeded but returned no id.');
-
+      // 5) mirror to cloud + local
       const build = {
-        id: saved.id,
-        name: saved.name,
+        id: assistantId,
+        assistantId,
+        name: st(s1?.name, 'Untitled Assistant'),
         type: s1?.type || s1?.botType || s1?.aiType || 'ai automation',
         industry: st(s1?.industry),
         language: st(s1?.language, 'English'),
-        model: saved.model,
-        prompt: saved.system,
-        createdAt: saved.createdAt || new Date().toISOString(),
-        updatedAt: saved.updatedAt || new Date().toISOString(),
+        model: selectedModel,
+        prompt: finalPrompt,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
       };
       await saveBuildEverywhere(build);
 
@@ -266,7 +272,7 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
       onFinish?.();
     } catch (e: any) {
       setLoading(false);
-      alert(e?.message || 'Failed to save the AI (no response body).');
+      alert(e?.message || 'Failed to generate the AI.');
     }
   }
 
@@ -347,6 +353,7 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
                 <Req ok={!!checks.languageText} label="Language Instructions" />
                 <Req ok={!!checks.template} label="Template" />
                 <Req ok={!!checks.model} label="Model" />
+                <Req ok={!!checks.apiKey} label="API Key" />
                 <Req ok={!!checks.description} label="Description" />
                 <Req ok={!!checks.flow} label="Conversation Flow" />
                 <Req ok={!!checks.rules} label="Rules" />
@@ -356,10 +363,10 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
               <div className="rounded-2xl p-4" style={{ ...CARD }}>
                 <div className="flex items-center gap-2 font-semibold" style={{ color: 'var(--brand)' }}>
                   <Sparkles className="w-4 h-4" />
-                  {ready ? 'Ready to Save' : 'Missing Requirements'}
+                  {ready ? 'Ready to Generate' : 'Missing Requirements'}
                 </div>
                 <div className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
-                  {ready ? 'Your AI will be saved to your account.' : 'Please complete the missing items above.'}
+                  {ready ? 'Your AI will be created now using your selected API key.' : 'Please complete the missing items above.'}
                 </div>
               </div>
             </div>
@@ -391,7 +398,7 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
             }}
           >
             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-            Save AI
+            Generate AI
           </button>
         </div>
       </div>
@@ -401,7 +408,7 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
         <div className="fixed inset-0 z-50 bg-black/70 grid place-items-center px-4">
           <div className="w-full max-w-md rounded-[24px] p-6 text-center" style={{ background: 'var(--panel)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-soft)' }}>
             <Loader2 className="w-7 h-7 mx-auto animate-spin mb-3" style={{ color: 'var(--brand)' }} />
-            <div className="text-lg font-semibold" style={{ color: 'var(--text)' }}>Saving AI…</div>
+            <div className="text-lg font-semibold" style={{ color: 'var(--text)' }}>Generating AI…</div>
             <div className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>{loadingMsg}</div>
           </div>
         </div>
@@ -415,7 +422,7 @@ export default function Step4Overview({ onBack, onFinish }: Props) {
         >
           <div className="flex items-center gap-2">
             <Check className="w-4 h-4" style={{ color: 'var(--brand)' }} />
-            <div className="text-sm">AI saved to your account.</div>
+            <div className="text-sm">AI generated and saved to your Builds.</div>
           </div>
         </div>
       )}
