@@ -1,3 +1,4 @@
+// FILE: components/voice/VoiceAgentSection.tsx
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
@@ -14,20 +15,16 @@ import WebCallButton from '@/components/voice/WebCallButton';
 // ✅ use your existing UI select
 import StyledSelect from '@/components/ui/StyledSelect';
 
-// ✅ use the simple, reliable versions below
+// ✅ simple, reliable modals (each portals itself)
 import GeneratePromptModal from '@/components/voice/GeneratePromptModal';
 import ImportWebsiteModal from '@/components/voice/ImportWebsiteModal';
 
-// ✅ bundle-safe JSZip loader file provided below
+// ✅ bundle-safe JSZip loader
 import { loadJSZip } from '@/lib/jszip-loader';
 
-// prompt engine
-import {
-  DEFAULT_PROMPT as _DEFAULT_PROMPT,
-  looksLikeFullPrompt as _looksLikeFullPrompt,
-  normalizeFullPrompt as _normalizeFullPrompt,
-  compilePrompt
-} from '@/lib/prompt-engine';
+// ✅ use your actual helpers (no missing prompt-engine)
+import { DEFAULT_PROMPT as BUILDER_DEFAULT, buildPromptFromWebsite } from '@/utils/prompt-builder';
+import { shapePromptForScheduling } from '@/components/voice/utils/prompt';
 
 /* ───────── constants ───────── */
 const EPHEMERAL_TOKEN_ENDPOINT = '/api/voice/ephemeral';
@@ -62,10 +59,8 @@ class RailBoundary extends React.Component<{children:React.ReactNode},{hasError:
 }
 
 /* ───────── tiny helpers ───────── */
-const isFn = (f: any): f is Function => typeof f === 'function';
 const isStr = (v: any): v is string => typeof v === 'string';
 const nonEmpty = (v: any): v is string => isStr(v) && v.trim().length > 0;
-const coerceStr = (v: any): string => (isStr(v) ? v : '');
 const safeTrim = (v: any): string => (nonEmpty(v) ? v.trim() : '');
 const sleep = (ms:number) => new Promise(r=>setTimeout(r,ms));
 
@@ -156,10 +151,7 @@ const PROMPT_SKELETON = `[Identity]
 [Task & Goals]
 
 [Error Handling / Fallback]`;
-
-const looksLikeFullPromptRT = (raw: string) => isFn(_looksLikeFullPrompt) ? !!_looksLikeFullPrompt(raw) : false;
-const normalizeFullPromptRT = (raw: string) => isFn(_normalizeFullPrompt) ? coerceStr(_normalizeFullPrompt(raw)) : raw;
-const DEFAULT_PROMPT_RT = nonEmpty(_DEFAULT_PROMPT) ? _DEFAULT_PROMPT! : PROMPT_SKELETON;
+const DEFAULT_PROMPT_RT = nonEmpty(BUILDER_DEFAULT) ? BUILDER_DEFAULT! : PROMPT_SKELETON;
 
 const DEFAULT_AGENT: AgentData = {
   name: 'Assistant',
@@ -169,8 +161,8 @@ const DEFAULT_AGENT: AgentData = {
   firstMsg: '',
   firstMsgs: [],
   greetPick: 'sequence',
-  systemPrompt:
-    (normalizeFullPromptRT(`
+  systemPrompt: (
+    `
 [Identity]
 - You are a helpful, professional AI assistant for this business.
 
@@ -184,7 +176,8 @@ const DEFAULT_AGENT: AgentData = {
 - Guide users to their next best action (booking, purchase, or escalation).
 
 [Error Handling / Fallback]
-- If unsure, ask a specific clarifying question first.`).trim()),
+- If unsure, ask a specific clarifying question first.`.trim()
+  ),
   systemPromptBackend: '',
   contextText: '',
   ctxFiles: [],
@@ -230,11 +223,6 @@ async function apiPublish(agentId: string){
 
 /* ───────── option helpers ───────── */
 type Opt = { value: string; label: string; disabled?: boolean; note?: string; iconLeft?: React.ReactNode };
-const providerOpts: Opt[] = [
-  { value: 'openai',     label: 'OpenAI',    iconLeft: <OpenAIStamp size={14} /> },
-  { value: 'anthropic',  label: 'Anthropic — coming soon', disabled: true },
-  { value: 'google',     label: 'Google — coming soon',    disabled: true },
-];
 
 /** models list (static UI) */
 function useOpenAIModels(){
@@ -303,14 +291,6 @@ async function readFileAsText(f: File): Promise<string> {
   });
 }
 
-/* ───────── Import helpers ───────── */
-function buildPromptFromWebsite(raw: string, basePrompt: string){
-  const text = (raw || '').trim();
-  const base = nonEmpty(basePrompt) ? basePrompt : DEFAULT_PROMPT_RT;
-  const block = text ? `\n\n[Business Facts]\n${text}` : '';
-  return `${base}${block}`.trim();
-}
-
 /* ───────── Page ───────── */
 export default function VoiceAgentSection() {
   /* Theme */
@@ -366,10 +346,8 @@ export default function VoiceAgentSection() {
 
   // Generate / typed diff flow
   const [showGenerate, setShowGenerate] = useState(false);
-  const [composerText, setComposerText] = useState('');
   const [isTypingIntoPrompt, setIsTypingIntoPrompt] = useState(false);
   const [diffCandidate, setDiffCandidate] = useState<string>('');
-  const basePromptRef = useRef<string>('');
   const typingRef = useRef<number | null>(null);
 
   // Website import overlay
@@ -496,15 +474,13 @@ export default function VoiceAgentSection() {
     return (v: AgentData[K]) => setData(prev => ({ ...prev, [k]: v }));
   }
 
-  // keep backend prompt synced when user types
+  // Keep backend prompt mirrored (no external compiler)
   useEffect(() => {
     if (!data.systemPrompt) return;
-    try {
-      const compiled = compilePrompt({ basePrompt: sanitizePrompt(data.systemPrompt), userText: '' });
-      if (compiled?.backendString && compiled.backendString !== data.systemPromptBackend) {
-        setData(p => ({ ...p, systemPromptBackend: sanitizePrompt(compiled.backendString) }));
-      }
-    } catch {}
+    const s = sanitizePrompt(data.systemPrompt);
+    if (s !== data.systemPromptBackend) {
+      setData(p => ({ ...p, systemPromptBackend: s }));
+    }
   }, [data.systemPrompt]);
 
   async function doSave(){
@@ -556,10 +532,6 @@ export default function VoiceAgentSection() {
     const base = sanitizePrompt((data.systemPromptBackend || data.systemPrompt || DEFAULT_PROMPT_RT).trim());
     const next = ctx ? `${base}\n\n[Context]\n${ctx}`.trim() : base;
 
-    basePromptRef.current = sanitizePrompt(data.systemPrompt || DEFAULT_PROMPT_RT);
-    setShowGenerate(false);
-    await sleep(50);
-
     setIsTypingIntoPrompt(true);
     setDiffCandidate('');
     if (typingRef.current) cancelAnimationFrame(typingRef.current as any);
@@ -572,16 +544,12 @@ export default function VoiceAgentSection() {
     };
     typingRef.current = requestAnimationFrame(step);
 
-    // precompile backend for faster accept
-    try {
-      const compiled = compilePrompt({ basePrompt: next, userText: '' });
-      setField('systemPromptBackend')(sanitizePrompt(compiled.backendString));
-    } catch {}
+    // mirror to backend
+    setField('systemPromptBackend')(next);
   };
 
   /* Generate → type inside the prompt box with Accept/Decline diff */
   const startTypingIntoPrompt = async (targetText:string) => {
-    basePromptRef.current = sanitizePrompt(data.systemPrompt || DEFAULT_PROMPT_RT);
     setIsTypingIntoPrompt(true);
     setDiffCandidate('');
     if (typingRef.current) cancelAnimationFrame(typingRef.current as any);
@@ -597,10 +565,7 @@ export default function VoiceAgentSection() {
   const acceptGenerated = () => {
     const chosen = sanitizePrompt((diffCandidate || data.systemPrompt).replace(/\u200b/g,''));
     setField('systemPrompt')(chosen);
-    try {
-      const compiled = compilePrompt({ basePrompt: chosen, userText: '' });
-      setField('systemPromptBackend')(sanitizePrompt(compiled.backendString));
-    } catch {}
+    setField('systemPromptBackend')(chosen);
     setIsTypingIntoPrompt(false);
     setDiffCandidate('');
   };
@@ -827,7 +792,7 @@ export default function VoiceAgentSection() {
                   <button
                     className="inline-flex items-center gap-2 rounded-[8px] text-sm"
                     style={{ height:34, padding:'0 12px', background:CTA, color:'#fff', border:'1px solid rgba(255,255,255,.08)' }}
-                    onClick={()=>{ setComposerText(''); setShowGenerate(true); }}
+                    onClick={()=> setShowGenerate(true)}
                   >
                     <Wand2 className="w-4 h-4" /> Generate
                   </button>
@@ -851,7 +816,6 @@ export default function VoiceAgentSection() {
                   />
                 ) : (
                   <div className="rounded-[8px] border p-3 text-xs" style={{ borderColor:'var(--border-weak)', background:'var(--panel-bg)' }}>
-                    {/* simple inline diff feel — just show the candidate typing in */}
                     <pre className="whitespace-pre-wrap break-words">{diffCandidate}</pre>
                     <div className="mt-3 flex gap-2">
                       <button onClick={acceptGenerated} className="px-3 py-1.5 rounded-[8px]" style={{ background:CTA, color:'#fff' }}>Accept</button>
@@ -1072,79 +1036,64 @@ export default function VoiceAgentSection() {
         </div>
       </div>
 
-      {/* Generate Modal (simple + reliable) */}
-      {showGenerate && IS_CLIENT ? createPortal(
-        <GeneratePromptModal
-          open={showGenerate}
-          value={composerText}
-          onChange={setComposerText}
-          onCancel={()=> setShowGenerate(false)}
-          onGenerate={async () => {
-            const raw = safeTrim(composerText);
-            if (!raw) return;
+      {/* Generate Prompt — correct props, no outer portal */}
+      <GeneratePromptModal
+        open={showGenerate}
+        onClose={() => setShowGenerate(false)}
+        onGenerate={async (userDescription: string) => {
+          const desc = safeTrim(userDescription);
+          if (!desc) return;
+          const target = sanitizePrompt(
+            shapePromptForScheduling(desc, { name: data.name, personaName: data.name, org: 'Your Business' })
+          );
+          setShowGenerate(false);
+          await sleep(40);
+          await startTypingIntoPrompt(target);
+          setField('systemPromptBackend')(target);
+        }}
+      />
+
+      {/* Import website — builds prompt blocks via prompt-builder */}
+      <ImportWebsiteModal
+        open={showImport}
+        onClose={() => setShowImport(false)}
+        onImport={async (urls: string[])=>{
+          const list = urls.map(s=>s.trim()).filter(Boolean);
+          if (!list.length) return;
+
+          const chunks: string[] = [];
+          for (const u of list) {
             try {
-              const base = nonEmpty(data.systemPrompt) ? sanitizePrompt(data.systemPrompt) : DEFAULT_PROMPT_RT;
-              const compiled = compilePrompt({ basePrompt: base, userText: raw });
-              setField('systemPromptBackend')(sanitizePrompt(compiled.backendString));
-              setShowGenerate(false);
-              await sleep(40);
-              await startTypingIntoPrompt(sanitizePrompt(compiled.frontendText));
-            } catch {
-              setToastKind('error'); setToast('Generate failed.');
-              setTimeout(()=>setToast(''), 1800);
-            }
-          }}
-        />,
-        document.body
-      ) : null}
-
-      {/* Import website modal (clean UI) */}
-      {showImport && IS_CLIENT ? createPortal(
-        <ImportWebsiteModal
-          open={showImport}
-          onCancel={()=> setShowImport(false)}
-          onImport={async (urls: string[])=>{
-            const list = urls.map(s=>s.trim()).filter(Boolean);
-            if (!list.length) return;
-
-            const chunks: string[] = [];
-            for (const u of list) {
-              try {
-                const r = await fetch('/api/connectors/website-import', {
-                  method:'POST',
-                  headers:{'Content-Type':'application/json'},
-                  body: JSON.stringify({ url: u })
-                });
-                const j = r.ok ? await r.json().catch(()=>null) : null;
-                const facts: string[] = Array.isArray(j?.facts) ? j.facts : [];
-                if (facts.length) {
-                  chunks.push(`# ${u}`, ...facts.map(s => `- ${s}`), '');
-                } else {
-                  chunks.push(`# ${u}`, '- No obvious facts extracted.', '');
-                }
-              } catch {
-                chunks.push(`# ${u}`, '- Fetch failed.', '');
+              const r = await fetch('/api/connectors/website-import', {
+                method:'POST',
+                headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({ url: u })
+              });
+              const j = r.ok ? await r.json().catch(()=>null) : null;
+              const facts: string[] = Array.isArray(j?.facts) ? j.facts : [];
+              if (facts.length) {
+                chunks.push(`# ${u}`, ...facts.map(s => `- ${s}`), '');
+              } else {
+                chunks.push(`# ${u}`, '- No obvious facts extracted.', '');
               }
+            } catch {
+              chunks.push(`# ${u}`, '- Fetch failed.', '');
             }
+          }
 
-            const merged = chunks.join('\n').trim();
-            const base = sanitizePrompt((data.systemPromptBackend || data.systemPrompt || DEFAULT_PROMPT_RT).trim());
-            const next = buildPromptFromWebsite(merged, base);
+          const merged = chunks.join('\n').trim();
+          const base = sanitizePrompt((data.systemPromptBackend || data.systemPrompt || DEFAULT_PROMPT_RT).trim());
+          const next = buildPromptFromWebsite(merged, base);
 
-            setShowImport(false);
-            await sleep(40);
-            await startTypingIntoPrompt(next);
-            try {
-              const compiled = compilePrompt({ basePrompt: next, userText: '' });
-              setField('systemPromptBackend')(sanitizePrompt(compiled.backendString));
-            } catch {}
-            setToastKind('info'); setToast('Website facts added'); setTimeout(()=>setToast(''), 1200);
-          }}
-        />,
-        document.body
-      ) : null}
+          setShowImport(false);
+          await sleep(40);
+          await startTypingIntoPrompt(next);
+          setField('systemPromptBackend')(next);
+          setToastKind('info'); setToast('Website facts added'); setTimeout(()=>setToast(''), 1200);
+        }}
+      />
 
-      {/* Voice/Call overlay */}
+      {/* Voice/Call overlay (this one can keep a portal) */}
       {IS_CLIENT ? createPortal(
         <>
           <div
