@@ -733,7 +733,8 @@ function normalizeApiKeyList(anyVal:any): ApiKey[] {
       for (const k of anyVal) {
         if (!k) continue;
         const id   = String(k.id ?? k._id ?? k.keyId ?? k.name ?? '').trim();
-        const name = String(k.name ?? k.label ?? k.title ?? id || 'OpenAI Key').trim();
+        const candidate = k.name ?? k.label ?? k.title ?? id;
+        const name = String(candidate ?? 'OpenAI Key').trim();
         const key  = k.key ? '••••' : (k.secret || k.value ? '••••' : undefined);
         if (id && name) out.push({ id, name, key });
       }
