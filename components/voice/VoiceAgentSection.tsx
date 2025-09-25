@@ -1,3 +1,4 @@
+// components/voice/VoiceAgentSection.tsx
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
@@ -91,13 +92,28 @@ const Tokens = () => (
       --green-weak:rgba(89,217,179,.12); --red-weak:rgba(239,68,68,.14);
       --good:#10b981; --bad:#ef4444;
     }
-    .va-card{ border-radius:var(--radius-outer); border:1px solid var(--border-weak); background:var(--panel-bg); box-shadow:var(--card-shadow); overflow:hidden; isolation:isolate; }
+
+    /* base */
+    .va-root { animation: vaPageIn 380ms var(--ease) both; }
+    .va-card{ border-radius:var(--radius-outer); border:1px solid var(--border-weak); background:var(--panel-bg); box-shadow:var(--card-shadow); overflow:hidden; isolation:isolate; animation: vaFloatIn 420ms var(--ease) both; }
     .va-head{ min-height:var(--header-h); display:grid; grid-template-columns:1fr auto; align-items:center; padding:0 16px; border-bottom:1px solid rgba(255,255,255,.08); color:var(--text);
       background:linear-gradient(90deg,var(--panel-bg) 0%,color-mix(in oklab, var(--panel-bg) 97%, white 3%) 50%,var(--panel-bg) 100%); border-top-left-radius:var(--radius-outer); border-top-right-radius:var(--radius-outer); }
 
-    /* add-row animation for First Messages */
+    /* controls */
+    .va-cta{ box-shadow:0 10px 22px rgba(89,217,179,.20); animation: vaPulse 3.6s ease-in-out 1s infinite; }
+    .va-cta:hover{ transform: translateY(-1px); }
+
+    /* First Messages add-row animation */
     @keyframes vaRowIn { from { transform: scale(0.98); opacity:.0; } to { transform: scale(1); opacity:1; } }
     .va-row-add { animation: vaRowIn 220ms var(--ease); }
+
+    /* page + cards */
+    @keyframes vaPageIn { from { opacity:0; transform: translateY(8px); } to { opacity:1; transform: translateY(0); } }
+    @keyframes vaFloatIn { from { opacity:0; transform: translateY(6px) scale(.995); } to { opacity:1; transform: translateY(0) scale(1); } }
+    @keyframes vaPulse { 0%,100% { box-shadow:0 10px 22px rgba(89,217,179,.20);} 50% { box-shadow:0 18px 32px rgba(89,217,179,.30);} }
+
+    /* smoother section expand */
+    .va-section-body{ will-change: height,opacity,transform; }
   `}</style>
 );
 
@@ -260,20 +276,45 @@ const providerOpts: Opt[] = [
   { value: 'google',     label: 'Google — coming soon',    disabled: true, note: 'soon' },
 ];
 
+/* ─────────── Model list filtering (3 per family, 4.* up to 5) ─────────── */
+function modelFamilyKey(v: string){
+  // normalize common OpenAI naming
+  const s = v.toLowerCase();
+  if (s.startsWith('o4')) return '4';            // treat o4 as 4-family
+  const m = s.match(/^gpt-(\d+)/);               // gpt-4*, gpt-5*, etc
+  if (m) return m[1];
+  const m2 = s.match(/^(\d)\D/);                 // fallback
+  return m2 ? m2[1] : 'other';
+}
+function filterModelsForUI(all: Array<{ value: string; label: string }>) {
+  const seen: Record<string, number> = {};
+  const out: typeof all = [];
+  for (const m of all) {
+    const fam = modelFamilyKey(m.value);
+    const cap = fam === '4' ? 5 : 3;
+    const n = seen[fam] ?? 0;
+    if (n < cap) { out.push(m); seen[fam] = n + 1; }
+  }
+  return out;
+}
+
 /** Fetch OpenAI models (labels) once an API key is chosen. */
 function useOpenAIModels(selectedKey: string|undefined){
-  const [opts, setOpts] = useState<Opt[]>([
-    { value: 'gpt-5', label: 'GPT-5' },
-    { value: 'gpt-5-mini', label: 'GPT-5 Mini' },
-    { value: 'gpt-4.1', label: 'GPT-4.1' },
-    { value: 'gpt-4.1-mini', label: 'GPT-4.1 Mini' },
-    { value: 'gpt-4o', label: 'GPT-4o' },
-    { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
-    { value: 'o4', label: 'o4' },
-    { value: 'o4-mini', label: 'o4 Mini' },
-    { value: 'gpt-4o-realtime-preview', label: 'GPT-4o Realtime Preview' },
-    { value: 'gpt-4o-realtime-preview-mini', label: 'GPT-4o Realtime Preview Mini' },
-  ]);
+  const [opts, setOpts] = useState<Opt[]>(
+    filterModelsForUI([
+      { value: 'gpt-5', label: 'GPT-5' },
+      { value: 'gpt-5-mini', label: 'GPT-5 Mini' },
+      { value: 'gpt-5-realtime', label: 'GPT-5 Realtime' },           // placeholder; will be replaced if backend returns different ids
+      { value: 'gpt-4.1', label: 'GPT-4.1' },
+      { value: 'gpt-4.1-mini', label: 'GPT-4.1 Mini' },
+      { value: 'gpt-4o', label: 'GPT-4o' },
+      { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
+      { value: 'o4', label: 'o4' },
+      { value: 'o4-mini', label: 'o4 Mini' },
+      { value: 'gpt-4o-realtime-preview', label: 'GPT-4o Realtime Preview' },
+      { value: 'gpt-4o-realtime-preview-mini', label: 'GPT-4o Realtime Preview Mini' },
+    ])
+  );
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -291,7 +332,7 @@ function useOpenAIModels(selectedKey: string|undefined){
         const j = await r.json();
         const models = Array.isArray(j?.models) ? j.models : [];
         if (!aborted && models.length) {
-          setOpts(models.map((m:any) => ({ value: String(m.value), label: String(m.label) })));
+          setOpts(filterModelsForUI(models.map((m:any) => ({ value: String(m.value), label: String(m.label) }))));
         }
       } catch {
         // keep defaults on failure
@@ -904,7 +945,7 @@ export default function VoiceAgentSection() {
 
   /* ─────────── UI ─────────── */
   return (
-    <section className="va-scope" style={{ background:'var(--bg)', color:'var(--text)' }}>
+    <section className="va-scope va-root" style={{ background:'var(--bg)', color:'var(--text)' }}>
       <Tokens />
 
       {/* rail + content */}
@@ -948,8 +989,8 @@ export default function VoiceAgentSection() {
                 }
                 setShowCall(true);
               }}
-              className="inline-flex items-center gap-2 rounded-[8px] select-none"
-              style={{ height:'var(--control-h)', padding:'0 16px', background:CTA, color:'#ffffff', fontWeight:700, boxShadow:'0 10px 22px rgba(89,217,179,.20)' }}
+              className="inline-flex items-center gap-2 rounded-[8px] select-none va-cta"
+              style={{ height:'var(--control-h)', padding:'0 16px', background:CTA, color:'#ffffff', fontWeight:700 }}
               onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA_HOVER)}
               onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA)}
             >
@@ -975,7 +1016,7 @@ export default function VoiceAgentSection() {
 
           {/* Metrics */}
           <div className="grid gap-3 md:grid-cols-2 mb-3">
-            <div className="va-card">
+            <div className="va-card" style={{ ['--i' as any]: 0 } as React.CSSProperties}>
               <div className="va-head" style={{ minHeight: 56 }}>
                 <div className="text-xs" style={{ color:'var(--text-muted)' }}>Cost</div><div />
               </div>
@@ -983,7 +1024,7 @@ export default function VoiceAgentSection() {
                 <div className="font-semibold" style={{ fontSize:'15px' }}>~$0.1/min</div>
               </div>
             </div>
-            <div className="va-card">
+            <div className="va-card" style={{ ['--i' as any]: 1 } as React.CSSProperties}>
               <div className="va-head" style={{ minHeight: 56 }}>
                 <div className="text-xs" style={{ color:'var(--text-muted)' }}>Latency</div><div />
               </div>
@@ -1557,6 +1598,7 @@ function Section({
         </button>
 
         <div
+          className="va-section-body"
           style={{
             height: open ? h : 0,
             opacity: open ? 1 : 0,
