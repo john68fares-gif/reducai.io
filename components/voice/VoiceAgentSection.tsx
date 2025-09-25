@@ -324,7 +324,7 @@ function filterModelsForUI(all: Array<{ value: string; label: string }>) {
 }
 
 /** Fetch OpenAI models (labels) once a key ID is chosen — server resolves secret. */
-function useOpenAIModels(selectedKeyId: string|undefined){
+function useOpenAIModels(selectedKeyId?: string){
   const [opts, setOpts] = useState<Opt[]>(
     filterModelsForUI([
       { value: 'gpt-5', label: 'GPT-5' },
@@ -342,6 +342,13 @@ function useOpenAIModels(selectedKeyId: string|undefined){
   );
   const [loading, setLoading] = useState(false);
 
+  // (optional) if you later fetch models per key, do it here:
+  useEffect(() => {
+    // if (selectedKeyId) { setLoading(true); … setOpts(newList); setLoading(false); }
+  }, [selectedKeyId]);
+
+  return { opts, loading };
+}
 // load API keys + Phone numbers — align with builder step (scopedStorage only)
 useEffect(() => {
   let mounted = true;
