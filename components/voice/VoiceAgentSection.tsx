@@ -477,7 +477,7 @@ export default function VoiceAgentSection() {
 
         store.ensureOwnerGuard?.().catch(() => {});
         const phoneV1 = await store.getJSON<PhoneNum[]>(PHONE_LIST_KEY_V1, []).catch(() => []);
-        the const phoneLegacy = await store.getJSON<PhoneNum[]>(PHONE_LIST_KEY_LEG, []).catch(() => []);
+        const phoneLegacy = await store.getJSON<PhoneNum[]>(PHONE_LIST_KEY_LEG, []).catch(() => []);
         const phonesMerged = Array.isArray(phoneV1) && phoneV1.length ? phoneV1
                              : Array.isArray(phoneLegacy) ? phoneLegacy : [];
         const phoneCleaned = phonesMerged
