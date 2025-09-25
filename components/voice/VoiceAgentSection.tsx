@@ -57,12 +57,12 @@ const Tokens = () => (
       --ease:cubic-bezier(.22,.61,.36,1);
       --control-h:40px;
 
-      /* Buttons (force white fg per your ask) */
+      /* Default (dark) buttons */
       --btn-bg: #1a1f1d;
       --btn-fg: #ffffff;
       --btn-border: var(--border);
       --brand-btn-bg: var(--brand);
-      --brand-btn-fg: #ffffff;
+      --brand-btn-fg: #0a0f0d;
     }
 
     :root[data-theme='light'] .va-scope{
@@ -72,10 +72,10 @@ const Tokens = () => (
       --shadow-soft:0 18px 48px rgba(0,0,0,.10);
       --shadow-card:0 8px 24px rgba(0,0,0,.10), 0 0 0 1px rgba(0,0,0,.06) inset;
 
-      /* keep buttons dark so white text always readable */
-      --btn-bg: #1a1f1d;
-      --btn-fg: #ffffff;
-      --btn-border: rgba(0,0,0,.18);
+      /* Light-mode friendly buttons (your ask) */
+      --btn-bg: #ffffff;
+      --btn-fg: #0b0c10;
+      --btn-border: rgba(0,0,0,.14);
       --brand-btn-bg: var(--brand);
       --brand-btn-fg: #ffffff;
     }
@@ -89,7 +89,7 @@ const Tokens = () => (
       isolation:isolate;
     }
     .va-head{
-      min-height:64px; /* taller header */
+      min-height:64px;
       display:grid;
       grid-template-columns:1fr auto;
       align-items:center;
@@ -147,7 +147,9 @@ type AgentData = {
 
   ttsProvider: 'openai' | 'elevenlabs';
   voiceName: string;
-  apiKeyId?: string;
+
+  apiKeyId?: string;       // moved to Credentials section
+  phoneNumber?: string;    // NEW: credentials phone number
 
   asrProvider: 'deepgram' | 'whisper' | 'assemblyai';
   asrModel: string;
@@ -213,6 +215,7 @@ const DEFAULT_AGENT: AgentData = {
   ttsProvider: 'openai',
   voiceName: 'Alloy (American)',
   apiKeyId: '',
+  phoneNumber: '',
   asrProvider: 'deepgram',
   asrModel: 'Nova 2',
   denoise: false,
@@ -232,6 +235,7 @@ function migrateAgent(d: AgentData): AgentData {
     greetPick: d.greetPick || 'sequence',
     contextText: typeof d.contextText === 'string' ? d.contextText : '',
     ctxFiles: Array.isArray(d.ctxFiles) ? d.ctxFiles : [],
+    phoneNumber: typeof d.phoneNumber === 'string' ? d.phoneNumber : ''
   };
 }
 
@@ -246,13 +250,21 @@ const saveAgentData = (id: string, data: AgentData) => { try { if (IS_CLIENT) lo
 
 /* ─────────── mock backend (save/publish) ─────────── */
 async function apiSave(agentId: string, payload: AgentData){
-  const r = await fetch(`/api/voice/agent/${agentId}/save`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).catch(()=>null as any);
-  if (!r?.ok) throw new Error('Save failed');
+  const r = await fetch(`/api/voice/agent/${agentId}/save`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  }).catch(()=>null as any);
+  if (!r?.ok) throw new Error((await r?.text?.()) || 'Save failed');
   return r.json();
 }
-async function apiPublish(agentId: string){
-  const r = await fetch(`/api/voice/agent/${agentId}/publish`, { method: 'POST' }).catch(()=>null as any);
-  if (!r?.ok) throw new Error('Publish failed');
+async function apiPublish(agentId: string, payload: Partial<AgentData>){
+  const r = await fetch(`/api/voice/agent/${agentId}/publish`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  }).catch(()=>null as any);
+  if (!r?.ok) throw new Error((await r?.text?.()) || 'Publish failed');
   return r.json();
 }
 
@@ -365,6 +377,7 @@ function StyledSelect({
 
   useEffect(() => {
     if (!open || !IS_CLIENT) return;
+
     const off = (e: MouseEvent) => {
       const t = e.target as Node;
       if (wrapRef.current?.contains(t)) return;
@@ -377,15 +390,35 @@ function StyledSelect({
       const r = btnRef.current.getBoundingClientRect();
       setMenuPos({ left: r.left, top: r.bottom + 8, width: r.width });
     };
+
     window.addEventListener('mousedown', off);
     window.addEventListener('keydown', onEsc);
     window.addEventListener('resize', onResize);
+
     return () => {
       window.removeEventListener('mousedown', off);
       window.removeEventListener('keydown', onEsc);
       window.removeEventListener('resize', onResize);
     };
   }, [open]);
+
+  // flip menu above if there's not enough space below
+  useEffect(() => {
+    if (!open || !menuRef.current || !btnRef.current) return;
+    const r = btnRef.current.getBoundingClientRect();
+    const menuEl = menuRef.current;
+    // small delay so the menu computes its height
+    const id = requestAnimationFrame(() => {
+      const mh = menuEl.getBoundingClientRect().height || 320;
+      const spaceBelow = window.innerHeight - r.bottom - 8;
+      if (spaceBelow < mh && r.top > mh + 8) {
+        setMenuPos({ left: r.left, top: r.top - mh - 8, width: r.width });
+      } else {
+        setMenuPos({ left: r.left, top: r.bottom + 8, width: r.width });
+      }
+    });
+    return () => cancelAnimationFrame(id);
+  }, [open, query, options.length]);
 
   return (
     <div ref={wrapRef} className="relative">
@@ -413,7 +446,7 @@ function StyledSelect({
             top: (menuPos?.top ?? 0),
             width: (menuPos?.width ?? (btnRef.current?.getBoundingClientRect().width ?? 280)),
             background:'var(--panel)', border:'1px solid var(--border)',
-            borderRadius:10, boxShadow:'var(--shadow-card)'
+            borderRadius:10, boxShadow:'var(--shadow-card)', maxHeight: '72vh', overflowY: 'auto'
           }}
         >
           {menuTop ? <div className="mb-2">{menuTop}</div> : null}
@@ -676,15 +709,25 @@ export default function VoiceAgentSection() {
     if (!activeId) { setToastKind('error'); setToast('Select or create an agent'); return; }
     setSaving(true); setToast('');
     try { await apiSave(activeId, data); setToastKind('info'); setToast('Saved'); }
-    catch { setToastKind('error'); setToast('Save failed'); }
+    catch (e:any) { setToastKind('error'); setToast(e?.message || 'Save failed'); }
     finally { setSaving(false); setTimeout(()=>setToast(''), 1400); }
   }
   async function doPublish(){
     if (!activeId) { setToastKind('error'); setToast('Select or create an agent'); return; }
+    if (!data.apiKeyId) { setToastKind('error'); setToast('Select an API key in Credentials.'); return; }
+    if (!safeTrim(data.phoneNumber)) { setToastKind('error'); setToast('Add a phone number in Credentials.'); return; }
+
     setPublishing(true); setToast('');
-    try { await apiPublish(activeId); setToastKind('info'); setToast('Published'); }
-    catch { setToastKind('error'); setToast('Publish failed'); }
-    finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
+    try {
+      await apiPublish(activeId, {
+        apiKeyId: data.apiKeyId,
+        phoneNumber: safeTrim(data.phoneNumber),
+        model: data.model || 'gpt-4o'
+      });
+      setToastKind('info'); setToast('Published');
+    }
+    catch (e:any) { setToastKind('error'); setToast(e?.message || 'Publish failed'); }
+    finally { setPublishing(false); setTimeout(()=>setToast(''), 1600); }
   }
 
   const callModel = useMemo(() => {
@@ -709,7 +752,7 @@ export default function VoiceAgentSection() {
           <RailBoundary><AssistantRail /></RailBoundary>
         </div>
 
-        <div className="px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w-[1160px]" style={{ fontSize:14, lineHeight:1.45 }}>
+        <div className="px-3 md:px-5 lg:px-6 py-5 pb-28 mx-auto w-full max-w-[1160px]" style={{ fontSize:14, lineHeight:1.45 }}>
           {/* Top actions */}
           <div className="mb-4 flex flex-wrap items-center justify-end gap-3">
             <button
@@ -738,7 +781,7 @@ export default function VoiceAgentSection() {
               onClick={()=>{
                 const key = apiKeys.find(k => k.id === data.apiKeyId)?.key || '';
                 if (!key) {
-                  setToastKind('error'); setToast('Select an OpenAI API key first.');
+                  setToastKind('error'); setToast('Select an OpenAI API key in Credentials first.');
                   setTimeout(()=>setToast(''), 2200);
                   return;
                 }
@@ -782,6 +825,34 @@ export default function VoiceAgentSection() {
               <div className="p-4"><div className="font-semibold" style={{ fontSize:'15px' }}>~1050 ms</div></div>
             </div>
           </div>
+
+          {/* Credentials (NEW) */}
+          <Section
+            title="Credentials"
+            icon={<Phone className="w-4 h-4" style={{ color:'var(--brand)' }} />}
+            desc="Phone and API key used for publishing and calls."
+            defaultOpen
+          >
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <div className="mb-2 text-[12.5px]">Phone Number</div>
+                <input
+                  value={data.phoneNumber || ''}
+                  onChange={(e)=>setField('phoneNumber')(e.target.value)}
+                  className="va-input w-full"
+                  placeholder="+1 555 123 4567"
+                />
+              </div>
+              <ApiKeySelect
+                apiKeys={apiKeys}
+                selectedId={data.apiKeyId || ''}
+                onChange={async (val)=>{
+                  setField('apiKeyId')(val);
+                  try { const store = await scopedStorage(); await store.ensureOwnerGuard?.(); await store.setJSON('apiKeys.selectedId', val); } catch {}
+                }}
+              />
+            </div>
+          </Section>
 
           {/* Model config */}
           <Section
@@ -918,14 +989,6 @@ export default function VoiceAgentSection() {
             defaultOpen
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <ApiKeySelect
-                apiKeys={apiKeys}
-                selectedId={data.apiKeyId || ''}
-                onChange={async (val)=>{
-                  setField('apiKeyId')(val);
-                  try { const store = await scopedStorage(); await store.ensureOwnerGuard?.(); await store.setJSON('apiKeys.selectedId', val); } catch {}
-                }}
-              />
               <div>
                 <div className="mb-2 text-[12.5px]">Voice</div>
                 <StyledSelect
