@@ -123,12 +123,13 @@ type AgentData = {
   contextText?: string;
   ctxFiles?: { name:string; text:string }[];
 
-  ttsProvider: 'openai' | 'elevenlabs';
+  // TTS provider (voice provider)
+  ttsProvider: 'openai' | 'elevenlabs' | 'other';
   voiceName: string;
-  apiKeyId?: string;
 
-  // NEW: store selected phone (id) just like API key
-  phoneId?: string;
+  // credentials
+  apiKeyId?: string;   // OpenAI key id (moved to Credentials section)
+  phoneId?: string;    // selected phone id
 
   asrProvider: 'deepgram' | 'whisper' | 'assemblyai';
   asrModel: string;
@@ -215,6 +216,7 @@ function migrateAgent(d: AgentData): AgentData {
     greetPick: d.greetPick || 'sequence',
     contextText: typeof d.contextText === 'string' ? d.contextText : '',
     ctxFiles: Array.isArray(d.ctxFiles) ? d.ctxFiles : [],
+    ttsProvider: (d.ttsProvider || 'openai') as AgentData['ttsProvider'],
   };
 }
 
@@ -307,8 +309,9 @@ function useOpenAIModels(selectedKey: string|undefined){
 }
 
 const ttsProviders: Opt[] = [
-  { value: 'openai',    label: 'OpenAI', iconLeft: <OpenAIStamp size={14} /> },
+  { value: 'openai',     label: 'OpenAI', iconLeft: <OpenAIStamp size={14} /> },
   { value: 'elevenlabs', label: 'ElevenLabs — coming soon', disabled: true, note: 'soon' },
+  { value: 'other',      label: 'Other — coming soon', disabled: true, note: 'soon' },
 ];
 
 const asrProviders: Opt[] = [
@@ -347,7 +350,7 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
-/* ─────────── Styled select with portal ─────────── */
+/* ─────────── Styled select with portal (anchors on scroll + auto-close) ─────────── */
 function StyledSelect({
   value, onChange, options, placeholder, leftIcon, menuTop
 }:{
@@ -368,14 +371,27 @@ function StyledSelect({
     return q ? options.filter(o => o.label.toLowerCase().includes(q)) : options;
   }, [options, query, value]);
 
-  useLayoutEffect(() => {
-    if (!open || !btnRef.current) return;
+  const computePos = () => {
+    if (!btnRef.current) return;
     const r = btnRef.current.getBoundingClientRect();
     setMenuPos({ left: r.left, top: r.bottom + 8, width: r.width });
+  };
+
+  const closeIfOffscreen = () => {
+    if (!btnRef.current) return;
+    const r = btnRef.current.getBoundingClientRect();
+    const fullyBelow = r.top > window.innerHeight;
+    const fullyAbove = r.bottom < 0;
+    if (fullyBelow || fullyAbove) setOpen(false);
+  };
+
+  useLayoutEffect(() => {
+    if (open) computePos();
   }, [open]);
 
   useEffect(() => {
     if (!open || !IS_CLIENT) return;
+
     const off = (e: MouseEvent) => {
       const t = e.target as Node;
       if (wrapRef.current?.contains(t)) return;
@@ -383,18 +399,19 @@ function StyledSelect({
       setOpen(false);
     };
     const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
-    const onResize = () => {
-      if (!btnRef.current) return;
-      const r = btnRef.current.getBoundingClientRect();
-      setMenuPos({ left: r.left, top: r.bottom + 8, width: r.width });
-    };
+    const onResize = () => { computePos(); };
+    const onScroll = () => { computePos(); closeIfOffscreen(); };
+
     window.addEventListener('mousedown', off);
     window.addEventListener('keydown', onEsc);
     window.addEventListener('resize', onResize);
+    window.addEventListener('scroll', onScroll, true); // capture to catch container scrolls
+
     return () => {
       window.removeEventListener('mousedown', off);
       window.removeEventListener('keydown', onEsc);
       window.removeEventListener('resize', onResize);
+      window.removeEventListener('scroll', onScroll, true);
     };
   }, [open]);
 
@@ -935,7 +952,7 @@ export default function VoiceAgentSection() {
               onClick={()=>{
                 const key = apiKeys.find(k => k.id === data.apiKeyId)?.key || '';
                 if (!key) {
-                  setToastKind('error'); setToast('Select an OpenAI API key first.');
+                  setToastKind('error'); setToast('Select an OpenAI API key in Credentials.');
                   setTimeout(()=>setToast(''), 2200);
                   return;
                 }
@@ -1203,32 +1220,24 @@ export default function VoiceAgentSection() {
             </div>
           </Section>
 
-          {/* Voice */}
+          {/* Voice (Provider + Voice) */}
           <Section
             title="Voice"
             icon={<Volume2 className="w-4 h-4" style={{ color: CTA }} />}
-            desc="Choose TTS and preview the voice."
+            desc="Choose the TTS provider and voice."
             defaultOpen={true}
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
-                <div className="mb-2 text-[12.5px] flex items-center gap-2">
-                  <KeyRound className="w-4 h-4 opacity-80" /> OpenAI API Key
-                </div>
+                <div className="mb-2 text-[12.5px]">TTS Provider</div>
                 <StyledSelect
-                  value={data.apiKeyId || ''}
-                  onChange={async (val)=>{
-                    setField('apiKeyId')(val);
-                    try { const store = await scopedStorage(); await store.ensureOwnerGuard?.(); await store.setJSON('apiKeys.selectedId', val); } catch {}
-                  }}
-                  options={[
-                    { value: '', label: 'Select an API key…', iconLeft: <OpenAIStamp size={14} /> },
-                    ...apiKeys.map(k=>({ value: k.id, label: `${k.name} ••••${(k.key||'').slice(-4).toUpperCase()}`, iconLeft: <OpenAIStamp size={14} /> }))
-                  ]}
+                  value={data.ttsProvider}
+                  onChange={(v)=>setField('ttsProvider')(v as AgentData['ttsProvider'])}
+                  options={ttsProviders}
                   leftIcon={<OpenAIStamp size={14} />}
                 />
                 <div className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
-                  Keys are stored per-account via scoped storage. Manage them in the API Keys page.
+                  Only OpenAI is available now; others are marked “coming soon”.
                 </div>
               </div>
 
@@ -1276,14 +1285,35 @@ export default function VoiceAgentSection() {
             </div>
           </Section>
 
-          {/* Credentials — NEW: Phone Number dropdown like API key */}
+          {/* Credentials — API key + Phone Number */}
           <Section
             title="Credentials"
             icon={<Phone className="w-4 h-4" style={{ color: CTA }} />}
-            desc="Select the phone number to use for calling."
+            desc="Select your OpenAI key and the phone number to use for calls."
             defaultOpen={true}
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <div className="mb-2 text-[12.5px] flex items-center gap-2">
+                  <KeyRound className="w-4 h-4 opacity-80" /> OpenAI API Key
+                </div>
+                <StyledSelect
+                  value={data.apiKeyId || ''}
+                  onChange={async (val)=>{
+                    setField('apiKeyId')(val);
+                    try { const store = await scopedStorage(); await store.ensureOwnerGuard?.(); await store.setJSON('apiKeys.selectedId', val); } catch {}
+                  }}
+                  options={[
+                    { value: '', label: 'Select an API key…', iconLeft: <OpenAIStamp size={14} /> },
+                    ...apiKeys.map(k=>({ value: k.id, label: `${k.name} ••••${(k.key||'').slice(-4).toUpperCase()}`, iconLeft: <OpenAIStamp size={14} /> }))
+                  ]}
+                  leftIcon={<OpenAIStamp size={14} />}
+                />
+                <div className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
+                  Keys are stored per-account via scoped storage. Manage them in the API Keys page.
+                </div>
+              </div>
+
               <div>
                 <div className="mb-2 text-[12.5px]">Phone Number</div>
                 <StyledSelect
@@ -1340,8 +1370,8 @@ export default function VoiceAgentSection() {
             </div>
           </Section>
 
-          {/* spacer under Transcriber per your note */}
-          <div style={{ height: 20 }} />
+          {/* spacer under Transcriber (extra room for dropdowns) */}
+          <div style={{ height: 40 }} />
         </div>
       </div>
 
@@ -1353,193 +1383,4 @@ export default function VoiceAgentSection() {
             style={{ zIndex: Z_OVERLAY, background:'rgba(6,8,10,.62)', backdropFilter:'blur(6px)' }}
             onClick={()=> setShowGenerate(false)}
           />
-          <div className="fixed inset-0 grid place-items-center px-4" style={{ zIndex: Z_MODAL }}>
-            <div
-              className="w-full max-w-[640px] rounded-[8px] overflow-hidden"
-              style={{
-                background: 'var(--panel)',
-                color: 'var(--text)',
-                border: `1px solid ${GREEN_LINE}`,
-                maxHeight: '86vh',
-                boxShadow:'0 22px 44px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px rgba(89,217,179,.20)'
-              }}
-            >
-              <div
-                className="flex items-center justify-between px-6 py-4"
-                style={{
-                  background:`linear-gradient(90deg,var(--panel) 0%,color-mix(in oklab,var(--panel) 97%, white 3%) 50%,var(--panel) 100%)`,
-                  borderBottom:`1px solid ${GREEN_LINE}`
-                }}
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-lg grid place-items-center" style={{ background:'rgba(89,217,179,.12)' }}>
-                    <span style={{ color: CTA }}><Wand2 className="w-5 h-5" /></span>
-                  </div>
-                  <div className="text-lg font-semibold">Describe how to update the prompt</div>
-                </div>
-                <button
-                  onClick={()=> setShowGenerate(false)}
-                  className="w-8 h-8 rounded-[6px] grid place-items-center"
-                  style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}` }}
-                  aria-label="Close"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              <div className="px-6 py-5 space-y-3">
-                <div className="text-xs" style={{ color:'var(--text-muted)' }}>
-                  Tip: “assistant for a dental clinic; tone friendly; handle booking and FAQs”.
-                </div>
-                <div
-                  className="rounded-[8px] p-2"
-                  style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)' }}
-                >
-                  <textarea
-                    value={composerText}
-                    onChange={(e)=>setComposerText(e.target.value)}
-                    className="w-full bg-transparent outline-none rounded-[6px] px-3 py-2"
-                    placeholder="Describe changes…"
-                    style={{ minHeight: 160, maxHeight: '40vh', color:'var(--text)', resize:'vertical' }}
-                  />
-                </div>
-              </div>
-
-              <div className="px-6 pb-6 flex gap-3">
-                <button
-                  onClick={()=> setShowGenerate(false)}
-                  className="w-full h-[40px] rounded-[8px]"
-                  style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)', color:'var(--text)', fontWeight:600 }}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={async ()=>{
-                    const raw = safeTrim(composerText);
-                    if (!raw) return;
-                    try {
-                      const base = nonEmpty(data.systemPrompt) ? data.systemPrompt : DEFAULT_PROMPT_RT;
-                      const compiled = compilePrompt({ basePrompt: base, userText: raw });
-                      setShowGenerate(false);
-                      await sleep(150);
-                      await startTypingIntoPrompt(compiled.frontendText); // typing happens in the prompt box
-                      setField('systemPromptBackend')(compiled.backendString);
-                    } catch {
-                      setToastKind('error'); setToast('Generate failed — try simpler wording.');
-                      setTimeout(()=>setToast(''), 2200);
-                    }
-                  }}
-                  disabled={!composerText.trim()}
-                  className="w-full h-[40px] rounded-[8px] font-semibold inline-flex items-center justify-center gap-2"
-                  style={{ background:CTA, color:'#ffffff', opacity: (!composerText.trim() ? .6 : 1) }}
-                >
-                  <Wand2 className="w-4 h-4" /> Generate
-                </button>
-              </div>
-            </div>
-          </div>
-        </>,
-        document.body
-      ) : null}
-
-      {/* ─────────── Voice/Call panel (WebRTC) ─────────── */}
-      {IS_CLIENT ? createPortal(
-        <>
-          <div
-            className={`fixed inset-0 ${showCall ? '' : 'pointer-events-none'}`}
-            style={{
-              zIndex: 9996,
-              background: showCall ? 'rgba(8,10,12,.78)' : 'transparent',
-              opacity: showCall ? 1 : 0,
-              transition: 'opacity .2s cubic-bezier(.22,.61,.36,1)'
-            }}
-            onClick={()=> setShowCall(false)}
-          />
-          {showCall && (
-            <WebCallButton
-              model={callModel}
-              systemPrompt={
-                (() => {
-                  const base = data.systemPromptBackend || data.systemPrompt || '';
-                  const ctx  = (data.contextText || '').trim();
-                  return ctx ? `${base}\n\n[Context]\n${ctx}`.trim() : base;
-                })()
-              }
-              voiceName={data.voiceName}
-              assistantName={data.name || 'Assistant'}
-              apiKey={selectedKey || ''}
-
-              ephemeralEndpoint={EPHEMERAL_TOKEN_ENDPOINT}
-              onError={(err:any) => {
-                const msg = err?.message || err?.error?.message || (typeof err === 'string' ? err : '') || 'Call failed';
-                setToastKind('error'); setToast(msg);
-              }}
-              onClose={()=> setShowCall(false)}
-              prosody={{ fillerWords: true, microPausesMs: 200, phoneFilter: true, turnEndPauseMs: 120 }}
-
-              // greetings: joined from list
-              firstMode={data.firstMode as any}
-              firstMsg={
-                (data.greetPick==='random'
-                  ? [...(data.firstMsgs||[])].filter(Boolean).sort(()=>Math.random()-0.5)
-                  : (data.firstMsgs||[]).filter(Boolean)
-                ).join('\n')
-              }
-            />
-          )}
-        </>,
-        document.body
-      ) : null}
-    </section>
-  );
-}
-
-/* ─────────── Section (expand anim) ─────────── */
-function Section({
-  title, icon, desc, children, defaultOpen = true
-}:{
-  title: string; icon: React.ReactNode; desc?: string; children: React.ReactNode; defaultOpen?: boolean;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  const innerRef = useRef<HTMLDivElement|null>(null);
-  const [h, setH] = useState<number>(0);
-  const measure = () => { if (innerRef.current) setH(innerRef.current.offsetHeight); };
-  useLayoutEffect(() => { measure(); }, [children, open]);
-
-  return (
-    <div className="mb-3">
-      <div className="mb-[6px] text-sm font-medium" style={{ color:'var(--text-muted)' }}>{title}</div>
-
-      <div className="va-card">
-        <button onClick={()=>setOpen(v=>!v)} className="va-head w-full text-left" style={{ color:'var(--text)' }}>
-          <span className="min-w-0 flex items-center gap-3">
-            <span className="inline-grid place-items-center w-7 h-7 rounded-full" style={{ background:'rgba(89,217,179,.12)' }}>
-              {icon}
-            </span>
-            <span className="min-w-0">
-              <span className="block font-semibold truncate" style={{ fontSize:'18px' }}>{title}</span>
-              {desc ? <span className="block text-xs truncate" style={{ color:'var(--text-muted)' }}>{desc}</span> : null}
-            </span>
-          </span>
-          <span className="justify-self-end">
-            {open ? <ChevronUp className="w-4 h-4" style={{ color:'var(--text-muted)' }}/> :
-                    <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)' }}/>}
-          </span>
-        </button>
-
-        <div
-          style={{
-            height: open ? h : 0,
-            opacity: open ? 1 : 0,
-            transform: open ? 'translateY(0)' : 'translateY(-4px)',
-            transition: 'height 260ms var(--ease), opacity 230ms var(--ease), transform 260ms var(--ease)',
-            overflow:'hidden'
-          }}
-          onTransitionEnd={() => { if (open) measure(); }}
-        >
-          <div ref={innerRef} className="p-5">{children}</div>
-        </div>
-      </div>
-    </div>
-  );
-}
+          <div className="fixed inset
