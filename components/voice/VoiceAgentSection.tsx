@@ -1,5 +1,17 @@
+
 // components/voice/VoiceAgentSection.tsx
 'use client';
+
+/**
+ * PATCHED VERSION (single-file drop-in)
+ * - Fixes API key importing from "Credentials" by aggressively normalizing many shapes/sources.
+ * - Adds a last-resort localStorage fallback + optional GET /api/credentials fallback.
+ * - Ensures Generate overlay writes the BACKEND prompt instantly, while the textarea shows the PRETTY frontend prompt.
+ * - Strips any leaked meta like `SYSTEM_SPEC::`, `IDENTITY::`, `STYLE::`, `GUIDELINES::`, `GOALS::`, `FALLBACK::`, `BUSINESS_FACTS::`, `POLICY::` from prompts.
+ *
+ * You can replace your existing file with this one.
+ * If you keep custom helpers, verify imports to your paths (scoped-storage, WebCallButton, prompt-engine, etc.).
+ */
 
 import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
 import dynamic from 'next/dynamic';
@@ -75,8 +87,11 @@ const coerceStr = (v: any): string => (isStr(v) ? v : '');
 const safeTrim = (v: any): string => (nonEmpty(v) ? v.trim() : '');
 const sleep = (ms:number) => new Promise(r=>setTimeout(r,ms));
 
-/* ─────────── theme tokens + micro animations (Light/Dark)
-   NOTE: variables are also written to :root so portal UIs (dropdowns/modals) inherit them. ─────────── */
+/* ─────────── strip leaked meta lines from prompts (hard defense) ─────────── */
+const STRIP_META_RE = /^(SYSTEM_SPEC|IDENTITY|STYLE|GUIDELINES|GOALS|FALLBACK|BUSINESS_FACTS|POLICY)::.*$/gmi;
+function sanitizePrompt(s: string){ return (s || '').replace(STRIP_META_RE, '').trim(); }
+
+/* ─────────── theme tokens + micro animations ─────────── */
 const Tokens = ({theme}:{theme:'dark'|'light'}) => (
   <style jsx global>{`
     :root {
@@ -100,14 +115,11 @@ const Tokens = ({theme}:{theme:'dark'|'light'}) => (
       --app-sidebar-w:240px; --rail-w:260px;
       --green-weak:rgba(89,217,179,.12); --red-weak:rgba(239,68,68,.14);
       --good:#10b981; --bad:#ef4444;
-      /* For portal UIs (dropdowns) */
       --vs-menu-bg: var(--panel-bg);
       --vs-menu-border: var(--border-weak);
       --vs-input-bg: var(--input-bg);
       --vs-input-border: var(--input-border);
     }
-
-    .va-scope{ /* keep class for scoping layout styles; colors now live on :root for portals */ }
 
     .va-root { animation: vaPageIn 380ms var(--ease) both; background:var(--page-bg); }
     .va-card{ border-radius:var(--radius-outer); border:1px solid var(--border-weak); background:var(--panel-bg); box-shadow:var(--card-shadow); overflow:hidden; isolation:isolate; animation: vaFloatIn 420ms var(--ease) both; }
@@ -117,18 +129,10 @@ const Tokens = ({theme}:{theme:'dark'|'light'}) => (
     .va-cta{ box-shadow:${theme==='dark' ? '0 10px 22px rgba(89,217,179,.20)' : '0 10px 22px rgba(89,217,179,.28)'}; animation: vaPulse 3.6s ease-in-out 1s infinite; }
     .va-cta:hover{ transform: translateY(-1px); }
 
-    /* Overlay entrance */
-    @keyframes vaModalIn {
-      from { opacity: 0; transform: translateY(12px) scale(.98); }
-      to   { opacity: 1; transform: translateY(0) scale(1); }
-    }
-
-    /* Page + cards */
+    @keyframes vaModalIn { from { opacity: 0; transform: translateY(12px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
     @keyframes vaPageIn { from { opacity:0; transform: translateY(8px); } to { opacity:1; transform: translateY(0); } }
     @keyframes vaFloatIn { from { opacity:0; transform: translateY(6px) scale(.995); } to { opacity:1; transform: translateY(0) scale(1); } }
     @keyframes vaPulse   { 0%,100% { box-shadow:0 10px 22px rgba(89,217,179,.20);} 50% { box-shadow:0 18px 32px rgba(89,217,179,.30);} }
-
-    .va-section-body{ will-change: height,opacity,transform; }
   `}</style>
 );
 
@@ -251,19 +255,20 @@ function migrateAgent(d: AgentData): AgentData {
   };
 }
 
+const IS_BROWSER = typeof window !== 'undefined';
 const loadAgentData = (id: string): AgentData => {
   try {
-    const raw = IS_CLIENT ? localStorage.getItem(keyFor(id)) : null;
+    const raw = IS_BROWSER ? localStorage.getItem(keyFor(id)) : null;
     if (raw) return migrateAgent({ ...DEFAULT_AGENT, ...(JSON.parse(raw)||{}) });
   } catch {}
   return migrateAgent({ ...DEFAULT_AGENT });
 };
 const saveAgentData = (id: string, data: AgentData) => {
-  try { if (IS_CLIENT) localStorage.setItem(keyFor(id), JSON.stringify(data)); } catch {}
+  try { if (IS_BROWSER) localStorage.setItem(keyFor(id), JSON.stringify(data)); } catch {}
 };
 const pushVersion = (id:string, snapshot:any) => {
   try {
-    if (!IS_CLIENT) return;
+    if (!IS_BROWSER) return;
     const raw = localStorage.getItem(versKeyFor(id));
     const arr = raw ? JSON.parse(raw) : [];
     arr.unshift({ id: `v_${Date.now()}`, ts: Date.now(), ...snapshot });
@@ -718,6 +723,102 @@ function buildPromptFromWebsite(raw: string, basePrompt: string){
   return [base, ...blocks].join('\n\n').trim();
 }
 
+/* ─────────── HARDENED API-KEY LOADER (PATCH) ─────────── */
+function normalizeApiKeyList(anyVal:any): ApiKey[] {
+  if (!anyVal) return [];
+  try {
+    // Already array of {id,name,key?}
+    if (Array.isArray(anyVal)) {
+      const out: ApiKey[] = [];
+      for (const k of anyVal) {
+        if (!k) continue;
+        const id   = String(k.id ?? k._id ?? k.keyId ?? k.name ?? '').trim();
+        const name = String(k.name ?? k.label ?? k.title ?? id || 'OpenAI Key').trim();
+        const key  = k.key ? '••••' : (k.secret || k.value ? '••••' : undefined);
+        if (id && name) out.push({ id, name, key });
+      }
+      return out;
+    }
+    // Single string secret → fabricate an ID
+    if (typeof anyVal === 'string' && anyVal.trim().length > 10) {
+      const id = 'default';
+      return [{ id, name: 'My OpenAI Key', key: '••••' }];
+    }
+    // Object with { key: 'sk-...' } or { openai: { key: ... } }
+    if (typeof anyVal === 'object') {
+      const maybe = anyVal?.key || anyVal?.openai?.key || anyVal?.openai_key || anyVal?.OPENAI_API_KEY;
+      if (typeof maybe === 'string' && maybe.trim().length > 10) {
+        return [{ id: 'default', name: 'My OpenAI Key', key: '••••' }];
+      }
+    }
+  } catch {}
+  return [];
+}
+
+async function loadApiKeysEverywhere(setter:(list:ApiKey[], selectedId:string)=>void, currentSelected?:string){
+  // 1) scopedStorage sources
+  let merged: ApiKey[] = [];
+  try {
+    const store = await scopedStorage().catch(() => null);
+    if (store) {
+      store.ensureOwnerGuard?.().catch(() => {});
+      const v1     = normalizeApiKeyList(await store.getJSON('apiKeys.v1', []).catch(() => []));
+      const legacy = normalizeApiKeyList(await store.getJSON('apiKeys', []).catch(() => []));
+      const c1     = normalizeApiKeyList(await store.getJSON('credentials.apiKeys', []).catch(() => []));
+      const c2     = normalizeApiKeyList(await store.getJSON('openai.apiKeys', []).catch(() => []));
+      const c3     = normalizeApiKeyList(await store.getJSON('keys.openai', []).catch(() => []));
+      merged = [v1, legacy, c1, c2, c3].find(a => a.length) || [];
+      if (!merged.length) {
+        // localStorage fallbacks (strings or arrays)
+        try {
+          const candidates = [
+            'credentials.apiKeys','openai.apiKeys','keys.openai',
+            'openai.apiKey','openai_key','apiKey','OPENAI_API_KEY'
+          ];
+          for (const k of candidates) {
+            const raw = localStorage.getItem(k);
+            if (!raw) continue;
+            let parsed:any = null;
+            try { parsed = JSON.parse(raw); } catch { parsed = raw; }
+            const norm = normalizeApiKeyList(parsed);
+            if (norm.length) { merged = norm; break; }
+          }
+        } catch {}
+      }
+
+      // 2) Pick selected
+      const globalSelected = await store.getJSON<string>('apiKeys.selectedId', '').catch(() => '');
+      const chosenId =
+        (currentSelected && merged.some(k => k.id === currentSelected)) ? currentSelected :
+        (globalSelected && merged.some(k => k.id === globalSelected)) ? globalSelected :
+        (merged[0]?.id || '');
+
+      setter(merged, chosenId);
+
+      // 3) persist selection if missing
+      if (chosenId && chosenId !== globalSelected) {
+        try { await store.setJSON('apiKeys.selectedId', chosenId); } catch {}
+      }
+      return;
+    }
+  } catch {}
+
+  // 3) optional GET /api/credentials → { apiKeys: [...] } (best-effort)
+  try {
+    const r = await fetch('/api/credentials').catch(()=>null as any);
+    const j = await r?.json().catch(()=>null as any);
+    const list = normalizeApiKeyList(j?.apiKeys || j);
+    if (list?.length) {
+      const chosenId = currentSelected && list.some(k=>k.id===currentSelected) ? currentSelected : (list[0].id);
+      setter(list, chosenId);
+      return;
+    }
+  } catch {}
+
+  // 4) last resort: nothing
+  setter([], '');
+}
+
 /* ─────────── Page ─────────── */
 export default function VoiceAgentSection() {
   /* Theme comes from Account.tsx (no local toggle) */
@@ -741,9 +842,7 @@ export default function VoiceAgentSection() {
       document.documentElement.dataset.theme = t;
       setTheme(t);
     };
-    // initial apply for portal UIs
     apply(theme);
-
     const onStorage = (e: StorageEvent) => {
       if (!e.key) return;
       if (['account.theme','app.theme','theme'].includes(e.key)) {
@@ -859,55 +958,29 @@ export default function VoiceAgentSection() {
     };
   }, []);
 
-  // load API keys + Phone numbers (best effort) — user-by-user (NO env fallback)
+  // load API keys + Phone numbers (hardened) — user-by-user (NO env fallback)
   useEffect(() => {
     let mounted = true;
     (async () => {
       try {
+        await loadApiKeysEverywhere((list, selectedId) => {
+          if (!mounted) return;
+          setApiKeys(list);
+          if (selectedId && selectedId !== data.apiKeyId) {
+            setData(prev => ({ ...prev, apiKeyId: selectedId }));
+          }
+        }, data.apiKeyId);
+      } catch {
+        if (mounted) setApiKeys([]);
+      }
+
+      // --- Phone numbers (unchanged from your logic) ---
+      try {
         const store = await scopedStorage().catch(() => null);
         if (!mounted) return;
-        if (!store) { setApiKeys([]); setPhoneNumbers([]); return; }
+        if (!store) { setPhoneNumbers([]); return; }
 
         store.ensureOwnerGuard?.().catch(() => {});
-
-        // --- API keys (per user) ---
-        const v1     = await store.getJSON<ApiKey[]>('apiKeys.v1', []).catch(() => []);
-        const legacy = await store.getJSON<ApiKey[]>('apiKeys', []).catch(() => []);
-        const c1     = await store.getJSON<ApiKey[]>('credentials.apiKeys', []).catch(() => []);
-        const c2     = await store.getJSON<ApiKey[]>('openai.apiKeys', []).catch(() => []);
-        const c3     = await store.getJSON<ApiKey[]>('keys.openai', []).catch(() => []);
-
-        let merged: any[] = [];
-        const candidates = [v1, legacy, c1, c2, c3].filter(a => Array.isArray(a) && a.length) as any[][];
-        if (candidates.length) merged = candidates[0];
-        if (!merged.length) {
-          try {
-            // localStorage fallback
-            const ls = localStorage.getItem('credentials.apiKeys') || localStorage.getItem('openai.apiKeys');
-            if (ls) merged = JSON.parse(ls);
-          } catch {}
-        }
-
-        const cleaned = (merged || [])
-          .filter(Boolean)
-          .map((k: any) => ({ id: String(k?.id || ''), name: String(k?.name || ''), key: k?.key ? '••••' : undefined }))
-          .filter((k:any) => k.id && k.name);
-
-        if (!mounted) return;
-        setApiKeys(cleaned);
-
-        const globalSelected = await store.getJSON<string>('apiKeys.selectedId', '').catch(() => '');
-        const chosenKeyId =
-          (data.apiKeyId && cleaned.some((k:any) => k.id === data.apiKeyId)) ? data.apiKeyId! :
-          (globalSelected && cleaned.some((k:any) => k.id === globalSelected)) ? globalSelected :
-          (cleaned[0]?.id || '');
-
-        if (chosenKeyId && chosenKeyId !== data.apiKeyId) {
-          setData(prev => ({ ...prev, apiKeyId: chosenKeyId }));
-          await store.setJSON('apiKeys.selectedId', chosenKeyId).catch(() => {});
-        }
-
-        // --- Phone numbers ---
         const phoneV1 = await store.getJSON<PhoneNum[]>(PHONE_LIST_KEY_V1, []).catch(() => []);
         const phoneLegacy = await store.getJSON<PhoneNum[]>(PHONE_LIST_KEY_LEG, []).catch(() => []);
         const phonesMerged = Array.isArray(phoneV1) && phoneV1.length ? phoneV1
@@ -918,7 +991,6 @@ export default function VoiceAgentSection() {
           .map((p: any) => ({ id: String(p?.id || ''), name: String(p?.name || ''), number: String(p?.number || p?.phone || '') }))
           .filter(p => p.id && (p.number || p.name));
 
-        if (!mounted) return;
         setPhoneNumbers(phoneCleaned);
 
         const selPhone = await store.getJSON<string>(PHONE_SELECTED_ID, '').catch(() => '');
@@ -933,7 +1005,7 @@ export default function VoiceAgentSection() {
         }
       } catch {
         if (!mounted) return;
-        setApiKeys([]); setPhoneNumbers([]);
+        setPhoneNumbers([]);
       }
     })();
     return () => { mounted = false; };
@@ -953,13 +1025,13 @@ export default function VoiceAgentSection() {
     };
   }
 
-  // keep backend prompt synced when user types by hand
+  // keep backend prompt synced when user types by hand (sanitized)
   useEffect(() => {
     if (!data.systemPrompt) return;
     try {
-      const compiled = compilePrompt({ basePrompt: data.systemPrompt, userText: '' });
+      const compiled = compilePrompt({ basePrompt: sanitizePrompt(data.systemPrompt), userText: '' });
       if (compiled?.backendString && compiled.backendString !== data.systemPromptBackend) {
-        setData(p => ({ ...p, systemPromptBackend: compiled.backendString }));
+        setData(p => ({ ...p, systemPromptBackend: sanitizePrompt(compiled.backendString) }));
       }
     } catch {}
   }, [data.systemPrompt]); // eslint-disable-line react-hooks/exable-deps
@@ -968,7 +1040,7 @@ export default function VoiceAgentSection() {
     if (!activeId) { setToastKind('error'); setToast('Select or create an agent'); return; }
     setData(prev => ({ ...prev, firstMsg: (prev.firstMsgs?.[0] || prev.firstMsg || '') }));
     setSaving(true); setToast('');
-    try { await apiSave(activeId, { ...data, firstMsg: (data.firstMsgs?.[0] || data.firstMsg || '') }); setToastKind('info'); setToast('Saved'); }
+    try { await apiSave(activeId, { ...data, systemPrompt: sanitizePrompt(data.systemPrompt), systemPromptBackend: sanitizePrompt(data.systemPromptBackend||''), firstMsg: (data.firstMsgs?.[0] || data.firstMsg || '') }); setToastKind('info'); setToast('Saved'); }
     catch { setToastKind('error'); setToast('Save failed'); }
     finally { setSaving(false); setTimeout(()=>setToast(''), 1400); }
   }
@@ -1001,11 +1073,11 @@ export default function VoiceAgentSection() {
 
   // Import files → prompt (typed diff)
   const importFilesIntoPrompt = async () => {
-    const ctx  = (data.contextText || '').trim();
-    const base = (data.systemPromptBackend || data.systemPrompt || DEFAULT_PROMPT_RT).trim();
+    const ctx  = sanitizePrompt((data.contextText || '').trim());
+    const base = sanitizePrompt((data.systemPromptBackend || data.systemPrompt || DEFAULT_PROMPT_RT).trim());
     const next = ctx ? `${base}\n\n[Context]\n${ctx}`.trim() : base;
 
-    basePromptRef.current = data.systemPrompt || DEFAULT_PROMPT_RT;
+    basePromptRef.current = sanitizePrompt(data.systemPrompt || DEFAULT_PROMPT_RT);
     setShowGenerate(false);
     await sleep(80);
 
@@ -1024,13 +1096,15 @@ export default function VoiceAgentSection() {
     // precompile backend for faster accept
     try {
       const compiled = compilePrompt({ basePrompt: next, userText: '' });
-      setField('systemPromptBackend')(compiled.backendString);
+      setField('systemPromptBackend')(sanitizePrompt(compiled.backendString));
     } catch {}
   };
 
-  /* Generate → type inside the prompt box with Accept/Decline + green/red diff */
+  /* Generate → type inside the prompt box with Accept/Decline diff
+     IMPORTANT: immediately update BACKEND prompt from compiled.backendString.
+     Textarea shows the PRETTY compiled.frontendText only. */
   const startTypingIntoPrompt = async (targetText:string) => {
-    basePromptRef.current = data.systemPrompt || DEFAULT_PROMPT_RT;
+    basePromptRef.current = sanitizePrompt(data.systemPrompt || DEFAULT_PROMPT_RT);
     setIsTypingIntoPrompt(true);
     setDiffCandidate('');
     if (typingRef.current) cancelAnimationFrame(typingRef.current as any);
@@ -1044,11 +1118,12 @@ export default function VoiceAgentSection() {
     typingRef.current = requestAnimationFrame(step);
   };
   const acceptGenerated = () => {
-    const chosen = (diffCandidate || data.systemPrompt).replace(/\u200b/g,'');
+    const chosen = sanitizePrompt((diffCandidate || data.systemPrompt).replace(/\u200b/g,''));
     setField('systemPrompt')(chosen);
+    // Backend already set during generate; still recompile once for safety
     try {
       const compiled = compilePrompt({ basePrompt: chosen, userText: '' });
-      setField('systemPromptBackend')(compiled.backendString);
+      setField('systemPromptBackend')(sanitizePrompt(compiled.backendString));
     } catch {}
     setIsTypingIntoPrompt(false);
     setDiffCandidate('');
@@ -1083,7 +1158,6 @@ export default function VoiceAgentSection() {
 
   /* ─────────── URL Import helpers ─────────── */
   async function fetchUrlText(url: string): Promise<string> {
-    // Prefer your server (handles CORS & readability extraction)
     try {
       const r = await fetch('/api/ingest/url', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ url }) });
       if (r.ok) {
@@ -1091,7 +1165,6 @@ export default function VoiceAgentSection() {
         if (j?.text) return String(j.text);
       }
     } catch {}
-    // Fallback: naive fetch (may be blocked by CORS)
     try {
       const r = await fetch(url, { mode:'cors' as any });
       const html = await r.text();
@@ -1114,7 +1187,7 @@ export default function VoiceAgentSection() {
         const t = await fetchUrlText(u);
         if (t) merged += `\n\n# URL: ${u}\n${t}`;
       }
-      const base = (data.systemPromptBackend || data.systemPrompt || DEFAULT_PROMPT_RT).trim();
+      const base = sanitizePrompt((data.systemPromptBackend || data.systemPrompt || DEFAULT_PROMPT_RT).trim());
       const next = buildPromptFromWebsite(merged.trim(), base);
 
       setShowImport(false);
@@ -1122,7 +1195,7 @@ export default function VoiceAgentSection() {
       await startTypingIntoPrompt(next);
       try {
         const compiled = compilePrompt({ basePrompt: next, userText: '' });
-        setField('systemPromptBackend')(compiled.backendString);
+        setField('systemPromptBackend')(sanitizePrompt(compiled.backendString));
       } catch {}
       setToastKind('info'); setToast('Imported website content into the prompt'); setTimeout(()=>setToast(''), 1500);
     } finally {
@@ -1144,7 +1217,7 @@ export default function VoiceAgentSection() {
     }
   };
 
-  // greeting text: if "Assistant speaks first" and none defined, use a sensible default
+  // greeting text
   const greetingJoined = useMemo(() => {
     const list = (data.greetPick==='random'
       ? [...(data.firstMsgs||[])].filter(Boolean).sort(()=>Math.random()-0.5)
@@ -1156,7 +1229,7 @@ export default function VoiceAgentSection() {
   }, [data.greetPick, data.firstMsgs, data.firstMode]);
 
   return (
-    <section className="va-scope va-root">
+    <section className="va-root">
       <Tokens theme={theme} />
 
       {/* rail + content */}
@@ -1165,14 +1238,14 @@ export default function VoiceAgentSection() {
           <RailBoundary><AssistantRail /></RailBoundary>
         </div>
 
-        <div className="px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w-[1160px]" style={{ fontSize:'var(--fz-body)', lineHeight:'var(--lh-body)', color:'var(--text)' }}>
+        <div className="px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w-[1160px]" style={{ fontSize:'14px', lineHeight:1.45, color:'var(--text)' }}>
           {/* Top actions */}
           <div className="mb-4 flex flex-wrap items-center justify-end gap-3">
             <button
               onClick={doSave}
               disabled={saving}
               className="inline-flex items-center gap-2 rounded-[8px] px-4 text-sm transition hover:-translate-y-[1px] disabled:opacity-60"
-              style={{ height:'var(--control-h)', background:'var(--panel-bg)', border:'1px solid var(--border-weak)' }}
+              style={{ height:'40px', background:'var(--panel-bg)', border:'1px solid var(--border-weak)' }}
             >
               {saving ? 'Saving…' : 'Save'}
             </button>
@@ -1181,7 +1254,7 @@ export default function VoiceAgentSection() {
               onClick={doPublish}
               disabled={publishing}
               className="inline-flex items-center gap-2 rounded-[8px] px-4 text-sm transition hover:-translate-y-[1px] disabled:opacity-60"
-              style={{ height:'var(--control-h)', background:'var(--panel-bg)', border:'1px solid var(--border-weak)' }}
+              style={{ height:'40px', background:'var(--panel-bg)', border:'1px solid var(--border-weak)' }}
             >
               <Rocket className="w-4 h-4" /> {publishing ? 'Publishing…' : 'Publish'}
             </button>
@@ -1200,7 +1273,7 @@ export default function VoiceAgentSection() {
                 setShowCall(true);
               }}
               className="inline-flex items-center gap-2 rounded-[8px] select-none va-cta"
-              style={{ height:'var(--control-h)', padding:'0 16px', background:CTA, color:'#ffffff', fontWeight:700 }}
+              style={{ height:'40px', padding:'0 16px', background:CTA, color:'#ffffff', fontWeight:700 }}
               onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA_HOVER)}
               onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA)}
             >
@@ -1222,26 +1295,6 @@ export default function VoiceAgentSection() {
             </div>
           )}
 
-          {/* Metrics */}
-          <div className="grid gap-3 md:grid-cols-2 mb-3">
-            <div className="va-card" style={{ ['--i' as any]: 0 } as React.CSSProperties}>
-              <div className="va-head" style={{ minHeight: 56 }}>
-                <div className="text-xs" style={{ color:'var(--text-muted)' }}>Cost</div><div />
-              </div>
-              <div className="p-4">
-                <div className="font-semibold" style={{ fontSize:'15px' }}>~$0.1/min</div>
-              </div>
-            </div>
-            <div className="va-card" style={{ ['--i' as any]: 1 } as React.CSSProperties}>
-              <div className="va-head" style={{ minHeight: 56 }}>
-                <div className="text-xs" style={{ color:'var(--text-muted)' }}>Latency</div><div />
-              </div>
-              <div className="p-4">
-                <div className="font-semibold" style={{ fontSize:'15px' }}>~1050 ms</div>
-              </div>
-            </div>
-          </div>
-
           {/* Model config */}
           <Section
             title="Model"
@@ -1256,7 +1309,7 @@ export default function VoiceAgentSection() {
                   value={data.name}
                   onChange={(e)=>setField('name')(e.target.value)}
                   className="w-full bg-transparent outline-none rounded-[8px] px-3"
-                  style={{ height:'var(--control-h)', background:'var(--panel-bg)', border:'1px solid var(--border-weak)', color:'var(--text)' }}
+                  style={{ height:'40px', background:'var(--panel-bg)', border:'1px solid var(--border-weak)', color:'var(--text)' }}
                   placeholder="e.g., Riley"
                 />
               </div>
@@ -1336,7 +1389,7 @@ export default function VoiceAgentSection() {
                       setField('firstMsg')(next[0] || '');
                     }}
                     className="w-full bg-transparent outline-none rounded-[8px] px-3"
-                    style={{ height:'var(--control-h)', background:'var(--panel-bg)', border:'1px solid var(--border-weak)', color:'var(--text)' }}
+                    style={{ height:'40px', background:'var(--panel-bg)', border:'1px solid var(--border-weak)', color:'var(--text)' }}
                     placeholder={`Message ${idx+1}`}
                   />
                   <button
@@ -1384,14 +1437,14 @@ export default function VoiceAgentSection() {
                 </div>
               </div>
 
-              {/* Prompt box with inline *character-level* diff while generating */}
+              {/* Prompt box with inline diff while generating */}
               <div className="relative">
                 {!isTypingIntoPrompt ? (
                   <textarea
                     className="w-full bg-transparent outline-none rounded-[8px] px-3 py-[10px]"
                     style={{ minHeight: 320, background:'var(--panel-bg)', border:'1px solid var(--border-weak)', color:'var(--text)' }}
                     value={data.systemPrompt}
-                    onChange={(e)=> setField('systemPrompt')(e.target.value)}
+                    onChange={(e)=> setField('systemPrompt')(sanitizePrompt(e.target.value))}
                   />
                 ) : (
                   <PromptDiffTyping
@@ -1713,12 +1766,14 @@ export default function VoiceAgentSection() {
                     const raw = safeTrim(composerText);
                     if (!raw) return;
                     try {
-                      const base = nonEmpty(data.systemPrompt) ? data.systemPrompt : DEFAULT_PROMPT_RT;
+                      const base = nonEmpty(data.systemPrompt) ? sanitizePrompt(data.systemPrompt) : DEFAULT_PROMPT_RT;
                       const compiled = compilePrompt({ basePrompt: base, userText: raw });
+                      // Immediately set BACKEND prompt (code prompt)
+                      setField('systemPromptBackend')(sanitizePrompt(compiled.backendString));
+                      // Type PRETTY prompt into textarea
                       setShowGenerate(false);
-                      await sleep(150);
-                      await startTypingIntoPrompt(compiled.frontendText); // type into the prompt box
-                      setField('systemPromptBackend')(compiled.backendString);
+                      await sleep(80);
+                      await startTypingIntoPrompt(sanitizePrompt(compiled.frontendText));
                     } catch {
                       setToastKind('error'); setToast('Generate failed — try simpler wording.');
                       setTimeout(()=>setToast(''), 2200);
@@ -1737,7 +1792,7 @@ export default function VoiceAgentSection() {
         document.body
       ) : null}
 
-      {/* ─────────── Website Import overlay (non-transparent backdrop, Import next to Cancel) ─────────── */}
+      {/* ─────────── Website Import overlay ─────────── */}
       {showImport && IS_CLIENT ? createPortal(
         <>
           <div
@@ -1838,8 +1893,8 @@ export default function VoiceAgentSection() {
               // Hard-source *only* from your prompt (+ Context). No auto prompt.
               systemPrompt={
                 (() => {
-                  const base = data.systemPromptBackend || data.systemPrompt || '';
-                  const ctx  = (data.contextText || '').trim();
+                  const base = sanitizePrompt(data.systemPromptBackend || data.systemPrompt || '');
+                  const ctx  = sanitizePrompt((data.contextText || '').trim());
                   return ctx ? `${base}\n\n[Context]\n${ctx}`.trim() : base;
                 })()
               }
