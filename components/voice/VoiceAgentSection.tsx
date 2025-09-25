@@ -1,4 +1,3 @@
-// components/voice/VoiceAgentSection.tsx
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
@@ -349,7 +348,7 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
-/* ─────────── Styled select with portal (now supports disabled) ─────────── */
+/* ─────────── Styled select with portal ─────────── */
 function StyledSelect({
   value, onChange, options, placeholder, leftIcon, menuTop, disabled
 }:{
@@ -378,7 +377,6 @@ function StyledSelect({
 
   useLayoutEffect(() => {
     if (open) positionMenu();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   useEffect(() => {
@@ -392,44 +390,34 @@ function StyledSelect({
     };
     const handleEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
     const handleResize = () => positionMenu();
-
-    // NEW: close on any scroll so menu doesn't “follow the screen”
     const handleScroll = () => setOpen(false);
 
     window.addEventListener('mousedown', handleDocumentMouseDown);
     window.addEventListener('keydown', handleEsc);
     window.addEventListener('resize', handleResize);
-    window.addEventListener('scroll', handleScroll, true); // capture scrolls in ancestors too
+    window.addEventListener('scroll', handleScroll, true);
     return () => {
       window.removeEventListener('mousedown', handleDocumentMouseDown);
       window.removeEventListener('keydown', handleEsc);
       window.removeEventListener('resize', handleResize);
       window.removeEventListener('scroll', handleScroll, true);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  const openMenu = () => {
-    if (disabled) return;
-    setOpen(v=>!v);
-    setTimeout(()=>searchRef.current?.focus(),0);
-  };
-
   return (
-    <div ref={wrapRef} className="relative" aria-disabled={!!disabled}>
+    <div ref={wrapRef} className="relative" style={disabled ? { opacity:.6, pointerEvents:'none' } : undefined}>
       <button
         ref={btnRef}
         type="button"
-        onClick={openMenu}
-        disabled={!!disabled}
-        className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-[8px] text-sm outline-none transition disabled:opacity-50"
+        onClick={() => { if (disabled) return; setOpen(v=>!v); setTimeout(()=>searchRef.current?.focus(),0); }}
+        className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-[8px] text-sm outline-none transition"
         style={{
           height:'var(--control-h)',
           background:'var(--vs-input-bg, #101314)',
           border:'1px solid var(--vs-input-border, rgba(255,255,255,.14))',
-          color:'var(--text)',
-          cursor: disabled ? 'not-allowed' : 'pointer'
+          color:'var(--text)'
         }}
+        aria-disabled={disabled}
       >
         <span className="flex items-center gap-2 truncate">
           {leftIcon}
@@ -768,8 +756,7 @@ export default function VoiceAgentSection() {
       }
     })();
     return () => { mounted = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   function setField<K extends keyof AgentData>(k: K) {
     return (v: AgentData[K]) => {
@@ -793,8 +780,7 @@ export default function VoiceAgentSection() {
         setData(p => ({ ...p, systemPromptBackend: compiled.backendString }));
       }
     } catch {}
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data.systemPrompt]);
+  }, [data.systemPrompt]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function doSave(){
     if (!activeId) { setToastKind('error'); setToast('Select or create an agent'); return; }
@@ -915,9 +901,6 @@ export default function VoiceAgentSection() {
     setJustAddedIndex(next.length - 1);
     setTimeout(()=>setJustAddedIndex(null), 260);
   };
-
-  /* helper: whether OpenAI TTS is selected */
-  const isOpenAIProvider = data.ttsProvider === 'openai';
 
   /* ─────────── UI ─────────── */
   return (
@@ -1260,7 +1243,7 @@ export default function VoiceAgentSection() {
                     { value: 'Amber (Australian)', label: 'Amber' },
                   ]}
                   placeholder="— Choose —"
-                  disabled={!isOpenAIProvider}
+                  disabled={data.ttsProvider !== 'openai'}  // 🔒 disable when provider ≠ OpenAI
                   menuTop={
                     <div className="flex items-center justify-between px-3 py-2 rounded-[8px]"
                          style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)' }}
@@ -1269,21 +1252,19 @@ export default function VoiceAgentSection() {
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
-                          disabled={!isOpenAIProvider}
                           onClick={()=>speakPreview(`This is ${data.voiceName || 'the selected'} voice preview.`)}
-                          className="w-8 h-8 rounded-full grid place-items-center disabled:opacity-40"
+                          className="w-8 h-8 rounded-full grid place-items-center"
                           aria-label="Play voice"
-                          style={{ background: CTA, color:'#0a0f0d' }}
+                          style={{ background: data.ttsProvider !== 'openai' ? 'rgba(255,255,255,.12)' : CTA, color:'#0a0f0d', opacity: data.ttsProvider !== 'openai' ? .6 : 1, pointerEvents: data.ttsProvider !== 'openai' ? 'none' : 'auto' }}
                         >
                           <Play className="w-4 h-4" />
                         </button>
                         <button
                           type="button"
-                          disabled={!isOpenAIProvider}
                           onClick={stopPreview}
-                          className="w-8 h-8 rounded-full grid place-items-center border disabled:opacity-40"
+                          className="w-8 h-8 rounded-full grid place-items-center border"
                           aria-label="Stop preview"
-                          style={{ background: 'var(--panel)', color:'var(--text)', borderColor:'rgba(255,255,255,.10)' }}
+                          style={{ background: 'var(--panel)', color:'var(--text)', borderColor:'rgba(255,255,255,.10)', opacity: data.ttsProvider !== 'openai' ? .6 : 1, pointerEvents: data.ttsProvider !== 'openai' ? 'none' : 'auto' }}
                         >
                           <Square className="w-4 h-4" />
                         </button>
@@ -1291,9 +1272,9 @@ export default function VoiceAgentSection() {
                     </div>
                   }
                 />
-                {!isOpenAIProvider && (
-                  <div className="mt-2 text-xs italic" style={{ color:'var(--text-muted)' }}>
-                    Voice controls are disabled until OpenAI is selected.
+                {data.ttsProvider !== 'openai' && (
+                  <div className="mt-2 text-xs" style={{ color:'var(--text-muted)' }}>
+                    Voice selection and preview are available once OpenAI is selected.
                   </div>
                 )}
               </div>
@@ -1383,7 +1364,7 @@ export default function VoiceAgentSection() {
                 <Toggle checked={data.numerals} onChange={setField('numerals')} />
               </div>
             </div>
-            <div className="mt-3 text-xs" style={{ color:'var(--text-muted)' }}>
+            <div className="mt-2 text-xs" style={{ color:'var(--text-muted)' }}>
               Realtime calls use OpenAI’s built-in transcription when Voice Provider = OpenAI.
             </div>
           </Section>
@@ -1473,4 +1454,121 @@ export default function VoiceAgentSection() {
                       await startTypingIntoPrompt(compiled.frontendText); // typing happens in the prompt box
                       setField('systemPromptBackend')(compiled.backendString);
                     } catch {
-                      setToastKind
+                      setToastKind('error'); setToast('Generate failed — try simpler wording.');
+                      setTimeout(()=>setToast(''), 2200);
+                    }
+                  }}
+                  disabled={!composerText.trim()}
+                  className="w-full h-[40px] rounded-[8px] font-semibold inline-flex items-center justify-center gap-2"
+                  style={{ background:CTA, color:'#ffffff', opacity: (!composerText.trim() ? .6 : 1) }}
+                >
+                  <Wand2 className="w-4 h-4" /> Generate
+                </button>
+              </div>
+            </div>
+          </div>
+        </>,
+        document.body
+      ) : null}
+
+      {/* ─────────── Voice/Call panel (WebRTC) ─────────── */}
+      {IS_CLIENT ? createPortal(
+        <>
+          <div
+            className={`fixed inset-0 ${showCall ? '' : 'pointer-events-none'}`}
+            style={{
+              zIndex: 9996,
+              background: showCall ? 'rgba(8,10,12,.78)' : 'transparent',
+              opacity: showCall ? 1 : 0,
+              transition: 'opacity .2s cubic-bezier(.22,.61,.36,1)'
+            }}
+            onClick={()=> setShowCall(false)}
+          />
+          {showCall && (
+            <WebCallButton
+              model={callModel}
+              systemPrompt={
+                (() => {
+                  const base = data.systemPromptBackend || data.systemPrompt || '';
+                  const ctx  = (data.contextText || '').trim();
+                  return ctx ? `${base}\n\n[Context]\n${ctx}`.trim() : base;
+                })()
+              }
+              voiceName={data.voiceName}
+              assistantName={data.name || 'Assistant'}
+              apiKey={selectedKey || ''}
+
+              ephemeralEndpoint={EPHEMERAL_TOKEN_ENDPOINT}
+              onError={(err:any) => {
+                const msg = err?.message || err?.error?.message || (typeof err === 'string' ? err : '') || 'Call failed';
+                setToastKind('error'); setToast(msg);
+              }}
+              onClose={()=> setShowCall(false)}
+              prosody={{ fillerWords: true, microPausesMs: 200, phoneFilter: true, turnEndPauseMs: 120 }}
+
+              // greetings: joined from list
+              firstMode={data.firstMode as any}
+              firstMsg={
+                (data.greetPick==='random'
+                  ? [...(data.firstMsgs||[])].filter(Boolean).sort(()=>Math.random()-0.5)
+                  : (data.firstMsgs||[]).filter(Boolean)
+                ).join('\n')
+              }
+            />
+          )}
+        </>,
+        document.body
+      ) : null}
+    </section>
+  );
+}
+
+/* ─────────── Section (expand anim) ─────────── */
+function Section({
+  title, icon, desc, children, defaultOpen = true
+}:{
+  title: string; icon: React.ReactNode; desc?: string; children: React.ReactNode; defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const innerRef = useRef<HTMLDivElement|null>(null);
+  const [h, setH] = useState<number>(0);
+  const measure = () => { if (innerRef.current) setH(innerRef.current.offsetHeight); };
+  useLayoutEffect(() => { measure(); }, [children, open]);
+
+  return (
+    <div className="mb-3">
+      <div className="mb-[6px] text-sm font-medium" style={{ color:'var(--text-muted)' }}>{title}</div>
+
+      <div className="va-card">
+        <button onClick={()=>setOpen(v=>!v)} className="va-head w-full text-left" style={{ color:'var(--text)' }}>
+          <span className="min-w-0 flex items-center gap-3">
+            <span className="inline-grid place-items-center w-7 h-7 rounded-full" style={{ background:'rgba(89,217,179,.12)' }}>
+              {icon}
+            </span>
+            <span className="min-w-0">
+              <span className="block font-semibold truncate" style={{ fontSize:'18px' }}>{title}</span>
+              {desc ? <span className="block text-xs truncate" style={{ color:'var(--text-muted)' }}>{desc}</span> : null}
+            </span>
+          </span>
+          <span className="justify-self-end">
+            {open ? <ChevronUp className="w-4 h-4" style={{ color:'var(--text-muted)' }}/> :
+                    <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)' }}/>}
+          </span>
+        </button>
+
+        <div
+          style={{
+            height: open ? h : 0,
+            opacity: open ? 1 : 0,
+            transform: open ? 'translateY(0)' : 'translateY(-4px)',
+            transition: 'height 260ms var(--ease), opacity 230ms var(--ease), transform 260ms var(--ease)',
+            overflow:'hidden'
+          }}
+          onTransitionEnd={() => { if (open) measure(); }}
+        >
+          <div ref={innerRef} className="p-5">{children}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
