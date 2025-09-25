@@ -40,6 +40,10 @@ const PHONE_LIST_KEY_V1   = 'phoneNumbers.v1';      // preferred [{id,name,numbe
 const PHONE_LIST_KEY_LEG  = 'phoneNumbers';         // legacy  [{id,name,number}] or similar
 const PHONE_SELECTED_ID   = 'phoneNumbers.selectedId';
 
+// shared API-key buckets (align with builder step)
+const LS_KEYS = 'apiKeys.v1';
+const LS_SELECTED = 'apiKeys.selectedId';
+
 /* ───────────────── Assistant rail (fixed) ───────────────── */
 const AssistantRail = dynamic(
   () =>
@@ -339,34 +343,85 @@ function useOpenAIModels(selectedKeyId: string|undefined){
   );
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    let aborted = false;
-    (async () => {
-      if (!selectedKeyId) return;
-      setLoading(true);
-      try {
-        const r = await fetch('/api/openai/models', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ apiKeyId: selectedKeyId }),
-        });
-        if (!r.ok) throw new Error(await r.text());
-        const j = await r.json();
-        const models = Array.isArray(j?.models) ? j.models : [];
-        if (!aborted && models.length) {
-          setOpts(filterModelsForUI(models.map((m:any) => ({ value: String(m.value), label: String(m.label) }))));
-        }
-      } catch {
-        // keep defaults on failure
-      } finally {
-        if (!aborted) setLoading(false);
-      }
-    })();
-    return () => { aborted = true; };
-  }, [selectedKeyId]);
+// load API keys + Phone numbers — align with builder step (scopedStorage only)
+useEffect(() => {
+  let mounted = true;
+  (async () => {
+    // --- API KEYS (same logic as Step2ModelSettings) ---
+    try {
+      const ss = await scopedStorage().catch(() => null);
+      if (!ss) {
+        if (mounted) setApiKeys([]);
+      } else {
+        await ss.ensureOwnerGuard?.();
 
-  return { opts, loading };
-}
+        const v1     = await ss.getJSON<ApiKey[]>(LS_KEYS, []).catch(() => []);
+        const legacy = await ss.getJSON<ApiKey[]>('apiKeys', []).catch(() => []);
+        const merged = Array.isArray(v1) && v1.length ? v1 : (Array.isArray(legacy) ? legacy : []);
+
+        const cleaned = (merged || [])
+          .filter(Boolean)
+          .map((k: any) => ({
+            id:   String(k?.id || ''),
+            name: String(k?.name || ''),
+            key:  String(k?.key || ''), // keep actual key string like Step 2
+          }))
+          .filter((k) => k.id && k.name);
+
+        if (!mounted) return;
+        setApiKeys(cleaned);
+
+        // Default order: existing selection -> globally selected -> first key
+        const globalSelected = await ss.getJSON<string>(LS_SELECTED, '').catch(() => '');
+        const chosenKeyId =
+          (data.apiKeyId && cleaned.some(k => k.id === data.apiKeyId)) ? data.apiKeyId! :
+          (globalSelected && cleaned.some(k => k.id === globalSelected)) ? globalSelected :
+          (cleaned[0]?.id || '');
+
+        if (chosenKeyId && chosenKeyId !== data.apiKeyId) {
+          setData(prev => ({ ...prev, apiKeyId: chosenKeyId }));
+          await ss.setJSON(LS_SELECTED, chosenKeyId).catch(() => {});
+        }
+      }
+    } catch {
+      if (mounted) setApiKeys([]);
+    }
+
+    // --- Phone numbers (unchanged) ---
+    try {
+      const store = await scopedStorage().catch(() => null);
+      if (!mounted) return;
+      if (!store) { setPhoneNumbers([]); return; }
+
+      store.ensureOwnerGuard?.().catch(() => {});
+      const phoneV1 = await store.getJSON<PhoneNum[]>(PHONE_LIST_KEY_V1, []).catch(() => []);
+      const phoneLegacy = await store.getJSON<PhoneNum[]>(PHONE_LIST_KEY_LEG, []).catch(() => []);
+      const phonesMerged = Array.isArray(phoneV1) && phoneV1.length ? phoneV1
+                           : (Array.isArray(phoneLegacy) ? phoneLegacy : []);
+      const phoneCleaned = phonesMerged
+        .filter(Boolean)
+        .map((p: any) => ({ id: String(p?.id || ''), name: String(p?.name || ''), number: String(p?.number || p?.phone || '') }))
+        .filter(p => p.id && (p.number || p.name));
+      setPhoneNumbers(phoneCleaned);
+
+      const selPhone = await store.getJSON<string>(PHONE_SELECTED_ID, '').catch(() => '');
+      const chosenPhoneId =
+        (data.phoneId && phoneCleaned.some(p => p.id === data.phoneId)) ? data.phoneId! :
+        (selPhone && phoneCleaned.some(p => p.id === selPhone)) ? selPhone :
+        (phoneCleaned[0]?.id || '');
+
+      if (chosenPhoneId && chosenPhoneId !== data.phoneId) {
+        setData(prev => ({ ...prev, phoneId: chosenPhoneId }));
+        await store.setJSON(PHONE_SELECTED_ID, chosenPhoneId).catch(() => {});
+      }
+    } catch {
+      if (!mounted) return;
+      setPhoneNumbers([]);
+    }
+  })();
+  return () => { mounted = false; };
+// eslint-disable-next-line react-hooks/exhaustive-deps
+}, [credsTick]);
 
 /* Voice (TTS) providers: only OpenAI enabled now */
 const ttsProviders: Opt[] = [
