@@ -875,8 +875,7 @@ async function loadApiKeysEverywhere(setter:(list:ApiKey[], selectedId:string)=>
 
 
 /* ─────────── Page ─────────── */
-/* ─────────── Page ─────────── */
-export default function VoiceAgentSection() {
+export default function VoiceAgentSection(
   /* Theme comes from Account.tsx (no local toggle) */
   const [theme, setTheme] = useState<'light'|'dark'>(() => {
     if (!IS_CLIENT) return 'dark';
