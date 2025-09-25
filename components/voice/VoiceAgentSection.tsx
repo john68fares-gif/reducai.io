@@ -57,12 +57,12 @@ const Tokens = () => (
       --ease:cubic-bezier(.22,.61,.36,1);
       --control-h:40px;
 
-      /* Default (dark) buttons */
+      /* Buttons (force white fg per your ask) */
       --btn-bg: #1a1f1d;
       --btn-fg: #ffffff;
       --btn-border: var(--border);
       --brand-btn-bg: var(--brand);
-      --brand-btn-fg: #0a0f0d;
+      --brand-btn-fg: #ffffff;
     }
 
     :root[data-theme='light'] .va-scope{
@@ -72,10 +72,10 @@ const Tokens = () => (
       --shadow-soft:0 18px 48px rgba(0,0,0,.10);
       --shadow-card:0 8px 24px rgba(0,0,0,.10), 0 0 0 1px rgba(0,0,0,.06) inset;
 
-      /* Light-mode friendly buttons (your ask) */
-      --btn-bg: #ffffff;
-      --btn-fg: #0b0c10;
-      --btn-border: rgba(0,0,0,.14);
+      /* keep buttons dark so white text always readable */
+      --btn-bg: #1a1f1d;
+      --btn-fg: #ffffff;
+      --btn-border: rgba(0,0,0,.18);
       --brand-btn-bg: var(--brand);
       --brand-btn-fg: #ffffff;
     }
@@ -89,7 +89,7 @@ const Tokens = () => (
       isolation:isolate;
     }
     .va-head{
-      min-height:64px;
+      min-height:64px; /* taller header */
       display:grid;
       grid-template-columns:1fr auto;
       align-items:center;
@@ -147,9 +147,10 @@ type AgentData = {
 
   ttsProvider: 'openai' | 'elevenlabs';
   voiceName: string;
+  apiKeyId?: string;
 
-  apiKeyId?: string;       // moved to Credentials section
-  phoneNumber?: string;    // NEW: credentials phone number
+  // NEW: phone number stored alongside creds section
+  phoneNumber?: string;
 
   asrProvider: 'deepgram' | 'whisper' | 'assemblyai';
   asrModel: string;
@@ -226,6 +227,11 @@ const DEFAULT_AGENT: AgentData = {
 const keyFor = (id: string) => `va:agent:${id}`;
 const versKeyFor = (id: string) => `va:versions:${id}`;
 
+/* If your phone number page writes under different keys, change these constants */
+const LS_PHONE_PRIMARY = 'phone.number.selected';
+const LS_PHONE_LEGACY  = 'phone.number';
+
+/* ─────────── migrations ─────────── */
 function migrateAgent(d: AgentData): AgentData {
   const msgs = Array.isArray(d.firstMsgs) ? d.firstMsgs : (d.firstMsg ? [d.firstMsg] : []);
   return {
@@ -235,7 +241,7 @@ function migrateAgent(d: AgentData): AgentData {
     greetPick: d.greetPick || 'sequence',
     contextText: typeof d.contextText === 'string' ? d.contextText : '',
     ctxFiles: Array.isArray(d.ctxFiles) ? d.ctxFiles : [],
-    phoneNumber: typeof d.phoneNumber === 'string' ? d.phoneNumber : ''
+    phoneNumber: typeof d.phoneNumber === 'string' ? d.phoneNumber : '',
   };
 }
 
@@ -255,16 +261,16 @@ async function apiSave(agentId: string, payload: AgentData){
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   }).catch(()=>null as any);
-  if (!r?.ok) throw new Error((await r?.text?.()) || 'Save failed');
+  if (!r?.ok) throw new Error('Save failed');
   return r.json();
 }
-async function apiPublish(agentId: string, payload: Partial<AgentData>){
+async function apiPublish(agentId: string, payload: { apiKeyId?: string; phoneNumber?: string; model?: string }){
   const r = await fetch(`/api/voice/agent/${agentId}/publish`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   }).catch(()=>null as any);
-  if (!r?.ok) throw new Error((await r?.text?.()) || 'Publish failed');
+  if (!r?.ok) throw new Error('Publish failed');
   return r.json();
 }
 
@@ -284,7 +290,7 @@ function useOpenAIModels(selectedKey: string|undefined){
     { value: 'gpt-4.1', label: 'GPT-4.1' },
     { value: 'gpt-4.1-mini', label: 'GPT-4.1 Mini' },
     { value: 'gpt-4o', label: 'GPT-4o' },
-    { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
+    { value: 'gpt-4o-mini', label: 'gpt-4o Mini' },
     { value: 'o4', label: 'o4' },
     { value: 'o4-mini', label: 'o4 Mini' },
     { value: 'gpt-4o-realtime-preview', label: 'GPT-4o Realtime Preview' },
@@ -298,7 +304,11 @@ function useOpenAIModels(selectedKey: string|undefined){
       if (!selectedKey) return;
       setLoading(true);
       try {
-        const r = await fetch('/api/openai/models', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: selectedKey }) });
+        const r = await fetch('/api/openai/models', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: selectedKey })
+        });
         if (!r.ok) throw new Error(await r.text());
         const j = await r.json();
         const models = Array.isArray(j?.models) ? j.models : [];
@@ -377,7 +387,6 @@ function StyledSelect({
 
   useEffect(() => {
     if (!open || !IS_CLIENT) return;
-
     const off = (e: MouseEvent) => {
       const t = e.target as Node;
       if (wrapRef.current?.contains(t)) return;
@@ -390,35 +399,15 @@ function StyledSelect({
       const r = btnRef.current.getBoundingClientRect();
       setMenuPos({ left: r.left, top: r.bottom + 8, width: r.width });
     };
-
     window.addEventListener('mousedown', off);
     window.addEventListener('keydown', onEsc);
     window.addEventListener('resize', onResize);
-
     return () => {
       window.removeEventListener('mousedown', off);
       window.removeEventListener('keydown', onEsc);
       window.removeEventListener('resize', onResize);
     };
   }, [open]);
-
-  // flip menu above if there's not enough space below
-  useEffect(() => {
-    if (!open || !menuRef.current || !btnRef.current) return;
-    const r = btnRef.current.getBoundingClientRect();
-    const menuEl = menuRef.current;
-    // small delay so the menu computes its height
-    const id = requestAnimationFrame(() => {
-      const mh = menuEl.getBoundingClientRect().height || 320;
-      const spaceBelow = window.innerHeight - r.bottom - 8;
-      if (spaceBelow < mh && r.top > mh + 8) {
-        setMenuPos({ left: r.left, top: r.top - mh - 8, width: r.width });
-      } else {
-        setMenuPos({ left: r.left, top: r.bottom + 8, width: r.width });
-      }
-    });
-    return () => cancelAnimationFrame(id);
-  }, [open, query, options.length]);
 
   return (
     <div ref={wrapRef} className="relative">
@@ -446,7 +435,7 @@ function StyledSelect({
             top: (menuPos?.top ?? 0),
             width: (menuPos?.width ?? (btnRef.current?.getBoundingClientRect().width ?? 280)),
             background:'var(--panel)', border:'1px solid var(--border)',
-            borderRadius:10, boxShadow:'var(--shadow-card)', maxHeight: '72vh', overflowY: 'auto'
+            borderRadius:10, boxShadow:'var(--shadow-card)'
           }}
         >
           {menuTop ? <div className="mb-2">{menuTop}</div> : null}
@@ -638,7 +627,7 @@ export default function VoiceAgentSection() {
 
   useEffect(() => { if (activeId) saveAgentData(activeId, data); }, [activeId, data]);
 
-  // load keys (best effort)
+  // load keys (best effort) + import phone number from Phone Number page
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -661,6 +650,7 @@ export default function VoiceAgentSection() {
         if (!mounted) return;
         setApiKeys(cleaned);
 
+        // Select an api key if none set
         const globalSelected = await store.getJSON<string>('apiKeys.selectedId', '').catch(() => '');
         const chosen =
           (data.apiKeyId && cleaned.some((k) => k.id === data.apiKeyId)) ? data.apiKeyId! :
@@ -670,6 +660,14 @@ export default function VoiceAgentSection() {
         if (chosen && chosen !== data.apiKeyId) {
           setData(prev => ({ ...prev, apiKeyId: chosen }));
           await store.setJSON('apiKeys.selectedId', chosen).catch(() => {});
+        }
+
+        // Import stored phone number (if your Phone page saved one)
+        const storedPrimary = await store.getJSON<string>(LS_PHONE_PRIMARY, '').catch(() => '');
+        const storedLegacy  = await store.getJSON<string>(LS_PHONE_LEGACY,  '').catch(() => '');
+        const phoneChosen   = (storedPrimary && storedPrimary.trim()) || (storedLegacy && storedLegacy.trim()) || '';
+        if (phoneChosen && phoneChosen !== (data.phoneNumber || '')) {
+          setData(prev => ({ ...prev, phoneNumber: phoneChosen }));
         }
       } catch {
         if (!mounted) return;
@@ -709,24 +707,27 @@ export default function VoiceAgentSection() {
     if (!activeId) { setToastKind('error'); setToast('Select or create an agent'); return; }
     setSaving(true); setToast('');
     try { await apiSave(activeId, data); setToastKind('info'); setToast('Saved'); }
-    catch (e:any) { setToastKind('error'); setToast(e?.message || 'Save failed'); }
+    catch { setToastKind('error'); setToast('Save failed'); }
     finally { setSaving(false); setTimeout(()=>setToast(''), 1400); }
   }
   async function doPublish(){
     if (!activeId) { setToastKind('error'); setToast('Select or create an agent'); return; }
-    if (!data.apiKeyId) { setToastKind('error'); setToast('Select an API key in Credentials.'); return; }
-    if (!safeTrim(data.phoneNumber)) { setToastKind('error'); setToast('Add a phone number in Credentials.'); return; }
+
+    // Frontend validation to avoid “Publish failed”
+    if (!safeTrim(data.apiKeyId || '')) { setToastKind('error'); setToast('Add an API key in Credentials.'); return; }
+    if (!safeTrim(data.phoneNumber || '')) { setToastKind('error'); setToast('Add a phone number in Credentials.'); return; }
+    if (!safeTrim(data.model || '')) { setToastKind('error'); setToast('Choose a model first.'); return; }
 
     setPublishing(true); setToast('');
     try {
       await apiPublish(activeId, {
         apiKeyId: data.apiKeyId,
-        phoneNumber: safeTrim(data.phoneNumber),
-        model: data.model || 'gpt-4o'
+        phoneNumber: data.phoneNumber,
+        model: data.model
       });
       setToastKind('info'); setToast('Published');
     }
-    catch (e:any) { setToastKind('error'); setToast(e?.message || 'Publish failed'); }
+    catch { setToastKind('error'); setToast('Publish failed'); }
     finally { setPublishing(false); setTimeout(()=>setToast(''), 1600); }
   }
 
@@ -752,7 +753,7 @@ export default function VoiceAgentSection() {
           <RailBoundary><AssistantRail /></RailBoundary>
         </div>
 
-        <div className="px-3 md:px-5 lg:px-6 py-5 pb-28 mx-auto w-full max-w-[1160px]" style={{ fontSize:14, lineHeight:1.45 }}>
+        <div className="px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w-[1160px]" style={{ fontSize:14, lineHeight:1.45 }}>
           {/* Top actions */}
           <div className="mb-4 flex flex-wrap items-center justify-end gap-3">
             <button
@@ -781,7 +782,7 @@ export default function VoiceAgentSection() {
               onClick={()=>{
                 const key = apiKeys.find(k => k.id === data.apiKeyId)?.key || '';
                 if (!key) {
-                  setToastKind('error'); setToast('Select an OpenAI API key in Credentials first.');
+                  setToastKind('error'); setToast('Select an OpenAI API key first (Credentials).');
                   setTimeout(()=>setToast(''), 2200);
                   return;
                 }
@@ -790,7 +791,8 @@ export default function VoiceAgentSection() {
               className="inline-flex items-center gap-2 rounded-[8px] select-none"
               style={{
                 height:'var(--control-h)', padding:'0 16px',
-                background:'var(--brand-btn-bg)', color:'var(--brand-btn-fg)', fontWeight:700,
+                background:'var(--brand-btn-bg)', color:'#ffffff', /* force white per request */
+                fontWeight:700,
                 boxShadow:'0 10px 22px rgba(89,217,179,.20)'
               }}
               onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.filter = 'brightness(1.05)')}
@@ -825,34 +827,6 @@ export default function VoiceAgentSection() {
               <div className="p-4"><div className="font-semibold" style={{ fontSize:'15px' }}>~1050 ms</div></div>
             </div>
           </div>
-
-          {/* Credentials (NEW) */}
-          <Section
-            title="Credentials"
-            icon={<Phone className="w-4 h-4" style={{ color:'var(--brand)' }} />}
-            desc="Phone and API key used for publishing and calls."
-            defaultOpen
-          >
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <div className="mb-2 text-[12.5px]">Phone Number</div>
-                <input
-                  value={data.phoneNumber || ''}
-                  onChange={(e)=>setField('phoneNumber')(e.target.value)}
-                  className="va-input w-full"
-                  placeholder="+1 555 123 4567"
-                />
-              </div>
-              <ApiKeySelect
-                apiKeys={apiKeys}
-                selectedId={data.apiKeyId || ''}
-                onChange={async (val)=>{
-                  setField('apiKeyId')(val);
-                  try { const store = await scopedStorage(); await store.ensureOwnerGuard?.(); await store.setJSON('apiKeys.selectedId', val); } catch {}
-                }}
-              />
-            </div>
-          </Section>
 
           {/* Model config */}
           <Section
@@ -989,6 +963,23 @@ export default function VoiceAgentSection() {
             defaultOpen
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {/* Provider on the LEFT */}
+              <div>
+                <div className="mb-2 text-[12.5px]">Provider</div>
+                <StyledSelect
+                  value={data.ttsProvider}
+                  onChange={(v)=>setField('ttsProvider')(v as any)}
+                  options={[
+                    { value: 'openai', label: 'OpenAI' },
+                    { value: 'elevenlabs', label: 'ElevenLabs — coming soon', disabled: true, note: 'soon' },
+                    { value: 'azure', label: 'Azure — coming soon', disabled: true, note: 'soon' },
+                    { value: 'google', label: 'Google — coming soon', disabled: true, note: 'soon' },
+                  ]}
+                  placeholder="— Choose —"
+                />
+              </div>
+
+              {/* Voice picker on the RIGHT */}
               <div>
                 <div className="mb-2 text-[12.5px]">Voice</div>
                 <StyledSelect
@@ -1033,6 +1024,41 @@ export default function VoiceAgentSection() {
             </div>
           </Section>
 
+          {/* NEW — Credentials (API key + Phone Number) */}
+          <Section
+            title="Credentials"
+            icon={<Phone className="w-4 h-4" style={{ color:'var(--brand)' }} />}
+            desc="Required to publish and place/receive calls."
+            defaultOpen
+          >
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <ApiKeySelect
+                apiKeys={apiKeys}
+                selectedId={data.apiKeyId || ''}
+                onChange={async (val)=>{
+                  setField('apiKeyId')(val);
+                  try {
+                    const store = await scopedStorage();
+                    await store.ensureOwnerGuard?.();
+                    await store.setJSON('apiKeys.selectedId', val);
+                  } catch {}
+                }}
+              />
+              <div>
+                <div className="mb-2 text-[12.5px]">Phone Number</div>
+                <input
+                  value={data.phoneNumber || ''}
+                  onChange={(e)=>setField('phoneNumber')(e.target.value)}
+                  className="va-input w-full"
+                  placeholder="+1 555-123-4567"
+                />
+                <div className="mt-2 text-xs" style={{ color:'var(--text-muted)' }}>
+                  We auto-import from your Phone Number page when available.
+                </div>
+              </div>
+            </div>
+          </Section>
+
           {/* Transcriber */}
           <Section
             title="Transcriber"
@@ -1058,7 +1084,7 @@ export default function VoiceAgentSection() {
         </div>
       </div>
 
-      {/* Generate overlay */}
+      {/* Generate overlay (exactly like your spec) */}
       {showGenerate && IS_CLIENT ? createPortal(
         <>
           <div
