@@ -1,100 +1,81 @@
 'use client';
 
-import React from 'react';
-import { X, Globe, Loader2 } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Globe, X } from 'lucide-react';
 
 export default function ImportWebsiteModal({
-  open,
-  value,
-  onChange,
-  onCancel,
-  onImport,
-  importing,
-}: {
+  open, onCancel, onImport
+}:{
   open: boolean;
-  value: string;
-  importing?: boolean;
-  onChange: (v: string) => void;
   onCancel: () => void;
-  onImport: () => void;
+  onImport: (urls: string[]) => void;
 }) {
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const boxRef = useRef<HTMLTextAreaElement|null>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onCancel(); };
+    if (open) window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onCancel]);
+
+  useEffect(() => { if (open) setTimeout(()=>boxRef.current?.focus(), 0); }, [open]);
+
   if (!open) return null;
 
+  const urls = text.split(/\s+/).map(s=>s.trim()).filter(Boolean);
+
   return (
-    <div
-      className="fixed inset-0 z-[100001] flex items-center justify-center"
-      aria-modal="true"
-      role="dialog"
-    >
-      {/* backdrop */}
+    <div className="fixed inset-0 z-[100001] flex items-center justify-center">
+      <div className="absolute inset-0" style={{ background: 'rgba(0,0,0,.55)' }} onClick={onCancel} />
       <div
-        className="absolute inset-0"
-        style={{ background: 'rgba(8,10,12,.78)' }}
-        onClick={onCancel}
-      />
-
-      {/* card */}
-      <div
-        className="relative w-[min(92vw,720px)] rounded-[12px] p-4"
-        style={{
-          background: 'var(--panel-bg)',
-          border: '1px solid var(--border-weak)',
-          boxShadow: '0 20px 40px rgba(0,0,0,.28)',
-          color: 'var(--text)',
-        }}
+        className="relative w-[min(720px,90vw)] rounded-2xl p-5"
+        style={{ background: 'var(--panel-bg, #0d0f11)', border: '1px solid var(--border-weak, rgba(255,255,255,.14))', boxShadow: '0 30px 80px rgba(0,0,0,.40)' }}
       >
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2 text-[15px] font-semibold">
-            <span className="inline-grid place-items-center w-7 h-7 rounded-full"
-                  style={{ background: 'rgba(89,217,179,.12)' }}>
-              <Globe className="w-4 h-4" style={{ color: '#59d9b3' }} />
-            </span>
-            Import website
-          </div>
-          <button
-            onClick={onCancel}
-            className="w-8 h-8 grid place-items-center rounded-[8px]"
-            style={{ border: '1px solid var(--border-weak)' }}
-            aria-label="Close"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
+        <button
+          onClick={onCancel}
+          className="absolute right-3 top-3 w-9 h-9 grid place-items-center rounded-full"
+          style={{ border: '1px solid var(--border-weak, rgba(255,255,255,.14))' }}
+        >
+          <X className="w-4 h-4" />
+        </button>
 
-        <div className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>
-          Paste one or more URLs (space or newline separated). We’ll fetch and extract prompt-ready facts.
-        </div>
+        <div className="text-base font-semibold mb-3">Import website facts</div>
+        <p className="text-sm mb-3" style={{ color: 'var(--text-muted, #9fb4ad)' }}>
+          Paste one or more URLs (space or newline separated). We’ll extract short, reliable bullets.
+        </p>
 
         <textarea
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="w-full rounded-[8px] px-3 py-2 bg-transparent outline-none"
-          style={{ minHeight: 160, background: 'var(--panel-bg)', border: '1px solid var(--border-weak)' }}
-          placeholder="https://example.com/about https://example.com/contact"
+          ref={boxRef}
+          value={text}
+          onChange={(e)=>setText(e.target.value)}
+          className="w-full rounded-xl bg-transparent outline-none text-sm p-3"
+          style={{ minHeight:120, border:'1px solid var(--border-weak, rgba(255,255,255,.14))' }}
+          placeholder="https://example.com  https://example.com/pricing  https://example.com/contact"
         />
 
-        <div className="mt-3 flex justify-end gap-2">
-          <button
-            onClick={onCancel}
-            className="px-3 py-1.5 text-sm rounded-[8px]"
-            style={{ border: '1px solid var(--border-weak)' }}
-          >
-            Cancel
-          </button>
-          <button
-            disabled={!!importing}
-            onClick={onImport}
-            className="px-3 py-1.5 text-sm rounded-[8px] inline-flex items-center gap-2"
-            style={{
-              background: '#59d9b3',
-              color: '#0a0f0d',
-              border: '1px solid rgba(255,255,255,.10)',
-              opacity: importing ? 0.7 : 1,
-            }}
-          >
-            {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-            Import
-          </button>
+        <div className="mt-4 flex items-center justify-between">
+          <div className="text-xs" style={{ color:'var(--text-muted, #9fb4ad)' }}>
+            {urls.length ? `${urls.length} URL${urls.length>1?'s':''} ready` : 'No URLs yet'}
+          </div>
+          <div className="flex gap-2">
+            <button onClick={onCancel} className="px-3 py-2 rounded-xl text-sm" style={{ border:'1px solid var(--border-weak, rgba(255,255,255,.14))' }}>
+              Cancel
+            </button>
+            <button
+              disabled={!urls.length || busy}
+              onClick={async ()=>{
+                if (!urls.length) return;
+                setBusy(true);
+                try { await onImport(urls); } finally { setBusy(false); }
+              }}
+              className="px-4 py-2 rounded-xl text-sm inline-flex items-center gap-2 disabled:opacity-60"
+              style={{ background:'#59d9b3', color:'#0a0f0d', boxShadow:'0 12px 30px rgba(89,217,179,.30)' }}
+            >
+              <Globe className="w-4 h-4" /> {busy ? 'Importing…' : 'Import'}
+            </button>
+          </div>
         </div>
       </div>
     </div>
