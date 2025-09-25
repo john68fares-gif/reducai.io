@@ -6,7 +6,7 @@ import { createPortal } from 'react-dom';
 import { Bot, Mic, MicOff, X, Loader2, ChevronDown, Search, Check, Lock } from 'lucide-react';
 
 /* ──────────────────────────────────────────────────────────────────────────
-   PROPS  (AI logic preserved)  — apiKeyId replaces apiKey (legacy)
+   PROPS  (AI logic preserved)  — apiKeyId preferred, with safe fallbacks
 ────────────────────────────────────────────────────────────────────────── */
 type ProsodyOpts = {
   fillerWords?: boolean;
@@ -33,7 +33,7 @@ type Props = {
   /** ID of the stored key (server will resolve to the real secret) */
   apiKeyId?: string;
 
-  /** @deprecated left for compatibility; not used on the client */
+  /** Raw secret, if you really want to pass it from the client (not recommended). */
   apiKey?: string;
 
   ephemeralEndpoint?: string;
@@ -43,7 +43,7 @@ type Props = {
 
   firstMode?: 'Assistant speaks first' | 'User speaks first' | 'Silent until tool required';
   firstMsg?: string;
-  greetMode?: 'server' | 'client' | 'off'; // behave like "off" to avoid rogue greetings
+  greetMode?: 'server' | 'client' | 'off';
 
   languageHint?: 'auto' | 'en' | 'de' | 'nl' | 'es' | 'ar';
   prosody?: ProsodyOpts;
@@ -65,6 +65,7 @@ type Props = {
 const CTA = '#59d9b3';
 const GREEN_LINE = 'rgba(89,217,179,.20)';
 const IS_CLIENT = typeof window !== 'undefined' && typeof document !== 'undefined';
+const ENV_FALLBACK_KEY = (process as any)?.env?.NEXT_PUBLIC_OPENAI_API_KEY || '';
 
 const RAW_ID = /^[a-z0-9._-]{3,}$/i;
 const clamp01 = (v:number)=>Math.max(0,Math.min(1,v));
@@ -113,7 +114,7 @@ function looksNonTargetLanguage(text:string, target:'en'|'de'|'nl'|'es'|'ar'){
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
-   SMALL SELECT (voice picker style)
+   SMALL SELECT (voice picker style) — stays open & repositions on scroll
 ────────────────────────────────────────────────────────────────────────── */
 type Opt = { value: string; label: string; disabled?: boolean; iconLeft?: React.ReactNode };
 function StyledSelect({
@@ -136,11 +137,13 @@ function StyledSelect({
     return q ? options.filter(o => o.label.toLowerCase().includes(q)) : options;
   }, [options, query, value]);
 
-  useLayoutEffect(() => {
-    if (!open || !btnRef.current) return;
+  const recompute = () => {
+    if (!btnRef.current) return;
     const r = btnRef.current.getBoundingClientRect();
     setMenuPos({ left: r.left, top: openUp ? r.top - 8 : r.bottom + 8, width: r.width });
-  }, [open, openUp]);
+  };
+
+  useLayoutEffect(() => { if (open) recompute(); }, [open, openUp]);
 
   useEffect(() => {
     if (!open || !IS_CLIENT) return;
@@ -151,18 +154,21 @@ function StyledSelect({
       setOpen(false);
     };
     const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
-    const onResize = () => {
-      if (!btnRef.current) return;
-      const r = btnRef.current.getBoundingClientRect();
-      setMenuPos({ left: r.left, top: openUp ? r.top - 8 : r.bottom + 8, width: r.width });
-    };
+
+    let raf = 0;
+    const onScroll = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(recompute); };
+    const onResize = () => recompute();
+
     window.addEventListener('mousedown', off);
     window.addEventListener('keydown', onEsc);
+    window.addEventListener('scroll', onScroll, true);
     window.addEventListener('resize', onResize);
     return () => {
       window.removeEventListener('mousedown', off);
       window.removeEventListener('keydown', onEsc);
+      window.removeEventListener('scroll', onScroll, true);
       window.removeEventListener('resize', onResize);
+      cancelAnimationFrame(raf);
     };
   }, [open, openUp]);
 
@@ -355,7 +361,7 @@ function makeScopedAdapter(scoped?: ScopedLike){
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
-   COMPONENT (no visible transcript; language pinned from prompt)
+   COMPONENT
 ────────────────────────────────────────────────────────────────────────── */
 export default function WebCallButton({
   className,
@@ -363,14 +369,14 @@ export default function WebCallButton({
   systemPrompt,
   voiceName,
   assistantName,
-  apiKeyId,            // ← secure id (server resolves secret)
-  apiKey,              // ← legacy, ignored
+  apiKeyId,
+  apiKey,               // may be undefined; we also check env fallback
   ephemeralEndpoint = '/api/voice/ephemeral',
   onClose,
   onError,
   firstMode='User speaks first',
   firstMsg='Hello.',
-  greetMode='off', // behave as OFF; no client greeting to avoid rogue language
+  greetMode='off',
   languageHint='auto',
   prosody,
   phoneFilter=false,
@@ -386,7 +392,7 @@ export default function WebCallButton({
   const [muted,setMuted]=useState(false);
   const [error,setError]=useState<string>('');
 
-  // voices (static allowlist; no client fetch)
+  // voices (static allowlist)
   const [voices,setVoices]=useState<string[]>(() => DEFAULT_VOICES);
   const [selectedVoice,setSelectedVoice]=useState<string>(() => resolveVoiceId(voiceName));
   const voiceId = useMemo(()=> resolveVoiceId(selectedVoice || voiceName), [selectedVoice, voiceName]);
@@ -462,11 +468,16 @@ export default function WebCallButton({
   }
 
   /* ────────────────────────────────────────────────────────────────────────
-     START CALL  (language pinned from prompt; assistant-first handled)
+     START CALL  (language pinned; assistant-first greeting optional)
   ──────────────────────────────────────────────────────────────────────── */
   async function startCall(){
     setError('');
-    if(!apiKeyId){ setError('No API key selected.'); onError?.('No API key'); return; }
+    const resolvedSecret = apiKey || ENV_FALLBACK_KEY || ''; // raw secret if provided
+    const haveKey = !!apiKeyId || !!resolvedSecret;
+    if(!haveKey){
+      const msg = 'No API key provided. Select a key in Credentials or set NEXT_PUBLIC_OPENAI_API_KEY.';
+      setError(msg); onError?.(msg); return;
+    }
     try{
       setConnecting(true);
       callRef.current = { id: `call_${Date.now()}_${Math.random().toString(36).slice(2,7)}`, startedAt: Date.now(), transcript: [] };
@@ -474,10 +485,18 @@ export default function WebCallButton({
 
       const TARGET_LANG = inferLang(systemPrompt, languageHint);
 
-      // 1) ephemeral — server resolves apiKeyId → secret (browser never sees secret)
+      // 1) ephemeral — server resolves apiKeyId → secret OR uses provided raw secret
       const sessionRes=await fetch(ephemeralEndpoint,{
         method:'POST', headers:{ 'Content-Type':'application/json' },
-        body:JSON.stringify({ model, voiceName:voiceId, assistantName, systemPrompt, apiKeyId }),
+        body:JSON.stringify({
+          model,
+          voiceName:voiceId,
+          assistantName,
+          systemPrompt,
+          // send BOTH; your server can prefer id, fallback to raw secret
+          apiKeyId: apiKeyId || null,
+          apiKey: resolvedSecret || null,
+        }),
       });
       if(!sessionRes.ok) throw new Error(`Ephemeral token error: ${await sessionRes.text()}`);
       const session=await sessionRes.json(); const EPHEMERAL=session?.client_secret?.value;
@@ -505,14 +524,13 @@ export default function WebCallButton({
       const dc=pc.createDataChannel('oai-events'); dcRef.current=dc;
 
       dc.onopen=()=>{
-        // STRICT language pin (from your prompt)
+        // STRICT language pin
         const langName: Record<typeof TARGET_LANG,string> = { en:'English', de:'German', nl:'Dutch', es:'Spanish', ar:'Arabic' };
         const strictLangBlock =
           `IMPORTANT: Speak ONLY ${langName[TARGET_LANG]} for the entire call. ` +
           `Do NOT code-switch or translate unless the caller explicitly requests a language change. ` +
           `If the user speaks another language, politely reply in ${langName[TARGET_LANG]} and ask if they want to switch languages.`;
 
-        // light human timing hints (doesn't change logic)
         const style = [
           systemPrompt || '',
           strictLangBlock,
@@ -521,7 +539,7 @@ export default function WebCallButton({
           'Between sentences, breathe lightly and keep a natural pace.'
         ].join('\n\n');
 
-        // Realtime config with pinned ASR language
+        // ✅ Live transcription (OpenAI Whisper) with target language
         const input_audio_transcription:any = {
           enabled:true,
           provider:'openai',
@@ -540,17 +558,15 @@ export default function WebCallButton({
             type:'server_vad',
             threshold:0.5,
             prefix_silence_ms: 100,
-            silence_duration_ms: Math.max(900, prosody?.turnEndPauseMs ?? 1600), // wait a beat after user
+            silence_duration_ms: Math.max(900, prosody?.turnEndPauseMs ?? 1600),
           },
         }}));
 
-        // Assistant-first greeting (server-voiced) when selected
+        // Assistant-first greeting (server-voiced)
         if (firstMode === 'Assistant speaks first' && (firstMsg||'').trim()) {
-          // Kick off a one-shot assistant output using Realtime
           dc.send(JSON.stringify({
             type: 'response.create',
             response: {
-              // Using "instructions" ensures it speaks without needing to add a user item
               instructions: String(firstMsg).trim(),
               modalities: ['audio','text']
             }
@@ -558,7 +574,7 @@ export default function WebCallButton({
         }
       };
 
-      // 5) events — save to scoped storage; nudge if it drifts
+      // 5) events — persist transcript; nudge if language drifts
       dc.onmessage=(ev)=>{
         try{
           const msg=JSON.parse(ev.data); const t=msg?.type as string;
@@ -569,10 +585,8 @@ export default function WebCallButton({
             const delta=String(msg?.delta||'');
             upsert(id,'assistant',(prev)=>({ text:(prev?.text||'')+delta }));
 
-            // If it obviously drifts away from the target language, reassert once
-            if (looksNonTargetLanguage(delta, inferLang(systemPrompt, languageHint))) {
-              const L = inferLang(systemPrompt, languageHint);
-              const LN = L==='en'?'English':L==='nl'?'Dutch':L==='de'?'German':L==='es'?'Spanish':'Arabic';
+            if (looksNonTargetLanguage(delta, TARGET_LANG)) {
+              const LN = { en:'English', nl:'Dutch', de:'German', es:'Spanish', ar:'Arabic' }[TARGET_LANG];
               dc.send(JSON.stringify({ type:'session.update', session:{ instructions: `REMINDER: Speak ONLY ${LN}.` }}));
             }
           }
@@ -608,7 +622,7 @@ export default function WebCallButton({
         else if(['disconnected','failed','closed'].includes(pc.connectionState)){ endCall(false); }
       };
 
-      // 6) SDP
+      // 6) SDP with ephemeral
       const offer=await pc.createOffer(); await pc.setLocalDescription(offer);
       const url=`https://api.openai.com/v1/realtime?model=${encodeURIComponent(model)}`;
       const answerRes=await fetch(url,{
@@ -665,10 +679,10 @@ export default function WebCallButton({
   function endCall(userIntent=true){ cleanup(); setConnected(false); setConnecting(false); if(userIntent) onClose?.(); }
 
   useEffect(()=>{ startCall(); return ()=>{ cleanup(); }; // eslint-disable-next-line
-  },[voiceId, systemPrompt, languageHint]);
+  },[voiceId, systemPrompt, languageHint, apiKeyId, apiKey]);
 
   /* ────────────────────────────────────────────────────────────────────────
-     UI — full-height slide-over, NO transcript list (we save it silently)
+     UI — slide-over; status only (transcript saved silently)
   ───────────────────────────────────────────────────────────────────────── */
   const header = (
     <div className="va-head" style={{ zIndex: 100011 }}>
