@@ -28,11 +28,6 @@ const PHONE_LIST_KEY_V1   = 'phoneNumbers.v1';      // preferred [{id,name,numbe
 const PHONE_LIST_KEY_LEG  = 'phoneNumbers';         // legacy  [{id,name,number}] or similar
 const PHONE_SELECTED_ID   = 'phoneNumbers.selectedId';
 
-/* Credentials storage (API Key section) */
-const CREDS_KEYS_V1 = 'credentials.apiKeys.v1';
-const CREDS_KEYS_LEG = 'credentials.apiKeys';
-const CREDS_SELECTED_ID = 'credentials.selectedApiKeyId';
-
 /* ───────────────── Assistant rail (fixed) ───────────────── */
 const AssistantRail = dynamic(
   () =>
@@ -80,41 +75,24 @@ const coerceStr = (v: any): string => (isStr(v) ? v : '');
 const safeTrim = (v: any): string => (nonEmpty(v) ? v.trim() : '');
 const sleep = (ms:number) => new Promise(r=>setTimeout(r,ms));
 
-/* ─────────── theme tokens + micro animations (Light/Dark) ───────────
-   Theme comes from Account (account.tsx) via:
-   - localStorage('account:theme') = 'light' | 'dark'
-   - window event 'account:theme' with detail { theme }
-*/
-type Theme = 'light'|'dark';
-const getAccountTheme = (): Theme => {
-  try {
-    const t = (localStorage.getItem('account:theme') as Theme) || (document.documentElement.dataset.theme as Theme);
-    return (t==='light'||t==='dark') ? t : 'dark';
-  } catch { return 'dark'; }
-};
-
-const Tokens = ({theme}:{theme:Theme}) => (
+/* ─────────── theme tokens + micro animations (Light/Dark)
+   NOTE: variables are also written to :root so portal UIs (dropdowns/modals) inherit them. ─────────── */
+const Tokens = ({theme}:{theme:'dark'|'light'}) => (
   <style jsx global>{`
-    .va-scope{
+    :root {
       ${theme==='dark' ? `
         --bg:#0b0c10; --panel:#0d0f11; --text:#e6f1ef; --text-muted:#9fb4ad;
         --page-bg:var(--bg); --panel-bg:var(--panel);
-        --input-bg:#101314; --input-border:rgba(255,255,255,.12); --input-shadow:0 0 0 1px rgba(255,255,255,.06) inset;
-        --border-weak:rgba(255,255,255,.16);
-        --card-shadow:0 20px 40px rgba(0,0,0,.32), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px ${GREEN_LINE};
+        --input-bg:#101314; --input-border:rgba(255,255,255,.10); --input-shadow:0 0 0 1px rgba(255,255,255,.06) inset;
+        --border-weak:rgba(255,255,255,.10);
+        --card-shadow:0 20px 40px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px ${GREEN_LINE};
       ` : `
         --bg:#f6f8f9; --panel:#ffffff; --text:#0b1620; --text-muted:#50606a;
         --page-bg:var(--bg); --panel-bg:var(--panel);
-        --input-bg:#ffffff; --input-border:rgba(0,0,0,.14); --input-shadow:0 0 0 1px rgba(0,0,0,.03) inset;
-        --border-weak:rgba(0,0,0,.12);
-        --card-shadow:0 14px 28px rgba(0,0,0,.10), 0 0 0 1px rgba(0,0,0,.04) inset, 0 0 0 1px rgba(89,217,179,.16);
+        --input-bg:#ffffff; --input-border:rgba(0,0,0,.12); --input-shadow:0 0 0 1px rgba(0,0,0,.03) inset;
+        --border-weak:rgba(0,0,0,.10);
+        --card-shadow:0 14px 28px rgba(0,0,0,.08), 0 0 0 1px rgba(0,0,0,.04) inset, 0 0 0 1px rgba(89,217,179,.16);
       `}
-      /* Select (dropdown) solid backgrounds (no transparency) */
-      --vs-input-bg: var(--panel-bg);
-      --vs-input-border: var(--input-border);
-      --vs-menu-bg: var(--panel-bg);
-      --vs-menu-border: var(--border-weak);
-
       --s-2:8px; --s-3:12px; --s-4:16px; --s-5:20px; --s-6:24px;
       --radius-outer:8px; --radius-inner:8px; --control-h:40px; --header-h:80px;
       --fz-title:18px; --fz-sub:15px; --fz-body:14px; --fz-label:12.5px;
@@ -122,14 +100,21 @@ const Tokens = ({theme}:{theme:Theme}) => (
       --app-sidebar-w:240px; --rail-w:260px;
       --green-weak:rgba(89,217,179,.12); --red-weak:rgba(239,68,68,.14);
       --good:#10b981; --bad:#ef4444;
+      /* For portal UIs (dropdowns) */
+      --vs-menu-bg: var(--panel-bg);
+      --vs-menu-border: var(--border-weak);
+      --vs-input-bg: var(--input-bg);
+      --vs-input-border: var(--input-border);
     }
+
+    .va-scope{ /* keep class for scoping layout styles; colors now live on :root for portals */ }
 
     .va-root { animation: vaPageIn 380ms var(--ease) both; background:var(--page-bg); }
     .va-card{ border-radius:var(--radius-outer); border:1px solid var(--border-weak); background:var(--panel-bg); box-shadow:var(--card-shadow); overflow:hidden; isolation:isolate; animation: vaFloatIn 420ms var(--ease) both; }
     .va-head{ min-height:var(--header-h); display:grid; grid-template-columns:1fr auto; align-items:center; padding:0 16px; border-bottom:1px solid var(--border-weak); color:var(--text);
-      background:var(--panel-bg); border-top-left-radius:var(--radius-outer); border-top-right-radius:var(--radius-outer); }
+      background:linear-gradient(90deg,var(--panel-bg) 0%,color-mix(in oklab, var(--panel-bg) 97%, white 3%) 50%,var(--panel-bg) 100%); border-top-left-radius:var(--radius-outer); border-top-right-radius:var(--radius-outer); }
 
-    .va-cta{ box-shadow:${theme==='dark' ? '0 10px 22px rgba(89,217,179,.20)' : '0 10px 22px rgba(89,217,179,.28)'}; }
+    .va-cta{ box-shadow:${theme==='dark' ? '0 10px 22px rgba(89,217,179,.20)' : '0 10px 22px rgba(89,217,179,.28)'}; animation: vaPulse 3.6s ease-in-out 1s infinite; }
     .va-cta:hover{ transform: translateY(-1px); }
 
     /* Overlay entrance */
@@ -141,6 +126,7 @@ const Tokens = ({theme}:{theme:Theme}) => (
     /* Page + cards */
     @keyframes vaPageIn { from { opacity:0; transform: translateY(8px); } to { opacity:1; transform: translateY(0); } }
     @keyframes vaFloatIn { from { opacity:0; transform: translateY(6px) scale(.995); } to { opacity:1; transform: translateY(0) scale(1); } }
+    @keyframes vaPulse   { 0%,100% { box-shadow:0 10px 22px rgba(89,217,179,.20);} 50% { box-shadow:0 18px 32px rgba(89,217,179,.30);} }
 
     .va-section-body{ will-change: height,opacity,transform; }
   `}</style>
@@ -420,7 +406,7 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
-/* ─────────── Styled select with portal (solid) ─────────── */
+/* ─────────── Styled select with portal (non-transparent) ─────────── */
 type OptT = { value: string; label: string; disabled?: boolean; note?: string; iconLeft?: React.ReactNode };
 function StyledSelect({
   value, onChange, options, placeholder, leftIcon, menuTop, disabled
@@ -505,16 +491,15 @@ function StyledSelect({
       {open && IS_CLIENT ? createPortal(
         <div
           ref={menuRef}
-          className="fixed p-2 va-portal"
+          className="fixed z-[100020] p-2 va-portal"
           style={{
-            zIndex: 100020,
             left: (menuPos?.left ?? 0),
             top: (menuPos?.top ?? 0),
             width: (menuPos?.width ?? (btnRef.current?.getBoundingClientRect().width ?? 280)),
             background:'var(--vs-menu-bg)',
             border:'1px solid var(--vs-menu-border)',
             borderRadius:10,
-            boxShadow:'0 24px 64px rgba(0,0,0,.22)'
+            boxShadow:'0 24px 64px rgba(0,0,0,.18)'
           }}
         >
           {menuTop ? <div className="mb-2">{menuTop}</div> : null}
@@ -692,7 +677,7 @@ async function readFileAsText(f: File): Promise<string> {
 function deelWebsiteToBuckets(raw: string){
   const text = (raw || '').replace(/\s+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
   const lower = text.toLowerCase();
-  const pick = (re: RegExp, take = 1400) => {
+  const pick = (re: RegExp, take = 1600) => {
     const m = lower.match(re);
     if (!m) return '';
     const i = Math.max(0, m.index || 0);
@@ -704,71 +689,79 @@ function deelWebsiteToBuckets(raw: string){
     pick(/\b(team|leadership|founders)\b/),
   ].filter(Boolean).join('\n\n');
 
-  const products = [
-    pick(/\b(products?|services?|what we do)\b/),
-    pick(/\b(pricing|plans|packages)\b/),
-  ].filter(Boolean).join('\n\n');
+  const services = pick(/\b(services|what we do|products|solutions|offerings)\b/);
+  const contact  = pick(/\b(contact|get in touch|address|email|phone)\b/);
 
-  const contact = [
-    pick(/\b(contact|support|help|email|phone|address)\b/),
-  ].filter(Boolean).join('\n\n');
+  const sponsors = pick(/\b(sponsors?|partners?|our partners|supported by)\b/);
 
   const other = text;
 
-  return { identity, products, contact, other };
+  return {
+    identity: identity || '',
+    services: services || '',
+    contact: contact || '',
+    sponsors: sponsors || '',
+    other: other || ''
+  };
 }
 
-function websiteTextToPrompt(raw: string){
+function buildPromptFromWebsite(raw: string, basePrompt: string){
   const b = deelWebsiteToBuckets(raw);
-  const lines:string[] = [];
-  lines.push('[Identity]');
-  lines.push((b.identity || 'Business details from site.').trim());
-  if (b.products) {
-    lines.push('\n[Products / Services]');
-    lines.push(b.products.trim());
-  }
-  if (b.contact) {
-    lines.push('\n[Contact]');
-    lines.push(b.contact.trim());
-  }
-  lines.push('\n[Context]');
-  lines.push((b.other || '').slice(0, 4000).trim());
+  const blocks: string[] = [];
+  if (b.identity)  blocks.push(`[Identity]\n${b.identity}`);
+  if (b.services)  blocks.push(`[Services]\n${b.services}`);
+  if (b.contact)   blocks.push(`[Contact]\n${b.contact}`);
+  if (b.sponsors)  blocks.push(`[Sponsors]\n${b.sponsors}`);
+  if (b.other)     blocks.push(`[Context]\n${b.other.slice(0, 4000)}`);
 
-  lines.push('\n[Style]\n- Clear, concise, friendly.\n- Keep answers grounded only in the provided site information.');
-  lines.push('\n[Response Guidelines]\n- Cite concrete facts from the site text when relevant.\n- If information is missing, say so briefly and ask a focused follow-up.');
-  lines.push('\n[Task & Goals]\n- Help users understand offerings and next steps (book, contact, purchase).');
-
-  return lines.join('\n').replace(/\n{3,}/g,'\n\n').trim();
+  const base = nonEmpty(basePrompt) ? basePrompt : DEFAULT_PROMPT_RT;
+  return [base, ...blocks].join('\n\n').trim();
 }
 
 /* ─────────── Page ─────────── */
 export default function VoiceAgentSection() {
-  /* Light/Dark mode — driven by Account */
-  const [theme, setTheme] = useState<Theme>(() => (IS_CLIENT ? getAccountTheme() : 'dark'));
+  /* Theme comes from Account.tsx (no local toggle) */
+  const [theme, setTheme] = useState<'light'|'dark'>(() => {
+    if (!IS_CLIENT) return 'dark';
+    try {
+      const keys = ['account.theme', 'app.theme', 'theme'];
+      for (const k of keys) {
+        const v = localStorage.getItem(k);
+        if (v === 'light' || v === 'dark') return v;
+      }
+      const ds = document.documentElement.dataset.theme;
+      if (ds === 'light' || ds === 'dark') return ds;
+    } catch {}
+    return 'dark';
+  });
+
   useEffect(() => {
     if (!IS_CLIENT) return;
-    const setFromAccount = (t: Theme) => {
+    const apply = (t:'light'|'dark') => {
       document.documentElement.dataset.theme = t;
       setTheme(t);
     };
-    setFromAccount(getAccountTheme());
+    // initial apply for portal UIs
+    apply(theme);
 
     const onStorage = (e: StorageEvent) => {
-      if (e.key === 'account:theme') setFromAccount(getAccountTheme());
+      if (!e.key) return;
+      if (['account.theme','app.theme','theme'].includes(e.key)) {
+        const v = e.newValue || '';
+        if (v === 'light' || v === 'dark') apply(v);
+      }
     };
-    const onCustom = (e: Event) => {
-      try {
-        const t = (e as CustomEvent<{theme:Theme}>).detail?.theme;
-        if (t==='light' || t==='dark') setFromAccount(t);
-      } catch {}
+    const onThemeEvt = (e: Event) => {
+      const t = (e as CustomEvent<'light'|'dark'>).detail;
+      if (t === 'light' || t === 'dark') apply(t);
     };
     window.addEventListener('storage', onStorage);
-    window.addEventListener('account:theme', onCustom as any);
+    window.addEventListener('account:theme', onThemeEvt as EventListener);
     return () => {
       window.removeEventListener('storage', onStorage);
-      window.removeEventListener('account:theme', onCustom as any);
+      window.removeEventListener('account:theme', onThemeEvt as EventListener);
     };
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* align rail to app sidebar */
   useEffect(() => {
@@ -812,7 +805,6 @@ export default function VoiceAgentSection() {
   const [showImport, setShowImport] = useState(false);
   const [urlsText, setUrlsText] = useState('');
   const [importing, setImporting] = useState(false);
-  const [importText, setImportText] = useState<string>('');
 
   // models list (live from API when key *ID* selected)
   const { opts: openaiModels, loading: loadingModels } = useOpenAIModels(data.apiKeyId || undefined);
@@ -852,6 +844,21 @@ export default function VoiceAgentSection() {
 
   useEffect(() => { if (activeId) saveAgentData(activeId, data); }, [activeId, data]);
 
+  const [credsTick, setCredsTick] = useState(0);
+
+  // refresh API keys when the credentials page updates them (custom event or storage)
+  useEffect(() => {
+    if (!IS_CLIENT) return;
+    const onCredsUpdated = () => setCredsTick(t=>t+1);
+    const onStorage = (e: StorageEvent) => { if (e.key && e.key.toLowerCase().includes('apikey')) onCredsUpdated(); };
+    window.addEventListener('credentials:updated', onCredsUpdated);
+    window.addEventListener('storage', onStorage);
+    return () => {
+      window.removeEventListener('credentials:updated', onCredsUpdated);
+      window.removeEventListener('storage', onStorage);
+    };
+  }, []);
+
   // load API keys + Phone numbers (best effort) — user-by-user (NO env fallback)
   useEffect(() => {
     let mounted = true;
@@ -863,39 +870,40 @@ export default function VoiceAgentSection() {
 
         store.ensureOwnerGuard?.().catch(() => {});
 
-        // --- API keys from **Credentials section** (preferred) ---
-        const credsV1 = await store.getJSON<ApiKey[]>(CREDS_KEYS_V1, []).catch(() => []);
-        const credsLeg = await store.getJSON<ApiKey[]>(CREDS_KEYS_LEG, []).catch(() => []);
-        const v1 = await store.getJSON<ApiKey[]>('apiKeys.v1', []).catch(() => []);        // fallback
-        const legacy = await store.getJSON<ApiKey[]>('apiKeys', []).catch(() => []);       // fallback
+        // --- API keys (per user) ---
+        const v1     = await store.getJSON<ApiKey[]>('apiKeys.v1', []).catch(() => []);
+        const legacy = await store.getJSON<ApiKey[]>('apiKeys', []).catch(() => []);
+        const c1     = await store.getJSON<ApiKey[]>('credentials.apiKeys', []).catch(() => []);
+        const c2     = await store.getJSON<ApiKey[]>('openai.apiKeys', []).catch(() => []);
+        const c3     = await store.getJSON<ApiKey[]>('keys.openai', []).catch(() => []);
 
-        const merged = (Array.isArray(credsV1) && credsV1.length ? credsV1
-                      : Array.isArray(credsLeg) && credsLeg.length ? credsLeg
-                      : Array.isArray(v1) && v1.length ? v1
-                      : legacy) || [];
+        let merged: any[] = [];
+        const candidates = [v1, legacy, c1, c2, c3].filter(a => Array.isArray(a) && a.length) as any[][];
+        if (candidates.length) merged = candidates[0];
+        if (!merged.length) {
+          try {
+            // localStorage fallback
+            const ls = localStorage.getItem('credentials.apiKeys') || localStorage.getItem('openai.apiKeys');
+            if (ls) merged = JSON.parse(ls);
+          } catch {}
+        }
 
-        const cleaned = merged
+        const cleaned = (merged || [])
           .filter(Boolean)
           .map((k: any) => ({ id: String(k?.id || ''), name: String(k?.name || ''), key: k?.key ? '••••' : undefined }))
-          .filter((k) => k.id && k.name);
+          .filter((k:any) => k.id && k.name);
 
         if (!mounted) return;
         setApiKeys(cleaned);
 
-        // selected key (prefer credentials.selected id)
-        const selCreds = await store.getJSON<string>(CREDS_SELECTED_ID, '').catch(() => '');
         const globalSelected = await store.getJSON<string>('apiKeys.selectedId', '').catch(() => '');
-
         const chosenKeyId =
-          (data.apiKeyId && cleaned.some((k) => k.id === data.apiKeyId)) ? data.apiKeyId! :
-          (selCreds && cleaned.some((k) => k.id === selCreds)) ? selCreds :
-          (globalSelected && cleaned.some((k) => k.id === globalSelected)) ? globalSelected :
+          (data.apiKeyId && cleaned.some((k:any) => k.id === data.apiKeyId)) ? data.apiKeyId! :
+          (globalSelected && cleaned.some((k:any) => k.id === globalSelected)) ? globalSelected :
           (cleaned[0]?.id || '');
 
         if (chosenKeyId && chosenKeyId !== data.apiKeyId) {
           setData(prev => ({ ...prev, apiKeyId: chosenKeyId }));
-          // keep both in sync
-          await store.setJSON(CREDS_SELECTED_ID, chosenKeyId).catch(() => {});
           await store.setJSON('apiKeys.selectedId', chosenKeyId).catch(() => {});
         }
 
@@ -929,7 +937,8 @@ export default function VoiceAgentSection() {
       }
     })();
     return () => { mounted = false; };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [credsTick]);
 
   function setField<K extends keyof AgentData>(k: K) {
     return (v: AgentData[K]) => {
@@ -1019,7 +1028,7 @@ export default function VoiceAgentSection() {
     } catch {}
   };
 
-  /* Generate → type inside the prompt box with Accept/Decline + diff */
+  /* Generate → type inside the prompt box with Accept/Decline + green/red diff */
   const startTypingIntoPrompt = async (targetText:string) => {
     basePromptRef.current = data.systemPrompt || DEFAULT_PROMPT_RT;
     setIsTypingIntoPrompt(true);
@@ -1084,7 +1093,7 @@ export default function VoiceAgentSection() {
     } catch {}
     // Fallback: naive fetch (may be blocked by CORS)
     try {
-      const r = await fetch(url as any);
+      const r = await fetch(url, { mode:'cors' as any });
       const html = await r.text();
       const div = document.createElement('div');
       div.innerHTML = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
@@ -1095,29 +1104,27 @@ export default function VoiceAgentSection() {
     }
   }
 
-  async function doImportWebsite() {
+  async function importUrlsIntoPrompt() {
     const list = urlsText.split(/\s+/).map(s=>s.trim()).filter(Boolean);
     if (!list.length) return;
-    setImporting(true); setImportText('');
+    setImporting(true);
     try {
       let merged = '';
       for (const u of list) {
         const t = await fetchUrlText(u);
         if (t) merged += `\n\n# URL: ${u}\n${t}`;
       }
-      const promptChunk = websiteTextToPrompt(merged.trim());
-      setImportText(promptChunk);
-
-      // Type the prompt into the System Prompt box
-      setShowImport(false);
-      await sleep(120);
       const base = (data.systemPromptBackend || data.systemPrompt || DEFAULT_PROMPT_RT).trim();
-      const next = [base, promptChunk].filter(Boolean).join('\n\n').trim();
+      const next = buildPromptFromWebsite(merged.trim(), base);
+
+      setShowImport(false);
+      await sleep(80);
       await startTypingIntoPrompt(next);
       try {
         const compiled = compilePrompt({ basePrompt: next, userText: '' });
         setField('systemPromptBackend')(compiled.backendString);
       } catch {}
+      setToastKind('info'); setToast('Imported website content into the prompt'); setTimeout(()=>setToast(''), 1500);
     } finally {
       setImporting(false);
     }
@@ -1137,19 +1144,16 @@ export default function VoiceAgentSection() {
     }
   };
 
-  // if assistant should speak first but greetings are empty, ensure a default line:
-  const computedFirstMsg = (() => {
-    const baseList = (data.greetPick==='random'
+  // greeting text: if "Assistant speaks first" and none defined, use a sensible default
+  const greetingJoined = useMemo(() => {
+    const list = (data.greetPick==='random'
       ? [...(data.firstMsgs||[])].filter(Boolean).sort(()=>Math.random()-0.5)
       : (data.firstMsgs||[]).filter(Boolean)
     );
-    const joined = baseList.join('\n').trim();
-    if (data.firstMode === 'Assistant speaks first') {
-      return joined || `Hi, I’m ${data.name || 'your assistant'}. How can I help today?`;
-    }
-    // if not “speaks first”, pass whatever list joins to allow silence behavior in WebCallButton
-    return joined;
-  })();
+    let s = list.join('\n').trim();
+    if (data.firstMode === 'Assistant speaks first' && !s) s = 'Hello! How can I help you today?';
+    return s;
+  }, [data.greetPick, data.firstMsgs, data.firstMode]);
 
   return (
     <section className="va-scope va-root">
@@ -1164,7 +1168,6 @@ export default function VoiceAgentSection() {
         <div className="px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w-[1160px]" style={{ fontSize:'var(--fz-body)', lineHeight:'var(--lh-body)', color:'var(--text)' }}>
           {/* Top actions */}
           <div className="mb-4 flex flex-wrap items-center justify-end gap-3">
-            {/* Theme toggle removed — theme is controlled by Account */}
             <button
               onClick={doSave}
               disabled={saving}
@@ -1190,7 +1193,7 @@ export default function VoiceAgentSection() {
             <button
               onClick={()=>{
                 if (!hasApiKey) {
-                  setToastKind('error'); setToast('Add your OpenAI API key in Credentials (Account).');
+                  setToastKind('error'); setToast('Add your own OpenAI API key in Credentials.');
                   setTimeout(()=>setToast(''), 2600);
                   return;
                 }
@@ -1215,14 +1218,28 @@ export default function VoiceAgentSection() {
                 boxShadow:'0 0 0 1px rgba(239,68,68,.25) inset'
               }}
             >
-              <Lock className="w-4 h-4" /> No API key selected. Go to <b>&nbsp;Account → Credentials&nbsp;</b>.
+              <Lock className="w-4 h-4" /> No API key selected. Each user must add their own key in <b>&nbsp;Credentials&nbsp;</b>.
             </div>
           )}
 
           {/* Metrics */}
           <div className="grid gap-3 md:grid-cols-2 mb-3">
-            <div className="va-card"><div className="va-head" style={{ minHeight: 56 }}><div className="text-xs" style={{ color:'var(--text-muted)' }}>Cost</div><div /></div><div className="p-4"><div className="font-semibold" style={{ fontSize:'15px' }}>~$0.1/min</div></div></div>
-            <div className="va-card"><div className="va-head" style={{ minHeight: 56 }}><div className="text-xs" style={{ color:'var(--text-muted)' }}>Latency</div><div /></div><div className="p-4"><div className="font-semibold" style={{ fontSize:'15px' }}>~1050 ms</div></div></div>
+            <div className="va-card" style={{ ['--i' as any]: 0 } as React.CSSProperties}>
+              <div className="va-head" style={{ minHeight: 56 }}>
+                <div className="text-xs" style={{ color:'var(--text-muted)' }}>Cost</div><div />
+              </div>
+              <div className="p-4">
+                <div className="font-semibold" style={{ fontSize:'15px' }}>~$0.1/min</div>
+              </div>
+            </div>
+            <div className="va-card" style={{ ['--i' as any]: 1 } as React.CSSProperties}>
+              <div className="va-head" style={{ minHeight: 56 }}>
+                <div className="text-xs" style={{ color:'var(--text-muted)' }}>Latency</div><div />
+              </div>
+              <div className="p-4">
+                <div className="font-semibold" style={{ fontSize:'15px' }}>~1050 ms</div>
+              </div>
+            </div>
           </div>
 
           {/* Model config */}
@@ -1327,4 +1344,597 @@ export default function VoiceAgentSection() {
                       const next = [...(data.firstMsgs||[])];
                       next.splice(idx,1);
                       setField('firstMsgs')(next);
-                      setField('firstMsg')((next[0]
+                      setField('firstMsg')((next[0]||''));
+                    }}
+                    className="w-10 h-10 grid place-items-center rounded-[8px]"
+                    style={{ border:'1px solid var(--border-weak)' }}
+                    aria-label="Remove"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+
+              {!(data.firstMsgs && data.firstMsgs.length) && (
+                <div className="text-xs" style={{ color:'var(--text-muted)' }}>
+                  No greetings yet. If you choose “Assistant speaks first” and keep this empty, a default greeting will be used.
+                </div>
+              )}
+            </div>
+
+            {/* Prompt + Generate */}
+            <div className="mt-6">
+              <div className="flex items-center justify-between mb-2">
+                <div className="font-medium" style={{ fontSize:'12.5px' }}>System Prompt</div>
+                <div className="flex items-center gap-2">
+                  <button
+                    className="inline-flex items-center gap-2 rounded-[8px] text-sm"
+                    style={{ height:34, padding:'0 12px', background:CTA, color:'#fff', border:'1px solid rgba(255,255,255,.08)' }}
+                    onClick={()=>{ setComposerText(''); setShowGenerate(true); }}
+                  >
+                    <Wand2 className="w-4 h-4" /> Generate
+                  </button>
+                  <button
+                    className="inline-flex items-center gap-2 rounded-[8px] text-sm"
+                    style={{ height:34, padding:'0 12px', background:'var(--panel-bg)', color:'var(--text)', border:'1px solid var(--border-weak)' }}
+                    onClick={()=> setShowImport(true)}
+                  >
+                    <Globe className="w-4 h-4" /> Import website
+                  </button>
+                </div>
+              </div>
+
+              {/* Prompt box with inline *character-level* diff while generating */}
+              <div className="relative">
+                {!isTypingIntoPrompt ? (
+                  <textarea
+                    className="w-full bg-transparent outline-none rounded-[8px] px-3 py-[10px]"
+                    style={{ minHeight: 320, background:'var(--panel-bg)', border:'1px solid var(--border-weak)', color:'var(--text)' }}
+                    value={data.systemPrompt}
+                    onChange={(e)=> setField('systemPrompt')(e.target.value)}
+                  />
+                ) : (
+                  <PromptDiffTyping
+                    base={basePromptRef.current}
+                    next={diffCandidate || data.systemPrompt}
+                    onAccept={acceptGenerated}
+                    onDecline={declineGenerated}
+                  />
+                )}
+              </div>
+
+              {/* Context files */}
+              <div className="mt-6">
+                <div className="mb-2 flex items-center justify-between">
+                  <div className="font-medium text-[12.5px]">Context Files</div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      multiple
+                      accept=".txt,.md,.csv,.json,.docx,.doc,.docs,text/plain,text/markdown,text/csv,application/json,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,application/zip"
+                      className="hidden"
+                      onChange={async (e)=>{ const files = Array.from(e.target.files || []); await onPickFiles(files); if (fileInputRef.current) fileInputRef.current.value=''; }}
+                    />
+                    <button
+                      type="button"
+                      onClick={()=>fileInputRef.current?.click()}
+                      className="inline-flex items-center gap-2 text-sm rounded-[8px] px-3 py-1.5"
+                      style={{ border:'1px solid var(--border-weak)' }}
+                    >
+                      Add file
+                    </button>
+                    {!!(data.ctxFiles && data.ctxFiles.length) && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={importFilesIntoPrompt}
+                          className="inline-flex items-center gap-2 text-sm rounded-[8px] px-3 py-1.5"
+                          style={{ background:CTA, color:'#fff', border:'1px solid rgba(255,255,255,.10)' }}
+                        >
+                          Import to Prompt
+                        </button>
+                        <button
+                          type="button"
+                          onClick={()=>{ rebuildContextText([]); }}
+                          className="inline-flex items-center gap-2 text-sm rounded-[8px] px-3 py-1.5"
+                          style={{ border:'1px solid var(--border-weak)' }}
+                        >
+                          Clear
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* List of files */}
+                {!(data.ctxFiles && data.ctxFiles.length) ? (
+                  <div className="text-xs" style={{ color:'var(--text-muted)' }}>
+                    No files yet. Click <b>Add file</b> to upload (.txt, .md, .csv, .json, .docx or best-effort .doc / .docs).
+                  </div>
+                ) : (
+                  <div className="rounded-[8px] p-3" style={{ background:'var(--panel-bg)', border:'1px solid var(--border-weak)' }}>
+                    {(data.ctxFiles||[]).map((f, idx) => (
+                      <div key={idx} className="mb-3 last:mb-0">
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="text-sm font-medium truncate">{f.name}</div>
+                          <button
+                            onClick={()=>{
+                              const next = [...(data.ctxFiles||[])]; next.splice(idx,1);
+                              rebuildContextText(next);
+                            }}
+                            className="text-xs rounded-[6px] px-2 py-1"
+                            style={{ border:'1px solid var(--border-weak)' }}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                        <div className="text-xs" style={{ color:'var(--text-muted)' }}>
+                          {(f.text || '').slice(0, 240) || '(empty)'}{(f.text||'').length>240?'…':''}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </Section>
+
+          {/* Voice */}
+          <Section
+            title="Voice"
+            icon={<Volume2 className="w-4 h-4" style={{ color: CTA }} />}
+            desc="Choose TTS, language, and preview the voice. (Language is enforced in calls.)"
+            defaultOpen={true}
+          >
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <div className="mb-2 text-[12.5px]">Voice Provider</div>
+                <StyledSelect
+                  value={data.ttsProvider}
+                  onChange={(v)=>setField('ttsProvider')(v as AgentData['ttsProvider'])}
+                  options={ttsProviders}
+                  placeholder="Choose a TTS provider"
+                />
+                <div className="mt-2 text-xs" style={{ color:'var(--text-muted)' }}>
+                  Only OpenAI is available right now.
+                </div>
+              </div>
+
+              <div>
+                <div className="mb-2 text-[12.5px]">Voice</div>
+                <StyledSelect
+                  value={data.voiceName}
+                  onChange={(v)=>setField('voiceName')(v)}
+                  options={[
+                    { value: 'Alloy (American)', label: 'Alloy' },
+                    { value: 'Verse (American)', label: 'Verse' },
+                    { value: 'Coral (British)', label: 'Coral' },
+                    { value: 'Amber (Australian)', label: 'Amber' },
+                  ]}
+                  placeholder="— Choose —"
+                  disabled={data.ttsProvider !== 'openai'}
+                  menuTop={
+                    <div className="flex items-center justify-between px-3 py-2 rounded-[8px]"
+                         style={{ background:'var(--panel-bg)', border:'1px solid var(--border-weak)' }}
+                    >
+                      <div className="text-xs" style={{ color:'var(--text-muted)' }}>Preview</div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={()=>speakPreview(`This is ${data.voiceName || 'the selected'} voice preview.`)}
+                          className="w-8 h-8 rounded-full grid place-items-center"
+                          aria-label="Play voice"
+                          style={{ background: data.ttsProvider !== 'openai' ? 'rgba(0,0,0,.08)' : CTA, color:'#0a0f0d', opacity: data.ttsProvider !== 'openai' ? .6 : 1, pointerEvents: data.ttsProvider !== 'openai' ? 'none' : 'auto' }}
+                        >
+                          <Play className="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={stopPreview}
+                          className="w-8 h-8 rounded-full grid place-items-center border"
+                          aria-label="Stop preview"
+                          style={{ background: 'var(--panel-bg)', color:'var(--text)', borderColor:'var(--border-weak)', opacity: data.ttsProvider !== 'openai' ? .6 : 1, pointerEvents: data.ttsProvider !== 'openai' ? 'none' : 'auto' }}
+                        >
+                          <Square className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  }
+                />
+              </div>
+            </div>
+          </Section>
+
+          {/* Credentials — OpenAI API Key + Phone Number (PER USER) */}
+          <Section
+            title="Credentials"
+            icon={<Phone className="w-4 h-4" style={{ color: CTA }} />}
+            desc="Each user selects their own OpenAI API key. Keys are not shared."
+            defaultOpen={true}
+          >
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <div className="mb-2 text-[12.5px] flex items-center gap-2">
+                  <KeyRound className="w-4 h-4 opacity-80" /> OpenAI API Key
+                </div>
+                <StyledSelect
+                  value={data.apiKeyId || ''}
+                  onChange={async (val)=>{
+                    setField('apiKeyId')(val);
+                    try { const store = await scopedStorage(); await store.ensureOwnerGuard?.(); await store.setJSON('apiKeys.selectedId', val); } catch {}
+                  }}
+                  options={[
+                    { value: '', label: 'Select your API key…', iconLeft: <OpenAIStamp size={14} /> },
+                    ...apiKeys.map(k=>({ value: k.id, label: k.name, iconLeft: <OpenAIStamp size={14} /> }))
+                  ]}
+                  leftIcon={<OpenAIStamp size={14} />}
+                />
+                <div className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
+                  The realtime call uses only the key ID; the server resolves the secret.
+                </div>
+              </div>
+
+              <div>
+                <div className="mb-2 text-[12.5px]">Phone Number</div>
+                <StyledSelect
+                  value={data.phoneId || ''}
+                  onChange={async (val)=>{
+                    setField('phoneId')(val);
+                    try {
+                      const store = await scopedStorage();
+                      await store.ensureOwnerGuard?.();
+                      await store.setJSON(PHONE_SELECTED_ID, val);
+                    } catch {}
+                  }}
+                  options={[
+                    { value: '', label: 'Select a phone number…' },
+                    ...phoneNumbers.map(p => ({
+                      value: p.id,
+                      label: `${p.name ? `${p.name} • ` : ''}${p.number}`
+                    }))
+                  ]}
+                />
+                <div className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
+                  Imported from your Phone Number section. Manage numbers there.
+                </div>
+              </div>
+            </div>
+          </Section>
+
+          {/* Transcriber */}
+          <Section
+            title="Transcriber"
+            icon={<Mic className="w-4 h-4" style={{ color: CTA }} />}
+            desc="Transcription settings"
+            defaultOpen={true}
+          >
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <div className="mb-2 text-[12.5px]">Provider</div>
+                <StyledSelect value={data.asrProvider} onChange={(v)=>setField('asrProvider')(v as AgentData['asrProvider'])} options={asrProviders}/>
+              </div>
+              <div>
+                <div className="mb-2 text-[12.5px]">Model</div>
+                <StyledSelect value={data.asrModel} onChange={setField('asrModel')} options={asrModelsFor(data.asrProvider)}/>
+              </div>
+            </div>
+            <div className="mt-4 grid sm:grid-cols-2 gap-3">
+              <div className="flex items-center justify-between p-3 rounded-[8px]" style={{ background:'var(--panel-bg)', border:'1px solid var(--border-weak)' }}>
+                <span className="text-sm">Background Denoising</span>
+                <Toggle checked={data.denoise} onChange={setField('denoise')} />
+              </div>
+              <div className="flex items-center justify-between p-3 rounded-[8px]" style={{ background:'var(--panel-bg)', border:'1px solid var(--border-weak)' }}>
+                <span className="text-sm">Use Numerals</span>
+                <Toggle checked={data.numerals} onChange={setField('numerals')} />
+              </div>
+            </div>
+            <div className="mt-2 text-xs" style={{ color:'var(--text-muted)' }}>
+              Realtime calls use OpenAI’s built-in transcription when Voice Provider = OpenAI.
+            </div>
+          </Section>
+
+          {/* spacer under Transcriber */}
+          <div style={{ height: 72 }} />
+        </div>
+      </div>
+
+      {/* ─────────── Generate overlay (non-transparent backdrop) ─────────── */}
+      {showGenerate && IS_CLIENT ? createPortal(
+        <>
+          <div
+            className="fixed inset-0"
+            style={{ zIndex: Z_OVERLAY, background:'rgba(0,0,0,.72)' }}
+            onClick={()=> setShowGenerate(false)}
+          />
+          <div className="fixed inset-0 grid place-items-center px-4" style={{ zIndex: Z_MODAL }}>
+            <div
+              className="w-full max-w-[640px] rounded-[12px] overflow-hidden"
+              style={{
+                background: 'var(--panel-bg)',
+                color: 'var(--text)',
+                border: `1px solid ${GREEN_LINE}`,
+                maxHeight: '86vh',
+                boxShadow:'0 24px 64px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px rgba(89,217,179,.20)',
+                animation: 'vaModalIn 280ms var(--ease) both'
+              }}
+            >
+              <div
+                className="flex items-center justify-between px-6 py-4"
+                style={{
+                  background:`linear-gradient(90deg,var(--panel-bg) 0%,color-mix(in oklab,var(--panel-bg) 97%, white 3%) 50%,var(--panel-bg) 100%)`,
+                  borderBottom:`1px solid ${GREEN_LINE}`
+                }}
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg grid place-items-center" style={{ background:'rgba(89,217,179,.12)' }}>
+                    <span style={{ color: CTA }}><Wand2 className="w-5 h-5" /></span>
+                  </div>
+                  <div className="text-lg font-semibold">Describe how to update the prompt</div>
+                </div>
+                <button
+                  onClick={()=> setShowGenerate(false)}
+                  className="w-8 h-8 rounded-[6px] grid place-items-center"
+                  style={{ background:'var(--panel-bg)', border:`1px solid ${GREEN_LINE}` }}
+                  aria-label="Close"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="px-6 py-5 space-y-3">
+                <div className="text-xs" style={{ color:'var(--text-muted)' }}>
+                  Tip: “assistant for a dental clinic; tone friendly; handle booking and FAQs”.
+                </div>
+                <div
+                  className="rounded-[8px] p-2"
+                  style={{ background:'var(--panel-bg)', border:'1px solid var(--border-weak)' }}
+                >
+                  <textarea
+                    value={composerText}
+                    onChange={(e)=>setComposerText(e.target.value)}
+                    className="w-full bg-transparent outline-none rounded-[6px] px-3 py-2"
+                    placeholder="Describe changes…"
+                    style={{ minHeight: 160, maxHeight: '40vh', color:'var(--text)', resize:'vertical' }}
+                  />
+                </div>
+              </div>
+
+              <div className="px-6 pb-6 flex gap-3">
+                <button
+                  onClick={()=> setShowGenerate(false)}
+                  className="w-full h-[40px] rounded-[8px]"
+                  style={{ background:'var(--panel-bg)', border:'1px solid var(--border-weak)', color:'var(--text)', fontWeight:600 }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={async ()=>{
+                    const raw = safeTrim(composerText);
+                    if (!raw) return;
+                    try {
+                      const base = nonEmpty(data.systemPrompt) ? data.systemPrompt : DEFAULT_PROMPT_RT;
+                      const compiled = compilePrompt({ basePrompt: base, userText: raw });
+                      setShowGenerate(false);
+                      await sleep(150);
+                      await startTypingIntoPrompt(compiled.frontendText); // type into the prompt box
+                      setField('systemPromptBackend')(compiled.backendString);
+                    } catch {
+                      setToastKind('error'); setToast('Generate failed — try simpler wording.');
+                      setTimeout(()=>setToast(''), 2200);
+                    }
+                  }}
+                  disabled={!composerText.trim()}
+                  className="w-full h-[40px] rounded-[8px] font-semibold inline-flex items-center justify-center gap-2"
+                  style={{ background:CTA, color:'#ffffff', opacity: (!composerText.trim() ? .6 : 1) }}
+                >
+                  <Wand2 className="w-4 h-4" /> Generate
+                </button>
+              </div>
+            </div>
+          </div>
+        </>,
+        document.body
+      ) : null}
+
+      {/* ─────────── Website Import overlay (non-transparent backdrop, Import next to Cancel) ─────────── */}
+      {showImport && IS_CLIENT ? createPortal(
+        <>
+          <div
+            className="fixed inset-0"
+            style={{ zIndex: Z_OVERLAY, background:'rgba(0,0,0,.72)' }}
+            onClick={()=> setShowImport(false)}
+          />
+          <div className="fixed inset-0 grid place-items-center px-4" style={{ zIndex: Z_MODAL }}>
+            <div
+              className="w-full max-w-[800px] rounded-[12px] overflow-hidden"
+              style={{
+                background: 'var(--panel-bg)',
+                color: 'var(--text)',
+                border: `1px solid ${GREEN_LINE}`,
+                maxHeight: '88vh',
+                boxShadow:'0 24px 64px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px rgba(89,217,179,.20)',
+                animation: 'vaModalIn 280ms var(--ease) both'
+              }}
+            >
+              <div
+                className="flex items-center justify-between px-6 py-4"
+                style={{
+                  background:`linear-gradient(90deg,var(--panel-bg) 0%,color-mix(in oklab,var(--panel-bg) 97%, white 3%) 50%,var(--panel-bg) 100%)`,
+                  borderBottom:`1px solid ${GREEN_LINE}`
+                }}
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg grid place-items-center" style={{ background:'rgba(89,217,179,.12)' }}>
+                    <span style={{ color: CTA }}><Globe className="w-5 h-5" /></span>
+                  </div>
+                  <div className="text-lg font-semibold">Import website</div>
+                </div>
+                <button
+                  onClick={()=> setShowImport(false)}
+                  className="w-8 h-8 rounded-[6px] grid place-items-center"
+                  style={{ background:'var(--panel-bg)', border:`1px solid ${GREEN_LINE}` }}
+                  aria-label="Close import"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="px-6 py-5 space-y-3" style={{ maxHeight:'64vh', overflow:'auto' }}>
+                <div className="text-xs" style={{ color:'var(--text-muted)' }}>
+                  Paste one or more URLs (space or newline separated). We'll fetch the pages and convert them into your prompt.
+                </div>
+                <div className="rounded-[8px] p-2" style={{ background:'var(--panel-bg)', border:'1px solid var(--border-weak)' }}>
+                  <textarea
+                    value={urlsText}
+                    onChange={(e)=>setUrlsText(e.target.value)}
+                    className="w-full bg-transparent outline-none rounded-[6px] px-3 py-2"
+                    placeholder="https://example.com  https://example.com/about …"
+                    style={{ minHeight: 120, color:'var(--text)', resize:'vertical' }}
+                  />
+                </div>
+              </div>
+
+              <div className="px-6 pb-6 flex gap-3">
+                <button
+                  onClick={()=> setShowImport(false)}
+                  className="w-full h-[40px] rounded-[8px]"
+                  style={{ background:'var(--panel-bg)', border:'1px solid var(--border-weak)', color:'var(--text)', fontWeight:600 }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={importUrlsIntoPrompt}
+                  disabled={importing || !urlsText.trim()}
+                  className="w-full h-[40px] rounded-[8px] font-semibold inline-flex items-center justify-center gap-2"
+                  style={{ background:CTA, color:'#ffffff', opacity: (importing || !urlsText.trim()) ? .7 : 1 }}
+                >
+                  {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Globe className="w-4 h-4" />}
+                  Import
+                </button>
+              </div>
+            </div>
+          </div>
+        </>,
+        document.body
+      ) : null}
+
+      {/* ─────────── Voice/Call panel (WebRTC) ─────────── */}
+      {IS_CLIENT ? createPortal(
+        <>
+          <div
+            className={`fixed inset-0 ${showCall ? '' : 'pointer-events-none'}`}
+            style={{
+              zIndex: 9996,
+              background: showCall ? 'rgba(8,10,12,.78)' : 'transparent',
+              opacity: showCall ? 1 : 0,
+              transition: 'opacity .2s cubic-bezier(.22,.61,.36,1)'
+            }}
+            onClick={()=> setShowCall(false)}
+          />
+          {showCall && (
+            <WebCallButton
+              model={callModel}
+              // Hard-source *only* from your prompt (+ Context). No auto prompt.
+              systemPrompt={
+                (() => {
+                  const base = data.systemPromptBackend || data.systemPrompt || '';
+                  const ctx  = (data.contextText || '').trim();
+                  return ctx ? `${base}\n\n[Context]\n${ctx}`.trim() : base;
+                })()
+              }
+              voiceName={data.voiceName}
+              assistantName={data.name || 'Assistant'}
+
+              // 🔐 Use ONLY the key ID (server resolves secret)
+              apiKeyId={data.apiKeyId || undefined}
+
+              ephemeralEndpoint={EPHEMERAL_TOKEN_ENDPOINT}
+              onError={(err:any) => {
+                const msg = err?.message || err?.error?.message || (typeof err === 'string' ? err : '') || 'Call failed';
+                setToastKind('error'); setToast(msg);
+              }}
+              onClose={()=> setShowCall(false)}
+              prosody={{ fillerWords: true, microPausesMs: 200, phoneFilter: true, turnEndPauseMs: 120 }}
+
+              // greetings: joined from list; respects First Message Mode, with fallback
+              firstMode={data.firstMode}
+              firstMsg={greetingJoined}
+
+              // Language is chosen here; WebCall pins it (no detection)
+              languageHint={langToHint(data.language)}
+            />
+          )}
+        </>,
+        document.body
+      ) : null}
+
+      {/* Toast */}
+      {!!toast && (
+        <div
+          className="fixed bottom-4 right-4 rounded-[8px] px-3 py-2 text-sm"
+          style={{
+            zIndex: 100050,
+            background: toastKind==='error' ? 'rgba(239,68,68,.14)' : 'rgba(89,217,179,.12)',
+            color: 'var(--text)',
+            border: `1px solid ${toastKind==='error' ? 'rgba(239,68,68,.30)' : GREEN_LINE}`,
+            boxShadow: '0 10px 24px rgba(0,0,0,.18)'
+          }}
+        >
+          {toast}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/* ─────────── Section (expand anim) ─────────── */
+function Section({
+  title, icon, desc, children, defaultOpen = true
+}:{
+  title: string; icon: React.ReactNode; desc?: string; children: React.ReactNode; defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const innerRef = useRef<HTMLDivElement|null>(null);
+  const [h, setH] = useState<number>(0);
+  const measure = () => { if (innerRef.current) setH(innerRef.current.offsetHeight); };
+  useLayoutEffect(() => { measure(); }, [children, open]);
+
+  return (
+    <div className="mb-3">
+      <div className="mb-[6px] text-sm font-medium" style={{ color:'var(--text-muted)' }}>{title}</div>
+
+      <div className="va-card">
+        <button onClick={()=>setOpen(v=>!v)} className="va-head w-full text-left" style={{ color:'var(--text)' }}>
+          <span className="min-w-0 flex items-center gap-3">
+            <span className="inline-grid place-items-center w-7 h-7 rounded-full" style={{ background:'rgba(89,217,179,.12)' }}>
+              {icon}
+            </span>
+            <span className="min-w-0">
+              <span className="block font-semibold truncate" style={{ fontSize:'18px' }}>{title}</span>
+              {desc ? <span className="block text-xs truncate" style={{ color:'var(--text-muted)' }}>{desc}</span> : null}
+            </span>
+          </span>
+          <span className="justify-self-end">
+            {open ? <ChevronUp className="w-4 h-4" style={{ color:'var(--text-muted)' }}/> :
+                    <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)' }}/>}
+          </span>
+        </button>
+
+        <div
+          className="va-section-body"
+          style={{
+            height: open ? h : 0,
+            opacity: open ? 1 : 0,
+            transform: open ? 'translateY(0)' : 'translateY(-4px)',
+            transition: 'height 260ms var(--ease), opacity 230ms var(--ease), transform 260ms var(--ease)',
+            overflow:'hidden'
+          }}
+          onTransitionEnd={() => { if (open) measure(); }}
+        >
+          <div ref={innerRef} className="p-5">{children}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
