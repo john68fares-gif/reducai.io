@@ -11,13 +11,14 @@ import {
 import { scopedStorage } from '@/utils/scoped-storage';
 import WebCallButton from '@/components/voice/WebCallButton';
 
-// ✅ correct path for your StyledSelect
+// ✅ use your existing UI select
 import StyledSelect from '@/components/ui/StyledSelect';
-import PromptDiffTyping from '@/components/voice/PromptDiffTyping';
+
+// ✅ use the simple, reliable versions below
 import GeneratePromptModal from '@/components/voice/GeneratePromptModal';
 import ImportWebsiteModal from '@/components/voice/ImportWebsiteModal';
 
-// ✅ bundle-safe JSZip loader (no webpack https: import)
+// ✅ bundle-safe JSZip loader file provided below
 import { loadJSZip } from '@/lib/jszip-loader';
 
 // prompt engine
@@ -35,10 +36,15 @@ const CTA_HOVER = '#54cfa9';
 const GREEN_LINE = 'rgba(89,217,179,.20)';
 const ACTIVE_KEY = 'va:activeId';
 const IS_CLIENT = typeof window !== 'undefined' && typeof document !== 'undefined';
+
+// keys storage (match Step2)
+const LS_KEYS = 'apiKeys.v1';
+const LS_SELECTED = 'apiKeys.selectedId';
+
+// phones storage (unchanged)
 const PHONE_LIST_KEY_V1   = 'phoneNumbers.v1';
 const PHONE_LIST_KEY_LEG  = 'phoneNumbers';
 const PHONE_SELECTED_ID   = 'phoneNumbers.selectedId';
-const LS_SELECTED  = 'apiKeys.selectedId';
 
 /* ───────── Assistant rail (lazy) ───────── */
 const AssistantRail = dynamic(
@@ -115,7 +121,7 @@ const PhoneFilled = (props: React.SVGProps<SVGSVGElement>) => (
 );
 
 /* ───────── types ───────── */
-type ApiKey = { id: string; name: string; key?: string };
+type ApiKey = { id: string; name: string; key: string };
 type PhoneNum = { id: string; name: string; number: string };
 type AgentData = {
   name: string;
@@ -229,28 +235,11 @@ const providerOpts: Opt[] = [
   { value: 'anthropic',  label: 'Anthropic — coming soon', disabled: true },
   { value: 'google',     label: 'Google — coming soon',    disabled: true },
 ];
-function modelFamilyKey(v: string){
-  const s = v.toLowerCase();
-  if (s.startsWith('o4')) return '4';
-  const m = s.match(/^gpt-(\d+)/); if (m) return m[1];
-  const m2 = s.match(/^(\d)\D/);   return m2 ? m2[1] : 'other';
-}
-function filterModelsForUI(all: Array<{ value: string; label: string }>) {
-  const seen: Record<string, number> = {};
-  const out: typeof all = [];
-  for (const m of all) {
-    const fam = modelFamilyKey(m.value);
-    const cap = fam === '4' ? 5 : 3;
-    const n = seen[fam] ?? 0;
-    if (n < cap) { out.push(m); seen[fam] = n + 1; }
-  }
-  return out;
-}
 
-/** models list (static list UI; you can later fetch per key) */
-function useOpenAIModels(selectedKeyId?: string){
+/** models list (static UI) */
+function useOpenAIModels(){
   const [opts] = useState<Opt[]>(
-    filterModelsForUI([
+    [
       { value: 'gpt-5', label: 'GPT-5' },
       { value: 'gpt-5-mini', label: 'GPT-5 Mini' },
       { value: 'gpt-5-realtime', label: 'GPT-5 Realtime' },
@@ -262,7 +251,7 @@ function useOpenAIModels(selectedKeyId?: string){
       { value: 'o4-mini', label: 'o4 Mini' },
       { value: 'gpt-4o-realtime-preview', label: 'GPT-4o Realtime Preview' },
       { value: 'gpt-4o-realtime-preview-mini', label: 'GPT-4o Realtime Preview Mini' },
-    ])
+    ]
   );
   return { opts, loading:false };
 }
@@ -283,7 +272,6 @@ async function readFileAsText(f: File): Promise<string> {
       const zip = await JSZip.loadAsync(buf);
       const docXml = await zip.file('word/document.xml')?.async('string');
       if (!docXml) return '';
-
       const text = docXml
         .replace(/<w:p[^>]*>/g,'\n')
         .replace(/<w:tab\/>/g,'\t')
@@ -316,123 +304,11 @@ async function readFileAsText(f: File): Promise<string> {
 }
 
 /* ───────── Import helpers ───────── */
-function deelWebsiteToBuckets(raw: string){
-  const text = (raw || '').replace(/\s+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
-  const lower = text.toLowerCase();
-  const pick = (re: RegExp, take = 1600) => {
-    const m = lower.match(re);
-    if (!m) return '';
-    const i = Math.max(0, m.index || 0);
-    return text.slice(i, i + take).trim();
-  };
-
-  const identity = [
-    pick(/\b(about us|about|who we are|our story|mission|vision|values)\b/),
-    pick(/\b(team|leadership|founders)\b/),
-  ].filter(Boolean).join('\n\n');
-
-  const services = pick(/\b(services|what we do|products|solutions|offerings)\b/);
-  const contact  = pick(/\b(contact|get in touch|address|email|phone)\b/);
-
-  const sponsors = pick(/\b(sponsors?|partners?|our partners|supported by)\b/);
-
-  const other = text;
-
-  return { identity: identity || '', services: services || '', contact: contact || '', sponsors: sponsors || '', other: other || '' };
-}
-
 function buildPromptFromWebsite(raw: string, basePrompt: string){
-  const b = deelWebsiteToBuckets(raw);
-  const blocks: string[] = [];
-  if (b.identity)  blocks.push(`[Identity]\n${b.identity}`);
-  if (b.services)  blocks.push(`[Services]\n${b.services}`);
-  if (b.contact)   blocks.push(`[Contact]\n${b.contact}`);
-  if (b.sponsors)  blocks.push(`[Sponsors]\n${b.sponsors}`);
-  if (b.other)     blocks.push(`[Context]\n${b.other.slice(0, 4000)}`);
-
+  const text = (raw || '').trim();
   const base = nonEmpty(basePrompt) ? basePrompt : DEFAULT_PROMPT_RT;
-  return [base, ...blocks].join('\n\n').trim();
-}
-
-/* ───────── API key import (hardened) ───────── */
-function normalizeApiKeyList(anyVal:any): ApiKey[] {
-  if (!anyVal) return [];
-  try {
-    if (Array.isArray(anyVal)) {
-      return anyVal.map((k:any)=>({
-        id:String(k?.id ?? k?._id ?? k?.keyId ?? k?.name ?? '').trim(),
-        name:String(k?.name ?? k?.label ?? k?.title ?? 'Key').trim(),
-        key:k?.key?'••••':(k?.secret||k?.value?'••••':undefined)
-      })).filter(k=>k.id && k.name);
-    }
-    if (typeof anyVal === 'string' && anyVal.trim().length > 10) {
-      return [{ id:'default', name:'My OpenAI Key', key:'••••' }];
-    }
-    if (typeof anyVal === 'object') {
-      const maybe = anyVal?.key || anyVal?.openai?.key || anyVal?.openai_key || anyVal?.OPENAI_API_KEY;
-      if (typeof maybe === 'string' && maybe.trim().length > 10) {
-        return [{ id:'default', name:'My OpenAI Key', key:'••••' }];
-      }
-    }
-  } catch {}
-  return [];
-}
-
-async function loadApiKeysEverywhere(setter:(list:ApiKey[], selectedId:string)=>void, currentSelected?:string){
-  let merged: ApiKey[] = [];
-  try {
-    const store = await scopedStorage().catch(() => null);
-    if (store) {
-      store.ensureOwnerGuard?.().catch(() => {});
-      const v1     = normalizeApiKeyList(await store.getJSON('apiKeys.v1', []).catch(() => []));
-      const legacy = normalizeApiKeyList(await store.getJSON('apiKeys', []).catch(() => []));
-      const c1     = normalizeApiKeyList(await store.getJSON('credentials.apiKeys', []).catch(() => []));
-      const c2     = normalizeApiKeyList(await store.getJSON('openai.apiKeys', []).catch(() => []));
-      const c3     = normalizeApiKeyList(await store.getJSON('keys.openai', []).catch(() => []));
-      merged = [v1, legacy, c1, c2, c3].find(a => a.length) || [];
-
-      if (!merged.length) {
-        try {
-          const candidates = [
-            'credentials.apiKeys','openai.apiKeys','keys.openai',
-            'openai.apiKey','openai_key','apiKey','OPENAI_API_KEY'
-          ];
-          for (const k of candidates) {
-            const raw = localStorage.getItem(k);
-            if (!raw) continue;
-            let parsed:any = null;
-            try { parsed = JSON.parse(raw); } catch { parsed = raw; }
-            const norm = normalizeApiKeyList(parsed);
-            if (norm.length) { merged = norm; break; }
-          }
-        } catch {}
-      }
-
-      const globalSelected = await store.getJSON<string>('apiKeys.selectedId', '').catch(() => '');
-      const chosenId =
-        (currentSelected && merged.some(k => k.id === currentSelected)) ? currentSelected :
-        (globalSelected && merged.some(k => k.id === globalSelected)) ? globalSelected :
-        (merged[0]?.id || '');
-
-      setter(merged, chosenId);
-      if (chosenId && chosenId !== globalSelected) {
-        try { await store.setJSON('apiKeys.selectedId', chosenId); } catch {}
-      }
-      return;
-    }
-  } catch {}
-
-  try {
-    const r = await fetch('/api/credentials').catch(()=>null as any);
-    const j = await r?.json().catch(()=>null as any);
-    const list = normalizeApiKeyList(j?.apiKeys || j);
-    if (list?.length) {
-      const chosenId = currentSelected && list.some(k=>k.id===currentSelected) ? currentSelected : (list[0].id);
-      setter(list, chosenId);
-      return;
-    }
-  } catch {}
-  setter([], '');
+  const block = text ? `\n\n[Business Facts]\n${text}` : '';
+  return `${base}${block}`.trim();
 }
 
 /* ───────── Page ───────── */
@@ -455,24 +331,7 @@ export default function VoiceAgentSection() {
     if (!IS_CLIENT) return;
     const apply = (t:'light'|'dark') => { document.documentElement.dataset.theme = t; setTheme(t); };
     apply(theme);
-    const onStorage = (e: StorageEvent) => {
-      if (!e.key) return;
-      if (['account.theme','app.theme','theme'].includes(e.key)) {
-        const v = e.newValue || '';
-        if (v === 'light' || v === 'dark') apply(v);
-      }
-    };
-    const onThemeEvt = (e: Event) => {
-      const t = (e as CustomEvent<'light'|'dark'>).detail;
-      if (t === 'light' || t === 'dark') apply(t);
-    };
-    window.addEventListener('storage', onStorage);
-    window.addEventListener('account:theme', onThemeEvt as EventListener);
-    return () => {
-      window.removeEventListener('storage', onStorage);
-      window.removeEventListener('account:theme', onThemeEvt as EventListener);
-    };
-  }, []); // eslint-disable-line
+  }, [theme]);
 
   /* sidebar width sync */
   useEffect(() => {
@@ -500,6 +359,7 @@ export default function VoiceAgentSection() {
   const [toast, setToast] = useState<string>('');
   const [toastKind, setToastKind] = useState<'info'|'error'>('info');
 
+  // KEYS/PHONES
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [phoneNumbers, setPhoneNumbers] = useState<PhoneNum[]>([]);
   const [showCall, setShowCall] = useState(false);
@@ -514,11 +374,9 @@ export default function VoiceAgentSection() {
 
   // Website import overlay
   const [showImport, setShowImport] = useState(false);
-  const [urlsText, setUrlsText] = useState('');
-  const [importing, setImporting] = useState(false);
 
   // models list
-  const { opts: openaiModels, loading: loadingModels } = useOpenAIModels(data.apiKeyId || undefined);
+  const { opts: openaiModels, loading: loadingModels } = useOpenAIModels();
 
   // voice preview via speechSynthesis
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
@@ -555,33 +413,49 @@ export default function VoiceAgentSection() {
 
   useEffect(() => { if (activeId) saveAgentData(activeId, data); }, [activeId, data]);
 
-  const [credsTick, setCredsTick] = useState(0);
-  useEffect(() => {
-    if (!IS_CLIENT) return;
-    const onCredsUpdated = () => setCredsTick(t=>t+1);
-    const onStorage = (e: StorageEvent) => { if (e.key && e.key.toLowerCase().includes('apikey')) onCredsUpdated(); };
-    window.addEventListener('credentials:updated', onCredsUpdated);
-    window.addEventListener('storage', onStorage);
-    return () => {
-      window.removeEventListener('credentials:updated', onCredsUpdated);
-      window.removeEventListener('storage', onStorage);
-    };
-  }, []);
-
-  // load keys + phones
+  // ===== API KEYS (exactly like Step2) =====
   useEffect(() => {
     let mounted = true;
     (async () => {
       try {
-        await loadApiKeysEverywhere((list, selectedId) => {
-          if (!mounted) return;
-          setApiKeys(list);
-          if (selectedId && selectedId !== data.apiKeyId) setData(prev => ({ ...prev, apiKeyId: selectedId }));
-        }, data.apiKeyId);
+        const ss = await scopedStorage();
+        await ss.ensureOwnerGuard();
+
+        const v1 = await ss.getJSON<ApiKey[]>(LS_KEYS, []);
+        const legacy = await ss.getJSON<ApiKey[]>('apiKeys', []);
+        const merged = Array.isArray(v1) && v1.length ? v1 : Array.isArray(legacy) ? legacy : [];
+
+        const cleaned = merged
+          .filter(Boolean)
+          .map((k: any) => ({ id: String(k?.id || ''), name: String(k?.name || ''), key: String(k?.key || '') }))
+          .filter(k => k.id && k.name);
+
+        if (!mounted) return;
+        setApiKeys(cleaned);
+
+        // restore global selection or default to first
+        const globalSelected = await ss.getJSON<string>(LS_SELECTED, '');
+        const chosen =
+          (data.apiKeyId && cleaned.some(k => k.id === data.apiKeyId)) ? data.apiKeyId! :
+          (globalSelected && cleaned.some(k => k.id === globalSelected)) ? globalSelected :
+          (cleaned[0]?.id || '');
+
+        if (chosen !== (data.apiKeyId || '')) {
+          setData(prev => ({ ...prev, apiKeyId: chosen }));
+        }
+        if (chosen) await ss.setJSON(LS_SELECTED, chosen);
       } catch {
         if (mounted) setApiKeys([]);
       }
+    })();
+    return () => { mounted = false; };
+    // eslint-disable-next-line
+  }, []);
 
+  // ===== PHONE NUMBERS (unchanged logic) =====
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
       try {
         const store = await scopedStorage().catch(() => null);
         if (!mounted) return;
@@ -616,7 +490,7 @@ export default function VoiceAgentSection() {
     })();
     return () => { mounted = false; };
   // eslint-disable-next-line
-  }, [credsTick]);
+  }, []);
 
   function setField<K extends keyof AgentData>(k: K) {
     return (v: AgentData[K]) => setData(prev => ({ ...prev, [k]: v }));
@@ -684,7 +558,7 @@ export default function VoiceAgentSection() {
 
     basePromptRef.current = sanitizePrompt(data.systemPrompt || DEFAULT_PROMPT_RT);
     setShowGenerate(false);
-    await sleep(80);
+    await sleep(50);
 
     setIsTypingIntoPrompt(true);
     setDiffCandidate('');
@@ -751,7 +625,7 @@ export default function VoiceAgentSection() {
     next.push('');
     setField('firstMsgs')(next);
     setJustAddedIndex(next.length - 1);
-    setTimeout(()=>setJustAddedIndex(null), 260);
+    setTimeout(()=>setJustAddedIndex(null), 200);
   };
 
   const langToHint = (lang: AgentData['language']): 'en'|'nl'|'de'|'es'|'ar' => {
@@ -767,7 +641,7 @@ export default function VoiceAgentSection() {
     return s;
   }, [data.greetPick, data.firstMsgs, data.firstMode]);
 
-  const hasApiKey = !!data.apiKeyId;
+  const hasApiKey = !!(data.apiKeyId && apiKeys.some(k=>k.id===data.apiKeyId && k.key));
 
   return (
     <section className="va-root">
@@ -798,8 +672,8 @@ export default function VoiceAgentSection() {
             <button
               onClick={()=>{
                 if (!hasApiKey) {
-                  setToastKind('error'); setToast('Add your own OpenAI API key in Credentials.');
-                  setTimeout(()=>setToast(''), 2600);
+                  setToastKind('error'); setToast('Add your own OpenAI API key in API Keys.');
+                  setTimeout(()=>setToast(''), 2200);
                   return;
                 }
                 setShowCall(true);
@@ -817,7 +691,7 @@ export default function VoiceAgentSection() {
           {!hasApiKey && (
             <div className="mb-4 inline-flex items-center gap-2 px-3 py-1.5 rounded-[8px]"
                  style={{ background: 'rgba(239,68,68,.12)', color: 'var(--text)', boxShadow:'0 0 0 1px rgba(239,68,68,.25) inset' }}>
-              <Lock className="w-4 h-4" /> No API key selected. Each user must add their own key in <b>&nbsp;Credentials&nbsp;</b>.
+              <Lock className="w-4 h-4" /> No API key selected. Add one on the <b>&nbsp;API Keys&nbsp;</b> page.
             </div>
           )}
 
@@ -841,8 +715,15 @@ export default function VoiceAgentSection() {
               </div>
               <div>
                 <div className="mb-2 text-[12.5px]">Provider</div>
-                <StyledSelect value={data.provider} onChange={(v)=>setField('provider')(v as AgentData['provider'])} options={providerOpts}
-                  placeholder="Choose a provider" />
+                <StyledSelect
+                  value={data.provider}
+                  onChange={(v)=>setField('provider')(v as AgentData['provider'])}
+                  options={[
+                    { value: 'openai', label: 'OpenAI' },
+                    { value: 'anthropic', label: 'Anthropic — coming soon', disabled: true },
+                    { value: 'google', label: 'Google — coming soon', disabled: true },
+                  ]}
+                />
               </div>
             </div>
 
@@ -969,12 +850,14 @@ export default function VoiceAgentSection() {
                     onChange={(e)=> setField('systemPrompt')(sanitizePrompt(e.target.value))}
                   />
                 ) : (
-                  <PromptDiffTyping
-                    base={basePromptRef.current}
-                    next={diffCandidate || data.systemPrompt}
-                    onAccept={acceptGenerated}
-                    onDecline={declineGenerated}
-                  />
+                  <div className="rounded-[8px] border p-3 text-xs" style={{ borderColor:'var(--border-weak)', background:'var(--panel-bg)' }}>
+                    {/* simple inline diff feel — just show the candidate typing in */}
+                    <pre className="whitespace-pre-wrap break-words">{diffCandidate}</pre>
+                    <div className="mt-3 flex gap-2">
+                      <button onClick={acceptGenerated} className="px-3 py-1.5 rounded-[8px]" style={{ background:CTA, color:'#fff' }}>Accept</button>
+                      <button onClick={declineGenerated} className="px-3 py-1.5 rounded-[8px]" style={{ border:'1px solid var(--border-weak)' }}>Cancel</button>
+                    </div>
+                  </div>
                 )}
               </div>
 
@@ -1068,14 +951,11 @@ export default function VoiceAgentSection() {
                   value={data.ttsProvider}
                   onChange={(v)=>setField('ttsProvider')(v as AgentData['ttsProvider'])}
                   options={[
-                    { value: 'openai', label: 'OpenAI', iconLeft: <OpenAIStamp size={14} /> },
+                    { value: 'openai', label: 'OpenAI' },
                     { value: 'elevenlabs', label: 'ElevenLabs — coming soon', disabled: true },
                     { value: 'google-tts', label: 'Google TTS — coming soon', disabled: true },
                   ]}
                 />
-                <div className="mt-2 text-xs" style={{ color:'var(--text-muted)' }}>
-                  Only OpenAI is available right now.
-                </div>
               </div>
 
               <div>
@@ -1090,35 +970,27 @@ export default function VoiceAgentSection() {
                     { value: 'Amber (Australian)', label: 'Amber' },
                   ]}
                   placeholder="— Choose —"
-                  disabled={data.ttsProvider !== 'openai'}
-                  menuTop={
-                    <div className="flex items-center justify-between px-3 py-2 rounded-[8px]"
-                         style={{ background:'var(--panel-bg)', border:'1px solid var(--border-weak)' }}
-                    >
-                      <div className="text-xs" style={{ color:'var(--text-muted)' }}>Preview</div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={()=>speakPreview(`This is ${data.voiceName || 'the selected'} voice preview.`)}
-                          className="w-8 h-8 rounded-full grid place-items-center"
-                          aria-label="Play voice"
-                          style={{ background: data.ttsProvider !== 'openai' ? 'rgba(0,0,0,.08)' : CTA, color:'#0a0f0d', opacity: data.ttsProvider !== 'openai' ? .6 : 1, pointerEvents: data.ttsProvider !== 'openai' ? 'none' : 'auto' }}
-                        >
-                          <Play className="w-4 h-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={stopPreview}
-                          className="w-8 h-8 rounded-full grid place-items-center border"
-                          aria-label="Stop preview"
-                          style={{ background: 'var(--panel-bg)', color:'var(--text)', borderColor:'var(--border-weak)', opacity: data.ttsProvider !== 'openai' ? .6 : 1, pointerEvents: data.ttsProvider !== 'openai' ? 'none' : 'auto' }}
-                        >
-                          <Square className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  }
                 />
+                <div className="mt-2 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={()=>speakPreview(`This is ${data.voiceName || 'the selected'} voice preview.`)}
+                    className="w-8 h-8 rounded-full grid place-items-center"
+                    aria-label="Play voice"
+                    style={{ background: CTA, color:'#0a0f0d' }}
+                  >
+                    <Play className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={stopPreview}
+                    className="w-8 h-8 rounded-full grid place-items-center border"
+                    aria-label="Stop preview"
+                    style={{ background: 'var(--panel-bg)', color:'var(--text)', borderColor:'var(--border-weak)' }}
+                  >
+                    <Square className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             </div>
           </Section>
@@ -1127,7 +999,7 @@ export default function VoiceAgentSection() {
           <Section
             title="Credentials"
             icon={<Phone className="w-4 h-4" style={{ color: CTA }} />}
-            desc="Each user selects their own OpenAI API key. Keys are not shared."
+            desc="Select the API key stored on the API Keys page."
             defaultOpen
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -1139,16 +1011,15 @@ export default function VoiceAgentSection() {
                   value={data.apiKeyId || ''}
                   onChange={async (val)=>{
                     setField('apiKeyId')(val);
-                    try { const store = await scopedStorage(); await store.ensureOwnerGuard?.(); await store.setJSON(LS_SELECTED, val); } catch {}
+                    try { const ss = await scopedStorage(); await ss.ensureOwnerGuard(); await ss.setJSON(LS_SELECTED, val); } catch {}
                   }}
                   options={[
-                    { value: '', label: 'Select your API key…', iconLeft: <OpenAIStamp size={14} /> },
-                    ...apiKeys.map(k=>({ value: k.id, label: k.name, iconLeft: <OpenAIStamp size={14} /> }))
+                    { value: '', label: 'Select your API key…' },
+                    ...apiKeys.map(k=>({ value: k.id, label: `${k.name} ••••${(k.key||'').slice(-4).toUpperCase()}` }))
                   ]}
-                  leftIcon={<OpenAIStamp size={14} />}
                 />
                 <div className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
-                  The realtime call uses only the key ID; the server resolves the secret.
+                  Keys are per-account via scoped storage. Add/manage them on the API Keys page.
                 </div>
               </div>
 
@@ -1156,18 +1027,12 @@ export default function VoiceAgentSection() {
                 <div className="mb-2 text-[12.5px]">Phone Number</div>
                 <StyledSelect
                   value={data.phoneId || ''}
-                  onChange={async (val)=>{
-                    setField('phoneId')(val);
-                    try { const store = await scopedStorage(); await store.ensureOwnerGuard?.(); await store.setJSON(PHONE_SELECTED_ID, val); } catch {}
-                  }}
+                  onChange={async (val)=>{ setField('phoneId')(val); try { const ss = await scopedStorage(); await ss.ensureOwnerGuard(); await ss.setJSON(PHONE_SELECTED_ID, val); } catch {} }}
                   options={[
                     { value: '', label: 'Select a phone number…' },
                     ...phoneNumbers.map(p => ({ value: p.id, label: `${p.name ? `${p.name} • ` : ''}${p.number}` }))
                   ]}
                 />
-                <div className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
-                  Imported from your Phone Number section. Manage numbers there.
-                </div>
               </div>
             </div>
           </Section>
@@ -1197,11 +1062,7 @@ export default function VoiceAgentSection() {
                 <StyledSelect
                   value={data.asrModel}
                   onChange={setField('asrModel')}
-                  options={
-                    data.asrProvider === 'deepgram'
-                      ? [{ value: 'Nova 2', label: 'Nova 2' }, { value: 'Nova', label: 'Nova' }]
-                      : [{ value: 'coming', label: 'Models coming soon', disabled: true }]
-                  }
+                  options={[{ value: 'Nova 2', label: 'Nova 2' }, { value: 'Nova', label: 'Nova' }]}
                 />
               </div>
             </div>
@@ -1211,7 +1072,7 @@ export default function VoiceAgentSection() {
         </div>
       </div>
 
-      {/* Generate Modal */}
+      {/* Generate Modal (simple + reliable) */}
       {showGenerate && IS_CLIENT ? createPortal(
         <GeneratePromptModal
           open={showGenerate}
@@ -1226,64 +1087,58 @@ export default function VoiceAgentSection() {
               const compiled = compilePrompt({ basePrompt: base, userText: raw });
               setField('systemPromptBackend')(sanitizePrompt(compiled.backendString));
               setShowGenerate(false);
-              await sleep(80);
+              await sleep(40);
               await startTypingIntoPrompt(sanitizePrompt(compiled.frontendText));
             } catch {
-              setToastKind('error'); setToast('Generate failed — try simpler wording.');
-              setTimeout(()=>setToast(''), 2200);
+              setToastKind('error'); setToast('Generate failed.');
+              setTimeout(()=>setToast(''), 1800);
             }
           }}
         />,
         document.body
       ) : null}
 
-      {/* Import website modal */}
+      {/* Import website modal (clean UI) */}
       {showImport && IS_CLIENT ? createPortal(
         <ImportWebsiteModal
           open={showImport}
-          value={urlsText}
-          importing={importing}
-          onChange={setUrlsText}
           onCancel={()=> setShowImport(false)}
-          onImport={async ()=>{
-            const list = urlsText.split(/\s+/).map(s=>s.trim()).filter(Boolean);
+          onImport={async (urls: string[])=>{
+            const list = urls.map(s=>s.trim()).filter(Boolean);
             if (!list.length) return;
-            setImporting(true);
-            try {
-              // Use your API: POST /api/connectors/website-import → { ok, facts: string[] }
-              const allFacts: string[] = [];
-              for (const u of list) {
-                try {
-                  const r = await fetch('/api/connectors/website-import', {
-                    method:'POST',
-                    headers:{'Content-Type':'application/json'},
-                    body: JSON.stringify({ url: u })
-                  });
-                  const j = r.ok ? await r.json().catch(()=>null) : null;
-                  const facts: string[] = Array.isArray(j?.facts) ? j.facts : [];
-                  if (facts.length) {
-                    allFacts.push(`# Source: ${u}`, ...facts.map(s => `- ${s}`));
-                  }
-                } catch {}
-              }
 
-              let merged = allFacts.join('\n');
-              if (!merged.trim()) merged = `# Sources\n${list.map(u=>`- ${u}`).join('\n')}\n\n(No obvious facts extracted.)`;
-
-              const base = sanitizePrompt((data.systemPromptBackend || data.systemPrompt || DEFAULT_PROMPT_RT).trim());
-              const next = buildPromptFromWebsite(merged.trim(), base);
-
-              setShowImport(false);
-              await sleep(80);
-              await startTypingIntoPrompt(next);
+            const chunks: string[] = [];
+            for (const u of list) {
               try {
-                const compiled = compilePrompt({ basePrompt: next, userText: '' });
-                setField('systemPromptBackend')(sanitizePrompt(compiled.backendString));
-              } catch {}
-              setToastKind('info'); setToast('Imported website content into the prompt'); setTimeout(()=>setToast(''), 1500);
-            } finally {
-              setImporting(false);
+                const r = await fetch('/api/connectors/website-import', {
+                  method:'POST',
+                  headers:{'Content-Type':'application/json'},
+                  body: JSON.stringify({ url: u })
+                });
+                const j = r.ok ? await r.json().catch(()=>null) : null;
+                const facts: string[] = Array.isArray(j?.facts) ? j.facts : [];
+                if (facts.length) {
+                  chunks.push(`# ${u}`, ...facts.map(s => `- ${s}`), '');
+                } else {
+                  chunks.push(`# ${u}`, '- No obvious facts extracted.', '');
+                }
+              } catch {
+                chunks.push(`# ${u}`, '- Fetch failed.', '');
+              }
             }
+
+            const merged = chunks.join('\n').trim();
+            const base = sanitizePrompt((data.systemPromptBackend || data.systemPrompt || DEFAULT_PROMPT_RT).trim());
+            const next = buildPromptFromWebsite(merged, base);
+
+            setShowImport(false);
+            await sleep(40);
+            await startTypingIntoPrompt(next);
+            try {
+              const compiled = compilePrompt({ basePrompt: next, userText: '' });
+              setField('systemPromptBackend')(sanitizePrompt(compiled.backendString));
+            } catch {}
+            setToastKind('info'); setToast('Website facts added'); setTimeout(()=>setToast(''), 1200);
           }}
         />,
         document.body
