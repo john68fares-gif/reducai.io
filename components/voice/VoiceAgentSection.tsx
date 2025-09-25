@@ -278,7 +278,6 @@ const providerOpts: Opt[] = [
 
 /* ─────────── Model list filtering (3 per family, 4.* up to 5) ─────────── */
 function modelFamilyKey(v: string){
-  // normalize common OpenAI naming
   const s = v.toLowerCase();
   if (s.startsWith('o4')) return '4';            // treat o4 as 4-family
   const m = s.match(/^gpt-(\d+)/);               // gpt-4*, gpt-5*, etc
@@ -291,26 +290,28 @@ function filterModelsForUI(all: Array<{ value: string; label: string }>) {
   const out: typeof all = [];
   for (const m of all) {
     const fam = modelFamilyKey(m.value);
-    const cap = fam === '4' ? 5 : 3;
+    const cap = fam === '4' ? 5 : 3; // <= five for 4.*, else three
     const n = seen[fam] ?? 0;
     if (n < cap) { out.push(m); seen[fam] = n + 1; }
   }
   return out;
 }
 
-/** Fetch OpenAI models (labels) once an API key is chosen. */
+/** Fetch OpenAI models (labels). If no client key, we keep curated defaults. */
 function useOpenAIModels(selectedKey: string|undefined){
   const [opts, setOpts] = useState<Opt[]>(
     filterModelsForUI([
+      // 5.x (3 max)
       { value: 'gpt-5', label: 'GPT-5' },
       { value: 'gpt-5-mini', label: 'GPT-5 Mini' },
-      { value: 'gpt-5-realtime', label: 'GPT-5 Realtime' },           // placeholder; will be replaced if backend returns different ids
+      { value: 'gpt-5-realtime', label: 'GPT-5 Realtime' },
+      // 4.x / o4 (up to 5)
       { value: 'gpt-4.1', label: 'GPT-4.1' },
       { value: 'gpt-4.1-mini', label: 'GPT-4.1 Mini' },
       { value: 'gpt-4o', label: 'GPT-4o' },
       { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
       { value: 'o4', label: 'o4' },
-      { value: 'o4-mini', label: 'o4 Mini' },
+      // realtime variants (counted in 4.* family)
       { value: 'gpt-4o-realtime-preview', label: 'GPT-4o Realtime Preview' },
       { value: 'gpt-4o-realtime-preview-mini', label: 'GPT-4o Realtime Preview Mini' },
     ])
@@ -320,7 +321,7 @@ function useOpenAIModels(selectedKey: string|undefined){
   useEffect(() => {
     let aborted = false;
     (async () => {
-      if (!selectedKey) return;
+      if (!selectedKey) return;         // No client key: leave curated defaults
       setLoading(true);
       try {
         const r = await fetch('/api/openai/models', {
@@ -431,7 +432,9 @@ function StyledSelect({
     };
     const handleEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
     const handleResize = () => positionMenu();
-    const handleScroll = () => setOpen(false);
+
+    // 👇 Instead of closing on scroll, keep the menu open and reposition
+    const handleScroll = () => positionMenu();
 
     window.addEventListener('mousedown', handleDocumentMouseDown);
     window.addEventListener('keydown', handleEsc);
@@ -605,7 +608,7 @@ async function readFileAsText(f: File): Promise<string> {
   const looksZip = async () => {
     const buf = new Uint8Array(await f.slice(0,4).arrayBuffer());
     return buf[0]===0x50 && buf[1]===0x4b; // PK..
-  };
+    };
 
   if (name.endsWith('.docx') || name.endsWith('.docs') || await looksZip()) {
     try {
@@ -863,6 +866,7 @@ export default function VoiceAgentSection() {
   const importFilesIntoPrompt = async () => {
     const ctx  = (data.contextText || '').trim();
     const base = (data.systemPromptBackend || data.systemPrompt || DEFAULT_PROMPT_RT).trim();
+    theNext:
     const next = ctx ? `${base}\n\n[Context]\n${ctx}`.trim() : base;
 
     basePromptRef.current = data.systemPrompt || DEFAULT_PROMPT_RT;
@@ -979,16 +983,9 @@ export default function VoiceAgentSection() {
               Model selected: <span className="opacity-100">{selectedModelLabel}</span>
             </div>
 
+            {/* ✅ Remove client-side API key gate; ephemerals handle auth */}
             <button
-              onClick={()=>{
-                const key = apiKeys.find(k => k.id === data.apiKeyId)?.key || '';
-                if (!key) {
-                  setToastKind('error'); setToast('Select an OpenAI API key first.');
-                  setTimeout(()=>setToast(''), 2200);
-                  return;
-                }
-                setShowCall(true);
-              }}
+              onClick={()=>{ setShowCall(true); }}
               className="inline-flex items-center gap-2 rounded-[8px] select-none va-cta"
               style={{ height:'var(--control-h)', padding:'0 16px', background:CTA, color:'#ffffff', fontWeight:700 }}
               onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA_HOVER)}
@@ -1349,6 +1346,9 @@ export default function VoiceAgentSection() {
                 <div className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
                   Keys are stored per-account via scoped storage. Manage them in the API Keys page.
                 </div>
+                <div className="mt-2 text-xs" style={{ color:'var(--text-muted)'}}>
+                  Calls use server-issued <b>ephemeral tokens</b>; a client key is not required to place a call.
+                </div>
               </div>
 
               <div>
@@ -1537,8 +1537,8 @@ export default function VoiceAgentSection() {
               }
               voiceName={data.voiceName}
               assistantName={data.name || 'Assistant'}
-              apiKey={selectedKey || ''}
 
+              /* ✅ No client apiKey. Ephemeral route handles auth. */
               ephemeralEndpoint={EPHEMERAL_TOKEN_ENDPOINT}
               onError={(err:any) => {
                 const msg = err?.message || err?.error?.message || (typeof err === 'string' ? err : '') || 'Call failed';
@@ -1547,13 +1547,15 @@ export default function VoiceAgentSection() {
               onClose={()=> setShowCall(false)}
               prosody={{ fillerWords: true, microPausesMs: 200, phoneFilter: true, turnEndPauseMs: 120 }}
 
-              // greetings: joined from list
+              // ✅ greetings: send exactly one line
               firstMode={data.firstMode as any}
               firstMsg={
-                (data.greetPick==='random'
-                  ? [...(data.firstMsgs||[])].filter(Boolean).sort(()=>Math.random()-0.5)
-                  : (data.firstMsgs||[]).filter(Boolean)
-                ).join('\n')
+                (() => {
+                  const list = (data.firstMsgs || []).filter(Boolean);
+                  if (!list.length) return data.firstMsg || '';
+                  if (data.greetPick === 'random') return list[Math.floor(Math.random() * list.length)];
+                  return list[0];
+                })()
               }
             />
           )}
