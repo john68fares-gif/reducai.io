@@ -1,31 +1,33 @@
-// components/voice/VoiceAgentSection.tsx
+// FILE: components/voice/VoiceAgentSection.tsx
 'use client';
-
-/**
- * PATCHED VERSION (single-file drop-in)
- * - Fixes API key importing from "Credentials" by aggressively normalizing many shapes/sources.
- * - Adds a last-resort localStorage fallback + optional GET /api/credentials fallback.
- * - Ensures Generate overlay writes the BACKEND prompt instantly, while the textarea shows the PRETTY frontend prompt.
- * - Strips any leaked meta like `SYSTEM_SPEC::`, `IDENTITY::`, `STYLE::`, `GUIDELINES::`, `GOALS::`, `FALLBACK::`, `BUSINESS_FACTS::`, `POLICY::` from prompts.
- *
- * You can replace your existing file with this one.
- * If you keep custom helpers, verify imports to your paths (scoped-storage, WebCallButton, prompt-engine, etc.).
- */
 
 import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
 import dynamic from 'next/dynamic';
 import { createPortal } from 'react-dom';
 import {
-  Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Rocket, Search, Check, Lock,
-  KeyRound, Play, Square, X, Plus, Trash2, Phone, Globe, Loader2
+  Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Rocket,
+  KeyRound, Play, Square, X, Plus, Trash2, Phone, Globe, Loader2, Lock
 } from 'lucide-react';
+
 import { scopedStorage } from '@/utils/scoped-storage';
 import WebCallButton from '@/components/voice/WebCallButton';
 
-// ✅ ephemeral route
-const EPHEMERAL_TOKEN_ENDPOINT = '/api/voice/ephemeral';
+// ✅ new smaller imports
+import StyledSelect from '@/components/voice/StyledSelect';
+import PromptDiffTyping from '@/components/voice/PromptDiffTyping';
+import GeneratePromptModal from '@/components/voice/GeneratePromptModal';
+import ImportWebsiteModal from '@/components/voice/ImportWebsiteModal';
 
-/* ─────────── theme + layout tokens ─────────── */
+// prompt engine
+import {
+  DEFAULT_PROMPT as _DEFAULT_PROMPT,
+  looksLikeFullPrompt as _looksLikeFullPrompt,
+  normalizeFullPrompt as _normalizeFullPrompt,
+  compilePrompt
+} from '@/lib/prompt-engine';
+
+/* ───────── constants ───────── */
+const EPHEMERAL_TOKEN_ENDPOINT = '/api/voice/ephemeral';
 const CTA = '#59d9b3';
 const CTA_HOVER = '#54cfa9';
 const GREEN_LINE = 'rgba(89,217,179,.20)';
@@ -33,24 +35,18 @@ const ACTIVE_KEY = 'va:activeId';
 const Z_OVERLAY = 100000;
 const Z_MODAL   = 100001;
 const IS_CLIENT = typeof window !== 'undefined' && typeof document !== 'undefined';
-
-/* If your Phone Number page uses different storage keys or shape, adjust here */
-const PHONE_LIST_KEY_V1   = 'phoneNumbers.v1';      // preferred [{id,name,number}]
-const PHONE_LIST_KEY_LEG  = 'phoneNumbers';         // legacy  [{id,name,number}] or similar
+const PHONE_LIST_KEY_V1   = 'phoneNumbers.v1';
+const PHONE_LIST_KEY_LEG  = 'phoneNumbers';
 const PHONE_SELECTED_ID   = 'phoneNumbers.selectedId';
+const LS_KEYS      = 'apiKeys.v1';
+const LS_SELECTED  = 'apiKeys.selectedId';
 
-// shared API-key buckets (align with builder step)
-const LS_KEYS = 'apiKeys.v1';
-const LS_SELECTED = 'apiKeys.selectedId';
-
-/* ───────────────── Assistant rail (fixed) ───────────────── */
+/* ───────── Assistant rail (lazy) ───────── */
 const AssistantRail = dynamic(
   () =>
     import('@/components/voice/AssistantRail')
       .then(m => m.default ?? m)
-      .catch(() =>
-        Promise.resolve(() => <div className="px-3 py-3 text-xs opacity-70">Rail unavailable</div>)
-      ),
+      .catch(() => Promise.resolve(() => <div className="px-3 py-3 text-xs opacity-70">Rail unavailable</div>)),
   { ssr: false, loading: () => <div className="px-3 py-3 text-xs opacity-70">Loading…</div> }
 );
 
@@ -60,29 +56,7 @@ class RailBoundary extends React.Component<{children:React.ReactNode},{hasError:
   render(){ return this.state.hasError ? <div className="px-3 py-3 text-xs opacity-70">Rail crashed</div> : this.props.children; }
 }
 
-/* small phone icon */
-function PhoneFilled(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" width="16" height="16" {...props} aria-hidden>
-      <path
-        d="M6.62 10.79a15.053 15.053 0 006.59 6.59l2.2-2.2a1 1 0 011.03-.24c1.12.37 2.33.57 3.56.57a1 1 0 011 1v3.5a1 1 0 01-1 1C11.3 22 2 12.7 2 2.99a1 1 0 011-1H6.5a1 1 0 011 1c0 1.23.2 2.44.57 3.56a1 1 0 01-.24 1.03l-2.2 2.2z"
-        fill="currentColor"
-      />
-    </svg>
-  );
-}
-
-/* OpenAI logo (tiny) */
-function OpenAIStamp({size=14}:{size?:number}) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 40 40" aria-hidden>
-      <path d="M37.532 16.37a8.9 8.9 0 00-.77-7.3 8.96 8.96 0 00-11.87-3.42A8.99 8.99 0 007.53 9.63a8.9 8.9 0 00.77 7.3 8.96 8.96 0 0011.87 3.42 8.99 8.99 0 0017.36-3.99z" fill="currentColor" opacity=".18"/>
-      <path d="M20.5 6.5l-8 4.6v9.3l8 4.6 8-4.6v-9.3l-8-4.6z" fill="currentColor" />
-    </svg>
-  );
-}
-
-/* ─────────── tiny helpers ─────────── */
+/* ───────── tiny helpers ───────── */
 const isFn = (f: any): f is Function => typeof f === 'function';
 const isStr = (v: any): v is string => typeof v === 'string';
 const nonEmpty = (v: any): v is string => isStr(v) && v.trim().length > 0;
@@ -90,11 +64,11 @@ const coerceStr = (v: any): string => (isStr(v) ? v : '');
 const safeTrim = (v: any): string => (nonEmpty(v) ? v.trim() : '');
 const sleep = (ms:number) => new Promise(r=>setTimeout(r,ms));
 
-/* ─────────── strip leaked meta lines from prompts (hard defense) ─────────── */
+/* strip leaked meta lines */
 const STRIP_META_RE = /^(SYSTEM_SPEC|IDENTITY|STYLE|GUIDELINES|GOALS|FALLBACK|BUSINESS_FACTS|POLICY)::.*$/gmi;
-function sanitizePrompt(s: string){ return (s || '').replace(STRIP_META_RE, '').trim(); }
+const sanitizePrompt = (s: string) => (s || '').replace(STRIP_META_RE, '').trim();
 
-/* ─────────── theme tokens + micro animations ─────────── */
+/* theme tokens */
 const Tokens = ({theme}:{theme:'dark'|'light'}) => (
   <style jsx global>{`
     :root {
@@ -112,73 +86,63 @@ const Tokens = ({theme}:{theme:'dark'|'light'}) => (
         --card-shadow:0 14px 28px rgba(0,0,0,.08), 0 0 0 1px rgba(0,0,0,.04) inset, 0 0 0 1px rgba(89,217,179,.16);
       `}
       --s-2:8px; --s-3:12px; --s-4:16px; --s-5:20px; --s-6:24px;
-      --radius-outer:8px; --radius-inner:8px; --control-h:40px; --header-h:80px;
-      --fz-title:18px; --fz-sub:15px; --fz-body:14px; --fz-label:12.5px;
-      --lh-body:1.45; --ease:cubic-bezier(.22,.61,.36,1);
-      --app-sidebar-w:240px; --rail-w:260px;
-      --green-weak:rgba(89,217,179,.12); --red-weak:rgba(239,68,68,.14);
-      --good:#10b981; --bad:#ef4444;
-      --vs-menu-bg: var(--panel-bg);
-      --vs-menu-border: var(--border-weak);
-      --vs-input-bg: var(--input-bg);
-      --vs-input-border: var(--input-border);
+      --radius-outer:8px; --control-h:40px; --header-h:80px;
+      --fz-title:18px; --fz-label:12.5px; --lh-body:1.45; --ease:cubic-bezier(.22,.61,.36,1);
+      --app-sidebar-w:240px; --rail-w:260px; --green-weak:rgba(89,217,179,.12);
+      --vs-menu-bg: var(--panel-bg); --vs-menu-border: var(--border-weak);
+      --vs-input-bg: var(--input-bg); --vs-input-border: var(--input-border);
     }
-
-    .va-root { animation: vaPageIn 380ms var(--ease) both; background:var(--page-bg); }
-    .va-card{ border-radius:var(--radius-outer); border:1px solid var(--border-weak); background:var(--panel-bg); box-shadow:var(--card-shadow); overflow:hidden; isolation:isolate; animation: vaFloatIn 420ms var(--ease) both; }
-    .va-head{ min-height:var(--header-h); display:grid; grid-template-columns:1fr auto; align-items:center; padding:0 16px; border-bottom:1px solid var(--border-weak); color:var(--text);
-      background:linear-gradient(90deg,var(--panel-bg) 0%,color-mix(in oklab, var(--panel-bg) 97%, white 3%) 50%,var(--panel-bg) 100%); border-top-left-radius:var(--radius-outer); border-top-right-radius:var(--radius-outer); }
-
-    .va-cta{ box-shadow:${theme==='dark' ? '0 10px 22px rgba(89,217,179,.20)' : '0 10px 22px rgba(89,217,179,.28)'}; animation: vaPulse 3.6s ease-in-out 1s infinite; }
-    .va-cta:hover{ transform: translateY(-1px); }
-
-    @keyframes vaModalIn { from { opacity: 0; transform: translateY(12px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
-    @keyframes vaPageIn { from { opacity:0; transform: translateY(8px); } to { opacity:1; transform: translateY(0); } }
-    @keyframes vaFloatIn { from { opacity:0; transform: translateY(6px) scale(.995); } to { opacity:1; transform: translateY(0) scale(1); } }
-    @keyframes vaPulse   { 0%,100% { box-shadow:0 10px 22px rgba(89,217,179,.20);} 50% { box-shadow:0 18px 32px rgba(89,217,179,.30);} }
+    .va-root{animation:vaPageIn 380ms var(--ease) both; background:var(--page-bg);}
+    .va-card{border-radius:8px;border:1px solid var(--border-weak);background:var(--panel-bg);box-shadow:var(--card-shadow);overflow:hidden}
+    .va-head{min-height:var(--header-h);display:grid;grid-template-columns:1fr auto;align-items:center;padding:0 16px;border-bottom:1px solid var(--border-weak)}
+    .va-cta{box-shadow:0 10px 22px rgba(89,217,179,.28)}
+    @keyframes vaPageIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
   `}</style>
 );
 
-/* ─────────── types / storage ─────────── */
+/* OpenAI logo */
+function OpenAIStamp({size=14}:{size?:number}) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 40 40" aria-hidden>
+      <path d="M37.532 16.37a8.9 8.9 0 00-.77-7.3 8.96 8.96 0 00-11.87-3.42A8.99 8.99 0 007.53 9.63a8.9 8.9 0 00.77 7.3 8.96 8.96 0 0011.87 3.42 8.99 8.99 0 0017.36-3.99z" fill="currentColor" opacity=".18"/>
+      <path d="M20.5 6.5l-8 4.6v9.3l8 4.6 8-4.6v-9.3l-8-4.6z" fill="currentColor" />
+    </svg>
+  );
+}
+const PhoneFilled = (props: React.SVGProps<SVGSVGElement>) => (
+  <svg viewBox="0 0 24 24" width="16" height="16" {...props} aria-hidden>
+    <path d="M6.62 10.79a15.053 15.053 0 006.59 6.59l2.2-2.2a1 1 0 011.03-.24c1.12.37 2.33.57 3.56.57a1 1 0 011 1v3.5a1 1 0 01-1 1C11.3 22 2 12.7 2 2.99a1 1 0 011-1H6.5a1 1 0 011 1c0 1.23.2 2.44.57 3.56a1 1 0 01-.24 1.03l-2.2 2.2z" fill="currentColor"/>
+  </svg>
+);
+
+/* ───────── types ───────── */
 type ApiKey = { id: string; name: string; key?: string };
 type PhoneNum = { id: string; name: string; number: string };
-
 type AgentData = {
   name: string;
   provider: 'openai' | 'anthropic' | 'google';
   model: string;
-
   firstMode: 'Assistant speaks first' | 'User speaks first' | 'Silent until tool required';
   firstMsg: string;
   firstMsgs?: string[];
   greetPick?: 'sequence'|'random';
-
   systemPrompt: string;
   systemPromptBackend?: string;
-
   language: 'English'|'Dutch'|'German'|'Spanish'|'Arabic';
-
   contextText?: string;
   ctxFiles?: { name:string; text:string }[];
-
   ttsProvider: 'openai' | 'elevenlabs' | 'google-tts';
   voiceName: string;
   apiKeyId?: string;
-
   phoneId?: string;
-
   asrProvider: 'deepgram' | 'whisper' | 'assemblyai';
   asrModel: string;
-
   denoise: boolean;
   numerals: boolean;
 };
 
-const BLANK_TEMPLATE_NOTE =
-  'This is a blank template with minimal defaults. You can change the model and messages, or click Generate to tailor the prompt to your business.';
-
-const PROMPT_SKELETON =
-`[Identity]
+/* ───────── defaults ───────── */
+const PROMPT_SKELETON = `[Identity]
 
 [Style]
 
@@ -188,19 +152,10 @@ const PROMPT_SKELETON =
 
 [Error Handling / Fallback]`;
 
-/* ─────────── prompt engine (dual-layer) ─────────── */
-import {
-  DEFAULT_PROMPT as _DEFAULT_PROMPT,
-  looksLikeFullPrompt as _looksLikeFullPrompt,
-  normalizeFullPrompt as _normalizeFullPrompt,
-  compilePrompt
-} from '@/lib/prompt-engine';
-
 const looksLikeFullPromptRT = (raw: string) => isFn(_looksLikeFullPrompt) ? !!_looksLikeFullPrompt(raw) : false;
 const normalizeFullPromptRT = (raw: string) => isFn(_normalizeFullPrompt) ? coerceStr(_normalizeFullPrompt(raw)) : raw;
 const DEFAULT_PROMPT_RT = nonEmpty(_DEFAULT_PROMPT) ? _DEFAULT_PROMPT! : PROMPT_SKELETON;
 
-/* ─────────── defaults ─────────── */
 const DEFAULT_AGENT: AgentData = {
   name: 'Assistant',
   provider: 'openai',
@@ -224,8 +179,7 @@ const DEFAULT_AGENT: AgentData = {
 - Guide users to their next best action (booking, purchase, or escalation).
 
 [Error Handling / Fallback]
-- If unsure, ask a specific clarifying question first.
-`).trim() + '\n\n' + `# ${BLANK_TEMPLATE_NOTE}\n`),
+- If unsure, ask a specific clarifying question first.`).trim()),
   systemPromptBackend: '',
   contextText: '',
   ctxFiles: [],
@@ -241,45 +195,21 @@ const DEFAULT_AGENT: AgentData = {
 };
 
 const keyFor = (id: string) => `va:agent:${id}`;
-const versKeyFor = (id: string) => `va:versions:${id}`;
 
-function migrateAgent(d: AgentData): AgentData {
-  const msgs = Array.isArray(d.firstMsgs) ? d.firstMsgs : (d.firstMsg ? [d.firstMsg] : []);
-  const firstMode = (d.firstMode as any) || 'User speaks first';
-  return {
-    ...d,
-    firstMode,
-    firstMsgs: msgs.slice(0, 20),
-    firstMsg: msgs[0] || '',
-    greetPick: d.greetPick || 'sequence',
-    contextText: typeof d.contextText === 'string' ? d.contextText : '',
-    ctxFiles: Array.isArray(d.ctxFiles) ? d.ctxFiles : [],
-    language: (d.language as any) || 'English',
-  };
-}
-
+/* ───────── storage helpers ───────── */
 const IS_BROWSER = typeof window !== 'undefined';
 const loadAgentData = (id: string): AgentData => {
   try {
     const raw = IS_BROWSER ? localStorage.getItem(keyFor(id)) : null;
-    if (raw) return migrateAgent({ ...DEFAULT_AGENT, ...(JSON.parse(raw)||{}) });
+    if (raw) return { ...DEFAULT_AGENT, ...(JSON.parse(raw)||{}) };
   } catch {}
-  return migrateAgent({ ...DEFAULT_AGENT });
+  return { ...DEFAULT_AGENT };
 };
 const saveAgentData = (id: string, data: AgentData) => {
   try { if (IS_BROWSER) localStorage.setItem(keyFor(id), JSON.stringify(data)); } catch {}
 };
-const pushVersion = (id:string, snapshot:any) => {
-  try {
-    if (!IS_BROWSER) return;
-    const raw = localStorage.getItem(versKeyFor(id));
-    const arr = raw ? JSON.parse(raw) : [];
-    arr.unshift({ id: `v_${Date.now()}`, ts: Date.now(), ...snapshot });
-    localStorage.setItem(versKeyFor(id), JSON.stringify(arr.slice(0, 50)));
-  } catch {}
-};
 
-/* ─────────── mock backend (save/publish) ─────────── */
+/* ───────── backend stubs ───────── */
 async function apiSave(agentId: string, payload: AgentData){
   const r = await fetch(`/api/voice/agent/${agentId}/save`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
@@ -293,23 +223,18 @@ async function apiPublish(agentId: string){
   return r.json();
 }
 
-/* ─────────── option helpers ─────────── */
+/* ───────── option helpers ───────── */
 type Opt = { value: string; label: string; disabled?: boolean; note?: string; iconLeft?: React.ReactNode };
-
 const providerOpts: Opt[] = [
   { value: 'openai',     label: 'OpenAI',    iconLeft: <OpenAIStamp size={14} /> },
-  { value: 'anthropic',  label: 'Anthropic — coming soon', disabled: true, note: 'soon' },
-  { value: 'google',     label: 'Google — coming soon',    disabled: true, note: 'soon' },
+  { value: 'anthropic',  label: 'Anthropic — coming soon', disabled: true },
+  { value: 'google',     label: 'Google — coming soon',    disabled: true },
 ];
-
-/* ─────────── Model list filtering (3 per family, 4.* up to 5) ─────────── */
 function modelFamilyKey(v: string){
   const s = v.toLowerCase();
   if (s.startsWith('o4')) return '4';
-  const m = s.match(/^gpt-(\d+)/);
-  if (m) return m[1];
-  const m2 = s.match(/^(\d)\D/);
-  return m2 ? m2[1] : 'other';
+  const m = s.match(/^gpt-(\d+)/); if (m) return m[1];
+  const m2 = s.match(/^(\d)\D/);   return m2 ? m2[1] : 'other';
 }
 function filterModelsForUI(all: Array<{ value: string; label: string }>) {
   const seen: Record<string, number> = {};
@@ -323,9 +248,9 @@ function filterModelsForUI(all: Array<{ value: string; label: string }>) {
   return out;
 }
 
-/** Fetch OpenAI models (labels) once a key ID is chosen — server resolves secret. */
+/** models list (static list UI; you can later fetch per key) */
 function useOpenAIModels(selectedKeyId?: string){
-  const [opts, setOpts] = useState<Opt[]>(
+  const [opts] = useState<Opt[]>(
     filterModelsForUI([
       { value: 'gpt-5', label: 'GPT-5' },
       { value: 'gpt-5-mini', label: 'GPT-5 Mini' },
@@ -340,351 +265,10 @@ function useOpenAIModels(selectedKeyId?: string){
       { value: 'gpt-4o-realtime-preview-mini', label: 'GPT-4o Realtime Preview Mini' },
     ])
   );
-  const [loading, setLoading] = useState(false);
-
-  // (optional) if you later fetch models per key, do it here:
-  useEffect(() => {
-    // if (selectedKeyId) { setLoading(true); … setOpts(newList); setLoading(false); }
-  }, [selectedKeyId]);
-
-  return { opts, loading };
-}
-// load API keys + Phone numbers — align with builder step (scopedStorage only)
-useEffect(() => {
-  let mounted = true;
-  (async () => {
-    // --- API KEYS (same logic as Step2ModelSettings) ---
-    try {
-      const ss = await scopedStorage().catch(() => null);
-      if (!ss) {
-        if (mounted) setApiKeys([]);
-      } else {
-        await ss.ensureOwnerGuard?.();
-
-        const v1     = await ss.getJSON<ApiKey[]>(LS_KEYS, []).catch(() => []);
-        const legacy = await ss.getJSON<ApiKey[]>('apiKeys', []).catch(() => []);
-        const merged = Array.isArray(v1) && v1.length ? v1 : (Array.isArray(legacy) ? legacy : []);
-
-        const cleaned = (merged || [])
-          .filter(Boolean)
-          .map((k: any) => ({
-            id:   String(k?.id || ''),
-            name: String(k?.name || ''),
-            key:  String(k?.key || ''), // keep actual key string like Step 2
-          }))
-          .filter((k) => k.id && k.name);
-
-        if (!mounted) return;
-        setApiKeys(cleaned);
-
-        // Default order: existing selection -> globally selected -> first key
-        const globalSelected = await ss.getJSON<string>(LS_SELECTED, '').catch(() => '');
-        const chosenKeyId =
-          (data.apiKeyId && cleaned.some(k => k.id === data.apiKeyId)) ? data.apiKeyId! :
-          (globalSelected && cleaned.some(k => k.id === globalSelected)) ? globalSelected :
-          (cleaned[0]?.id || '');
-
-        if (chosenKeyId && chosenKeyId !== data.apiKeyId) {
-          setData(prev => ({ ...prev, apiKeyId: chosenKeyId }));
-          await ss.setJSON(LS_SELECTED, chosenKeyId).catch(() => {});
-        }
-      }
-    } catch {
-      if (mounted) setApiKeys([]);
-    }
-
-    // --- Phone numbers (unchanged) ---
-    try {
-      const store = await scopedStorage().catch(() => null);
-      if (!mounted) return;
-      if (!store) { setPhoneNumbers([]); return; }
-
-      store.ensureOwnerGuard?.().catch(() => {});
-      const phoneV1 = await store.getJSON<PhoneNum[]>(PHONE_LIST_KEY_V1, []).catch(() => []);
-      const phoneLegacy = await store.getJSON<PhoneNum[]>(PHONE_LIST_KEY_LEG, []).catch(() => []);
-      const phonesMerged = Array.isArray(phoneV1) && phoneV1.length ? phoneV1
-                           : (Array.isArray(phoneLegacy) ? phoneLegacy : []);
-      const phoneCleaned = phonesMerged
-        .filter(Boolean)
-        .map((p: any) => ({ id: String(p?.id || ''), name: String(p?.name || ''), number: String(p?.number || p?.phone || '') }))
-        .filter(p => p.id && (p.number || p.name));
-      setPhoneNumbers(phoneCleaned);
-
-      const selPhone = await store.getJSON<string>(PHONE_SELECTED_ID, '').catch(() => '');
-      const chosenPhoneId =
-        (data.phoneId && phoneCleaned.some(p => p.id === data.phoneId)) ? data.phoneId! :
-        (selPhone && phoneCleaned.some(p => p.id === selPhone)) ? selPhone :
-        (phoneCleaned[0]?.id || '');
-
-      if (chosenPhoneId && chosenPhoneId !== data.phoneId) {
-        setData(prev => ({ ...prev, phoneId: chosenPhoneId }));
-        await store.setJSON(PHONE_SELECTED_ID, chosenPhoneId).catch(() => {});
-      }
-    } catch {
-      if (!mounted) return;
-      setPhoneNumbers([]);
-    }
-  })();
-  return () => { mounted = false; };
-// eslint-disable-next-line react-hooks/exhaustive-deps
-}, [credsTick]);
-
-/* Voice (TTS) providers: only OpenAI enabled now */
-const ttsProviders: Opt[] = [
-  { value: 'openai',     label: 'OpenAI', iconLeft: <OpenAIStamp size={14} /> },
-  { value: 'elevenlabs', label: 'ElevenLabs — coming soon', disabled: true, note: 'soon' },
-  { value: 'google-tts', label: 'Google TTS — coming soon', disabled: true, note: 'soon' },
-];
-
-const asrProviders: Opt[] = [
-  { value: 'deepgram',   label: 'Deepgram' },
-  { value: 'whisper',    label: 'Whisper — coming soon', disabled: true, note: 'soon' },
-  { value: 'assemblyai', label: 'AssemblyAI — coming soon', disabled: true, note: 'soon' },
-];
-
-const asrModelsFor = (asr: string): Opt[] =>
-  asr === 'deepgram'
-    ? [
-        { value: 'Nova 2', label: 'Nova 2' },
-        { value: 'Nova',   label: 'Nova' },
-      ]
-    : [{ value: 'coming', label: 'Models coming soon', disabled: true }];
-
-/* ─────────── UI atoms ─────────── */
-const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}) => (
-  <button
-    onClick={()=>onChange(!checked)}
-    className="inline-flex items-center"
-    style={{
-      height:26, width:46, padding:'0 6px', borderRadius:999, justifyContent:'flex-start',
-      background: checked ? 'color-mix(in oklab, #59d9b3 18%, var(--input-bg))' : 'var(--input-bg)',
-      border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)'
-    }}
-    aria-pressed={checked}
-  >
-    <span
-      style={{
-        width:16, height:16, borderRadius:999,
-        background: checked ? CTA : 'rgba(0,0,0,.14)',
-        transform:`translateX(${checked?20:0}px)`, transition:'transform .18s var(--ease)'
-      }}
-    />
-  </button>
-);
-
-/* ─────────── Styled select with portal (non-transparent) ─────────── */
-type OptT = { value: string; label: string; disabled?: boolean; note?: string; iconLeft?: React.ReactNode };
-function StyledSelect({
-  value, onChange, options, placeholder, leftIcon, menuTop, disabled
-}:{
-  value: string; onChange: (v: string) => void;
-  options: OptT[]; placeholder?: string; leftIcon?: React.ReactNode; menuTop?: React.ReactNode; disabled?: boolean;
-}) {
-  const wrapRef = useRef<HTMLDivElement|null>(null);
-  const btnRef = useRef<HTMLButtonElement|null>(null);
-  const menuRef = useRef<HTMLDivElement|null>(null);
-  const searchRef = useRef<HTMLInputElement|null>(null);
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState('');
-  const [menuPos, setMenuPos] = useState<{left:number; top:number; width:number} | null>(null);
-
-  const current = options.find(o => o.value === value) || null;
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return q ? options.filter(o => o.label.toLowerCase().includes(q)) : options;
-  }, [options, query, value]);
-
-  const computeMenuPos = () => {
-    if (!btnRef.current) return null;
-    const r = btnRef.current.getBoundingClientRect();
-    return { left: r.left, top: r.bottom + 8, width: r.width };
-  };
-  const positionMenu = () => setMenuPos(computeMenuPos());
-
-  useLayoutEffect(() => { if (open) positionMenu(); }, [open]);
-
-  useEffect(() => {
-    if (!open || !IS_CLIENT) return;
-
-    const handleDocumentMouseDown = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (wrapRef.current?.contains(t)) return;
-      if (menuRef.current?.contains(t)) return;
-      setOpen(false);
-    };
-    const handleEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
-
-    let raf = 0;
-    const handleScroll = () => { if (!open) return; cancelAnimationFrame(raf); raf = requestAnimationFrame(positionMenu); };
-    const handleResize = () => positionMenu();
-
-    window.addEventListener('mousedown', handleDocumentMouseDown);
-    window.addEventListener('keydown', handleEsc);
-    window.addEventListener('resize', handleResize);
-    window.addEventListener('scroll', handleScroll, true);
-
-    return () => {
-      window.removeEventListener('mousedown', handleDocumentMouseDown);
-      window.removeEventListener('keydown', handleEsc);
-      window.removeEventListener('resize', handleResize);
-      window.removeEventListener('scroll', handleScroll, true);
-      cancelAnimationFrame(raf);
-    };
-  }, [open]);
-
-  return (
-    <div ref={wrapRef} className="relative" style={disabled ? { opacity:.6, pointerEvents:'none' } : undefined}>
-      <button
-        ref={btnRef}
-        type="button"
-        onClick={() => { if (disabled) return; setOpen(v=>!v); setTimeout(()=>searchRef.current?.focus(),0); }}
-        className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-[8px] text-sm outline-none transition"
-        style={{
-          height:'var(--control-h)',
-          background:'var(--vs-input-bg)',
-          border:'1px solid var(--vs-input-border)',
-          color:'var(--text)'
-        }}
-        aria-disabled={disabled}
-      >
-        <span className="flex items-center gap-2 truncate">
-          {leftIcon}
-          <span className="truncate">{current ? current.label : (placeholder || '— Choose —')}</span>
-        </span>
-        <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)' }} />
-      </button>
-
-      {open && IS_CLIENT ? createPortal(
-        <div
-          ref={menuRef}
-          className="fixed z-[100020] p-2 va-portal"
-          style={{
-            left: (menuPos?.left ?? 0),
-            top: (menuPos?.top ?? 0),
-            width: (menuPos?.width ?? (btnRef.current?.getBoundingClientRect().width ?? 280)),
-            background:'var(--vs-menu-bg)',
-            border:'1px solid var(--vs-menu-border)',
-            borderRadius:10,
-            boxShadow:'0 24px 64px rgba(0,0,0,.18)'
-          }}
-        >
-          {menuTop ? <div className="mb-2">{menuTop}</div> : null}
-
-          <div
-            className="flex items-center gap-2 mb-2 px-2 py-1.5 rounded-[8px]"
-            style={{ background:'var(--vs-input-bg)', border:'1px solid var(--vs-input-border)', color:'var(--text)' }}
-          >
-            <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
-            <input
-              ref={searchRef}
-              value={query}
-              onChange={(e)=>setQuery(e.target.value)}
-              placeholder="Filter…"
-              className="w-full bg-transparent outline-none text-sm"
-              style={{ color:'var(--text)' }}
-            />
-          </div>
-
-          <div className="max-h-72 overflow-y-auto pr-1" style={{ scrollbarWidth:'thin' }}>
-            {filtered.map(o => (
-              <button
-                key={o.value}
-                disabled={!!o.disabled}
-                onClick={()=>{ if (o.disabled) return; onChange(o.value); setOpen(false); }}
-                className="w-full text-left text-sm px-2.5 py-2 rounded-[8px] transition grid grid-cols-[18px_1fr_auto] items-center gap-2 disabled:opacity-60"
-                style={{
-                  color: o.disabled ? 'var(--text-muted)' : 'var(--text)',
-                  background:'transparent',
-                  border:'1px solid transparent',
-                  cursor:o.disabled?'not-allowed':'pointer',
-                }}
-                onMouseEnter={(e)=>{ if (o.disabled) return; const el=e.currentTarget as HTMLButtonElement; el.style.background = 'rgba(0,255,194,0.08)'; el.style.border = '1px solid rgba(0,255,194,0.25)'; }}
-                onMouseLeave={(e)=>{ const el=e.currentTarget as HTMLButtonElement; el.style.background = 'transparent'; el.style.border = '1px solid transparent'; }}
-              >
-                {o.disabled ? (
-                  <Lock className="w-3.5 h-3.5" />
-                ) : (
-                  <span className="inline-flex items-center justify-center w-3.5 h-3.5">
-                    {o.iconLeft || <Check className="w-3.5 h-3.5" style={{ opacity: o.value===value ? 1 : 0 }} />}
-                  </span>
-                )}
-                <span className="truncate">{o.label}</span>
-                <span />
-              </button>
-            ))}
-            {filtered.length===0 && (
-              <div className="px-3 py-6 text-sm" style={{ color:'var(--text-muted)' }}>No matches.</div>
-            )}
-          </div>
-        </div>,
-        document.body
-      ) : null}
-    </div>
-  );
+  return { opts, loading:false };
 }
 
-/* ─────────── Character-level diff (LCS) ─────────── */
-function diffCharsLCS(a: string, b: string){
-  const A = Array.from(a || '');
-  const B = Array.from(b || '');
-  const n = A.length, m = B.length;
-  const dp = Array.from({length:n+1},()=>new Array<number>(m+1).fill(0));
-  for (let i=1;i<=n;i++){
-    for (let j=1;j<=m;j++){
-      dp[i][j] = A[i-1]===B[j-1] ? dp[i-1][j-1]+1 : Math.max(dp[i-1][j], dp[i][j-1]);
-    }
-  }
-  const ops: Array<{t:'same'|'add'|'rem', ch:string}> = [];
-  let i=n, j=m;
-  while (i>0 && j>0){
-    if (A[i-1]===B[j-1]) { ops.push({t:'same', ch:A[i-1]}); i--; j--; }
-    else if (dp[i-1][j] >= dp[i][j-1]) { ops.push({t:'rem', ch:A[i-1]}); i--; }
-    else { ops.push({t:'add', ch:B[j-1]}); j--; }
-  }
-  while (i>0){ ops.push({t:'rem', ch:A[i-1]}); i--; }
-  while (j>0){ ops.push({t:'add', ch:B[j-1]}); j--; }
-  ops.reverse();
-  return ops;
-}
-
-function PromptDiffTyping({
-  base, next, onAccept, onDecline
-}:{ base:string; next:string; onAccept:()=>void; onDecline:()=>void }){
-  const ops = diffCharsLCS(base, next);
-  return (
-    <div
-      className="rounded-[8px] px-3 py-[10px]"
-      style={{ minHeight: 320, background:'var(--panel-bg)', border:'1px solid var(--border-weak)', color:'var(--text)' }}
-    >
-      <pre style={{ whiteSpace:'pre-wrap', wordBreak:'break-word', lineHeight:'1.55', margin:0 }}>
-        {ops.map((o, i) => {
-          if (o.t==='same') return <span key={i}>{o.ch}</span>;
-          if (o.t==='add')  return <span key={i} style={{ background:'rgba(16,185,129,.14)', color:'#10b981' }}>{o.ch}</span>;
-          return <span key={i} style={{ background:'rgba(239,68,68,.18)', color:'#ef4444', textDecoration:'line-through' }}>{o.ch}</span>;
-        })}
-      </pre>
-
-      <div className="mt-3 flex gap-2">
-        <button
-          className="h-9 px-3 rounded-[8px] font-semibold"
-          style={{ background:'#10b981', color:'#ffffff' }}
-          onClick={onAccept}
-        >
-          Accept
-        </button>
-        <button
-          className="h-9 px-3 rounded-[8px] font-semibold"
-          style={{ background:'#ef4444', color:'#ffffff' }}
-          onClick={onDecline}
-        >
-          Decline
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/* ─────────── File helpers ─────────── */
+/* ───────── File helpers (kept here for now) ───────── */
 async function readFileAsText(f: File): Promise<string> {
   const name = f.name.toLowerCase();
 
@@ -696,10 +280,7 @@ async function readFileAsText(f: File): Promise<string> {
   if (name.endsWith('.docx') || name.endsWith('.docs') || await looksZip()) {
     try {
       // @ts-ignore
-      const JSZipModule = await import(
-        /* webpackIgnore: true */
-        'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js'
-      );
+      const JSZipModule = await import('https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js');
       const JSZip = (JSZipModule?.default || (window as any).JSZip);
       if (!JSZip) throw new Error('JSZip not loaded');
 
@@ -715,9 +296,7 @@ async function readFileAsText(f: File): Promise<string> {
         .replace(/<(.|\n)*?>/g,'')
         .replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>');
       return text.trim();
-    } catch {
-      return '';
-    }
+    } catch { return ''; }
   }
 
   if (name.endsWith('.doc')) {
@@ -739,7 +318,7 @@ async function readFileAsText(f: File): Promise<string> {
   });
 }
 
-/* ─────────── Import helpers ─────────── */
+/* ───────── Import helpers ───────── */
 function deelWebsiteToBuckets(raw: string){
   const text = (raw || '').replace(/\s+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
   const lower = text.toLowerCase();
@@ -762,13 +341,7 @@ function deelWebsiteToBuckets(raw: string){
 
   const other = text;
 
-  return {
-    identity: identity || '',
-    services: services || '',
-    contact: contact || '',
-    sponsors: sponsors || '',
-    other: other || ''
-  };
+  return { identity: identity || '', services: services || '', contact: contact || '', sponsors: sponsors || '', other: other || '' };
 }
 
 function buildPromptFromWebsite(raw: string, basePrompt: string){
@@ -784,33 +357,24 @@ function buildPromptFromWebsite(raw: string, basePrompt: string){
   return [base, ...blocks].join('\n\n').trim();
 }
 
-/* ─────────── HARDENED API-KEY LOADER (PATCH) ─────────── */
+/* ───────── API key import (hardened) ───────── */
 function normalizeApiKeyList(anyVal:any): ApiKey[] {
   if (!anyVal) return [];
   try {
-    // Already array of {id,name,key?}
     if (Array.isArray(anyVal)) {
-      const out: ApiKey[] = [];
-      for (const k of anyVal) {
-        if (!k) continue;
-        const id   = String(k.id ?? k._id ?? k.keyId ?? k.name ?? '').trim();
-        const candidate = k.name ?? k.label ?? k.title ?? id;
-        const name = String(candidate ?? 'OpenAI Key').trim();
-        const key  = k.key ? '••••' : (k.secret || k.value ? '••••' : undefined);
-        if (id && name) out.push({ id, name, key });
-      }
-      return out;
+      return anyVal.map((k:any)=>({
+        id:String(k?.id ?? k?._id ?? k?.keyId ?? k?.name ?? '').trim(),
+        name:String(k?.name ?? k?.label ?? k?.title ?? 'Key').trim(),
+        key:k?.key?'••••':(k?.secret||k?.value?'••••':undefined)
+      })).filter(k=>k.id && k.name);
     }
-    // Single string secret → fabricate an ID
     if (typeof anyVal === 'string' && anyVal.trim().length > 10) {
-      const id = 'default';
-      return [{ id, name: 'My OpenAI Key', key: '••••' }];
+      return [{ id:'default', name:'My OpenAI Key', key:'••••' }];
     }
-    // Object with { key: 'sk-...' } or { openai: { key: ... } }
     if (typeof anyVal === 'object') {
       const maybe = anyVal?.key || anyVal?.openai?.key || anyVal?.openai_key || anyVal?.OPENAI_API_KEY;
       if (typeof maybe === 'string' && maybe.trim().length > 10) {
-        return [{ id: 'default', name: 'My OpenAI Key', key: '••••' }];
+        return [{ id:'default', name:'My OpenAI Key', key:'••••' }];
       }
     }
   } catch {}
@@ -818,7 +382,6 @@ function normalizeApiKeyList(anyVal:any): ApiKey[] {
 }
 
 async function loadApiKeysEverywhere(setter:(list:ApiKey[], selectedId:string)=>void, currentSelected?:string){
-  // 1) scopedStorage sources
   let merged: ApiKey[] = [];
   try {
     const store = await scopedStorage().catch(() => null);
@@ -830,8 +393,8 @@ async function loadApiKeysEverywhere(setter:(list:ApiKey[], selectedId:string)=>
       const c2     = normalizeApiKeyList(await store.getJSON('openai.apiKeys', []).catch(() => []));
       const c3     = normalizeApiKeyList(await store.getJSON('keys.openai', []).catch(() => []));
       merged = [v1, legacy, c1, c2, c3].find(a => a.length) || [];
+
       if (!merged.length) {
-        // localStorage fallbacks (strings or arrays)
         try {
           const candidates = [
             'credentials.apiKeys','openai.apiKeys','keys.openai',
@@ -848,7 +411,6 @@ async function loadApiKeysEverywhere(setter:(list:ApiKey[], selectedId:string)=>
         } catch {}
       }
 
-      // 2) Pick selected
       const globalSelected = await store.getJSON<string>('apiKeys.selectedId', '').catch(() => '');
       const chosenId =
         (currentSelected && merged.some(k => k.id === currentSelected)) ? currentSelected :
@@ -856,8 +418,6 @@ async function loadApiKeysEverywhere(setter:(list:ApiKey[], selectedId:string)=>
         (merged[0]?.id || '');
 
       setter(merged, chosenId);
-
-      // 3) persist selection if missing
       if (chosenId && chosenId !== globalSelected) {
         try { await store.setJSON('apiKeys.selectedId', chosenId); } catch {}
       }
@@ -865,7 +425,6 @@ async function loadApiKeysEverywhere(setter:(list:ApiKey[], selectedId:string)=>
     }
   } catch {}
 
-  // 3) optional GET /api/credentials → { apiKeys: [...] } (best-effort)
   try {
     const r = await fetch('/api/credentials').catch(()=>null as any);
     const j = await r?.json().catch(()=>null as any);
@@ -876,14 +435,12 @@ async function loadApiKeysEverywhere(setter:(list:ApiKey[], selectedId:string)=>
       return;
     }
   } catch {}
-
-  // 4) last resort: nothing
   setter([], '');
 }
 
-/* ─────────── Page ─────────── */
+/* ───────── Page ───────── */
 export default function VoiceAgentSection() {
-  /* Theme comes from Account.tsx (no local toggle) */
+  /* Theme */
   const [theme, setTheme] = useState<'light'|'dark'>(() => {
     if (!IS_CLIENT) return 'dark';
     try {
@@ -897,13 +454,9 @@ export default function VoiceAgentSection() {
     } catch {}
     return 'dark';
   });
-
   useEffect(() => {
     if (!IS_CLIENT) return;
-    const apply = (t:'light'|'dark') => {
-      document.documentElement.dataset.theme = t;
-      setTheme(t);
-    };
+    const apply = (t:'light'|'dark') => { document.documentElement.dataset.theme = t; setTheme(t); };
     apply(theme);
     const onStorage = (e: StorageEvent) => {
       if (!e.key) return;
@@ -922,9 +475,9 @@ export default function VoiceAgentSection() {
       window.removeEventListener('storage', onStorage);
       window.removeEventListener('account:theme', onThemeEvt as EventListener);
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []); // eslint-disable-line
 
-  /* align rail to app sidebar */
+  /* sidebar width sync */
   useEffect(() => {
     if (!IS_CLIENT) return;
     const candidates = ['[data-app-sidebar]','aside[aria-label="Sidebar"]','aside[class*="sidebar"]','#sidebar'];
@@ -954,7 +507,7 @@ export default function VoiceAgentSection() {
   const [phoneNumbers, setPhoneNumbers] = useState<PhoneNum[]>([]);
   const [showCall, setShowCall] = useState(false);
 
-  // Generate / type-into-prompt flow
+  // Generate / typed diff flow
   const [showGenerate, setShowGenerate] = useState(false);
   const [composerText, setComposerText] = useState('');
   const [isTypingIntoPrompt, setIsTypingIntoPrompt] = useState(false);
@@ -967,10 +520,10 @@ export default function VoiceAgentSection() {
   const [urlsText, setUrlsText] = useState('');
   const [importing, setImporting] = useState(false);
 
-  // models list (live from API when key *ID* selected)
+  // models list
   const { opts: openaiModels, loading: loadingModels } = useOpenAIModels(data.apiKeyId || undefined);
 
-  // TTS preview (browser speechSynthesis as a cheap preview)
+  // voice preview via speechSynthesis
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   useEffect(() => {
     if (!IS_CLIENT || !('speechSynthesis' in window)) return;
@@ -1006,8 +559,6 @@ export default function VoiceAgentSection() {
   useEffect(() => { if (activeId) saveAgentData(activeId, data); }, [activeId, data]);
 
   const [credsTick, setCredsTick] = useState(0);
-
-  // refresh API keys when the credentials page updates them (custom event or storage)
   useEffect(() => {
     if (!IS_CLIENT) return;
     const onCredsUpdated = () => setCredsTick(t=>t+1);
@@ -1020,7 +571,7 @@ export default function VoiceAgentSection() {
     };
   }, []);
 
-  // load API keys + Phone numbers (hardened) — user-by-user (NO env fallback)
+  // load keys + phones
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -1028,15 +579,12 @@ export default function VoiceAgentSection() {
         await loadApiKeysEverywhere((list, selectedId) => {
           if (!mounted) return;
           setApiKeys(list);
-          if (selectedId && selectedId !== data.apiKeyId) {
-            setData(prev => ({ ...prev, apiKeyId: selectedId }));
-          }
+          if (selectedId && selectedId !== data.apiKeyId) setData(prev => ({ ...prev, apiKeyId: selectedId }));
         }, data.apiKeyId);
       } catch {
         if (mounted) setApiKeys([]);
       }
 
-      // --- Phone numbers (unchanged from your logic) ---
       try {
         const store = await scopedStorage().catch(() => null);
         if (!mounted) return;
@@ -1047,7 +595,6 @@ export default function VoiceAgentSection() {
         const phoneLegacy = await store.getJSON<PhoneNum[]>(PHONE_LIST_KEY_LEG, []).catch(() => []);
         const phonesMerged = Array.isArray(phoneV1) && phoneV1.length ? phoneV1
                              : Array.isArray(phoneLegacy) ? phoneLegacy : [];
-
         const phoneCleaned = phonesMerged
           .filter(Boolean)
           .map((p: any) => ({ id: String(p?.id || ''), name: String(p?.name || ''), number: String(p?.number || p?.phone || '') }))
@@ -1071,23 +618,14 @@ export default function VoiceAgentSection() {
       }
     })();
     return () => { mounted = false; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line
   }, [credsTick]);
 
   function setField<K extends keyof AgentData>(k: K) {
-    return (v: AgentData[K]) => {
-      setData(prev => {
-        const next = { ...prev, [k]: v };
-        if (k === 'name' && activeId) {
-          try { if (IS_CLIENT) localStorage.setItem(keyFor(activeId), JSON.stringify(next)); } catch {}
-          try { if (IS_CLIENT) window.dispatchEvent(new CustomEvent('assistant:update', { detail: { id: activeId, name: String(v) } })); } catch {}
-        }
-        return next;
-      });
-    };
+    return (v: AgentData[K]) => setData(prev => ({ ...prev, [k]: v }));
   }
 
-  // keep backend prompt synced when user types by hand (sanitized)
+  // keep backend prompt synced when user types
   useEffect(() => {
     if (!data.systemPrompt) return;
     try {
@@ -1096,15 +634,23 @@ export default function VoiceAgentSection() {
         setData(p => ({ ...p, systemPromptBackend: sanitizePrompt(compiled.backendString) }));
       }
     } catch {}
-  }, [data.systemPrompt]); // eslint-disable-line react-hooks/exable-deps
+  }, [data.systemPrompt]);
 
   async function doSave(){
     if (!activeId) { setToastKind('error'); setToast('Select or create an agent'); return; }
     setData(prev => ({ ...prev, firstMsg: (prev.firstMsgs?.[0] || prev.firstMsg || '') }));
     setSaving(true); setToast('');
-    try { await apiSave(activeId, { ...data, systemPrompt: sanitizePrompt(data.systemPrompt), systemPromptBackend: sanitizePrompt(data.systemPromptBackend||''), firstMsg: (data.firstMsgs?.[0] || data.firstMsg || '') }); setToastKind('info'); setToast('Saved'); }
-    catch { setToastKind('error'); setToast('Save failed'); }
-    finally { setSaving(false); setTimeout(()=>setToast(''), 1400); }
+    try {
+      await apiSave(activeId, {
+        ...data,
+        systemPrompt: sanitizePrompt(data.systemPrompt),
+        systemPromptBackend: sanitizePrompt(data.systemPromptBackend||''),
+        firstMsg: (data.firstMsgs?.[0] || data.firstMsg || '')
+      });
+      setToastKind('info'); setToast('Saved');
+    } catch {
+      setToastKind('error'); setToast('Save failed');
+    } finally { setSaving(false); setTimeout(()=>setToast(''), 1400); }
   }
   async function doPublish(){
     if (!activeId) { setToastKind('error'); setToast('Select or create an agent'); return; }
@@ -1114,7 +660,7 @@ export default function VoiceAgentSection() {
     finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
   }
 
-  /* Files: click-to-upload, show Import button to type-diff into prompt */
+  /* files */
   const fileInputRef = useRef<HTMLInputElement|null>(null);
   const rebuildContextText = (files:{name:string;text:string}[]) => {
     const merged = files.map(f => `# File: ${f.name}\n${(f.text||'').trim()}`).join('\n\n');
@@ -1162,9 +708,7 @@ export default function VoiceAgentSection() {
     } catch {}
   };
 
-  /* Generate → type inside the prompt box with Accept/Decline diff
-     IMPORTANT: immediately update BACKEND prompt from compiled.backendString.
-     Textarea shows the PRETTY compiled.frontendText only. */
+  /* Generate → type inside the prompt box with Accept/Decline diff */
   const startTypingIntoPrompt = async (targetText:string) => {
     basePromptRef.current = sanitizePrompt(data.systemPrompt || DEFAULT_PROMPT_RT);
     setIsTypingIntoPrompt(true);
@@ -1182,7 +726,6 @@ export default function VoiceAgentSection() {
   const acceptGenerated = () => {
     const chosen = sanitizePrompt((diffCandidate || data.systemPrompt).replace(/\u200b/g,''));
     setField('systemPrompt')(chosen);
-    // Backend already set during generate; still recompile once for safety
     try {
       const compiled = compilePrompt({ basePrompt: chosen, userText: '' });
       setField('systemPromptBackend')(sanitizePrompt(compiled.backendString));
@@ -1190,12 +733,9 @@ export default function VoiceAgentSection() {
     setIsTypingIntoPrompt(false);
     setDiffCandidate('');
   };
-  const declineGenerated = () => {
-    setIsTypingIntoPrompt(false);
-    setDiffCandidate('');
-  };
+  const declineGenerated = () => { setIsTypingIntoPrompt(false); setDiffCandidate(''); };
 
-  /* ─────────── CALL MODEL ─────────── */
+  /* call model */
   const callModel = useMemo(() => {
     const m = (data.model || '').toLowerCase();
     if (m.includes('realtime')) return data.model;
@@ -1207,7 +747,6 @@ export default function VoiceAgentSection() {
     return found?.label || data.model || '—';
   }, [openaiModels, data.model]);
 
-  /* state for First Message add-row highlight */
   const [justAddedIndex, setJustAddedIndex] = useState<number | null>(null);
   const addFirstMessage = () => {
     const next = [...(data.firstMsgs||[])];
@@ -1218,68 +757,9 @@ export default function VoiceAgentSection() {
     setTimeout(()=>setJustAddedIndex(null), 260);
   };
 
-  /* ─────────── URL Import helpers ─────────── */
-  async function fetchUrlText(url: string): Promise<string> {
-    try {
-      const r = await fetch('/api/ingest/url', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ url }) });
-      if (r.ok) {
-        const j = await r.json().catch(()=>null);
-        if (j?.text) return String(j.text);
-      }
-    } catch {}
-    try {
-      const r = await fetch(url, { mode:'cors' as any });
-      const html = await r.text();
-      const div = document.createElement('div');
-      div.innerHTML = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
-      const txt = div.textContent || '';
-      return txt.replace(/\s+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
-    } catch {
-      return '';
-    }
-  }
-
-  async function importUrlsIntoPrompt() {
-    const list = urlsText.split(/\s+/).map(s=>s.trim()).filter(Boolean);
-    if (!list.length) return;
-    setImporting(true);
-    try {
-      let merged = '';
-      for (const u of list) {
-        const t = await fetchUrlText(u);
-        if (t) merged += `\n\n# URL: ${u}\n${t}`;
-      }
-      const base = sanitizePrompt((data.systemPromptBackend || data.systemPrompt || DEFAULT_PROMPT_RT).trim());
-      const next = buildPromptFromWebsite(merged.trim(), base);
-
-      setShowImport(false);
-      await sleep(80);
-      await startTypingIntoPrompt(next);
-      try {
-        const compiled = compilePrompt({ basePrompt: next, userText: '' });
-        setField('systemPromptBackend')(sanitizePrompt(compiled.backendString));
-      } catch {}
-      setToastKind('info'); setToast('Imported website content into the prompt'); setTimeout(()=>setToast(''), 1500);
-    } finally {
-      setImporting(false);
-    }
-  }
-
-  /* ─────────── UI ─────────── */
-  const hasApiKey = !!data.apiKeyId;
-
-  // language short code for WebCall
   const langToHint = (lang: AgentData['language']): 'en'|'nl'|'de'|'es'|'ar' => {
-    switch (lang) {
-      case 'Dutch': return 'nl';
-      case 'German': return 'de';
-      case 'Spanish': return 'es';
-      case 'Arabic': return 'ar';
-      default: return 'en';
-    }
+    switch (lang) { case 'Dutch': return 'nl'; case 'German': return 'de'; case 'Spanish': return 'es'; case 'Arabic': return 'ar'; default: return 'en'; }
   };
-
-  // greeting text
   const greetingJoined = useMemo(() => {
     const list = (data.greetPick==='random'
       ? [...(data.firstMsgs||[])].filter(Boolean).sort(()=>Math.random()-0.5)
@@ -1290,34 +770,27 @@ export default function VoiceAgentSection() {
     return s;
   }, [data.greetPick, data.firstMsgs, data.firstMode]);
 
+  const hasApiKey = !!data.apiKeyId;
+
   return (
     <section className="va-root">
       <Tokens theme={theme} />
 
-      {/* rail + content */}
       <div className="grid w-full" style={{ gridTemplateColumns: '260px 1fr' }}>
         <div className="sticky top-0 h-screen" style={{ borderRight:'1px solid var(--border-weak)' }}>
           <RailBoundary><AssistantRail /></RailBoundary>
         </div>
 
         <div className="px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w-[1160px]" style={{ fontSize:'14px', lineHeight:1.45, color:'var(--text)' }}>
-          {/* Top actions */}
           <div className="mb-4 flex flex-wrap items-center justify-end gap-3">
-            <button
-              onClick={doSave}
-              disabled={saving}
-              className="inline-flex items-center gap-2 rounded-[8px] px-4 text-sm transition hover:-translate-y-[1px] disabled:opacity-60"
-              style={{ height:'40px', background:'var(--panel-bg)', border:'1px solid var(--border-weak)' }}
-            >
+            <button onClick={doSave} disabled={saving}
+              className="inline-flex items-center gap-2 rounded-[8px] px-4 text-sm"
+              style={{ height:'40px', background:'var(--panel-bg)', border:'1px solid var(--border-weak)' }}>
               {saving ? 'Saving…' : 'Save'}
             </button>
-
-            <button
-              onClick={doPublish}
-              disabled={publishing}
-              className="inline-flex items-center gap-2 rounded-[8px] px-4 text-sm transition hover:-translate-y-[1px] disabled:opacity-60"
-              style={{ height:'40px', background:'var(--panel-bg)', border:'1px solid var(--border-weak)' }}
-            >
+            <button onClick={doPublish} disabled={publishing}
+              className="inline-flex items-center gap-2 rounded-[8px] px-4 text-sm"
+              style={{ height:'40px', background:'var(--panel-bg)', border:'1px solid var(--border-weak)' }}>
               <Rocket className="w-4 h-4" /> {publishing ? 'Publishing…' : 'Publish'}
             </button>
 
@@ -1340,29 +813,23 @@ export default function VoiceAgentSection() {
               onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA)}
             >
               <PhoneFilled style={{ color:'#ffffff' }} />
-              <span style={{ color:'#ffffff' }}>Talk to Assistant</span>
+              <span>Talk to Assistant</span>
             </button>
           </div>
 
           {!hasApiKey && (
-            <div
-              className="mb-4 inline-flex items-center gap-2 px-3 py-1.5 rounded-[8px]"
-              style={{
-                background: 'rgba(239,68,68,.12)',
-                color: 'var(--text)',
-                boxShadow:'0 0 0 1px rgba(239,68,68,.25) inset'
-              }}
-            >
+            <div className="mb-4 inline-flex items-center gap-2 px-3 py-1.5 rounded-[8px]"
+                 style={{ background: 'rgba(239,68,68,.12)', color: 'var(--text)', boxShadow:'0 0 0 1px rgba(239,68,68,.25) inset' }}>
               <Lock className="w-4 h-4" /> No API key selected. Each user must add their own key in <b>&nbsp;Credentials&nbsp;</b>.
             </div>
           )}
 
-          {/* Model config */}
+          {/* Model */}
           <Section
             title="Model"
             icon={<Gauge className="w-4 h-4" style={{ color: CTA }} />}
             desc="Configure the model, assistant name, greetings, and language."
-            defaultOpen={true}
+            defaultOpen
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
@@ -1371,7 +838,7 @@ export default function VoiceAgentSection() {
                   value={data.name}
                   onChange={(e)=>setField('name')(e.target.value)}
                   className="w-full bg-transparent outline-none rounded-[8px] px-3"
-                  style={{ height:'40px', background:'var(--panel-bg)', border:'1px solid var(--border-weak)', color:'var(--text)' }}
+                  style={{ height:'40px', background:'var(--panel-bg)', border:'1px solid var(--border-weak)' }}
                   placeholder="e.g., Riley"
                 />
               </div>
@@ -1424,10 +891,7 @@ export default function VoiceAgentSection() {
                   <StyledSelect
                     value={data.greetPick || 'sequence'}
                     onChange={(v)=>setField('greetPick')(v as AgentData['greetPick'])}
-                    options={[
-                      { value: 'sequence', label: 'Play in order' },
-                      { value: 'random',   label: 'Randomize'   },
-                    ]}
+                    options={[{ value: 'sequence', label: 'Play in order' }, { value: 'random', label: 'Randomize' }]}
                   />
                   <button
                     type="button"
@@ -1451,7 +915,7 @@ export default function VoiceAgentSection() {
                       setField('firstMsg')(next[0] || '');
                     }}
                     className="w-full bg-transparent outline-none rounded-[8px] px-3"
-                    style={{ height:'40px', background:'var(--panel-bg)', border:'1px solid var(--border-weak)', color:'var(--text)' }}
+                    style={{ height:'40px', background:'var(--panel-bg)', border:'1px solid var(--border-weak)' }}
                     placeholder={`Message ${idx+1}`}
                   />
                   <button
@@ -1499,12 +963,11 @@ export default function VoiceAgentSection() {
                 </div>
               </div>
 
-              {/* Prompt box with inline diff while generating */}
               <div className="relative">
                 {!isTypingIntoPrompt ? (
                   <textarea
                     className="w-full bg-transparent outline-none rounded-[8px] px-3 py-[10px]"
-                    style={{ minHeight: 320, background:'var(--panel-bg)', border:'1px solid var(--border-weak)', color:'var(--text)' }}
+                    style={{ minHeight: 320, background:'var(--panel-bg)', border:'1px solid var(--border-weak)' }}
                     value={data.systemPrompt}
                     onChange={(e)=> setField('systemPrompt')(sanitizePrompt(e.target.value))}
                   />
@@ -1562,7 +1025,6 @@ export default function VoiceAgentSection() {
                   </div>
                 </div>
 
-                {/* List of files */}
                 {!(data.ctxFiles && data.ctxFiles.length) ? (
                   <div className="text-xs" style={{ color:'var(--text-muted)' }}>
                     No files yet. Click <b>Add file</b> to upload (.txt, .md, .csv, .json, .docx or best-effort .doc / .docs).
@@ -1599,8 +1061,8 @@ export default function VoiceAgentSection() {
           <Section
             title="Voice"
             icon={<Volume2 className="w-4 h-4" style={{ color: CTA }} />}
-            desc="Choose TTS, language, and preview the voice. (Language is enforced in calls.)"
-            defaultOpen={true}
+            desc="Choose TTS, language, and preview the voice."
+            defaultOpen
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
@@ -1608,8 +1070,11 @@ export default function VoiceAgentSection() {
                 <StyledSelect
                   value={data.ttsProvider}
                   onChange={(v)=>setField('ttsProvider')(v as AgentData['ttsProvider'])}
-                  options={ttsProviders}
-                  placeholder="Choose a TTS provider"
+                  options={[
+                    { value: 'openai', label: 'OpenAI', iconLeft: <OpenAIStamp size={14} /> },
+                    { value: 'elevenlabs', label: 'ElevenLabs — coming soon', disabled: true },
+                    { value: 'google-tts', label: 'Google TTS — coming soon', disabled: true },
+                  ]}
                 />
                 <div className="mt-2 text-xs" style={{ color:'var(--text-muted)' }}>
                   Only OpenAI is available right now.
@@ -1661,12 +1126,12 @@ export default function VoiceAgentSection() {
             </div>
           </Section>
 
-          {/* Credentials — OpenAI API Key + Phone Number (PER USER) */}
+          {/* Credentials */}
           <Section
             title="Credentials"
             icon={<Phone className="w-4 h-4" style={{ color: CTA }} />}
             desc="Each user selects their own OpenAI API key. Keys are not shared."
-            defaultOpen={true}
+            defaultOpen
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
@@ -1677,7 +1142,7 @@ export default function VoiceAgentSection() {
                   value={data.apiKeyId || ''}
                   onChange={async (val)=>{
                     setField('apiKeyId')(val);
-                    try { const store = await scopedStorage(); await store.ensureOwnerGuard?.(); await store.setJSON('apiKeys.selectedId', val); } catch {}
+                    try { const store = await scopedStorage(); await store.ensureOwnerGuard?.(); await store.setJSON(LS_SELECTED, val); } catch {}
                   }}
                   options={[
                     { value: '', label: 'Select your API key…', iconLeft: <OpenAIStamp size={14} /> },
@@ -1696,18 +1161,11 @@ export default function VoiceAgentSection() {
                   value={data.phoneId || ''}
                   onChange={async (val)=>{
                     setField('phoneId')(val);
-                    try {
-                      const store = await scopedStorage();
-                      await store.ensureOwnerGuard?.();
-                      await store.setJSON(PHONE_SELECTED_ID, val);
-                    } catch {}
+                    try { const store = await scopedStorage(); await store.ensureOwnerGuard?.(); await store.setJSON(PHONE_SELECTED_ID, val); } catch {}
                   }}
                   options={[
                     { value: '', label: 'Select a phone number…' },
-                    ...phoneNumbers.map(p => ({
-                      value: p.id,
-                      label: `${p.name ? `${p.name} • ` : ''}${p.number}`
-                    }))
+                    ...phoneNumbers.map(p => ({ value: p.id, label: `${p.name ? `${p.name} • ` : ''}${p.number}` }))
                   ]}
                 />
                 <div className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
@@ -1722,237 +1180,117 @@ export default function VoiceAgentSection() {
             title="Transcriber"
             icon={<Mic className="w-4 h-4" style={{ color: CTA }} />}
             desc="Transcription settings"
-            defaultOpen={true}
+            defaultOpen
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
                 <div className="mb-2 text-[12.5px]">Provider</div>
-                <StyledSelect value={data.asrProvider} onChange={(v)=>setField('asrProvider')(v as AgentData['asrProvider'])} options={asrProviders}/>
+                <StyledSelect
+                  value={data.asrProvider}
+                  onChange={(v)=>setField('asrProvider')(v as AgentData['asrProvider'])}
+                  options={[
+                    { value: 'deepgram', label: 'Deepgram' },
+                    { value: 'whisper', label: 'Whisper — coming soon', disabled: true },
+                    { value: 'assemblyai', label: 'AssemblyAI — coming soon', disabled: true },
+                  ]}
+                />
               </div>
               <div>
                 <div className="mb-2 text-[12.5px]">Model</div>
-                <StyledSelect value={data.asrModel} onChange={setField('asrModel')} options={asrModelsFor(data.asrProvider)}/>
+                <StyledSelect
+                  value={data.asrModel}
+                  onChange={setField('asrModel')}
+                  options={
+                    data.asrProvider === 'deepgram'
+                      ? [{ value: 'Nova 2', label: 'Nova 2' }, { value: 'Nova', label: 'Nova' }]
+                      : [{ value: 'coming', label: 'Models coming soon', disabled: true }]
+                  }
+                />
               </div>
-            </div>
-            <div className="mt-4 grid sm:grid-cols-2 gap-3">
-              <div className="flex items-center justify-between p-3 rounded-[8px]" style={{ background:'var(--panel-bg)', border:'1px solid var(--border-weak)' }}>
-                <span className="text-sm">Background Denoising</span>
-                <Toggle checked={data.denoise} onChange={setField('denoise')} />
-              </div>
-              <div className="flex items-center justify-between p-3 rounded-[8px]" style={{ background:'var(--panel-bg)', border:'1px solid var(--border-weak)' }}>
-                <span className="text-sm">Use Numerals</span>
-                <Toggle checked={data.numerals} onChange={setField('numerals')} />
-              </div>
-            </div>
-            <div className="mt-2 text-xs" style={{ color:'var(--text-muted)' }}>
-              Realtime calls use OpenAI’s built-in transcription when Voice Provider = OpenAI.
             </div>
           </Section>
 
-          {/* spacer under Transcriber */}
           <div style={{ height: 72 }} />
         </div>
       </div>
 
-      {/* ─────────── Generate overlay (non-transparent backdrop) ─────────── */}
+      {/* Generate Modal */}
       {showGenerate && IS_CLIENT ? createPortal(
-        <>
-          <div
-            className="fixed inset-0"
-            style={{ zIndex: Z_OVERLAY, background:'rgba(0,0,0,.72)' }}
-            onClick={()=> setShowGenerate(false)}
-          />
-          <div className="fixed inset-0 grid place-items-center px-4" style={{ zIndex: Z_MODAL }}>
-            <div
-              className="w-full max-w-[640px] rounded-[12px] overflow-hidden"
-              style={{
-                background: 'var(--panel-bg)',
-                color: 'var(--text)',
-                border: `1px solid ${GREEN_LINE}`,
-                maxHeight: '86vh',
-                boxShadow:'0 24px 64px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px rgba(89,217,179,.20)',
-                animation: 'vaModalIn 280ms var(--ease) both'
-              }}
-            >
-              <div
-                className="flex items-center justify-between px-6 py-4"
-                style={{
-                  background:`linear-gradient(90deg,var(--panel-bg) 0%,color-mix(in oklab,var(--panel-bg) 97%, white 3%) 50%,var(--panel-bg) 100%)`,
-                  borderBottom:`1px solid ${GREEN_LINE}`
-                }}
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-lg grid place-items-center" style={{ background:'rgba(89,217,179,.12)' }}>
-                    <span style={{ color: CTA }}><Wand2 className="w-5 h-5" /></span>
-                  </div>
-                  <div className="text-lg font-semibold">Describe how to update the prompt</div>
-                </div>
-                <button
-                  onClick={()=> setShowGenerate(false)}
-                  className="w-8 h-8 rounded-[6px] grid place-items-center"
-                  style={{ background:'var(--panel-bg)', border:`1px solid ${GREEN_LINE}` }}
-                  aria-label="Close"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              <div className="px-6 py-5 space-y-3">
-                <div className="text-xs" style={{ color:'var(--text-muted)' }}>
-                  Tip: “assistant for a dental clinic; tone friendly; handle booking and FAQs”.
-                </div>
-                <div
-                  className="rounded-[8px] p-2"
-                  style={{ background:'var(--panel-bg)', border:'1px solid var(--border-weak)' }}
-                >
-                  <textarea
-                    value={composerText}
-                    onChange={(e)=>setComposerText(e.target.value)}
-                    className="w-full bg-transparent outline-none rounded-[6px] px-3 py-2"
-                    placeholder="Describe changes…"
-                    style={{ minHeight: 160, maxHeight: '40vh', color:'var(--text)', resize:'vertical' }}
-                  />
-                </div>
-              </div>
-
-              <div className="px-6 pb-6 flex gap-3">
-                <button
-                  onClick={()=> setShowGenerate(false)}
-                  className="w-full h-[40px] rounded-[8px]"
-                  style={{ background:'var(--panel-bg)', border:'1px solid var(--border-weak)', color:'var(--text)', fontWeight:600 }}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={async ()=>{
-                    const raw = safeTrim(composerText);
-                    if (!raw) return;
-                    try {
-                      const base = nonEmpty(data.systemPrompt) ? sanitizePrompt(data.systemPrompt) : DEFAULT_PROMPT_RT;
-                      const compiled = compilePrompt({ basePrompt: base, userText: raw });
-                      // Immediately set BACKEND prompt (code prompt)
-                      setField('systemPromptBackend')(sanitizePrompt(compiled.backendString));
-                      // Type PRETTY prompt into textarea
-                      setShowGenerate(false);
-                      await sleep(80);
-                      await startTypingIntoPrompt(sanitizePrompt(compiled.frontendText));
-                    } catch {
-                      setToastKind('error'); setToast('Generate failed — try simpler wording.');
-                      setTimeout(()=>setToast(''), 2200);
-                    }
-                  }}
-                  disabled={!composerText.trim()}
-                  className="w-full h-[40px] rounded-[8px] font-semibold inline-flex items-center justify-center gap-2"
-                  style={{ background:CTA, color:'#ffffff', opacity: (!composerText.trim() ? .6 : 1) }}
-                >
-                  <Wand2 className="w-4 h-4" /> Generate
-                </button>
-              </div>
-            </div>
-          </div>
-        </>,
+        <GeneratePromptModal
+          open={showGenerate}
+          value={composerText}
+          onChange={setComposerText}
+          onCancel={()=> setShowGenerate(false)}
+          onGenerate={async () => {
+            const raw = safeTrim(composerText);
+            if (!raw) return;
+            try {
+              const base = nonEmpty(data.systemPrompt) ? sanitizePrompt(data.systemPrompt) : DEFAULT_PROMPT_RT;
+              const compiled = compilePrompt({ basePrompt: base, userText: raw });
+              setField('systemPromptBackend')(sanitizePrompt(compiled.backendString));
+              setShowGenerate(false);
+              await sleep(80);
+              await startTypingIntoPrompt(sanitizePrompt(compiled.frontendText));
+            } catch {
+              setToastKind('error'); setToast('Generate failed — try simpler wording.');
+              setTimeout(()=>setToast(''), 2200);
+            }
+          }}
+        />,
         document.body
       ) : null}
 
-      {/* ─────────── Website Import overlay ─────────── */}
+      {/* Import website modal */}
       {showImport && IS_CLIENT ? createPortal(
-        <>
-          <div
-            className="fixed inset-0"
-            style={{ zIndex: Z_OVERLAY, background:'rgba(0,0,0,.72)' }}
-            onClick={()=> setShowImport(false)}
-          />
-          <div className="fixed inset-0 grid place-items-center px-4" style={{ zIndex: Z_MODAL }}>
-            <div
-              className="w-full max-w-[800px] rounded-[12px] overflow-hidden"
-              style={{
-                background: 'var(--panel-bg)',
-                color: 'var(--text)',
-                border: `1px solid ${GREEN_LINE}`,
-                maxHeight: '88vh',
-                boxShadow:'0 24px 64px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px rgba(89,217,179,.20)',
-                animation: 'vaModalIn 280ms var(--ease) both'
-              }}
-            >
-              <div
-                className="flex items-center justify-between px-6 py-4"
-                style={{
-                  background:`linear-gradient(90deg,var(--panel-bg) 0%,color-mix(in oklab,var(--panel-bg) 97%, white 3%) 50%,var(--panel-bg) 100%)`,
-                  borderBottom:`1px solid ${GREEN_LINE}`
-                }}
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-lg grid place-items-center" style={{ background:'rgba(89,217,179,.12)' }}>
-                    <span style={{ color: CTA }}><Globe className="w-5 h-5" /></span>
-                  </div>
-                  <div className="text-lg font-semibold">Import website</div>
-                </div>
-                <button
-                  onClick={()=> setShowImport(false)}
-                  className="w-8 h-8 rounded-[6px] grid place-items-center"
-                  style={{ background:'var(--panel-bg)', border:`1px solid ${GREEN_LINE}` }}
-                  aria-label="Close import"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              <div className="px-6 py-5 space-y-3" style={{ maxHeight:'64vh', overflow:'auto' }}>
-                <div className="text-xs" style={{ color:'var(--text-muted)' }}>
-                  Paste one or more URLs (space or newline separated). We'll fetch the pages and convert them into your prompt.
-                </div>
-                <div className="rounded-[8px] p-2" style={{ background:'var(--panel-bg)', border:'1px solid var(--border-weak)' }}>
-                  <textarea
-                    value={urlsText}
-                    onChange={(e)=>setUrlsText(e.target.value)}
-                    className="w-full bg-transparent outline-none rounded-[6px] px-3 py-2"
-                    placeholder="https://example.com  https://example.com/about …"
-                    style={{ minHeight: 120, color:'var(--text)', resize:'vertical' }}
-                  />
-                </div>
-              </div>
-
-              <div className="px-6 pb-6 flex gap-3">
-                <button
-                  onClick={()=> setShowImport(false)}
-                  className="w-full h-[40px] rounded-[8px]"
-                  style={{ background:'var(--panel-bg)', border:'1px solid var(--border-weak)', color:'var(--text)', fontWeight:600 }}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={importUrlsIntoPrompt}
-                  disabled={importing || !urlsText.trim()}
-                  className="w-full h-[40px] rounded-[8px] font-semibold inline-flex items-center justify-center gap-2"
-                  style={{ background:CTA, color:'#ffffff', opacity: (importing || !urlsText.trim()) ? .7 : 1 }}
-                >
-                  {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Globe className="w-4 h-4" />}
-                  Import
-                </button>
-              </div>
-            </div>
-          </div>
-        </>,
+        <ImportWebsiteModal
+          open={showImport}
+          value={urlsText}
+          importing={importing}
+          onChange={setUrlsText}
+          onCancel={()=> setShowImport(false)}
+          onImport={async ()=>{
+            const list = urlsText.split(/\s+/).map(s=>s.trim()).filter(Boolean);
+            if (!list.length) return;
+            setImporting(true);
+            try {
+              let merged = '';
+              for (const u of list) {
+                try {
+                  const r = await fetch('/api/ingest/url', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ url: u }) });
+                  const j = r.ok ? await r.json().catch(()=>null) : null;
+                  const t = j?.text || '';
+                  if (t) merged += `\n\n# URL: ${u}\n${t}`;
+                } catch {}
+              }
+              const base = sanitizePrompt((data.systemPromptBackend || data.systemPrompt || DEFAULT_PROMPT_RT).trim());
+              const next = buildPromptFromWebsite(merged.trim(), base);
+              setShowImport(false);
+              await sleep(80);
+              await startTypingIntoPrompt(next);
+              try {
+                const compiled = compilePrompt({ basePrompt: next, userText: '' });
+                setField('systemPromptBackend')(sanitizePrompt(compiled.backendString));
+              } catch {}
+              setToastKind('info'); setToast('Imported website content into the prompt'); setTimeout(()=>setToast(''), 1500);
+            } finally {
+              setImporting(false);
+            }
+          }}
+        />,
         document.body
       ) : null}
 
-      {/* ─────────── Voice/Call panel (WebRTC) ─────────── */}
+      {/* Voice/Call overlay */}
       {IS_CLIENT ? createPortal(
         <>
           <div
             className={`fixed inset-0 ${showCall ? '' : 'pointer-events-none'}`}
-            style={{
-              zIndex: 9996,
-              background: showCall ? 'rgba(8,10,12,.78)' : 'transparent',
-              opacity: showCall ? 1 : 0,
-              transition: 'opacity .2s cubic-bezier(.22,.61,.36,1)'
-            }}
+            style={{ zIndex: 9996, background: showCall ? 'rgba(8,10,12,.78)' : 'transparent', opacity: showCall ? 1 : 0, transition: 'opacity .2s cubic-bezier(.22,.61,.36,1)' }}
             onClick={()=> setShowCall(false)}
           />
           {showCall && (
             <WebCallButton
               model={callModel}
-              // Hard-source *only* from your prompt (+ Context). No auto prompt.
               systemPrompt={
                 (() => {
                   const base = sanitizePrompt(data.systemPromptBackend || data.systemPrompt || '');
@@ -1962,10 +1300,7 @@ export default function VoiceAgentSection() {
               }
               voiceName={data.voiceName}
               assistantName={data.name || 'Assistant'}
-
-              // 🔐 Use ONLY the key ID (server resolves secret)
               apiKeyId={data.apiKeyId || undefined}
-
               ephemeralEndpoint={EPHEMERAL_TOKEN_ENDPOINT}
               onError={(err:any) => {
                 const msg = err?.message || err?.error?.message || (typeof err === 'string' ? err : '') || 'Call failed';
@@ -1973,12 +1308,8 @@ export default function VoiceAgentSection() {
               }}
               onClose={()=> setShowCall(false)}
               prosody={{ fillerWords: true, microPausesMs: 200, phoneFilter: true, turnEndPauseMs: 120 }}
-
-              // greetings: joined from list; respects First Message Mode, with fallback
               firstMode={data.firstMode}
               firstMsg={greetingJoined}
-
-              // Language is chosen here; WebCall pins it (no detection)
               languageHint={langToHint(data.language)}
             />
           )}
@@ -2005,7 +1336,7 @@ export default function VoiceAgentSection() {
   );
 }
 
-/* ─────────── Section (expand anim) ─────────── */
+/* ───────── Section ───────── */
 function Section({
   title, icon, desc, children, defaultOpen = true
 }:{
@@ -2041,9 +1372,7 @@ function Section({
         <div
           className="va-section-body"
           style={{
-            height: open ? h : 0,
-            opacity: open ? 1 : 0,
-            transform: open ? 'translateY(0)' : 'translateY(-4px)',
+            height: open ? h : 0, opacity: open ? 1 : 0, transform: open ? 'translateY(0)' : 'translateY(-4px)',
             transition: 'height 260ms var(--ease), opacity 230ms var(--ease), transform 260ms var(--ease)',
             overflow:'hidden'
           }}
