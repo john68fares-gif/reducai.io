@@ -11,8 +11,8 @@ import {
 import { scopedStorage } from '@/utils/scoped-storage';
 import WebCallButton from '@/components/voice/WebCallButton';
 
-// ✅ local components
-import StyledSelect from '@/components/voice/StyledSelect';
+// ✅ correct path for your StyledSelect
+import StyledSelect from '@/components/ui/StyledSelect';
 import PromptDiffTyping from '@/components/voice/PromptDiffTyping';
 import GeneratePromptModal from '@/components/voice/GeneratePromptModal';
 import ImportWebsiteModal from '@/components/voice/ImportWebsiteModal';
@@ -278,7 +278,7 @@ async function readFileAsText(f: File): Promise<string> {
 
   if (name.endsWith('.docx') || name.endsWith('.docs') || await looksZip()) {
     try {
-      const JSZip = await loadJSZip(); // ← no webpack "https:" import
+      const JSZip = await loadJSZip();
       const buf = await f.arrayBuffer();
       const zip = await JSZip.loadAsync(buf);
       const docXml = await zip.file('word/document.xml')?.async('string');
@@ -1251,7 +1251,6 @@ export default function VoiceAgentSection() {
             setImporting(true);
             try {
               // Use your API: POST /api/connectors/website-import → { ok, facts: string[] }
-              // Merge multiple URLs into a single prompt-friendly context block.
               const allFacts: string[] = [];
               for (const u of list) {
                 try {
