@@ -1,4 +1,3 @@
-// FILE: components/voice/VoiceAgentSection.tsx
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
@@ -6,17 +5,20 @@ import dynamic from 'next/dynamic';
 import { createPortal } from 'react-dom';
 import {
   Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Rocket,
-  KeyRound, Play, Square, X, Plus, Trash2, Phone, Globe, Loader2, Lock
+  KeyRound, Play, Square, Plus, Trash2, Phone, Globe, Lock
 } from 'lucide-react';
 
 import { scopedStorage } from '@/utils/scoped-storage';
 import WebCallButton from '@/components/voice/WebCallButton';
 
-// ✅ new smaller imports
+// ✅ local components
 import StyledSelect from '@/components/voice/StyledSelect';
 import PromptDiffTyping from '@/components/voice/PromptDiffTyping';
 import GeneratePromptModal from '@/components/voice/GeneratePromptModal';
 import ImportWebsiteModal from '@/components/voice/ImportWebsiteModal';
+
+// ✅ bundle-safe JSZip loader (no webpack https: import)
+import { loadJSZip } from '@/lib/jszip-loader';
 
 // prompt engine
 import {
@@ -32,13 +34,10 @@ const CTA = '#59d9b3';
 const CTA_HOVER = '#54cfa9';
 const GREEN_LINE = 'rgba(89,217,179,.20)';
 const ACTIVE_KEY = 'va:activeId';
-const Z_OVERLAY = 100000;
-const Z_MODAL   = 100001;
 const IS_CLIENT = typeof window !== 'undefined' && typeof document !== 'undefined';
 const PHONE_LIST_KEY_V1   = 'phoneNumbers.v1';
 const PHONE_LIST_KEY_LEG  = 'phoneNumbers';
 const PHONE_SELECTED_ID   = 'phoneNumbers.selectedId';
-const LS_KEYS      = 'apiKeys.v1';
 const LS_SELECTED  = 'apiKeys.selectedId';
 
 /* ───────── Assistant rail (lazy) ───────── */
@@ -268,7 +267,7 @@ function useOpenAIModels(selectedKeyId?: string){
   return { opts, loading:false };
 }
 
-/* ───────── File helpers (kept here for now) ───────── */
+/* ───────── File helpers (bundle-safe) ───────── */
 async function readFileAsText(f: File): Promise<string> {
   const name = f.name.toLowerCase();
 
@@ -279,9 +278,7 @@ async function readFileAsText(f: File): Promise<string> {
 
   if (name.endsWith('.docx') || name.endsWith('.docs') || await looksZip()) {
     try {
-      // ✅ bundle-safe lazy import from node_modules (no https: import)
-      const { default: JSZip } = await import('jszip');
-
+      const JSZip = await loadJSZip(); // ← no webpack "https:" import
       const buf = await f.arrayBuffer();
       const zip = await JSZip.loadAsync(buf);
       const docXml = await zip.file('word/document.xml')?.async('string');
@@ -1253,17 +1250,30 @@ export default function VoiceAgentSection() {
             if (!list.length) return;
             setImporting(true);
             try {
-              let merged = '';
+              // Use your API: POST /api/connectors/website-import → { ok, facts: string[] }
+              // Merge multiple URLs into a single prompt-friendly context block.
+              const allFacts: string[] = [];
               for (const u of list) {
                 try {
-                  const r = await fetch('/api/ingest/url', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ url: u }) });
+                  const r = await fetch('/api/connectors/website-import', {
+                    method:'POST',
+                    headers:{'Content-Type':'application/json'},
+                    body: JSON.stringify({ url: u })
+                  });
                   const j = r.ok ? await r.json().catch(()=>null) : null;
-                  const t = j?.text || '';
-                  if (t) merged += `\n\n# URL: ${u}\n${t}`;
+                  const facts: string[] = Array.isArray(j?.facts) ? j.facts : [];
+                  if (facts.length) {
+                    allFacts.push(`# Source: ${u}`, ...facts.map(s => `- ${s}`));
+                  }
                 } catch {}
               }
+
+              let merged = allFacts.join('\n');
+              if (!merged.trim()) merged = `# Sources\n${list.map(u=>`- ${u}`).join('\n')}\n\n(No obvious facts extracted.)`;
+
               const base = sanitizePrompt((data.systemPromptBackend || data.systemPrompt || DEFAULT_PROMPT_RT).trim());
               const next = buildPromptFromWebsite(merged.trim(), base);
+
               setShowImport(false);
               await sleep(80);
               await startTypingIntoPrompt(next);
