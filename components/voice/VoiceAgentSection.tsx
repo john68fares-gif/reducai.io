@@ -5,8 +5,8 @@ import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 're
 import dynamic from 'next/dynamic';
 import { createPortal } from 'react-dom';
 import {
-  Wand2, ChevronRight, Gauge, Mic, Volume2, Rocket, Search, Check, Lock,
-  Play, Square, X, Plus, Trash2, Phone, CheckCircle2
+  Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Rocket, Search, Check, Lock,
+  KeyRound, Play, Square, X, Plus, Trash2, Phone
 } from 'lucide-react';
 import { scopedStorage } from '@/utils/scoped-storage';
 import WebCallButton from '@/components/voice/WebCallButton';
@@ -14,10 +14,19 @@ import WebCallButton from '@/components/voice/WebCallButton';
 // ✅ ephemeral route
 const EPHEMERAL_TOKEN_ENDPOINT = '/api/voice/ephemeral';
 
+/* ─────────── theme + layout tokens ─────────── */
+const CTA = '#59d9b3';
+const CTA_HOVER = '#54cfa9';
+const GREEN_LINE = 'rgba(89,217,179,.20)';
 const ACTIVE_KEY = 'va:activeId';
 const Z_OVERLAY = 100000;
 const Z_MODAL   = 100001;
 const IS_CLIENT = typeof window !== 'undefined' && typeof document !== 'undefined';
+
+/* If your Phone Number page uses different storage keys or shape, adjust here */
+const PHONE_LIST_KEY_V1   = 'phoneNumbers.v1';      // preferred [{id,name,number}]
+const PHONE_LIST_KEY_LEG  = 'phoneNumbers';         // legacy  [{id,name,number}] or similar
+const PHONE_SELECTED_ID   = 'phoneNumbers.selectedId';
 
 /* ───────────────── Assistant rail (fixed) ───────────────── */
 const AssistantRail = dynamic(
@@ -36,6 +45,28 @@ class RailBoundary extends React.Component<{children:React.ReactNode},{hasError:
   render(){ return this.state.hasError ? <div className="px-3 py-3 text-xs opacity-70">Rail crashed</div> : this.props.children; }
 }
 
+/* small phone icon */
+function PhoneFilled(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" {...props} aria-hidden>
+      <path
+        d="M6.62 10.79a15.053 15.053 0 006.59 6.59l2.2-2.2a1 1 0 011.03-.24c1.12.37 2.33.57 3.56.57a1 1 0 011 1v3.5a1 1 0 01-1 1C11.3 22 2 12.7 2 2.99a1 1 0 011-1H6.5a1 1 0 011 1c0 1.23.2 2.44.57 3.56a1 1 0 01-.24 1.03l-2.2 2.2z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+/* OpenAI logo (tiny) */
+function OpenAIStamp({size=14}:{size?:number}) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 40 40" aria-hidden>
+      <path d="M37.532 16.37a8.9 8.9 0 00-.77-7.3 8.96 8.96 0 00-11.87-3.42A8.99 8.99 0 007.53 9.63a8.9 8.9 0 00.77 7.3 8.96 8.96 0 0011.87 3.42 8.99 8.99 0 0017.36-3.99z" fill="currentColor" opacity=".18"/>
+      <path d="M20.5 6.5l-8 4.6v9.3l8 4.6 8-4.6v-9.3l-8-4.6z" fill="currentColor" />
+    </svg>
+  );
+}
+
 /* ─────────── tiny helpers ─────────── */
 const isFn = (f: any): f is Function => typeof f === 'function';
 const isStr = (v: any): v is string => typeof v === 'string';
@@ -44,89 +75,36 @@ const coerceStr = (v: any): string => (isStr(v) ? v : '');
 const safeTrim = (v: any): string => (nonEmpty(v) ? v.trim() : '');
 const sleep = (ms:number) => new Promise(r=>setTimeout(r,ms));
 
-/* ─────────── shared tokens (dark + light) to MATCH Account page ─────────── */
+/* ─────────── theme tokens + micro animations ─────────── */
 const Tokens = () => (
   <style jsx global>{`
     .va-scope{
-      --bg:#0b0c10; --panel:#0d0f11; --card:#0f1214; --text:#e6f1ef; --text-muted:#9fb4ad;
-      --brand:#59d9b3; --brand-weak:rgba(89,217,179,.22);
-      --border:rgba(255,255,255,.10); --border-weak:rgba(255,255,255,.10);
-      --shadow-soft:0 18px 48px rgba(0,0,0,.20);
-      --shadow-card:0 20px 40px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset;
-      --radius-outer:8px; --radius-inner:8px;
-      --ease:cubic-bezier(.22,.61,.36,1);
-      --control-h:40px;
-
-      /* Buttons (force white fg per your ask) */
-      --btn-bg: #1a1f1d;
-      --btn-fg: #ffffff;
-      --btn-border: var(--border);
-      --brand-btn-bg: var(--brand);
-      --brand-btn-fg: #ffffff;
+      --bg:#0b0c10; --panel:#0d0f11; --text:#e6f1ef; --text-muted:#9fb4ad;
+      --s-2:8px; --s-3:12px; --s-4:16px; --s-5:20px; --s-6:24px;
+      --radius-outer:8px; --radius-inner:8px; --control-h:40px; --header-h:80px;
+      --fz-title:18px; --fz-sub:15px; --fz-body:14px; --fz-label:12.5px;
+      --lh-body:1.45; --ease:cubic-bezier(.22,.61,.36,1);
+      --app-sidebar-w:240px; --rail-w:260px;
+      --page-bg:var(--bg); --panel-bg:var(--panel); --input-bg:var(--panel);
+      --input-border:rgba(255,255,255,.10); --input-shadow:0 0 0 1px rgba(255,255,255,.06) inset;
+      --border-weak:rgba(255,255,255,.10);
+      --card-shadow:0 20px 40px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px ${GREEN_LINE};
+      --green-weak:rgba(89,217,179,.12); --red-weak:rgba(239,68,68,.14);
+      --good:#10b981; --bad:#ef4444;
     }
+    .va-card{ border-radius:var(--radius-outer); border:1px solid var(--border-weak); background:var(--panel-bg); box-shadow:var(--card-shadow); overflow:hidden; isolation:isolate; }
+    .va-head{ min-height:var(--header-h); display:grid; grid-template-columns:1fr auto; align-items:center; padding:0 16px; border-bottom:1px solid rgba(255,255,255,.08); color:var(--text);
+      background:linear-gradient(90deg,var(--panel-bg) 0%,color-mix(in oklab, var(--panel-bg) 97%, white 3%) 50%,var(--panel-bg) 100%); border-top-left-radius:var(--radius-outer); border-top-right-radius:var(--radius-outer); }
 
-    :root[data-theme='light'] .va-scope{
-      --bg:#f7f9fb; --panel:#ffffff; --card:#ffffff; --text:#0b0c10; --text-muted:#4b5a57;
-      --brand:#2cbf9a; --brand-weak:rgba(44,191,154,.16);
-      --border:rgba(0,0,0,.12); --border-weak:rgba(0,0,0,.08);
-      --shadow-soft:0 18px 48px rgba(0,0,0,.10);
-      --shadow-card:0 8px 24px rgba(0,0,0,.10), 0 0 0 1px rgba(0,0,0,.06) inset;
-
-      /* keep buttons dark so white text always readable */
-      --btn-bg: #1a1f1d;
-      --btn-fg: #ffffff;
-      --btn-border: rgba(0,0,0,.18);
-      --brand-btn-bg: var(--brand);
-      --brand-btn-fg: #ffffff;
-    }
-
-    .va-card{
-      border-radius:var(--radius-outer);
-      border:1px solid var(--border-weak);
-      background:var(--panel);
-      box-shadow:var(--shadow-card);
-      overflow:hidden;
-      isolation:isolate;
-    }
-    .va-head{
-      min-height:64px; /* taller header */
-      display:grid;
-      grid-template-columns:1fr auto;
-      align-items:center;
-      padding:0 16px;
-      border-bottom:1px solid var(--border);
-      color:var(--text);
-      background:linear-gradient(
-        90deg,
-        var(--panel) 0%,
-        color-mix(in oklab, var(--panel) 97%, white 3%) 50%,
-        var(--panel) 100%
-      );
-    }
-
-    .skeleton {
-      background: linear-gradient(90deg, var(--card) 25%, var(--panel) 37%, var(--card) 63%);
-      background-size: 200% 100%;
-      animation: shimmer 1.2s linear infinite;
-      display: inline-block;
-    }
-    @keyframes shimmer { from { background-position: -200% 0; } to { background-position: 200% 0; } }
-
-    input.va-input, textarea.va-input {
-      height: var(--control-h);
-      border-radius: 8px;
-      background: var(--panel);
-      border: 1px solid var(--border);
-      color: var(--text);
-      padding: 0 12px;
-      outline: none;
-    }
-    textarea.va-input { min-height: 160px; padding: 10px 12px; height:auto; }
+    /* add-row animation for First Messages */
+    @keyframes vaRowIn { from { transform: scale(0.98); opacity:.0; } to { transform: scale(1); opacity:1; } }
+    .va-row-add { animation: vaRowIn 220ms var(--ease); }
   `}</style>
 );
 
 /* ─────────── types / storage ─────────── */
 type ApiKey = { id: string; name: string; key: string };
+type PhoneNum = { id: string; name: string; number: string };
 
 type AgentData = {
   name: string;
@@ -149,8 +127,8 @@ type AgentData = {
   voiceName: string;
   apiKeyId?: string;
 
-  // NEW: phone number stored alongside creds section
-  phoneNumber?: string;
+  // NEW: store selected phone (id) just like API key
+  phoneId?: string;
 
   asrProvider: 'deepgram' | 'whisper' | 'assemblyai';
   asrModel: string;
@@ -159,7 +137,8 @@ type AgentData = {
   numerals: boolean;
 };
 
-type SetFieldFn = <K extends keyof AgentData>(k: K) => (v: AgentData[K]) => void;
+const BLANK_TEMPLATE_NOTE =
+  'This is a blank template with minimal defaults. You can change the model and messages, or click Generate to tailor the prompt to your business.';
 
 const PROMPT_SKELETON =
 `[Identity]
@@ -209,14 +188,14 @@ const DEFAULT_AGENT: AgentData = {
 
 [Error Handling / Fallback]
 - If unsure, ask a specific clarifying question first.
-`).trim() + '\n\n' + `# This is a blank template.`),
+`).trim() + '\n\n' + `# ${BLANK_TEMPLATE_NOTE}\n`),
   systemPromptBackend: '',
   contextText: '',
   ctxFiles: [],
   ttsProvider: 'openai',
   voiceName: 'Alloy (American)',
   apiKeyId: '',
-  phoneNumber: '',
+  phoneId: '',
   asrProvider: 'deepgram',
   asrModel: 'Nova 2',
   denoise: false,
@@ -227,11 +206,6 @@ const DEFAULT_AGENT: AgentData = {
 const keyFor = (id: string) => `va:agent:${id}`;
 const versKeyFor = (id: string) => `va:versions:${id}`;
 
-/* If your phone number page writes under different keys, change these constants */
-const LS_PHONE_PRIMARY = 'phone.number.selected';
-const LS_PHONE_LEGACY  = 'phone.number';
-
-/* ─────────── migrations ─────────── */
 function migrateAgent(d: AgentData): AgentData {
   const msgs = Array.isArray(d.firstMsgs) ? d.firstMsgs : (d.firstMsg ? [d.firstMsg] : []);
   return {
@@ -241,7 +215,6 @@ function migrateAgent(d: AgentData): AgentData {
     greetPick: d.greetPick || 'sequence',
     contextText: typeof d.contextText === 'string' ? d.contextText : '',
     ctxFiles: Array.isArray(d.ctxFiles) ? d.ctxFiles : [],
-    phoneNumber: typeof d.phoneNumber === 'string' ? d.phoneNumber : '',
   };
 }
 
@@ -252,24 +225,29 @@ const loadAgentData = (id: string): AgentData => {
   } catch {}
   return migrateAgent({ ...DEFAULT_AGENT });
 };
-const saveAgentData = (id: string, data: AgentData) => { try { if (IS_CLIENT) localStorage.setItem(keyFor(id), JSON.stringify(data)); } catch {} };
+const saveAgentData = (id: string, data: AgentData) => {
+  try { if (IS_CLIENT) localStorage.setItem(keyFor(id), JSON.stringify(data)); } catch {}
+};
+const pushVersion = (id:string, snapshot:any) => {
+  try {
+    if (!IS_CLIENT) return;
+    const raw = localStorage.getItem(versKeyFor(id));
+    const arr = raw ? JSON.parse(raw) : [];
+    arr.unshift({ id: `v_${Date.now()}`, ts: Date.now(), ...snapshot });
+    localStorage.setItem(versKeyFor(id), JSON.stringify(arr.slice(0, 50)));
+  } catch {}
+};
 
 /* ─────────── mock backend (save/publish) ─────────── */
 async function apiSave(agentId: string, payload: AgentData){
   const r = await fetch(`/api/voice/agent/${agentId}/save`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
   }).catch(()=>null as any);
   if (!r?.ok) throw new Error('Save failed');
   return r.json();
 }
-async function apiPublish(agentId: string, payload: { apiKeyId?: string; phoneNumber?: string; model?: string }){
-  const r = await fetch(`/api/voice/agent/${agentId}/publish`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  }).catch(()=>null as any);
+async function apiPublish(agentId: string){
+  const r = await fetch(`/api/voice/agent/${agentId}/publish`, { method: 'POST' }).catch(()=>null as any);
   if (!r?.ok) throw new Error('Publish failed');
   return r.json();
 }
@@ -278,11 +256,12 @@ async function apiPublish(agentId: string, payload: { apiKeyId?: string; phoneNu
 type Opt = { value: string; label: string; disabled?: boolean; note?: string; iconLeft?: React.ReactNode };
 
 const providerOpts: Opt[] = [
-  { value: 'openai',     label: 'OpenAI' },
+  { value: 'openai',     label: 'OpenAI',    iconLeft: <OpenAIStamp size={14} /> },
   { value: 'anthropic',  label: 'Anthropic — coming soon', disabled: true, note: 'soon' },
   { value: 'google',     label: 'Google — coming soon',    disabled: true, note: 'soon' },
 ];
 
+/** Fetch OpenAI models (labels) once an API key is chosen. */
 function useOpenAIModels(selectedKey: string|undefined){
   const [opts, setOpts] = useState<Opt[]>([
     { value: 'gpt-5', label: 'GPT-5' },
@@ -290,7 +269,7 @@ function useOpenAIModels(selectedKey: string|undefined){
     { value: 'gpt-4.1', label: 'GPT-4.1' },
     { value: 'gpt-4.1-mini', label: 'GPT-4.1 Mini' },
     { value: 'gpt-4o', label: 'GPT-4o' },
-    { value: 'gpt-4o-mini', label: 'gpt-4o Mini' },
+    { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
     { value: 'o4', label: 'o4' },
     { value: 'o4-mini', label: 'o4 Mini' },
     { value: 'gpt-4o-realtime-preview', label: 'GPT-4o Realtime Preview' },
@@ -307,13 +286,19 @@ function useOpenAIModels(selectedKey: string|undefined){
         const r = await fetch('/api/openai/models', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ key: selectedKey })
+          body: JSON.stringify({ key: selectedKey }),
         });
         if (!r.ok) throw new Error(await r.text());
         const j = await r.json();
         const models = Array.isArray(j?.models) ? j.models : [];
-        if (!aborted && models.length) setOpts(models.map((m:any) => ({ value: String(m.value), label: String(m.label) })));
-      } catch {} finally { if (!aborted) setLoading(false); }
+        if (!aborted && models.length) {
+          setOpts(models.map((m:any) => ({ value: String(m.value), label: String(m.label) })));
+        }
+      } catch {
+        // keep defaults on failure
+      } finally {
+        if (!aborted) setLoading(false);
+      }
     })();
     return () => { aborted = true; };
   }, [selectedKey]);
@@ -322,7 +307,7 @@ function useOpenAIModels(selectedKey: string|undefined){
 }
 
 const ttsProviders: Opt[] = [
-  { value: 'openai', label: 'OpenAI' },
+  { value: 'openai',    label: 'OpenAI', iconLeft: <OpenAIStamp size={14} /> },
   { value: 'elevenlabs', label: 'ElevenLabs — coming soon', disabled: true, note: 'soon' },
 ];
 
@@ -334,31 +319,35 @@ const asrProviders: Opt[] = [
 
 const asrModelsFor = (asr: string): Opt[] =>
   asr === 'deepgram'
-    ? [{ value: 'Nova 2', label: 'Nova 2' }, { value: 'Nova', label: 'Nova' }]
+    ? [
+        { value: 'Nova 2', label: 'Nova 2' },
+        { value: 'Nova',   label: 'Nova' },
+      ]
     : [{ value: 'coming', label: 'Models coming soon', disabled: true }];
 
-/* ─────────── UI atoms (styled to match Account) ─────────── */
+/* ─────────── UI atoms ─────────── */
 const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}) => (
   <button
     onClick={()=>onChange(!checked)}
     className="inline-flex items-center"
     style={{
       height:26, width:46, padding:'0 6px', borderRadius:999, justifyContent:'flex-start',
-      background: checked ? 'color-mix(in oklab, var(--brand) 18%, var(--panel))' : 'var(--panel)',
-      border:'1px solid var(--border)', boxShadow:'var(--shadow-card)'
+      background: checked ? 'color-mix(in oklab, #59d9b3 18%, var(--input-bg))' : 'var(--input-bg)',
+      border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)'
     }}
     aria-pressed={checked}
   >
     <span
       style={{
         width:16, height:16, borderRadius:999,
-        background: checked ? 'var(--brand)' : 'rgba(255,255,255,.12)',
+        background: checked ? CTA : 'rgba(255,255,255,.12)',
         transform:`translateX(${checked?20:0}px)`, transition:'transform .18s var(--ease)'
       }}
     />
   </button>
 );
 
+/* ─────────── Styled select with portal ─────────── */
 function StyledSelect({
   value, onChange, options, placeholder, leftIcon, menuTop
 }:{
@@ -416,33 +405,39 @@ function StyledSelect({
         type="button"
         onClick={() => { setOpen(v=>!v); setTimeout(()=>searchRef.current?.focus(),0); }}
         className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-[8px] text-sm outline-none transition"
-        style={{ height:'var(--control-h)', background:'var(--panel)', border:'1px solid var(--border)', color:'var(--text)' }}
+        style={{
+          height:'var(--control-h)',
+          background:'var(--vs-input-bg, #101314)',
+          border:'1px solid var(--vs-input-border, rgba(255,255,255,.14))',
+          color:'var(--text)'
+        }}
       >
         <span className="flex items-center gap-2 truncate">
           {leftIcon}
           <span className="truncate">{current ? current.label : (placeholder || '— Choose —')}</span>
         </span>
-        <ChevronRight className="w-4 h-4" style={{ color:'var(--text-muted)', transform: open ? 'rotate(90deg)' : 'rotate(0deg)', transition:'transform 200ms var(--ease)' }} />
+        <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)' }} />
       </button>
 
       {open && IS_CLIENT ? createPortal(
         <div
           ref={menuRef}
-          className="fixed p-2"
+          className="fixed z-[100020] p-2 va-portal"
           style={{
-            zIndex: 100020,
             left: (menuPos?.left ?? 0),
             top: (menuPos?.top ?? 0),
             width: (menuPos?.width ?? (btnRef.current?.getBoundingClientRect().width ?? 280)),
-            background:'var(--panel)', border:'1px solid var(--border)',
-            borderRadius:10, boxShadow:'var(--shadow-card)'
+            background:'var(--vs-menu-bg, #101314)',
+            border:'1px solid var(--vs-menu-border, rgba(255,255,255,.16))',
+            borderRadius:10,
+            boxShadow:'0 24px 64px rgba(0,0,0,.60), 0 8px 20px rgba(0,0,0,.45), 0 0 0 1px rgba(0,255,194,.10)'
           }}
         >
           {menuTop ? <div className="mb-2">{menuTop}</div> : null}
 
           <div
             className="flex items-center gap-2 mb-2 px-2 py-1.5 rounded-[8px]"
-            style={{ background:'var(--panel)', border:'1px solid var(--border)', color:'var(--text)' }}
+            style={{ background:'var(--vs-input-bg, #101314)', border:'1px solid var(--vs-input-border, rgba(255,255,255,.14))', color:'var(--text)' }}
           >
             <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
             <input
@@ -468,13 +463,16 @@ function StyledSelect({
                   border:'1px solid transparent',
                   cursor:o.disabled?'not-allowed':'pointer',
                 }}
-                onMouseEnter={(e)=>{ if (o.disabled) return; const el=e.currentTarget as HTMLButtonElement; el.style.background = 'color-mix(in oklab, var(--brand) 8%, transparent)'; el.style.border = '1px solid color-mix(in oklab, var(--brand) 35%, var(--border))'; }}
+                onMouseEnter={(e)=>{ if (o.disabled) return; const el=e.currentTarget as HTMLButtonElement; el.style.background = 'rgba(0,255,194,0.08)'; el.style.border = '1px solid rgba(0,255,194,0.25)'; }}
                 onMouseLeave={(e)=>{ const el=e.currentTarget as HTMLButtonElement; el.style.background = 'transparent'; el.style.border = '1px solid transparent'; }}
               >
-                {o.disabled ? <Lock className="w-3.5 h-3.5" /> :
+                {o.disabled ? (
+                  <Lock className="w-3.5 h-3.5" />
+                ) : (
                   <span className="inline-flex items-center justify-center w-3.5 h-3.5">
-                    <Check className="w-3.5 h-3.5" style={{ opacity: o.value===value ? 1 : 0 }} />
-                  </span>}
+                    {o.iconLeft || <Check className="w-3.5 h-3.5" style={{ opacity: o.value===value ? 1 : 0 }} />}
+                  </span>
+                )}
                 <span className="truncate">{o.label}</span>
                 <span />
               </button>
@@ -490,49 +488,102 @@ function StyledSelect({
   );
 }
 
-/* ─────────── Runtime JSZip loader (no webpack import) ─────────── */
-async function loadJSZipRuntime(): Promise<any | null> {
-  if (!IS_CLIENT) return null;
-  const w = window as any;
-  if (w.JSZip) return w.JSZip;
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const s = document.createElement('script');
-      s.src = 'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js';
-      s.async = true;
-      s.onload = () => resolve();
-      s.onerror = () => reject(new Error('JSZip CDN failed'));
-      document.head.appendChild(s);
-    });
-    return (window as any).JSZip || null;
-  } catch {
-    return null;
+/* ─────────── Character-level diff (LCS) to keep removals IN PLACE ─────────── */
+function diffCharsLCS(a: string, b: string){
+  const A = Array.from(a || '');
+  const B = Array.from(b || '');
+  const n = A.length, m = B.length;
+  const dp = Array.from({length:n+1},()=>new Array<number>(m+1).fill(0));
+  for (let i=1;i<=n;i++){
+    for (let j=1;j<=m;j++){
+      dp[i][j] = A[i-1]===B[j-1] ? dp[i-1][j-1]+1 : Math.max(dp[i-1][j], dp[i][j-1]);
+    }
   }
+  const ops: Array<{t:'same'|'add'|'rem', ch:string}> = [];
+  let i=n, j=m;
+  while (i>0 && j>0){
+    if (A[i-1]===B[j-1]) { ops.push({t:'same', ch:A[i-1]}); i--; j--; }
+    else if (dp[i-1][j] >= dp[i][j-1]) { ops.push({t:'rem', ch:A[i-1]}); i--; }
+    else { ops.push({t:'add', ch:B[j-1]}); j--; }
+  }
+  while (i>0){ ops.push({t:'rem', ch:A[i-1]}); i--; }
+  while (j>0){ ops.push({t:'add', ch:B[j-1]}); j--; }
+  ops.reverse();
+  return ops;
 }
 
-/* ─────────── File helpers (.docx via runtime JSZip; .doc best-effort) ─────────── */
+function PromptDiffTyping({
+  base, next, onAccept, onDecline
+}:{ base:string; next:string; onAccept:()=>void; onDecline:()=>void }){
+  const ops = diffCharsLCS(base, next);
+  return (
+    <div
+      className="rounded-[8px] px-3 py-[10px]"
+      style={{ minHeight: 320, background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)', color:'var(--text)' }}
+    >
+      <pre style={{ whiteSpace:'pre-wrap', wordBreak:'break-word', lineHeight:'1.55', margin:0 }}>
+        {ops.map((o, i) => {
+          if (o.t==='same') return <span key={i}>{o.ch}</span>;
+          if (o.t==='add')  return <span key={i} style={{ background:'rgba(16,185,129,.14)', color:'#10b981' }}>{o.ch}</span>;
+          return <span key={i} style={{ background:'rgba(239,68,68,.18)', color:'#ef4444', textDecoration:'line-through' }}>{o.ch}</span>;
+        })}
+      </pre>
+
+      <div className="mt-3 flex gap-2">
+        <button
+          className="h-9 px-3 rounded-[8px] font-semibold"
+          style={{ background:'#10b981', color:'#ffffff' }}
+          onClick={onAccept}
+        >
+          Accept
+        </button>
+        <button
+          className="h-9 px-3 rounded-[8px] font-semibold"
+          style={{ background:'#ef4444', color:'#ffffff' }}
+          onClick={onDecline}
+        >
+          Decline
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ─────────── File helpers (.docx via CDN JSZip; .doc best-effort; accept .docs) ─────────── */
 async function readFileAsText(f: File): Promise<string> {
   const name = f.name.toLowerCase();
+
+  // Allow weird ".docs" extension by treating like .docx if it is actually a zip
   const looksZip = async () => {
-    try {
-      const buf = new Uint8Array(await f.slice(0,4).arrayBuffer());
-      return buf[0]===0x50 && buf[1]===0x4b;
-    } catch { return false; }
+    const buf = new Uint8Array(await f.slice(0,4).arrayBuffer());
+    return buf[0]===0x50 && buf[1]===0x4b; // PK..
   };
 
   if (name.endsWith('.docx') || name.endsWith('.docs') || await looksZip()) {
-    const JSZip = await loadJSZipRuntime();
-    if (!JSZip) return '';
     try {
+      // @ts-ignore
+      const JSZipModule = await import(
+        /* webpackIgnore: true */
+        'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js'
+      );
+      const JSZip = (JSZipModule?.default || (window as any).JSZip);
+      if (!JSZip) throw new Error('JSZip not loaded');
+
       const buf = await f.arrayBuffer();
       const zip = await JSZip.loadAsync(buf);
       const docXml = await zip.file('word/document.xml')?.async('string');
       if (!docXml) return '';
+
       const text = docXml
-        .replace(/<w:p[^>]*>/g,'\n').replace(/<w:tab\/>/g,'\t').replace(/<w:br\/>/g,'\n')
-        .replace(/<(.|\n)*?>/g,'').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>');
+        .replace(/<w:p[^>]*>/g,'\n')
+        .replace(/<w:tab\/>/g,'\t')
+        .replace(/<w:br\/>/g,'\n')
+        .replace(/<(.|\n)*?>/g,'')
+        .replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>');
       return text.trim();
-    } catch { return ''; }
+    } catch {
+      return '';
+    }
   }
 
   if (name.endsWith('.doc')) {
@@ -581,18 +632,24 @@ export default function VoiceAgentSection() {
   const [publishing, setPublishing] = useState(false);
   const [toast, setToast] = useState<string>('');
   const [toastKind, setToastKind] = useState<'info'|'error'>('info');
+
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
+  const [phoneNumbers, setPhoneNumbers] = useState<PhoneNum[]>([]);
   const [showCall, setShowCall] = useState(false);
 
-  // Generate
+  // Generate / type-into-prompt flow
   const [showGenerate, setShowGenerate] = useState(false);
   const [composerText, setComposerText] = useState('');
+  const [isTypingIntoPrompt, setIsTypingIntoPrompt] = useState(false);
+  const [diffCandidate, setDiffCandidate] = useState<string>('');
+  const basePromptRef = useRef<string>('');
+  const typingRef = useRef<number | null>(null);
 
-  // models list
+  // models list (live from API when key selected)
   const selectedKey = apiKeys.find(k => k.id === data.apiKeyId)?.key;
   const { opts: openaiModels, loading: loadingModels } = useOpenAIModels(selectedKey);
 
-  // TTS preview
+  // TTS preview (quick)
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   useEffect(() => {
     if (!IS_CLIENT || !('speechSynthesis' in window)) return;
@@ -627,17 +684,18 @@ export default function VoiceAgentSection() {
 
   useEffect(() => { if (activeId) saveAgentData(activeId, data); }, [activeId, data]);
 
-  // load keys (best effort) + import phone number from Phone Number page
+  // load API keys + Phone numbers (best effort)
   useEffect(() => {
     let mounted = true;
     (async () => {
       try {
         const store = await scopedStorage().catch(() => null);
         if (!mounted) return;
-        if (!store) { setApiKeys([]); return; }
+        if (!store) { setApiKeys([]); setPhoneNumbers([]); return; }
 
         store.ensureOwnerGuard?.().catch(() => {});
 
+        // --- API keys ---
         const v1 = await store.getJSON<ApiKey[]>('apiKeys.v1', []).catch(() => []);
         const legacy = await store.getJSON<ApiKey[]>('apiKeys', []).catch(() => []);
         const merged = Array.isArray(v1) && v1.length ? v1 : Array.isArray(legacy) ? legacy : [];
@@ -650,28 +708,44 @@ export default function VoiceAgentSection() {
         if (!mounted) return;
         setApiKeys(cleaned);
 
-        // Select an api key if none set
         const globalSelected = await store.getJSON<string>('apiKeys.selectedId', '').catch(() => '');
-        const chosen =
+        const chosenKeyId =
           (data.apiKeyId && cleaned.some((k) => k.id === data.apiKeyId)) ? data.apiKeyId! :
           (globalSelected && cleaned.some((k) => k.id === globalSelected)) ? globalSelected :
           (cleaned[0]?.id || '');
 
-        if (chosen && chosen !== data.apiKeyId) {
-          setData(prev => ({ ...prev, apiKeyId: chosen }));
-          await store.setJSON('apiKeys.selectedId', chosen).catch(() => {});
+        if (chosenKeyId && chosenKeyId !== data.apiKeyId) {
+          setData(prev => ({ ...prev, apiKeyId: chosenKeyId }));
+          await store.setJSON('apiKeys.selectedId', chosenKeyId).catch(() => {});
         }
 
-        // Import stored phone number (if your Phone page saved one)
-        const storedPrimary = await store.getJSON<string>(LS_PHONE_PRIMARY, '').catch(() => '');
-        const storedLegacy  = await store.getJSON<string>(LS_PHONE_LEGACY,  '').catch(() => '');
-        const phoneChosen   = (storedPrimary && storedPrimary.trim()) || (storedLegacy && storedLegacy.trim()) || '';
-        if (phoneChosen && phoneChosen !== (data.phoneNumber || '')) {
-          setData(prev => ({ ...prev, phoneNumber: phoneChosen }));
+        // --- Phone numbers (LIKE API KEY DROPDOWN) ---
+        const phoneV1 = await store.getJSON<PhoneNum[]>(PHONE_LIST_KEY_V1, []).catch(() => []);
+        const phoneLegacy = await store.getJSON<PhoneNum[]>(PHONE_LIST_KEY_LEG, []).catch(() => []);
+        const phonesMerged = Array.isArray(phoneV1) && phoneV1.length ? phoneV1
+                             : Array.isArray(phoneLegacy) ? phoneLegacy : [];
+
+        const phoneCleaned = phonesMerged
+          .filter(Boolean)
+          .map((p: any) => ({ id: String(p?.id || ''), name: String(p?.name || ''), number: String(p?.number || p?.phone || '') }))
+          .filter(p => p.id && (p.number || p.name));
+
+        if (!mounted) return;
+        setPhoneNumbers(phoneCleaned);
+
+        const selPhone = await store.getJSON<string>(PHONE_SELECTED_ID, '').catch(() => '');
+        const chosenPhoneId =
+          (data.phoneId && phoneCleaned.some(p => p.id === data.phoneId)) ? data.phoneId! :
+          (selPhone && phoneCleaned.some(p => p.id === selPhone)) ? selPhone :
+          (phoneCleaned[0]?.id || '');
+
+        if (chosenPhoneId && chosenPhoneId !== data.phoneId) {
+          setData(prev => ({ ...prev, phoneId: chosenPhoneId }));
+          await store.setJSON(PHONE_SELECTED_ID, chosenPhoneId).catch(() => {});
         }
       } catch {
         if (!mounted) return;
-        setApiKeys([]);
+        setApiKeys([]); setPhoneNumbers([]);
       }
     })();
     return () => { mounted = false; };
@@ -691,7 +765,7 @@ export default function VoiceAgentSection() {
     };
   }
 
-  // keep backend prompt synced
+  // keep backend prompt synced when user types by hand
   useEffect(() => {
     if (!data.systemPrompt) return;
     try {
@@ -700,7 +774,7 @@ export default function VoiceAgentSection() {
         setData(p => ({ ...p, systemPromptBackend: compiled.backendString }));
       }
     } catch {}
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data.systemPrompt]);
 
   async function doSave(){
@@ -712,25 +786,93 @@ export default function VoiceAgentSection() {
   }
   async function doPublish(){
     if (!activeId) { setToastKind('error'); setToast('Select or create an agent'); return; }
-
-    // Frontend validation to avoid “Publish failed”
-    if (!safeTrim(data.apiKeyId || '')) { setToastKind('error'); setToast('Add an API key in Credentials.'); return; }
-    if (!safeTrim(data.phoneNumber || '')) { setToastKind('error'); setToast('Add a phone number in Credentials.'); return; }
-    if (!safeTrim(data.model || '')) { setToastKind('error'); setToast('Choose a model first.'); return; }
-
     setPublishing(true); setToast('');
-    try {
-      await apiPublish(activeId, {
-        apiKeyId: data.apiKeyId,
-        phoneNumber: data.phoneNumber,
-        model: data.model
-      });
-      setToastKind('info'); setToast('Published');
-    }
+    try { await apiPublish(activeId); setToastKind('info'); setToast('Published'); }
     catch { setToastKind('error'); setToast('Publish failed'); }
-    finally { setPublishing(false); setTimeout(()=>setToast(''), 1600); }
+    finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
   }
 
+  /* Files: click-to-upload, show Import button to type-diff into prompt */
+  const fileInputRef = useRef<HTMLInputElement|null>(null);
+  const rebuildContextText = (files:{name:string;text:string}[]) => {
+    const merged = files.map(f => `# File: ${f.name}\n${(f.text||'').trim()}`).join('\n\n');
+    setField('ctxFiles')(files);
+    setField('contextText')(merged.trim());
+  };
+  const onPickFiles = async (files: File[]) => {
+    if (!files?.length) return;
+    const out: {name:string;text:string}[] = [...(data.ctxFiles||[])];
+    for (const f of files) {
+      const txt = await readFileAsText(f);
+      if (!txt) continue;
+      out.push({ name: f.name, text: txt });
+    }
+    rebuildContextText(out);
+    setToastKind('info'); setToast('File(s) added'); setTimeout(()=>setToast(''), 1200);
+  };
+
+  // Import files → prompt (typed diff)
+  const importFilesIntoPrompt = async () => {
+    const ctx  = (data.contextText || '').trim();
+    const base = (data.systemPromptBackend || data.systemPrompt || DEFAULT_PROMPT_RT).trim();
+    const next = ctx ? `${base}\n\n[Context]\n${ctx}`.trim() : base;
+
+    basePromptRef.current = data.systemPrompt || DEFAULT_PROMPT_RT;
+    setShowGenerate(false);
+    await sleep(80);
+
+    setIsTypingIntoPrompt(true);
+    setDiffCandidate('');
+    if (typingRef.current) cancelAnimationFrame(typingRef.current as any);
+
+    let i = 0;
+    const step = () => {
+      i += Math.max(1, Math.round(next.length / 140));
+      setDiffCandidate(next.slice(0, i));
+      if (i < next.length) typingRef.current = requestAnimationFrame(step);
+    };
+    typingRef.current = requestAnimationFrame(step);
+
+    // precompile backend for faster accept
+    try {
+      const compiled = compilePrompt({ basePrompt: next, userText: '' });
+      setField('systemPromptBackend')(compiled.backendString);
+    } catch {}
+  };
+
+  /* Generate → type inside the prompt box with Accept/Decline + green/red diff */
+  const startTypingIntoPrompt = async (targetText:string) => {
+    basePromptRef.current = data.systemPrompt || DEFAULT_PROMPT_RT;
+    setIsTypingIntoPrompt(true);
+    setDiffCandidate('');
+    if (typingRef.current) cancelAnimationFrame(typingRef.current as any);
+    let i = 0;
+    const step = () => {
+      i += Math.max(1, Math.round(targetText.length / 140));
+      const slice = targetText.slice(0, i);
+      setDiffCandidate(slice);
+      if (i < targetText.length) {
+        typingRef.current = requestAnimationFrame(step);
+      }
+    };
+    typingRef.current = requestAnimationFrame(step);
+  };
+  const acceptGenerated = () => {
+    const chosen = (diffCandidate || data.systemPrompt).replace(/\u200b/g,'');
+    setField('systemPrompt')(chosen);
+    try {
+      const compiled = compilePrompt({ basePrompt: chosen, userText: '' });
+      setField('systemPromptBackend')(compiled.backendString);
+    } catch {}
+    setIsTypingIntoPrompt(false);
+    setDiffCandidate('');
+  };
+  const declineGenerated = () => {
+    setIsTypingIntoPrompt(false);
+    setDiffCandidate('');
+  };
+
+  /* ─────────── CALL MODEL ─────────── */
   const callModel = useMemo(() => {
     const m = (data.model || '').toLowerCase();
     if (m.includes('realtime')) return data.model;
@@ -742,6 +884,17 @@ export default function VoiceAgentSection() {
     return found?.label || data.model || '—';
   }, [openaiModels, data.model]);
 
+  /* state for First Message add-row highlight */
+  const [justAddedIndex, setJustAddedIndex] = useState<number | null>(null);
+  const addFirstMessage = () => {
+    const next = [...(data.firstMsgs||[])];
+    if (next.length >= 20) return;
+    next.push('');
+    setField('firstMsgs')(next);
+    setJustAddedIndex(next.length - 1);
+    setTimeout(()=>setJustAddedIndex(null), 260);
+  };
+
   /* ─────────── UI ─────────── */
   return (
     <section className="va-scope" style={{ background:'var(--bg)', color:'var(--text)' }}>
@@ -749,18 +902,18 @@ export default function VoiceAgentSection() {
 
       {/* rail + content */}
       <div className="grid w-full" style={{ gridTemplateColumns: '260px 1fr' }}>
-        <div className="sticky top-0 h-screen" style={{ borderRight:'1px solid var(--border)' }}>
+        <div className="sticky top-0 h-screen" style={{ borderRight:'1px solid rgba(255,255,255,.06)' }}>
           <RailBoundary><AssistantRail /></RailBoundary>
         </div>
 
-        <div className="px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w-[1160px]" style={{ fontSize:14, lineHeight:1.45 }}>
+        <div className="px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w-[1160px]" style={{ fontSize:'var(--fz-body)', lineHeight:'var(--lh-body)' }}>
           {/* Top actions */}
           <div className="mb-4 flex flex-wrap items-center justify-end gap-3">
             <button
               onClick={doSave}
               disabled={saving}
               className="inline-flex items-center gap-2 rounded-[8px] px-4 text-sm transition hover:-translate-y-[1px] disabled:opacity-60"
-              style={{ height:'var(--control-h)', background:'var(--btn-bg)', border:'1px solid var(--btn-border)', color:'var(--btn-fg)' }}
+              style={{ height:'var(--control-h)', background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)', color:'var(--text)' }}
             >
               {saving ? 'Saving…' : 'Save'}
             </button>
@@ -769,7 +922,7 @@ export default function VoiceAgentSection() {
               onClick={doPublish}
               disabled={publishing}
               className="inline-flex items-center gap-2 rounded-[8px] px-4 text-sm transition hover:-translate-y-[1px] disabled:opacity-60"
-              style={{ height:'var(--control-h)', background:'var(--btn-bg)', border:'1px solid var(--btn-border)', color:'var(--btn-fg)' }}
+              style={{ height:'var(--control-h)', background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)', color:'var(--text)' }}
             >
               <Rocket className="w-4 h-4" /> {publishing ? 'Publishing…' : 'Publish'}
             </button>
@@ -782,24 +935,19 @@ export default function VoiceAgentSection() {
               onClick={()=>{
                 const key = apiKeys.find(k => k.id === data.apiKeyId)?.key || '';
                 if (!key) {
-                  setToastKind('error'); setToast('Select an OpenAI API key first (Credentials).');
+                  setToastKind('error'); setToast('Select an OpenAI API key first.');
                   setTimeout(()=>setToast(''), 2200);
                   return;
                 }
                 setShowCall(true);
               }}
               className="inline-flex items-center gap-2 rounded-[8px] select-none"
-              style={{
-                height:'var(--control-h)', padding:'0 16px',
-                background:'var(--brand-btn-bg)', color:'#ffffff', /* force white per request */
-                fontWeight:700,
-                boxShadow:'0 10px 22px rgba(89,217,179,.20)'
-              }}
-              onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.filter = 'brightness(1.05)')}
-              onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.filter = 'none')}
+              style={{ height:'var(--control-h)', padding:'0 16px', background:CTA, color:'#ffffff', fontWeight:700, boxShadow:'0 10px 22px rgba(89,217,179,.20)' }}
+              onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA_HOVER)}
+              onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA)}
             >
-              <Phone className="w-4 h-4" />
-              <span>Talk to Assistant</span>
+              <PhoneFilled style={{ color:'#ffffff' }} />
+              <span style={{ color:'#ffffff' }}>Talk to Assistant</span>
             </button>
           </div>
 
@@ -809,31 +957,41 @@ export default function VoiceAgentSection() {
               style={{
                 background: toastKind === 'error' ? 'rgba(239,68,68,.12)' : 'rgba(89,217,179,.10)',
                 color: 'var(--text)',
-                boxShadow:'var(--shadow-card)', border:'1px solid var(--border)'
+                boxShadow: toastKind === 'error'
+                  ? '0 0 0 1px rgba(239,68,68,.25) inset'
+                  : '0 0 0 1px rgba(89,217,179,.16) inset'
               }}
             >
-              <CheckCircle2 className="w-4 h-4" /> {toast}
+              <Check className="w-4 h-4" /> {toast}
             </div>
           ) : null}
 
           {/* Metrics */}
           <div className="grid gap-3 md:grid-cols-2 mb-3">
             <div className="va-card">
-              <div className="va-head"><div className="text-xs" style={{ color:'var(--text-muted)' }}>Cost</div><div /></div>
-              <div className="p-4"><div className="font-semibold" style={{ fontSize:'15px' }}>~$0.1/min</div></div>
+              <div className="va-head" style={{ minHeight: 56 }}>
+                <div className="text-xs" style={{ color:'var(--text-muted)' }}>Cost</div><div />
+              </div>
+              <div className="p-4">
+                <div className="font-semibold" style={{ fontSize:'15px' }}>~$0.1/min</div>
+              </div>
             </div>
             <div className="va-card">
-              <div className="va-head"><div className="text-xs" style={{ color:'var(--text-muted)' }}>Latency</div><div /></div>
-              <div className="p-4"><div className="font-semibold" style={{ fontSize:'15px' }}>~1050 ms</div></div>
+              <div className="va-head" style={{ minHeight: 56 }}>
+                <div className="text-xs" style={{ color:'var(--text-muted)' }}>Latency</div><div />
+              </div>
+              <div className="p-4">
+                <div className="font-semibold" style={{ fontSize:'15px' }}>~1050 ms</div>
+              </div>
             </div>
           </div>
 
           {/* Model config */}
           <Section
             title="Model"
-            icon={<Gauge className="w-4 h-4" style={{ color:'var(--brand)' }} />}
+            icon={<Gauge className="w-4 h-4" style={{ color: CTA }} />}
             desc="Configure the model, assistant name, and first message(s)."
-            defaultOpen
+            defaultOpen={true}
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
@@ -841,7 +999,8 @@ export default function VoiceAgentSection() {
                 <input
                   value={data.name}
                   onChange={(e)=>setField('name')(e.target.value)}
-                  className="va-input w-full"
+                  className="w-full bg-transparent outline-none rounded-[8px] px-3"
+                  style={{ height:'var(--control-h)', background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)', color:'var(--text)' }}
                   placeholder="e.g., Riley"
                 />
               </div>
@@ -880,24 +1039,24 @@ export default function VoiceAgentSection() {
                   <StyledSelect
                     value={data.greetPick || 'sequence'}
                     onChange={(v)=>setField('greetPick')(v as AgentData['greetPick'])}
-                    options={[{ value: 'sequence', label: 'Play in order' },{ value: 'random', label: 'Randomize' }]}
+                    options={[
+                      { value: 'sequence', label: 'Play in order' },
+                      { value: 'random',   label: 'Randomize'   },
+                    ]}
                   />
                   <button
                     type="button"
-                    onClick={()=>{
-                      const next = [...(data.firstMsgs||[])]; if (next.length>=20) return; next.push('');
-                      setField('firstMsgs')(next); setField('firstMsg')(next[0]||'');
-                    }}
+                    onClick={addFirstMessage}
                     className="inline-flex items-center gap-2 text-sm rounded-[8px] px-3 py-1.5"
-                    style={{ border:'1px solid var(--btn-border)', background:'var(--btn-bg)', color:'var(--btn-fg)' }}
+                    style={{ border:'1px solid rgba(255,255,255,.14)' }}
                   >
                     <Plus className="w-4 h-4" /> Add
                   </button>
                 </div>
               </div>
 
-              {(data.firstMsgs||[]).map((msg, idx) => (
-                <div key={idx} className="flex items-center gap-2 mb-2">
+              {(data.firstMsgs?.length ? data.firstMsgs : []).map((msg, idx) => (
+                <div key={idx} className={`flex items-center gap-2 mb-2 ${justAddedIndex===idx?'va-row-add':''}`}>
                   <input
                     value={msg}
                     onChange={(e)=>{
@@ -906,16 +1065,19 @@ export default function VoiceAgentSection() {
                       setField('firstMsgs')(next);
                       setField('firstMsg')(next[0] || '');
                     }}
-                    className="va-input w-full"
+                    className="w-full bg-transparent outline-none rounded-[8px] px-3"
+                    style={{ height:'var(--control-h)', background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)', color:'var(--text)' }}
                     placeholder={`Message ${idx+1}`}
                   />
                   <button
                     onClick={()=>{
-                      const next = [...(data.firstMsgs||[])]; next.splice(idx,1);
-                      setField('firstMsgs')(next); setField('firstMsg')(next[0]||'');
+                      const next = [...(data.firstMsgs||[])];
+                      next.splice(idx,1);
+                      setField('firstMsgs')(next);
+                      setField('firstMsg')((next[0]||''));
                     }}
                     className="w-10 h-10 grid place-items-center rounded-[8px]"
-                    style={{ border:'1px solid var(--btn-border)', background:'var(--btn-bg)', color:'var(--btn-fg)' }}
+                    style={{ border:'1px solid rgba(255,255,255,.12)' }}
                     aria-label="Remove"
                   >
                     <Trash2 className="w-4 h-4" />
@@ -934,52 +1096,142 @@ export default function VoiceAgentSection() {
             <div className="mt-6">
               <div className="flex items-center justify-between mb-2">
                 <div className="font-medium" style={{ fontSize:'12.5px' }}>System Prompt</div>
-                <button
-                  className="inline-flex items-center gap-2 rounded-[8px] text-sm"
-                  style={{ height:34, padding:'0 12px', background:'var(--btn-bg)', color:'var(--btn-fg)', border:'1px solid var(--btn-border)' }}
-                  onClick={()=>{ setComposerText(''); setShowGenerate(true); }}
-                >
-                  <Wand2 className="w-4 h-4" /> Generate
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    className="inline-flex items-center gap-2 rounded-[8px] text-sm"
+                    style={{ height:34, padding:'0 12px', background:CTA, color:'#fff', border:'1px solid rgba(255,255,255,.08)' }}
+                    onClick={()=>{ setComposerText(''); setShowGenerate(true); }}
+                  >
+                    <Wand2 className="w-4 h-4" /> Generate
+                  </button>
+                </div>
               </div>
 
-              <textarea
-                className="va-input w-full"
-                style={{ minHeight: 320 }}
-                value={data.systemPrompt}
-                onChange={(e)=> setField('systemPrompt')(e.target.value)}
-              />
+              {/* Prompt box with inline *character-level* diff while generating */}
+              <div className="relative">
+                {!isTypingIntoPrompt ? (
+                  <textarea
+                    className="w-full bg-transparent outline-none rounded-[8px] px-3 py-[10px]"
+                    style={{ minHeight: 320, background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)', color:'var(--text)' }}
+                    value={data.systemPrompt}
+                    onChange={(e)=> setField('systemPrompt')(e.target.value)}
+                  />
+                ) : (
+                  <PromptDiffTyping
+                    base={basePromptRef.current}
+                    next={diffCandidate || data.systemPrompt}
+                    onAccept={acceptGenerated}
+                    onDecline={declineGenerated}
+                  />
+                )}
+              </div>
 
               {/* Context files */}
-              <ContextFiles data={data} setField={setField} />
+              <div className="mt-6">
+                <div className="mb-2 flex items-center justify-between">
+                  <div className="font-medium text-[12.5px]">Context Files</div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      multiple
+                      accept=".txt,.md,.csv,.json,.docx,.doc,.docs,text/plain,text/markdown,text/csv,application/json,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,application/zip"
+                      className="hidden"
+                      onChange={async (e)=>{ const files = Array.from(e.target.files || []); await onPickFiles(files); if (fileInputRef.current) fileInputRef.current.value=''; }}
+                    />
+                    <button
+                      type="button"
+                      onClick={()=>fileInputRef.current?.click()}
+                      className="inline-flex items-center gap-2 text-sm rounded-[8px] px-3 py-1.5"
+                      style={{ border:'1px solid rgba(255,255,255,.14)' }}
+                    >
+                      Add file
+                    </button>
+                    {!!(data.ctxFiles && data.ctxFiles.length) && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={importFilesIntoPrompt}
+                          className="inline-flex items-center gap-2 text-sm rounded-[8px] px-3 py-1.5"
+                          style={{ background:CTA, color:'#fff', border:'1px solid rgba(255,255,255,.10)' }}
+                        >
+                          Import to Prompt
+                        </button>
+                        <button
+                          type="button"
+                          onClick={()=>{ rebuildContextText([]); }}
+                          className="inline-flex items-center gap-2 text-sm rounded-[8px] px-3 py-1.5"
+                          style={{ border:'1px solid rgba(255,255,255,.14)' }}
+                        >
+                          Clear
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* List of files */}
+                {!(data.ctxFiles && data.ctxFiles.length) ? (
+                  <div className="text-xs" style={{ color:'var(--text-muted)' }}>
+                    No files yet. Click <b>Add file</b> to upload (.txt, .md, .csv, .json, <b>.docx</b> or best-effort <b>.doc</b> / <b>.docs</b>).
+                  </div>
+                ) : (
+                  <div className="rounded-[8px] p-3" style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)' }}>
+                    {(data.ctxFiles||[]).map((f, idx) => (
+                      <div key={idx} className="mb-3 last:mb-0">
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="text-sm font-medium truncate">{f.name}</div>
+                          <button
+                            onClick={()=>{
+                              const next = [...(data.ctxFiles||[])]; next.splice(idx,1);
+                              rebuildContextText(next);
+                            }}
+                            className="text-xs rounded-[6px] px-2 py-1"
+                            style={{ border:'1px solid rgba(255,255,255,.14)' }}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                        <div className="text-xs" style={{ color:'var(--text-muted)' }}>
+                          {(f.text || '').slice(0, 240) || '(empty)'}{(f.text||'').length>240?'…':''}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </Section>
 
           {/* Voice */}
           <Section
             title="Voice"
-            icon={<Volume2 className="w-4 h-4" style={{ color:'var(--brand)' }} />}
+            icon={<Volume2 className="w-4 h-4" style={{ color: CTA }} />}
             desc="Choose TTS and preview the voice."
-            defaultOpen
+            defaultOpen={true}
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {/* Provider on the LEFT */}
               <div>
-                <div className="mb-2 text-[12.5px]">Provider</div>
+                <div className="mb-2 text-[12.5px] flex items-center gap-2">
+                  <KeyRound className="w-4 h-4 opacity-80" /> OpenAI API Key
+                </div>
                 <StyledSelect
-                  value={data.ttsProvider}
-                  onChange={(v)=>setField('ttsProvider')(v as any)}
+                  value={data.apiKeyId || ''}
+                  onChange={async (val)=>{
+                    setField('apiKeyId')(val);
+                    try { const store = await scopedStorage(); await store.ensureOwnerGuard?.(); await store.setJSON('apiKeys.selectedId', val); } catch {}
+                  }}
                   options={[
-                    { value: 'openai', label: 'OpenAI' },
-                    { value: 'elevenlabs', label: 'ElevenLabs — coming soon', disabled: true, note: 'soon' },
-                    { value: 'azure', label: 'Azure — coming soon', disabled: true, note: 'soon' },
-                    { value: 'google', label: 'Google — coming soon', disabled: true, note: 'soon' },
+                    { value: '', label: 'Select an API key…', iconLeft: <OpenAIStamp size={14} /> },
+                    ...apiKeys.map(k=>({ value: k.id, label: `${k.name} ••••${(k.key||'').slice(-4).toUpperCase()}`, iconLeft: <OpenAIStamp size={14} /> }))
                   ]}
-                  placeholder="— Choose —"
+                  leftIcon={<OpenAIStamp size={14} />}
                 />
+                <div className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
+                  Keys are stored per-account via scoped storage. Manage them in the API Keys page.
+                </div>
               </div>
 
-              {/* Voice picker on the RIGHT */}
               <div>
                 <div className="mb-2 text-[12.5px]">Voice</div>
                 <StyledSelect
@@ -994,7 +1246,7 @@ export default function VoiceAgentSection() {
                   placeholder="— Choose —"
                   menuTop={
                     <div className="flex items-center justify-between px-3 py-2 rounded-[8px]"
-                         style={{ background:'var(--panel)', border:'1px solid var(--border)' }}
+                         style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)' }}
                     >
                       <div className="text-xs" style={{ color:'var(--text-muted)' }}>Preview</div>
                       <div className="flex items-center gap-2">
@@ -1003,7 +1255,7 @@ export default function VoiceAgentSection() {
                           onClick={()=>speakPreview(`This is ${data.voiceName || 'the selected'} voice preview.`)}
                           className="w-8 h-8 rounded-full grid place-items-center"
                           aria-label="Play voice"
-                          style={{ background:'var(--brand-btn-bg)', color:'var(--brand-btn-fg)' }}
+                          style={{ background: CTA, color:'#0a0f0d' }}
                         >
                           <Play className="w-4 h-4" />
                         </button>
@@ -1012,7 +1264,7 @@ export default function VoiceAgentSection() {
                           onClick={stopPreview}
                           className="w-8 h-8 rounded-full grid place-items-center border"
                           aria-label="Stop preview"
-                          style={{ background: 'var(--btn-bg)', color:'var(--btn-fg)', borderColor:'var(--btn-border)' }}
+                          style={{ background: 'var(--panel)', color:'var(--text)', borderColor:'rgba(255,255,255,.10)' }}
                         >
                           <Square className="w-4 h-4" />
                         </button>
@@ -1024,36 +1276,36 @@ export default function VoiceAgentSection() {
             </div>
           </Section>
 
-          {/* NEW — Credentials (API key + Phone Number) */}
+          {/* Credentials — NEW: Phone Number dropdown like API key */}
           <Section
             title="Credentials"
-            icon={<Phone className="w-4 h-4" style={{ color:'var(--brand)' }} />}
-            desc="Required to publish and place/receive calls."
-            defaultOpen
+            icon={<Phone className="w-4 h-4" style={{ color: CTA }} />}
+            desc="Select the phone number to use for calling."
+            defaultOpen={true}
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <ApiKeySelect
-                apiKeys={apiKeys}
-                selectedId={data.apiKeyId || ''}
-                onChange={async (val)=>{
-                  setField('apiKeyId')(val);
-                  try {
-                    const store = await scopedStorage();
-                    await store.ensureOwnerGuard?.();
-                    await store.setJSON('apiKeys.selectedId', val);
-                  } catch {}
-                }}
-              />
               <div>
                 <div className="mb-2 text-[12.5px]">Phone Number</div>
-                <input
-                  value={data.phoneNumber || ''}
-                  onChange={(e)=>setField('phoneNumber')(e.target.value)}
-                  className="va-input w-full"
-                  placeholder="+1 555-123-4567"
+                <StyledSelect
+                  value={data.phoneId || ''}
+                  onChange={async (val)=>{
+                    setField('phoneId')(val);
+                    try {
+                      const store = await scopedStorage();
+                      await store.ensureOwnerGuard?.();
+                      await store.setJSON(PHONE_SELECTED_ID, val);
+                    } catch {}
+                  }}
+                  options={[
+                    { value: '', label: 'Select a phone number…' },
+                    ...phoneNumbers.map(p => ({
+                      value: p.id,
+                      label: `${p.name ? `${p.name} • ` : ''}${p.number}`
+                    }))
+                  ]}
                 />
-                <div className="mt-2 text-xs" style={{ color:'var(--text-muted)' }}>
-                  We auto-import from your Phone Number page when available.
+                <div className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
+                  Imported from your Phone Number section. Manage numbers there.
                 </div>
               </div>
             </div>
@@ -1062,9 +1314,9 @@ export default function VoiceAgentSection() {
           {/* Transcriber */}
           <Section
             title="Transcriber"
-            icon={<Mic className="w-4 h-4" style={{ color:'var(--brand)' }} />}
+            icon={<Mic className="w-4 h-4" style={{ color: CTA }} />}
             desc="Transcription settings"
-            defaultOpen
+            defaultOpen={true}
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
@@ -1077,14 +1329,23 @@ export default function VoiceAgentSection() {
               </div>
             </div>
             <div className="mt-4 grid sm:grid-cols-2 gap-3">
-              <ToggleRow label="Background Denoising" checked={data.denoise} onChange={setField('denoise')} />
-              <ToggleRow label="Use Numerals" checked={data.numerals} onChange={setField('numerals')} />
+              <div className="flex items-center justify-between p-3 rounded-[8px]" style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)' }}>
+                <span className="text-sm">Background Denoising</span>
+                <Toggle checked={data.denoise} onChange={setField('denoise')} />
+              </div>
+              <div className="flex items-center justify-between p-3 rounded-[8px]" style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)' }}>
+                <span className="text-sm">Use Numerals</span>
+                <Toggle checked={data.numerals} onChange={setField('numerals')} />
+              </div>
             </div>
           </Section>
+
+          {/* spacer under Transcriber per your note */}
+          <div style={{ height: 20 }} />
         </div>
       </div>
 
-      {/* Generate overlay (exactly like your spec) */}
+      {/* ─────────── Generate overlay (boxed input; typing is in prompt box) ─────────── */}
       {showGenerate && IS_CLIENT ? createPortal(
         <>
           <div
@@ -1093,18 +1354,33 @@ export default function VoiceAgentSection() {
             onClick={()=> setShowGenerate(false)}
           />
           <div className="fixed inset-0 grid place-items-center px-4" style={{ zIndex: Z_MODAL }}>
-            <div className="w-full max-w-[640px] rounded-[8px] overflow-hidden va-card" style={{ maxHeight:'86vh' }}>
-              <div className="va-head" style={{ minHeight:64 }}>
+            <div
+              className="w-full max-w-[640px] rounded-[8px] overflow-hidden"
+              style={{
+                background: 'var(--panel)',
+                color: 'var(--text)',
+                border: `1px solid ${GREEN_LINE}`,
+                maxHeight: '86vh',
+                boxShadow:'0 22px 44px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px rgba(89,217,179,.20)'
+              }}
+            >
+              <div
+                className="flex items-center justify-between px-6 py-4"
+                style={{
+                  background:`linear-gradient(90deg,var(--panel) 0%,color-mix(in oklab,var(--panel) 97%, white 3%) 50%,var(--panel) 100%)`,
+                  borderBottom:`1px solid ${GREEN_LINE}`
+                }}
+              >
                 <div className="flex items-center gap-3">
                   <div className="w-9 h-9 rounded-lg grid place-items-center" style={{ background:'rgba(89,217,179,.12)' }}>
-                    <Wand2 className="w-5 h-5" style={{ color:'var(--brand)' }} />
+                    <span style={{ color: CTA }}><Wand2 className="w-5 h-5" /></span>
                   </div>
                   <div className="text-lg font-semibold">Describe how to update the prompt</div>
                 </div>
                 <button
                   onClick={()=> setShowGenerate(false)}
                   className="w-8 h-8 rounded-[6px] grid place-items-center"
-                  style={{ background:'var(--btn-bg)', border:'1px solid var(--btn-border)', color:'var(--btn-fg)' }}
+                  style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}` }}
                   aria-label="Close"
                 >
                   <X className="w-4 h-4" />
@@ -1115,13 +1391,16 @@ export default function VoiceAgentSection() {
                 <div className="text-xs" style={{ color:'var(--text-muted)' }}>
                   Tip: “assistant for a dental clinic; tone friendly; handle booking and FAQs”.
                 </div>
-                <div className="rounded-[8px] p-2" style={{ background:'var(--panel)', border:'1px solid var(--border)' }}>
+                <div
+                  className="rounded-[8px] p-2"
+                  style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)' }}
+                >
                   <textarea
                     value={composerText}
                     onChange={(e)=>setComposerText(e.target.value)}
-                    className="va-input w-full"
+                    className="w-full bg-transparent outline-none rounded-[6px] px-3 py-2"
                     placeholder="Describe changes…"
-                    style={{ minHeight: 160, maxHeight: '40vh', resize:'vertical' }}
+                    style={{ minHeight: 160, maxHeight: '40vh', color:'var(--text)', resize:'vertical' }}
                   />
                 </div>
               </div>
@@ -1130,7 +1409,7 @@ export default function VoiceAgentSection() {
                 <button
                   onClick={()=> setShowGenerate(false)}
                   className="w-full h-[40px] rounded-[8px]"
-                  style={{ background:'var(--btn-bg)', border:'1px solid var(--btn-border)', color:'var(--btn-fg)', fontWeight:600 }}
+                  style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)', color:'var(--text)', fontWeight:600 }}
                 >
                   Cancel
                 </button>
@@ -1143,7 +1422,7 @@ export default function VoiceAgentSection() {
                       const compiled = compilePrompt({ basePrompt: base, userText: raw });
                       setShowGenerate(false);
                       await sleep(150);
-                      setField('systemPrompt')(compiled.frontendText);
+                      await startTypingIntoPrompt(compiled.frontendText); // typing happens in the prompt box
                       setField('systemPromptBackend')(compiled.backendString);
                     } catch {
                       setToastKind('error'); setToast('Generate failed — try simpler wording.');
@@ -1152,7 +1431,7 @@ export default function VoiceAgentSection() {
                   }}
                   disabled={!composerText.trim()}
                   className="w-full h-[40px] rounded-[8px] font-semibold inline-flex items-center justify-center gap-2"
-                  style={{ background:'var(--btn-bg)', color:'var(--btn-fg)', border:'1px solid var(--btn-border)', opacity: (!composerText.trim() ? .6 : 1) }}
+                  style={{ background:CTA, color:'#ffffff', opacity: (!composerText.trim() ? .6 : 1) }}
                 >
                   <Wand2 className="w-4 h-4" /> Generate
                 </button>
@@ -1163,7 +1442,7 @@ export default function VoiceAgentSection() {
         document.body
       ) : null}
 
-      {/* Voice/Call panel (WebRTC) */}
+      {/* ─────────── Voice/Call panel (WebRTC) ─────────── */}
       {IS_CLIENT ? createPortal(
         <>
           <div
@@ -1172,7 +1451,7 @@ export default function VoiceAgentSection() {
               zIndex: 9996,
               background: showCall ? 'rgba(8,10,12,.78)' : 'transparent',
               opacity: showCall ? 1 : 0,
-              transition: 'opacity .2s var(--ease)'
+              transition: 'opacity .2s cubic-bezier(.22,.61,.36,1)'
             }}
             onClick={()=> setShowCall(false)}
           />
@@ -1198,6 +1477,7 @@ export default function VoiceAgentSection() {
               onClose={()=> setShowCall(false)}
               prosody={{ fillerWords: true, microPausesMs: 200, phoneFilter: true, turnEndPauseMs: 120 }}
 
+              // greetings: joined from list
               firstMode={data.firstMode as any}
               firstMsg={
                 (data.greetPick==='random'
@@ -1214,7 +1494,7 @@ export default function VoiceAgentSection() {
   );
 }
 
-/* ─────────── Section (match Account: ChevronRight rotate, bigger title) ─────────── */
+/* ─────────── Section (expand anim) ─────────── */
 function Section({
   title, icon, desc, children, defaultOpen = true
 }:{
@@ -1237,18 +1517,13 @@ function Section({
               {icon}
             </span>
             <span className="min-w-0">
-              <span className="block font-semibold truncate" style={{ fontSize:'20px' }}>{title}</span>
+              <span className="block font-semibold truncate" style={{ fontSize:'18px' }}>{title}</span>
               {desc ? <span className="block text-xs truncate" style={{ color:'var(--text-muted)' }}>{desc}</span> : null}
             </span>
           </span>
           <span className="justify-self-end">
-            <ChevronRight className="w-4 h-4"
-              style={{
-                color:'var(--text-muted)',
-                transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
-                transition:'transform 220ms var(--ease)'
-              }}
-            />
+            {open ? <ChevronUp className="w-4 h-4" style={{ color:'var(--text-muted)' }}/> :
+                    <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)' }}/>}
           </span>
         </button>
 
@@ -1265,141 +1540,6 @@ function Section({
           <div ref={innerRef} className="p-5">{children}</div>
         </div>
       </div>
-    </div>
-  );
-}
-
-/* ─────────── small pieces ─────────── */
-function ToggleRow({label, checked, onChange}:{label:string; checked:boolean; onChange:(v:boolean)=>void}) {
-  return (
-    <div className="flex items-center justify-between p-3 rounded-[8px]"
-         style={{ background:'var(--panel)', border:'1px solid var(--border)' }}>
-      <span className="text-sm">{label}</span>
-      <Toggle checked={checked} onChange={onChange} />
-    </div>
-  );
-}
-
-function ApiKeySelect({
-  apiKeys, selectedId, onChange
-}:{ apiKeys:ApiKey[]; selectedId:string; onChange:(id:string)=>void }) {
-  return (
-    <div>
-      <div className="mb-2 text-[12.5px]">OpenAI API Key</div>
-      <StyledSelect
-        value={selectedId}
-        onChange={onChange}
-        options={[
-          { value: '', label: 'Select an API key…' },
-          ...apiKeys.map(k=>({ value: k.id, label: `${k.name} ••••${(k.key||'').slice(-4).toUpperCase()}` }))
-        ]}
-      />
-      <div className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
-        Keys are stored per-account via scoped storage. Manage them in the API Keys page.
-      </div>
-    </div>
-  );
-}
-
-function ContextFiles({ data, setField }:{
-  data:AgentData;
-  setField: SetFieldFn;
-}) {
-  const fileInputRef = useRef<HTMLInputElement|null>(null);
-  const rebuildContextText = (files:{name:string;text:string}[]) => {
-    const merged = files.map(f => `# File: ${f.name}\n${(f.text||'').trim()}`).join('\n\n');
-    setField('ctxFiles')(files);
-    setField('contextText')(merged.trim());
-  };
-  const onPickFiles = async (files: File[]) => {
-    if (!files?.length) return;
-    const out: {name:string;text:string}[] = [...(data.ctxFiles||[])];
-    for (const f of files) {
-      const txt = await readFileAsText(f);
-      if (!txt) continue;
-      out.push({ name: f.name, text: txt });
-    }
-    rebuildContextText(out);
-  };
-
-  return (
-    <div className="mt-6">
-      <div className="mb-2 flex items-center justify-between">
-        <div className="font-medium text-[12.5px]">Context Files</div>
-        <div className="flex items-center gap-2">
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            accept=".txt,.md,.csv,.json,.docx,.doc,.docs,text/plain,text/markdown,text/csv,application/json,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,application/zip"
-            className="hidden"
-            onChange={async (e)=>{ const files = Array.from(e.target.files || []); await onPickFiles(files); if (fileInputRef.current) fileInputRef.current.value=''; }}
-          />
-          <button
-            type="button"
-            onClick={()=>fileInputRef.current?.click()}
-            className="inline-flex items-center gap-2 text-sm rounded-[8px] px-3 py-1.5"
-            style={{ border:'1px solid var(--btn-border)', background:'var(--btn-bg)', color:'var(--btn-fg)' }}
-          >
-            Add file
-          </button>
-          {!!(data.ctxFiles && data.ctxFiles.length) && (
-            <>
-              <button
-                type="button"
-                onClick={()=>{
-                  const ctx  = (data.contextText || '').trim();
-                  const base = (data.systemPromptBackend || data.systemPrompt || DEFAULT_PROMPT_RT).trim();
-                  const next = ctx ? `${base}\n\n[Context]\n${ctx}`.trim() : base;
-                  setField('systemPrompt')(next);
-                }}
-                className="inline-flex items-center gap-2 text-sm rounded-[8px] px-3 py-1.5"
-                style={{ background:'var(--brand-btn-bg)', color:'var(--brand-btn-fg)', border:'1px solid var(--border)' }}
-              >
-                Import to Prompt
-              </button>
-              <button
-                type="button"
-                onClick={()=>{ rebuildContextText([]); }}
-                className="inline-flex items-center gap-2 text-sm rounded-[8px] px-3 py-1.5"
-                style={{ border:'1px solid var(--btn-border)', background:'var(--btn-bg)', color:'var(--btn-fg)' }}
-              >
-                Clear
-              </button>
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* List of files */}
-      {!(data.ctxFiles && data.ctxFiles.length) ? (
-        <div className="text-xs" style={{ color:'var(--text-muted)' }}>
-          No files yet. Click <b>Add file</b> to upload (.txt, .md, .csv, .json, <b>.docx</b> or best-effort <b>.doc</b> / <b>.docs</b>).
-        </div>
-      ) : (
-        <div className="rounded-[8px] p-3" style={{ background:'var(--panel)', border:'1px solid var(--border)' }}>
-          {(data.ctxFiles||[]).map((f, idx) => (
-            <div key={idx} className="mb-3 last:mb-0">
-              <div className="flex items-center justify-between mb-1">
-                <div className="text-sm font-medium truncate">{f.name}</div>
-                <button
-                  onClick={()=>{
-                    const next = [...(data.ctxFiles||[])]; next.splice(idx,1);
-                    rebuildContextText(next);
-                  }}
-                  className="text-xs rounded-[6px] px-2 py-1"
-                  style={{ border:'1px solid var(--btn-border)', background:'var(--btn-bg)', color:'var(--btn-fg)' }}
-                >
-                  Remove
-                </button>
-              </div>
-              <div className="text-xs" style={{ color:'var(--text-muted)' }}>
-                {(f.text || '').slice(0, 240) || '(empty)'}{(f.text||'').length>240?'…':''}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
