@@ -279,10 +279,8 @@ async function readFileAsText(f: File): Promise<string> {
 
   if (name.endsWith('.docx') || name.endsWith('.docs') || await looksZip()) {
     try {
-      // @ts-ignore
-      const JSZipModule = await import('https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js');
-      const JSZip = (JSZipModule?.default || (window as any).JSZip);
-      if (!JSZip) throw new Error('JSZip not loaded');
+      // ✅ bundle-safe lazy import from node_modules (no https: import)
+      const { default: JSZip } = await import('jszip');
 
       const buf = await f.arrayBuffer();
       const zip = await JSZip.loadAsync(buf);
@@ -296,7 +294,9 @@ async function readFileAsText(f: File): Promise<string> {
         .replace(/<(.|\n)*?>/g,'')
         .replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>');
       return text.trim();
-    } catch { return ''; }
+    } catch {
+      return '';
+    }
   }
 
   if (name.endsWith('.doc')) {
