@@ -6,7 +6,7 @@ import { createPortal } from 'react-dom';
 import { Bot, Mic, MicOff, X, Loader2, ChevronDown, Search, Check, Lock } from 'lucide-react';
 
 /* ──────────────────────────────────────────────────────────────────────────
-   PROPS  (AI logic preserved)
+   PROPS  (AI logic preserved)  — apiKeyId replaces apiKey (legacy)
 ────────────────────────────────────────────────────────────────────────── */
 type ProsodyOpts = {
   fillerWords?: boolean;
@@ -29,7 +29,12 @@ type Props = {
   systemPrompt: string;
   voiceName: string;
   assistantName: string;
-  apiKey: string;
+
+  /** ID of the stored key (server will resolve to the real secret) */
+  apiKeyId?: string;
+
+  /** @deprecated left for compatibility; not used on the client */
+  apiKey?: string;
 
   ephemeralEndpoint?: string;
 
@@ -38,7 +43,7 @@ type Props = {
 
   firstMode?: 'Assistant speaks first' | 'User speaks first' | 'Silent until tool required';
   firstMsg?: string;
-  greetMode?: 'server' | 'client' | 'off'; // we'll behave like "off" to avoid rogue greetings
+  greetMode?: 'server' | 'client' | 'off'; // behave like "off" to avoid rogue greetings
 
   languageHint?: 'auto' | 'en' | 'de' | 'nl' | 'es' | 'ar';
   prosody?: ProsodyOpts;
@@ -217,7 +222,7 @@ function StyledSelect({
               <button
                 key={o.value}
                 disabled={!!o.disabled}
-                onClick={()=>{ if (o.disabled) return; onChange(o.value); setOpen(false); }}
+                onClick={()=>{ if (o.disabled) return; onChange(o.value); }}
                 className="w-full text-left text-sm px-2.5 py-2 rounded-[8px] transition grid grid-cols-[18px_1fr_auto] items-center gap-2 disabled:opacity-60"
                 style={{
                   color: o.disabled ? 'var(--text-muted)' : 'var(--text)',
@@ -358,7 +363,8 @@ export default function WebCallButton({
   systemPrompt,
   voiceName,
   assistantName,
-  apiKey,
+  apiKeyId,            // ← secure id (server resolves secret)
+  apiKey,              // ← legacy, ignored
   ephemeralEndpoint = '/api/voice/ephemeral',
   onClose,
   onError,
@@ -380,9 +386,9 @@ export default function WebCallButton({
   const [muted,setMuted]=useState(false);
   const [error,setError]=useState<string>('');
 
-  // voices
-  const [voices,setVoices]=useState<string[]>([]);
-  const [selectedVoice,setSelectedVoice]=useState<string>('');
+  // voices (static allowlist; no client fetch)
+  const [voices,setVoices]=useState<string[]>(() => DEFAULT_VOICES);
+  const [selectedVoice,setSelectedVoice]=useState<string>(() => resolveVoiceId(voiceName));
   const voiceId = useMemo(()=> resolveVoiceId(selectedVoice || voiceName), [selectedVoice, voiceName]);
 
   // internal transcript buffer (NOT rendered)
@@ -402,24 +408,12 @@ export default function WebCallButton({
     transcript: []
   });
 
-  // gather voices
+  // Ensure selectedVoice is valid from allowlist
   useEffect(()=>{
-    let cancelled=false;
-    const fallback = Array.from(new Set([voiceName,...DEFAULT_VOICES].filter(Boolean))) as string[];
-    (async()=>{
-      try{
-        const r=await fetch('https://api.openai.com/v1/voices',{ headers:{ Authorization:`Bearer ${apiKey}` }});
-        if(!r.ok) throw new Error(String(r.status));
-        const j=await r.json();
-        let ids:Array<string>=Array.isArray(j?.data)? j.data.map((v:any)=>v?.id).filter(Boolean):[];
-        ids=ids.filter(id=>HUMAN_LIKE.has(id)); if(!ids.length) ids=fallback;
-        if(!cancelled){ setVoices(ids); setSelectedVoice(ids.includes(resolveVoiceId(voiceName))? resolveVoiceId(voiceName) : (ids[0]||'alloy')); }
-      }catch{
-        if(!cancelled){ setVoices(fallback); setSelectedVoice(resolveVoiceId(voiceName) || fallback[0]||'alloy'); }
-      }
-    })();
-    return()=>{ cancelled=true; };
-  },[apiKey, voiceName]);
+    const rid = resolveVoiceId(voiceName);
+    setVoices(DEFAULT_VOICES.filter(v=>HUMAN_LIKE.has(v)));
+    setSelectedVoice(HUMAN_LIKE.has(rid) ? rid : (DEFAULT_VOICES[0]||'alloy'));
+  },[voiceName]);
 
   const upsert=(id:string, who:TranscriptRow['who'], patch:Partial<TranscriptRow>|((p?:TranscriptRow)=>Partial<TranscriptRow>))=>{
     setLog(prev=>{
@@ -468,11 +462,11 @@ export default function WebCallButton({
   }
 
   /* ────────────────────────────────────────────────────────────────────────
-     START CALL  (language pinned from prompt; no client greeting)
+     START CALL  (language pinned from prompt; assistant-first handled)
   ──────────────────────────────────────────────────────────────────────── */
   async function startCall(){
     setError('');
-    if(!apiKey){ setError('No API key selected.'); onError?.('No API key'); return; }
+    if(!apiKeyId){ setError('No API key selected.'); onError?.('No API key'); return; }
     try{
       setConnecting(true);
       callRef.current = { id: `call_${Date.now()}_${Math.random().toString(36).slice(2,7)}`, startedAt: Date.now(), transcript: [] };
@@ -480,10 +474,10 @@ export default function WebCallButton({
 
       const TARGET_LANG = inferLang(systemPrompt, languageHint);
 
-      // 1) ephemeral
+      // 1) ephemeral — server resolves apiKeyId → secret (browser never sees secret)
       const sessionRes=await fetch(ephemeralEndpoint,{
-        method:'POST', headers:{ 'Content-Type':'application/json', 'X-OpenAI-Key':apiKey },
-        body:JSON.stringify({ model, voiceName:voiceId, assistantName, systemPrompt }),
+        method:'POST', headers:{ 'Content-Type':'application/json' },
+        body:JSON.stringify({ model, voiceName:voiceId, assistantName, systemPrompt, apiKeyId }),
       });
       if(!sessionRes.ok) throw new Error(`Ephemeral token error: ${await sessionRes.text()}`);
       const session=await sessionRes.json(); const EPHEMERAL=session?.client_secret?.value;
@@ -550,7 +544,18 @@ export default function WebCallButton({
           },
         }}));
 
-        // DO NOT send any client greeting. Model talks only when your backend/prompt does.
+        // Assistant-first greeting (server-voiced) when selected
+        if (firstMode === 'Assistant speaks first' && (firstMsg||'').trim()) {
+          // Kick off a one-shot assistant output using Realtime
+          dc.send(JSON.stringify({
+            type: 'response.create',
+            response: {
+              // Using "instructions" ensures it speaks without needing to add a user item
+              instructions: String(firstMsg).trim(),
+              modalities: ['audio','text']
+            }
+          }));
+        }
       };
 
       // 5) events — save to scoped storage; nudge if it drifts
@@ -566,12 +571,9 @@ export default function WebCallButton({
 
             // If it obviously drifts away from the target language, reassert once
             if (looksNonTargetLanguage(delta, inferLang(systemPrompt, languageHint))) {
-              dc.send(JSON.stringify({ type:'session.update', session:{
-                instructions: `REMINDER: Speak ONLY ${inferLang(systemPrompt, languageHint)==='en'?'English':
-                  inferLang(systemPrompt, languageHint)==='nl'?'Dutch':
-                  inferLang(systemPrompt, languageHint)==='de'?'German':
-                  inferLang(systemPrompt, languageHint)==='es'?'Spanish':'Arabic'} .`
-              }}));
+              const L = inferLang(systemPrompt, languageHint);
+              const LN = L==='en'?'English':L==='nl'?'Dutch':L==='de'?'German':L==='es'?'Spanish':'Arabic';
+              dc.send(JSON.stringify({ type:'session.update', session:{ instructions: `REMINDER: Speak ONLY ${LN}.` }}));
             }
           }
           if(t==='response.completed'||t==='response.stop'){
@@ -717,6 +719,14 @@ export default function WebCallButton({
 
   const body = (
     <div className="p-4" style={{ color:'var(--text)', background:'var(--panel-bg)' }}>
+      {/* Disclosure banner */}
+      <div
+        className="mb-3 text-[12.5px] px-3 py-2 rounded-[8px]"
+        style={{ background:'rgba(89,217,179,.10)', border:'1px solid rgba(89,217,179,.25)', color:'var(--text)' }}
+      >
+        This voice is AI-generated.
+      </div>
+
       <div className="text-xs pb-2 mb-3 border-b" style={{ borderColor:'rgba(255,255,255,.10)', color:'var(--text-muted)' }}>
         Status
       </div>
