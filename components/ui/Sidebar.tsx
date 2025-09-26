@@ -1,4 +1,4 @@
-// components/ui/Sidebar.tsx
+// FILE: components/ui/Sidebar.tsx
 'use client';
 
 import { useEffect, useState, cloneElement } from 'react';
@@ -8,7 +8,7 @@ import {
   Home, Hammer, Mic, Rocket,
   Phone, Key, HelpCircle,
   ChevronLeft, ChevronRight,
-  User as UserIcon, Bot
+  User as UserIcon, Bot, FileText
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase-client';
 
@@ -37,14 +37,15 @@ type NavItem = {
 };
 
 const NAV: NavItem[] = [
-  { id: 'create', href: '/builder',      label: 'Create',       sub: 'Design your agent',     icon: <Home />,   group: 'workspace' },
-  { id: 'tuning', href: '/improve',      label: 'Tuning',       sub: 'Integrate & optimize',  icon: <Hammer />, group: 'workspace' },
-  { id: 'voice',  href: '/voice-agent',  label: 'Voice Studio', sub: 'Calls & persona',       icon: <Mic />,    group: 'workspace' },
-  { id: 'launch', href: '/launch',       label: 'Launchpad',    sub: 'Go live',               icon: <Rocket />, group: 'workspace' },
+  { id: 'create', href: '/builder',      label: 'Create',       sub: 'Design your agent',     icon: <Home />,     group: 'workspace' },
+  { id: 'tuning', href: '/improve',      label: 'Tuning',       sub: 'Integrate & optimize',  icon: <Hammer />,   group: 'workspace' },
+  { id: 'voice',  href: '/voice-agent',  label: 'Voice Studio', sub: 'Calls & persona',       icon: <Mic />,      group: 'workspace' },
+  { id: 'subaccts', href: '/subaccounts', label: 'Subaccounts', sub: 'Transcripts',           icon: <FileText />, group: 'workspace' },
+  { id: 'launch', href: '/launch',       label: 'Launchpad',    sub: 'Go live',               icon: <Rocket />,   group: 'workspace' },
 
   { id: 'numbers', href: '/phone-numbers', label: 'Numbers',    sub: 'Twilio & BYO',          icon: <Phone />,  group: 'resources' },
-  { id: 'keys',    href: '/apikeys',       label: 'API Keys',    sub: 'Models & access',       icon: <Key />,    group: 'resources' },
-  { id: 'help',    href: '/support',       label: 'Help',        sub: 'Guides & FAQ',          icon: <HelpCircle />, group: 'resources' },
+  { id: 'keys',    href: '/apikeys',       label: 'API Keys',   sub: 'Models & access',       icon: <Key />,    group: 'resources' },
+  { id: 'help',    href: '/support',       label: 'Help',       sub: 'Guides & FAQ',          icon: <HelpCircle />, group: 'resources' },
 ];
 
 export default function Sidebar() {
@@ -58,7 +59,7 @@ export default function Sidebar() {
   });
   useEffect(() => {
     try { localStorage.setItem(LS_COLLAPSED, JSON.stringify(collapsed)); } catch {}
-    document.documentElement.style.setProperty('--sidebar-w', `${collapsed ? W_COLLAPSED : W_EXPANDED}px`);
+    document.documentElement.style.setProperty('--app-sidebar-w', `${collapsed ? W_COLLAPSED : W_EXPANDED}px`);
   }, [collapsed]);
 
   // user
@@ -165,6 +166,7 @@ export default function Sidebar() {
 
   return (
     <aside
+      data-app-sidebar
       className="fixed left-0 top-0 h-screen z-50 font-movatif"
       style={{
         width: collapsed ? W_COLLAPSED : W_EXPANDED,
@@ -175,10 +177,10 @@ export default function Sidebar() {
         borderRight: '1px solid var(--sidebar-border)',
         boxShadow: 'var(--sb-shell-shadow, inset 0 0 18px rgba(0,0,0,0.28))',
       }}
-      aria-label="Primary"
+      aria-label="Sidebar"
     >
       <div className="relative h-full flex flex-col">
-        {/* Header — ONLY logo + name (subtitle removed) */}
+        {/* Header */}
         <div className="px-4 pt-5 pb-4">
           <div className="flex items-center gap-3">
             <div
@@ -203,7 +205,7 @@ export default function Sidebar() {
           </div>
         </div>
 
-        {/* Rail-aligned divider under the header */}
+        {/* Divider */}
         <div
           aria-hidden
           className="pointer-events-none absolute left-0 right-0"
@@ -299,16 +301,28 @@ export default function Sidebar() {
         </button>
       </div>
 
+      {/* Theme + style alignment with VoiceAgentSection */}
       <style jsx>{`
-        :global(:root:not([data-theme="dark"])) .fixed.left-0 {
-          --sb-icon-bg: var(--card);
-          --sb-icon-border: var(--border);
-          --acct-bg: var(--card);
-          --acct-border: var(--border);
-          --sb-tag-bg: var(--panel);
+        /* Light mode (root or data-theme="light") — match VoiceAgentSection tokens */
+        :global(:root:not([data-theme="dark"])) aside[aria-label="Sidebar"] {
+          --sidebar-bg: var(--panel-bg, #ffffff);
+          --sidebar-text: var(--text, #0b1620);
+          --sidebar-muted: var(--text-muted, #50606a);
+          --sidebar-border: var(--border-weak, rgba(0,0,0,.10));
+          --sb-icon-bg: var(--panel-bg, #ffffff);
+          --sb-icon-border: var(--border-weak, rgba(0,0,0,.10));
+          --acct-bg: var(--panel-bg, #ffffff);
+          --acct-border: var(--border-weak, rgba(0,0,0,.10));
+          --sb-tag-bg: var(--panel-bg, #ffffff);
           --sb-shell-shadow: inset 0 0 18px rgba(0,0,0,.06);
         }
-        :global([data-theme="dark"]) .fixed.left-0 {
+
+        /* Dark mode — match VoiceAgentSection tokens */
+        :global([data-theme="dark"]) aside[aria-label="Sidebar"] {
+          --sidebar-bg: var(--panel-bg, #0d0f11);
+          --sidebar-text: var(--text, #e6f1ef);
+          --sidebar-muted: var(--text-muted, #9fb4ad);
+          --sidebar-border: var(--border-weak, rgba(255,255,255,.10));
           --sb-icon-bg: rgba(255,255,255,.06);
           --sb-icon-border: rgba(255,255,255,.12);
           --acct-bg: rgba(15,18,20,.85);
