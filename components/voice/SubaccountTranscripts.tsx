@@ -1,25 +1,22 @@
-// FILE: components/voice/SubaccountWorkspace.tsx
+// FILE: components/voice/SubaccountHub.tsx
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Bot, Users, Phone, FileText, Download, Share2, Trash2,
-  ExternalLink, Search, XCircle, PlayCircle, Wifi, WifiOff, RefreshCw
+  Users, Bot, Phone, FileText, Download, Share2, Trash2,
+  ExternalLink, Search, XCircle, PlayCircle, RefreshCw
 } from 'lucide-react';
 
 /**
- * SubaccountWorkspace
+ * SubaccountHub (clean split UX)
  * ------------------------------------------------------------
- * A VA-styled 3-pane workspace:
- *  1) LEFT  — Secondary sidebar of Sub-Accounts (as CARDS you click)
- *  2) MIDDLE— Call Logs for the selected sub-account
- *  3) RIGHT — Transcript reader pane for the selected call
+ * • FIRST: a grid of big rectangular CARDS — one per AI/Sub-Account.
+ * • When you click a card, the lower “workspace” appears:
+ *      LEFT  = Call Logs
+ *      RIGHT = Transcript Viewer
+ * • Styled to match VoiceAgentSection (CTA glow, rounded-8, light/dark).
  *
- * - Matches VoiceAgentSection tokens (CTA glow, rounded-8).
- * - Obeys global theme via document.documentElement.dataset.theme (light/dark).
- * - “Online mode” indicator in the header (lights green when online=true).
- *
- * Endpoints expected (adapt names if needed):
+ * Endpoints expected:
  *  - GET    /api/subaccounts
  *  - GET    /api/voice/transcripts?subId=...&q=...&status=...
  *  - GET    /api/voice/transcripts/:id
@@ -44,61 +41,48 @@ type Transcript = {
   turns?: TranscriptTurn[];
 };
 
-const CTA       = '#59d9b3';
-const CTA_WEAK  = 'rgba(89,217,179,.12)';
-const CTA_LINE  = 'rgba(89,217,179,.20)';
-const EASE      = 'cubic-bezier(.22,.61,.36,1)';
+const CTA      = '#59d9b3';
+const CTA_WEAK = 'rgba(89,217,179,.12)';
+const CTA_LINE = 'rgba(89,217,179,.20)';
+const EASE     = 'cubic-bezier(.22,.61,.36,1)';
 
-function fmtTime(iso?: string) {
+const fmtTime = (iso?: string) => {
   if (!iso) return '—';
   try { return new Date(iso).toLocaleString(); } catch { return iso; }
-}
-function fmtDur(s?: number) {
-  if (s == null) return '—';
-  const m = Math.floor(s/60);
-  const sec = s % 60;
-  return `${m}m ${sec}s`;
-}
+};
+const fmtDur = (s?: number) => (s==null ? '—' : `${Math.floor(s/60)}m ${s%60}s`);
 
-export default function SubaccountWorkspace({ online=false }: { online?: boolean }) {
-  /* ───────── tokens to align with VA ───────── */
+export default function SubaccountHub() {
+  /* inject minimal tokens to match VA */
   useEffect(() => {
-    const style = document.createElement('style');
-    style.innerHTML = `
-      :root{
-        --ease:${EASE};
-        --va-cta:${CTA};
-        --va-cta-weak:${CTA_WEAK};
-        --va-cta-line:${CTA_LINE};
-      }
-      .sa-shell{display:grid;grid-template-columns:240px 360px 1fr;gap:12px}
-      .sa-card{border-radius:8px;border:1px solid var(--border-weak, rgba(0,0,0,.10));background:var(--panel-bg,#fff);box-shadow:var(--card-shadow,0 14px 28px rgba(0,0,0,.08));overflow:hidden}
-      .sa-head{min-height:56px;display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid var(--border-weak, rgba(0,0,0,.10))}
-      .sa-ctl{height:38px;border-radius:8px;border:1px solid var(--border-weak, rgba(0,0,0,.10));background:var(--panel-bg,#fff);padding:0 12px;outline:none}
-      .sa-pill{width:40px;height:40px;border-radius:8px;display:grid;place-items:center;background:var(--va-cta);box-shadow:0 10px 22px rgba(89,217,179,.28)}
-      .sa-col{display:flex;flex-direction:column;gap:12px}
-      .sa-card-list-item{position:relative;display:flex;align-items:center;gap:10px;padding:10px;border-radius:10px;border:1px solid var(--border-weak, rgba(0,0,0,.10));background:var(--panel-bg,#fff);transition:transform .16s var(--ease), box-shadow .16s var(--ease), border-color .16s var(--ease)}
-      .sa-card-list-item:hover{transform:translateY(-1px);box-shadow:0 10px 22px rgba(0,0,0,.14), 0 0 0 1px var(--va-cta-line) inset}
-      .sa-card-list-item[data-active="true"]{box-shadow:0 10px 22px rgba(89,217,179,.28), 0 0 0 1px var(--va-cta-line) inset;background:var(--va-cta-weak)}
-      .sa-card-list-item .ring{position:absolute;inset:-2px;border-radius:12px;pointer-events:none;box-shadow:0 0 0 0 var(--va-cta);opacity:0;transition:box-shadow .18s var(--ease), opacity .18s var(--ease)}
-      .sa-card-list-item:hover .ring{box-shadow:0 0 0 2px var(--va-cta);opacity:.7}
-      .sa-row{position:relative;text-align:left;padding:10px 12px;border-top:1px solid var(--border-weak, rgba(0,0,0,.10));transition:transform .16s var(--ease)}
-      .sa-row:hover{transform:translateX(2px)}
-      .sa-row::after{content:'';position:absolute;inset:0;border-radius:8px;background:var(--va-cta);opacity:0;pointer-events:none;transition:opacity .18s var(--ease);mix-blend-mode:screen}
-      .sa-row:hover::after{opacity:.14}
-      .sa-row.active{background:var(--va-cta-weak)}
-      @media (max-width:1200px){ .sa-shell{grid-template-columns:220px 320px 1fr} }
-      @media (max-width:980px){ .sa-shell{grid-template-columns:1fr} .sa-right, .sa-mid{order:2} .sa-left{order:1} }
+    const el = document.createElement('style');
+    el.innerHTML = `
+      :root{ --ease:${EASE}; --cta:${CTA}; --cta-weak:${CTA_WEAK}; --cta-line:${CTA_LINE}; }
+      .sa-card{border-radius:8px;border:1px solid var(--border-weak,rgba(0,0,0,.10));background:var(--panel-bg,#fff);box-shadow:var(--card-shadow,0 14px 28px rgba(0,0,0,.08));}
+      .sa-head{min-height:56px;display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid var(--border-weak,rgba(0,0,0,.10))}
+      .sa-ctl{height:38px;border-radius:8px;border:1px solid var(--border-weak,rgba(0,0,0,.10));background:var(--panel-bg,#fff);padding:0 12px;outline:none}
+      .sa-pill{width:42px;height:42px;border-radius:8px;display:grid;place-items:center;background:var(--cta);box-shadow:0 10px 22px rgba(89,217,179,.28)}
+      .ai-card{position:relative;display:flex;align-items:center;gap:12px;padding:14px;border-radius:12px;background:var(--panel-bg,#fff);border:1px solid var(--border-weak,rgba(0,0,0,.10));transition:transform .16s var(--ease), box-shadow .16s var(--ease)}
+      .ai-card:hover{transform:translateY(-2px);box-shadow:0 16px 28px rgba(0,0,0,.16), 0 0 0 1px var(--cta-line) inset}
+      .ai-card[data-active="true"]{box-shadow:0 16px 28px rgba(89,217,179,.28), 0 0 0 1px var(--cta-line) inset;background:var(--cta-weak)}
+      .ai-card .halo{position:absolute;inset:-6px;border-radius:16px;background:radial-gradient(60% 60% at 50% 50%, var(--cta) 0%, transparent 70%);filter:blur(10px);opacity:0;transition:opacity .18s var(--ease)}
+      .ai-card:hover .halo{opacity:.6}
+      .log-row{position:relative;text-align:left;padding:10px 12px;border-top:1px solid var(--border-weak,rgba(0,0,0,.10));transition:transform .14s var(--ease)}
+      .log-row:hover{transform:translateX(2px)}
+      .log-row::after{content:'';position:absolute;inset:0;border-radius:8px;background:var(--cta);opacity:0;pointer-events:none;transition:opacity .16s var(--ease);mix-blend-mode:screen}
+      .log-row:hover::after{opacity:.12}
+      .log-row.active{background:var(--cta-weak)}
+      @media (max-width:1024px){ .ws-grid{grid-template-columns:1fr} }
+      @media (min-width:1025px){ .ws-grid{grid-template-columns:420px 1fr} }
     `;
-    document.head.appendChild(style);
-    return () => { try { document.head.removeChild(style); } catch {} };
+    document.head.appendChild(el);
+    return () => { try { document.head.removeChild(el); } catch {} };
   }, []);
 
-  /* ───────── data ───────── */
+  /* data */
   const [subs, setSubs] = useState<SubAccount[]>([]);
   const [subsLoading, setSubsLoading] = useState(true);
   const [activeSubId, setActiveSubId] = useState('');
-  const activeSub = subs.find(s => s.id === activeSubId) || null;
 
   const [q, setQ] = useState('');
   const [status, setStatus] = useState<'all'|'completed'|'missed'|'failed'|'in-progress'>('all');
@@ -110,7 +94,7 @@ export default function SubaccountWorkspace({ online=false }: { online?: boolean
   const [selectedId, setSelectedId] = useState('');
   const selected = logs.find(t => t.id === selectedId);
 
-  /* fetch subs */
+  /* fetch sub-accounts (AIs) */
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -121,17 +105,15 @@ export default function SubaccountWorkspace({ online=false }: { online?: boolean
         const arr: SubAccount[] = Array.isArray(j) ? j : (Array.isArray(j?.items) ? j.items : []);
         if (!alive) return;
         setSubs(arr);
-        if (!activeSubId && arr[0]?.id) setActiveSubId(arr[0].id);
       } catch { if (alive) setSubs([]); }
       finally { if (alive) setSubsLoading(false); }
     })();
     return () => { alive = false; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* fetch logs */
+  /* fetch logs when a sub is chosen */
   useEffect(() => {
-    if (!activeSubId) { setLogs([]); return; }
+    if (!activeSubId) { setLogs([]); setSelectedId(''); return; }
     let alive = true;
     (async () => {
       setLogsLoading(true);
@@ -139,22 +121,21 @@ export default function SubaccountWorkspace({ online=false }: { online?: boolean
         const qs = new URLSearchParams();
         qs.set('subId', activeSubId);
         if (q.trim()) qs.set('q', q.trim());
-        if (status !== 'all') qs.set('status', status);
+        if (status!=='all') qs.set('status', status);
         const r = await fetch(`/api/voice/transcripts?${qs.toString()}`).catch(()=>null as any);
         const j = r?.ok ? await r.json() : null;
         if (!alive) return;
         const items: Transcript[] = Array.isArray(j?.items) ? j.items : (Array.isArray(j) ? j : []);
         items.sort((a,b)=> (new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()));
         setLogs(items);
-        if (!selectedId && items[0]?.id) setSelectedId(items[0].id);
+        setSelectedId(items[0]?.id || '');
       } catch { if (alive) setLogs([]); }
       finally { if (alive) setLogsLoading(false); }
     })();
     return () => { alive = false; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeSubId, status, refreshKey]);
+  }, [activeSubId, status, refreshKey]); // q is “client-side” filter below
 
-  /* fetch full transcript on demand */
+  /* lazy fetch full transcript */
   useEffect(() => {
     if (!selectedId) return;
     const base = logs.find(x => x.id === selectedId);
@@ -172,11 +153,12 @@ export default function SubaccountWorkspace({ online=false }: { online?: boolean
   }, [selectedId, logs]);
 
   /* derived */
-  const filtered = useMemo(() => {
+  const filteredLogs = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    const byQ = (t:Transcript) => !needle || [t.caller, t.callee, t.summary, t.id].some(v => (v||'').toLowerCase().includes(needle));
-    const byStatus = (t:Transcript) => status==='all' ? true : t.status===status;
-    return logs.filter(t => byQ(t) && byStatus(t));
+    const byQ = (t:Transcript) =>
+      !needle || [t.caller, t.callee, t.summary, t.id].some(v => (v||'').toLowerCase().includes(needle));
+    const byS = (t:Transcript) => status==='all' ? true : t.status===status;
+    return logs.filter(t => byQ(t) && byS(t));
   }, [logs, q, status]);
 
   /* actions */
@@ -187,7 +169,7 @@ export default function SubaccountWorkspace({ online=false }: { online?: boolean
         body: JSON.stringify({ shared: !t.shared })
       }).catch(()=>null as any);
       const j = r?.ok ? await r.json() : null;
-      setLogs(prev => prev.map(x => x.id === t.id ? { ...x, shared: !!j?.shared, shareUrl: j?.url || x.shareUrl } : x));
+      setLogs(prev => prev.map(x => x.id===t.id ? { ...x, shared: !!j?.shared, shareUrl: j?.url || x.shareUrl } : x));
     } catch {}
   }
   async function removeTranscript(t: Transcript) {
@@ -213,8 +195,7 @@ export default function SubaccountWorkspace({ online=false }: { online?: boolean
       `Caller: ${t.caller || '—'}`,
       `Callee: ${t.callee || '—'}`,
       `Summary: ${t.summary || '—'}`,
-      '',
-      '--- Transcript ---',
+      '', '--- Transcript ---',
       ...(t.turns||[]).map(turn => `[${turn.role}${turn.at?` @ ${fmtTime(turn.at)}`:''}] ${turn.text}`)
     ].join('\n');
     const blob = new Blob([lines], { type:'text/plain' });
@@ -222,34 +203,24 @@ export default function SubaccountWorkspace({ online=false }: { online?: boolean
     a.download = `transcript_${t.id}.txt`; a.click(); URL.revokeObjectURL(a.href);
   }
 
-  /* ───────── UI ───────── */
+  /* UI */
+
   return (
-    <section className="sa-root" style={{ color:'var(--text)' }}>
-      {/* header (like VA) */}
+    <section className="grid gap-4" style={{ color:'var(--text)' }}>
+      {/* 1) AI CARDS STRIP */}
       <div className="sa-card">
         <div className="sa-head">
           <div className="flex items-center gap-3">
             <div className="sa-pill"><Bot className="w-5 h-5 text-black" /></div>
             <div className="min-w-0">
-              <div className="text-[18px] font-semibold leading-tight truncate">
-                {activeSub ? activeSub.name : 'Sub Accounts'}
-              </div>
+              <div className="text-[18px] font-semibold leading-tight">Choose an AI / Sub-Account</div>
               <div className="text-xs" style={{ color:'var(--text-muted,#64748b)' }}>
-                {activeSub ? `Owner • ${activeSub.ownerEmail || '—'}` : 'Pick a sub-account to browse calls'}
+                Click a card to open its call workspace
               </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-6">
-            <div className="flex items-center gap-2 text-sm">
-              {online
-                ? <Wifi className="w-4 h-4" style={{ color: CTA }} />
-                : <WifiOff className="w-4 h-4" style={{ color: 'var(--text-muted,#9fb4ad)' }} />
-              }
-              <span style={{ color: online ? CTA : 'var(--text-muted,#9fb4ad)' }}>
-                {online ? 'Online' : 'Offline'}
-              </span>
-            </div>
+          <div className="flex items-center gap-2">
             <button
               onClick={()=>setRefreshKey(k=>k+1)}
               className="sa-ctl grid place-items-center"
@@ -262,79 +233,28 @@ export default function SubaccountWorkspace({ online=false }: { online?: boolean
           </div>
         </div>
 
-        {/* controls */}
-        <div className="p-3 grid gap-3" style={{ gridTemplateColumns:'minmax(200px,260px) 1fr 220px' }}>
-          <div className="grid gap-1.5">
-            <label className="text-[12px]" style={{ color:'var(--text-muted,#64748b)' }}>Sub-Account</label>
-            <select
-              value={activeSubId}
-              onChange={(e)=>{ setActiveSubId(e.target.value); setSelectedId(''); }}
-              className="sa-ctl"
-            >
-              {subsLoading && <option>Loading…</option>}
-              {!subsLoading && subs.length===0 && <option value="">No sub-accounts</option>}
-              {!subsLoading && subs.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-          </div>
-
-          <div className="grid gap-1.5 relative">
-            <label className="text-[12px]" style={{ color:'var(--text-muted,#64748b)' }}>Search</label>
-            <input
-              value={q}
-              onChange={(e)=>setQ(e.target.value)}
-              placeholder="Search id, caller, callee, summary…"
-              className="sa-ctl"
-              style={{ paddingLeft:36, paddingRight:36 }}
-            />
-            <Search className="w-4 h-4" style={{ position:'absolute', left:10, top:34, color:'var(--text-muted,#64748b)' }} />
-            {!!q && (
-              <button onClick={()=>setQ('')} title="Clear" className="absolute" style={{ right:6, top:30 }}>
-                <span className="sa-ctl grid place-items-center" style={{ width:30, height:30, padding:0 }}>
-                  <XCircle className="w-4 h-4" />
-                </span>
-              </button>
-            )}
-          </div>
-
-          <div className="grid gap-1.5">
-            <label className="text-[12px]" style={{ color:'var(--text-muted,#64748b)' }}>Status</label>
-            <select value={status} onChange={(e)=>setStatus(e.target.value as any)} className="sa-ctl">
-              <option value="all">All</option>
-              <option value="completed">Completed</option>
-              <option value="missed">Missed</option>
-              <option value="failed">Failed</option>
-              <option value="in-progress">In progress</option>
-            </select>
-          </div>
-        </div>
-      </div>
-
-      {/* BODY — 3 panes */}
-      <div className="sa-shell mt-3">
-        {/* LEFT — Subaccounts (cards) */}
-        <div className="sa-col sa-left">
-          <div className="text-[11px] font-semibold tracking-[.12em]" style={{ color:'var(--text-muted,#64748b)' }}>
-            SUB-ACCOUNTS
-          </div>
-          <div className="sa-card p-3">
-            <div className="grid gap-2">
-              {subsLoading && <div className="text-sm" style={{ color:'var(--text-muted,#64748b)' }}>Loading…</div>}
-              {!subsLoading && subs.length===0 && <div className="text-sm" style={{ color:'var(--text-muted,#64748b)' }}>No sub-accounts</div>}
-              {!subsLoading && subs.map(s => (
+        <div className="p-3">
+          {subsLoading && <div className="text-sm" style={{ color:'var(--text-muted,#64748b)' }}>Loading AIs…</div>}
+          {!subsLoading && subs.length===0 && (
+            <div className="text-sm" style={{ color:'var(--text-muted,#64748b)' }}>No sub-accounts yet.</div>
+          )}
+          {!subsLoading && subs.length>0 && (
+            <div className="grid gap-3"
+                 style={{ gridTemplateColumns:'repeat(auto-fill, minmax(220px, 1fr))' }}>
+              {subs.map(s => (
                 <button
                   key={s.id}
-                  className="sa-card-list-item group relative"
+                  className="ai-card"
                   data-active={s.id===activeSubId}
                   onClick={()=>{ setActiveSubId(s.id); setSelectedId(''); }}
-                  title={s.name}
                 >
-                  <span className="ring" />
-                  <div className="w-9 h-9 rounded-[8px] grid place-items-center"
+                  <span className="halo" />
+                  <div className="w-10 h-10 rounded-[8px] grid place-items-center"
                        style={{ background: CTA, boxShadow:'0 10px 22px rgba(89,217,179,.28)' }}>
-                    <Users className="w-4 h-4 text-black" />
+                    <Users className="w-5 h-5 text-black" />
                   </div>
                   <div className="min-w-0">
-                    <div className="text-[14px] font-semibold truncate">{s.name}</div>
+                    <div className="text-[15px] font-semibold truncate">{s.name}</div>
                     <div className="text-[11px] truncate" style={{ color:'var(--text-muted,#64748b)' }}>
                       {s.ownerEmail || '—'}
                     </div>
@@ -342,26 +262,56 @@ export default function SubaccountWorkspace({ online=false }: { online?: boolean
                 </button>
               ))}
             </div>
-          </div>
+          )}
         </div>
+      </div>
 
-        {/* MIDDLE — Call Logs */}
-        <div className="sa-col sa-mid">
-          <div className="text-[11px] font-semibold tracking-[.12em]" style={{ color:'var(--text-muted,#64748b)' }}>
-            CALL LOGS
-          </div>
-          <div className="sa-card" style={{ minHeight: 420 }}>
-            <div className="sa-head" style={{ justifyContent:'flex-start', gap:10 }}>
-              <Phone className="w-4 h-4" />
-              <span className="text-sm" style={{ color:'var(--text-muted,#64748b)' }}>
-                {logsLoading ? 'Loading…' : `${filtered.length} call${filtered.length===1?'':'s'}`}
-              </span>
+      {/* 2) WORKSPACE appears ONLY AFTER a card is selected */}
+      {!activeSubId ? null : (
+        <div className="ws-grid grid gap-4">
+          {/* LEFT: CALL LOGS */}
+          <div className="sa-card">
+            <div className="sa-head">
+              <div className="flex items-center gap-2">
+                <Phone className="w-4 h-4" />
+                <b>Call Logs</b>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <input
+                    value={q}
+                    onChange={(e)=>setQ(e.target.value)}
+                    placeholder="Search id, caller, callee, summary…"
+                    className="sa-ctl"
+                    style={{ width:280, paddingLeft:34, paddingRight:34 }}
+                  />
+                  <Search className="w-4 h-4" style={{ position:'absolute', left:10, top:8, color:'var(--text-muted,#64748b)' }} />
+                  {!!q && (
+                    <button onClick={()=>setQ('')} title="Clear" className="absolute" style={{ right:6, top:4 }}>
+                      <span className="sa-ctl grid place-items-center" style={{ width:30, height:30, padding:0 }}>
+                        <XCircle className="w-4 h-4" />
+                      </span>
+                    </button>
+                  )}
+                </div>
+                <select
+                  value={status}
+                  onChange={(e)=>setStatus(e.target.value as any)}
+                  className="sa-ctl"
+                >
+                  <option value="all">All</option>
+                  <option value="completed">Completed</option>
+                  <option value="missed">Missed</option>
+                  <option value="failed">Failed</option>
+                  <option value="in-progress">In progress</option>
+                </select>
+              </div>
             </div>
 
-            {logsLoading && <div className="p-4 text-sm" style={{ color:'var(--text-muted,#64748b)' }}>Fetching transcripts…</div>}
-            {!logsLoading && filtered.length===0 && <div className="p-4 text-sm" style={{ color:'var(--text-muted,#64748b)' }}>No calls.</div>}
+            {logsLoading && <div className="p-4 text-sm" style={{ color:'var(--text-muted,#64748b)' }}>Loading transcripts…</div>}
+            {!logsLoading && filteredLogs.length===0 && <div className="p-4 text-sm" style={{ color:'var(--text-muted,#64748b)' }}>No calls.</div>}
 
-            {!logsLoading && filtered.map(t => {
+            {!logsLoading && filteredLogs.map(t => {
               const chipBg =
                 t.status==='completed' ? 'rgba(34,197,94,.12)'
               : t.status==='missed'    ? 'rgba(245,158,11,.16)'
@@ -377,14 +327,14 @@ export default function SubaccountWorkspace({ online=false }: { online?: boolean
                 <button
                   key={t.id}
                   onClick={()=>setSelectedId(t.id)}
-                  className={`sa-row ${t.id===selectedId ? 'active' : ''}`}
+                  className={`log-row ${t.id===selectedId ? 'active' : ''}`}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         <strong className="truncate">{t.caller || 'Unknown caller'}</strong>
                         <span className="text-[11px] px-1.5 py-0.5 rounded"
-                              style={{ background:chipBg, color:chipFg, border:'1px solid var(--border-weak, rgba(0,0,0,.10))' }}>
+                              style={{ background:chipBg, color:chipFg, border:'1px solid var(--border-weak,rgba(0,0,0,.10))' }}>
                           {t.status || '—'}
                         </span>
                       </div>
@@ -418,19 +368,12 @@ export default function SubaccountWorkspace({ online=false }: { online?: boolean
               );
             })}
           </div>
-        </div>
 
-        {/* RIGHT — Transcript Reader */}
-        <div className="sa-col sa-right">
-          <div className="text-[11px] font-semibold tracking-[.12em]" style={{ color:'var(--text-muted,#64748b)' }}>
-            TRANSCRIPT
-          </div>
-          <div className="sa-card" style={{ minHeight: 420 }}>
+          {/* RIGHT: TRANSCRIPT VIEWER */}
+          <div className="sa-card">
             <div className="sa-head">
-              <div className="flex items-center gap-2">
-                <span className="text-sm" style={{ color:'var(--text-muted,#64748b)' }}>
-                  {selected ? `Call ${selected.id.slice(0,8)}…` : 'Select a call'}
-                </span>
+              <div className="text-sm" style={{ color:'var(--text-muted,#64748b)' }}>
+                {selected ? `Call ${selected.id.slice(0,8)}…` : 'Select a call'}
               </div>
               {selected && (
                 <div className="flex items-center gap-2">
@@ -472,12 +415,12 @@ export default function SubaccountWorkspace({ online=false }: { online?: boolean
 
             {!selected ? (
               <div className="p-5 text-sm" style={{ color:'var(--text-muted,#64748b)' }}>
-                Choose a call on the middle panel to read its transcript here.
+                Choose a call to read its transcript here.
               </div>
             ) : (
               <div className="p-3 grid gap-3">
-                {/* META */}
-                <div className="sa-card" style={{ border:'1px dashed var(--border-weak, rgba(0,0,0,.10))' }}>
+                {/* meta */}
+                <div className="sa-card" style={{ border:'1px dashed var(--border-weak,rgba(0,0,0,.10))' }}>
                   <div className="p-3 grid gap-3" style={{ gridTemplateColumns:'repeat(3,minmax(0,1fr))' }}>
                     <Meta label="Started"  value={fmtTime(selected.startedAt)} />
                     <Meta label="Duration" value={fmtDur(selected.durationSec)} />
@@ -500,9 +443,9 @@ export default function SubaccountWorkspace({ online=false }: { online?: boolean
                   </div>
                 </div>
 
-                {/* RECORDING */}
+                {/* recording */}
                 {selected.recordingUrl && (
-                  <div className="sa-card" style={{ border:'1px dashed var(--border-weak, rgba(0,0,0,.10))' }}>
+                  <div className="sa-card" style={{ border:'1px dashed var(--border-weak,rgba(0,0,0,.10))' }}>
                     <div className="sa-head" style={{ borderStyle:'dashed' }}>
                       <div className="flex items-center gap-2">
                         <PlayCircle className="w-4 h-4" />
@@ -517,7 +460,7 @@ export default function SubaccountWorkspace({ online=false }: { online?: boolean
                   </div>
                 )}
 
-                {/* SUMMARY */}
+                {/* summary */}
                 <div className="sa-card">
                   <div className="sa-head"><b>Summary</b></div>
                   <div className="p-3 whitespace-pre-wrap">
@@ -525,11 +468,11 @@ export default function SubaccountWorkspace({ online=false }: { online?: boolean
                   </div>
                 </div>
 
-                {/* TRANSCRIPT TURNS */}
+                {/* transcript */}
                 <div className="sa-card">
                   <div className="sa-head"><b>Transcript</b></div>
                   <div className="p-3 grid gap-2 max-h-[520px] overflow-auto">
-                    {(selected.turns || []).map(turn => (
+                    {(selected.turns||[]).map(turn => (
                       <div key={turn.id} className="grid gap-1.5">
                         <div className="text-xs" style={{ color:'var(--text-muted,#64748b)' }}>
                           [{turn.role}{turn.at ? ` • ${fmtTime(turn.at)}` : ''}]
@@ -537,7 +480,7 @@ export default function SubaccountWorkspace({ online=false }: { online?: boolean
                         <div
                           style={{
                             background: turn.role==='assistant' ? CTA_WEAK : 'transparent',
-                            border:'1px solid var(--border-weak, rgba(0,0,0,.10))',
+                            border:'1px solid var(--border-weak,rgba(0,0,0,.10))',
                             borderRadius:8, padding:'10px 12px', whiteSpace:'pre-wrap'
                           }}
                         >
@@ -556,16 +499,15 @@ export default function SubaccountWorkspace({ online=false }: { online?: boolean
             )}
           </div>
         </div>
-
-      </div>
+      )}
     </section>
   );
 }
 
-/* Meta cell */
+/* meta cell */
 function Meta({ label, value, extra }: { label: string; value: string; extra?: React.ReactNode }) {
   return (
-    <div className="p-3" style={{ border:'1px dashed var(--border-weak, rgba(0,0,0,.10))', borderRadius:8 }}>
+    <div className="p-3" style={{ border:'1px dashed var(--border-weak,rgba(0,0,0,.10))', borderRadius:8 }}>
       <div className="text-xs" style={{ color:'var(--text-muted,#64748b)', marginBottom:4 }}>{label}</div>
       <div className="text-sm">{value}</div>
       {extra}
