@@ -18,8 +18,9 @@ function genId() {
   return `${(t + r).slice(0, 8)}-${(t + r).slice(8, 13)}-${(t + r).slice(13, 18)}`;
 }
 
-/* ---- Visual utils ---- */
-function bandedBackground({ steps = 15, cap = 0.05 }) {
+/* ---------- Visual utils ---------- */
+/* 15 bands, green-tinted, very subtle; sides only slightly lighter */
+function bandedBackground({ steps = 15, cap = 0.045 }) {
   const parts: string[] = [];
   const center = Math.ceil(steps / 2);
   const bw = 100 / steps;
@@ -31,17 +32,20 @@ function bandedBackground({ steps = 15, cap = 0.05 }) {
   }
   return `linear-gradient(90deg, ${parts.join(', ')})`;
 }
+
+/* Header lines: left→right light→dark, broad bands */
 function headerBands() {
-  const steps = 10;
+  const steps = 9;
   const parts: string[] = [];
   for (let i = 0; i < steps; i++) {
-    const amt = 0.06 - (0.06 / (steps - 1)) * i;
+    const amt = 0.065 - (0.065 / (steps - 1)) * i; // wider, fades to dark
     const col = `color-mix(in oklab, ${PANEL} ${100 - amt * 100}%, ${CTA} ${amt * 100}%)`;
     parts.push(`${col} ${(i * 100) / steps}%, ${col} ${((i + 1) * 100) / steps}%`);
   }
   return `linear-gradient(90deg, ${parts.join(',')})`;
 }
-function IconTile({ children, size = 112, radius = 12 }:{
+
+function IconTile({ children, size = 104, radius = 14 }:{
   children: React.ReactNode; size?: number; radius?: number
 }) {
   return (
@@ -51,7 +55,7 @@ function IconTile({ children, size = 112, radius = 12 }:{
         width: size,
         height: size,
         borderRadius: radius,
-        background: `color-mix(in oklab, ${PANEL} 86%, ${CTA} 14%)`,
+        background: `color-mix(in oklab, ${PANEL} 88%, ${CTA} 12%)`,
         border: `1px solid ${GREEN_LINE}`,
         color: CTA
       }}
@@ -61,7 +65,7 @@ function IconTile({ children, size = 112, radius = 12 }:{
   );
 }
 
-/* ---- Component ---- */
+/* ---------- Component ---------- */
 type Sub = { id: string; name: string; agents: number; active: boolean };
 
 export default function SubaccountsPage() {
@@ -83,12 +87,10 @@ export default function SubaccountsPage() {
     setNewName(''); setNewOpen(false);
   }
 
-  /* >>> Sizing you asked for <<< */
-  const CardSide   = 288;   // smaller square
-  const CardRadius = 16;    // MORE rounded corners
-  const IconSize   = 56;    // smaller icon
-  const IconPlate  = 112;   // smaller plate
-  const IconRadius = 12;
+  /* Sizing */
+  const CardRadius = 18;           // more rounded (per your last note)
+  const IconSize   = 50;           // smaller icon
+  const IconPlate  = 104;          // smaller plate
 
   return (
     <div className="min-h-screen px-6 pb-16 pt-6" style={{ background: CANVAS, color: TEXT }}>
@@ -112,9 +114,9 @@ export default function SubaccountsPage() {
         </button>
       </div>
 
-      {/* Row B: search + centered count */}
+      {/* Row B: search (left) + centered count */}
       <div className="mt-5 flex items-center">
-        <div className="w-[380px]">
+        <div className="w-[360px]">
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -131,27 +133,41 @@ export default function SubaccountsPage() {
         </div>
       </div>
 
-      {/* Grid (4 across) */}
-      <div className="mt-8 grid gap-8" style={{ gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' }}>
-        {/* Create card */}
+      {/* Grid: **max 4 per row** and **perfect squares** (aspect-ratio keeps them from getting tall) */}
+      <div
+        className="mt-8 grid gap-8"
+        style={{
+          gridTemplateColumns: 'repeat(4, 1fr)',   // hard max of 4
+        }}
+      >
+        {/* Create card (fine dashed border; no bottom “line”) */}
         <button
           onClick={() => setNewOpen(true)}
           className="relative group overflow-hidden"
           style={{
-            height: CardSide, borderRadius: CardRadius, background: PANEL,
-            border: `1px dashed ${GREEN_LINE}`,
-            boxShadow: '0 18px 54px rgba(0,0,0,.55), 0 0 0 1px rgba(89,217,179,.20), 0 22px 58px rgba(89,217,179,.10)'
+            aspectRatio: '1 / 1',                 // perfect square, never tall
+            borderRadius: CardRadius,
+            background: PANEL,
+            border: `1px dashed ${GREEN_LINE}`,   // small dashed outline
+            boxShadow: '0 18px 54px rgba(0,0,0,.55), 0 22px 58px rgba(89,217,179,.08)' // drop shadow only (no 1px ring)
           }}
         >
-          <div aria-hidden className="absolute inset-0" style={{ borderRadius: CardRadius, background: bandedBackground({ steps: 15, cap: 0.05 }), zIndex: 0 }} />
+          {/* banded lines UNDER content */}
+          <div
+            aria-hidden
+            className="absolute inset-0"
+            style={{ borderRadius: CardRadius, background: bandedBackground({ steps: 15, cap: 0.045 }), zIndex: 0 }}
+          />
           <div className="absolute inset-0 p-6 flex flex-col" style={{ zIndex: 1 }}>
             <div style={{ fontSize: 18, fontWeight: 700 }}>Create Subaccount</div>
             <div style={{ fontSize: 12, color: MUTED, marginTop: 4, letterSpacing: '.04em' }}>Add new workspace</div>
+
             <div className="flex-1 grid place-items-center">
-              <IconTile size={IconPlate} radius={IconRadius}>
+              <IconTile size={IconPlate} radius={14}>
                 <Plus size={IconSize} strokeWidth={2.6} color={CTA} />
               </IconTile>
             </div>
+
             <div style={{ textAlign: 'center', fontSize: 12, color: MUTED, marginTop: 6 }}>Click to create</div>
           </div>
         </button>
@@ -162,20 +178,24 @@ export default function SubaccountsPage() {
             key={s.id}
             className="relative overflow-hidden"
             style={{
-              height: CardSide, borderRadius: CardRadius, background: PANEL,
+              aspectRatio: '1 / 1',
+              borderRadius: CardRadius,
+              background: PANEL,
               border: `1px solid ${GREEN_LINE}`,
-              boxShadow: '0 18px 54px rgba(0,0,0,.55), 0 0 0 1px rgba(89,217,179,.20), 0 22px 58px rgba(89,217,179,.10)'
+              boxShadow: '0 18px 54px rgba(0,0,0,.55), 0 22px 58px rgba(89,217,179,.08)'
             }}
           >
-            <div aria-hidden className="absolute inset-0" style={{ borderRadius: CardRadius, background: bandedBackground({ steps: 15, cap: 0.05 }), zIndex: 0 }} />
+            <div aria-hidden className="absolute inset-0" style={{ borderRadius: CardRadius, background: bandedBackground({ steps: 15, cap: 0.045 }), zIndex: 0 }} />
             <div className="absolute inset-0 p-6 flex flex-col" style={{ color: TEXT, zIndex: 1 }}>
               <div style={{ fontSize: 18, fontWeight: 700 }}>{s.name}</div>
               <div style={{ fontSize: 12, color: MUTED, marginTop: 4, letterSpacing: '.04em' }}>ID: {s.id}</div>
+
               <div className="flex-1 grid place-items-center">
-                <IconTile size={IconPlate} radius={IconRadius}>
+                <IconTile size={IconPlate} radius={14}>
                   <Bot size={IconSize - 2} strokeWidth={2.6} color={CTA} />
                 </IconTile>
               </div>
+
               <div className="flex items-center justify-center gap-2" style={{ fontSize: 12, color: MUTED }}>
                 <span>{s.agents} AI Agents</span>
                 <span>•</span>
@@ -186,14 +206,19 @@ export default function SubaccountsPage() {
         ))}
       </div>
 
-      {/* Create overlay (kept narrow/square-ish) */}
+      {/* Create overlay — **narrower** */}
       {newOpen && (
         <div className="fixed inset-0 z-[1000] grid place-items-center" style={{ background: 'rgba(6,8,10,.66)', backdropFilter: 'blur(6px)' }}>
           <div
             className="relative overflow-hidden"
             style={{
-              width: 520, maxWidth: '92vw', borderRadius: 12, border: `2px solid ${GREEN_LINE}`,
-              background: PANEL, boxShadow: '0 24px 80px rgba(0,0,0,.6)', color: TEXT
+              width: 440,                        // narrower than before
+              maxWidth: '92vw',
+              borderRadius: 12,
+              border: `2px solid ${GREEN_LINE}`,
+              background: PANEL,
+              boxShadow: '0 24px 80px rgba(0,0,0,.6)',
+              color: TEXT
             }}
           >
             <div className="px-5 py-4 flex items-center gap-3" style={{ background: headerBands(), borderBottom: `1px solid ${GREEN_LINE}` }}>
@@ -252,6 +277,19 @@ export default function SubaccountsPage() {
 
       <style jsx>{`
         :global(body){ background:${CANVAS}; }
+        /* Tighter dash look for the create card (small dashes) */
+        button[style*="dashed"]{
+          border-style: dashed;
+          border-width: 1px;
+          /* browsers vary; this shrinks dash visuals a bit */
+          border-image: repeating-linear-gradient(
+            to right,
+            ${GREEN_LINE},
+            ${GREEN_LINE} 6px,
+            transparent 6px,
+            transparent 10px
+          ) 1;
+        }
       `}</style>
     </div>
   );
