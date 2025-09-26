@@ -92,15 +92,7 @@ const Tokens = ({theme}:{theme:'dark'|'light'}) => (
   `}</style>
 );
 
-/* OpenAI logo */
-function OpenAIStamp({size=14}:{size?:number}) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 40 40" aria-hidden>
-      <path d="M37.532 16.37a8.9 8.9 0 00-.77-7.3 8.96 8.96 0 00-11.87-3.42A8.99 8.99 0 007.53 9.63a8.9 8.9 0 00.77 7.3 8.96 8.96 0 0011.87 3.42 8.99 8.99 0 0017.36-3.99z" fill="currentColor" opacity=".18"/>
-      <path d="M20.5 6.5l-8 4.6v9.3l8 4.6 8-4.6v-9.3l-8-4.6z" fill="currentColor" />
-    </svg>
-  );
-}
+/* SVG */
 const PhoneFilled = (props: React.SVGProps<SVGSVGElement>) => (
   <svg viewBox="0 0 24 24" width="16" height="16" {...props} aria-hidden>
     <path d="M6.62 10.79a15.053 15.053 0 006.59 6.59l2.2-2.2a1 1 0 011.03-.24c1.12.37 2.33.57 3.56.57a1 1 0 011 1v3.5a1 1 0 01-1 1C11.3 22 2 12.7 2 2.99a1 1 0 011-1H6.5a1 1 0 011 1c0 1.23.2 2.44.57 3.56a1 1 0 01-.24 1.03l-2.2 2.2z" fill="currentColor"/>
@@ -286,7 +278,7 @@ async function readFileAsText(f: File): Promise<string> {
 
   const looksZip = async () => {
     const buf = new Uint8Array(await f.slice(0,4).arrayBuffer());
-    return buf[0]===0x50 && buf[1]===0x4b;
+    return buf[0]===0x50 && buf[1]===0x4b; // PK..
   };
 
   if (name.endsWith('.docx') || name.endsWith('.docs') || await looksZip()) {
@@ -380,10 +372,13 @@ export default function VoiceAgentSection() {
   const [phoneNumbers, setPhoneNumbers] = useState<PhoneNum[]>([]);
   const [showCall, setShowCall] = useState(false);
 
+  // ===== NEW: modal state that was missing (caused crash) =====
+  const [showGenerate, setShowGenerate] = useState(false);
+
   // ===== Diff/Generate flow =====
-  const [diffMode, setDiffMode] = useState(false);
-  const [basePrompt, setBasePrompt] = useState('');
-  const [candidatePrompt, setCandidatePrompt] = useState('');
+  const [diffMode, setDiffMode] = useState(false);          // show diff box instead of textarea
+  const [basePrompt, setBasePrompt] = useState('');         // snapshot of current prompt
+  const [candidatePrompt, setCandidatePrompt] = useState('');// proposed updated prompt
 
   // Website import overlay
   const [showImport, setShowImport] = useState(false);
@@ -508,7 +503,7 @@ export default function VoiceAgentSection() {
     return (v: AgentData[K]) => setData(prev => ({ ...prev, [k]: v }));
   }
 
-  // Keep backend prompt mirrored
+  // Keep backend prompt mirrored (no external compiler)
   useEffect(() => {
     if (!data.systemPrompt) return;
     const s = sanitizePrompt(data.systemPrompt);
@@ -560,7 +555,7 @@ export default function VoiceAgentSection() {
     setToastKind('info'); setToast('File(s) added'); setTimeout(()=>setToast(''), 1200);
   };
 
-  // ── Helpers to enter/exit diff mode ──
+  // ── Helpers to enter diff mode ──
   const startDiff = (nextText: string) => {
     const current = sanitizePrompt((data.systemPromptBackend || data.systemPrompt || DEFAULT_PROMPT_RT).trim());
     const next = sanitizePrompt(nextText);
@@ -576,6 +571,7 @@ export default function VoiceAgentSection() {
     setCandidatePrompt('');
   };
   const declineDiff = () => {
+    // do not change the prompt; just close diff
     setDiffMode(false);
     setBasePrompt('');
     setCandidatePrompt('');
@@ -630,7 +626,7 @@ export default function VoiceAgentSection() {
   }, [data.greetPick, data.firstMsgs, data.firstMode]);
 
   const hasApiKey = !!(data.apiKeyId && apiKeys.some(k=>k.id===data.apiKeyId && k.key));
-  const selectedKey = useMemo(() => apiKeys.find(k => k.id === data.apiKeyId)?.key || '', [apiKeys, data.apiKeyId]);
+  const selectedKey = useMemo(() => apiKeys.find(k => k.id === data.apiKeyId)?.key || '', [apiKeys, data.apiKeyId]); // NEW
 
   return (
     <section className="va-root">
@@ -1150,7 +1146,7 @@ export default function VoiceAgentSection() {
               }
               voiceName={data.voiceName}
               assistantName={data.name || 'Assistant'}
-              apiKey={selectedKey}                      // ✅ pass RAW KEY, not id
+              apiKey={selectedKey}                      // pass RAW KEY to the button
               ephemeralEndpoint={EPHEMERAL_TOKEN_ENDPOINT}
               onError={(err:any) => {
                 const msg = err?.message || err?.error?.message || (typeof err === 'string' ? err : '') || 'Call failed';
