@@ -4,56 +4,44 @@ import React, { useMemo, useState } from 'react';
 import { Plus, Bot, User2, X } from 'lucide-react';
 
 /* Brand */
-const CTA = '#59d9b3';                           // button + icon green
-const GREEN_LINE = 'rgba(89,217,179,.24)';       // greener + slightly brighter seams
+const CTA = '#59d9b3';
+const GREEN_LINE = 'rgba(89,217,179,.24)';
 const CANVAS = '#070b0d';
 const PANEL  = '#0b0f11';
 const TEXT   = 'rgba(236,242,247,.92)';
 const MUTED  = 'rgba(176,196,210,.58)';
 
-/* IDs (placeholder until backend) */
+/* ID helper (placeholder) */
 function genId() {
   const t = Date.now().toString(36);
   const r = Math.random().toString(36).slice(2, 12);
   return `${(t + r).slice(0, 8)}-${(t + r).slice(8, 13)}-${(t + r).slice(13, 18)}`;
 }
 
-/* ---------- VISUAL UTILITIES ---------- */
-
-/**
- * 15 hard bands. Center darkest.
- * Sides lighten only up to +5% and the lightening uses CTA (green) instead of white,
- * so lines look *greenish* and just a bit lighter — not washed out.
- */
+/* ---- Visual utils ---- */
 function bandedBackground({ steps = 15, cap = 0.05 }) {
   const parts: string[] = [];
   const center = Math.ceil(steps / 2);
   const bw = 100 / steps;
-
   for (let i = 1; i <= steps; i++) {
     const dist = Math.abs(i - center);
     const lighten = Math.min((cap / (center - 1)) * dist, cap);
-    // mix PANEL with CTA to get a subtle green lift
     const col = `color-mix(in oklab, ${PANEL} ${100 - lighten * 100}%, ${CTA} ${lighten * 100}%)`;
     parts.push(`${col} ${(i - 1) * bw}%, ${col} ${i * bw}%`);
   }
   return `linear-gradient(90deg, ${parts.join(', ')})`;
 }
-
-/** Header: broader bands light->dark (kept from previous, green-tinted too) */
 function headerBands() {
   const steps = 10;
   const parts: string[] = [];
   for (let i = 0; i < steps; i++) {
-    const amt = 0.06 - (0.06 / (steps - 1)) * i; // 6% -> 0%
+    const amt = 0.06 - (0.06 / (steps - 1)) * i;
     const col = `color-mix(in oklab, ${PANEL} ${100 - amt * 100}%, ${CTA} ${amt * 100}%)`;
     parts.push(`${col} ${(i * 100) / steps}%, ${col} ${((i + 1) * 100) / steps}%`);
   }
   return `linear-gradient(90deg, ${parts.join(',')})`;
 }
-
-/** Solid icon plate (opaque; no drop/shadow; icons stay centered). */
-function IconTile({ children, size = 132, radius = 8 }:{
+function IconTile({ children, size = 112, radius = 12 }:{
   children: React.ReactNode; size?: number; radius?: number
 }) {
   return (
@@ -73,6 +61,7 @@ function IconTile({ children, size = 132, radius = 8 }:{
   );
 }
 
+/* ---- Component ---- */
 type Sub = { id: string; name: string; agents: number; active: boolean };
 
 export default function SubaccountsPage() {
@@ -83,8 +72,7 @@ export default function SubaccountsPage() {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return subs;
-    return subs.filter(s => (s.name + ' ' + s.id).toLowerCase().includes(q));
+    return q ? subs.filter(s => (s.name + ' ' + s.id).toLowerCase().includes(q)) : subs;
   }, [subs, query]);
 
   const count = subs.length;
@@ -95,14 +83,16 @@ export default function SubaccountsPage() {
     setNewName(''); setNewOpen(false);
   }
 
-  /* Layout sizing */
-  const CardSide = 332;    // SQUARE cards
-  const CardRadius = 8;    // “squared” (minimal rounding)
-  const IconRadius = 8;
+  /* >>> Sizing you asked for <<< */
+  const CardSide   = 288;   // smaller square
+  const CardRadius = 16;    // MORE rounded corners
+  const IconSize   = 56;    // smaller icon
+  const IconPlate  = 112;   // smaller plate
+  const IconRadius = 12;
 
   return (
     <div className="min-h-screen px-6 pb-16 pt-6" style={{ background: CANVAS, color: TEXT }}>
-      {/* Row A: Subaccounts (left) + CTA (right) */}
+      {/* Row A: Subaccounts + CTA */}
       <div className="flex items-end gap-4">
         <div className="pb-3">
           <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: '.02em' }}>Subaccounts</div>
@@ -113,10 +103,8 @@ export default function SubaccountsPage() {
           onClick={() => setNewOpen(true)}
           className="ml-auto h-[40px] px-4 font-semibold"
           style={{
-            background: CTA,
-            color: '#fff',
-            borderRadius: 10,
-            border: `1px solid ${CTA}`,
+            background: CTA, color: '#fff',
+            borderRadius: 10, border: `1px solid ${CTA}`,
             boxShadow: '0 14px 28px rgba(89,217,179,.22)'
           }}
         >
@@ -124,9 +112,9 @@ export default function SubaccountsPage() {
         </button>
       </div>
 
-      {/* Row B: search (left) + centered count */}
+      {/* Row B: search + centered count */}
       <div className="mt-5 flex items-center">
-        <div className="w-[420px]">
+        <div className="w-[380px]">
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -143,42 +131,32 @@ export default function SubaccountsPage() {
         </div>
       </div>
 
-      {/* Grid: up to 4 per row */}
+      {/* Grid (4 across) */}
       <div className="mt-8 grid gap-8" style={{ gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' }}>
-        {/* Create card (dashed) */}
+        {/* Create card */}
         <button
           onClick={() => setNewOpen(true)}
           className="relative group overflow-hidden"
           style={{
             height: CardSide, borderRadius: CardRadius, background: PANEL,
             border: `1px dashed ${GREEN_LINE}`,
-            // green-tinted drop shadow UNDER the card, not on icons
             boxShadow: '0 18px 54px rgba(0,0,0,.55), 0 0 0 1px rgba(89,217,179,.20), 0 22px 58px rgba(89,217,179,.10)'
           }}
         >
-          {/* bands UNDER content; subtle greenish lines */}
-          <div
-            aria-hidden
-            className="absolute inset-0"
-            style={{ borderRadius: CardRadius, background: bandedBackground({ steps: 15, cap: 0.05 }), zIndex: 0 }}
-          />
-
+          <div aria-hidden className="absolute inset-0" style={{ borderRadius: CardRadius, background: bandedBackground({ steps: 15, cap: 0.05 }), zIndex: 0 }} />
           <div className="absolute inset-0 p-6 flex flex-col" style={{ zIndex: 1 }}>
             <div style={{ fontSize: 18, fontWeight: 700 }}>Create Subaccount</div>
             <div style={{ fontSize: 12, color: MUTED, marginTop: 4, letterSpacing: '.04em' }}>Add new workspace</div>
-
-            {/* equal spacing above / below icon */}
             <div className="flex-1 grid place-items-center">
-              <IconTile size={132} radius={IconRadius}>
-                <Plus size={66} strokeWidth={2.6} color={CTA} />
+              <IconTile size={IconPlate} radius={IconRadius}>
+                <Plus size={IconSize} strokeWidth={2.6} color={CTA} />
               </IconTile>
             </div>
-
             <div style={{ textAlign: 'center', fontSize: 12, color: MUTED, marginTop: 6 }}>Click to create</div>
           </div>
         </button>
 
-        {/* Subaccount cards (always show agent count, even 0) */}
+        {/* Subaccount cards */}
         {filtered.map((s) => (
           <div
             key={s.id}
@@ -189,22 +167,15 @@ export default function SubaccountsPage() {
               boxShadow: '0 18px 54px rgba(0,0,0,.55), 0 0 0 1px rgba(89,217,179,.20), 0 22px 58px rgba(89,217,179,.10)'
             }}
           >
-            <div
-              aria-hidden
-              className="absolute inset-0"
-              style={{ borderRadius: CardRadius, background: bandedBackground({ steps: 15, cap: 0.05 }), zIndex: 0 }}
-            />
-
+            <div aria-hidden className="absolute inset-0" style={{ borderRadius: CardRadius, background: bandedBackground({ steps: 15, cap: 0.05 }), zIndex: 0 }} />
             <div className="absolute inset-0 p-6 flex flex-col" style={{ color: TEXT, zIndex: 1 }}>
               <div style={{ fontSize: 18, fontWeight: 700 }}>{s.name}</div>
               <div style={{ fontSize: 12, color: MUTED, marginTop: 4, letterSpacing: '.04em' }}>ID: {s.id}</div>
-
               <div className="flex-1 grid place-items-center">
-                <IconTile size={132} radius={IconRadius}>
-                  <Bot size={60} strokeWidth={2.6} color={CTA} />
+                <IconTile size={IconPlate} radius={IconRadius}>
+                  <Bot size={IconSize - 2} strokeWidth={2.6} color={CTA} />
                 </IconTile>
               </div>
-
               <div className="flex items-center justify-center gap-2" style={{ fontSize: 12, color: MUTED }}>
                 <span>{s.agents} AI Agents</span>
                 <span>•</span>
@@ -215,7 +186,7 @@ export default function SubaccountsPage() {
         ))}
       </div>
 
-      {/* Overlay (unchanged logic; still dark + narrow) */}
+      {/* Create overlay (kept narrow/square-ish) */}
       {newOpen && (
         <div className="fixed inset-0 z-[1000] grid place-items-center" style={{ background: 'rgba(6,8,10,.66)', backdropFilter: 'blur(6px)' }}>
           <div
