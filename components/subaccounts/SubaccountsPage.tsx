@@ -1,188 +1,107 @@
-// components/subaccounts/SubaccountsPage.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { Plus, Bot, ChevronRight, Search } from 'lucide-react';
-import { AnimatePresence, motion } from 'framer-motion';
-import { createPortal } from 'react-dom';
+import { useMemo, useState } from 'react';
+import { Plus, Bot, Search } from 'lucide-react';
+import { motion } from 'framer-motion';
+
+/** Brand (from AssistantRail) */
+const CTA        = '#59d9b3';
+const GREEN_LINE = 'rgba(89,217,179,.22)';
+const TEXT       = 'rgba(232,244,241,.92)';
+const MUTED      = 'rgba(180,206,198,.56)';
+const R          = 6;            // squared corners
+const ICON_SIZE  = 72;           // centered icon block size
+const CARD_H     = 220;          // taller cards
 
 type Subaccount = { id: string; name: string; agents: number; status: 'active'|'inactive' };
 
-const CTA        = '#59d9b3';
-const GREEN_LINE = 'rgba(89,217,179,.22)';
-const PANEL_DK   = 'rgba(12,16,18,.82)';
-const TEXT       = 'rgba(232,244,241,.92)';
-const MUTED      = 'rgba(180,206,198,.56)';
-const R          = 8;     // tighter corners (squared)
-const R_ICON     = 10;
-
-// detect collapse via your --sidebar-w variable (68px when collapsed)
-function useSidebarCollapsed(){
-  const [collapsed, set] = useState(false);
-  useEffect(()=>{
-    const read = () => {
-      const raw = getComputedStyle(document.documentElement).getPropertyValue('--sidebar-w').trim();
-      const n = Number(raw.replace('px','')) || 0;
-      set(n > 0 && n < 100);
-    };
-    read();
-    const id = setInterval(read, 500);
-    return () => clearInterval(id);
-  },[]);
-  return collapsed;
-}
-
-/** base gradient (dark center) — stripes moved to a subtle overlay (::after) */
-function cardBase() {
-  return `
-    radial-gradient(120% 160% at 50% 38%, rgba(0,0,0,.58) 0%, rgba(0,0,0,.40) 58%, rgba(0,0,0,.30) 100%),
-    linear-gradient(180deg, rgba(16,20,22,.70), rgba(10,12,14,.70))
-  `;
-}
-
-/** very subtle mint pinstripes — used in ::after */
 const stripeOverlay = `
   repeating-linear-gradient(
     90deg,
-    rgba(89,217,179,.28) 0 1px,
-    rgba(89,217,179,0)   1px 8px
+    rgba(89,217,179,.22) 0 1px,
+    rgba(89,217,179,0)   1px 10px
   )
 `;
 
-/* ---------------- Modal (unchanged visuals) ---------------- */
-function CreateModal({ open, onClose, onCreate }:{
-  open:boolean; onClose:()=>void; onCreate:(name:string)=>void;
-}) {
-  const [val,setVal] = useState('');
-  useEffect(()=>{ if(open) setVal(''); },[open]);
-  if(!open) return null;
+const baseBg = `
+  radial-gradient(120% 160% at 50% 40%, rgba(0,0,0,.55) 0%, rgba(0,0,0,.40) 60%, rgba(0,0,0,.28) 100%),
+  linear-gradient(180deg, rgba(16,20,22,.70), rgba(10,12,14,.70))
+`;
 
-  return createPortal(
-    <AnimatePresence>
-      <motion.div
-        key="veil" className="fixed inset-0 z-[9999]"
-        initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}
-        style={{ background:'rgba(6,8,10,.62)', backdropFilter:'blur(6px)' }}
-        onClick={onClose}
-      />
-      <div className="fixed inset-0 z-[10000] grid place-items-center px-4">
-        <motion.div
-          initial={{ opacity:0, y:10, scale:.98 }}
-          animate={{ opacity:1, y:0, scale:1 }}
-          exit={{ opacity:0, y:8, scale:.98 }}
-          transition={{ duration:.18, ease:'easeOut' }}
-          className="w-full max-w-[560px] overflow-hidden"
-          style={{
-            borderRadius:R,
-            background:`linear-gradient(90deg, ${PANEL_DK} 0%, color-mix(in oklab, ${PANEL_DK} 97%, white 3%) 50%, ${PANEL_DK} 100%)`,
-            border:`1px solid ${GREEN_LINE}`, boxShadow:'0 10px 40px rgba(0,0,0,.45)'
-          }}
-        >
-          <div className="flex items-center gap-3 px-6 py-4" style={{ borderBottom:`1px solid ${GREEN_LINE}` }}>
-            <div className="grid place-items-center" style={{ width:40, height:40, borderRadius:R_ICON, background:'rgba(89,217,179,.10)' }}>
-              <Plus className="w-5 h-5" style={{ color:CTA }} />
-            </div>
-            <div className="min-w-0">
-              <div className="text-lg font-semibold" style={{ color:TEXT }}>Create New Subaccount</div>
-              <div className="text-xs" style={{ color:MUTED }}>Organize your AI agents</div>
-            </div>
-          </div>
-
-          <div className="px-6 py-5">
-            <label className="block text-xs mb-1" style={{ color:MUTED }}>Subaccount Name</label>
-            <input
-              value={val} onChange={e=>setVal(e.target.value)} autoFocus
-              placeholder="e.g., Dental Chatbot"
-              className="w-full h-[44px] px-3 text-sm outline-none"
-              style={{ color:TEXT, background:'rgba(8,10,12,.65)', border:`1px solid ${GREEN_LINE}`, borderRadius:R }}
-            />
-          </div>
-
-          <div className="px-6 pb-6 flex gap-3">
-            <button onClick={onClose} className="w-full h-[44px] font-semibold"
-              style={{ borderRadius:R, background:'rgba(12,16,18,.75)', color:TEXT, border:'1px solid rgba(255,255,255,.10)' }}>
-              Cancel
-            </button>
-            <button
-              disabled={val.trim().length<2}
-              onClick={()=> val.trim() && onCreate(val.trim())}
-              className="w-full h-[44px] font-semibold disabled:opacity-60"
-              style={{ borderRadius:R, background:CTA, color:'#0b1110', border:`1px solid ${CTA}`, boxShadow:'0 6px 22px rgba(89,217,179,.35)' }}
-            >
-              Create Subaccount
-            </button>
-          </div>
-        </motion.div>
-      </div>
-    </AnimatePresence>,
-    document.body
-  );
-}
-
-/* ---------------- Page ---------------- */
 export default function SubaccountsPage() {
-  const collapsed = useSidebarCollapsed();
-
-  const [items,setItems] = useState<Subaccount[]>([
-    { id:'__create__', name:'__create__', agents:0, status:'inactive' },
-    { id:'1', name:'Dental Chatbot', agents:1, status:'active' },
+  const [items, setItems] = useState<Subaccount[]>([
+    { id: '__create__', name: '', agents: 0, status: 'inactive' },
+    { id: '1', name: 'Dental Chatbot', agents: 1, status: 'active' },
   ]);
+  const [q, setQ] = useState('');
 
-  // lock 3-up on desktop
-  const gridCols = useMemo(()=> 'repeat(3, minmax(0, 1fr))', []);
-  const CARD_H   = collapsed ? 140 : 168; // more rectangular when collapsed
+  const list = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    const arr = items.filter(i => i.id !== '__create__');
+    return s ? arr.filter(x => (x.name.toLowerCase()).includes(s)) : arr;
+  }, [items, q]);
 
-  const [open,setOpen] = useState(false);
+  const total = list.length;
 
   return (
-    <div className="h-full w-full" style={{ color:TEXT }}>
-      {/* header / tabs / search */}
-      <div className="px-6 pt-6">
+    <div className="w-full h-full" style={{ color: TEXT }}>
+      {/* Page header */}
+      <div className="px-6 pt-6 pb-2">
         <div className="flex items-center justify-between">
-          <div className="text-xl font-semibold" style={{ color:TEXT }}>Launch &amp; Deploy</div>
-          <button onClick={()=>setOpen(true)}
+          <h1 className="text-[18px] font-semibold" style={{ color: TEXT }}>Subaccounts</h1>
+
+          <button
+            onClick={() => onCreate(setItems)}
             className="inline-flex items-center gap-2 px-4 h-[38px] font-semibold"
-            style={{ borderRadius:999, background:CTA, color:'#0b1110', border:`1px solid ${CTA}`, boxShadow:'0 8px 30px rgba(89,217,179,.35)' }}>
-            <Plus className="w-4 h-4" /> New Subaccount
+            style={{
+              background: CTA, color: '#ffffff',
+              border: `1px solid ${CTA}`, borderRadius: 999,
+              boxShadow: '0 8px 30px rgba(89,217,179,.35)'
+            }}
+          >
+            <Plus className="w-4 h-4" style={{ color: '#ffffff' }} />
+            New Subaccount
           </button>
         </div>
 
-        <div className="mt-5 flex items-center gap-8 text-sm">
-          <button className="relative pb-2 font-medium" style={{ color:TEXT }}>
-            Subaccounts
-            <span className="absolute left-0 right-0 -bottom-[1px] h-[2px] rounded-full"
-                  style={{ background:`linear-gradient(90deg, transparent, ${CTA}, transparent)` }} />
-          </button>
-          <button className="pb-2" style={{ color:MUTED }}>Legacy View</button>
-        </div>
+        {/* Search row (inset, not full width) + total count on same line */}
+        <div className="mt-4 flex items-center gap-6">
+          <div className="relative" style={{ minWidth: 340, maxWidth: 460, width: '32vw' }}>
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search subaccounts…"
+              className="w-full h-[40px] pr-3 pl-9 text-sm outline-none"
+              style={{
+                color: TEXT,
+                background: 'rgba(8,10,12,.55)',
+                border: `1px solid ${GREEN_LINE}`,
+                borderRadius: 999
+              }}
+            />
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2" style={{ color: MUTED }} />
+          </div>
 
-        <div className="mt-4 relative">
-          <input
-            placeholder="Search subaccounts..." className="w-full h-[40px] pr-3 pl-9 text-sm outline-none"
-            style={{ color:TEXT, background:'rgba(8,10,12,.55)', border:`1px solid ${GREEN_LINE}`, borderRadius:999 }}
-          />
-          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2" style={{ color:MUTED }} />
-        </div>
-      </div>
-
-      {/* cards */}
-      <div className="px-6 pb-10 pt-6">
-        <div className="grid gap-6" style={{ gridTemplateColumns: gridCols }}>
-          {items.map((it) =>
-            it.id==='__create__'
-              ? <CreateCard key="create" height={CARD_H} onClick={()=>setOpen(true)} />
-              : <SubCard key={it.id} item={it} height={CARD_H} />
-          )}
+          <div className="ml-auto text-sm" style={{ color: MUTED }}>
+            Total Subaccounts: <span style={{ color: TEXT }}>{total}</span>
+          </div>
         </div>
       </div>
 
-      <CreateModal open={open} onClose={()=>setOpen(false)}
-        onCreate={(name)=>{
-          setItems(p => [p[0], { id: crypto.randomUUID(), name, agents:0, status:'inactive' }, ...p.slice(1)]);
-          setOpen(false);
-        }} />
+      {/* Grid (3-up on desktop) */}
+      <div className="px-6 pb-10 pt-4">
+        <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(3, minmax(0,1fr))' }}>
+          {/* Create card */}
+          <CreateCard onClick={() => onCreate(setItems)} />
 
-      {/* responsive — only drop to 2/1 columns on smaller widths */}
+          {/* Items */}
+          {list.map((it) => (
+            <SubCard key={it.id} item={it} />
+          ))}
+        </div>
+      </div>
+
+      {/* responsive breakpoints */}
       <style jsx>{`
         @media (max-width: 1300px) {
           div[style*="grid-template-columns"] { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
@@ -197,73 +116,111 @@ export default function SubaccountsPage() {
 
 /* ---------------- Cards ---------------- */
 
-function CreateCard({ onClick, height }:{ onClick:()=>void; height:number }) {
+function CreateCard({ onClick }: { onClick: () => void }) {
   return (
-    <button onClick={onClick} className="group w-full text-left relative overflow-hidden"
+    <button
+      onClick={onClick}
+      className="group relative overflow-hidden w-full text-center"
       style={{
-        borderRadius:R, height, padding:18, background:cardBase(),
-        border:`1px dashed ${GREEN_LINE}`, boxShadow:'0 8px 26px rgba(0,0,0,.38)'
-      }}>
-      {/* SUBTLE STRIPES (very faint) */}
+        height: CARD_H,
+        borderRadius: R,
+        background: baseBg,
+        border: `1px dashed ${GREEN_LINE}`,
+        boxShadow: '0 8px 26px rgba(0,0,0,.38)',
+        padding: 16
+      }}
+    >
+      {/* squared stripe overlay */}
       <div aria-hidden className="absolute inset-0 pointer-events-none"
-        style={{ borderRadius:R, background:stripeOverlay, opacity:.08, mixBlendMode:'overlay' }} />
+           style={{ borderRadius: R, background: stripeOverlay, opacity: .08, mixBlendMode: 'overlay' }} />
 
-      <div className="flex items-center gap-3 relative z-[1]">
-        <div className="grid place-items-center"
-          style={{ width:42, height:42, borderRadius:R_ICON, background:'rgba(89,217,179,.10)', border:`1px solid ${GREEN_LINE}`, boxShadow:'inset 0 0 18px rgba(0,0,0,.28)'}}>
-          <Plus className="w-5 h-5" style={{ color:CTA }} />
-        </div>
-        <div className="min-w-0">
-          <div className="text-[15px] font-semibold" style={{ color:TEXT }}>Create Subaccount</div>
-          <div className="text-[12px]" style={{ color:MUTED }}>Add new workspace</div>
-        </div>
+      {/* centered icon block */}
+      <div className="mx-auto grid place-items-center"
+           style={{
+             width: ICON_SIZE, height: ICON_SIZE,
+             borderRadius: R, border: `1px solid ${GREEN_LINE}`,
+             background: 'rgba(89,217,179,.10)'
+           }}>
+        <Plus className="w-6 h-6" style={{ color: CTA }} />
       </div>
 
-      <div className="mt-3 text-[12px] relative z-[1]" style={{ color:MUTED }}>Click to create</div>
+      {/* label */}
+      <div className="mt-3 text-[15px] font-semibold" style={{ color: TEXT }}>Create Subaccount</div>
+      <div className="text-[12px]" style={{ color: MUTED }}>Add new workspace</div>
 
-      {/* soft hover glow */}
-      <div aria-hidden className="absolute inset-0 rounded-[8px] opacity-0 group-hover:opacity-[.18] transition-opacity"
-           style={{ background:CTA, mixBlendMode:'screen' }} />
+      {/* hover wash */}
+      <div aria-hidden className="absolute inset-0" style={{ borderRadius: R, background: CTA, opacity: 0, mixBlendMode: 'screen', transition: 'opacity .18s ease' }} />
+      <style jsx>{`
+        button.group:hover > div[aria-hidden]:last-child { opacity: .14; }
+      `}</style>
     </button>
   );
 }
 
-function SubCard({ item, height }:{ item:Subaccount; height:number }) {
+function SubCard({ item }: { item: Subaccount }) {
   return (
-    <a href={`/subaccounts/${item.id}`} className="group block relative overflow-hidden"
-       style={{
-         borderRadius:R, height, padding:18, background:cardBase(),
-         border:`1px solid ${GREEN_LINE}`,
-         boxShadow:'0 10px 28px rgba(0,0,0,.40), inset 0 0 0 1px rgba(255,255,255,.02)'
-       }}>
-      {/* SUBTLE STRIPES (same treatment as create card) */}
+    <a
+      href={`/subaccounts/${item.id}`}
+      className="group relative overflow-hidden block text-center"
+      style={{
+        height: CARD_H,
+        borderRadius: R,
+        background: baseBg,
+        border: `1px solid ${GREEN_LINE}`,
+        boxShadow: '0 10px 28px rgba(0,0,0,.40), inset 0 0 0 1px rgba(255,255,255,.02)',
+        padding: 16
+      }}
+    >
+      {/* squared stripe overlay */}
       <div aria-hidden className="absolute inset-0 pointer-events-none"
-           style={{ borderRadius:R, background:stripeOverlay, opacity:.08, mixBlendMode:'overlay' }} />
+           style={{ borderRadius: R, background: stripeOverlay, opacity: .08, mixBlendMode: 'overlay' }} />
 
-      <div className="flex items-center gap-3 relative z-[1]">
-        <div className="grid place-items-center"
-          style={{ width:42, height:42, borderRadius:R_ICON, background:'rgba(89,217,179,.10)', border:`1px solid ${GREEN_LINE}`, boxShadow:'inset 0 0 18px rgba(0,0,0,.28)' }}>
-          <Bot className="w-5 h-5" style={{ color:CTA }} />
-        </div>
-
-        <div className="min-w-0">
-          <div className="text-[15px] font-semibold truncate" style={{ color:TEXT }}>{item.name}</div>
-          <div className="text-[12px] flex items-center gap-2" style={{ color:MUTED }}>
-            {item.agents} AI Agents
-            <span className="inline-flex items-center gap-1">
-              <span className="w-[6px] h-[6px] rounded-full" style={{ background:item.status==='active'?CTA:'#94a3b8' }} />
-              <span style={{ color:item.status==='active'?CTA:MUTED }}>
-                {item.status.charAt(0).toUpperCase()+item.status.slice(1)}
-              </span>
-            </span>
-          </div>
-        </div>
-
-        <ChevronRight className="ml-auto w-4 h-4 opacity-0 group-hover:opacity-80 transition-opacity" style={{ color:MUTED }} />
+      {/* centered icon block */}
+      <div className="mx-auto grid place-items-center"
+           style={{
+             width: ICON_SIZE, height: ICON_SIZE,
+             borderRadius: R, border: `1px solid ${GREEN_LINE}`,
+             background: 'rgba(89,217,179,.10)'
+           }}>
+        <Bot className="w-6 h-6" style={{ color: CTA }} />
       </div>
 
-      <div aria-hidden className="absolute inset-0 rounded-[8px] opacity-0 group-hover:opacity-[.14] transition-opacity"
-           style={{ background:CTA, mixBlendMode:'screen' }} />
+      {/* name + meta */}
+      <div className="mt-3 text-[15px] font-semibold truncate" style={{ color: TEXT }}>
+        {item.name}
+      </div>
+      <div className="text-[12px] flex items-center justify-center gap-2" style={{ color: MUTED }}>
+        {item.agents} AI Agents
+        <span className="inline-flex items-center gap-1">
+          <span className="w-[6px] h-[6px] rounded-[3px]" style={{ background: item.status === 'active' ? CTA : '#94a3b8' }} />
+          <span style={{ color: item.status === 'active' ? CTA : MUTED }}>
+            {item.status.charAt(0).toUpperCase() + item.status.slice(1)}
+          </span>
+        </span>
+      </div>
+
+      {/* hover wash */}
+      <motion.div
+        aria-hidden
+        className="absolute inset-0"
+        initial={{ opacity: 0 }}
+        whileHover={{ opacity: 0.12 }}
+        transition={{ duration: .18 }}
+        style={{ borderRadius: R, background: CTA, mixBlendMode: 'screen' }}
+      />
     </a>
   );
+}
+
+/* ---------------- Helpers ---------------- */
+
+function onCreate(setItems: React.Dispatch<React.SetStateAction<Subaccount[]>>) {
+  const id = crypto.randomUUID();
+  setItems((prev) => {
+    const created: Subaccount = { id, name: `Workspace ${prev.length}`, agents: 0, status: 'inactive' };
+    // keep the __create__ tile first
+    const createTile = prev.find(p => p.id === '__create__')!;
+    const rest = prev.filter(p => p.id !== '__create__');
+    return [createTile, created, ...rest];
+  });
 }
