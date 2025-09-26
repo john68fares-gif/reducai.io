@@ -3,60 +3,57 @@
 import React, { useMemo, useState } from 'react';
 import { Plus, Bot } from 'lucide-react';
 
-/* Brand/colors (from your rail) */
+/* Brand/colors (unchanged) */
 const CTA        = '#59d9b3';
 const GREEN_LINE = 'rgba(89,217,179,.20)';
 const TEXT       = 'rgba(236,242,247,.92)';
 const MUTED      = 'rgba(176,196,210,.60)';
-const PANEL      = '#0c1114';
+const PANEL      = '#0c1114';   // card base
 const CANVAS     = '#070b0d';
 
-/* IDs (replace with backend IDs later) */
+/* IDs */
 function genId() {
   const t = Date.now().toString(36);
   const r = Math.random().toString(36).slice(2, 12);
   return (t + r).slice(0, 8) + '-' + (t + r).slice(8, 13) + '-' + (t + r).slice(13, 18);
 }
 
-/* ====== STRIPES (keep your 15 bands; change COLORS/CONTRAST only) ======
-   Center band = darkest, each side gets ~+2% lighter, but all bands are
-   green-tinted (no harsh B/W). Also slightly de-contrast for subtlety. */
+/* ===== stripes: center = PANEL; +1% lightness per step; capped to 7% ===== */
 function bandedBackground(steps = 15) {
+  const center = Math.ceil(steps / 2);
+  const bandW = 100 / steps;
+  const MAX = 0.07;                 // ≤ 7% total on the far edge (very subtle)
   const parts: string[] = [];
-  const center = Math.ceil(steps / 2); // 8 for 15
-  const bandWidth = 100 / steps;
 
   for (let i = 1; i <= steps; i++) {
-    const dist = Math.abs(i - center);           // 0..7
-    const lighten = Math.min(0.02 * dist, 0.14); // +2% per step (cap)
-    // Base: panel tinted toward CTA; then tiny lift with white
-    const col = `color-mix(in oklab,
-                 color-mix(in oklab, ${PANEL} 88%, ${CTA} 12%) ${100 - lighten*100}%,
-                 white ${lighten*100}%)`;
-    const start = (i - 1) * bandWidth;
-    const end   = i * bandWidth;
-    parts.push(`${col} ${start}%, ${col} ${end}%`);
+    const dist = Math.abs(i - center);     // 0..7
+    const lighten = Math.min(0.01 * dist, MAX);
+    // only PANEL→white (no extra tint) so the middle equals PANEL exactly
+    const col = `color-mix(in oklab, ${PANEL} ${100 - lighten*100}%, white ${lighten*100}%)`;
+    const s = (i - 1) * bandW;
+    const e = i * bandW;
+    parts.push(`${col} ${s}%, ${col} ${e}%`);
   }
-  return `linear-gradient(90deg, ${parts.join(', ')} )`;
+  return `linear-gradient(90deg, ${parts.join(', ')})`;
 }
 
-/* Overlay-style icon tile (squared, bigger) */
-function IconTile({
-  children, size = 124, radius = 12
-}:{ children: React.ReactNode; size?: number; radius?: number }) {
+/* Icon tile (unchanged except border 2px to match cards) */
+function IconTile({ children, size = 124, radius = 12 }:{
+  children:React.ReactNode; size?:number; radius?:number
+}) {
   return (
     <div
       className="grid place-items-center"
       style={{
-        width: size, height: size, borderRadius: radius,
+        width:size, height:size, borderRadius:radius,
         background: `
           linear-gradient(180deg, rgba(89,217,179,.10), rgba(89,217,179,.02)),
           radial-gradient(60% 90% at 50% 10%, rgba(255,255,255,.05), rgba(255,255,255,0))
         `,
-        border: `2px solid ${GREEN_LINE}`,                // thicker border
-        boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.03), 0 8px 24px rgba(89,217,179,.10)',
-        color: CTA,
-        filter: 'drop-shadow(0 0 10px rgba(89,217,179,.30))',
+        border:`2px solid ${GREEN_LINE}`,
+        boxShadow:'inset 0 0 0 1px rgba(255,255,255,.03), 0 8px 24px rgba(89,217,179,.10)',
+        color:CTA,
+        filter:'drop-shadow(0 0 10px rgba(89,217,179,.30))'
       }}
     >
       {children}
@@ -64,10 +61,10 @@ function IconTile({
   );
 }
 
-/* ====== Create Modal (LONGER, squared, thicker borders, less-rounded buttons) ====== */
-function CreateModal({
-  open, onClose, onCreate
-}:{ open:boolean; onClose:()=>void; onCreate:(name:string)=>void }) {
+/* ===== overlay: slightly wider than square (not huge), squared + thick borders ===== */
+function CreateModal({ open, onClose, onCreate }:{
+  open:boolean; onClose:()=>void; onCreate:(name:string)=>void
+}) {
   const [name, setName] = useState('');
   if (!open) return null;
   const can = name.trim().length > 1;
@@ -83,20 +80,20 @@ function CreateModal({
         <div
           onClick={(e)=>e.stopPropagation()}
           className="w-full"
-          /* longer (wider) modal, squared */
           style={{
-            maxWidth: 820,             // << longer
+            /* about square height, just a bit wider; not 100% wide */
+            maxWidth: 660,                     // was 820
             background: PANEL,
             color: TEXT,
-            border: `2px solid ${GREEN_LINE}`,  // thicker
-            borderRadius: 8,           // squared
+            border: `2px solid ${GREEN_LINE}`,
+            borderRadius: 8,
             boxShadow: '0 20px 80px rgba(0,0,0,.55)'
           }}
         >
           <div
             className="flex items-center justify-between px-6 py-4"
             style={{
-              borderBottom: `2px solid ${GREEN_LINE}`,     // thicker
+              borderBottom: `2px solid ${GREEN_LINE}`,
               background: `linear-gradient(90deg, ${PANEL}, color-mix(in oklab, ${PANEL} 96%, white 4%), ${PANEL})`
             }}
           >
@@ -132,7 +129,6 @@ function CreateModal({
             <button
               onClick={onClose}
               className="w-full h-[44px] font-semibold"
-              /* less rounded buttons */
               style={{ background:PANEL, border:`2px solid ${GREEN_LINE}`, color:TEXT, borderRadius: 6 }}
             >
               Cancel
@@ -165,18 +161,17 @@ export default function SubaccountsPage() {
     setSubs([{ id: genId(), name, agents: 0, active: true }, ...subs]);
   }
 
-  /* Bigger, still square-ish cards */
-  const CardRadius        = 10;
-  const CardHeight        = 280;   // bigger/taller
-  const CreateInnerRadius = 14;
+  /* Card proportions: square-ish, slightly bigger */
+  const CardRadius = 10;
+  const CardHeight = 280;
 
   return (
     <div className="px-6 pb-16 pt-6" style={{ background: CANVAS, color: TEXT, minHeight: '100dvh' }}>
-      {/* Header row */}
+      {/* header */}
       <div className="flex items-end gap-4">
         <div className="pb-3">
           <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: '.02em' }}>Subaccounts</div>
-          <div style={{ height: 2, background: GREEN_LINE, marginTop: 10, width: 240 }} /> {/* thicker underline */}
+          <div style={{ height: 2, background: GREEN_LINE, marginTop: 10, width: 240 }} />
         </div>
 
         <div className="ml-auto flex items-end gap-10 pb-2">
@@ -186,7 +181,6 @@ export default function SubaccountsPage() {
             <div style={{ fontSize: 12, color: MUTED }}>Subaccounts</div>
           </div>
 
-          {/* top-right green button (white text) */}
           <button
             onClick={()=>setOpen(true)}
             className="px-4 h-[40px] font-semibold"
@@ -197,9 +191,9 @@ export default function SubaccountsPage() {
         </div>
       </div>
 
-      {/* Grid: up to 4 per row */}
+      {/* grid (4 per row) */}
       <div className="grid gap-6 mt-8" style={{ gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' }}>
-        {/* Create card (keep dashed) */}
+        {/* create card */}
         <button
           onClick={()=>setOpen(true)}
           className="relative text-left group overflow-hidden"
@@ -207,10 +201,9 @@ export default function SubaccountsPage() {
             height: CardHeight,
             borderRadius: CardRadius,
             background: PANEL,
-            border: `2px dashed ${GREEN_LINE}`,                 // thicker border
+            border: `2px dashed ${GREEN_LINE}`,
           }}
         >
-          {/* keep 15 bands, now green-tinted */}
           <div aria-hidden className="absolute inset-0" style={{ borderRadius: CardRadius, background: bandedBackground(15) }} />
 
           <div className="absolute inset-0 p-6 flex flex-col">
@@ -218,7 +211,7 @@ export default function SubaccountsPage() {
             <div style={{ fontSize: 12, color: MUTED, marginTop: 4, letterSpacing: '.04em' }}>Add new workspace</div>
 
             <div className="flex-1 grid place-items-center">
-              <IconTile radius={CreateInnerRadius}>
+              <IconTile radius={12}>
                 <Plus size={62} strokeWidth={2.4} />
               </IconTile>
             </div>
@@ -232,7 +225,7 @@ export default function SubaccountsPage() {
           />
         </button>
 
-        {/* Existing subs (solid border) */}
+        {/* existing subs */}
         {subs.map((s) => (
           <div
             key={s.id}
@@ -241,7 +234,7 @@ export default function SubaccountsPage() {
               height: CardHeight,
               borderRadius: CardRadius,
               background: PANEL,
-              border: `2px solid ${GREEN_LINE}`,               // thicker border
+              border: `2px solid ${GREEN_LINE}`,
             }}
           >
             <div aria-hidden className="absolute inset-0" style={{ borderRadius: CardRadius, background: bandedBackground(15) }} />
@@ -269,7 +262,6 @@ export default function SubaccountsPage() {
         ))}
       </div>
 
-      {/* SQUARED, LONGER overlay modal */}
       <CreateModal
         open={open}
         onClose={()=>setOpen(false)}
