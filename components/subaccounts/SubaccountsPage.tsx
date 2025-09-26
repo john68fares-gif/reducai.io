@@ -1,173 +1,206 @@
 'use client';
 
+import React from 'react';
 import { Plus, Bot } from 'lucide-react';
+import Link from 'next/link';
 
-type Sub = { id: string; name: string; agents: number; status: 'active'|'inactive' };
+/* === Brand pulled from your rail === */
+const CTA        = '#59d9b3';
+const GREEN_LINE = 'rgba(89,217,179,.20)';
 
-const SAMPLE: Sub[] = [
-  { id: '68b7b14b2c8bbab698dd0a1', name: 'Dental Chatbot', agents: 1, status: 'active' },
-];
+/** Stepped / striped background used across cards */
+const STEPPED_BG =
+  // dark center → lighter edges
+  `radial-gradient(140% 100% at 50% 30%, rgba(10,14,13,.72) 0%, rgba(10,14,13,.62) 38%, rgba(10,14,13,.50) 65%, rgba(10,14,13,.35) 100%),
+   /* faint horizontal bands */
+   repeating-linear-gradient(
+     to right,
+     rgba(255,255,255,.03) 0px,
+     rgba(255,255,255,.03) 1px,
+     rgba(255,255,255,0)   1px,
+     rgba(255,255,255,0)   7px
+   ),
+   /* subtle vertical falloff */
+   linear-gradient(180deg, rgba(255,255,255,.02) 0%, rgba(0,0,0,.20) 100%)`;
+
+/** Inner tile bg (icon square) */
+const TILE_BG =
+  `radial-gradient(120% 120% at 50% 30%, rgba(13,18,17,.78) 0%, rgba(13,18,17,.60) 60%, rgba(13,18,17,.42) 100%),
+   repeating-linear-gradient(
+     to right,
+     rgba(255,255,255,.03) 0px,
+     rgba(255,255,255,.03) 1px,
+     rgba(255,255,255,0)   1px,
+     rgba(255,255,255,0)   6px
+   )`;
+
+/* ---------- Card shells ---------- */
+
+type CardShellProps = {
+  children: React.ReactNode;
+  border?: 'dashed' | 'solid';
+  href?: string;
+};
+
+function CardShell({ children, border = 'solid', href }: CardShellProps) {
+  const common = (
+    <div
+      className="rounded-2xl p-5 relative group"
+      style={{
+        background: STEPPED_BG,
+        border: `${border === 'dashed' ? '1px dashed' : '1px solid'} ${GREEN_LINE}`,
+        boxShadow:
+          'inset 0 1px 0 rgba(255,255,255,.04), 0 6px 26px rgba(0,0,0,.30)',
+        transition: 'transform .18s ease, box-shadow .18s ease, border-color .18s ease',
+      }}
+    >
+      {/* soft neon aura on hover */}
+      <div
+        className="pointer-events-none absolute inset-0 rounded-2xl opacity-0 group-hover:opacity-100"
+        style={{
+          transition: 'opacity .18s ease',
+          boxShadow: '0 0 0 1px rgba(89,217,179,.10), 0 12px 28px rgba(89,217,179,.10)',
+        }}
+      />
+      {children}
+    </div>
+  );
+
+  if (href) {
+    return (
+      <Link href={href} className="block hover:scale-[1.01]">
+        {common}
+      </Link>
+    );
+  }
+  return <div className="hover:scale-[1.01]">{common}</div>;
+}
+
+function IconTile({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      className="w-[112px] h-[112px] rounded-2xl grid place-items-center"
+      style={{
+        background: TILE_BG,
+        border: `1px solid ${GREEN_LINE}`,
+        boxShadow:
+          'inset 0 1px 0 rgba(255,255,255,.04), 0 10px 28px rgba(0,0,0,.35)',
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+/* ---------- Specific cards ---------- */
+
+function CreateSubaccountCard({ onClick }: { onClick?: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="text-left w-full"
+      style={{ color: 'var(--text, #d7e5e0)' }}
+      aria-label="Create subaccount"
+    >
+      <CardShell border="dashed">
+        <div className="flex items-start gap-6">
+          <IconTile>
+            <Plus className="w-10 h-10" style={{ color: CTA, filter: 'drop-shadow(0 0 10px rgba(89,217,179,.35))' }} />
+          </IconTile>
+
+          <div className="pt-2">
+            <div className="text-[22px] font-semibold leading-tight">Create Subaccount</div>
+            <div className="text-sm mt-1" style={{ color: 'rgba(214,236,229,.70)' }}>
+              Add new workspace
+            </div>
+            <div className="text-xs mt-6" style={{ color: 'rgba(214,236,229,.55)' }}>
+              Click to create
+            </div>
+          </div>
+        </div>
+      </CardShell>
+    </button>
+  );
+}
+
+type SubItem = {
+  id: string;
+  name: string;
+  agents: number;
+  status: 'Active' | 'Paused';
+  href?: string;
+};
+
+function SubaccountCard({ item }: { item: SubItem }) {
+  return (
+    <CardShell href={item.href}>
+      <div className="flex items-start gap-6">
+        <IconTile>
+          <Bot className="w-10 h-10" style={{ color: CTA, filter: 'drop-shadow(0 0 10px rgba(89,217,179,.35))' }} />
+        </IconTile>
+
+        <div className="pt-2 min-w-0">
+          <div className="text-[22px] font-semibold leading-tight" style={{ color: 'var(--text, #e5f6f1)' }}>
+            {item.name}
+          </div>
+
+          <div className="mt-1 text-sm flex items-center gap-2" style={{ color: 'rgba(214,236,229,.75)' }}>
+            <span>{item.agents} AI Agents</span>
+            <span>•</span>
+            <span
+              className="inline-flex items-center gap-1"
+              style={{ color: CTA }}
+            >
+              <span className="w-[6px] h-[6px] rounded-full" style={{ background: CTA }} />
+              {item.status}
+            </span>
+          </div>
+
+          <div className="mt-3 text-[11px]" style={{ color: 'rgba(214,236,229,.45)' }}>
+            ID: {item.id}
+          </div>
+        </div>
+      </div>
+    </CardShell>
+  );
+}
+
+/* ---------- Page (only the cards area; no other sections touched) ---------- */
 
 export default function SubaccountsPage() {
+  // plug your real data here; this mock is only to render the visuals
+  const subs: SubItem[] = [
+    {
+      id: '68b7b14b2c8bbab698dd0a1',
+      name: 'Dental Chatbot',
+      agents: 1,
+      status: 'Active',
+      href: '/subaccounts/68b7b14b2c8bbab698dd0a1',
+    },
+  ];
+
   return (
-    <div className="px-6 md:px-8 max-w-[1200px] mx-auto">
-      {/* top bar placeholder; keep minimal while we nail visuals */}
-      <div className="flex items-center justify-between py-6">
-        <div className="text-xl font-semibold tracking-[.2px]">Launch & Deploy</div>
-        <button className="btn-new">New Subaccount</button>
-      </div>
+    <div className="w-full">
+      {/* Cards grid */}
+      <div className="grid gap-6 sm:grid-cols-2 max-w-5xl">
+        <CreateSubaccountCard onClick={() => {
+          // hook to your modal open action
+          const ev = new CustomEvent('subaccounts:create');
+          try { window.dispatchEvent(ev); } catch {}
+        }} />
 
-      {/* grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 pb-16">
-        {/* Create card */}
-        <button className="sb-card create group" aria-label="Create subaccount">
-          <div className="icon-tile">
-            <Plus className="h-14 w-14" />
-          </div>
-          <div className="mt-4 text-[22px] font-semibold leading-none">Create Subaccount</div>
-          <div className="mt-1 text-sm opacity-80">Add new workspace</div>
-          <div className="mt-6 text-[13px] opacity-90">Click to create</div>
-        </button>
-
-        {/* Example existing subaccount card */}
-        {SAMPLE.map((s) => (
-          <a key={s.id} className="sb-card group" href="#">
-            <div className="icon-tile">
-              <Bot className="h-14 w-14" />
-            </div>
-            <div className="mt-4 text-[22px] font-semibold leading-none">{s.name}</div>
-            <div className="mt-1 text-sm opacity-80">
-              {s.agents} AI Agents • <span className={s.status === 'active' ? 'text-emerald-400' : 'opacity-70'}>{s.status === 'active' ? 'Active' : 'Paused'}</span>
-            </div>
-            <div className="mt-3 text-[11px] opacity-70">ID: {s.id}</div>
-          </a>
+        {subs.map(s => (
+          <SubaccountCard key={s.id} item={s} />
         ))}
       </div>
 
-      {/* === Visuals only: stepped stripes + dashed border + glow === */}
+      {/* Page-level vars (light/dark safe) */}
       <style jsx>{`
-        :root {
-          --acc: #00ffc2;                  /* neon accent */
-          --acc-deep: #12a989;            /* deeper green */
-          --card-edge: #151a1a;           /* edge tone */
-          --card-mid: #0b0f10;            /* center tone */
-          --line-a: rgba(255,255,255,0.035);
-          --line-b: rgba(255,255,255,0.020);
-          --dash: rgba(0,255,194,.22);    /* dashed border base */
-          --dash-hover: rgba(0,255,194,.38);
-          --ring: rgba(0,255,194,.28);    /* hover glow */
-          --ring-strong: rgba(0,255,194,.45);
-          --ink: rgba(255,255,255,.92);
-          --muted: rgba(255,255,255,.66);
+        :global(:root:not([data-theme="dark"])) .grid > * {
+          --text: #0f172a;
         }
-
-        .btn-new {
-          height: 40px;
-          padding: 0 14px;
-          border-radius: 12px;
-          font-weight: 600;
-          color: #0a1212;
-          background: linear-gradient(180deg, #35e9c8, #19c7a7);
-          box-shadow: 0 8px 20px rgba(0,255,194,.18);
-          transition: transform .2s ease, box-shadow .2s ease, filter .2s ease;
-        }
-        .btn-new:hover { transform: translateY(-1px); box-shadow: 0 10px 26px rgba(0,255,194,.26); filter: saturate(1.05); }
-
-        /* Card shell */
-        .sb-card {
-          position: relative;
-          border-radius: 20px;
-          padding: 22px;
-          color: var(--ink);
-          text-align: left;
-          overflow: hidden;
-          isolation: isolate;
-          /* multi-layer background:
-             1) subtle center vignette
-             2) HORIZONTAL repeating stripes (the 2% step bands you want)
-             3) base gradient edge->center->edge
-          */
-          background:
-            radial-gradient(80% 60% at 50% 50%, rgba(0,0,0,0.35), transparent 60%),
-            repeating-linear-gradient(
-              90deg,
-              var(--line-a) 0px,
-              var(--line-a) 2px,
-              var(--line-b) 2px,
-              var(--line-b) 4px
-            ),
-            linear-gradient(90deg, var(--card-edge), var(--card-mid) 50%, var(--card-edge));
-          border: 1px dashed var(--dash);
-          box-shadow:
-            inset 0 0 22px rgba(0,0,0,.40),
-            0 10px 26px rgba(0,0,0,.30);
-          transition: transform .28s cubic-bezier(.2,.8,.2,1), box-shadow .28s, border-color .28s, filter .28s;
-        }
-
-        /* Slight “selected/hover” lift + glow */
-        .sb-card:hover,
-        .sb-card:focus-visible {
-          transform: translateY(-2px);
-          border-color: var(--dash-hover);
-          box-shadow:
-            inset 0 0 22px rgba(0,0,0,.35),
-            0 10px 26px rgba(0,0,0,.28),
-            0 0 0 1px var(--ring),
-            0 14px 44px rgba(0,255,194,.14);
-        }
-
-        /* green inner tile for icon — matches screenshots */
-        .icon-tile {
-          width: 136px;
-          height: 136px;
-          border-radius: 20px;
-          display: grid;
-          place-items: center;
-          color: var(--acc-deep);
-          background:
-            linear-gradient(180deg, rgba(255,255,255,.02), rgba(0,0,0,.12)),
-            linear-gradient(90deg, rgba(0,0,0,.22), rgba(0,0,0,.32));
-          border: 1px solid rgba(255,255,255,.08);
-          box-shadow:
-            inset 0 0 22px rgba(0,0,0,.45),
-            0 8px 28px rgba(0,0,0,.35),
-            0 0 0 1px rgba(0,255,194,.06);
-          transition: box-shadow .28s, transform .28s;
-        }
-
-        .sb-card:hover .icon-tile {
-          box-shadow:
-            inset 0 0 18px rgba(0,0,0,.35),
-            0 10px 32px rgba(0,0,0,.35),
-            0 0 0 1px var(--ring-strong),
-            0 0 34px rgba(0,255,194,.18);
-          transform: translateY(-1px);
-        }
-
-        /* Create variant: slightly more “dashed” feel */
-        .sb-card.create {
-          border-style: dashed;
-          background:
-            radial-gradient(80% 60% at 50% 50%, rgba(0,255,194,.06), transparent 60%),
-            repeating-linear-gradient(
-              90deg,
-              rgba(0,255,194,.06) 0px,
-              rgba(0,255,194,.06) 2px,
-              rgba(0,255,194,.03) 2px,
-              rgba(0,255,194,.03) 4px
-            ),
-            linear-gradient(90deg, var(--card-edge), var(--card-mid) 50%, var(--card-edge));
-        }
-
-        /* Typography color balance */
-        .sb-card :global(svg) { stroke-width: 2.2; }
-        .sb-card .opacity-80 { color: var(--muted); }
-        .sb-card .opacity-70 { color: rgba(255,255,255,.6); }
-        .sb-card .opacity-90 { color: rgba(255,255,255,.84); }
-
-        /* Responsive tune */
-        @media (max-width: 640px) {
-          .icon-tile { width: 120px; height: 120px; }
+        :global([data-theme="dark"]) .grid > * {
+          --text: #e7f5f0;
         }
       `}</style>
     </div>
