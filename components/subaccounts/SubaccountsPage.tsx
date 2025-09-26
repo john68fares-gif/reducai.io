@@ -1,237 +1,353 @@
+// components/subaccounts/SubaccountsPage.tsx
 'use client';
 
-import { useMemo } from 'react';
-import Link from 'next/link';
-import { Plus, Bot, ChevronRight } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import {
+  Plus, Search, Users, Rocket, Bot, X, ChevronRight
+} from 'lucide-react';
 
-/** Use the same rail colors */
-const CTA        = '#59d9b3';
-const GREEN_LINE = 'rgba(89,217,179,.20)';
+/* ─────────────────────────── Theme tokens ───────────────────────────
+   You can override these via CSS variables at app level.
+   ------------------------------------------------------------------ */
+const BRAND = 'var(--brand, #00ffc2)';               // accent green
+const CARD_BG = 'var(--card, #0b0c10)';              // dark
+const SURFACE = 'var(--surface, #0d0f11)';           // panels/modals
+const TEXT = 'var(--text, #e8f5f1)';                 // body text
+const SUBTEXT = 'color-mix(in oklab, var(--text, #e8f5f1) 65%, transparent)';
+const BORDER = 'color-mix(in oklab, var(--brand, #00ffc2) 24%, transparent)';
+const BORDER_SOFT = 'color-mix(in oklab, var(--brand, #00ffc2) 16%, transparent)';
 
+/* Subaccount shape */
 type Subaccount = {
   id: string;
   name: string;
   agents: number;
-  active: boolean;
+  status: 'Active' | 'Paused';
 };
 
-const demoData: Subaccount[] = [
-  // replace with your data
-  { id: '68d6d34...e1445c', name: 'Dental Chatbot', agents: 1, active: true },
-];
-
 export default function SubaccountsPage() {
-  // replace with your actual list
-  const subaccounts = demoData;
+  const [query, setQuery] = useState('');
+  const [showModal, setShowModal] = useState(false);
+  const [items, setItems] = useState<Subaccount[]>([
+    { id: '68b7b14b2cbbbab698dd0a1', name: 'Dental Chatbot', agents: 1, status: 'Active' },
+  ]);
 
-  const total = subaccounts.length;
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return items;
+    return items.filter(i => i.name.toLowerCase().includes(q) || i.id.includes(q));
+  }, [items, query]);
 
   return (
-    <div className="px-6 pb-10">
-      {/* Top row (NO page title, NO Legacy) */}
-      <div className="flex items-center justify-between gap-4 pt-6 pb-3">
-        {/* “Subaccounts” tab-style label */}
+    <section
+      className="w-full h-full"
+      style={{ color: TEXT }}
+    >
+      {/* Top bar */}
+      <div className="flex items-center justify-between gap-4 mb-6">
         <div className="flex items-center gap-6">
-          <div
-            className="relative h-9 inline-flex items-center px-3 text-sm font-semibold"
-            style={{
-              color: 'var(--text)',
-              border: `1px solid ${GREEN_LINE}`,
-              borderRadius: 8,
-              background:
-                'linear-gradient(90deg,var(--panel) 0%,color-mix(in oklab,var(--panel) 97%, white 3%) 50%,var(--panel) 100%)'
-            }}
-          >
-            Subaccounts
-          </div>
-
-          {/* Search (NOT full width) */}
-          <div className="relative">
-            <input
-              placeholder="Search subaccounts..."
-              className="h-[38px] w-[420px] pl-3 pr-10 text-sm outline-none"
-              style={{
-                background: 'var(--panel)',
-                color: 'var(--text)',
-                border: `1px solid ${GREEN_LINE}`,
-                borderRadius: 10,
-              }}
-            />
-            <div className="absolute right-2 top-1/2 -translate-y-1/2 opacity-60 text-[12px]" style={{color:'var(--text)'}}>⌘K</div>
+          <h1 className="text-xl font-semibold tracking-tight">Launch &amp; Deploy</h1>
+          <div className="flex items-center gap-2">
+            <Tab active>Subaccounts</Tab>
+            <Tab>Legacy View</Tab>
           </div>
         </div>
+        <button
+          onClick={() => setShowModal(true)}
+          className="inline-flex items-center gap-2 px-4 py-[10px] rounded-none"
+          style={{
+            background: BRAND,
+            color: '#ffffff',            // white text as requested
+            boxShadow: `0 0 0 1px ${BORDER}, 0 10px 30px -10px ${BORDER}`,
+          }}
+        >
+          <Plus size={18} />
+          New Subaccount
+        </button>
+      </div>
 
-        {/* Right side: total + CTA */}
-        <div className="flex items-center gap-4">
-          <div className="text-xs opacity-70" style={{color:'var(--text)'}}>
-            <span className="opacity-70 mr-1">Total</span>
-            <b>{total}</b> <span className="opacity-70">Subaccounts</span>
-          </div>
-          <button
-            className="h-[38px] px-4 text-sm font-semibold"
-            style={{
-              background: CTA,
-              color: '#fff',                 // WHITE text
-              border: `1px solid ${GREEN_LINE}`,
-              borderRadius: 999,
-              boxShadow: '0 8px 28px rgba(89,217,179,.22)'
-            }}
-          >
-            <span className="inline-flex items-center gap-2">
-              <Plus className="w-4 h-4" /> New Subaccount
-            </span>
-          </button>
+      {/* Search */}
+      <div
+        className="relative mb-6 w-full max-w-xl"
+        style={{ filter: 'none' }}
+      >
+        <div
+          className="absolute inset-0 -z-10 rounded-none"
+          style={{ boxShadow: `0 0 0 1px ${BORDER_SOFT}` }}
+        />
+        <div
+          className="flex items-center gap-2 px-4 py-3 rounded-none"
+          style={{ background: SURFACE }}
+        >
+          <Search size={18} className="opacity-60" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search subaccounts..."
+            className="bg-transparent outline-none w-full placeholder:opacity-60"
+          />
         </div>
       </div>
 
-      {/* Grid — ALWAYS 3 per row on desktop */}
-      <div
-        className="grid gap-6 mt-6"
-        style={{
-          gridTemplateColumns: 'repeat(3, minmax(0, 1fr))'
-        }}
-      >
-        {/* Create card */}
-        <CreateCard />
+      {/* Cards grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+        {/* Create card (square) */}
+        <SquareCard
+          onClick={() => setShowModal(true)}
+          dashed
+          title="Create Subaccount"
+          subtitle="Add new workspace"
+        >
+          <div className="aspect-square w-28 grid place-items-center"
+               style={{
+                 boxShadow: `inset 0 0 0 1px ${BORDER_SOFT}`,
+                 background: layeredSteps(),
+               }}>
+            <Plus size={34} style={{ color: BRAND }} />
+          </div>
+          <p className="mt-3 text-sm" style={{ color: SUBTEXT }}>Click to create</p>
+        </SquareCard>
 
-        {/* Existing subaccounts */}
-        {subaccounts.map(s => (
-          <SubaccountCard key={s.id} data={s} />
+        {filtered.map((s) => (
+          <SquareCard key={s.id} onClick={() => { /* route to detail view */ }}>
+            <div className="flex items-center justify-between w-full">
+              <div className="text-[15px] font-medium">{s.name}</div>
+              <ChevronRight className="opacity-60" size={18} />
+            </div>
+
+            <div className="mt-4 grid place-items-center">
+              <div
+                className="aspect-square w-28 grid place-items-center"
+                style={{
+                  boxShadow: `inset 0 0 0 1px ${BORDER_SOFT}`,
+                  background: layeredSteps(),
+                }}
+              >
+                <Bot size={34} style={{ color: BRAND }} />
+              </div>
+            </div>
+
+            <div className="mt-5 flex items-center justify-between w-full text-sm">
+              <span className="opacity-70">ID: <span className="opacity-80">{s.id}</span></span>
+            </div>
+
+            <div className="mt-2 flex items-center gap-4 text-sm">
+              <span className="opacity-80">{s.agents} AI Agents</span>
+              <span className="inline-flex items-center gap-1 opacity-80">
+                <span className="inline-block w-2.5 h-2.5 rounded-full"
+                      style={{ background: s.status === 'Active' ? BRAND : BORDER_SOFT }} />
+                {s.status}
+              </span>
+            </div>
+          </SquareCard>
         ))}
       </div>
-    </div>
+
+      {showModal && (
+        <CreateModal
+          onClose={() => setShowModal(false)}
+          onCreate={(name) => {
+            const id = cryptoRandomId();
+            setItems(prev => [{ id, name, status: 'Active', agents: 0 }, ...prev]);
+            setShowModal(false);
+          }}
+        />
+      )}
+    </section>
   );
 }
 
-/* ---------- Visual primitives ---------- */
+/* ─────────────────────────── Pieces ─────────────────────────── */
 
-/** Shared square card shell (banded stripes + subtle halo). Always 1:1. */
-function SquareCardShell({
-  dashed = false,
-  children,
-}: {
-  dashed?: boolean;
-  children: React.ReactNode;
-}) {
+function Tab({ active, children }: { active?: boolean; children: React.ReactNode }) {
   return (
-    <div
-      className="group relative overflow-hidden"
+    <button
+      className="px-3 py-2 text-sm rounded-none"
       style={{
-        aspectRatio: '1 / 1',                // **ALWAYS SQUARE**
-        border: dashed ? `2px dashed ${GREEN_LINE}` : `1px solid ${GREEN_LINE}`,
-        borderRadius: 12,                    // can drop to 8 if you want sharper corners
-        background:
-          // vertical banded “step” lines with a dark core
-          `linear-gradient(180deg, rgba(0,0,0,.05), rgba(0,0,0,0) 35%),
-           repeating-linear-gradient(
-             to right,
-             rgba(12,18,16,.68) 0px,
-             rgba(12,18,16,.68) 3px,
-             rgba(12,18,16,.62) 3px,
-             rgba(12,18,16,.62) 6px
-           )`,
-        boxShadow:
-          'inset 0 0 14px rgba(0,0,0,.35), 0 10px 30px rgba(0,0,0,.28), 0 0 0 1px rgba(0,0,0,.18)',
-        transition: 'transform .18s ease, box-shadow .18s ease, border-color .18s ease',
+        color: active ? TEXT : SUBTEXT,
+        boxShadow: active ? `inset 0 -2px 0 0 ${BRAND}` : 'none',
       }}
     >
-      {/* hover/active green glow (square, not rounded) */}
-      <div
-        className="absolute inset-0 opacity-0 group-hover:opacity-100 pointer-events-none"
-        style={{
-          background:
-            `radial-gradient(40% 40% at 50% 50%, rgba(89,217,179,.10) 0%, rgba(89,217,179,0) 100%)`,
-          transition: 'opacity .18s ease',
-        }}
-      />
-      <div className="absolute inset-0 p-4 flex flex-col">
-        {children}
-      </div>
-    </div>
-  );
-}
-
-/** Create Subaccount card (dashed) */
-function CreateCard() {
-  return (
-    <button className="text-left">
-      <SquareCardShell dashed>
-        {/* Title row */}
-        <div className="text-[15px] font-semibold" style={{color:'var(--text)'}}>
-          Create Subaccount
-        </div>
-        <div className="text-[11px] mt-1 opacity-60" style={{color:'var(--text)'}}>Add new workspace</div>
-
-        {/* Centered square icon tile */}
-        <div className="flex-1 grid place-items-center">
-          <div
-            className="grid place-items-center"
-            style={{
-              width: 96, height: 96,
-              borderRadius: 12,
-              background: 'rgba(255,255,255,.04)',
-              border: `1px solid ${GREEN_LINE}`,
-              boxShadow: 'inset 0 0 10px rgba(0,0,0,.22), 0 8px 24px rgba(0,0,0,.24)'
-            }}
-          >
-            <Plus className="w-8 h-8" style={{ color: CTA, filter:'drop-shadow(0 0 8px rgba(89,217,179,.35))' }} />
-          </div>
-        </div>
-
-        <div className="text-[12px] opacity-70" style={{color:'var(--text)'}}>Click to create</div>
-      </SquareCardShell>
+      {children}
     </button>
   );
 }
 
-/** Existing Subaccount card (solid border) */
-function SubaccountCard({ data }: { data: Subaccount }) {
-  const statusColor = data.active ? 'rgba(34,197,94,.95)' : 'rgba(148,163,184,.9)';
-
+function SquareCard({
+  children,
+  onClick,
+  dashed,
+  title,
+  subtitle,
+}: {
+  children: React.ReactNode;
+  onClick?: () => void;
+  dashed?: boolean;
+  title?: string;
+  subtitle?: string;
+}) {
   return (
-    <Link href={`/subaccounts/${data.id}`}>
-      <SquareCardShell>
-        {/* Top-left meta */}
-        <div className="text-[15px] font-semibold" style={{color:'var(--text)'}}>
-          {data.name}
-        </div>
-        <div className="text-[11px] mt-1 opacity-55" style={{color:'var(--text)'}}>ID: {shortId(data.id)}</div>
+    <button
+      onClick={onClick}
+      className="group relative text-left p-5 flex flex-col items-start gap-2 rounded-none"
+      style={{
+        background: panelSurface(),
+        boxShadow: `0 0 0 1px ${dashed ? BORDER_SOFT : BORDER}, 0 10px 30px -12px rgba(0,0,0,0.6)`,
+      }}
+    >
+      {/* card inner stripe contour */}
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          background: subtleStripes(),
+          opacity: 0.18,
+        }}
+      />
 
-        {/* Centered square icon tile */}
-        <div className="flex-1 grid place-items-center">
-          <div
-            className="grid place-items-center"
-            style={{
-              width: 96, height: 96,
-              borderRadius: 12,
-              background: 'rgba(255,255,255,.04)',
-              border: `1px solid ${GREEN_LINE}`,
-              boxShadow: 'inset 0 0 10px rgba(0,0,0,.22), 0 8px 24px rgba(0,0,0,.24)'
-            }}
-          >
-            <Bot className="w-8 h-8" style={{ color: CTA, filter:'drop-shadow(0 0 8px rgba(89,217,179,.35))' }} />
-          </div>
-        </div>
+      {title && (
+        <>
+          <div className="text-[15px] font-semibold tracking-tight">{title}</div>
+          {subtitle && <div className="text-sm" style={{ color: SUBTEXT }}>{subtitle}</div>}
+        </>
+      )}
 
-        {/* Bottom row */}
-        <div className="flex items-center justify-between text-[12px]" style={{color:'var(--text)'}}>
-          <span className="opacity-70">{data.agents} AI Agents</span>
-          <span className="inline-flex items-center gap-1">
-            <span
-              className="w-2 h-2 rounded-full"
-              style={{ background: statusColor }}
-            />
-            <span className="opacity-90">{data.active ? 'Active' : 'Paused'}</span>
-          </span>
-        </div>
-      </SquareCardShell>
-    </Link>
+      <div className="mt-2 w-full">{children}</div>
+
+      <div
+        className="pointer-events-none absolute inset-0 transition-opacity duration-200"
+        style={{
+          boxShadow: `0 0 0 1px ${BORDER}, 0 0 60px -30px ${BORDER}`,
+          opacity: 0,
+        }}
+      />
+      <style jsx>{`
+        button.group:hover > div:last-child { opacity: .9; }
+      `}</style>
+    </button>
   );
 }
 
-/* helpers */
-function shortId(id: string) {
-  if (!id) return '';
-  if (id.length <= 8) return id;
-  return id.slice(0, 6) + '…' + id.slice(-4);
+function CreateModal({
+  onClose,
+  onCreate,
+}: {
+  onClose: () => void;
+  onCreate: (name: string) => void;
+}) {
+  const [name, setName] = useState('');
+
+  return (
+    <div
+      className="fixed inset-0 z-[200]"
+      style={{ background: 'rgba(0,0,0,.55)' }}  // solid overlay (not transparent/see-thru UI)
+      onClick={onClose}
+    >
+      <div
+        className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[min(680px,92vw)] p-6 rounded-none"
+        style={{
+          background: SURFACE,
+          boxShadow: `0 0 0 1px ${BORDER}, 0 40px 120px -30px rgba(0,0,0,.8)`,
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between">
+          <div className="flex items-center gap-2">
+            <Users size={20} style={{ color: BRAND }} />
+            <h3 className="text-xl font-semibold">Create New Subaccount</h3>
+          </div>
+          <button onClick={onClose} className="p-1 rounded-none hover:opacity-80">
+            <X size={18} />
+          </button>
+        </div>
+
+        <p className="mt-1 text-sm" style={{ color: SUBTEXT }}>
+          Organize your AI agents
+        </p>
+
+        <label className="block mt-6 mb-2 text-sm">Subaccount Name</label>
+        <div className="relative">
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Enter subaccount name…"
+            className="w-full px-4 py-3 rounded-none bg-transparent outline-none"
+            style={{
+              boxShadow: `inset 0 0 0 1px ${BORDER_SOFT}`,
+            }}
+          />
+        </div>
+
+        <div className="mt-6 flex items-center justify-end gap-3">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 rounded-none"
+            style={{
+              boxShadow: `inset 0 0 0 1px ${BORDER_SOFT}`,
+              background: CARD_BG,
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            disabled={!name.trim()}
+            onClick={() => onCreate(name.trim())}
+            className="px-4 py-2 inline-flex items-center gap-2 rounded-none disabled:opacity-50"
+            style={{
+              background: BRAND,
+              color: '#ffffff', // white text on green CTA
+              boxShadow: `0 0 0 1px ${BORDER}, 0 10px 40px -10px ${BORDER}`,
+            }}
+          >
+            <Rocket size={16} />
+            Create Subaccount
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────────── Helpers / FX ─────────────────────────── */
+
+function layeredSteps() {
+  // Square inner plate with subtle banded steps (center darker).
+  return `
+    radial-gradient(100% 100% at 50% 50%,
+      rgba(0,0,0,.55) 0%,
+      rgba(0,0,0,.55) 35%,
+      rgba(0,0,0,.52) 36%,
+      rgba(0,0,0,.52) 55%,
+      rgba(0,0,0,.48) 56%,
+      rgba(0,0,0,.48) 72%,
+      rgba(0,0,0,.45) 73%,
+      rgba(0,0,0,.45) 100%
+    )
+  `;
+}
+
+function subtleStripes() {
+  return `
+    repeating-linear-gradient(
+      135deg,
+      rgba(0,0,0,0) 0px,
+      rgba(0,0,0,0) 6px,
+      ${'rgba(255,255,255,0.04)'} 6px,
+      ${'rgba(255,255,255,0.04)'} 8px
+    )
+  `;
+}
+
+function panelSurface() {
+  // Solid, non-transparent surface with a faint inner glow and banding
+  return `
+    linear-gradient(180deg, ${SURFACE} 0%, ${CARD_BG} 100%)
+  `;
+}
+
+function cryptoRandomId() {
+  if (typeof window !== 'undefined' && 'crypto' in window && 'randomUUID' in crypto) {
+    return window.crypto.randomUUID().replace(/-/g, '').slice(0, 24);
+  }
+  // fallback
+  return Math.random().toString(16).slice(2).padEnd(24, '0');
 }
