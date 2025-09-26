@@ -1,299 +1,225 @@
-// components/subaccounts/SubaccountsPage.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { Plus, Bot } from 'lucide-react';
+import { useMemo } from 'react';
 import Link from 'next/link';
+import { Plus, Bot } from 'lucide-react';
 
-/** --- Brand / tokens (aligned to your screenshots) --- */
-const CTA = '#59d9b3';
-const LINE = 'rgba(89,217,179,.20)';
-const TEXT = 'rgba(232,240,238,.92)';
-const MUTED = 'rgba(189,207,203,.55)';
-const CARD_BORDER = 'rgba(89,217,179,.14)';
-
-/** corners = more squared than before */
-const R = 12;
-
-/** localStorage key used by your Sidebar */
-const LS_COLLAPSED = 'ui:sidebarCollapsed';
+/** Accent + lines (same family as your rail) */
+const CTA        = '#59d9b3';
+const GREEN_LINE = 'rgba(89,217,179,.20)';
 
 type Subaccount = {
   id: string;
   name: string;
-  agents?: number;
-  status?: 'active' | 'inactive';
+  agents: number;
+  status: 'active' | 'paused';
 };
 
 export default function SubaccountsPage() {
-  /** mock data — replace with real fetch */
-  const items: Subaccount[] = useMemo(
-    () => [
-      { id: 'create', name: 'Create', status: 'inactive' },
-      { id: '687b', name: 'Dental Chatbot', agents: 1, status: 'active' },
-    ],
+  // mock data — replace with your fetch/useQuery
+  const subs = useMemo<Subaccount[]>(
+    () => [{ id: '687b714b2c8bbab698dd0a1', name: 'Dental Chatbot', agents: 1, status: 'active' }],
     []
   );
 
-  /** watch sidebar collapsed so we can slightly change card proportions */
-  const [sbCollapsed, setSbCollapsed] = useState<boolean>(false);
-  useEffect(() => {
-    const read = () => {
-      try {
-        const raw = localStorage.getItem(LS_COLLAPSED);
-        setSbCollapsed(raw ? JSON.parse(raw) : false);
-      } catch {}
-    };
-    read();
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === LS_COLLAPSED) read();
-    };
-    window.addEventListener('storage', onStorage);
-    const onFocus = () => read();
-    window.addEventListener('focus', onFocus);
-    return () => {
-      window.removeEventListener('storage', onStorage);
-      window.removeEventListener('focus', onFocus);
-    };
-  }, []);
-
   return (
-    <div className="px-6 pb-10">
-      {/* header */}
-      <div className="flex items-center justify-between pt-6 pb-5">
-        <h1 className="text-[22px] font-semibold" style={{ color: TEXT }}>
+    <div className="min-h-screen">
+      {/* Header row (kept minimal — matches your screenshots) */}
+      <div className="flex items-center justify-between px-6 pt-6">
+        <div className="text-[22px] font-semibold" style={{ color: 'var(--text)' }}>
           Launch & Deploy
-        </h1>
-
-        <button
-          className="h-10 px-4 rounded-[12px] font-semibold inline-flex items-center gap-2"
+        </div>
+        <Link
+          href="#"
+          className="h-10 px-4 rounded-[10px] font-semibold inline-flex items-center gap-2"
           style={{
             background: CTA,
-            color: '#0b1110',
-            border: `1px solid ${LINE}`,
-            boxShadow:
-              '0 10px 30px rgba(89,217,179,.18), 0 0 18px rgba(89,217,179,.24)',
+            color: '#0b0f0e',
+            boxShadow: '0 10px 24px rgba(89,217,179,.22)',
+            border: `1px solid ${GREEN_LINE}`
           }}
         >
-          <Plus className="w-4 h-4" />
-          New Subaccount
-        </button>
+          <Plus className="w-4 h-4" /> New Subaccount
+        </Link>
       </div>
 
-      {/* grid */}
-      <div
-        className="grid gap-6"
-        style={{
-          gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-          maxWidth: 920,
-        }}
-      >
-        {/* Create card (dashed outer, banded fill) */}
-        <CreateCard squish={sbCollapsed} />
+      {/* Tabs + search (shell only so spacing matches) */}
+      <div className="px-6 mt-4">
+        <div className="flex items-center gap-6">
+          <button className="pb-2 text-sm font-semibold" style={{ color: CTA, borderBottom: `2px solid ${CTA}` }}>
+            Subaccounts
+          </button>
+          <button className="pb-2 text-sm" style={{ color: 'var(--text-muted)' }}>
+            Legacy View
+          </button>
+        </div>
+        <div className="mt-4">
+          <div
+            className="h-11 rounded-[10px] px-4 flex items-center"
+            style={{
+              background: 'var(--panel)',
+              border: `1px solid ${GREEN_LINE}`,
+              color: 'var(--text)'
+            }}
+          >
+            <span className="text-sm" style={{ color: 'var(--text-muted)' }}>
+              Search subaccounts…
+            </span>
+          </div>
+        </div>
+      </div>
 
-        {/* existing subaccounts */}
-        {items
-          .filter((x) => x.id !== 'create')
-          .map((s) => (
-            <SubCard key={s.id} s={s} squish={sbCollapsed} />
+      {/* Cards — 3 per row on large+; naturally become a bit wider when sidebar collapses */}
+      <div className="px-6 py-8">
+        <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+          {/* Create Card */}
+          <CreateCard />
+
+          {/* Existing subaccounts */}
+          {subs.map((s) => (
+            <SubCard key={s.id} sub={s} />
           ))}
+        </div>
       </div>
 
-      {/* page bg subtle vignette */}
       <style jsx>{`
-        :global(body) {
-          --panel: #0e1312;
+        /* Light theme mapping */
+        :global(:root:not([data-theme="dark"])) {
+          --panel: #ffffff;
+          --text: #0f172a;
+          --text-muted: #64748b;
+        }
+        /* Dark theme mapping */
+        :global([data-theme="dark"]) {
+          --panel: rgba(10, 14, 16, 0.78);
+          --text: rgba(255, 255, 255, 0.92);
+          --text-muted: rgba(255, 255, 255, 0.55);
         }
       `}</style>
     </div>
   );
 }
 
-/* ---------- Cards ---------- */
-
-function CreateCard({ squish }: { squish: boolean }) {
-  const h = squish ? 148 : 176; // when sidebar collapsed → a touch more rectangular
-
+/** Reusable card shell with banded “step” background + subtle neon halo */
+function CardShell({
+  children,
+  dashed = false,
+}: {
+  children: React.ReactNode;
+  dashed?: boolean;
+}) {
   return (
-    <button
-      type="button"
-      className="relative text-left group"
+    <div
+      className="rounded-[10px] p-5 relative"
       style={{
-        borderRadius: R,
-        height: h,
-        padding: 18,
-        color: TEXT,
-        border: `2px dashed ${LINE}`,
-        background: layeredBanded(),
+        /* Layered look:
+           1) faint radial tint
+           2) banded horizontal steps (subtle stripes)
+           3) base dark panel
+        */
+        background: `
+          radial-gradient(80% 120% at 50% -20%, rgba(89,217,179,.10) 0%, rgba(89,217,179,0) 60%),
+          repeating-linear-gradient(
+            90deg,
+            rgba(255,255,255,.038) 0px,
+            rgba(255,255,255,.038) 2px,
+            rgba(0,0,0,.00) 2px,
+            rgba(0,0,0,.00) 4px
+          ),
+          color-mix(in oklab, var(--panel) 92%, black 8%)
+        `,
+        border: dashed ? `2px dashed ${GREEN_LINE}` : `1px solid ${GREEN_LINE}`,
         boxShadow:
-          'inset 0 0 0 1px rgba(255,255,255,.02), 0 12px 34px rgba(0,0,0,.42)',
+          'inset 0 1px 0 rgba(255,255,255,.03), 0 12px 30px rgba(0,0,0,.35), 0 0 0 1px rgba(0,0,0,.20)',
+        minHeight: 168, // stays “squared”; when the sidebar collapses, width grows so it reads more rectangular
       }}
     >
-      <div className="flex items-start gap-16">
+      {/* soft outer glow on hover */}
+      <div
+        className="pointer-events-none absolute inset-0 rounded-[10px] opacity-0 transition-opacity duration-200"
+        style={{
+          boxShadow: '0 0 0 1px rgba(89,217,179,.28), 0 22px 50px rgba(89,217,179,.08)',
+        }}
+      />
+      <div className="relative z-10">{children}</div>
+    </div>
+  );
+}
+
+function CreateCard() {
+  return (
+    <CardShell dashed>
+      <div className="grid grid-cols-[72px_1fr] gap-4">
         <div
-          className="grid place-items-center"
+          className="w-[72px] h-[72px] grid place-items-center rounded-[10px]"
           style={{
-            width: 72,
-            height: 72,
-            borderRadius: R,
-            background: innerTile(),
-            boxShadow:
-              'inset 0 1px 0 rgba(255,255,255,.06), 0 12px 28px rgba(0,0,0,.35)',
-            border: `1px solid ${CARD_BORDER}`,
+            background: 'linear-gradient(180deg, rgba(0,0,0,.35), rgba(0,0,0,.15))',
+            border: `1px solid ${GREEN_LINE}`,
+            boxShadow: 'inset 0 0 16px rgba(0,0,0,.25)',
           }}
         >
-          <Plus
-            className="w-8 h-8"
-            style={{
-              color: CTA,
-              filter: 'drop-shadow(0 0 10px rgba(89,217,179,.35))',
-            }}
-          />
+          <Plus className="w-7 h-7" style={{ color: CTA, filter: 'drop-shadow(0 0 10px rgba(89,217,179,.35))' }} />
         </div>
 
         <div className="min-w-0">
-          <div className="text-[20px] font-semibold mb-1">Create Subaccount</div>
-          <div className="text-[13px]" style={{ color: MUTED }}>
+          <div className="text-[18px] font-semibold" style={{ color: 'var(--text)' }}>
+            Create Subaccount
+          </div>
+          <div className="text-sm" style={{ color: 'var(--text-muted)' }}>
             Add new workspace
           </div>
-          <div className="mt-6 text-sm" style={{ color: MUTED }}>
+          <div className="mt-6 text-xs" style={{ color: 'var(--text-muted)' }}>
             Click to create
           </div>
         </div>
       </div>
-
-      {/* soft green ring on hover */}
-      <div
-        className="absolute inset-0 rounded-[12px] pointer-events-none opacity-0 group-hover:opacity-100 transition"
-        style={{
-          boxShadow:
-            '0 0 0 1px rgba(89,217,179,.26), 0 10px 26px rgba(89,217,179,.18)',
-        }}
-      />
-    </button>
+    </CardShell>
   );
 }
 
-function SubCard({ s, squish }: { s: Subaccount; squish: boolean }) {
-  const h = squish ? 148 : 176;
-
+function SubCard({ sub }: { sub: { id: string; name: string; agents: number; status: 'active' | 'paused' } }) {
   return (
-    <Link
-      href={`/subaccounts/${s.id}`}
-      className="relative block group"
-      style={{
-        borderRadius: R,
-        height: h,
-        padding: 18,
-        color: TEXT,
-        background: layeredBanded(),
-        border: `1px solid ${CARD_BORDER}`,
-        boxShadow:
-          'inset 0 0 0 1px rgba(255,255,255,.03), 0 12px 34px rgba(0,0,0,.42)',
-      }}
-    >
-      <div className="flex items-start gap-16">
+    <CardShell>
+      <div className="grid grid-cols-[72px_1fr] gap-4">
         <div
-          className="grid place-items-center"
+          className="w-[72px] h-[72px] grid place-items-center rounded-[10px]"
           style={{
-            width: 72,
-            height: 72,
-            borderRadius: R,
-            background: innerTile(),
-            border: `1px solid ${CARD_BORDER}`,
-            boxShadow:
-              'inset 0 1px 0 rgba(255,255,255,.06), 0 12px 28px rgba(0,0,0,.35)',
+            background: 'linear-gradient(180deg, rgba(0,0,0,.35), rgba(0,0,0,.15))',
+            border: `1px solid ${GREEN_LINE}`,
+            boxShadow: 'inset 0 0 16px rgba(0,0,0,.25)',
           }}
         >
-          <Bot
-            className="w-8 h-8"
-            style={{
-              color: CTA,
-              filter: 'drop-shadow(0 0 10px rgba(89,217,179,.35))',
-            }}
-          />
+          <Bot className="w-7 h-7" style={{ color: CTA, filter: 'drop-shadow(0 0 10px rgba(89,217,179,.35))' }} />
         </div>
 
         <div className="min-w-0">
-          <div className="text-[20px] font-semibold mb-1">{s.name}</div>
-          <div className="text-[13px]" style={{ color: MUTED }}>
-            {s.agents ?? 0} AI Agents •{' '}
-            <span
-              style={{
-                color: s.status === 'active' ? CTA : MUTED,
-                textShadow:
-                  s.status === 'active'
-                    ? '0 0 8px rgba(89,217,179,.35)'
-                    : 'none',
-              }}
-            >
-              {s.status === 'active' ? 'Active' : 'Inactive'}
-            </span>
+          <div className="text-[18px] font-semibold truncate" style={{ color: 'var(--text)' }}>
+            {sub.name}
           </div>
-          <div className="mt-6 text-[12px]" style={{ color: MUTED }}>
-            ID: {s.id}…
+
+          <div className="mt-1 text-xs" style={{ color: 'var(--text-muted)' }}>
+            ID: <span className="tabular-nums">{sub.id.slice(0, 12)}…</span>
+          </div>
+
+          <div className="mt-6 flex items-center gap-3 text-sm" style={{ color: 'var(--text-muted)' }}>
+            <span className="whitespace-nowrap">{sub.agents} AI Agents</span>
+            <span className="inline-flex items-center gap-1">
+              <span
+                className="inline-block rounded-full"
+                style={{
+                  width: 6,
+                  height: 6,
+                  background: sub.status === 'active' ? CTA : 'rgba(255,255,255,.4)',
+                  boxShadow: sub.status === 'active' ? '0 0 10px rgba(89,217,179,.5)' : 'none',
+                }}
+              />
+              <span style={{ color: sub.status === 'active' ? CTA : 'var(--text-muted)' }}>
+                {sub.status === 'active' ? 'Active' : 'Paused'}
+              </span>
+            </span>
           </div>
         </div>
       </div>
-
-      {/* soft hover glow */}
-      <div
-        className="absolute inset-0 rounded-[12px] pointer-events-none opacity-0 group-hover:opacity-100 transition"
-        style={{
-          boxShadow:
-            '0 0 0 1px rgba(89,217,179,.26), 0 10px 26px rgba(89,217,179,.18)',
-        }}
-      />
-    </Link>
+    </CardShell>
   );
-}
-
-/* ---------- Visual recipes (banded/striped gradient like in your shots) ---------- */
-
-/**
- * Creates the subtle “strip line” / stepped gradient:
- *  - dark core in the middle
- *  - slight +2–3% lightness steps horizontally left/right
- *  - super low-contrast dotted pattern overlay
- */
-function layeredBanded() {
-  const core = 'rgba(8,12,11,.86)';
-  const edge = 'rgba(12,16,15,.78)';
-
-  // horizontal band steps
-  const bands = `
-    repeating-linear-gradient(
-      90deg,
-      rgba(0,0,0,.06) 0px,
-      rgba(0,0,0,.06) 2px,
-      rgba(0,0,0,.02) 2px,
-      rgba(0,0,0,.02) 4px
-    )
-  `;
-
-  // dark center with slight lift towards edges
-  const smooth = `
-    radial-gradient(60% 120% at 50% 50%, ${core} 0%, ${edge} 100%)
-  `;
-
-  // dotted matrix (super faint) to match the texture in your “Create” card
-  const dots = `
-    radial-gradient(circle at 1px 1px, rgba(255,255,255,.04) 1px, transparent 1px)
-  `;
-
-  return `${bands}, ${smooth}, ${dots}`;
-}
-
-/** inner icon tile gradient (darker center, soft edges) */
-function innerTile() {
-  return `
-    radial-gradient(60% 80% at 50% 50%, rgba(11,16,15,.85) 0%, rgba(13,18,17,.7) 100%),
-    repeating-linear-gradient(
-      90deg,
-      rgba(255,255,255,.03) 0px,
-      rgba(255,255,255,.03) 2px,
-      transparent 2px,
-      transparent 4px
-    )
-  `;
 }
