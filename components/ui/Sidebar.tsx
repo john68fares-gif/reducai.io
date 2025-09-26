@@ -11,13 +11,13 @@ import {
 import { supabase } from '@/lib/supabase-client';
 
 const W_EXPANDED = 260;
-const W_COLLAPSED = 72;
+const W_COLLAPSED = 76;
 const LS_COLLAPSED = 'ui:sidebarCollapsed';
 
-/* Match VoiceAgentSection tokens / AssistantRail overlay vibes */
+/* Tokens to match overlays (Voice/AssistantRail) */
 const CTA       = '#59d9b3';
-const CTA_LINE  = 'rgba(89,217,179,.20)';
 const CTA_WEAK  = 'rgba(89,217,179,.12)';
+const CTA_LINE  = 'rgba(89,217,179,.20)';
 
 type NavItem = {
   id: string;
@@ -29,27 +29,26 @@ type NavItem = {
 };
 
 const NAV: NavItem[] = [
-  { id: 'create',  href: '/builder',      label: 'Create',       sub: 'Design your agent',     icon: <Home />,     group: 'workspace' },
-  { id: 'tuning',  href: '/improve',      label: 'Tuning',       sub: 'Integrate & optimize',  icon: <Hammer />,   group: 'workspace' },
-  { id: 'voice',   href: '/voice-agent',  label: 'Voice Studio', sub: 'Calls & persona',       icon: <Mic />,      group: 'workspace' },
-  { id: 'subs',    href: '/subaccounts',  label: 'Subaccounts',  sub: 'Transcripts',           icon: <FileText />, group: 'workspace' },
-  { id: 'launch',  href: '/launch',       label: 'Launchpad',    sub: 'Go live',               icon: <Rocket />,   group: 'workspace' },
+  { id: 'create',   href: '/builder',       label: 'Create',       sub: 'Design your agent',     icon: <Home />,     group: 'workspace' },
+  { id: 'tuning',   href: '/improve',       label: 'Tuning',       sub: 'Integrate & optimize',  icon: <Hammer />,   group: 'workspace' },
+  { id: 'voice',    href: '/voice-agent',   label: 'Voice Studio', sub: 'Calls & persona',       icon: <Mic />,      group: 'workspace' },
+  { id: 'subs',     href: '/subaccounts',   label: 'Subaccounts',  sub: 'Transcripts',           icon: <FileText />, group: 'workspace' },
+  { id: 'launch',   href: '/launch',        label: 'Launchpad',    sub: 'Go live',               icon: <Rocket />,   group: 'workspace' },
 
-  { id: 'numbers', href: '/phone-numbers', label: 'Numbers',     sub: 'Twilio & BYO',          icon: <Phone />,    group: 'resources' },
-  { id: 'keys',    href: '/apikeys',       label: 'API Keys',     sub: 'Models & access',       icon: <Key />,      group: 'resources' },
-  { id: 'help',    href: '/support',       label: 'Help',         sub: 'Guides & FAQ',          icon: <HelpCircle />, group: 'resources' },
+  { id: 'numbers',  href: '/phone-numbers', label: 'Numbers',      sub: 'Twilio & BYO',          icon: <Phone />,    group: 'resources' },
+  { id: 'keys',     href: '/apikeys',       label: 'API Keys',     sub: 'Models & access',       icon: <Key />,      group: 'resources' },
+  { id: 'help',     href: '/support',       label: 'Help',         sub: 'Guides & FAQ',          icon: <HelpCircle />, group: 'resources' },
 ];
 
-function displayName(name?: string | null, email?: string | null) {
+function getDisplayName(name?: string | null, email?: string | null) {
   if (name && name.trim()) return name.trim();
   if (email && email.includes('@')) return email.split('@')[0];
   return 'Account';
 }
 
-/* Pill icon like overlays: compact, 8px radius, animated green glow on hover/active */
-function useIcon(node: JSX.Element) {
-  return cloneElement(node, { className: 'w-[16px] h-[16px] shrink-0', strokeWidth: 2.2 });
-}
+/* Unify icon sizing like the overlays */
+const renderIcon = (node: JSX.Element) =>
+  cloneElement(node, { className: 'w-[16px] h-[16px] shrink-0', strokeWidth: 2.25 });
 
 export default function Sidebar() {
   const pathname = usePathname();
@@ -83,19 +82,26 @@ export default function Sidebar() {
     return () => unsub?.data?.subscription?.unsubscribe?.();
   }, []);
 
-  const isActive = (item: NavItem) => {
+  const activeCheck = (item: NavItem) => {
     const p = pathname || '';
     if (item.href === '/launch') return p === '/launch';
     return p.startsWith(item.href);
   };
 
   const Item = ({ item, active }: { item: NavItem; active: boolean }) => {
-    const icon = useIcon(item.icon);
     const isWorkspace = item.group === 'workspace';
+
+    // Per-group overlay/glow variables (workspace = CTA, resources = white)
+    const glow      = isWorkspace ? CTA : 'rgba(255,255,255,.96)';
+    const glowLine  = isWorkspace ? CTA_LINE : 'rgba(255,255,255,.28)';
+    const iconColor = isWorkspace ? CTA : '#ffffff';
+    const pillActiveBg = isWorkspace ? CTA_WEAK : 'rgba(255,255,255,.10)';
+    const pillBorder   = isWorkspace ? (active ? CTA_LINE : 'var(--sb-icon-border)') : (active ? 'rgba(255,255,255,.28)' : 'var(--sb-icon-border)');
+
     return (
-      <Link href={item.href} className="block group">
+      <Link href={item.href} className="block group/sidebar" title={collapsed ? item.label : undefined}>
         <div
-          className="sb-row relative flex items-center rounded-[8px]"
+          className="sb-item relative flex items-center rounded-[8px]"
           data-active={active ? 'true' : 'false'}
           data-collapsed={collapsed ? 'true' : 'false'}
           style={{
@@ -103,37 +109,43 @@ export default function Sidebar() {
             paddingLeft: collapsed ? 8 : 10,
             paddingRight: 8,
             gap: collapsed ? 0 : 10,
-            transition: 'gap 260ms var(--ease), padding 260ms var(--ease), transform 200ms var(--ease)',
-          }}
+            transition: 'gap 280ms var(--ease), padding 280ms var(--ease), transform 220ms var(--ease)',
+            // expose CSS vars for row overlay color
+            // @ts-ignore
+            '--row-glow': glow,
+          } as React.CSSProperties}
         >
-          {/* Icon pill */}
+          {/* icon pill (overlay-style) */}
           <div
-            className="sb-icon relative grid place-items-center rounded-[8px]"
+            className="sb-icon grid place-items-center rounded-[8px] relative"
             style={{
+              // @ts-ignore
+              '--glow': glow,
+              '--glow-line': glowLine,
               width: 36, height: 36,
-              background: active ? CTA_WEAK : 'var(--sb-icon-bg)',
-              border: `1px solid ${active ? CTA_LINE : 'var(--sb-icon-border)'}`,
+              background: active ? pillActiveBg : 'var(--sb-icon-bg)',
+              border: `1px solid ${pillBorder}`,
+              color: 'var(--sidebar-text)',
               boxShadow: active
-                ? '0 10px 22px rgba(89,217,179,.28), 0 0 0 1px rgba(255,255,255,.06) inset'
-                : 'inset 0 0 0 1px rgba(0,0,0,.04)',
+                ? '0 10px 22px rgba(0,0,0,.10), 0 0 0 1px rgba(255,255,255,.06) inset'
+                : 'inset 0 0 0 1px rgba(0,0,0,0.04)',
               transform: collapsed ? 'translateX(2px)' : 'none'
             }}
-            title={collapsed ? item.label : undefined}
           >
-            {/* overlay glow layers */}
-            <span className="sb-g-inset" />
-            <span className="sb-g-outer" />
-            <span className="sb-g-line" />
-            <span className="relative" style={{ color: isWorkspace ? CTA : 'var(--sidebar-text)' }}>
-              {icon}
+            {/* glow layers like dropdown/overlays */}
+            <span className="sb-glow" />
+            <span className="sb-glow-outer" />
+            <span className="sb-glow-line" />
+            <span className="relative" style={{ color: iconColor }}>
+              {renderIcon(item.icon)}
             </span>
           </div>
 
-          {/* Labels */}
+          {/* labels */}
           <div
             className="overflow-hidden"
             style={{
-              transition: 'max-width 260ms var(--ease), opacity 260ms var(--ease), transform 260ms var(--ease)',
+              transition: 'max-width 280ms var(--ease), opacity 280ms var(--ease), transform 280ms var(--ease)',
               maxWidth: collapsed ? 0 : 200,
               opacity: collapsed ? 0 : 1,
               transform: collapsed ? 'translateX(-6px)' : 'translateX(0)',
@@ -149,66 +161,77 @@ export default function Sidebar() {
               </div>
             )}
           </div>
-
-          {/* row green screen overlay */}
-          <span className="sb-row-overlay" />
         </div>
 
         {/* active hairline */}
         <div
           className="h-[2px] rounded-full"
           style={{
-            marginLeft: collapsed ? 18 : 12,
+            marginLeft: collapsed ? 20 : 12,
             marginRight: 12,
             background: active
-              ? 'linear-gradient(90deg, transparent, rgba(89,217,179,.55), transparent)'
-              : 'linear-gradient(90deg, transparent, rgba(89,217,179,0), transparent)',
-            transition: 'background 200ms var(--ease), margin 200ms var(--ease)',
+              ? `linear-gradient(90deg, transparent, ${glow}, transparent)`
+              : 'linear-gradient(90deg, transparent, rgba(0,0,0,0), transparent)',
+            transition: 'background 220ms var(--ease), margin 220ms var(--ease)',
           }}
         />
 
+        {/* row overlay & hover effects, using per-row vars */}
         <style jsx>{`
-          .sb-row-overlay{
+          .sb-item::after{
+            content:'';
             position:absolute; inset:0;
             border-radius:8px;
-            background:${CTA};
+            background: var(--row-glow);
             opacity:0;
-            mix-blend-mode:screen;
             pointer-events:none;
             transition: opacity .18s var(--ease);
+            mix-blend-mode:screen;
           }
-          .group:hover .sb-row-overlay{ opacity:.18; }
-          .sb-row[data-active="true"] .sb-row-overlay{ opacity:.32; }
+          .group\/sidebar:hover .sb-item::after{ opacity:.18; }
+          .sb-item[data-active="true"]::after{ opacity:.30; }
 
-          .sb-icon .sb-g-inset{
-            position:absolute; inset:-1px; border-radius:8px;
-            box-shadow: 0 0 0 0 ${CTA};
+          .sb-icon .sb-glow{
+            position:absolute; inset:-1px;
+            border-radius:8px;
+            box-shadow: 0 0 0 0 var(--glow);
             opacity:0;
-            transition: box-shadow .2s var(--ease), opacity .2s var(--ease);
+            transition: box-shadow .22s var(--ease), opacity .22s var(--ease);
           }
-          .sb-icon .sb-g-outer{
-            position:absolute; inset:-6px; border-radius:12px;
-            background: radial-gradient(60% 60% at 50% 50%, ${CTA} 0%, transparent 70%);
+          .sb-icon .sb-glow-outer{
+            position:absolute; inset:-6px;
+            border-radius:12px;
+            background: radial-gradient(60% 60% at 50% 50%, var(--glow) 0%, transparent 70%);
             filter: blur(10px);
             opacity:0;
-            transition: opacity .2s var(--ease);
+            transition: opacity .22s var(--ease);
           }
-          .sb-icon .sb-g-line{
-            position:absolute; inset:0; border-radius:8px;
-            box-shadow: inset 0 0 0 0 ${CTA_LINE};
+          .sb-icon .sb-glow-line{
+            position:absolute; inset:0;
+            border-radius:8px;
+            box-shadow: inset 0 0 0 0 var(--glow-line);
             opacity:0;
-            transition: box-shadow .2s var(--ease), opacity .2s var(--ease);
+            transition: box-shadow .22s var(--ease), opacity .22s var(--ease);
           }
 
-          .group:hover .sb-icon .sb-g-inset{ box-shadow: 0 0 0 2px ${CTA}; opacity:.7; }
-          .group:hover .sb-icon .sb-g-outer{ opacity:.55; }
-          .group:hover .sb-icon .sb-g-line{ box-shadow: inset 0 0 0 1px ${CTA_LINE}; opacity:1; }
+          .group\/sidebar:hover .sb-icon .sb-glow{
+            box-shadow: 0 0 0 2px var(--glow);
+            opacity:.8;
+          }
+          .group\/sidebar:hover .sb-icon .sb-glow-outer{ opacity:.55; }
+          .group\/sidebar:hover .sb-icon .sb-glow-line{
+            box-shadow: inset 0 0 0 1px var(--glow-line);
+            opacity:1;
+          }
 
-          .sb-row[data-active="true"] .sb-icon .sb-g-inset{ box-shadow: 0 0 0 3px ${CTA}; opacity:.9; }
-          .sb-row[data-active="true"] .sb-icon .sb-g-outer{ opacity:.7; }
+          .sb-item[data-active="true"] .sb-icon .sb-glow{
+            box-shadow: 0 0 0 3px var(--glow);
+            opacity:.95;
+          }
+          .sb-item[data-active="true"] .sb-icon .sb-glow-outer{ opacity:.7; }
 
-          /* Collapsed nicety */
-          .sb-row[data-collapsed="true"]:hover{ transform: translateX(2px); }
+          /* Collapsed hover nicety */
+          .sb-item[data-collapsed="true"]:hover{ transform: translateX(2px); }
         `}</style>
       </Link>
     );
@@ -220,7 +243,7 @@ export default function Sidebar() {
       className="fixed left-0 top-0 h-screen z-50"
       style={{
         width: collapsed ? W_COLLAPSED : W_EXPANDED,
-        transition: 'width 340ms var(--ease)',
+        transition: 'width 360ms var(--ease)',
         background: 'var(--sidebar-bg)',
         color: 'var(--sidebar-text)',
         borderRight: '1px solid var(--sidebar-border)',
@@ -229,7 +252,7 @@ export default function Sidebar() {
       aria-label="Sidebar"
     >
       <div className="relative h-full flex flex-col">
-        {/* Header — overlay style chip + 8px radius */}
+        {/* Header chip like overlays */}
         <div className="px-3 pt-4 pb-3">
           <div className="flex items-center gap-2.5">
             <div
@@ -241,7 +264,7 @@ export default function Sidebar() {
             <div
               className="overflow-hidden"
               style={{
-                transition: 'max-width 340ms var(--ease), opacity 340ms var(--ease), transform 340ms var(--ease)',
+                transition: 'max-width 360ms var(--ease), opacity 360ms var(--ease), transform 360ms var(--ease)',
                 maxWidth: collapsed ? 0 : 200,
                 opacity: collapsed ? 0 : 1,
                 transform: collapsed ? 'translateX(-6px)' : 'translateX(0)',
@@ -259,7 +282,6 @@ export default function Sidebar() {
 
         {/* Groups */}
         <div className="flex-1 min-h-0 overflow-y-auto px-3 pb-6">
-          {/* WORKSPACE */}
           {!collapsed && (
             <div
               className="inline-flex items-center h-6 px-2 rounded-[8px] text-[10px] font-semibold tracking-[.14em] mb-2"
@@ -270,13 +292,12 @@ export default function Sidebar() {
           )}
           <nav className="space-y-[6px]">
             {NAV.filter(n => n.group === 'workspace').map(item => (
-              <Item key={item.id} item={item} active={isActive(item)} />
+              <Item key={item.id} item={item} active={activeCheck(item)} />
             ))}
           </nav>
 
           <div style={{ height: 14 }} />
 
-          {/* RESOURCES */}
           {!collapsed && (
             <div
               className="inline-flex items-center h-6 px-2 rounded-[8px] text-[10px] font-semibold tracking-[.14em] mb-2"
@@ -287,12 +308,12 @@ export default function Sidebar() {
           )}
           <nav className="space-y-[6px]">
             {NAV.filter(n => n.group === 'resources').map(item => (
-              <Item key={item.id} item={item} active={isActive(item)} />
+              <Item key={item.id} item={item} active={activeCheck(item)} />
             ))}
           </nav>
         </div>
 
-        {/* Account */}
+        {/* Account card */}
         <div className="px-3 pb-4">
           {!collapsed ? (
             <Link
@@ -310,7 +331,7 @@ export default function Sidebar() {
               </div>
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-semibold truncate">
-                  {userLoading ? 'Loading…' : displayName(userName, userEmail)}
+                  {userLoading ? 'Loading…' : getDisplayName(userName, userEmail)}
                 </div>
                 <div className="text-[11px] truncate" style={{ color: 'var(--sidebar-muted)' }}>
                   {userEmail || ''}
@@ -357,7 +378,7 @@ export default function Sidebar() {
         </button>
       </div>
 
-      {/* Theme alignment with VoiceAgentSection & overlays */}
+      {/* Theme alignment with the Voice section */}
       <style jsx>{`
         :global(:root) { --ease: cubic-bezier(.22,.61,.36,1); }
         /* Light */
