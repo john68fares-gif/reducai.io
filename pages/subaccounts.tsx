@@ -4,7 +4,7 @@ import dynamic from 'next/dynamic';
 
 // Render the section only on the client (no SSR) to prevent build/runtime mismatches
 const SubaccountTranscripts = dynamic(
-  () => import('@/components/voice/SubaccountTranscripts'),
+  () => import('@/components/subaccounts/SubaccountsPage.tsx'),
   { ssr: false, loading: () => <div className="p-6 text-sm opacity-70">Loading…</div> }
 );
 
