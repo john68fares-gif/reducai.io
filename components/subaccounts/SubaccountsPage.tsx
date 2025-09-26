@@ -1,234 +1,257 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import Link from 'next/link';
 import { Plus, Bot } from 'lucide-react';
 
-/* === BRAND (from your AssistantRail) === */
-const CTA        = '#59d9b3';
-const GREEN_LINE = 'rgba(89,217,179,.20)';
+/* ---- BRAND ---- */
+const CTA = '#59d9b3';                           // your green
+const GREEN_LINE = 'rgba(89,217,179,.20)';       // thin borders
+const TEXT = 'rgba(236,242,247,.92)';
+const MUTED = 'rgba(176,196,210,.60)';
+const PANEL = '#0c1114';                         // card fill
+const CANVAS = '#070b0d';
 
-/* === ID: real 24-hex like Mongo ObjectId === */
-function genId(): string {
-  const bytes = new Uint8Array(12);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+/* ---- SIMPLE ID UTIL (stable, human-ish) ---- */
+function genId() {
+  // 8-5-5-ish base36 id: e.g. 68d6d34-9badf-9092e
+  const t = Date.now().toString(36);
+  const r = Math.random().toString(36).slice(2, 10);
+  return (t + r).slice(0, 8) + '-' + (t + r).slice(8, 13) + '-' + (t + r).slice(13, 18);
 }
 
-/* === Hard vertical bands (no gradient blur) ===========================
-   n=15 bands, middle index darkest; each step away lightens ~2% (alpha).
-   We build multiple non-repeating gradient layers with explicit positions.
-====================================================================== */
-function makeBands(n = 15, base = { r: 10, g: 16, b: 14, a: 0.84 }, step = 0.02) {
-  if (n % 2 === 0) n += 1;
-  const w = 100 / n;                 // width per band (%)
-  const mid = Math.floor(n / 2);
-
-  const imgs: string[] = [];
-  const poss: string[] = [];
-  const sizes: string[] = [];
-
-  for (let i = 0; i < n; i++) {
-    const dist = Math.abs(i - mid);
-    const a = Math.max(0, base.a - dist * step);
-    const color = `rgba(${base.r},${base.g},${base.b},${a.toFixed(3)})`;
-    imgs.push(`linear-gradient(0deg, ${color}, ${color})`);
-    poss.push(`${(i * w).toFixed(4)}% 0`);
-    sizes.push(`${w.toFixed(4)}% 100%`);
-  }
-
-  return {
-    backgroundImage: imgs.join(','),
-    backgroundPosition: poss.join(','),
-    backgroundSize: sizes.join(','),
-    backgroundRepeat: 'no-repeat',
-  } as React.CSSProperties;
-}
-
-/* === Types === */
 type Sub = { id: string; name: string; agents: number; active: boolean };
 
 export default function SubaccountsPage() {
   const [subs, setSubs] = useState<Sub[]>([
-    { id: genId(), name: 'Dental Chatbot', agents: 1, active: true },
+    { id: genId(), name: 'aha', agents: 0, active: true },
   ]);
+  const [q, setQ] = useState('');
 
-  const total = subs.length;
+  const filtered = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    if (!s) return subs;
+    return subs.filter(x => (x.name + ' ' + x.id).toLowerCase().includes(s));
+  }, [subs, q]);
 
-  /* bands memoized (same for all cards) */
-  const bands = useMemo(() => makeBands(15), []);
+  function createSub() {
+    const name = prompt('Subaccount name?')?.trim();
+    if (!name) return;
+    setSubs([{ id: genId(), name, agents: 0, active: true }, ...subs]);
+  }
 
   return (
-    <div className="px-6 pb-16">
-      {/* Top row: Search (left) + Counter (right) + CTA (far right) */}
-      <div className="mt-6 flex items-end gap-4">
-        <div className="relative grow-0">
+    <div
+      style={{
+        minHeight: '100%',
+        background: CANVAS,
+        color: TEXT,
+      }}
+      className="px-6 pb-16 pt-6"
+    >
+      {/* Top row: Search (left) + Count (right) + New button */}
+      <div className="flex items-center gap-4 mb-6">
+        {/* Search – not full width; just a bit to the side */}
+        <div className="relative" style={{ width: 420 }}>
           <input
-            aria-label="Search subaccounts"
+            value={q}
+            onChange={e => setQ(e.target.value)}
             placeholder="Search subaccounts…"
-            className="h-[40px] w-[420px] px-3 text-sm outline-none"
+            className="h-[40px] w-full outline-none"
             style={{
-              background: 'var(--panel)',
-              color: 'var(--text)',
+              background: 'transparent',
+              color: TEXT,
               border: `1px solid ${GREEN_LINE}`,
-              borderRadius: 10,
+              borderRadius: 8,
+              padding: '0 12px',
             }}
           />
         </div>
 
-        <div className="ml-auto mr-4 text-right select-none" style={{ color: 'var(--text)' }}>
-          <div className="text-[11px] opacity-70">You have</div>
-          <div className="text-[30px] leading-none font-semibold">{total}</div>
-          <div className="text-[11px] opacity-70 mt-1">subaccounts</div>
-        </div>
+        <div className="ml-auto flex items-end gap-10">
+          {/* Count block */}
+          <div className="text-right">
+            <div style={{ fontSize: 13, letterSpacing: '.04em', color: MUTED }}>You have</div>
+            <div style={{ fontSize: 28, fontWeight: 800, lineHeight: 1.1 }}>{subs.length}</div>
+            <div style={{ fontSize: 12, color: MUTED }}>Subaccounts</div>
+          </div>
 
-        <button
-          type="button"
-          onClick={() => {
-            const name = prompt('Subaccount name?')?.trim();
-            if (!name) return;
-            setSubs(s => [{ id: genId(), name, agents: 0, active: true }, ...s]);
-          }}
-          className="shrink-0 px-4 font-semibold"
-          style={{
-            height: 40,
-            background: CTA,
-            color: '#fff',                    // WHITE text inside the green button
-            borderRadius: 10,
-            border: `1px solid ${GREEN_LINE}`,
-            boxShadow: '0 8px 28px rgba(89,217,179,.18)',
-          }}
-        >
-          New Subaccount
-        </button>
+          {/* New Subaccount button (white text on your green) */}
+          <button
+            onClick={createSub}
+            className="px-4 h-[40px] font-semibold"
+            style={{
+              background: CTA,
+              color: '#fff',
+              borderRadius: 10,
+              border: `1px solid ${CTA}`,
+              boxShadow: '0 12px 26px rgba(89,217,179,.18)',
+            }}
+          >
+            New Subaccount
+          </button>
+        </div>
       </div>
 
-      {/* Grid — up to 4 SQUARES per row */}
+      {/* Grid – up to 4 per row, squared, a bit taller */}
       <div
-        className="mt-6 grid gap-5"
+        className="grid gap-6"
         style={{
           gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
         }}
       >
-        {/* CREATE card (slightly rounder + dashed micro-border) */}
-        <button
-          type="button"
-          onClick={() => {
-            const name = prompt('Subaccount name?')?.trim();
-            if (!name) return;
-            setSubs(s => [{ id: genId(), name, agents: 0, active: true }, ...s]);
-          }}
-          className="text-left"
-        >
-          <SquareCard bands={bands} variant="create">
-            <Header title="Create Subaccount" subtitle="Add new workspace" />
-            <CenterTile icon="plus" />
-            <div className="text-[12px] opacity-75" style={{ color: 'var(--text)' }}>
-              Click to create
-            </div>
-          </SquareCard>
-        </button>
+        {/* Create card */}
+        <CreateCard onClick={createSub} />
 
-        {/* Existing subaccounts (always square) */}
-        {subs.map(s => (
-          <Link key={s.id} href={`/subaccounts/${s.id}`} className="block">
-            <SquareCard bands={bands}>
-              <Header title={s.name} subtitle={`ID: ${s.id}`} />
-              <CenterTile icon="bot" />
-              <div className="flex items-center justify-between text-[12px]" style={{ color: 'var(--text)' }}>
-                <span className="opacity-85">{s.agents} AI Agents</span>
-                <span className="inline-flex items-center gap-1">
-                  <span
-                    className="w-2 h-2 rounded-full"
-                    style={{ background: s.active ? 'rgba(34,197,94,.95)' : 'rgba(148,163,184,.9)' }}
-                  />
-                  <span className="opacity-90">{s.active ? 'Active' : 'Paused'}</span>
-                </span>
-              </div>
-            </SquareCard>
-          </Link>
+        {filtered.map(sub => (
+          <SubCard key={sub.id} sub={sub} />
         ))}
       </div>
+
+      {/* page background feather */}
+      <style jsx>{`
+        :global(body){ background: ${CANVAS}; }
+      `}</style>
     </div>
   );
 }
 
-/* ===== Pieces ====================================================== */
-
-function Header({ title, subtitle }: { title: string; subtitle?: string }) {
+/* ---------- Shared stripe background (15 lines, dark middle → lighter edges) ---------- */
+/* We emulate 15 banded lines using repeating-linear-gradient for stripes
+   + mirrored edge-fades so the center appears darker and each step to L/R looks ~2% lighter. */
+function StripeBG({ rounded = 8 }: { rounded?: number }) {
   return (
-    <div className="mb-1">
-      <div className="text-[15px] font-semibold" style={{ color: 'var(--text)' }}>
-        {title}
-      </div>
-      {subtitle && (
-        <div className="text-[11px] mt-1 opacity-55" style={{ color: 'var(--text)' }}>
-          {subtitle}
+    <div
+      aria-hidden
+      style={{
+        position: 'absolute',
+        inset: 0,
+        borderRadius: rounded,
+        // Layer 1: subtle vertical stripes (approx 15 across)
+        background:
+          `repeating-linear-gradient(90deg,
+            rgba(255,255,255,0.022) 0px,
+            rgba(255,255,255,0.022) 2px,
+            rgba(255,255,255,0.00) 2px,
+            rgba(255,255,255,0.00) 16px
+          ),
+          /* Center dark band that eases to edges (mirrored) */
+          linear-gradient(90deg, rgba(0,0,0,0.30), rgba(0,0,0,0.12) 16%, rgba(0,0,0,0.06) 36%, rgba(0,0,0,0.02) 50%),
+          linear-gradient(270deg, rgba(0,0,0,0.30), rgba(0,0,0,0.12) 16%, rgba(0,0,0,0.06) 36%, rgba(0,0,0,0.02) 50%),
+          ${PANEL}`,
+        boxShadow: 'inset 0 0 0 1px rgba(89,217,179,.12), 0 8px 28px rgba(0,0,0,.35)',
+      }}
+    />
+  );
+}
+
+/* ---------- Icon tile — match overlay style ---------- */
+function IconTile({ children, size = 112, rounded = 12 }: { children: React.ReactNode; size?: number; rounded?: number }) {
+  return (
+    <div
+      className="grid place-items-center"
+      style={{
+        width: size,
+        height: size,
+        borderRadius: rounded,
+        background:
+          `linear-gradient(180deg, rgba(89,217,179,.10), rgba(89,217,179,.02)),
+           radial-gradient(60% 90% at 50% 10%, rgba(255,255,255,.06), rgba(255,255,255,0))`,
+        border: `1px solid ${GREEN_LINE}`,
+        boxShadow: 'inset 0 0 0 1px rgba(255,255,255,.03), 0 8px 24px rgba(89,217,179,.10)',
+      }}
+    >
+      <div style={{ color: CTA, filter: 'drop-shadow(0 0 10px rgba(89,217,179,.35))' }}>{children}</div>
+    </div>
+  );
+}
+
+/* ---------- Create Subaccount Card (square, dashed border, slightly rounder inner tile) ---------- */
+function CreateCard({ onClick }: { onClick: () => void }) {
+  const R = 10;                       // card radius (square-ish)
+  const InnerR = 14;                  // icon tile slightly more rounded (per your ask)
+  const H = 240;                      // a bit taller
+
+  return (
+    <button
+      onClick={onClick}
+      className="relative text-left group"
+      style={{
+        height: H,
+        borderRadius: R,
+        background: PANEL,
+        border: `1px dashed ${GREEN_LINE}`,
+        color: TEXT,
+        overflow: 'hidden',
+      }}
+    >
+      <StripeBG rounded={R} />
+
+      <div className="absolute inset-0 p-6 flex flex-col">
+        <div style={{ fontSize: 18, fontWeight: 700 }}>Create Subaccount</div>
+        <div style={{ fontSize: 12, color: MUTED, marginTop: 4, letterSpacing: '.04em' }}>
+          Add new workspace
         </div>
-      )}
-    </div>
-  );
-}
 
-/* Center icon tile — bigger and perfectly centered */
-function CenterTile({ icon }: { icon: 'plus' | 'bot' }) {
-  return (
-    <div className="flex-1 grid place-items-center">
-      <div
-        className="grid place-items-center"
-        style={{
-          width: 116,
-          height: 116,
-          borderRadius: 12,
-          background: 'rgba(255,255,255,.035)',
-          border: `1px solid ${GREEN_LINE}`,
-          boxShadow: 'inset 0 0 12px rgba(0,0,0,.28), 0 10px 26px rgba(0,0,0,.26)',
-        }}
-      >
-        {icon === 'plus' ? (
-          <Plus className="w-11 h-11" style={{ color: CTA, filter: 'drop-shadow(0 0 8px rgba(89,217,179,.35))' }} />
-        ) : (
-          <Bot className="w-11 h-11" style={{ color: CTA, filter: 'drop-shadow(0 0 8px rgba(89,217,179,.35))' }} />
-        )}
+        {/* centered icon tile */}
+        <div className="flex-1 grid place-items-center">
+          <IconTile rounded={InnerR}>
+            <Plus size={56} strokeWidth={2.5} />
+          </IconTile>
+        </div>
+
+        <div style={{ textAlign: 'center', fontSize: 12, color: MUTED, marginTop: 6 }}>Click to create</div>
       </div>
-    </div>
+
+      {/* hover glow */}
+      <div
+        className="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition"
+        style={{
+          borderRadius: R,
+          boxShadow: `0 0 0 1px ${GREEN_LINE}, 0 12px 40px rgba(89,217,179,.18)`,
+        }}
+      />
+    </button>
   );
 }
 
-/* Square card shell with hard-lined background */
-function SquareCard({
-  children,
-  bands,
-  variant = 'normal',
-}: {
-  children: React.ReactNode;
-  bands: React.CSSProperties;
-  variant?: 'normal' | 'create';
-}) {
-  const radius = variant === 'create' ? 14 : 10;
+/* ---------- Subaccount Card (square, icon centered, real ID shown) ---------- */
+function SubCard({ sub }: { sub: Sub }) {
+  const R = 10;         // square-ish
+  const H = 240;
 
   return (
     <div
-      className="group relative overflow-hidden"
+      className="relative"
       style={{
-        aspectRatio: '1 / 1',                          // ALWAYS SQUARE
-        borderRadius: radius,
-        border: variant === 'create' ? `2px dashed ${GREEN_LINE}` : `1px solid ${GREEN_LINE}`,
-        ...bands,                                       // <-- 15 HARD VERTICAL LINES
-        boxShadow:
-          'inset 0 0 14px rgba(0,0,0,.35), 0 10px 28px rgba(0,0,0,.25), 0 0 0 1px rgba(0,0,0,.18)',
-        transition: 'transform .16s ease, box-shadow .16s ease, border-color .16s ease',
+        height: H,
+        borderRadius: R,
+        background: PANEL,
+        border: `1px solid ${GREEN_LINE}`,
+        color: TEXT,
+        overflow: 'hidden',
       }}
     >
-      {/* squared glow on hover */}
-      <div
-        className="absolute inset-0 opacity-0 group-hover:opacity-100 pointer-events-none"
-        style={{
-          background: 'radial-gradient(36% 36% at 50% 50%, rgba(89,217,179,.10) 0%, rgba(89,217,179,0) 100%)',
-          transition: 'opacity .16s ease',
-        }}
-      />
-      <div className="absolute inset-0 p-4 flex flex-col">{children}</div>
+      <StripeBG rounded={R} />
+
+      <div className="absolute inset-0 p-6 flex flex-col">
+        <div style={{ fontSize: 18, fontWeight: 700 }}>{sub.name}</div>
+        <div style={{ fontSize: 12, color: MUTED, marginTop: 4, letterSpacing: '.04em' }}>
+          ID: {sub.id}
+        </div>
+
+        {/* centered icon tile – same style as overlays */}
+        <div className="flex-1 grid place-items-center">
+          <IconTile>
+            <Bot size={54} strokeWidth={2.5} />
+          </IconTile>
+        </div>
+
+        <div className="flex items-center justify-center gap-2" style={{ fontSize: 12, color: MUTED }}>
+          <span>{sub.agents} AI Agents</span>
+          <span>•</span>
+          <span style={{ color: sub.active ? CTA : MUTED }}>{sub.active ? 'Active' : 'Paused'}</span>
+        </div>
+      </div>
     </div>
   );
 }
