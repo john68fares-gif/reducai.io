@@ -261,8 +261,6 @@ async function apiPublish(agentId: string){
 
 /* ───────── option helpers ───────── */
 type Opt = { value: string; label: string; disabled?: boolean; note?: string; iconLeft?: React.ReactNode };
-
-/** models list (static UI) */
 function useOpenAIModels(){
   const [opts] = useState<Opt[]>(
     [
@@ -288,7 +286,7 @@ async function readFileAsText(f: File): Promise<string> {
 
   const looksZip = async () => {
     const buf = new Uint8Array(await f.slice(0,4).arrayBuffer());
-    return buf[0]===0x50 && buf[1]===0x4b; // PK..
+    return buf[0]===0x50 && buf[1]===0x4b;
   };
 
   if (name.endsWith('.docx') || name.endsWith('.docs') || await looksZip()) {
@@ -383,9 +381,9 @@ export default function VoiceAgentSection() {
   const [showCall, setShowCall] = useState(false);
 
   // ===== Diff/Generate flow =====
-  const [diffMode, setDiffMode] = useState(false);          // NEW: show diff box instead of textarea
-  const [basePrompt, setBasePrompt] = useState('');         // NEW: snapshot of current prompt
-  const [candidatePrompt, setCandidatePrompt] = useState('');// NEW: proposed updated prompt
+  const [diffMode, setDiffMode] = useState(false);
+  const [basePrompt, setBasePrompt] = useState('');
+  const [candidatePrompt, setCandidatePrompt] = useState('');
 
   // Website import overlay
   const [showImport, setShowImport] = useState(false);
@@ -510,7 +508,7 @@ export default function VoiceAgentSection() {
     return (v: AgentData[K]) => setData(prev => ({ ...prev, [k]: v }));
   }
 
-  // Keep backend prompt mirrored (no external compiler)
+  // Keep backend prompt mirrored
   useEffect(() => {
     if (!data.systemPrompt) return;
     const s = sanitizePrompt(data.systemPrompt);
@@ -562,7 +560,7 @@ export default function VoiceAgentSection() {
     setToastKind('info'); setToast('File(s) added'); setTimeout(()=>setToast(''), 1200);
   };
 
-  // ── Helpers to enter diff mode ──
+  // ── Helpers to enter/exit diff mode ──
   const startDiff = (nextText: string) => {
     const current = sanitizePrompt((data.systemPromptBackend || data.systemPrompt || DEFAULT_PROMPT_RT).trim());
     const next = sanitizePrompt(nextText);
@@ -578,7 +576,6 @@ export default function VoiceAgentSection() {
     setCandidatePrompt('');
   };
   const declineDiff = () => {
-    // do not change the prompt; just close diff
     setDiffMode(false);
     setBasePrompt('');
     setCandidatePrompt('');
@@ -633,7 +630,7 @@ export default function VoiceAgentSection() {
   }, [data.greetPick, data.firstMsgs, data.firstMode]);
 
   const hasApiKey = !!(data.apiKeyId && apiKeys.some(k=>k.id===data.apiKeyId && k.key));
-  const selectedKey = useMemo(() => apiKeys.find(k => k.id === data.apiKeyId)?.key || '', [apiKeys, data.apiKeyId]); // NEW
+  const selectedKey = useMemo(() => apiKeys.find(k => k.id === data.apiKeyId)?.key || '', [apiKeys, data.apiKeyId]);
 
   return (
     <section className="va-root">
