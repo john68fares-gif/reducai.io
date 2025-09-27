@@ -6,7 +6,7 @@ import dynamic from 'next/dynamic';
 import { createPortal } from 'react-dom';
 import {
   Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Rocket,
-  KeyRound, Play, Pause, Square, Plus, Trash2, Phone, Globe, Lock, Check, X
+  KeyRound, Play, Pause, Square, Plus, Trash2, Phone, Globe, Lock, Check, X, Search
 } from 'lucide-react';
 
 import { scopedStorage } from '@/utils/scoped-storage';
@@ -15,20 +15,20 @@ import StyledSelect from '@/components/ui/StyledSelect';
 import GeneratePromptModal from '@/components/voice/GeneratePromptModal';
 import ImportWebsiteModal from '@/components/voice/ImportWebsiteModal';
 import { loadJSZip } from '@/lib/jszip-loader';
-import { buildPromptFromWebsite } from '@/utils/prompt-builder';
+import { DEFAULT_PROMPT as BUILDER_DEFAULT, buildPromptFromWebsite } from '@/utils/prompt-builder';
 import { shapePromptForScheduling } from '@/components/voice/utils/prompt';
 
-/* ──────────────── PROMPT ENGINE (YOUR ENGINE) ──────────────── */
+// 🔧 Prompt engine (drives frontend+backend strings)
 import {
   DEFAULT_PROMPT as ENGINE_DEFAULT,
   looksLikeFullPrompt,
   normalizeFullPrompt,
-  compilePrompt,
+  compilePrompt
 } from '@/lib/prompt-engine';
 
 /* ───────── constants ───────── */
 const EPHEMERAL_TOKEN_ENDPOINT = '/api/voice/ephemeral';
-const PREVIEW_TTS_ENDPOINT     = '/api/voice/tts/preview';
+const PREVIEW_TTS_ENDPOINT     = '/api/voice/tts/preview'; // <- returns audio blob
 const CTA = '#59d9b3';
 const CTA_HOVER = '#54cfa9';
 const GREEN_LINE = 'rgba(89,217,179,.20)';
@@ -75,12 +75,13 @@ async function typeIntoPrompt(
   onTick: (current: string) => void,
   opts: { cps?: number } = {}
 ) {
-  const cps = opts.cps ?? 90; // chars/sec
+  const cps = opts.cps ?? 120; // chars/sec
   const delay = Math.max(6, Math.round(1000 / cps));
   let out = '';
   for (let i = 0; i < full.length; i++) {
     out += full[i];
     onTick(out);
+    // slightly slower on newlines so big blocks are readable
     await new Promise(r => setTimeout(r, full[i] === '\n' ? delay * 2 : delay));
   }
 }
@@ -187,7 +188,7 @@ type AgentData = {
   contextText?: string;
   ctxFiles?: { name:string; text:string }[];
   ttsProvider: 'openai' | 'elevenlabs' | 'google-tts';
-  voiceName: string;
+  voiceName: string;                 // friendly name (e.g., Alloy (American))
   apiKeyId?: string;
   phoneId?: string;
   asrProvider: 'deepgram' | 'whisper' | 'assemblyai';
@@ -206,7 +207,7 @@ const PROMPT_SKELETON = `[Identity]
 [Task & Goals]
 
 [Error Handling / Fallback]`;
-const DEFAULT_PROMPT_RT = nonEmpty(ENGINE_DEFAULT) ? ENGINE_DEFAULT! : PROMPT_SKELETON;
+const DEFAULT_PROMPT_RT = nonEmpty(BUILDER_DEFAULT) ? BUILDER_DEFAULT! : (nonEmpty(ENGINE_DEFAULT) ? ENGINE_DEFAULT! : PROMPT_SKELETON);
 
 const DEFAULT_AGENT: AgentData = {
   name: 'Assistant',
@@ -216,8 +217,7 @@ const DEFAULT_AGENT: AgentData = {
   firstMsg: '',
   firstMsgs: [],
   greetPick: 'sequence',
-  systemPrompt: normalizeFullPrompt?.(
-    `
+  systemPrompt: normalizeFullPrompt?.(`
 [Identity]
 - You are a helpful, professional AI assistant for this business.
 
@@ -232,23 +232,7 @@ const DEFAULT_AGENT: AgentData = {
 
 [Error Handling / Fallback]
 - If unsure, ask a specific clarifying question first.
-`.trim()
-  ) ?? `
-[Identity]
-- You are a helpful, professional AI assistant for this business.
-
-[Style]
-- Clear, concise, friendly.
-
-[Response Guidelines]
-- Ask one clarifying question when essential info is missing.
-
-[Task & Goals]
-- Guide users to their next best action (booking, purchase, or escalation).
-
-[Error Handling / Fallback]
-- If unsure, ask a specific clarifying question first.
-`.trim(),
+`) ?? PROMPT_SKELETON,
   systemPromptBackend: '',
   contextText: '',
   ctxFiles: [],
@@ -370,6 +354,7 @@ async function readFileAsText(f: File): Promise<string> {
 
 /* ───────── Helper: front-end prompt from description (fallback) ───────── */
 function makeFrontendPromptFromDescription(desc: string, baseName: string) {
+  // Use your scheduler shaper; then ensure sections exist and are clean
   const raw = shapePromptForScheduling(desc, { name: baseName, personaName: baseName, org: 'Your Business' }) || '';
   const s = sanitizePrompt(raw);
 
@@ -472,11 +457,13 @@ export default function VoiceAgentSection() {
   // Generate modal
   const [showGenerate, setShowGenerate] = useState(false);
 
-  // Diff state
+  // Diff state (preview typing BEFORE accept/decline)
   const [diffMode, setDiffMode] = useState(false);
   const [basePrompt, setBasePrompt] = useState('');
   const [candidatePrompt, setCandidatePrompt] = useState('');
-  const pendingBackendRef = useRef<string>(''); // ← backend string from prompt-engine while diffing
+  const [previewTyped, setPreviewTyped] = useState('');     // grows as we type the candidate
+  const [isTypingPreview, setIsTypingPreview] = useState(false);
+  const pendingBackendRef = useRef<string>('');             // backend for the candidate
 
   // Website import overlay
   const [showImport, setShowImport] = useState(false);
@@ -663,12 +650,10 @@ export default function VoiceAgentSection() {
     return (v: AgentData[K]) => setData(prev => ({ ...prev, [k]: v }));
   }
 
-  // Keep backend prompt mirrored with the ENGINE when user edits manually.
+  // Keep backend prompt mirrored (for manual edits)
   useEffect(() => {
     const raw = sanitizePrompt(data.systemPrompt || '');
     if (!raw) return;
-
-    // If it already looks like your full prompt, compile to backend.
     try {
       const isFull = looksLikeFullPrompt ? looksLikeFullPrompt(raw) : true;
       if (isFull && compilePrompt) {
@@ -676,19 +661,14 @@ export default function VoiceAgentSection() {
         if (compiled?.backendString && compiled.backendString !== data.systemPromptBackend) {
           setData(p => ({ ...p, systemPromptBackend: compiled.backendString }));
         }
-      } else {
-        // otherwise mirror sanitized string
-        if (raw !== data.systemPromptBackend) {
-          setData(p => ({ ...p, systemPromptBackend: raw }));
-        }
+      } else if (raw !== data.systemPromptBackend) {
+        setData(p => ({ ...p, systemPromptBackend: raw }));
       }
     } catch {
-      // fallback to mirroring
       if (raw !== data.systemPromptBackend) {
         setData(p => ({ ...p, systemPromptBackend: raw }));
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data.systemPrompt]);
 
   async function doSave(){
@@ -735,86 +715,70 @@ export default function VoiceAgentSection() {
   };
 
   // ── Diff helpers ──
-  const startDiff = (nextText: string, backendForNext?: string) => {
+  const startDiff = async (nextText: string, backendForNext?: string) => {
     const current = sanitizePrompt((data.systemPromptBackend || data.systemPrompt || DEFAULT_PROMPT_RT).trim());
     const next = sanitizePrompt(nextText);
+
     setBasePrompt(current);
     setCandidatePrompt(next);
     pendingBackendRef.current = backendForNext ? sanitizePrompt(backendForNext) : next;
+
     setDiffMode(true);
+    setPreviewTyped('');
+    setIsTypingPreview(true);
+
+    await typeIntoPrompt(next, (chunk) => setPreviewTyped(chunk), { cps: 120 });
+    setIsTypingPreview(false); // buttons show only after preview finishes typing
   };
+
   const acceptDiff = async () => {
     const chosenFront = candidatePrompt;
     const chosenBack  = pendingBackendRef.current || candidatePrompt;
+
     setDiffMode(false);
     setBasePrompt('');
     setCandidatePrompt('');
     pendingBackendRef.current = '';
+    setPreviewTyped('');
+    setIsTypingPreview(false);
+
+    // Type the accepted text *into the editor* for delight, while backend is already known
     await typeIntoPrompt(chosenFront, (chunk) => {
       setData(prev => ({ ...prev, systemPrompt: chunk, systemPromptBackend: chosenBack }));
-    });
+    }, { cps: 120 });
   };
+
   const declineDiff = () => {
     setDiffMode(false);
     setBasePrompt('');
     setCandidatePrompt('');
     pendingBackendRef.current = '';
+    setPreviewTyped('');
+    setIsTypingPreview(false);
   };
 
-  // Import files → append as [Context] and diff (backend mirrors)
+  // Import files → propose appended prompt (engine not needed; just append context)
   const importFilesIntoPrompt = async () => {
     const ctx  = sanitizePrompt((data.contextText || '').trim());
     const base = sanitizePrompt((data.systemPromptBackend || data.systemPrompt || DEFAULT_PROMPT_RT).trim());
     const next = ctx ? `${base}\n\n[Context]\n${ctx}`.trim() : base;
-    startDiff(next, next); // backend = same for simple append
+    await startDiff(next, next);
   };
 
-  /* Generate → USE PROMPT ENGINE to compile → type-diff */
+  /* Generate → prompt-engine: sectioned frontend + machine backend → typing preview */
   const onGenerateToDiff = async (userDesc:string) => {
     try {
       const base = sanitizePrompt((data.systemPrompt || DEFAULT_PROMPT_RT).trim());
-      const compiled = compilePrompt
-        ? compilePrompt({ basePrompt: base, userText: userDesc })
-        : { frontendText: makeFrontendPromptFromDescription(userDesc, data.name || 'Assistant'), backendString: base };
+      const compiled = compilePrompt({ basePrompt: base, userText: userDesc });
+
       const front = nonEmpty(compiled.frontendText) ? compiled.frontendText : base;
       const back  = nonEmpty(compiled.backendString) ? compiled.backendString : front;
-      startDiff(front, back);
+
+      await startDiff(front, back);
     } catch {
-      // Fallback to simple builder if engine throws
       const front = makeFrontendPromptFromDescription(userDesc, data.name || 'Assistant');
-      startDiff(front, front);
+      await startDiff(front, front);
     }
-  };
-
-  // Website import → build → diff (backend mirrors unless you prefer to compile again)
-  const onWebsiteImport = async (urls: string[]) => {
-    const list = urls.map(s=>s.trim()).filter(Boolean);
-    if (!list.length) return;
-
-    const chunks: string[] = [];
-    for (const u of list) {
-      try {
-        const r = await fetch('/api/connectors/website-import', {
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ url: u })
-        });
-        const j = r.ok ? await r.json().catch(()=>null) : null;
-        const facts: string[] = Array.isArray(j?.facts) ? j.facts : [];
-        if (facts.length) {
-          chunks.push(`# ${u}`, ...facts.map(s => `- ${s}`), '');
-        } else {
-          chunks.push(`# ${u}`, '- No obvious facts extracted.', '');
-        }
-      } catch {
-        chunks.push(`# ${u}`, '- Fetch failed.', '');
-      }
-    }
-
-    const merged = chunks.join('\n').trim();
-    const base = sanitizePrompt((data.systemPromptBackend || data.systemPrompt || DEFAULT_PROMPT_RT).trim());
-    const next = buildPromptFromWebsite(merged, base);
-    startDiff(next, next);
   };
 
   /* call model */
@@ -843,7 +807,7 @@ export default function VoiceAgentSection() {
     switch (lang) { case 'Dutch': return 'nl'; case 'German': return 'de'; case 'Spanish': return 'es'; case 'Arabic': return 'ar'; default: return 'en'; }
   };
 
-  // Greeting logic
+  // Greeting logic (STRICT)
   const greetingJoined = useMemo(() => {
     if (data.firstMode !== 'Assistant speaks first') return '';
     const list = (data.greetPick==='random'
@@ -1056,8 +1020,8 @@ export default function VoiceAgentSection() {
                 </div>
               </div>
 
-              {/* Accept/Decline above the prompt when diffing */}
-              {diffMode && (
+              {/* Accept/Decline appear only AFTER typing preview finishes */}
+              {diffMode && !isTypingPreview && (
                 <div className="mb-2 flex items-center gap-2">
                   <button
                     onClick={acceptDiff}
@@ -1086,7 +1050,7 @@ export default function VoiceAgentSection() {
                   />
                 ) : (
                   <div className="rounded-[8px] border p-3 text-xs" style={{ borderColor:'var(--border-weak)', background:'var(--panel-bg)', minHeight: 320 }}>
-                    <PromptDiffView base={basePrompt} next={candidatePrompt} />
+                    <PromptDiffView base={basePrompt} next={isTypingPreview ? previewTyped : candidatePrompt} />
                   </div>
                 )}
               </div>
@@ -1236,7 +1200,7 @@ export default function VoiceAgentSection() {
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
-                <div className="mb-2 text-[12.5px]] flex items-center gap-2">
+                <div className="mb-2 text-[12.5px] flex items-center gap-2">
                   <KeyRound className="w-4 h-4 opacity-80" /> OpenAI API Key
                 </div>
                 <StyledSelect
@@ -1304,7 +1268,7 @@ export default function VoiceAgentSection() {
         </div>
       </div>
 
-      {/* Generate Prompt → ENGINE compile, then diff */}
+      {/* Generate Prompt → engine compile → typing preview → Accept/Decline */}
       <GeneratePromptModal
         open={showGenerate}
         onClose={() => setShowGenerate(false)}
@@ -1313,15 +1277,46 @@ export default function VoiceAgentSection() {
           if (!desc) return;
           setShowGenerate(false);
           await sleep(10);
-          onGenerateToDiff(desc);
+          await onGenerateToDiff(desc);
         }}
       />
 
-      {/* Import website — builds prompt blocks → diff (mirrored backend) */}
+      {/* Import website — builds prompt blocks via prompt-builder → diff preview */}
       <ImportWebsiteModal
         open={showImport}
         onClose={() => setShowImport(false)}
-        onImport={onWebsiteImport}
+        onImport={async (urls: string[])=>{
+          const list = urls.map(s=>s.trim()).filter(Boolean);
+          if (!list.length) return;
+
+          const chunks: string[] = [];
+          for (const u of list) {
+            try {
+              const r = await fetch('/api/connectors/website-import', {
+                method:'POST',
+                headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({ url: u })
+              });
+              const j = r.ok ? await r.json().catch(()=>null) : null;
+              const facts: string[] = Array.isArray(j?.facts) ? j.facts : [];
+              if (facts.length) {
+                chunks.push(`# ${u}`, ...facts.map(s => `- ${s}`), '');
+              } else {
+                chunks.push(`# ${u}`, '- No obvious facts extracted.', '');
+              }
+            } catch {
+              chunks.push(`# ${u}`, '- Fetch failed.', '');
+            }
+          }
+
+          const merged = chunks.join('\n').trim();
+          const base = sanitizePrompt((data.systemPromptBackend || data.systemPrompt || DEFAULT_PROMPT_RT).trim());
+          const next = buildPromptFromWebsite(merged, base);
+
+          setShowImport(false);
+          await sleep(10);
+          await startDiff(next, next);
+        }}
       />
 
       {/* Voice/Call overlay */}
