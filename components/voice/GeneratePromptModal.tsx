@@ -27,7 +27,7 @@ export default function GeneratePromptModal({
   const [composerText, setComposerText] = useState('');
   const [busy, setBusy] = useState(false);
 
-  // ✅ Reset the textarea every time the modal opens
+  // ✅ clear the textarea every time the modal opens
   useEffect(() => {
     if (open) setComposerText('');
   }, [open]);
@@ -45,10 +45,9 @@ export default function GeneratePromptModal({
     if (!text || busy) return;
     try {
       setBusy(true);
-      await onGenerate(text);
-      // ✅ Clear after successful generation so nothing “sticks”
-      setComposerText('');
-      onClose(); // parent starts typing effect
+      await onGenerate(text); // parent will insert the new prompt
+      setComposerText('');    // ✅ ensure it never “sticks”
+      onClose();
     } finally {
       setBusy(false);
     }
@@ -77,7 +76,7 @@ export default function GeneratePromptModal({
           role="dialog"
           aria-modal="true"
           aria-label="Generate prompt"
-          onClick={(e)=>e.stopPropagation()} // prevent backdrop click
+          onClick={(e)=>e.stopPropagation()}
         >
           {/* Header */}
           <div
