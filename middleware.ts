@@ -1,69 +1,117 @@
-// middleware.ts
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 
-// ✅ Allow the landing page and other marketing pages without auth
+/** Public, no-auth pages */
 const PUBLIC = new Set<string>([
-  '/',                 // ← put root back
-  '/auth',             // if you still keep a dedicated page
-  '/auth/callback',
+  '/',
+  '/auth/callback',   // Supabase OAuth callback
+  '/post-auth',       // <-- land here after OAuth (we’ll branch to Stripe or /builder)
   '/pricing',
   '/contact',
   '/privacy',
   '/terms'
 ]);
 
-function isAsset(pathname: string) {
+/** Asset paths (always allowed) */
+function isAsset(p: string) {
   return (
-    pathname.startsWith('/_next') ||
-    pathname.startsWith('/favicon') ||
-    pathname.startsWith('/images') ||
-    pathname.startsWith('/fonts') ||
-    pathname.startsWith('/static')
+    p.startsWith('/_next') ||
+    p.startsWith('/favicon') ||
+    p.startsWith('/images') ||
+    p.startsWith('/fonts') ||
+    p.startsWith('/static')
   );
 }
 
+/** Basic “am I signed in” check using Supabase cookies */
 function isAuthed(req: NextRequest) {
   const c = req.cookies;
-  if (c.get('ra_session')?.value === '1') return true; // your custom session flag
+  if (c.get('ra_session')?.value === '1') return true; // your own session flag if you set one
   const hasSb =
     c.get('sb-access-token') ||
     c.get('sb-refresh-token') ||
-    c.getAll().some((x) => x.name.startsWith('sb-'));
+    c.getAll().some(x => x.name.startsWith('sb-'));
   return Boolean(hasSb);
 }
 
-export function middleware(req: NextRequest) {
+export async function middleware(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
 
-  // Always allow static assets
+  // Allow assets
   if (isAsset(pathname)) return NextResponse.next();
 
-  const authed = isAuthed(req);
+  // Public routes are open
+  if (PUBLIC.has(pathname)) {
+    // Special handler: /post-auth decides Stripe vs /builder
+    if (pathname === '/post-auth') {
+      if (!isAuthed(req)) {
+        // Not signed in? Go home and open your overlay
+        const back = req.nextUrl.clone();
+        back.pathname = '/';
+        back.search = '?signin=1';
+        return NextResponse.redirect(back);
+      }
 
-  // If authed and visiting "/", send them to the app
-  if (pathname === '/' && authed) {
-    const url = req.nextUrl.clone();
-    url.pathname = '/builder';
-    url.search = '';
-    return NextResponse.redirect(url);
+      // Ask our API if user already exists / is subscribed
+      const url = new URL('/api/user-status', req.url);
+      const resp = await fetch(url.toString(), {
+        headers: { cookie: req.headers.get('cookie') || '' }
+      });
+
+      // If the API fails for any reason, fail open to /builder (never loop)
+      if (!resp.ok) {
+        const go = req.nextUrl.clone();
+        go.pathname = '/builder';
+        go.search = '';
+        return NextResponse.redirect(go);
+      }
+
+      const data = (await resp.json()) as {
+        hasAccount: boolean;
+        hasSubscription: boolean;
+        paymentLink?: string | null;
+      };
+
+      // Existing user OR already subscribed -> app
+      if (data.hasAccount || data.hasSubscription) {
+        const go = req.nextUrl.clone();
+        go.pathname = '/builder';
+        go.search = '';
+        return NextResponse.redirect(go);
+      }
+
+      // New user -> Stripe Payment Link (must be set)
+      const paymentLink =
+        data.paymentLink ||
+        process.env.NEXT_PUBLIC_STRIPE_PAYMENT_LINK || // e.g. https://buy.stripe.com/xxxxxx
+        '';
+
+      if (paymentLink) {
+        return NextResponse.redirect(paymentLink);
+      }
+
+      // If no payment link configured, at least don’t trap them
+      const fallback = req.nextUrl.clone();
+      fallback.pathname = '/pricing';
+      return NextResponse.redirect(fallback);
+    }
+
+    // Other public paths just pass through
+    return NextResponse.next();
   }
-
-  // ✅ Public routes are allowed for everyone
-  if (PUBLIC.has(pathname)) return NextResponse.next();
 
   // Everything else requires auth
-  if (!authed) {
-    const url = req.nextUrl.clone();
-    url.pathname = '/auth'; // or keep `/` if you only use the overlay
-    url.search = `?mode=signin&from=${encodeURIComponent(pathname + (search || ''))}`;
-    return NextResponse.redirect(url);
+  if (!isAuthed(req)) {
+    const back = req.nextUrl.clone();
+    back.pathname = '/';
+    back.search = '?signin=1';
+    return NextResponse.redirect(back);
   }
 
+  // Auth-only pages allowed
   return NextResponse.next();
 }
 
 export const config = {
-  // still protect everything except common asset paths
   matcher: ['/((?!_next/|favicon|images/|fonts/|static/).*)'],
 };
