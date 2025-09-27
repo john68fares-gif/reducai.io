@@ -1,3 +1,4 @@
+// components/voice/VoiceAgentSection.tsx
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
@@ -14,8 +15,16 @@ import StyledSelect from '@/components/ui/StyledSelect';
 import GeneratePromptModal from '@/components/voice/GeneratePromptModal';
 import ImportWebsiteModal from '@/components/voice/ImportWebsiteModal';
 import { loadJSZip } from '@/lib/jszip-loader';
-import { DEFAULT_PROMPT as BUILDER_DEFAULT, buildPromptFromWebsite } from '@/utils/prompt-builder';
+import { buildPromptFromWebsite } from '@/utils/prompt-builder';
 import { shapePromptForScheduling } from '@/components/voice/utils/prompt';
+
+/* ──────────────── PROMPT ENGINE (YOUR ENGINE) ──────────────── */
+import {
+  DEFAULT_PROMPT as ENGINE_DEFAULT,
+  looksLikeFullPrompt,
+  normalizeFullPrompt,
+  compilePrompt,
+} from '@/lib/prompt-engine';
 
 /* ───────── constants ───────── */
 const EPHEMERAL_TOKEN_ENDPOINT = '/api/voice/ephemeral';
@@ -197,7 +206,7 @@ const PROMPT_SKELETON = `[Identity]
 [Task & Goals]
 
 [Error Handling / Fallback]`;
-const DEFAULT_PROMPT_RT = nonEmpty(BUILDER_DEFAULT) ? BUILDER_DEFAULT! : PROMPT_SKELETON;
+const DEFAULT_PROMPT_RT = nonEmpty(ENGINE_DEFAULT) ? ENGINE_DEFAULT! : PROMPT_SKELETON;
 
 const DEFAULT_AGENT: AgentData = {
   name: 'Assistant',
@@ -207,7 +216,7 @@ const DEFAULT_AGENT: AgentData = {
   firstMsg: '',
   firstMsgs: [],
   greetPick: 'sequence',
-  systemPrompt: (
+  systemPrompt: normalizeFullPrompt?.(
     `
 [Identity]
 - You are a helpful, professional AI assistant for this business.
@@ -222,8 +231,24 @@ const DEFAULT_AGENT: AgentData = {
 - Guide users to their next best action (booking, purchase, or escalation).
 
 [Error Handling / Fallback]
-- If unsure, ask a specific clarifying question first.`.trim()
-  ),
+- If unsure, ask a specific clarifying question first.
+`.trim()
+  ) ?? `
+[Identity]
+- You are a helpful, professional AI assistant for this business.
+
+[Style]
+- Clear, concise, friendly.
+
+[Response Guidelines]
+- Ask one clarifying question when essential info is missing.
+
+[Task & Goals]
+- Guide users to their next best action (booking, purchase, or escalation).
+
+[Error Handling / Fallback]
+- If unsure, ask a specific clarifying question first.
+`.trim(),
   systemPromptBackend: '',
   contextText: '',
   ctxFiles: [],
@@ -343,7 +368,7 @@ async function readFileAsText(f: File): Promise<string> {
   });
 }
 
-/* ───────── Helper: front-end prompt from description ───────── */
+/* ───────── Helper: front-end prompt from description (fallback) ───────── */
 function makeFrontendPromptFromDescription(desc: string, baseName: string) {
   const raw = shapePromptForScheduling(desc, { name: baseName, personaName: baseName, org: 'Your Business' }) || '';
   const s = sanitizePrompt(raw);
@@ -451,6 +476,7 @@ export default function VoiceAgentSection() {
   const [diffMode, setDiffMode] = useState(false);
   const [basePrompt, setBasePrompt] = useState('');
   const [candidatePrompt, setCandidatePrompt] = useState('');
+  const pendingBackendRef = useRef<string>(''); // ← backend string from prompt-engine while diffing
 
   // Website import overlay
   const [showImport, setShowImport] = useState(false);
@@ -637,13 +663,32 @@ export default function VoiceAgentSection() {
     return (v: AgentData[K]) => setData(prev => ({ ...prev, [k]: v }));
   }
 
-  // Keep backend prompt mirrored
+  // Keep backend prompt mirrored with the ENGINE when user edits manually.
   useEffect(() => {
-    if (!data.systemPrompt) return;
-    const s = sanitizePrompt(data.systemPrompt);
-    if (s !== data.systemPromptBackend) {
-      setData(p => ({ ...p, systemPromptBackend: s }));
+    const raw = sanitizePrompt(data.systemPrompt || '');
+    if (!raw) return;
+
+    // If it already looks like your full prompt, compile to backend.
+    try {
+      const isFull = looksLikeFullPrompt ? looksLikeFullPrompt(raw) : true;
+      if (isFull && compilePrompt) {
+        const compiled = compilePrompt({ basePrompt: raw, userText: '' });
+        if (compiled?.backendString && compiled.backendString !== data.systemPromptBackend) {
+          setData(p => ({ ...p, systemPromptBackend: compiled.backendString }));
+        }
+      } else {
+        // otherwise mirror sanitized string
+        if (raw !== data.systemPromptBackend) {
+          setData(p => ({ ...p, systemPromptBackend: raw }));
+        }
+      }
+    } catch {
+      // fallback to mirroring
+      if (raw !== data.systemPromptBackend) {
+        setData(p => ({ ...p, systemPromptBackend: raw }));
+      }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data.systemPrompt]);
 
   async function doSave(){
@@ -690,40 +735,86 @@ export default function VoiceAgentSection() {
   };
 
   // ── Diff helpers ──
-  const startDiff = (nextText: string) => {
+  const startDiff = (nextText: string, backendForNext?: string) => {
     const current = sanitizePrompt((data.systemPromptBackend || data.systemPrompt || DEFAULT_PROMPT_RT).trim());
     const next = sanitizePrompt(nextText);
     setBasePrompt(current);
     setCandidatePrompt(next);
+    pendingBackendRef.current = backendForNext ? sanitizePrompt(backendForNext) : next;
     setDiffMode(true);
   };
   const acceptDiff = async () => {
-    const chosen = candidatePrompt;
+    const chosenFront = candidatePrompt;
+    const chosenBack  = pendingBackendRef.current || candidatePrompt;
     setDiffMode(false);
     setBasePrompt('');
     setCandidatePrompt('');
-    await typeIntoPrompt(chosen, (chunk) => {
-      setData(prev => ({ ...prev, systemPrompt: chunk, systemPromptBackend: chunk }));
+    pendingBackendRef.current = '';
+    await typeIntoPrompt(chosenFront, (chunk) => {
+      setData(prev => ({ ...prev, systemPrompt: chunk, systemPromptBackend: chosenBack }));
     });
   };
   const declineDiff = () => {
     setDiffMode(false);
     setBasePrompt('');
     setCandidatePrompt('');
+    pendingBackendRef.current = '';
   };
 
-  // Import files → propose appended prompt
+  // Import files → append as [Context] and diff (backend mirrors)
   const importFilesIntoPrompt = async () => {
     const ctx  = sanitizePrompt((data.contextText || '').trim());
     const base = sanitizePrompt((data.systemPromptBackend || data.systemPrompt || DEFAULT_PROMPT_RT).trim());
     const next = ctx ? `${base}\n\n[Context]\n${ctx}`.trim() : base;
-    startDiff(next);
+    startDiff(next, next); // backend = same for simple append
   };
 
-  /* Generate → translate into structured front-end prompt, then diff */
+  /* Generate → USE PROMPT ENGINE to compile → type-diff */
   const onGenerateToDiff = async (userDesc:string) => {
-    const next = makeFrontendPromptFromDescription(userDesc, data.name || 'Assistant');
-    startDiff(next);
+    try {
+      const base = sanitizePrompt((data.systemPrompt || DEFAULT_PROMPT_RT).trim());
+      const compiled = compilePrompt
+        ? compilePrompt({ basePrompt: base, userText: userDesc })
+        : { frontendText: makeFrontendPromptFromDescription(userDesc, data.name || 'Assistant'), backendString: base };
+      const front = nonEmpty(compiled.frontendText) ? compiled.frontendText : base;
+      const back  = nonEmpty(compiled.backendString) ? compiled.backendString : front;
+      startDiff(front, back);
+    } catch {
+      // Fallback to simple builder if engine throws
+      const front = makeFrontendPromptFromDescription(userDesc, data.name || 'Assistant');
+      startDiff(front, front);
+    }
+  };
+
+  // Website import → build → diff (backend mirrors unless you prefer to compile again)
+  const onWebsiteImport = async (urls: string[]) => {
+    const list = urls.map(s=>s.trim()).filter(Boolean);
+    if (!list.length) return;
+
+    const chunks: string[] = [];
+    for (const u of list) {
+      try {
+        const r = await fetch('/api/connectors/website-import', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ url: u })
+        });
+        const j = r.ok ? await r.json().catch(()=>null) : null;
+        const facts: string[] = Array.isArray(j?.facts) ? j.facts : [];
+        if (facts.length) {
+          chunks.push(`# ${u}`, ...facts.map(s => `- ${s}`), '');
+        } else {
+          chunks.push(`# ${u}`, '- No obvious facts extracted.', '');
+        }
+      } catch {
+        chunks.push(`# ${u}`, '- Fetch failed.', '');
+      }
+    }
+
+    const merged = chunks.join('\n').trim();
+    const base = sanitizePrompt((data.systemPromptBackend || data.systemPrompt || DEFAULT_PROMPT_RT).trim());
+    const next = buildPromptFromWebsite(merged, base);
+    startDiff(next, next);
   };
 
   /* call model */
@@ -1145,7 +1236,7 @@ export default function VoiceAgentSection() {
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
-                <div className="mb-2 text-[12.5px] flex items-center gap-2">
+                <div className="mb-2 text-[12.5px]] flex items-center gap-2">
                   <KeyRound className="w-4 h-4 opacity-80" /> OpenAI API Key
                 </div>
                 <StyledSelect
@@ -1213,7 +1304,7 @@ export default function VoiceAgentSection() {
         </div>
       </div>
 
-      {/* Generate Prompt → translate, then diff */}
+      {/* Generate Prompt → ENGINE compile, then diff */}
       <GeneratePromptModal
         open={showGenerate}
         onClose={() => setShowGenerate(false)}
@@ -1226,42 +1317,11 @@ export default function VoiceAgentSection() {
         }}
       />
 
-      {/* Import website — builds prompt blocks via prompt-builder → diff */}
+      {/* Import website — builds prompt blocks → diff (mirrored backend) */}
       <ImportWebsiteModal
         open={showImport}
         onClose={() => setShowImport(false)}
-        onImport={async (urls: string[])=>{
-          const list = urls.map(s=>s.trim()).filter(Boolean);
-          if (!list.length) return;
-
-          const chunks: string[] = [];
-          for (const u of list) {
-            try {
-              const r = await fetch('/api/connectors/website-import', {
-                method:'POST',
-                headers:{'Content-Type':'application/json'},
-                body: JSON.stringify({ url: u })
-              });
-              const j = r.ok ? await r.json().catch(()=>null) : null;
-              const facts: string[] = Array.isArray(j?.facts) ? j.facts : [];
-              if (facts.length) {
-                chunks.push(`# ${u}`, ...facts.map(s => `- ${s}`), '');
-              } else {
-                chunks.push(`# ${u}`, '- No obvious facts extracted.', '');
-              }
-            } catch {
-              chunks.push(`# ${u}`, '- Fetch failed.', '');
-            }
-          }
-
-          const merged = chunks.join('\n').trim();
-          const base = sanitizePrompt((data.systemPromptBackend || data.systemPrompt || DEFAULT_PROMPT_RT).trim());
-          const next = buildPromptFromWebsite(merged, base);
-
-          setShowImport(false);
-          await sleep(10);
-          startDiff(next);
-        }}
+        onImport={onWebsiteImport}
       />
 
       {/* Voice/Call overlay */}
