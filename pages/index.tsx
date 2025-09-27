@@ -67,7 +67,9 @@ const Tokens = () => (
       transform: translateZ(0);
       transition: transform .18s ease, box-shadow .18s ease, background .18s ease;
       overflow:hidden;
+      font-size:16px;
     }
+    .btn-lg{ height:56px; padding:0 26px; font-size:17px; }
     .btn:hover{ transform: scale(1.04); box-shadow: 0 24px 64px rgba(89,217,179,.38), inset 0 0 0 1px rgba(255,255,255,.10); }
     .btn:active{ transform: scale(0.985); }
     .btn.ghost{ background: transparent; color: var(--text); border-color: var(--line); }
@@ -94,22 +96,14 @@ const Tokens = () => (
     .toggle .opt.active::after{ content:''; position:absolute; inset:-2px; border-radius:999px; box-shadow:0 0 0 0 rgba(89,217,179,.0); animation: optPulse .32s ease; }
     @keyframes optPulse{ 0%{ box-shadow:0 0 0 0 rgba(89,217,179,.45); } 100%{ box-shadow:0 0 0 16px rgba(89,217,179,0); } }
 
-    /* HERO grid (thicker + animated sweep) */
+    /* HERO grid — cover whole section (no mask) */
     .hero-wrap{ position:relative; isolation:isolate; }
     .hero-grid{
       position:absolute; inset:0; pointer-events:none; z-index:0; opacity:.42;
       background:
         linear-gradient(to right, rgba(89,217,179,.34) 2px, transparent 2px) 0 0/36px 36px,
         linear-gradient(to bottom, rgba(89,217,179,.28) 2px, transparent 2px) 0 0/36px 36px;
-      mask-image: radial-gradient(70% 70% at 50% 40%, rgba(0,0,0,1), transparent 78%);
     }
-    .hero-sheen{
-      position:absolute; inset:-20%; pointer-events:none; z-index:0;
-      background: linear-gradient(115deg, transparent 20%, rgba(89,217,179,.14) 50%, transparent 80%);
-      filter: blur(14px);
-      animation: sheen 6s linear infinite;
-    }
-    @keyframes sheen{ 0%{ transform: translateX(-40%) translateY(-10%) rotate(0.001deg);} 100%{ transform: translateX(40%) translateY(10%) rotate(0.001deg);} }
     .hero-content{ position:relative; z-index:1; }
   `}</style>
 );
@@ -132,7 +126,7 @@ function AuthModal({ open, onClose }: { open:boolean; onClose:()=>void }) {
       setBusy(true); setErr('');
       await supabase.auth.signInWithOAuth({
         provider:'google',
-        options:{ redirectTo: `${window.location.origin}/post-auth` } // important
+        options:{ redirectTo: `${window.location.origin}/post-auth` } // IMPORTANT
       });
     }catch(e:any){
       setErr(e?.message || 'Sign-in failed');
@@ -182,7 +176,6 @@ export default function HomePage(){
   const [stripeErr,setStripeErr] = useState('');
   const clickRipple = useClickedRipple();
 
-  // Keep authed state in sync (no client-side redirect here; /post-auth handles branching)
   useEffect(() => {
     let unsub: (() => void) | null = null;
     (async () => {
@@ -197,31 +190,24 @@ export default function HomePage(){
     return () => { try { unsub?.(); } catch {} };
   }, []);
 
-  // Unified plan flow
   const startPlanFlow = async (p:'monthly'|'yearly', tier:'starter'|'pro')=>{
     setStripeErr('');
     const { data: { session } } = await supabase.auth.getSession();
-
-    // Not signed in → remember choice and open Google
     if (!session?.user?.id) {
       localStorage.setItem(PENDING_KEY, JSON.stringify({ period:p, tier }));
       setAuthOpen(true);
       return;
     }
-
     await goToPayment(p, tier);
   };
 
   const goToPayment = async (p:'monthly'|'yearly', tier:'starter'|'pro')=>{
     const link = PAYMENT_LINKS[p][tier];
     if (link && /^https?:\/\//i.test(link)) { window.location.href = link; return; }
-
     const price = PRICE_IDS[p][tier];
     if (!price || !/^price_[A-Za-z0-9]+$/.test(price)) { setStripeErr('No payment link and Stripe Price ID looks invalid.'); return; }
-
     const stripe = await stripePromise;
     if (!stripe) { setStripeErr('Stripe not initialised. Check NEXT_PUBLIC_STRIPE_PK.'); return; }
-
     try{
       setBusy(`${p}:${tier}`);
       const { error } = await stripe.redirectToCheckout({
@@ -274,11 +260,10 @@ export default function HomePage(){
         </div>
       </div>
 
-      {/* HERO with stronger grid + animated sheen */}
+      {/* HERO with full-section grid */}
       <section style={{ minHeight:'100vh', padding:'10vh 0', display:'grid', placeItems:'center', background:'var(--section-1)' }}>
         <div className="container hero-wrap">
           <div className="hero-grid" />
-          <div className="hero-sheen" />
           <div className="hero-content text-center">
             <h1 style={{ fontSize:'86px', lineHeight:1.02, letterSpacing:'-.02em', fontWeight:900 }}>
               Build <span style={{ color:'var(--brand)' }}>AI Agents</span><br/>
@@ -294,7 +279,8 @@ export default function HomePage(){
               >
                 <Zap className="w-4 h-4" /><span>Start building</span><ArrowRight className="w-4 h-4" />
               </button>
-              <a className="btn ghost" href="#how">How it works</a>
+              {/* bigger How it works */}
+              <a className="btn btn-lg ghost" href="#how">How it works</a>
             </div>
           </div>
         </div>
@@ -405,7 +391,7 @@ export default function HomePage(){
               <div className="flex items-center justify-between">
                 <div className="text-xl font-semibold">Pro</div>
                 <div className="px-3 py-1 rounded-full" style={{
-                  background:'var(--brand)', color:'#fff', // white text as requested
+                  background:'var(--brand)', color:'#fff',
                   border:'1px solid var(--line)', boxShadow:'0 8px 28px rgba(89,217,179,.35)'
                 }}>
                   Most popular
