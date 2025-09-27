@@ -1,6 +1,6 @@
 // pages/index.tsx
 import Head from 'next/head';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { loadStripe } from '@stripe/stripe-js';
 import { motion } from 'framer-motion';
 import {
@@ -10,41 +10,44 @@ import {
 const CTA = '#59d9b3';
 const GREEN_LINE = 'rgba(89,217,179,.20)';
 
-// stripe-js (client)
+// Stripe (client) — keep stripe-js in package.json
 const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || '');
 
 type BillingCycle = 'monthly' | 'annual';
 
-// Your Stripe Prices (you gave these)
+// Your Stripe Prices
 const PRICE_IDS = {
-  starter: {
-    monthly: 'price_1SByXOHWdU8X80NM4jFrU6Nr',
-    annual:  'price_1SByXAHWdU8X80NMftriHWJW',
-  },
-  pro: {
-    monthly: 'price_1SByXKHWdU8X80NMAw5IlrTc',
-    annual:  'price_1SByXRHWdU8X80NM7UwuAw0B',
-  },
+  starter: { monthly: 'price_1SByXOHWdU8X80NM4jFrU6Nr', annual: 'price_1SByXAHWdU8X80NMftriHWJW' },
+  pro:     { monthly: 'price_1SByXKHWdU8X80NMAw5IlrTc', annual: 'price_1SByXRHWdU8X80NM7UwuAw0B' },
 };
 
 export default function Home() {
   const [cycle, setCycle] = useState<BillingCycle>('monthly');
-  const [loadingPlan, setLoadingPlan] = useState<string>('');
+  const [loading, setLoading] = useState<string>('');
 
   async function beginCheckout(priceId: string, planName: string) {
+    // Safety: prevent double clicks
+    if (loading) return;
     try {
-      setLoadingPlan(priceId);
+      setLoading(priceId);
+
+      // call our API to create a Checkout Session
       const res = await fetch('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type':'application/json' },
-        body: JSON.stringify({ priceId, planName, fromPath: '/#pricing' }),
+        body: JSON.stringify({
+          priceId,
+          planName,
+          // where to go back to in case of cancel/success
+          successPath: '/builder',
+          cancelPath: '/#pricing',
+        }),
       });
 
-      // surface server error text to help fix 400/500s
       if (!res.ok) {
         const text = await res.text();
-        console.error('checkout api error:', text);
-        alert('Could not start checkout. Please check Stripe keys/prices (see console).');
+        console.error('Checkout API failed:', text);
+        alert('Could not start checkout. Check Stripe keys + price IDs (see console).');
         return;
       }
 
@@ -57,7 +60,7 @@ export default function Home() {
       console.error(e);
       alert('Could not start checkout. Please try again.');
     } finally {
-      setLoadingPlan('');
+      setLoading('');
     }
   }
 
@@ -67,51 +70,42 @@ export default function Home() {
     <>
       <Head>
         <title>ReduxAI — Build voice agents in minutes</title>
-        <meta name="description" content="ReduxAI: clean, minimal landing with overlay-style UI. Build & launch AI voice agents fast." />
+        <meta name="description" content="Overlay-clean landing. Paywall-first flow with Stripe checkout." />
       </Head>
 
-      {/* Overlay-style design tokens */}
+      {/* Overlay tokens (same vibe as AssistantRail modals) */}
       <style jsx global>{`
-        .va-landing {
+        .va-landing{
           --bg:#0b0c10; --panel:#0d0f11; --card:#0f1214;
           --text:#e6f1ef; --text-muted:#9fb4ad;
-          --brand:${CTA}; --brand-weak:rgba(89,217,179,.18);
+          --brand:${CTA}; --brand-weak:rgba(89,217,179,.20);
           --border:rgba(255,255,255,.10); --border-weak:rgba(255,255,255,.10);
-          --shadow-card:0 18px 40px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset;
+          --shadow-card:0 20px 40px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset;
           --radius:16px; --ease:cubic-bezier(.22,.61,.36,1);
         }
-        :root:not([data-theme="dark"]) .va-landing {
-          --bg:#f7faf9; --panel:#ffffff; --card:#f4f7f6; --text:#0f172a; --text-muted:#64748b;
+        :root:not([data-theme="dark"]) .va-landing{
+          --bg:#f7faf9; --panel:#ffffff; --card:#f4f7f6;
+          --text:#0f172a; --text-muted:#64748b;
           --brand:${CTA}; --brand-weak:rgba(89,217,179,.16);
           --border:rgba(15,23,42,.12); --border-weak:rgba(15,23,42,.12);
           --shadow-card:0 10px 24px rgba(2,6,12,.06), 0 0 0 1px rgba(15,23,42,.06) inset;
         }
-        .btn {
-          height: 44px; padding: 0 18px; border-radius: 999px;
-          display:inline-flex; align-items:center; gap:8px;
-          font-weight: 600; letter-spacing:.1px;
-          border:1px solid transparent;
-          transition: transform .15s var(--ease), box-shadow .15s var(--ease);
-        }
-        .btn:hover { transform: translateY(-1px); }
-        .btn-primary { background: var(--brand); color: #fff; }
-        .btn-secondary { background: var(--panel); border-color: var(--border); color: var(--text); }
-        .pill {
-          display:inline-flex; align-items:center; gap:8px; padding: 6px 12px; border-radius: 999px;
-          background: color-mix(in oklab, var(--brand) 12%, var(--panel)); border:1px solid ${GREEN_LINE};
-          font-size: 12px; color: var(--text);
-        }
-        .card {
-          border-radius: var(--radius);
-          border:1px solid var(--border-weak);
-          background: var(--panel);
-          box-shadow: var(--shadow-card);
-        }
-        .section { padding: 72px 0; }
+        .btn{ height:44px; padding:0 18px; border-radius:999px; display:inline-flex; align-items:center; gap:8px;
+              font-weight:600; letter-spacing:.1px; border:1px solid transparent;
+              transition:transform .15s var(--ease), box-shadow .15s var(--ease); }
+        .btn:hover{ transform:translateY(-1px); }
+        .btn-primary{ background:var(--brand); color:#fff; }
+        .btn-secondary{ background:var(--panel); border-color:var(--border); color:var(--text); }
+        .pill{ display:inline-flex; align-items:center; gap:8px; padding:6px 12px; border-radius:999px;
+               background:color-mix(in oklab, var(--brand) 12%, var(--panel)); border:1px solid ${GREEN_LINE}; font-size:12px; color:var(--text); }
+        .card{ border-radius:var(--radius); border:1px solid var(--border-weak); background:var(--panel); box-shadow:var(--shadow-card); }
+        .section{ padding:72px 0; }
+        /* clickable sanity: ensure nothing overlays pricing buttons */
+        #pricing{ position:relative; z-index:0; }
       `}</style>
 
       <div className="va-landing" style={{ background:'var(--bg)', color:'var(--text)' }}>
-        {/* NAV — super clean */}
+        {/* NAV — minimal */}
         <header className="w-full" style={{ borderBottom:`1px solid ${GREEN_LINE}` }}>
           <nav className="mx-auto max-w-[1160px] px-5 lg:px-6 h-[66px] flex items-center justify-between">
             <div className="flex items-center gap-10">
@@ -122,17 +116,12 @@ export default function Home() {
               <a href="#features" className="text-sm" style={{ color:'var(--text-muted)' }}>Features</a>
             </div>
             <div className="flex items-center gap-8">
-              <button
-                className="btn btn-primary"
-                onClick={() => document.getElementById('pricing')?.scrollIntoView({ behavior:'smooth', block:'start' })}
-              >
-                Get started <ArrowRight className="w-4 h-4" />
-              </button>
+              <a className="btn btn-primary" href="#pricing">Get started <ArrowRight className="w-4 h-4" /></a>
             </div>
           </nav>
         </header>
 
-        {/* HERO — “Welcome inside ReduxAI.com” vibe */}
+        {/* HERO — “Welcome inside ReduxAI.com” */}
         <section className="section">
           <div className="mx-auto max-w-[1160px] px-5 lg:px-6 grid md:grid-cols-2 gap-10 items-center">
             <div>
@@ -144,13 +133,13 @@ export default function Home() {
                 Build & launch AI voice agents — in minutes.
               </h1>
               <p className="mt-3 text-[15px]" style={{ color:'var(--text-muted)' }}>
-                Minimal, rounded, overlay-style UI. Pick a plan, verify your card with a $0 auth, and start building.
+                Clean, rounded, overlay-first UI. Pick a plan, verify your card with a $0 auth, charge after the trial.
               </p>
 
               <div className="mt-6 flex flex-wrap gap-10 items-center">
                 <a className="btn btn-primary" href="#pricing">Choose a plan</a>
                 <div className="flex items-center gap-2 text-sm" style={{ color:'var(--text-muted)' }}>
-                  <Shield className="w-4 h-4" /> Card verification now, charge after trial
+                  <Shield className="w-4 h-4" /> Secure Stripe checkout
                 </div>
               </div>
 
@@ -161,7 +150,7 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Overlay-like preview card */}
+            {/* Preview card with mint glow (like overlays) */}
             <div className="card p-6">
               <div className="text-sm mb-2" style={{ color:'var(--text-muted)' }}>Preview</div>
               <div className="rounded-[14px]" style={{
@@ -202,7 +191,7 @@ export default function Home() {
           </div>
         </section>
 
-        {/* PRICING — overlay sectioning/spacing */}
+        {/* PRICING (overlay spacing/sectioning) */}
         <section id="pricing" className="section" style={{ borderTop:`1px solid ${GREEN_LINE}` }}>
           <div className="mx-auto max-w-[1160px] px-5 lg:px-6">
             <div className="flex items-center justify-between mb-6">
@@ -219,7 +208,7 @@ export default function Home() {
                 <button
                   className="btn"
                   style={{
-                    height:36, padding:'0 14px', borderRadius: 999,
+                    height:36, padding:'0 14px', borderRadius:999,
                     background: monthly ? 'var(--brand)' : 'var(--panel)',
                     color: monthly ? '#fff' : 'var(--text)',
                     border: `1px solid ${monthly ? 'transparent' : 'var(--border)'}`
@@ -231,7 +220,7 @@ export default function Home() {
                 <button
                   className="btn"
                   style={{
-                    height:36, padding:'0 14px', borderRadius: 999,
+                    height:36, padding:'0 14px', borderRadius:999,
                     background: !monthly ? 'var(--brand)' : 'var(--panel)',
                     color: !monthly ? '#fff' : 'var(--text)',
                     border: `1px solid ${!monthly ? 'transparent' : 'var(--border)'}`
@@ -244,39 +233,27 @@ export default function Home() {
             </div>
 
             <div className="grid md:grid-cols-2 gap-6">
-              {/* Starter */}
               <PlanCard
                 title="Starter"
                 priceLabel={monthly ? '€19/mo' : '€11/mo (billed yearly)'}
                 blurb="Everything you need to launch a single voice agent."
-                features={[
-                  '1 assistant',
-                  'Real-time voice',
-                  'Basic analytics',
-                  'Email support'
-                ]}
-                loading={loadingPlan === PRICE_IDS.starter[cycle]}
+                features={['1 assistant','Real-time voice','Basic analytics','Email support']}
+                loading={loading === PRICE_IDS.starter[cycle]}
                 onSelect={() => beginCheckout(PRICE_IDS.starter[cycle], 'Starter')}
               />
-              {/* Pro */}
               <PlanCard
                 title="Pro"
                 highlight
                 priceLabel={monthly ? '€39/mo' : '€23/mo (billed yearly)'}
                 blurb="Scale to multiple assistants and teams."
-                features={[
-                  'Up to 5 assistants',
-                  'Advanced analytics',
-                  'Priority routing',
-                  'Priority support'
-                ]}
-                loading={loadingPlan === PRICE_IDS.pro[cycle]}
+                features={['Up to 5 assistants','Advanced analytics','Priority routing','Priority support']}
+                loading={loading === PRICE_IDS.pro[cycle]}
                 onSelect={() => beginCheckout(PRICE_IDS.pro[cycle], 'Pro')}
               />
             </div>
 
             <div className="mt-5 text-xs" style={{ color:'var(--text-muted)' }}>
-              UI prices are labels. The actual amount/interval comes from your Stripe Price.
+              UI prices are labels; the actual amount/interval is defined by your Stripe Price.
             </div>
           </div>
         </section>
@@ -291,8 +268,6 @@ export default function Home() {
     </>
   );
 }
-
-/* ---------- UI bits ---------- */
 
 function PlanCard({
   title, blurb, priceLabel, features, onSelect, highlight, loading
