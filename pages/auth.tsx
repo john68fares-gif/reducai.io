@@ -1,337 +1,195 @@
-// pages/auth.tsx
-import { useEffect, useMemo, useState } from 'react';
+// pages/post-auth.tsx
+'use client';
+
+import { useEffect, useState } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { supabase } from '@/lib/supabase-client';
 
-type Mode = 'signin' | 'signup';
+type Status = 'exchanging' | 'checking' | 'redirecting' | 'error';
 
-const ACCENT = '#6af7d1';
-const BG = '#0b0c10';
+const Tokens = () => (
+  <style jsx global>{`
+    :root{
+      --bg:#0a0c0e;
+      --bg-2:#0b1013;
+      --bg-3:#0c1216;
 
-export default function AuthPage() {
-  const router = useRouter();
-  const queryMode = (router.query.mode === 'signup' ? 'signup' : 'signin') as Mode;
-  const from = useMemo(
-    () => (typeof router.query.from === 'string' ? router.query.from : '/builder'),
-    [router.query.from]
-  );
+      --nav-grad: linear-gradient(90deg, rgba(10,12,14,.92) 0%, rgba(12,18,16,.92) 40%, rgba(20,36,31,.92) 100%);
 
-  const [mode, setMode] = useState<Mode>(queryMode);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [username, setUsername] = useState('');
-  const [heardAbout, setHeardAbout] = useState('');
+      --section-1:
+        radial-gradient(1100px 660px at 50% -10%, rgba(89,217,179,.18), transparent 60%),
+        #0a0c0e;
 
-  const [busy, setBusy] = useState(false);
-  const [phase, setPhase] = useState<'idle' | 'checking' | 'contacting' | 'finalizing'>('idle');
-  const [msg, setMsg] = useState<string | null>(typeof router.query.msg === 'string' ? router.query.msg : null);
-  const [err, setErr] = useState<string | null>(null);
-  const [verifySent, setVerifySent] = useState(false);
-  const [hasSession, setHasSession] = useState(false); // show a banner instead of auto-redirect
+      --panel:#0f1417;
+      --card:#11181b;
+      --text:#e9f4f1;
+      --muted:#9eb7af;
 
-  useEffect(() => {
-    setMode(queryMode);
-    setErr(null); setMsg(null); setVerifySent(false); setPhase('idle');
-  }, [queryMode]);
+      --brand:#59d9b3;
+      --line:rgba(89,217,179,.22);
+      --border:rgba(255,255,255,.08);
 
-  // Check whether a session exists (for banner only — DO NOT REDIRECT)
-  useEffect(() => {
-    let unsub: any;
-    (async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      setHasSession(!!session);
-      unsub = supabase.auth.onAuthStateChange((_e, sess) => setHasSession(!!sess));
-    })();
-    return () => unsub?.data?.subscription?.unsubscribe?.();
-  }, []);
-
-  const switchMode = (m: Mode) => {
-    router.replace({ pathname: '/auth', query: { mode: m, from } }, undefined, { shallow: true });
-  };
-
-  function setServerVisibleCookie() {
-    document.cookie = `ra_session=1; Path=/; Max-Age=${60 * 60 * 24 * 14}; SameSite=Lax; Secure`;
-  }
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setErr(null); setMsg(null);
-
-    if (!email || !password) return setErr('Please fill your email and password.');
-    if (mode === 'signup' && (!username || username.trim().length < 3)) {
-      return setErr('Choose a username (3+ characters).');
+      --radius:22px;
+      --shadow:0 26px 64px rgba(0,0,0,.42);
     }
 
-    try {
-      setBusy(true); setPhase('checking'); await delay(250);
+    /* MovaTiff font to match index */
+    @font-face{
+      font-family:'MovaTiff';
+      src:url('/fonts/MovaTiff.woff2') format('woff2');
+      font-weight: 400 900;
+      font-style: normal;
+      font-display: swap;
+    }
+    html,body{ background:var(--bg); color:var(--text); }
+    body{ font-family: MovaTiff, Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
 
-      if (mode === 'signin') {
-        setPhase('contacting');
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
+    .btn{
+      position:relative; display:inline-flex; align-items:center; justify-content:center; gap:10px;
+      height:48px; padding:0 22px; border-radius:9999px;
+      background: var(--brand); color:#fff; border:1px solid var(--line);
+      box-shadow:0 16px 44px rgba(89,217,179,.32), inset 0 0 0 1px rgba(255,255,255,.08);
+      transition: transform .18s ease, box-shadow .18s ease, background .18s ease;
+    }
+    .btn:hover{ transform: scale(1.04); box-shadow: 0 24px 64px rgba(89,217,179,.38), inset 0 0 0 1px rgba(255,255,255,.10); }
+
+    .card{
+      background:
+        radial-gradient(120% 100% at 0% 0%, rgba(89,217,179,.16), transparent 55%),
+        var(--card);
+      border:1px solid var(--border);
+      border-radius:var(--radius);
+      box-shadow:
+        0 0 0 1px rgba(89,217,179,.25) inset,
+        0 18px 60px rgba(89,217,179,.18);
+    }
+
+    /* Full-section grid (no mask) */
+    .hero-grid{
+      position:absolute; inset:0; pointer-events:none; z-index:0;
+      opacity:.34;
+      background:
+        linear-gradient(to right, rgba(89,217,179,.28) 1px, transparent 1px) 0 0/28px 28px,
+        linear-gradient(to bottom, rgba(89,217,179,.28) 1px, transparent 1px) 0 0/28px 28px;
+      filter: drop-shadow(0 0 24px rgba(89,217,179,.18));
+    }
+  `}</style>
+);
+
+export default function PostAuth() {
+  const router = useRouter();
+  const [status, setStatus] = useState<Status>('exchanging');
+  const [msg, setMsg] = useState<string>('Completing sign-in…');
+
+  useEffect(() => {
+    (async () => {
+      try {
+        // 1) Finish the PKCE/code exchange so Supabase sets the session
+        const { error } = await supabase.auth.exchangeCodeForSession(window.location.href);
         if (error) throw error;
 
-        setServerVisibleCookie();
-        setPhase('finalizing'); await delay(350);
-        localStorage.setItem('postAuthRedirect', from);
-        router.replace(from);
-      } else {
-        setPhase('contacting');
-        const { data, error } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            data: {
-              full_name: username,
-              preferred_username: username,
-              user_name: username,
-              heard_about: heardAbout || 'unspecified',
-            },
-            emailRedirectTo: `${window.location.origin}/auth/callback?from=${encodeURIComponent(from)}`,
-          },
-        });
-        if (error) throw error;
+        // 2) Ask backend about account/subscription
+        setStatus('checking');
+        setMsg('Checking your account…');
 
-        setPhase('finalizing'); await delay(350);
+        const resp = await fetch('/api/user-status', { credentials: 'include' });
 
-        if (!data.session) {
-          setVerifySent(true);
-          setMsg('Account created! Verify your email, then sign in.');
+        // If API is missing or fails, go to builder (fail-open)
+        if (!resp.ok) {
+          setStatus('redirecting');
+          setMsg('Loading your dashboard…');
+          router.replace('/builder');
           return;
         }
 
-        setServerVisibleCookie();
-        localStorage.setItem('postAuthRedirect', `${from}?onboard=1&mode=signup`);
-        router.replace(`${from}?onboard=1&mode=signup`);
-      }
-    } catch (e: any) {
-      const m = (e?.message || '').toLowerCase();
-      if (m.includes('invalid login credentials')) setErr('Wrong email or password.');
-      else if (m.includes('email not confirmed')) setErr('Email not verified yet. Check your inbox.');
-      else if (m.includes('already registered')) setErr('This email is already registered. Try signing in.');
-      else setErr(e?.message || 'Something went wrong.');
-      setPhase('idle');
-    } finally {
-      setBusy(false);
-    }
-  }
+        const data = await resp.json() as {
+          hasAccount: boolean;
+          hasSubscription: boolean;
+          paymentLink?: string | null;
+        };
 
-  async function handleGoogle() {
-    try {
-      setErr(null); setBusy(true); setPhase('contacting');
-      localStorage.setItem('postAuthRedirect', mode === 'signup' ? `${from}?onboard=1&mode=signup` : from);
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: `${window.location.origin}/auth/callback?from=${encodeURIComponent(from)}`,
-          queryParams: { prompt: 'select_account' },
-        },
-      });
-      if (error) throw error;
-    } catch (e: any) {
-      setErr(e?.message || 'Could not open Google right now.');
-      setBusy(false); setPhase('idle');
-    }
-  }
+        // 3) Route based on status
+        if (data.hasAccount || data.hasSubscription) {
+          setStatus('redirecting');
+          setMsg('Welcome back! Loading your dashboard…');
+          router.replace('/builder');
+          return;
+        }
+
+        const paymentLink =
+          data.paymentLink ||
+          process.env.NEXT_PUBLIC_STRIPE_PAYMENT_LINK ||
+          '';
+
+        if (paymentLink) {
+          setStatus('redirecting');
+          setMsg('Almost done — opening payment…');
+          window.location.replace(paymentLink);
+          return;
+        }
+
+        setStatus('redirecting');
+        setMsg('Choose a plan to continue…');
+        router.replace('/pricing');
+      } catch (e: any) {
+        console.error(e);
+        setStatus('error');
+        setMsg(e?.message || 'Sign-in failed. Please try again.');
+      }
+    })();
+  }, [router]);
 
   return (
     <>
-      <Head><title>{mode === 'signup' ? 'Sign up' : 'Sign in'} · Reduc.ai</title></Head>
+      <Head><title>Welcome • ReducAI</title></Head>
+      <Tokens />
 
-      <main className="page">
-        <div className="glow glow1" />
-        <div className="glow glow2" />
+      <section
+        style={{
+          minHeight:'100vh',
+          display:'grid',
+          placeItems:'center',
+          position:'relative',
+          background:'var(--section-1)'
+        }}
+      >
+        {/* grid behind everything */}
+        <div className="hero-grid" />
 
-        <div className="wrap">
-          <section className="card auth appear">
-            {/* If a session exists, show an info bar instead of auto-redirecting */}
-            {hasSession && (
-              <div className="already">
-                You’re already signed in.
-                <button className="mini" onClick={() => router.replace(from)}>Open builder</button>
-              </div>
-            )}
+        {/* content */}
+        <div className="card relative z-[1] w-[92%] max-w-[560px] p-8 text-center">
+          <h1 style={{ fontSize:'38px', fontWeight:900, letterSpacing:'-.02em' }}>
+            Welcome to <span style={{ color:'var(--brand)' }}>ReducAI</span>
+          </h1>
+          <p className="mt-3" style={{ color:'var(--muted)' }}>{msg}</p>
 
-            <div className="tabs">
-              <button className={`tab ${mode === 'signin' ? 'active' : ''}`} disabled={busy} onClick={() => switchMode('signin')}>Sign in</button>
-              <button className={`tab ${mode === 'signup' ? 'active' : ''}`} disabled={busy} onClick={() => switchMode('signup')}>Sign up</button>
+          {/* nice little loader while we redirect */}
+          {status !== 'error' && (
+            <div className="mt-6 inline-flex items-center gap-3" aria-live="polite">
+              <span
+                className="w-6 h-6 rounded-full border-2 animate-spin"
+                style={{
+                  borderColor: 'color-mix(in oklab, var(--text) 40%, transparent)',
+                  borderTopColor: 'var(--brand)'
+                }}
+              />
+              <span style={{ color:'var(--muted)' }}>
+                {status === 'exchanging' && 'Finishing sign-in…'}
+                {status === 'checking' && 'Verifying your subscription…'}
+                {status === 'redirecting' && 'Redirecting…'}
+              </span>
             </div>
+          )}
 
-            {verifySent ? (
-              <div className="verify">
-                <h2>Check your email</h2>
-                <p>We sent a verification link to <b>{email}</b>. After verifying, come back here to sign in.</p>
-                <button className="ghost" onClick={() => setVerifySent(false)}>Use a different email</button>
-              </div>
-            ) : (
-              <form className="form" onSubmit={handleSubmit}>
-                {mode === 'signup' && (
-                  <div className="row">
-                    <input className="input" placeholder="Username" value={username} onChange={(e) => setUsername(e.target.value)} />
-                    <select className="input" value={heardAbout} onChange={(e) => setHeardAbout(e.target.value)}>
-                      <option value="">Where did you hear about us?</option>
-                      <option value="twitter">Twitter / X</option>
-                      <option value="tiktok">TikTok</option>
-                      <option value="youtube">YouTube</option>
-                      <option value="friend">Friend / Colleague</option>
-                      <option value="search">Google Search</option>
-                      <option value="other">Other</option>
-                    </select>
-                  </div>
-                )}
-
-                <input className="input" type="email" placeholder="Email address" value={email} onChange={(e) => setEmail(e.target.value)} />
-                <input className="input" type="password" placeholder={mode === 'signup' ? 'Create a password' : 'Password'} value={password} onChange={(e) => setPassword(e.target.value)} />
-
-                <button type="submit" className="primary" disabled={busy}>
-                  {busy
-                    ? phase === 'checking'
-                      ? 'Checking…'
-                      : phase === 'contacting'
-                        ? (mode === 'signup' ? 'Creating your account…' : 'Signing you in…')
-                        : 'Finalizing…'
-                    : mode === 'signup'
-                      ? 'Create account'
-                      : 'Sign in'}
-                </button>
-
-                <div className="or"><div className="line" /><span>or</span><div className="line" /></div>
-
-                <button type="button" className="google" onClick={handleGoogle} disabled={busy}>
-                  <GoogleG /> Continue with Google
-                </button>
-
-                {(msg || err) && (
-                  <div className="notice">
-                    {msg && <div className="msg">{msg}</div>}
-                    {err && <div className="err">{err}</div>}
-                  </div>
-                )}
-
-                <div className="foot">You must {mode === 'signup' ? 'sign up' : 'sign in'} to continue.</div>
-              </form>
-            )}
-          </section>
-
-          <aside className="card welcome appear">
-            <div className="welcomeHead">
-              <div className="spark">✦</div>
-              <h2>Welcome to Reduc.ai</h2>
+          {status === 'error' && (
+            <div className="mt-7 flex items-center justify-center gap-3">
+              <button className="btn" onClick={() => router.replace('/')}>Go to homepage</button>
+              <button className="btn" onClick={() => router.replace('/pricing')}>See pricing</button>
             </div>
-            <p className="p">Build and manage AI agents. Clean onboarding, secure sessions.</p>
-            <ul className="list">
-              <li>● Email + password or Google</li>
-              <li>● Secure sessions by Supabase Auth</li>
-              <li>● You control your data</li>
-            </ul>
-          </aside>
+          )}
         </div>
-      </main>
-
-      <style jsx>{`
-        :global(html, body) { margin: 0; }
-        .page {
-          min-height: 100vh; background: ${BG}; color: #fff; position: relative; overflow: hidden;
-          font-family: "Manrope", ui-sans-serif, system-ui, -apple-system, Segoe UI, Inter, Roboto, Arial;
-        }
-        .glow { position: absolute; border-radius: 9999px; pointer-events: none; filter: blur(24px); }
-        .glow1 { width: 740px; height: 740px; left: -180px; top: -160px; background: radial-gradient(circle, rgba(106,247,209,0.10), transparent 60%); }
-        .glow2 { width: 660px; height: 660px; right: -200px; bottom: -180px; background: radial-gradient(circle, rgba(106,247,209,0.08), transparent 65%); }
-
-        .wrap { max-width: 1180px; margin: 0 auto; padding: 56px 24px; display: grid; gap: 24px; grid-template-columns: 1.25fr 0.75fr; align-items: start; }
-
-        .card {
-          background: rgba(13,15,17,0.92);
-          border: 2px solid rgba(106,247,209,0.32);
-          box-shadow: 0 18px 60px rgba(0,0,0,0.50), inset 0 0 22px rgba(0,0,0,0.28), 0 0 20px rgba(106,247,209,0.06);
-          border-radius: 28px;
-          padding: 22px;
-        }
-        .appear { animation: fadeInUp 380ms ease-out both; }
-        @keyframes fadeInUp { from{opacity:0; transform:translateY(8px)} to{opacity:1; transform:translateY(0)} }
-
-        .auth { max-width: 680px; }
-
-        .already {
-          display:flex; align-items:center; justify-content:space-between;
-          gap:10px; margin-bottom:10px; padding:10px 12px; border-radius:12px;
-          background: rgba(16,19,20,0.9); border:1px solid rgba(255,255,255,0.18); font-size:13px;
-        }
-        .mini {
-          border:1px solid rgba(255,255,255,0.25); background:rgba(0,0,0,0.25); color:#fff;
-          padding:6px 10px; border-radius:10px; cursor:pointer;
-        }
-
-        .tabs { display: flex; gap: 10px; margin-bottom: 18px; }
-        .tab {
-          flex: 1; padding: 10px 12px; border-radius: 14px; background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.92);
-          border: 1px solid rgba(255,255,255,0.08); font-weight: 800; cursor: pointer; transition: transform .08s ease, box-shadow .2s ease, background .2s ease;
-        }
-        .tab.active { background: ${ACCENT}; color: ${BG}; box-shadow: 0 0 8px rgba(106,247,209,0.18); }
-        .tab:active { transform: scale(0.995); }
-
-        .form { display: flex; flex-direction: column; gap: 10px; }
-        .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-        .input {
-          width: 100%; border-radius: 14px; background: #101314; border: 1px solid #13312b; color: #fff;
-          padding: 12px 14px; outline: none; box-shadow: 0 8px 34px rgba(0,0,0,0.25);
-        }
-        .input:focus { border-color: #13312b; box-shadow: 0 0 0 2px rgba(106,247,209,0.20) inset; }
-
-        .primary {
-          border: 0; border-radius: 14px; padding: 12px 16px;
-          background: ${ACCENT}; color: #000; font-weight: 900; cursor: pointer;
-          box-shadow: 0 0 10px rgba(106,247,209,0.18);
-          transition: transform .08s ease, filter .2s ease;
-        }
-        .primary:active { transform: scale(0.995); }
-        .primary:disabled { opacity: .7; cursor: not-allowed; }
-
-        .or { display: flex; align-items: center; gap: 10px; color: rgba(255,255,255,0.55); font-size: 12px; margin: 10px 0; }
-        .line { height: 1px; background: rgba(255,255,255,0.10); flex: 1; }
-
-        .google {
-          display: inline-flex; align-items: center; justify-content: center; gap: 10px;
-          width: 100%; padding: 12px 16px; border-radius: 14px;
-          border: 1px solid rgba(255,255,255,0.25); background: rgba(16,19,20,0.88);
-          color: #fff; cursor: pointer; transition: transform .08s ease, box-shadow .2s ease;
-        }
-        .google:active { transform: scale(0.995); }
-        .google:disabled { opacity: .7; cursor: not-allowed; }
-
-        .notice { margin-top: 10px; border: 1px solid rgba(255,255,255,0.25); background: rgba(16,19,20,0.88); border-radius: 12px; padding: 10px; font-size: 14px; }
-        .msg { color: rgba(255,255,255,0.92); }
-        .err { color: #ff9aa3; }
-        .foot { margin-top: 4px; font-size: 12px; color: rgba(255,255,255,0.55); }
-
-        .welcome .welcomeHead { display:flex; align-items:center; gap:10px; margin-bottom:6px; }
-        .welcome h2 { margin:0; font-size: 22px; font-weight: 800; }
-        .spark { color: ${ACCENT}; font-size: 18px; }
-        .p { opacity:.84; margin:0 0 12px; }
-        .list { list-style:none; padding:0; margin:0; opacity:.9; display:grid; gap:8px; }
-
-        @media (max-width: 980px) {
-          .wrap { grid-template-columns: 1fr; }
-          .auth { order: 1; }
-          .welcome { order: 2; }
-          .row { grid-template-columns: 1fr; }
-        }
-      `}</style>
+      </section>
     </>
   );
-}
-
-function GoogleG() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 256 262" xmlns="http://www.w3.org/2000/svg" aria-hidden>
-      <path fill="#4285F4" d="M255.88 133.5c0-10.9-.9-18.8-2.9-27.1H130.5v49.1h71.9c-1.5 12.3-9.6 30.9-27.6 43.4l-.3 2.1 40.1 31 2.8.3c25.8-23.8 38.4-58.8 38.4-98.9z"/>
-      <path fill="#34A853" d="M130.5 261.1c36.7 0 67.5-12.1 89.9-32.8l-42.9-33.2c-11.5 8-27.1 13.6-47 13.6-35.9 0-66.3-23.8-77.2-56.6l-2 .2-42 32.5-.5 2c22.2 44.1 67.7 74.3 121.7 74.3z"/>
-      <path fill="#FBBC05" d="M53.3 151.9c-2.9-8.3-4.6-17.2-4.6-26.4s1.7-18.1 4.6-26.4l-.1-1.8L10.7 64.3l-1.3.6C3.5 80.2 0 97.2 0 115.5s3.5 35.3 9.4 50.6l43.9-34.2z"/>
-      <path fill="#EA4335" d="M130.5 50.5c25.5 0 42.7 11 52.6 20.2l38.4-37.5C198 12.1 167.2 0 130.5 0 76.5 0 31 30.2 9.4 64.9l43.9 34.2c10.9-32.8 41.3-48.6 77.2-48.6z"/>
-    </svg>
-  );
-}
-
-function delay(ms: number) {
-  return new Promise((r) => setTimeout(r, ms));
 }
