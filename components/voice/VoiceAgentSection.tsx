@@ -20,7 +20,7 @@ import { shapePromptForScheduling } from '@/components/voice/utils/prompt';
 
 /* ───────── constants ───────── */
 const EPHEMERAL_TOKEN_ENDPOINT = '/api/voice/ephemeral';
-const PREVIEW_TTS_ENDPOINT     = '/api/voice/tts/preview'; // <- returns audio blob
+const PREVIEW_TTS_ENDPOINT     = '/api/voice/tts/preview';
 const CTA = '#59d9b3';
 const CTA_HOVER = '#54cfa9';
 const GREEN_LINE = 'rgba(89,217,179,.20)';
@@ -61,6 +61,22 @@ const sleep = (ms:number) => new Promise(r=>setTimeout(r,ms));
 const STRIP_META_RE = /^(SYSTEM_SPEC|IDENTITY|STYLE|GUIDELINES|GOALS|FALLBACK|BUSINESS_FACTS|POLICY)::.*$/gmi;
 const sanitizePrompt = (s: string) => (s || '').replace(STRIP_META_RE, '').trim();
 
+/* typing effect for prompt */
+async function typeIntoPrompt(
+  fullText: string,
+  setChunk: (s: string) => void,
+  opts?: { step?: number; delayMs?: number }
+) {
+  const step = opts?.step ?? 3;
+  const delayMs = opts?.delayMs ?? 8;
+  setChunk('');
+  for (let i = 0; i < fullText.length; i += step) {
+    setChunk(fullText.slice(0, i + step));
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+}
+
 /* theme tokens */
 const Tokens = ({theme}:{theme:'dark'|'light'}) => (
   <style jsx global>{`
@@ -76,7 +92,7 @@ const Tokens = ({theme}:{theme:'dark'|'light'}) => (
         --page-bg:var(--bg); --panel-bg:var(--panel);
         --input-bg:#ffffff; --input-border:rgba(0,0,0,.12); --input-shadow:0 0 0 1px rgba(0,0,0,.03) inset;
         --border-weak:rgba(0,0,0,.10);
-        --card-shadow:0 14px 28px rgba(0,0,0,.08), 0 0 0 1px rgba(0,0,0,.04) inset, 0 0 0 1px rgba(89,217,179,.16);
+        --card-shadow:0 14px 28px rgba(0,0,0,.08), 0 0 0 1px rgba(89,217,179,.16);
       `}
       --s-2:8px; --s-3:12px; --s-4:16px; --s-5:20px; --s-6:24px;
       --radius-outer:8px; --control-h:40px; --header-h:80px;
@@ -117,7 +133,8 @@ function diffCharsLCS(a: string, b: string): DiffOp[] {
   while (i>0 && j>0){
     if (A[i-1]===B[j-1]) { ops.push({t:'same', ch:A[i-1]}); i--; j--; }
     else if (dp[i-1][j] >= dp[i][j-1]) { ops.push({t:'rem', ch:A[i-1]}); i--; }
-    else { ops.push({t:'add', ch:B[j-1]}); j--; }
+    else { ops.push({t:'add', ch:B[j-1]}); j--;
+    }
   }
   while (i>0){ ops.push({t:'rem', ch:A[i-1]}); i--; }
   while (j>0){ ops.push({t:'add', ch:B[j-1]}); j--; }
@@ -271,7 +288,7 @@ function useOpenAIModels(){
       { value: 'gpt-4.1', label: 'GPT-4.1' },
       { value: 'gpt-4.1-mini', label: 'GPT-4.1 Mini' },
       { value: 'gpt-4o', label: 'GPT-4o' },
-      { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
+      { value: 'gpt-4o-mini', label: 'gpt-4o Mini' },
       { value: 'o4', label: 'o4' },
       { value: 'o4-mini', label: 'o4 Mini' },
       { value: 'gpt-4o-realtime-preview', label: 'GPT-4o Realtime Preview' },
@@ -288,7 +305,7 @@ async function readFileAsText(f: File): Promise<string> {
   const looksZip = async () => {
     const buf = new Uint8Array(await f.slice(0,4).arrayBuffer());
     return buf[0]===0x50 && buf[1]===0x4b; // PK..
-    };
+  };
 
   if (name.endsWith('.docx') || name.endsWith('.docs') || await looksZip()) {
     try {
@@ -344,7 +361,6 @@ function makeFrontendPromptFromDescription(desc: string, baseName: string) {
   };
 
   // Split by bracketed headings
-  const re = /^\[(.+?)\]\s*$/m;
   const lines = s.split('\n');
   let current = '';
   let buf: string[] = [];
@@ -440,13 +456,13 @@ export default function VoiceAgentSection() {
   const [phoneNumbers, setPhoneNumbers] = useState<PhoneNum[]>([]);
   const [showCall, setShowCall] = useState(false);
 
-  // ===== NEW: modal state that was missing (caused crash) =====
+  // Generate modal state
   const [showGenerate, setShowGenerate] = useState(false);
 
-  // ===== Diff/Generate flow =====
-  const [diffMode, setDiffMode] = useState(false);          // show diff box instead of textarea
-  const [basePrompt, setBasePrompt] = useState('');         // snapshot of current prompt
-  const [candidatePrompt, setCandidatePrompt] = useState('');// proposed updated prompt
+  // Diff state (used only for Import Website now)
+  const [diffMode, setDiffMode] = useState(false);
+  const [basePrompt, setBasePrompt] = useState('');
+  const [candidatePrompt, setCandidatePrompt] = useState('');
 
   // Website import overlay
   const [showImport, setShowImport] = useState(false);
@@ -482,7 +498,6 @@ export default function VoiceAgentSection() {
     const item = OPENAI_VOICES.find(v => v.value === data.voiceName);
     const providerVoiceId = item?.id || 'alloy';
 
-    // If you haven't wired the route yet, we'll fall back to speechSynthesis
     try {
       setAudioLoading(true);
       previewAbortRef.current?.abort();
@@ -494,7 +509,7 @@ export default function VoiceAgentSection() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           provider: data.ttsProvider,
-          voiceName: providerVoiceId,  // provider id
+          voiceName: providerVoiceId,
           text: text || `This is ${data.voiceName || 'the selected'} voice preview.`
         }),
         signal: ctrl.signal
@@ -527,7 +542,6 @@ export default function VoiceAgentSection() {
     if (!audioURL) {
       await fetchVoicePreview(`Hi, I'm ${data.name || 'your assistant'}.`);
     }
-    // play
     requestAnimationFrame(() => {
       const el = audioRef.current;
       if (!el) return;
@@ -638,7 +652,7 @@ export default function VoiceAgentSection() {
     return (v: AgentData[K]) => setData(prev => ({ ...prev, [k]: v }));
   }
 
-  // Keep backend prompt mirrored (no external compiler)
+  // Keep backend prompt mirrored
   useEffect(() => {
     if (!data.systemPrompt) return;
     const s = sanitizePrompt(data.systemPrompt);
@@ -649,7 +663,6 @@ export default function VoiceAgentSection() {
 
   async function doSave(){
     if (!activeId) { setToastKind('error'); setToast('Select or create an agent'); return; }
-    // Always keep firstMsg = firstMsgs[0] for backend compatibility
     setData(prev => ({ ...prev, firstMsg: (prev.firstMsgs?.[0] || prev.firstMsg || '') }));
     setSaving(true); setToast('');
     try {
@@ -691,7 +704,7 @@ export default function VoiceAgentSection() {
     setToastKind('info'); setToast('File(s) added'); setTimeout(()=>setToast(''), 1200);
   };
 
-  // ── Diff helpers ──
+  // ── Diff helpers (still used by Import Website only) ──
   const startDiff = (nextText: string) => {
     const current = sanitizePrompt((data.systemPromptBackend || data.systemPrompt || DEFAULT_PROMPT_RT).trim());
     const next = sanitizePrompt(nextText);
@@ -717,12 +730,6 @@ export default function VoiceAgentSection() {
     const ctx  = sanitizePrompt((data.contextText || '').trim());
     const base = sanitizePrompt((data.systemPromptBackend || data.systemPrompt || DEFAULT_PROMPT_RT).trim());
     const next = ctx ? `${base}\n\n[Context]\n${ctx}`.trim() : base;
-    startDiff(next);
-  };
-
-  /* Generate → translate into structured front-end prompt, then diff */
-  const onGenerateToDiff = async (userDesc:string) => {
-    const next = makeFrontendPromptFromDescription(userDesc, data.name || 'Assistant');
     startDiff(next);
   };
 
@@ -752,12 +759,9 @@ export default function VoiceAgentSection() {
     switch (lang) { case 'Dutch': return 'nl'; case 'German': return 'de'; case 'Spanish': return 'es'; case 'Arabic': return 'ar'; default: return 'en'; }
   };
 
-  // Greeting logic (STRICT):
-  // - Assistant speaks first: use firstMsgs (sequence/random); fallback default if empty.
-  // - User speaks first: blank (assistant stays silent).
-  // - Silent until tool required: blank (assistant stays silent).
+  // Greeting logic (STRICT)
   const greetingJoined = useMemo(() => {
-    if (data.firstMode !== 'Assistant speaks first') return ''; // <- strict silence unless assistant-first
+    if (data.firstMode !== 'Assistant speaks first') return '';
     const list = (data.greetPick==='random'
       ? [...(data.firstMsgs||[])].filter(Boolean).sort(()=>Math.random()-0.5)
       : (data.firstMsgs||[]).filter(Boolean)
@@ -968,7 +972,7 @@ export default function VoiceAgentSection() {
                 </div>
               </div>
 
-              {/* Accept/Decline above the prompt when diffing */}
+              {/* Accept/Decline above the prompt when diffing (used by Import only) */}
               {diffMode && (
                 <div className="mb-2 flex items-center gap-2">
                   <button
@@ -1019,355 +1023,4 @@ export default function VoiceAgentSection() {
                     <button
                       type="button"
                       onClick={()=>fileInputRef.current?.click()}
-                      className="inline-flex items-center gap-2 text-sm rounded-[8px] px-3 py-1.5"
-                      style={{ border:'1px solid var(--border-weak)' }}
-                    >
-                      Add file
-                    </button>
-                    {!!(data.ctxFiles && data.ctxFiles.length) && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={importFilesIntoPrompt}
-                          className="inline-flex items-center gap-2 text-sm rounded-[8px] px-3 py-1.5"
-                          style={{ background:CTA, color:'#fff', border:'1px solid rgba(255,255,255,.10)' }}
-                        >
-                          Import to Prompt
-                        </button>
-                        <button
-                          type="button"
-                          onClick={()=>{ rebuildContextText([]); }}
-                          className="inline-flex items-center gap-2 text-sm rounded-[8px] px-3 py-1.5"
-                          style={{ border:'1px solid var(--border-weak)' }}
-                        >
-                          Clear
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </div>
-
-                {!(data.ctxFiles && data.ctxFiles.length) ? (
-                  <div className="text-xs" style={{ color:'var(--text-muted)' }}>
-                    No files yet. Click <b>Add file</b> to upload (.txt, .md, .csv, .json, .docx or best-effort .doc / .docs).
-                  </div>
-                ) : (
-                  <div className="rounded-[8px] p-3" style={{ background:'var(--panel-bg)', border:'1px solid var(--border-weak)' }}>
-                    {(data.ctxFiles||[]).map((f, idx) => (
-                      <div key={idx} className="mb-3 last:mb-0">
-                        <div className="flex items-center justify-between mb-1">
-                          <div className="text-sm font-medium truncate">{f.name}</div>
-                          <button
-                            onClick={()=>{
-                              const next = [...(data.ctxFiles||[])]; next.splice(idx,1);
-                              rebuildContextText(next);
-                            }}
-                            className="text-xs rounded-[6px] px-2 py-1"
-                            style={{ border:'1px solid var(--border-weak)' }}
-                          >
-                            Remove
-                          </button>
-                        </div>
-                        <div className="text-xs" style={{ color:'var(--text-muted)' }}>
-                          {(f.text || '').slice(0, 240) || '(empty)'}{(f.text||'').length>240?'…':''}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          </Section>
-
-          {/* Voice */}
-          <Section
-            title="Voice"
-            icon={<Volume2 className="w-4 h-4" style={{ color: CTA }} />}
-            desc="Choose TTS, language, and preview the voice."
-            defaultOpen
-          >
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <div className="mb-2 text-[12.5px]">Voice Provider</div>
-                <StyledSelect
-                  value={data.ttsProvider}
-                  onChange={(v)=>setField('ttsProvider')(v as AgentData['ttsProvider'])}
-                  options={[
-                    { value: 'openai', label: 'OpenAI' },
-                    { value: 'elevenlabs', label: 'ElevenLabs — coming soon', disabled: true },
-                    { value: 'google-tts', label: 'Google TTS — coming soon', disabled: true },
-                  ]}
-                />
-              </div>
-
-              <div>
-                <div className="mb-2 text-[12.5px]">Voice</div>
-                <StyledSelect
-                  value={data.voiceName}
-                  onChange={(v)=>{ setField('voiceName')(v); stopPreview(); setAudioURL(''); setAudioProgress(0); }}
-                  options={OPENAI_VOICES.map(v => ({ value: v.value, label: v.label }))}
-                  placeholder="— Choose —"
-                />
-                <div className="mt-2 flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={onClickPreview}
-                    disabled={audioLoading}
-                    className="w-9 h-9 rounded-full grid place-items-center"
-                    aria-label="Play / Pause preview"
-                    style={{ background: CTA, color:'#0a0f0d' }}
-                  >
-                    {audioPlaying ? <Pause className="w-4 h-4"/> : <Play className="w-4 h-4" />}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={stopPreview}
-                    className="w-9 h-9 rounded-full grid place-items-center border"
-                    aria-label="Stop preview"
-                    style={{ background: 'var(--panel-bg)', color:'var(--text)', borderColor:'var(--border-weak)' }}
-                  >
-                    <Square className="w-4 h-4" />
-                  </button>
-
-                  <div className="flex-1 h-1 rounded-full overflow-hidden" style={{ minWidth: 120, background:'var(--border-weak)' }}>
-                    <div style={{ width: `${audioProgress}%`, height:'100%', background: CTA }} />
-                  </div>
-                  <audio ref={audioRef} src={audioURL || undefined} preload="auto" />
-                </div>
-                {audioLoading && <div className="mt-2 text-xs" style={{ color:'var(--text-muted)' }}>Generating preview…</div>}
-              </div>
-            </div>
-          </Section>
-
-          {/* Credentials */}
-          <Section
-            title="Credentials"
-            icon={<Phone className="w-4 h-4" style={{ color: CTA }} />}
-            desc="Select the API key stored on the API Keys page."
-            defaultOpen
-          >
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <div className="mb-2 text-[12.5px] flex items-center gap-2">
-                  <KeyRound className="w-4 h-4 opacity-80" /> OpenAI API Key
-                </div>
-                <StyledSelect
-                  value={data.apiKeyId || ''}
-                  onChange={async (val)=>{
-                    setField('apiKeyId')(val);
-                    try { const ss = await scopedStorage(); await ss.ensureOwnerGuard(); await ss.setJSON(LS_SELECTED, val); } catch {}
-                  }}
-                  options={[
-                    { value: '', label: 'Select your API key…' },
-                    ...apiKeys.map(k=>({ value: k.id, label: `${k.name} ••••${(k.key||'').slice(-4).toUpperCase()}` }))
-                  ]}
-                />
-                <div className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
-                  Keys are per-account via scoped storage. Add/manage them on the API Keys page.
-                </div>
-              </div>
-
-              <div>
-                <div className="mb-2 text-[12.5px]">Phone Number</div>
-                <StyledSelect
-                  value={data.phoneId || ''}
-                  onChange={async (val)=>{ setField('phoneId')(val); try { const ss = await scopedStorage(); await ss.ensureOwnerGuard(); await ss.setJSON(PHONE_SELECTED_ID, val); } catch {} }}
-                  options={[
-                    { value: '', label: 'Select a phone number…' },
-                    ...phoneNumbers.map(p => ({ value: p.id, label: `${p.name ? `${p.name} • ` : ''}${p.number}` }))
-                  ]}
-                />
-              </div>
-            </div>
-          </Section>
-
-          {/* Transcriber */}
-          <Section
-            title="Transcriber"
-            icon={<Mic className="w-4 h-4" style={{ color: CTA }} />}
-            desc="Transcription settings"
-            defaultOpen
-          >
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <div className="mb-2 text-[12.5px]">Provider</div>
-                <StyledSelect
-                  value={data.asrProvider}
-                  onChange={(v)=>setField('asrProvider')(v as AgentData['asrProvider'])}
-                  options={[
-                    { value: 'deepgram', label: 'Deepgram' },
-                    { value: 'whisper', label: 'Whisper — coming soon', disabled: true },
-                    { value: 'assemblyai', label: 'AssemblyAI — coming soon', disabled: true },
-                  ]}
-                />
-              </div>
-              <div>
-                <div className="mb-2 text-[12.5px]">Model</div>
-                <StyledSelect
-                  value={data.asrModel}
-                  onChange={setField('asrModel')}
-                  options={[{ value: 'Nova 2', label: 'Nova 2' }, { value: 'Nova', label: 'Nova' }]}
-                />
-              </div>
-            </div>
-          </Section>
-
-          <div style={{ height: 72 }} />
-        </div>
-      </div>
-
-      {/* Generate Prompt → translate, then diff */}
-      <GeneratePromptModal
-        open={showGenerate}
-        onClose={() => setShowGenerate(false)}
-        onGenerate={async (userDescription: string) => {
-          const desc = safeTrim(userDescription);
-          if (!desc) return;
-          setShowGenerate(false);
-          await sleep(10);
-          onGenerateToDiff(desc);
-        }}
-      />
-
-      {/* Import website — builds prompt blocks via prompt-builder → diff */}
-      <ImportWebsiteModal
-        open={showImport}
-        onClose={() => setShowImport(false)}
-        onImport={async (urls: string[])=>{
-          const list = urls.map(s=>s.trim()).filter(Boolean);
-          if (!list.length) return;
-
-          const chunks: string[] = [];
-          for (const u of list) {
-            try {
-              const r = await fetch('/api/connectors/website-import', {
-                method:'POST',
-                headers:{'Content-Type':'application/json'},
-                body: JSON.stringify({ url: u })
-              });
-              const j = r.ok ? await r.json().catch(()=>null) : null;
-              const facts: string[] = Array.isArray(j?.facts) ? j.facts : [];
-              if (facts.length) {
-                chunks.push(`# ${u}`, ...facts.map(s => `- ${s}`), '');
-              } else {
-                chunks.push(`# ${u}`, '- No obvious facts extracted.', '');
-              }
-            } catch {
-              chunks.push(`# ${u}`, '- Fetch failed.', '');
-            }
-          }
-
-          const merged = chunks.join('\n').trim();
-          const base = sanitizePrompt((data.systemPromptBackend || data.systemPrompt || DEFAULT_PROMPT_RT).trim());
-          const next = buildPromptFromWebsite(merged, base);
-
-          setShowImport(false);
-          await sleep(10);
-          startDiff(next);
-        }}
-      />
-
-      {/* Voice/Call overlay */}
-      {IS_CLIENT ? createPortal(
-        <>
-          <div
-            className={`fixed inset-0 ${showCall ? '' : 'pointer-events-none'}`}
-            style={{ zIndex: 9996, background: showCall ? 'rgba(8,10,12,.78)' : 'transparent', opacity: showCall ? 1 : 0, transition: 'opacity .2s cubic-bezier(.22,.61,.36,1)' }}
-            onClick={()=> setShowCall(false)}
-          />
-          {showCall && (
-            <WebCallButton
-              model={callModel}
-              systemPrompt={
-                (() => {
-                  const base = sanitizePrompt(data.systemPromptBackend || data.systemPrompt || '');
-                  const ctx  = sanitizePrompt((data.contextText || '').trim());
-                  return ctx ? `${base}\n\n[Context]\n${ctx}`.trim() : base;
-                })()
-              }
-              voiceName={data.voiceName}
-              assistantName={data.name || 'Assistant'}
-              apiKey={selectedKey}
-              ephemeralEndpoint={EPHEMERAL_TOKEN_ENDPOINT}
-              onError={(err:any) => {
-                const msg = err?.message || err?.error?.message || (typeof err === 'string' ? err : '') || 'Call failed';
-                setToastKind('error'); setToast(msg);
-              }}
-              onClose={()=> setShowCall(false)}
-              prosody={{ fillerWords: true, microPausesMs: 200, phoneFilter: true, turnEndPauseMs: 120 }}
-              firstMode={data.firstMode}                 // <- STRICT: respected inside the call widget
-              firstMsg={greetingJoined}                  // <- empty unless “Assistant speaks first”
-              languageHint={langToHint(data.language)}
-            />
-          )}
-        </>,
-        document.body
-      ) : null}
-
-      {/* Toast */}
-      {!!toast && (
-        <div
-          className="fixed bottom-4 right-4 rounded-[8px] px-3 py-2 text-sm"
-          style={{
-            zIndex: 100050,
-            background: toastKind==='error' ? 'rgba(239,68,68,.14)' : 'rgba(89,217,179,.12)',
-            color: 'var(--text)',
-            border: `1px solid ${toastKind==='error' ? 'rgba(239,68,68,.30)' : GREEN_LINE}`,
-            boxShadow: '0 10px 24px rgba(0,0,0,.18)'
-          }}
-        >
-          {toast}
-        </div>
-      )}
-    </section>
-  );
-}
-
-/* ───────── Section ───────── */
-function Section({
-  title, icon, desc, children, defaultOpen = true
-}:{
-  title: string; icon: React.ReactNode; desc?: string; children: React.ReactNode; defaultOpen?: boolean;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  const innerRef = useRef<HTMLDivElement|null>(null);
-  const [h, setH] = useState<number>(0);
-  const measure = () => { if (innerRef.current) setH(innerRef.current.offsetHeight); };
-  useLayoutEffect(() => { measure(); }, [children, open]);
-
-  return (
-    <div className="mb-3">
-      <div className="mb-[6px] text-sm font-medium" style={{ color:'var(--text-muted)' }}>{title}</div>
-
-      <div className="va-card">
-        <button onClick={()=>setOpen(v=>!v)} className="va-head w-full text-left" style={{ color:'var(--text)' }}>
-          <span className="min-w-0 flex items-center gap-3">
-            <span className="inline-grid place-items-center w-7 h-7 rounded-full" style={{ background:'rgba(89,217,179,.12)' }}>
-              {icon}
-            </span>
-            <span className="min-w-0">
-              <span className="block font-semibold truncate" style={{ fontSize:'18px' }}>{title}</span>
-              {desc ? <span className="block text-xs truncate" style={{ color:'var(--text-muted)' }}>{desc}</span> : null}
-            </span>
-          </span>
-          <span className="justify-self-end">
-            {open ? <ChevronUp className="w-4 h-4" style={{ color:'var(--text-muted)' }}/> :
-                    <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)' }}/>}
-          </span>
-        </button>
-
-        <div
-          className="va-section-body"
-          style={{
-            height: open ? h : 0, opacity: open ? 1 : 0, transform: open ? 'translateY(0)' : 'translateY(-4px)',
-            transition: 'height 260ms var(--ease), opacity 230ms var(--ease), transform 260ms var(--ease)',
-            overflow:'hidden'
-          }}
-          onTransitionEnd={() => { if (open) measure(); }}
-        >
-          <div ref={innerRef} className="p-5">{children}</div>
-        </div>
-      </div>
-    </div>
-  );
-}
+                      className="inline-flex items-center gap-2 text-sm
