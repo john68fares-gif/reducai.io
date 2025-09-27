@@ -9,16 +9,21 @@ import {
 import { AnimatePresence, motion } from 'framer-motion';
 import { createPortal } from 'react-dom';
 
-/* Scoped storage helper (your implementation) */
+import { supabase } from '@/lib/supabase-client';
 import { scopedStorage, type Scoped } from '@/utils/scoped-storage';
 
 /* Types */
 export type AssistantLite = {
-  id: string; name: string; purpose?: string; createdAt?: number; folderId?: string | null
+  id: string;
+  name: string;
+  purpose?: string;
+  createdAt?: number;
+  updatedAt?: number;          // used for conflict-free sync
+  folderId?: string | null;
 };
-type FolderLite = { id: string; name: string; createdAt?: number };
+type FolderLite = { id: string; name: string; createdAt?: number; updatedAt?: number };
 
-/* Keys (now saved in scoped storage, not global) */
+/* Keys (scoped storage) */
 const STORAGE_KEY       = 'agents';
 const FOLDERS_KEY       = 'agentFolders';
 const ACTIVE_KEY        = 'va:activeId';
@@ -29,10 +34,10 @@ const CTA        = '#59d9b3';
 const GREEN_LINE = 'rgba(89,217,179,.20)';
 const GREEN_ICON = CTA;
 
-/* Radius tweaks (less rounded) */
-const R_SM = 6;   // small corners
-const R_MD = 8;   // medium corners
-const R_LG = 10;  // large corners (trimmed down from 12/14)
+/* Radius */
+const R_SM = 6;
+const R_MD = 8;
+const R_LG = 10;
 
 /* Row glow overlays */
 const HOVER_OPACITY  = 0.20;
@@ -43,6 +48,7 @@ function uid() {
   return `a_${Date.now().toString(36)}_${crypto.getRandomValues(new Uint32Array(1))[0].toString(36)}`;
 }
 
+/* ---------- Local (scoped) helpers ---------- */
 async function loadAssistants(ss: Scoped): Promise<AssistantLite[]> {
   return ss.getJSON<AssistantLite[]>(STORAGE_KEY, []);
 }
@@ -55,7 +61,6 @@ async function loadFolders(ss: Scoped): Promise<FolderLite[]> {
 async function saveFolders(ss: Scoped, list: FolderLite[]) {
   await ss.setJSON(FOLDERS_KEY, list);
 }
-
 async function readActiveId(ss: Scoped): Promise<string> {
   return ss.getJSON<string>(ACTIVE_KEY, '');
 }
@@ -70,7 +75,48 @@ async function writeActiveFolderId(ss: Scoped, id: string) {
   await ss.setJSON(ACTIVE_FOLDER_KEY, id);
 }
 
-/* ---------- Modal shells (PORTALED + blur + entrance anim) ---------- */
+/* ---------- Cloud (Supabase) helpers ---------- */
+function toRow(a: AssistantLite, userId: string) {
+  const nowIso = new Date().toISOString();
+  return {
+    id: a.id,
+    user_id: userId,
+    name: a.name,
+    purpose: a.purpose ?? '',
+    folder_id: a.folderId ?? null,
+    created_at: a.createdAt ? new Date(a.createdAt).toISOString() : nowIso,
+    updated_at: new Date(a.updatedAt ?? Date.now()).toISOString(),
+  };
+}
+async function cloudFetchAssistants(userId: string): Promise<AssistantLite[]> {
+  const { data, error } = await supabase
+    .from('assistants')
+    .select('id,name,purpose,folder_id,created_at,updated_at')
+    .eq('user_id', userId)
+    .order('updated_at', { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map(r => ({
+    id: r.id,
+    name: r.name,
+    purpose: r.purpose || '',
+    folderId: r.folder_id ?? null,
+    createdAt: r.created_at ? Date.parse(r.created_at) : Date.now(),
+    updatedAt: r.updated_at ? Date.parse(r.updated_at) : Date.now(),
+  }));
+}
+async function cloudUpsertAssistants(userId: string, list: AssistantLite[]) {
+  if (!list.length) return;
+  const payload = list.map(a => toRow(a, userId));
+  const { error } = await supabase.from('assistants').upsert(payload, { onConflict: 'id' });
+  if (error) throw error;
+}
+async function cloudDeleteAssistants(userId: string, ids: string[]) {
+  if (!ids.length) return;
+  const { error } = await supabase.from('assistants').delete().in('id', ids).eq('user_id', userId);
+  if (error) throw error;
+}
+
+/* ---------- Modals ---------- */
 function ModalShell({ children }:{ children:React.ReactNode }) {
   if (typeof document === 'undefined') return null;
   return createPortal(
@@ -102,7 +148,6 @@ function ModalShell({ children }:{ children:React.ReactNode }) {
     document.body
   );
 }
-
 function ModalHeader({ icon, title, subtitle }:{
   icon:React.ReactNode; title:string; subtitle?:string;
 }) {
@@ -115,10 +160,7 @@ function ModalHeader({ icon, title, subtitle }:{
       }}
     >
       <div className="flex items-center gap-3">
-        <div
-          className="grid place-items-center"
-          style={{ width: 40, height: 40, borderRadius: R_LG, background:'var(--brand-weak)' }}
-        >
+        <div className="grid place-items-center" style={{ width: 40, height: 40, borderRadius: R_LG, background:'var(--brand-weak)' }}>
           <span style={{ color: GREEN_ICON, filter:'drop-shadow(0 0 8px rgba(89,217,179,.35))' }}>
             {icon}
           </span>
@@ -132,8 +174,6 @@ function ModalHeader({ icon, title, subtitle }:{
     </div>
   );
 }
-
-/* Modals */
 function CreateModal({ open, onClose, onCreate }:{
   open:boolean; onClose:()=>void; onCreate:(name:string)=>void;
 }) {
@@ -154,18 +194,13 @@ function CreateModal({ open, onClose, onCreate }:{
         />
       </div>
       <div className="px-6 pb-6 flex gap-3">
-        <button
-          onClick={onClose}
-          className="w-full h-[44px] font-semibold"
+        <button onClick={onClose} className="w-full h-[44px] font-semibold"
           style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.9)', color:'var(--text)', borderRadius: R_MD }}>
           Cancel
         </button>
-        <button
-          disabled={!can}
-          onClick={()=> can && onCreate(name.trim())}
+        <button disabled={!can} onClick={()=> can && onCreate(name.trim())}
           className="w-full h-[44px] font-semibold disabled:opacity-60"
-          style={{ background:CTA, color:'#fff', borderRadius: R_MD }}
-        >
+          style={{ background:CTA, color:'#fff', borderRadius: R_MD }}>
           Create
         </button>
       </div>
@@ -189,17 +224,13 @@ function RenameModal({ open, initial, onClose, onSave }:{
                style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, color:'var(--text)', borderRadius: R_MD }} />
       </div>
       <div className="px-6 pb-6 flex gap-3">
-        <button onClick={onClose}
-                className="w-full h-[44px] font-semibold"
-                style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.9)', color:'var(--text)', borderRadius: R_MD }}>
+        <button onClick={onClose} className="w-full h-[44px] font-semibold"
+          style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.9)', color:'var(--text)', borderRadius: R_MD }}>
           Cancel
         </button>
-        <button
-          disabled={!can}
-          onClick={()=> can && onSave(val.trim())}
+        <button disabled={!can} onClick={()=> can && onSave(val.trim())}
           className="w-full h-[44px] font-semibold disabled:opacity-60"
-          style={{ background:CTA, color:'#fff', borderRadius: R_MD }}
-        >
+          style={{ background:CTA, color:'#fff', borderRadius: R_MD }}>
           Save
         </button>
       </div>
@@ -212,22 +243,17 @@ function ConfirmDelete({ open, name, onClose, onConfirm }:{
   if(!open) return null;
   return (
     <ModalShell>
-      <ModalHeader
-        icon={<AlertTriangle className="w-5 h-5" />}
-        title="Delete Assistant" subtitle="This action cannot be undone."
-      />
+      <ModalHeader icon={<AlertTriangle className="w-5 h-5" />} title="Delete Assistant" subtitle="This action cannot be undone." />
       <div className="px-6 py-5 text-sm" style={{ color:'var(--text)' }}>
         Delete <b>“{name||'assistant'}”</b>?
       </div>
       <div className="px-6 pb-6 flex gap-3">
-        <button onClick={onClose}
-                className="w-full h-[44px] font-semibold"
-                style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.9)', color:'var(--text)', borderRadius: R_MD }}>
+        <button onClick={onClose} className="w-full h-[44px] font-semibold"
+          style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.9)', color:'var(--text)', borderRadius: R_MD }}>
           Cancel
         </button>
-        <button onClick={onConfirm}
-                className="w-full h-[44px] font-semibold"
-                style={{ background:'#ef4444', color:'#fff', border:'1px solid #ef4444', borderRadius: R_MD }}>
+        <button onClick={onConfirm} className="w-full h-[44px] font-semibold"
+          style={{ background:'#ef4444', color:'#fff', border:'1px solid #ef4444', borderRadius: R_MD }}>
           Delete
         </button>
       </div>
@@ -235,7 +261,7 @@ function ConfirmDelete({ open, name, onClose, onConfirm }:{
   );
 }
 
-/* ---------- Text-only assistant row with green overlay + TOP shadow ---------- */
+/* ---------- Rows ---------- */
 function AssistantRow({
   a, active, onClick, onRename, onDelete, onDragStart
 }:{
@@ -246,22 +272,18 @@ function AssistantRow({
       draggable
       onDragStart={(e)=>onDragStart(a.id, e)}
       onClick={onClick}
-      className={`ai-row group w-full text-left px-3 py-3 flex items-center gap-2 transition`}
+      className="ai-row group w-full text-left px-3 py-3 flex items-center gap-2 transition"
       data-active={active ? 'true' : 'false'}
       style={{ background:'transparent', color:'var(--text)', position:'relative', borderRadius: R_MD }}
     >
-      {/* icons = bright CTA */}
       <Bot className="w-4 h-4" style={{ color: GREEN_ICON }} />
-
       <div className="min-w-0 flex-1">
         <div className="text-[15px] font-semibold truncate">{a.name}</div>
         <div className="text-[12px] truncate" style={{ color:'var(--sidebar-muted)' }}>
           {a.purpose || '—'}
         </div>
       </div>
-
       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-        {/* Rename = WHITE */}
         <button
           onClick={(e)=>{ e.stopPropagation(); onRename(); }}
           className="px-2 h-[28px]"
@@ -270,7 +292,6 @@ function AssistantRow({
         >
           <Edit3 className="w-4 h-4" style={{ color: GREEN_ICON }} />
         </button>
-        {/* Delete = RED */}
         <button
           onClick={(e)=>{ e.stopPropagation(); onDelete(); }}
           className="px-2 h-[28px]"
@@ -281,7 +302,6 @@ function AssistantRow({
         </button>
       </div>
 
-      {/* green full overlay glow */}
       <style jsx>{`
         .ai-row::after{
           content:'';
@@ -293,7 +313,6 @@ function AssistantRow({
           transition: opacity .18s ease, transform .18s ease;
           mix-blend-mode:screen;
         }
-        /* soft “top shadow” highlight */
         .ai-row::before{
           content:'';
           position:absolute; left:8px; right:8px; top:-6px;
@@ -313,7 +332,6 @@ function AssistantRow({
   );
 }
 
-/* ---------- Folder row (droppable) ---------- */
 function FolderRow({
   f, onOpen, onDropIds
 }:{
@@ -352,11 +370,15 @@ export default function AssistantRail() {
   const [renId,setRenId] = useState<string|null>(null);
   const [delId,setDelId] = useState<string|null>(null);
 
-  /* New Folder modal */
+  // Cloud
+  const [userId, setUserId] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+
+  // New Folder modal
   const [newFolderOpen,setNewFolderOpen] = useState(false);
   const [newFolderName,setNewFolderName] = useState('');
 
-  /* body background = same as header bg while this rail is mounted */
+  // body background like header
   useEffect(() => {
     const prev = document.body.style.background;
     const headerBG = `linear-gradient(90deg,var(--panel) 0%,color-mix(in oklab,var(--panel) 97%, white 3%) 50%,var(--panel) 100%)`;
@@ -364,34 +386,75 @@ export default function AssistantRail() {
     return () => { document.body.style.background = prev; };
   }, []);
 
-  /* Init scoped storage + load everything from scoped namespace */
+  /* Init scoped + reconcile with cloud */
   useEffect(()=>{ (async()=>{
     const scoped = await scopedStorage();
     setSS(scoped);
     await scoped.ensureOwnerGuard();
 
-    const [list, flds, savedActive, savedFolder] = await Promise.all([
+    const { data: { user } } = await supabase.auth.getUser();
+    const uid = user?.id ?? null;
+    setUserId(uid);
+
+    const [localList, flds, savedActive, savedFolder] = await Promise.all([
       loadAssistants(scoped),
       loadFolders(scoped),
       readActiveId(scoped),
       readActiveFolderId(scoped)
     ]);
 
-    setAssistants(list);
+    let baseList = localList;
+
+    if (uid) {
+      setSyncing(true);
+      try {
+        const cloudList = await cloudFetchAssistants(uid);
+        if (cloudList.length > 0) {
+          baseList = cloudList;
+          await saveAssistants(scoped, baseList);
+        } else if (localList.length > 0) {
+          await cloudUpsertAssistants(uid, localList.map(a => ({ ...a, updatedAt: a.updatedAt ?? Date.now() })));
+        }
+      } catch {/* offline-first on error */}
+      finally { setSyncing(false); }
+    }
+
+    setAssistants(baseList);
     setFolders(flds);
 
-    // choose a valid active assistant
     const firstId =
-      (savedActive && list.find(a=>a.id===savedActive)?.id) ||
-      (list[0]?.id || '');
+      (savedActive && baseList.find(a=>a.id===savedActive)?.id) ||
+      (baseList[0]?.id || '');
     setActiveId(firstId);
     if (firstId) await writeActiveId(scoped, firstId);
 
     setActiveFolderId(savedFolder || '');
 
-    // slightly delayed to avoid flashing the skeleton too fast
     setTimeout(()=>setInitialLoading(false), 220);
   })(); },[]);
+
+  /* Re-sync on auth state change (e.g., user logs in later) */
+  useEffect(() => {
+    const sub = supabase.auth.onAuthStateChange(async (_evt, sess) => {
+      const uid = sess?.user?.id ?? null;
+      setUserId(uid);
+      if (!ss) return;
+      if (uid) {
+        try {
+          setSyncing(true);
+          const cloud = await cloudFetchAssistants(uid);
+          if (cloud.length > 0) {
+            setAssistants(cloud);
+            await saveAssistants(ss, cloud);
+          } else if (assistants.length > 0) {
+            await cloudUpsertAssistants(uid, assistants.map(a => ({ ...a, updatedAt: Date.now() })));
+          }
+        } catch {/* noop */}
+        finally { setSyncing(false); }
+      }
+    });
+    return () => sub?.data?.subscription?.unsubscribe?.();
+  }, [ss, assistants]);
 
   const filtered = useMemo(()=>{
     const s=q.trim().toLowerCase();
@@ -402,7 +465,7 @@ export default function AssistantRail() {
     });
   },[assistants,q,activeFolderId]);
 
-  /* freeze helpers (keep look; just smaller radius already applied) */
+  /* freeze helpers */
   function freezePage(on:boolean){
     const html = document.documentElement;
     const body = document.body;
@@ -426,25 +489,51 @@ export default function AssistantRail() {
     window.setTimeout(()=> { setVeil(false); freezePage(false); }, 800);
   }
 
-  /* Assistant CRUD (scoped storage) */
+  /* ---------- CRUD (local → cloud write-through) ---------- */
   async function addAssistant(name:string){
     if (!ss) return;
-    const a:AssistantLite = { id: uid(), name, createdAt: Date.now(), purpose:'', folderId: activeFolderId||null };
+    const now = Date.now();
+    const a:AssistantLite = {
+      id: uid(),
+      name,
+      createdAt: now,
+      updatedAt: now,
+      purpose:'',
+      folderId: activeFolderId||null
+    };
     const next=[a, ...assistants];
-    setAssistants(next); await saveAssistants(ss, next);
+    setAssistants(next);
+    await saveAssistants(ss, next);
     setCreateOpen(false);
+
+    if (userId) { try { await cloudUpsertAssistants(userId, [a]); } catch {} }
+
     await select(a.id);
   }
+
   async function saveRename(name:string){
     if (!ss) return;
-    const next=assistants.map(x=> x.id===renId ? {...x, name} : x);
-    setAssistants(next); await saveAssistants(ss, next); setRenId(null);
+    const now = Date.now();
+    const next=assistants.map(x=> x.id===renId ? {...x, name, updatedAt: now} : x);
+    setAssistants(next);
+    await saveAssistants(ss, next);
+    const changed = next.find(z => z.id === renId);
+    setRenId(null);
+
+    if (userId && changed) { try { await cloudUpsertAssistants(userId, [changed]); } catch {} }
   }
+
   async function confirmDelete(){
     if (!ss) return;
+    const ids = delId ? [delId] : [];
     const next = assistants.filter(x=> x.id!==delId);
     const deletedActive = activeId===delId;
-    setAssistants(next); await saveAssistants(ss, next);
+
+    setAssistants(next);
+    await saveAssistants(ss, next);
+
+    if (userId && ids.length) { try { await cloudDeleteAssistants(userId, ids); } catch {} }
+
     if (deletedActive) {
       const nid = next.find(a=> activeFolderId ? a.folderId===activeFolderId : !a.folderId)?.id || '';
       setActiveId(nid);
@@ -453,17 +542,25 @@ export default function AssistantRail() {
     setDelId(null);
   }
 
-  /* Folders */
   async function createFolder(name:string){
     if (!ss) return;
     const f:FolderLite = { id: uid(), name, createdAt: Date.now() };
     const next=[f, ...folders];
-    setFolders(next); await saveFolders(ss, next);
+    setFolders(next);
+    await saveFolders(ss, next);
   }
+
   async function moveAssistantsToFolder(ids:string[], folderId:string|null){
     if (!ss) return;
-    const next = assistants.map(a => ids.includes(a.id) ? { ...a, folderId } : a);
-    setAssistants(next); await saveAssistants(ss, next);
+    const now = Date.now();
+    const next = assistants.map(a => ids.includes(a.id) ? { ...a, folderId, updatedAt: now } : a);
+    setAssistants(next);
+    await saveAssistants(ss, next);
+
+    if (userId) {
+      const changed = next.filter(a => ids.includes(a.id));
+      try { await cloudUpsertAssistants(userId, changed); } catch {}
+    }
   }
 
   function onRowDragStart(id:string, e:React.DragEvent){
@@ -472,7 +569,6 @@ export default function AssistantRail() {
 
   const renName = assistants.find(a=>a.id===renId)?.name || '';
   const delName = assistants.find(a=>a.id===delId)?.name;
-
   const inAllScope = !activeFolderId;
   const visibleFolders = folders;
 
@@ -553,6 +649,14 @@ export default function AssistantRail() {
               </button>
             )}
           </div>
+
+          {/* optional: tiny sync hint */}
+          {syncing && (
+            <div className="mt-2 flex items-center gap-2 text-[11px]" style={{ color:'var(--text-muted)' }}>
+              <Loader2 className="w-3 h-3 animate-spin" />
+              Syncing…
+            </div>
+          )}
         </div>
 
         {/* LIST */}
@@ -575,7 +679,6 @@ export default function AssistantRail() {
                   />
                 ))}
               </div>
-              {/* divider between folders and assistants */}
               <div className="mt-3 mb-1" style={{ height:1, background:GREEN_LINE }} />
             </div>
           )}
@@ -588,7 +691,6 @@ export default function AssistantRail() {
               ))}
             </div>
           ) : (
-            // no line under each assistant — remove any visual separation
             <div className="space-y-0">
               <AnimatePresence initial={false}>
                 {filtered.map(a=>(
@@ -614,12 +716,12 @@ export default function AssistantRail() {
           )}
         </div>
 
-        {/* Assistant modals */}
+        {/* Modals */}
         <CreateModal  open={createOpen} onClose={()=>setCreateOpen(false)} onCreate={(name)=>{ void addAssistant(name); }} />
         <RenameModal  open={!!renId} initial={renName} onClose={()=>setRenId(null)} onSave={(v)=>{ void saveRename(v); }} />
         <ConfirmDelete open={!!delId} name={delName} onClose={()=>setDelId(null)} onConfirm={()=>{ void confirmDelete(); }} />
 
-        {/* New Folder modal (overlay) */}
+        {/* New Folder modal */}
         <AnimatePresence>
           {newFolderOpen && (
             <ModalShell>
@@ -662,7 +764,6 @@ export default function AssistantRail() {
 
         {/* Theme + freeze */}
         <style jsx>{`
-          /* Light */
           :global(:root:not([data-theme="dark"])) .assistant-rail{
             --sidebar-text: #0f172a;
             --sidebar-muted: #64748b;
@@ -670,7 +771,6 @@ export default function AssistantRail() {
             --text: #0f172a;
             --text-muted: #64748b;
           }
-          /* Dark */
           :global([data-theme="dark"]) .assistant-rail{
             --sidebar-text: var(--text);
             --sidebar-muted: var(--text-muted);
