@@ -11,13 +11,6 @@ import {
 import { scopedStorage } from '@/utils/scoped-storage';
 import WebCallButton from '@/components/voice/WebCallButton';
 
-/* ========= Minimal external UI pieces you already have =========
-   - This file assumes you already have:
-     - /components/voice/AssistantRail
-     - /lib/prompt-engine  (compilePrompt, looksLikeFullPrompt, normalizeFullPrompt, DEFAULT_PROMPT)
-     - /utils/scoped-storage
-   =============================================================== */
-
 /* ─────────── constants ─────────── */
 const EPHEMERAL_TOKEN_ENDPOINT = '/api/voice/ephemeral';
 const CTA = '#59d9b3';
@@ -212,7 +205,7 @@ const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}
   </button>
 );
 
-/* ─────────── StyledSelect (with search, portal, close-on-scroll) ─────────── */
+/* ─────────── StyledSelect (with search) ─────────── */
 type Opt = { value: string; label: string; disabled?: boolean; note?: string; iconLeft?: React.ReactNode };
 function StyledSelect({
   value, onChange, options, placeholder, leftIcon, menuTop
@@ -339,7 +332,7 @@ function StyledSelect({
                   <Lock className="w-3.5 h-3.5" />
                 ) : (
                   <span className="inline-flex items-center justify-center w-3.5 h-3.5">
-                    {o.iconLeft || <Check className="w-3.5 h-3.5" style={{ opacity: o.value===value ? 1 : 0 }} />}
+                    <Check className="w-3.5 h-3.5" style={{ opacity: o.value===value ? 1 : 0 }} />
                   </span>
                 )}
                 <span className="truncate">{o.label}</span>
@@ -410,11 +403,10 @@ function PromptDiffTyping({
   );
 }
 
-/* ─────────── Files: read and summarize ─────────── */
+/* ─────────── Files: read & summarize ─────────── */
 async function readFileAsText(f: File): Promise<string> {
   const name = f.name.toLowerCase();
 
-  // quick heuristic: .docx/.docs or any PK zip -> try parsing word/document.xml via CDN JSZip
   const looksZip = async () => {
     const buf = new Uint8Array(await f.slice(0,4).arrayBuffer());
     return buf[0]===0x50 && buf[1]===0x4b;
@@ -463,17 +455,14 @@ async function readFileAsText(f: File): Promise<string> {
   });
 }
 
-/** very small local “summary”: keep headings, compress blank lines, take the most informative lines first */
 function summarizeText(s: string, maxChars = 1200): string {
   const cleaned = (s || '')
     .replace(/\r/g,'')
     .split('\n')
     .map(l => l.trim())
     .filter(Boolean)
-    .slice(0, 1200) // cap lines for perf
+    .slice(0, 1200)
     .join('\n');
-
-  // prefer lines that look like headings or long informative sentences
   const lines = cleaned.split('\n');
   const scored = lines.map(l => {
     let score = 0;
@@ -482,14 +471,35 @@ function summarizeText(s: string, maxChars = 1200): string {
     score += Math.min(3, Math.floor(l.length / 50));
     return { l, score };
   });
-
   const top = scored.sort((a,b)=>b.score-a.score).slice(0, 40).map(x=>x.l);
-  const uniq: string[] = [];
-  for (const t of top) { if (uniq.join('\n').length + t.length + 1 < maxChars) uniq.push(t); }
+  const out: string[] = [];
+  for (const t of top) { if (out.join('\n').length + t.length + 1 < maxChars) out.push(t); }
+  return out.map(t => (t.startsWith('- ') ? t : `- ${t}`)).join('\n');
+}
 
-  // simple bullets
-  const bullets = uniq.map(t => (t.length > 3 && !t.startsWith('- ') ? `- ${t}` : t));
-  return bullets.join('\n');
+/* ─────────── Twilio helpers ─────────── */
+/** Map UI voice to a Twilio-compatible Polly voice */
+function mapVoiceToTwilioPolly(uiVoice: string): string {
+  const v = (uiVoice || '').toLowerCase();
+  if (v.includes('alloy'))  return 'Polly.Joanna';  // US female
+  if (v.includes('verse'))  return 'Polly.Matthew'; // US male
+  if (v.includes('coral'))  return 'Polly.Amy';     // UK female
+  if (v.includes('amber'))  return 'Polly.Nicole';  // AU female
+  return 'Polly.Joanna';
+}
+
+/** Build greeting based on firstMode + firstMsgs */
+function buildGreeting(firstMode: AgentData['firstMode'], firstMsgs?: string[], fallbackName?: string) {
+  const clean = (firstMsgs || []).filter(Boolean);
+  if (firstMode === 'Assistant speaks first') {
+    return clean.length ? clean[0] : `Hi, this is ${fallbackName || 'your assistant'}. How can I help?`;
+  }
+  if (firstMode === 'User speaks first') {
+    // keep it silent-ish; Twilio endpoint will put us straight into <Gather>
+    return '';
+  }
+  // Silent until tool required -> also no greet
+  return '';
 }
 
 /* ─────────── Page ─────────── */
@@ -532,7 +542,7 @@ export default function VoiceAgentSection() {
   const basePromptRef = useRef<string>('');
   const rafRef = useRef<number | null>(null);
 
-  // Voice preview (using browser speech)
+  // Voice preview (browser)
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   useEffect(() => {
     if (!IS_CLIENT || !('speechSynthesis' in window)) return;
@@ -595,10 +605,10 @@ export default function VoiceAgentSection() {
           await store.setJSON('apiKeys.selectedId', chosenKeyId).catch(() => {});
         }
 
-        const phoneV1 = await store.getJSON<PhoneNum[]>(PHONE_LIST_KEY_V1, []).catch(() => []);
-        const phoneLegacy = await store.getJSON<PhoneNum[]>(PHONE_LIST_KEY_LEG, []).catch(() => []);
-        const phonesMerged = Array.isArray(phoneV1) && phoneV1.length ? phoneV1
-                             : Array.isArray(phoneLegacy) ? phoneLegacy : [];
+        const storePhonesV1 = await store.getJSON<PhoneNum[]>(PHONE_LIST_KEY_V1, []).catch(() => []);
+        const storePhonesLegacy = await store.getJSON<PhoneNum[]>(PHONE_LIST_KEY_LEG, []).catch(() => []);
+        const phonesMerged = Array.isArray(storePhonesV1) && storePhonesV1.length ? storePhonesV1
+                             : Array.isArray(storePhonesLegacy) ? storePhonesLegacy : [];
         const phoneCleaned = phonesMerged
           .filter(Boolean)
           .map((p: any) => ({ id: String(p?.id || ''), name: String(p?.name || ''), number: String(p?.number || p?.phone || '') }))
@@ -654,16 +664,83 @@ export default function VoiceAgentSection() {
       setToastKind('error'); setToast('Save failed');
     } finally { setSaving(false); setTimeout(()=>setToast(''), 1400); }
   }
+
+  /** ===== Publish + attach Twilio number ===== */
   async function doPublish(){
     if (!activeId) { setToastKind('error'); setToast('Select or create an agent'); return; }
     setPublishing(true); setToast('');
+
     try {
+      // 1) Publish
       const r = await fetch(`/api/voice/agent/${activeId}/publish`, { method:'POST' });
-      if (!r.ok) throw new Error();
-      setToastKind('info'); setToast('Published');
-    } catch {
-      setToastKind('error'); setToast('Publish failed');
-    } finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
+      if (!r.ok) throw new Error('Publish failed');
+
+      // 2) Attach Twilio number (if we have one)
+      const selectedPhone = phoneNumbers.find(p => p.id === data.phoneId);
+      if (!selectedPhone?.number) {
+        setToastKind('info'); setToast('Published. (No phone number selected to attach)');
+        setPublishing(false); setTimeout(()=>setToast(''), 1800);
+        return;
+      }
+
+      const mode =
+        data.firstMode === 'Assistant speaks first' ? 'assistant'
+      : data.firstMode === 'User speaks first'       ? 'user'
+      : 'user'; // Silent until tool required -> treat as user-first
+
+      const greeting = buildGreeting(data.firstMode, data.firstMsgs, data.name);
+      const twilioVoice = mapVoiceToTwilioPolly(data.voiceName);
+
+      // Optional: fetch Twilio creds from scoped storage (if you store them). Otherwise env vars will be used by the API route.
+      let accountSid = '', authToken = '';
+      try {
+        const store = await scopedStorage();
+        accountSid = (await store.getJSON<string>('twilio.accountSid', '')).trim();
+        authToken  = (await store.getJSON<string>('twilio.authToken',  '')).trim();
+      } catch {}
+
+      const payload = {
+        accountSid,
+        authToken,
+        phoneNumber: selectedPhone.number,     // E.164
+        agentId: activeId,
+        // voice routing config:
+        language: (data.language || 'en-US'),
+        voice: twilioVoice,
+        greeting,
+        style: '',           // reserved
+        delayMs: 0,          // start immediately
+        rate: 100,           // TTS rate hint (for future)
+        pitch: 0,
+        bargeIn: mode === 'assistant' ? true : true,
+        // NEW: pass mode so /incoming can adjust TwiML
+        mode,
+      };
+
+      const attachResp = await fetch('/api/telephony/attach-number', {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!attachResp.ok) {
+        const txt = await attachResp.text();
+        throw new Error(`Attach failed: ${txt}`);
+      }
+      const json = await attachResp.json();
+
+      if (json?.ok) {
+        setToastKind('info');
+        setToast(`Published & linked to ${selectedPhone.number}`);
+      } else {
+        throw new Error(json?.error || 'Attach failed');
+      }
+    } catch (e:any) {
+      setToastKind('error'); setToast(e?.message || 'Publish failed');
+    } finally {
+      setPublishing(false);
+      setTimeout(()=>setToast(''), 2400);
+    }
   }
 
   /* ===== Generate / Diff Preview (typing) ===== */
@@ -674,7 +751,6 @@ export default function VoiceAgentSection() {
     if (rafRef.current) cancelAnimationFrame(rafRef.current as any);
     let i = 0;
     const step = () => {
-      // smooth typing effect (preview only)
       i += Math.max(1, Math.round(targetText.length / 140));
       const slice = targetText.slice(0, i);
       setDiffCandidate(slice);
@@ -683,7 +759,6 @@ export default function VoiceAgentSection() {
     rafRef.current = requestAnimationFrame(step);
   }
   const acceptPreview = () => {
-    // 🚫 No typing effect after Accept — commit instantly
     const chosen = diffCandidate || data.systemPrompt;
     setIsTypingPreview(false);
     setDiffCandidate('');
@@ -693,10 +768,7 @@ export default function VoiceAgentSection() {
       setField('systemPromptBackend')(compiled.backendString);
     } catch {}
   };
-  const declinePreview = () => {
-    setIsTypingPreview(false);
-    setDiffCandidate('');
-  };
+  const declinePreview = () => { setIsTypingPreview(false); setDiffCandidate(''); };
 
   /* ===== Files ===== */
   const fileInputRef = useRef<HTMLInputElement|null>(null);
@@ -717,39 +789,28 @@ export default function VoiceAgentSection() {
     setToastKind('info'); setToast('File(s) added'); setTimeout(()=>setToast(''), 1200);
   };
 
-  // Build an appended prompt with [Info] (summaries) + [Context] (full)
   function buildPromptWithFiles(basePrompt: string, ctxFiles: {name:string;text:string}[], ctxMerged: string) {
-    const infoBlocks = ctxFiles.map(f => {
-      const summary = summarizeText(f.text || '');
-      return `## ${f.name}\n${summary || '- (no obvious summary)'}\n`;
-    }).join('\n');
-
+    const infoBlocks = ctxFiles.map(f => `## ${f.name}\n${summarizeText(f.text || '') || '- (no obvious summary)'}\n`).join('\n');
     const base = (basePrompt || DEFAULT_PROMPT_RT).trim();
     const info = infoBlocks.trim();
     const ctx  = (ctxMerged || '').trim();
-
-    const appended = [
+    return [
       base,
       info ? '\n[Info]\n' + info : '',
       ctx  ? '\n[Context]\n' + ctx  : ''
     ].join('').trim();
-
-    return appended;
   }
-
   const importFilesIntoPrompt = async () => {
     const base = (data.systemPromptBackend || data.systemPrompt || DEFAULT_PROMPT_RT).trim();
     const next = buildPromptWithFiles(base, data.ctxFiles || [], data.contextText || '');
-    startTypingPreview(next); // typing only in preview
-    // Precompile backend for fast commit
+    startTypingPreview(next);
     try {
       const compiled = compilePrompt({ basePrompt: next, userText: '' });
       setField('systemPromptBackend')(compiled.backendString);
     } catch {}
   };
 
-  /* ===== Models list (simple static with fallback) ===== */
-  const selectedKey = apiKeys.find(k => k.id === data.apiKeyId)?.key || '';
+  /* ===== Models list (static) ===== */
   const openaiModels: Opt[] = [
     { value: 'gpt-5', label: 'GPT-5' },
     { value: 'gpt-5-mini', label: 'GPT-5 Mini' },
@@ -767,7 +828,6 @@ export default function VoiceAgentSection() {
     return found?.label || data.model || '—';
   }, [openaiModels, data.model]);
 
-  /* ===== UI ===== */
   const providerOpts: Opt[] = [
     { value: 'openai',     label: 'OpenAI',    iconLeft: <OpenAIStamp size={14} /> },
     { value: 'anthropic',  label: 'Anthropic — coming soon', disabled: true },
@@ -831,7 +891,7 @@ export default function VoiceAgentSection() {
               className="inline-flex items-center gap-2 rounded-[8px] px-4 text-sm transition hover:-translate-y-[1px] disabled:opacity-60"
               style={{ height:'var(--control-h)', background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)', color:'var(--text)' }}
             >
-              <Rocket className="w-4 h-4" /> {publishing ? 'Publishing…' : 'Publish'}
+              <Rocket className="w-4 h-4" /> {publishing ? 'Publishing…' : 'Publish & Link Number'}
             </button>
 
             <div className="mr-auto text-xs opacity-70 pl-1">
@@ -906,7 +966,12 @@ export default function VoiceAgentSection() {
               <div>
                 <div className="mb-2 text-[12.5px]">Provider</div>
                 <StyledSelect value={data.provider} onChange={(v)=>setField('provider')(v as AgentData['provider'])}
-                  options={providerOpts} placeholder="Choose a provider" />
+                  options={[
+                    { value: 'openai', label: 'OpenAI', iconLeft: <OpenAIStamp size={14} /> },
+                    { value: 'anthropic', label: 'Anthropic — coming soon', disabled: true },
+                    { value: 'google', label: 'Google — coming soon', disabled: true },
+                  ]}
+                  placeholder="Choose a provider" />
               </div>
             </div>
 
@@ -978,7 +1043,7 @@ export default function VoiceAgentSection() {
 
               {!(data.firstMsgs && data.firstMsgs.length) && (
                 <div className="text-xs" style={{ color:'var(--text-muted)' }}>
-                  No greetings yet. If you choose “Assistant speaks first” and keep this empty, a default greeting will be used.
+                  Empty = no custom greeting. If you choose “Assistant speaks first”, a generic hello will be used.
                 </div>
               )}
             </div>
@@ -998,7 +1063,6 @@ export default function VoiceAgentSection() {
                 </div>
               </div>
 
-              {/* Prompt box / Diff preview */}
               <div className="relative">
                 {!isTypingPreview ? (
                   <textarea
@@ -1063,7 +1127,7 @@ export default function VoiceAgentSection() {
 
                 {!(data.ctxFiles && data.ctxFiles.length) ? (
                   <div className="text-xs" style={{ color:'var(--text-muted)' }}>
-                    No files yet. Click <b>Add file</b> to upload (.txt, .md, .csv, .json, <b>.docx</b> or best-effort <b>.doc</b> / <b>.docs</b>).
+                    No files yet. Click <b>Add file</b> to upload (.txt, .md, .csv, .json, .docx, .doc/.docs).
                   </div>
                 ) : (
                   <div className="rounded-[8px] p-3" style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)' }}>
@@ -1104,10 +1168,12 @@ export default function VoiceAgentSection() {
               <div>
                 <div className="mb-2 text-[12.5px]">Voice Provider</div>
                 <StyledSelect value={data.ttsProvider} onChange={(v)=>setField('ttsProvider')(v as AgentData['ttsProvider'])}
-                  options={ttsProviders} placeholder="Choose a TTS provider" />
-                <div className="mt-2 text-xs" style={{ color:'var(--text-muted)' }}>
-                  Only OpenAI is available right now.
-                </div>
+                  options={[
+                    { value: 'openai', label: 'OpenAI', iconLeft: <OpenAIStamp size={14} /> },
+                    { value: 'elevenlabs', label: 'ElevenLabs — coming soon', disabled: true },
+                    { value: 'google-tts', label: 'Google TTS — coming soon', disabled: true },
+                  ]}
+                  placeholder="Choose a TTS provider" />
               </div>
 
               <div>
@@ -1281,9 +1347,7 @@ export default function VoiceAgentSection() {
                       const base = nonEmpty(data.systemPrompt) ? data.systemPrompt : DEFAULT_PROMPT_RT;
                       const compiled = compilePrompt({ basePrompt: base, userText: raw });
                       setShowGenerate(false);
-                      // show preview diff (typing only in preview)
                       setTimeout(()=> startTypingPreview(compiled.frontendText), 80);
-                      // prepare backend
                       setField('systemPromptBackend')(compiled.backendString);
                     } catch {
                       setToastKind('error'); setToast('Generate failed — try simpler wording.');
@@ -1303,7 +1367,7 @@ export default function VoiceAgentSection() {
         document.body
       ) : null}
 
-      {/* Web call overlay */}
+      {/* Web call overlay (WebRTC path respects firstMode via props) */}
       {IS_CLIENT ? createPortal(
         <>
           <div
@@ -1323,7 +1387,7 @@ export default function VoiceAgentSection() {
               }
               voiceName={data.voiceName}
               assistantName={data.name || 'Assistant'}
-              apiKey={selectedKey}
+              apiKey={apiKeys.find(k => k.id === data.apiKeyId)?.key || ''}
               ephemeralEndpoint={EPHEMERAL_TOKEN_ENDPOINT}
               onError={(err:any) => {
                 const msg = err?.message || err?.error?.message || (typeof err === 'string' ? err : '') || 'Call failed';
