@@ -6,7 +6,7 @@ import dynamic from 'next/dynamic';
 import { createPortal } from 'react-dom';
 import {
   Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Rocket,
-  KeyRound, Play, Square, Plus, Trash2, Phone, Globe, Lock, Check, X
+  KeyRound, Play, Pause, Square, Plus, Trash2, Phone, Globe, Lock, Check, X
 } from 'lucide-react';
 
 import { scopedStorage } from '@/utils/scoped-storage';
@@ -20,6 +20,7 @@ import { shapePromptForScheduling } from '@/components/voice/utils/prompt';
 
 /* ───────── constants ───────── */
 const EPHEMERAL_TOKEN_ENDPOINT = '/api/voice/ephemeral';
+const PREVIEW_TTS_ENDPOINT     = '/api/voice/tts/preview'; // <- returns audio blob
 const CTA = '#59d9b3';
 const CTA_HOVER = '#54cfa9';
 const GREEN_LINE = 'rgba(89,217,179,.20)';
@@ -137,7 +138,7 @@ function PromptDiffView({ base, next }: { base: string; next: string }) {
           );
         return (
           <span key={i} style={{ background:'rgba(239,68,68,.18)', color:'#ef4444', textDecoration:'line-through' }}>
-            {o.ch}
+              {o.ch}
           </span>
         );
       })}
@@ -162,7 +163,7 @@ type AgentData = {
   contextText?: string;
   ctxFiles?: { name:string; text:string }[];
   ttsProvider: 'openai' | 'elevenlabs' | 'google-tts';
-  voiceName: string;
+  voiceName: string;                 // friendly name (e.g., Alloy (American))
   apiKeyId?: string;
   phoneId?: string;
   asrProvider: 'deepgram' | 'whisper' | 'assemblyai';
@@ -224,6 +225,14 @@ const DEFAULT_AGENT: AgentData = {
 
 const keyFor = (id: string) => `va:agent:${id}`;
 
+/* Imported voices (front-end list → maps to provider voice ids for preview route) */
+const OPENAI_VOICES: { value: string; label: string; id: string }[] = [
+  { value: 'Alloy (American)', label: 'Alloy', id: 'alloy' },
+  { value: 'Verse (American)', label: 'Verse', id: 'verse' },
+  { value: 'Coral (British)',  label: 'Coral', id: 'coral' },
+  { value: 'Amber (Australian)',label: 'Amber', id: 'amber' },
+];
+
 /* ───────── storage helpers ───────── */
 const IS_BROWSER = typeof window !== 'undefined';
 const loadAgentData = (id: string): AgentData => {
@@ -279,7 +288,7 @@ async function readFileAsText(f: File): Promise<string> {
   const looksZip = async () => {
     const buf = new Uint8Array(await f.slice(0,4).arrayBuffer());
     return buf[0]===0x50 && buf[1]===0x4b; // PK..
-  };
+    };
 
   if (name.endsWith('.docx') || name.endsWith('.docs') || await looksZip()) {
     try {
@@ -317,6 +326,65 @@ async function readFileAsText(f: File): Promise<string> {
     r.onload = () => res(String(r.result || ''));
     r.readAsText(f);
   });
+}
+
+/* ───────── Helper: make a clean front-end prompt from a description ───────── */
+function makeFrontendPromptFromDescription(desc: string, baseName: string) {
+  // Use your existing smart scheduler shaper, then ensure all sections are present and human-friendly
+  const raw = shapePromptForScheduling(desc, { name: baseName, personaName: baseName, org: 'Your Business' }) || '';
+  const s = sanitizePrompt(raw);
+
+  // Ensure all sections exist; add headings if missing
+  const sections: Record<string, string> = {
+    'Identity': '',
+    'Style': '',
+    'Response Guidelines': '',
+    'Task & Goals': '',
+    'Error Handling / Fallback': '',
+  };
+
+  // Split by bracketed headings
+  const re = /^\[(.+?)\]\s*$/m;
+  const lines = s.split('\n');
+  let current = '';
+  let buf: string[] = [];
+  const commit = () => {
+    if (!current) return;
+    const joined = buf.join('\n').trim();
+    if (joined) sections[current] = joined;
+    buf = [];
+  };
+
+  for (const line of lines) {
+    const m = line.match(/^\[(.+?)\]\s*$/);
+    if (m) {
+      commit();
+      current = m[1];
+    } else {
+      buf.push(line);
+    }
+  }
+  commit();
+
+  // Build final prompt in a consistent pretty format
+  const final = [
+    '[Identity]',
+    sections['Identity'] || `- You are ${baseName}, a helpful AI assistant for this business.`,
+    '',
+    '[Style]',
+    sections['Style'] || '- Clear, concise, friendly. Use plain language and short sentences.',
+    '',
+    '[Response Guidelines]',
+    sections['Response Guidelines'] || '- Ask for missing info. Confirm key details back to the user. Provide one call-to-action.',
+    '',
+    '[Task & Goals]',
+    sections['Task & Goals'] || '- Help users complete their next best action (book, purchase, or escalate).',
+    '',
+    '[Error Handling / Fallback]',
+    sections['Error Handling / Fallback'] || '- If unsure, ask a specific clarifying question before proceeding.',
+  ].join('\n').trim();
+
+  return final;
 }
 
 /* ───────── Page ───────── */
@@ -386,24 +454,91 @@ export default function VoiceAgentSection() {
   // models list
   const { opts: openaiModels, loading: loadingModels } = useOpenAIModels();
 
-  // voice preview via speechSynthesis
-  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+  // ===== Voice preview state =====
+  const audioRef = useRef<HTMLAudioElement|null>(null);
+  const [audioURL, setAudioURL] = useState<string>('');
+  const [audioLoading, setAudioLoading] = useState<boolean>(false);
+  const [audioPlaying, setAudioPlaying] = useState<boolean>(false);
+  const [audioProgress, setAudioProgress] = useState<number>(0);
+  const previewAbortRef = useRef<AbortController | null>(null);
+
+  // Preview progress handler
   useEffect(() => {
-    if (!IS_CLIENT || !('speechSynthesis' in window)) return;
-    const load = () => setVoices(window.speechSynthesis.getVoices());
-    load();
-    (window.speechSynthesis as any).onvoiceschanged = load;
-    return () => { (window.speechSynthesis as any).onvoiceschanged = null; };
+    const el = audioRef.current;
+    if (!el) return;
+    const onTime = () => {
+      if (!el.duration || Number.isNaN(el.duration)) return setAudioProgress(0);
+      setAudioProgress((el.currentTime / el.duration) * 100);
+    };
+    const onEnd = () => { setAudioPlaying(false); setAudioProgress(0); };
+    el.addEventListener('timeupdate', onTime);
+    el.addEventListener('ended', onEnd);
+    return () => { el.removeEventListener('timeupdate', onTime); el.removeEventListener('ended', onEnd); };
   }, []);
-  function speakPreview(line?: string){
-    if (!IS_CLIENT || !('speechSynthesis' in window)) return;
-    const u = new SpeechSynthesisUtterance(line || `Hi, I'm ${data.name || 'your assistant'}. This is a preview.`);
-    const byName = voices.find(v => v.name.toLowerCase().includes((data.voiceName || '').split(' ')[0]?.toLowerCase() || ''));
-    const en = voices.find(v => v.lang?.startsWith('en'));
-    if (byName) u.voice = byName; else if (en) u.voice = en;
-    window.speechSynthesis.cancel(); window.speechSynthesis.speak(u);
+
+  // Real TTS preview (with graceful fallback)
+  async function fetchVoicePreview(text: string) {
+    // Map friendly to provider id
+    const item = OPENAI_VOICES.find(v => v.value === data.voiceName);
+    const providerVoiceId = item?.id || 'alloy';
+
+    // If you haven't wired the route yet, we'll fall back to speechSynthesis
+    try {
+      setAudioLoading(true);
+      previewAbortRef.current?.abort();
+      const ctrl = new AbortController();
+      previewAbortRef.current = ctrl;
+
+      const r = await fetch(PREVIEW_TTS_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: data.ttsProvider,
+          voiceName: providerVoiceId,  // provider id
+          text: text || `This is ${data.voiceName || 'the selected'} voice preview.`
+        }),
+        signal: ctrl.signal
+      });
+
+      if (!r.ok) throw new Error('Preview route not ready');
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      setAudioURL(prev => { if (prev) URL.revokeObjectURL(prev); return url; });
+    } catch {
+      // Fallback to speechSynthesis
+      if ('speechSynthesis' in window) {
+        const u = new SpeechSynthesisUtterance(text || `This is ${data.voiceName || 'the selected'} voice preview.`);
+        const voices = window.speechSynthesis.getVoices();
+        const en = voices.find(v => v.lang?.startsWith('en'));
+        if (en) u.voice = en;
+        window.speechSynthesis.cancel();
+        window.speechSynthesis.speak(u);
+      }
+    } finally {
+      setAudioLoading(false);
+    }
   }
-  const stopPreview = () => { if (IS_CLIENT && 'speechSynthesis' in window) window.speechSynthesis.cancel(); };
+  async function onClickPreview() {
+    if (audioPlaying) {
+      audioRef.current?.pause();
+      setAudioPlaying(false);
+      return;
+    }
+    if (!audioURL) {
+      await fetchVoicePreview(`Hi, I'm ${data.name || 'your assistant'}.`);
+    }
+    // play
+    requestAnimationFrame(() => {
+      const el = audioRef.current;
+      if (!el) return;
+      el.currentTime = 0;
+      el.play().then(()=> setAudioPlaying(true)).catch(()=>{});
+    });
+  }
+  function stopPreview() {
+    try { audioRef.current?.pause(); audioRef.current && (audioRef.current.currentTime = 0); setAudioPlaying(false); setAudioProgress(0); } catch {}
+    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+  }
 
   /* listen for active rail id */
   useEffect(() => {
@@ -470,7 +605,7 @@ export default function VoiceAgentSection() {
 
         store.ensureOwnerGuard?.().catch(() => {});
         const phoneV1 = await store.getJSON<PhoneNum[]>(PHONE_LIST_KEY_V1, []).catch(() => []);
-        const phoneLegacy = await store.getJSON<PhoneNum[]>(PHONE_LIST_KEY_LEG, []).catch(() => []);
+        const phoneLegacy = await store.getJSON<PhoneNum[]>('phoneNumbers', []).catch(() => []);
         const phonesMerged = Array.isArray(phoneV1) && phoneV1.length ? phoneV1
                              : Array.isArray(phoneLegacy) ? phoneLegacy : [];
         const phoneCleaned = phonesMerged
@@ -514,6 +649,7 @@ export default function VoiceAgentSection() {
 
   async function doSave(){
     if (!activeId) { setToastKind('error'); setToast('Select or create an agent'); return; }
+    // Always keep firstMsg = firstMsgs[0] for backend compatibility
     setData(prev => ({ ...prev, firstMsg: (prev.firstMsgs?.[0] || prev.firstMsg || '') }));
     setSaving(true); setToast('');
     try {
@@ -555,7 +691,7 @@ export default function VoiceAgentSection() {
     setToastKind('info'); setToast('File(s) added'); setTimeout(()=>setToast(''), 1200);
   };
 
-  // ── Helpers to enter diff mode ──
+  // ── Diff helpers ──
   const startDiff = (nextText: string) => {
     const current = sanitizePrompt((data.systemPromptBackend || data.systemPrompt || DEFAULT_PROMPT_RT).trim());
     const next = sanitizePrompt(nextText);
@@ -571,7 +707,6 @@ export default function VoiceAgentSection() {
     setCandidatePrompt('');
   };
   const declineDiff = () => {
-    // do not change the prompt; just close diff
     setDiffMode(false);
     setBasePrompt('');
     setCandidatePrompt('');
@@ -585,9 +720,10 @@ export default function VoiceAgentSection() {
     startDiff(next);
   };
 
-  /* Generate → diff against current */
-  const onGenerateToDiff = async (targetText:string) => {
-    startDiff(targetText);
+  /* Generate → translate into structured front-end prompt, then diff */
+  const onGenerateToDiff = async (userDesc:string) => {
+    const next = makeFrontendPromptFromDescription(userDesc, data.name || 'Assistant');
+    startDiff(next);
   };
 
   /* call model */
@@ -615,18 +751,24 @@ export default function VoiceAgentSection() {
   const langToHint = (lang: AgentData['language']): 'en'|'nl'|'de'|'es'|'ar' => {
     switch (lang) { case 'Dutch': return 'nl'; case 'German': return 'de'; case 'Spanish': return 'es'; case 'Arabic': return 'ar'; default: return 'en'; }
   };
+
+  // Greeting logic (STRICT):
+  // - Assistant speaks first: use firstMsgs (sequence/random); fallback default if empty.
+  // - User speaks first: blank (assistant stays silent).
+  // - Silent until tool required: blank (assistant stays silent).
   const greetingJoined = useMemo(() => {
+    if (data.firstMode !== 'Assistant speaks first') return ''; // <- strict silence unless assistant-first
     const list = (data.greetPick==='random'
       ? [...(data.firstMsgs||[])].filter(Boolean).sort(()=>Math.random()-0.5)
       : (data.firstMsgs||[]).filter(Boolean)
     );
     let s = list.join('\n').trim();
-    if (data.firstMode === 'Assistant speaks first' && !s) s = 'Hello! How can I help you today?';
+    if (!s) s = 'Hello! How can I help you today?';
     return s;
   }, [data.greetPick, data.firstMsgs, data.firstMode]);
 
   const hasApiKey = !!(data.apiKeyId && apiKeys.some(k=>k.id===data.apiKeyId && k.key));
-  const selectedKey = useMemo(() => apiKeys.find(k => k.id === data.apiKeyId)?.key || '', [apiKeys, data.apiKeyId]); // NEW
+  const selectedKey = useMemo(() => apiKeys.find(k => k.id === data.apiKeyId)?.key || '', [apiKeys, data.apiKeyId]);
 
   return (
     <section className="va-root">
@@ -723,7 +865,7 @@ export default function VoiceAgentSection() {
                 />
               </div>
               <div>
-                <div className="mb-2 text-[12.5px]">First Message Mode</div>
+                <div className="mb-2 text/[12.5px] mb-2">First Message Mode</div>
                 <StyledSelect value={data.firstMode} onChange={setField('firstMode')} options={[
                   { value: 'Assistant speaks first', label: 'Assistant speaks first' },
                   { value: 'User speaks first', label: 'User speaks first' },
@@ -826,7 +968,7 @@ export default function VoiceAgentSection() {
                 </div>
               </div>
 
-              {/* Accept/Decline toolbar ABOVE the prompt when in diff mode */}
+              {/* Accept/Decline above the prompt when diffing */}
               {diffMode && (
                 <div className="mb-2 flex items-center gap-2">
                   <button
@@ -962,35 +1104,37 @@ export default function VoiceAgentSection() {
                 <div className="mb-2 text-[12.5px]">Voice</div>
                 <StyledSelect
                   value={data.voiceName}
-                  onChange={(v)=>setField('voiceName')(v)}
-                  options={[
-                    { value: 'Alloy (American)', label: 'Alloy' },
-                    { value: 'Verse (American)', label: 'Verse' },
-                    { value: 'Coral (British)', label: 'Coral' },
-                    { value: 'Amber (Australian)', label: 'Amber' },
-                  ]}
+                  onChange={(v)=>{ setField('voiceName')(v); stopPreview(); setAudioURL(''); setAudioProgress(0); }}
+                  options={OPENAI_VOICES.map(v => ({ value: v.value, label: v.label }))}
                   placeholder="— Choose —"
                 />
                 <div className="mt-2 flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={()=>speakPreview(`This is ${data.voiceName || 'the selected'} voice preview.`)}
-                    className="w-8 h-8 rounded-full grid place-items-center"
-                    aria-label="Play voice"
+                    onClick={onClickPreview}
+                    disabled={audioLoading}
+                    className="w-9 h-9 rounded-full grid place-items-center"
+                    aria-label="Play / Pause preview"
                     style={{ background: CTA, color:'#0a0f0d' }}
                   >
-                    <Play className="w-4 h-4" />
+                    {audioPlaying ? <Pause className="w-4 h-4"/> : <Play className="w-4 h-4" />}
                   </button>
                   <button
                     type="button"
                     onClick={stopPreview}
-                    className="w-8 h-8 rounded-full grid place-items-center border"
+                    className="w-9 h-9 rounded-full grid place-items-center border"
                     aria-label="Stop preview"
                     style={{ background: 'var(--panel-bg)', color:'var(--text)', borderColor:'var(--border-weak)' }}
                   >
                     <Square className="w-4 h-4" />
                   </button>
+
+                  <div className="flex-1 h-1 rounded-full overflow-hidden" style={{ minWidth: 120, background:'var(--border-weak)' }}>
+                    <div style={{ width: `${audioProgress}%`, height:'100%', background: CTA }} />
+                  </div>
+                  <audio ref={audioRef} src={audioURL || undefined} preload="auto" />
                 </div>
+                {audioLoading && <div className="mt-2 text-xs" style={{ color:'var(--text-muted)' }}>Generating preview…</div>}
               </div>
             </div>
           </Section>
@@ -1072,19 +1216,16 @@ export default function VoiceAgentSection() {
         </div>
       </div>
 
-      {/* Generate Prompt → send into diff */}
+      {/* Generate Prompt → translate, then diff */}
       <GeneratePromptModal
         open={showGenerate}
         onClose={() => setShowGenerate(false)}
         onGenerate={async (userDescription: string) => {
           const desc = safeTrim(userDescription);
           if (!desc) return;
-          const target = sanitizePrompt(
-            shapePromptForScheduling(desc, { name: data.name, personaName: data.name, org: 'Your Business' })
-          );
           setShowGenerate(false);
-          await sleep(20);
-          onGenerateToDiff(target);
+          await sleep(10);
+          onGenerateToDiff(desc);
         }}
       />
 
@@ -1121,7 +1262,7 @@ export default function VoiceAgentSection() {
           const next = buildPromptFromWebsite(merged, base);
 
           setShowImport(false);
-          await sleep(20);
+          await sleep(10);
           startDiff(next);
         }}
       />
@@ -1146,7 +1287,7 @@ export default function VoiceAgentSection() {
               }
               voiceName={data.voiceName}
               assistantName={data.name || 'Assistant'}
-              apiKey={selectedKey}                      // pass RAW KEY to the button
+              apiKey={selectedKey}
               ephemeralEndpoint={EPHEMERAL_TOKEN_ENDPOINT}
               onError={(err:any) => {
                 const msg = err?.message || err?.error?.message || (typeof err === 'string' ? err : '') || 'Call failed';
@@ -1154,8 +1295,8 @@ export default function VoiceAgentSection() {
               }}
               onClose={()=> setShowCall(false)}
               prosody={{ fillerWords: true, microPausesMs: 200, phoneFilter: true, turnEndPauseMs: 120 }}
-              firstMode={data.firstMode}
-              firstMsg={greetingJoined}
+              firstMode={data.firstMode}                 // <- STRICT: respected inside the call widget
+              firstMsg={greetingJoined}                  // <- empty unless “Assistant speaks first”
               languageHint={langToHint(data.language)}
             />
           )}
