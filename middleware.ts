@@ -5,8 +5,8 @@ import { NextResponse } from 'next/server';
 /** Public, no-auth pages */
 const PUBLIC = new Set<string>([
   '/',
-  '/auth/callback',     // Supabase OAuth callback
-  '/post-auth',         // land here after OAuth; we branch to Stripe or /builder
+  '/auth/callback',   // Supabase OAuth callback
+  '/post-auth',       // land here after OAuth; client finishes auth
   '/pricing',
   '/contact',
   '/privacy',
@@ -21,7 +21,7 @@ function isBypassedPath(p: string) {
     p.startsWith('/images') ||
     p.startsWith('/fonts') ||
     p.startsWith('/static') ||
-    p.startsWith('/api')      // <-- IMPORTANT: don't run middleware on API routes
+    p.startsWith('/api')      // do NOT run middleware on API routes
   );
 }
 
@@ -52,62 +52,8 @@ export async function middleware(req: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // Public routes are open (with special /post-auth logic)
+  // Public routes are open — and /post-auth must always pass through
   if (PUBLIC.has(pathname)) {
-    if (pathname === '/post-auth') {
-      if (!authed) {
-        const back = req.nextUrl.clone();
-        back.pathname = '/';
-        back.search = '?signin=1';
-        return NextResponse.redirect(back);
-      }
-
-      // Ask our API if user exists / subscribed
-      const url = new URL('/api/user-status', req.url);
-      const resp = await fetch(url.toString(), {
-        headers: { cookie: req.headers.get('cookie') || '' }
-      });
-
-      // If API fails, fail open to /builder (avoid loops)
-      if (!resp.ok) {
-        const go = req.nextUrl.clone();
-        go.pathname = '/builder';
-        go.search = '';
-        return NextResponse.redirect(go);
-      }
-
-      const data = (await resp.json()) as {
-        hasAccount: boolean;
-        hasSubscription: boolean;
-        paymentLink?: string | null;
-      };
-
-      // Existing user OR already subscribed -> app
-      if (data.hasAccount || data.hasSubscription) {
-        const go = req.nextUrl.clone();
-        go.pathname = '/builder';
-        go.search = '';
-        return NextResponse.redirect(go);
-      }
-
-      // New user -> Stripe Payment Link (must be set somewhere)
-      const paymentLink =
-        data.paymentLink ||
-        process.env.NEXT_PUBLIC_STRIPE_PAYMENT_LINK ||
-        '';
-
-      if (paymentLink) {
-        // Absolute external link is fine here
-        return NextResponse.redirect(paymentLink);
-      }
-
-      // No link configured -> pricing (don’t trap the user)
-      const fallback = req.nextUrl.clone();
-      fallback.pathname = '/pricing';
-      fallback.search = '';
-      return NextResponse.redirect(fallback);
-    }
-
     return NextResponse.next();
   }
 
