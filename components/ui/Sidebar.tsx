@@ -210,7 +210,7 @@ export default function Sidebar() {
 
       <style jsx>{`
         /* hover */
-        a.block.group > div:hover > div:first-child{ /* the plate */
+        a.block.group > div:hover > div:first-child{
           ${white
             ? 'opacity:.94;'
             : 'box-shadow:0 0 0 1px rgba(89,217,179,.32), 0 0 18px rgba(89,217,179,.14); transform: translateY(-1px);'
@@ -224,128 +224,130 @@ export default function Sidebar() {
   const resources = useMemo(() => NAV.filter(n => n.group === 'resources'), []);
 
   return (
-    <aside
-      className="fixed left-0 top-0 h-screen z-50 font-movatif sidebar"
-      style={{
-        width: collapsed ? W_COLLAPSED : W_EXPANDED,
-        transition: 'width 300ms cubic-bezier(0.16,1,0.3,1)',
-        background: railBands(isDark),               // bands only on rail body
-        color: textColor,
-        borderRight: `1px solid ${SEP}`,
-        boxShadow: 'inset 0 0 18px rgba(0,0,0,.28), 14px 0 28px rgba(0,0,0,.42)'
-      }}
-      aria-label="Primary"
-    >
-      <div className="relative h-full flex flex-col">
+    <>
+      <aside
+        className="fixed left-0 top-0 h-screen z-50 font-movatif sidebar"
+        style={{
+          width: collapsed ? W_COLLAPSED : W_EXPANDED,
+          transition: 'width 300ms cubic-bezier(0.16,1,0.3,1)',
+          background: railBands(isDark),               // bands only on rail body
+          color: textColor,
+          borderRight: `1px solid ${SEP}`,
+          boxShadow: 'inset 0 0 18px rgba(0,0,0,.28), 14px 0 28px rgba(0,0,0,.42)'
+        }}
+        aria-label="Primary"
+      >
+        <div className="relative h-full flex flex-col">
 
-        {/* BRAND (filled block; NO bands inside) */}
-        <div style={{ padding: '16px 12px 12px', background: isDark ? DARK_BASE : LIGHT_BASE }}>
-          <div className="flex flex-col items-center gap-2">
-            <div
-              className="grid place-items-center"
-              style={{
-                width: 40, height: 40, borderRadius: 12,
-                background: isDark ? 'rgba(255,255,255,.12)' : 'rgba(15,23,42,.08)',
-                border: isDark ? '1px solid rgba(255,255,255,.18)' : '1px solid rgba(15,23,42,.16)'
-              }}
-            >
-              <Bot className="w-5 h-5" style={{ color: '#fff' }} />
-            </div>
-            {!collapsed && (
-              <div className="font-movatif" style={{ fontSize: 16, fontWeight: 550, color: isDark ? '#fff' : '#0f172a' }}>
-                Reduc <span style={{ color: CTA, fontWeight: 520 }}>AI</span>
+          {/* BRAND (filled block; NO bands inside) */}
+          <div style={{ padding: '16px 12px 12px', background: isDark ? DARK_BASE : LIGHT_BASE }}>
+            <div className="flex flex-col items-center gap-2">
+              <div
+                className="grid place-items-center"
+                style={{
+                  width: 40, height: 40, borderRadius: 12,
+                  background: isDark ? 'rgba(255,255,255,.12)' : 'rgba(15,23,42,.08)',
+                  border: isDark ? '1px solid rgba(255,255,255,.18)' : '1px solid rgba(15,23,42,.16)'
+                }}
+              >
+                <Bot className="w-5 h-5" style={{ color: '#fff' }} />
               </div>
-            )}
+              {!collapsed && (
+                <div className="font-movatif" style={{ fontSize: 16, fontWeight: 550, color: isDark ? '#fff' : '#0f172a' }}>
+                  Reduc <span style={{ color: CTA, fontWeight: 520 }}>AI</span>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
 
-        {/* WORKSPACE (top 4) */}
-        <div className="px-3 pt-1">
-          <nav className="space-y-[6px]">
-            {workspace.map(item => (
-              <Item key={item.id} item={item} active={isActive(item)} />
-            ))}
-          </nav>
-        </div>
+          {/* WORKSPACE (top 4) */}
+          <div className="px-3 pt-1">
+            <nav className="space-y-[6px]">
+              {workspace.map(item => (
+                <Item key={item.id} item={item} active={isActive(item)} />
+              ))}
+            </nav>
+          </div>
 
-        {/* push resources down */}
-        <div className="flex-1" />
+          {/* push resources down */}
+          <div className="flex-1" />
 
-        {/* full-width separator (left→right), low opacity */}
-        <div aria-hidden className="mx-3" style={{ height: 1, background: SEP }} />
+          {/* full-width separator (left→right), low opacity */}
+          <div aria-hidden className="mx-3" style={{ height: 1, background: SEP }} />
 
-        {/* RESOURCES (muted; white icons on dark) */}
-        <div className="px-3 mt-2 mb-2">
-          <nav className="space-y-[6px]">
-            {resources.map(item => (
-              <Item key={item.id} item={item} active={isActive(item)} white />
-            ))}
-          </nav>
-        </div>
+          {/* RESOURCES (muted; white icons on dark) */}
+          <div className="px-3 mt-2 mb-2">
+            <nav className="space-y-[6px]">
+              {resources.map(item => (
+                <Item key={item.id} item={item} active={isActive(item)} white />
+              ))}
+            </nav>
+          </div>
 
-        {/* ACCOUNT (teal-ish card; not grey) — also no bands */}
-        <div className="px-3 pb-4" style={{ background: isDark ? DARK_BASE : LIGHT_BASE }}>
-          <button
-            onClick={() => router.push('/account')}
-            className="w-full rounded-xl px-3 py-3 flex items-center gap-3 text-left"
-            style={{
-              background: isDark ? 'linear-gradient(180deg, rgba(23,34,37,.92), rgba(11,18,20,.9))'
-                                  : 'linear-gradient(180deg, rgba(240,244,246,.92), rgba(232,237,239,.94))',
-              border: `1px solid ${isDark ? 'rgba(255,255,255,.10)' : 'rgba(15,23,42,.12)'}`,
-              boxShadow: 'inset 0 0 8px rgba(0,0,0,.18)',
-              color: textColor
-            }}
-          >
-            <div
-              className="grid place-items-center"
+          {/* ACCOUNT (teal-ish card; not grey) — also no bands */}
+          <div className="px-3 pb-4" style={{ background: isDark ? DARK_BASE : LIGHT_BASE }}>
+            <button
+              onClick={() => router.push('/account')}
+              className="w-full rounded-xl px-3 py-3 flex items-center gap-3 text-left"
               style={{
-                width: 32, height: 32, borderRadius: 10,
-                background: CTA
+                background: isDark ? 'linear-gradient(180deg, rgba(23,34,37,.92), rgba(11,18,20,.9))'
+                                    : 'linear-gradient(180deg, rgba(240,244,246,.92), rgba(232,237,239,.94))',
+                border: `1px solid ${isDark ? 'rgba(255,255,255,.10)' : 'rgba(15,23,42,.12)'}`,
+                boxShadow: 'inset 0 0 8px rgba(0,0,0,.18)',
+                color: textColor
               }}
             >
-              <UserIcon className="w-4 h-4 text-black/85" />
-            </div>
-
-            {!collapsed && (
-              <div className="min-w-0 flex-1">
-                <div className="text-[13px] truncate" style={{ fontWeight: 560 }}>
-                  {userLoading ? 'Account' : getDisplayName(userName, userEmail)}
-                </div>
-                <div className="text-[11px] truncate" style={{ color: subColor }}>
-                  {userEmail || 'Open account'}
-                </div>
+              <div
+                className="grid place-items-center"
+                style={{
+                  width: 32, height: 32, borderRadius: 10,
+                  background: CTA
+                }}
+              >
+                <UserIcon className="w-4 h-4 text-black/85" />
               </div>
-            )}
 
-            {!collapsed && (
-              <span className="text-[11px]" style={{ color: subColor }}>Open</span>
-            )}
+              {!collapsed && (
+                <div className="min-w-0 flex-1">
+                  <div className="text-[13px] truncate" style={{ fontWeight: 560 }}>
+                    {userLoading ? 'Account' : getDisplayName(userName, userEmail)}
+                  </div>
+                  <div className="text-[11px] truncate" style={{ color: subColor }}>
+                    {userEmail || 'Open account'}
+                  </div>
+                </div>
+              )}
+
+              {!collapsed && (
+                <span className="text-[11px]" style={{ color: subColor }}>Open</span>
+              )}
+            </button>
+          </div>
+
+          {/* Collapse handle (mid-rail) */}
+          <button
+            onClick={() => setCollapsed(c => !c)}
+            className="absolute top-1/2 -right-3 translate-y-[-50%] rounded-full p-1.5"
+            style={{
+              border: `1px solid rgba(89,217,179,.26)`,
+              background: 'rgba(89,217,179,.10)',
+              boxShadow: '0 2px 12px rgba(0,0,0,.18), 0 0 10px rgba(0,255,194,.10)',
+            }}
+            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            {collapsed
+              ? <ChevronRight className="w-4 h-4" style={{ color: CTA }} />
+              : <ChevronLeft  className="w-4 h-4" style={{ color: CTA }} />}
           </button>
         </div>
+      </aside>
 
-        {/* Collapse handle (mid-rail) */}
-        <button
-          onClick={() => setCollapsed(c => !c)}
-          className="absolute top-1/2 -right-3 translate-y-[-50%] rounded-full p-1.5"
-          style={{
-            border: `1px solid rgba(89,217,179,.26)`,
-            background: 'rgba(89,217,179,.10)',
-            boxShadow: '0 2px 12px rgba(0,0,0,.18), 0 0 10px rgba(0,255,194,.10)',
-          }}
-          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        >
-          {collapsed
-            ? <ChevronRight className="w-4 h-4" style={{ color: CTA }} />
-            : <ChevronLeft  className="w-4 h-4" style={{ color: CTA }} />}
-        </button>
-      </div>
-    </aside>
-
-    /* Minor light/dark overrides (icon plates for resources flip in light) */
-    <style jsx global>{`
-      :root:not([data-theme="dark"]) .sidebar .plate-res {
-        color: #0f172a;
-      }
-    `}</style>
+      {/* Minor light/dark overrides (icon plates for resources flip in light) */}
+      <style jsx global>{`
+        :root:not([data-theme="dark"]) .sidebar .plate-res {
+          color: #0f172a;
+        }
+      `}</style>
+    </>
   );
 }
