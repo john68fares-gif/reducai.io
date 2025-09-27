@@ -1,30 +1,18 @@
 // FILE: components/voice/GeneratePromptModal.tsx
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Wand2, X, Loader2 } from 'lucide-react';
 
 type Props = {
-  /** show/hide the modal */
   open: boolean;
-  /** close the modal */
   onClose: () => void;
-
-  /**
-   * Called when the user clicks Generate.
-   * You receive the raw description the user typed.
-   * Return a promise if you want the button to show a spinner while you work.
-   */
   onGenerate: (userDescription: string) => Promise<void> | void;
-
-  /** optional: z-indexes (match your page tokens) */
-  zBackdrop?: number; // default 100000
-  zModal?: number;    // default 100001
-
-  /** optional: theme colors to blend with your page */
-  ctaColor?: string;        // default '#59d9b3'
-  borderGlow?: string;      // default 'rgba(89,217,179,.20)'
+  zBackdrop?: number;
+  zModal?: number;
+  ctaColor?: string;
+  borderGlow?: string;
 };
 
 export default function GeneratePromptModal({
@@ -39,14 +27,28 @@ export default function GeneratePromptModal({
   const [composerText, setComposerText] = useState('');
   const [busy, setBusy] = useState(false);
 
+  // ✅ Reset the textarea every time the modal opens
+  useEffect(() => {
+    if (open) setComposerText('');
+  }, [open]);
+
   if (!open || typeof document === 'undefined') return null;
 
+  const closeAndReset = () => {
+    if (busy) return;
+    setComposerText('');
+    onClose();
+  };
+
   const handleGenerate = async () => {
-    if (!composerText.trim() || busy) return;
+    const text = composerText.trim();
+    if (!text || busy) return;
     try {
       setBusy(true);
-      await onGenerate(composerText.trim());
-      onClose(); // parent will start the typing animation after this resolves
+      await onGenerate(text);
+      // ✅ Clear after successful generation so nothing “sticks”
+      setComposerText('');
+      onClose(); // parent starts typing effect
     } finally {
       setBusy(false);
     }
@@ -57,7 +59,7 @@ export default function GeneratePromptModal({
       <div
         className="fixed inset-0"
         style={{ zIndex: zBackdrop, background: 'rgba(0,0,0,.72)' }}
-        onClick={busy ? undefined : onClose}
+        onClick={closeAndReset}
         aria-hidden
       />
       <div className="fixed inset-0 grid place-items-center px-4" style={{ zIndex: zModal }}>
@@ -75,6 +77,7 @@ export default function GeneratePromptModal({
           role="dialog"
           aria-modal="true"
           aria-label="Generate prompt"
+          onClick={(e)=>e.stopPropagation()} // prevent backdrop click
         >
           {/* Header */}
           <div
@@ -94,10 +97,11 @@ export default function GeneratePromptModal({
               <div className="text-lg font-semibold">Describe how to update the prompt</div>
             </div>
             <button
-              onClick={busy ? undefined : onClose}
+              onClick={closeAndReset}
               className="w-8 h-8 rounded-[6px] grid place-items-center"
               style={{ background: 'var(--panel-bg)', border: `1px solid ${borderGlow}`, opacity: busy ? 0.6 : 1 }}
               aria-label="Close"
+              disabled={busy}
             >
               <X className="w-4 h-4" />
             </button>
@@ -108,10 +112,7 @@ export default function GeneratePromptModal({
             <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
               Tip: “assistant for a dental clinic; tone friendly; handle booking and FAQs”.
             </div>
-            <div
-              className="rounded-[8px] p-2"
-              style={{ background: 'var(--panel-bg)', border: '1px solid var(--border-weak)' }}
-            >
+            <div className="rounded-[8px] p-2" style={{ background: 'var(--panel-bg)', border: '1px solid var(--border-weak)' }}>
               <textarea
                 value={composerText}
                 onChange={(e) => setComposerText(e.target.value)}
@@ -126,9 +127,10 @@ export default function GeneratePromptModal({
           {/* Footer */}
           <div className="px-6 pb-6 flex gap-3">
             <button
-              onClick={busy ? undefined : onClose}
+              onClick={closeAndReset}
               className="w-full h-[40px] rounded-[8px]"
               style={{ background: 'var(--panel-bg)', border: '1px solid var(--border-weak)', color: 'var(--text)', fontWeight: 600, opacity: busy ? 0.7 : 1 }}
+              disabled={busy}
             >
               Cancel
             </button>
