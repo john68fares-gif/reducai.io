@@ -5,51 +5,38 @@ import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 're
 import dynamic from 'next/dynamic';
 import { createPortal } from 'react-dom';
 import {
-  Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Rocket,
-  KeyRound, Play, Pause, Square, Plus, Trash2, Phone, Globe, Lock, Check, X
+  Wand2, ChevronDown, ChevronUp, Gauge, Mic, Volume2, Rocket, Search, Check, Lock,
+  KeyRound, Play, Square, X, Plus, Trash2, Phone
 } from 'lucide-react';
-
 import { scopedStorage } from '@/utils/scoped-storage';
 import WebCallButton from '@/components/voice/WebCallButton';
-import StyledSelect from '@/components/ui/StyledSelect';
-import GeneratePromptModal from '@/components/voice/GeneratePromptModal';
-import ImportWebsiteModal from '@/components/voice/ImportWebsiteModal';
-import { loadJSZip } from '@/lib/jszip-loader';
-import { DEFAULT_PROMPT as BUILDER_DEFAULT, buildPromptFromWebsite } from '@/utils/prompt-builder';
-import { shapePromptForScheduling } from '@/components/voice/utils/prompt';
 
-// Prompt engine glue
-import {
-  DEFAULT_PROMPT as ENGINE_DEFAULT,
-  looksLikeFullPrompt,
-  normalizeFullPrompt,
-  compilePrompt
-} from '@/lib/prompt-engine';
+/* ========= Minimal external UI pieces you already have =========
+   - This file assumes you already have:
+     - /components/voice/AssistantRail
+     - /lib/prompt-engine  (compilePrompt, looksLikeFullPrompt, normalizeFullPrompt, DEFAULT_PROMPT)
+     - /utils/scoped-storage
+   =============================================================== */
 
-/* ───────── constants ───────── */
+/* ─────────── constants ─────────── */
 const EPHEMERAL_TOKEN_ENDPOINT = '/api/voice/ephemeral';
-const PREVIEW_TTS_ENDPOINT     = '/api/voice/tts/preview';
 const CTA = '#59d9b3';
 const CTA_HOVER = '#54cfa9';
 const GREEN_LINE = 'rgba(89,217,179,.20)';
 const ACTIVE_KEY = 'va:activeId';
 const IS_CLIENT = typeof window !== 'undefined' && typeof document !== 'undefined';
-
-// keys storage
-const LS_KEYS = 'apiKeys.v1';
-const LS_SELECTED = 'apiKeys.selectedId';
-
-// phones storage
 const PHONE_LIST_KEY_V1   = 'phoneNumbers.v1';
 const PHONE_LIST_KEY_LEG  = 'phoneNumbers';
 const PHONE_SELECTED_ID   = 'phoneNumbers.selectedId';
 
-/* ───────── Assistant rail (lazy) ───────── */
+/* ─────────── Assistant rail (lazy) ─────────── */
 const AssistantRail = dynamic(
   () =>
     import('@/components/voice/AssistantRail')
       .then(m => m.default ?? m)
-      .catch(() => Promise.resolve(() => <div className="px-3 py-3 text-xs opacity-70">Rail unavailable</div>)),
+      .catch(() =>
+        Promise.resolve(() => <div className="px-3 py-3 text-xs opacity-70">Rail unavailable</div>)
+      ),
   { ssr: false, loading: () => <div className="px-3 py-3 text-xs opacity-70">Loading…</div> }
 );
 
@@ -59,138 +46,82 @@ class RailBoundary extends React.Component<{children:React.ReactNode},{hasError:
   render(){ return this.state.hasError ? <div className="px-3 py-3 text-xs opacity-70">Rail crashed</div> : this.props.children; }
 }
 
-/* ───────── tiny helpers ───────── */
+/* ─────────── tiny helpers ─────────── */
+const isFn = (f: any): f is Function => typeof f === 'function';
 const isStr = (v: any): v is string => typeof v === 'string';
 const nonEmpty = (v: any): v is string => isStr(v) && v.trim().length > 0;
+const coerceStr = (v: any): string => (isStr(v) ? v : '');
 const safeTrim = (v: any): string => (nonEmpty(v) ? v.trim() : '');
-const sleep = (ms:number) => new Promise(r=>setTimeout(r,ms));
 
-/* strip leaked meta lines */
-const STRIP_META_RE = /^(SYSTEM_SPEC|IDENTITY|STYLE|GUIDELINES|GOALS|FALLBACK|BUSINESS_FACTS|POLICY)::.*$/gmi;
-const sanitizePrompt = (s: string) => (s || '').replace(STRIP_META_RE, '').trim();
-
-/* ───────── typing effect helper ───────── */
-async function typeIntoPrompt(
-  full: string,
-  onTick: (current: string) => void,
-  opts: { cps?: number } = {}
-) {
-  const cps = opts.cps ?? 120; // chars/sec
-  const delay = Math.max(6, Math.round(1000 / cps));
-  let out = '';
-  for (let i = 0; i < full.length; i++) {
-    out += full[i];
-    onTick(out);
-    await new Promise(r => setTimeout(r, full[i] === '\n' ? delay * 2 : delay));
-  }
-}
-
-/* theme tokens */
-const Tokens = ({theme}:{theme:'dark'|'light'}) => (
+/* ─────────── theme tokens ─────────── */
+const Tokens = () => (
   <style jsx global>{`
-    :root {
-      ${theme==='dark' ? `
-        --bg:#0b0c10; --panel:#0d0f11; --text:#e6f1ef; --text-muted:#9fb4ad;
-        --page-bg:var(--bg); --panel-bg:var(--panel);
-        --input-bg:#101314; --input-border:rgba(255,255,255,.10); --input-shadow:0 0 0 1px rgba(255,255,255,.06) inset;
-        --border-weak:rgba(255,255,255,.10);
-        --card-shadow:0 20px 40px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px ${GREEN_LINE};
-      ` : `
-        --bg:#f6f8f9; --panel:#ffffff; --text:#0b1620; --text-muted:#50606a;
-        --page-bg:var(--bg); --panel-bg:var(--panel);
-        --input-bg:#ffffff; --input-border:rgba(0,0,0,.12); --input-shadow:0 0 0 1px rgba(0,0,0,.03) inset;
-        --border-weak:rgba(0,0,0,.10);
-        --card-shadow:0 14px 28px rgba(0,0,0,.08), 0 0 0 1px rgba(0,0,0,.04) inset, 0 0 0 1px rgba(89,217,179,.16);
-      `}
+    .va-scope{
+      --bg:#0b0c10; --panel:#0d0f11; --text:#e6f1ef; --text-muted:#9fb4ad;
       --s-2:8px; --s-3:12px; --s-4:16px; --s-5:20px; --s-6:24px;
-      --radius-outer:8px; --control-h:40px; --header-h:80px;
-      --fz-title:18px; --fz-label:12.5px; --lh-body:1.45; --ease:cubic-bezier(.22,.61,.36,1);
-      --app-sidebar-w:240px; --rail-w:260px; --green-weak:rgba(89,217,179,.12);
-      --vs-menu-bg: var(--panel-bg); --vs-menu-border: var(--border-weak);
-      --vs-input-bg: var(--input-bg); --vs-input-border: var(--input-border);
+      --radius-outer:8px; --radius-inner:8px; --control-h:40px; --header-h:80px;
+      --fz-title:18px; --fz-sub:15px; --fz-body:14px; --fz-label:12.5px;
+      --lh-body:1.45; --ease:cubic-bezier(.22,.61,.36,1);
+      --app-sidebar-w:240px; --rail-w:260px;
+      --page-bg:var(--bg); --panel-bg:var(--panel); --input-bg:var(--panel);
+      --input-border:rgba(255,255,255,.10); --input-shadow:0 0 0 1px rgba(255,255,255,.06) inset;
+      --border-weak:rgba(255,255,255,.10);
+      --card-shadow:0 20px 40px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px ${GREEN_LINE};
+      --good:#10b981; --bad:#ef4444;
     }
-    .va-root{animation:vaPageIn 380ms var(--ease) both; background:var(--page-bg);}
-    .va-card{border-radius:8px;border:1px solid var(--border-weak);background:var(--panel-bg);box-shadow:var(--card-shadow);overflow:hidden}
-    .va-head{min-height:var(--header-h);display:grid;grid-template-columns:1fr auto;align-items:center;padding:0 16px;border-bottom:1px solid var(--border-weak)}
-    .va-cta{box-shadow:0 10px 22px rgba(89,217,179,.28)}
-    @keyframes vaPageIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+    .va-card{ border-radius:var(--radius-outer); border:1px solid var(--border-weak); background:var(--panel-bg); box-shadow:var(--card-shadow); overflow:hidden; isolation:isolate; }
+    .va-head{ min-height:var(--header-h); display:grid; grid-template-columns:1fr auto; align-items:center; padding:0 16px; border-bottom:1px solid rgba(255,255,255,.08); color:var(--text);
+      background:linear-gradient(90deg,var(--panel-bg) 0%,color-mix(in oklab, var(--panel-bg) 97%, white 3%) 50%,var(--panel-bg) 100%); border-top-left-radius:var(--radius-outer); border-top-right-radius:var(--radius-outer); }
+    @keyframes vaRowIn { from { transform: scale(0.98); opacity:.0; } to { transform: scale(1); opacity:1; } }
+    .va-row-add { animation: vaRowIn 220ms var(--ease); }
   `}</style>
 );
 
-/* SVG */
-const PhoneFilled = (props: React.SVGProps<SVGSVGElement>) => (
-  <svg viewBox="0 0 24 24" width="16" height="16" {...props} aria-hidden>
-    <path d="M6.62 10.79a15.053 15.053 0 006.59 6.59l2.2-2.2a1 1 0 011.03-.24c1.12.37 2.33.57 3.56.57a1 1 0 011 1v3.5a1 1 0 01-1 1C11.3 22 2 12.7 2 2.99a1 1 0 011-1H6.5a1 1 0 011 1c0 1.23.2 2.44.57 3.56a1 1 0 01-.24 1.03l-2.2 2.2z" fill="currentColor"/>
-  </svg>
-);
-
-/* ───────── diff (LCS) ───────── */
-type DiffOp = { t: 'same' | 'add' | 'rem'; ch: string };
-function diffCharsLCS(a: string, b: string): DiffOp[] {
-  const A = Array.from(a || '');
-  const B = Array.from(b || '');
-  const n = A.length, m = B.length;
-  const dp = Array.from({length:n+1},()=>new Array<number>(m+1).fill(0));
-  for (let i=1;i<=n;i++){
-    for (let j=1;j<=m;j++){
-      dp[i][j] = A[i-1]===B[j-1] ? dp[i-1][j-1]+1 : Math.max(dp[i-1][j], dp[i][j-1]);
-    }
-  }
-  const ops: DiffOp[] = [];
-  let i=n, j=m;
-  while (i>0 && j>0){
-    if (A[i-1]===B[j-1]) { ops.push({t:'same', ch:A[i-1]}); i--; j--; }
-    else if (dp[i-1][j] >= dp[i][j-1]) { ops.push({t:'rem', ch:A[i-1]}); i--; }
-    else { ops.push({t:'add', ch:B[j-1]}); j--;
-    }
-  }
-  while (i>0){ ops.push({t:'rem', ch:A[i-1]}); i--; }
-  while (j>0){ ops.push({t:'add', ch:B[j-1]}); j--; }
-  ops.reverse();
-  return ops;
-}
-
-function PromptDiffView({ base, next }: { base: string; next: string }) {
-  const ops = diffCharsLCS(base, next);
-  return (
-    <pre className="whitespace-pre-wrap break-words m-0" style={{ lineHeight: 1.55 }}>
-      {ops.map((o, i) => {
-        if (o.t === 'same') return <span key={i}>{o.ch}</span>;
-        if (o.t === 'add')  return <span key={i} style={{ background:'rgba(16,185,129,.14)', color:'#10b981' }}>{o.ch}</span>;
-        return <span key={i} style={{ background:'rgba(239,68,68,.18)', color:'#ef4444', textDecoration:'line-through' }}>{o.ch}</span>;
-      })}
-    </pre>
-  );
-}
-
-/* ───────── types ───────── */
+/* ─────────── types ─────────── */
 type ApiKey = { id: string; name: string; key: string };
 type PhoneNum = { id: string; name: string; number: string };
+
 type AgentData = {
   name: string;
   provider: 'openai' | 'anthropic' | 'google';
   model: string;
+
   firstMode: 'Assistant speaks first' | 'User speaks first' | 'Silent until tool required';
   firstMsg: string;
   firstMsgs?: string[];
   greetPick?: 'sequence'|'random';
-  systemPrompt: string;
-  systemPromptBackend?: string;
-  language: 'English'|'Dutch'|'German'|'Spanish'|'Arabic';
-  contextText?: string;
+
+  systemPrompt: string;             // frontend (sectioned)
+  systemPromptBackend?: string;     // backend / machine string
+  language?: string;
+
+  contextText?: string;             // merged raw file text (for call runtime)
   ctxFiles?: { name:string; text:string }[];
+
   ttsProvider: 'openai' | 'elevenlabs' | 'google-tts';
   voiceName: string;
   apiKeyId?: string;
   phoneId?: string;
+
   asrProvider: 'deepgram' | 'whisper' | 'assemblyai';
   asrModel: string;
   denoise: boolean;
   numerals: boolean;
 };
 
-/* ───────── defaults ───────── */
-const PROMPT_SKELETON = `[Identity]
+/* ─────────── prompt engine ─────────── */
+import {
+  DEFAULT_PROMPT as ENGINE_DEFAULT,
+  looksLikeFullPrompt as _looksLikeFullPrompt,
+  normalizeFullPrompt as _normalizeFullPrompt,
+  compilePrompt
+} from '@/lib/prompt-engine';
+
+const looksLikeFullPromptRT = (raw: string) => isFn(_looksLikeFullPrompt) ? !!_looksLikeFullPrompt(raw) : false;
+const normalizeFullPromptRT = (raw: string) => isFn(_normalizeFullPrompt) ? coerceStr(_normalizeFullPrompt(raw)) : raw;
+
+const PROMPT_SKELETON =
+`[Identity]
 
 [Style]
 
@@ -200,19 +131,19 @@ const PROMPT_SKELETON = `[Identity]
 
 [Error Handling / Fallback]`;
 
-const DEFAULT_PROMPT_RT =
-  nonEmpty(BUILDER_DEFAULT) ? BUILDER_DEFAULT! :
-  (nonEmpty(ENGINE_DEFAULT) ? ENGINE_DEFAULT! : PROMPT_SKELETON);
+const DEFAULT_PROMPT_RT = nonEmpty(ENGINE_DEFAULT) ? ENGINE_DEFAULT! : PROMPT_SKELETON;
 
+/* ─────────── defaults ─────────── */
 const DEFAULT_AGENT: AgentData = {
   name: 'Assistant',
   provider: 'openai',
   model: 'gpt-4o',
-  firstMode: 'User speaks first',
+  firstMode: 'Assistant speaks first',
   firstMsg: '',
   firstMsgs: [],
   greetPick: 'sequence',
-  systemPrompt: normalizeFullPrompt?.(`
+  systemPrompt:
+    (normalizeFullPromptRT(`
 [Identity]
 - You are a helpful, professional AI assistant for this business.
 
@@ -227,7 +158,7 @@ const DEFAULT_AGENT: AgentData = {
 
 [Error Handling / Fallback]
 - If unsure, ask a specific clarifying question first.
-`) ?? PROMPT_SKELETON,
+`).trim()),
   systemPromptBackend: '',
   contextText: '',
   ctxFiles: [],
@@ -244,74 +175,261 @@ const DEFAULT_AGENT: AgentData = {
 
 const keyFor = (id: string) => `va:agent:${id}`;
 
-/* Voices for preview */
-const OPENAI_VOICES: { value: string; label: string; id: string }[] = [
-  { value: 'Alloy (American)', label: 'Alloy', id: 'alloy' },
-  { value: 'Verse (American)', label: 'Verse', id: 'verse' },
-  { value: 'Coral (British)',  label: 'Coral', id: 'coral' },
-  { value: 'Amber (Australian)',label: 'Amber', id: 'amber' },
-];
-
-/* ───────── storage helpers ───────── */
-const IS_BROWSER = typeof window !== 'undefined';
-const loadAgentData = (id: string): AgentData => {
-  try {
-    const raw = IS_BROWSER ? localStorage.getItem(keyFor(id)) : null;
-    if (raw) return { ...DEFAULT_AGENT, ...(JSON.parse(raw)||{}) };
-  } catch {}
-  return { ...DEFAULT_AGENT };
-};
-const saveAgentData = (id: string, data: AgentData) => {
-  try { if (IS_BROWSER) localStorage.setItem(keyFor(id), JSON.stringify(data)); } catch {}
-};
-
-/* ───────── backend stubs ───────── */
-async function apiSave(agentId: string, payload: AgentData){
-  const r = await fetch(`/api/voice/agent/${agentId}/save`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
-  }).catch(()=>null as any);
-  if (!r?.ok) throw new Error('Save failed');
-  return r.json();
-}
-async function apiPublish(agentId: string){
-  const r = await fetch(`/api/voice/agent/${agentId}/publish`, { method: 'POST' }).catch(()=>null as any);
-  if (!r?.ok) throw new Error('Publish failed');
-  return r.json();
-}
-
-/* ───────── option helpers ───────── */
-type Opt = { value: string; label: string; disabled?: boolean; note?: string; iconLeft?: React.ReactNode };
-function useOpenAIModels(){
-  const [opts] = useState<Opt[]>(
-    [
-      { value: 'gpt-5', label: 'GPT-5' },
-      { value: 'gpt-5-mini', label: 'GPT-5 Mini' },
-      { value: 'gpt-5-realtime', label: 'GPT-5 Realtime' },
-      { value: 'gpt-4.1', label: 'GPT-4.1' },
-      { value: 'gpt-4.1-mini', label: 'GPT-4.1 Mini' },
-      { value: 'gpt-4o', label: 'GPT-4o' },
-      { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
-      { value: 'o4', label: 'o4' },
-      { value: 'o4-mini', label: 'o4 Mini' },
-      { value: 'gpt-4o-realtime-preview', label: 'GPT-4o Realtime Preview' },
-      { value: 'gpt-4o-realtime-preview-mini', label: 'GPT-4o Realtime Preview Mini' },
-    ]
+/* ─────────── small UI atoms ─────────── */
+function OpenAIStamp({size=14}:{size?:number}) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 40 40" aria-hidden>
+      <path d="M37.532 16.37a8.9 8.9 0 00-.77-7.3 8.96 8.96 0 00-11.87-3.42A8.99 8.99 0 007.53 9.63a8.9 8.9 0 00.77 7.3 8.96 8.96 0 0011.87 3.42 8.99 8.99 0 0017.36-3.99z" fill="currentColor" opacity=".18"/>
+      <path d="M20.5 6.5l-8 4.6v9.3l8 4.6 8-4.6v-9.3l-8-4.6z" fill="currentColor" />
+    </svg>
   );
-  return { opts, loading:false };
+}
+function PhoneFilled(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" {...props} aria-hidden>
+      <path d="M6.62 10.79a15.053 15.053 0 006.59 6.59l2.2-2.2a1 1 0 011.03-.24c1.12.37 2.33.57 3.56.57a1 1 0 011 1v3.5a1 1 0 01-1 1C11.3 22 2 12.7 2 2.99a1 1 0 011-1H6.5a1 1 0 011 1c0 1.23.2 2.44.57 3.56a1 1 0 01-.24 1.03l-2.2 2.2z" fill="currentColor"/>
+    </svg>
+  );
+}
+const Toggle = ({checked,onChange}:{checked:boolean; onChange:(v:boolean)=>void}) => (
+  <button
+    onClick={()=>onChange(!checked)}
+    className="inline-flex items-center"
+    style={{
+      height:26, width:46, padding:'0 6px', borderRadius:999, justifyContent:'flex-start',
+      background: checked ? 'color-mix(in oklab, #59d9b3 18%, var(--input-bg))' : 'var(--input-bg)',
+      border:'1px solid var(--input-border)', boxShadow:'var(--input-shadow)'
+    }}
+    aria-pressed={checked}
+  >
+    <span
+      style={{
+        width:16, height:16, borderRadius:999,
+        background: checked ? CTA : 'rgba(255,255,255,.12)',
+        transform:`translateX(${checked?20:0}px)`, transition:'transform .18s cubic-bezier(.22,.61,.36,1)'
+      }}
+    />
+  </button>
+);
+
+/* ─────────── StyledSelect (with search, portal, close-on-scroll) ─────────── */
+type Opt = { value: string; label: string; disabled?: boolean; note?: string; iconLeft?: React.ReactNode };
+function StyledSelect({
+  value, onChange, options, placeholder, leftIcon, menuTop
+}:{
+  value: string; onChange: (v: string) => void;
+  options: Opt[]; placeholder?: string; leftIcon?: React.ReactNode; menuTop?: React.ReactNode;
+}) {
+  const wrapRef = useRef<HTMLDivElement|null>(null);
+  const btnRef = useRef<HTMLButtonElement|null>(null);
+  const menuRef = useRef<HTMLDivElement|null>(null);
+  const searchRef = useRef<HTMLInputElement|null>(null);
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [menuPos, setMenuPos] = useState<{left:number; top:number; width:number} | null>(null);
+
+  const current = options.find(o => o.value === value) || null;
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return q ? options.filter(o => o.label.toLowerCase().includes(q)) : options;
+  }, [options, query, value]);
+
+  const positionMenu = () => {
+    if (!btnRef.current) return;
+    const r = btnRef.current.getBoundingClientRect();
+    setMenuPos({ left: r.left, top: r.bottom + 8, width: r.width });
+  };
+
+  useLayoutEffect(() => { if (open) positionMenu(); }, [open]);
+
+  useEffect(() => {
+    if (!open || !IS_CLIENT) return;
+
+    const handleDocumentMouseDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (wrapRef.current?.contains(t)) return;
+      if (menuRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    const handleEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    const handleResize = () => positionMenu();
+    const handleScroll = () => setOpen(false);
+
+    window.addEventListener('mousedown', handleDocumentMouseDown);
+    window.addEventListener('keydown', handleEsc);
+    window.addEventListener('resize', handleResize);
+    window.addEventListener('scroll', handleScroll, true);
+    return () => {
+      window.removeEventListener('mousedown', handleDocumentMouseDown);
+      window.removeEventListener('keydown', handleEsc);
+      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('scroll', handleScroll, true);
+    };
+  }, [open]);
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={() => { setOpen(v=>!v); setTimeout(()=>searchRef.current?.focus(),0); }}
+        className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-[8px] text-sm outline-none transition"
+        style={{
+          height:'var(--control-h)',
+          background:'var(--vs-input-bg, #101314)',
+          border:'1px solid var(--vs-input-border, rgba(255,255,255,.14))',
+          color:'var(--text)'
+        }}
+      >
+        <span className="flex items-center gap-2 truncate">
+          {leftIcon}
+          <span className="truncate">{current ? current.label : (placeholder || '— Choose —')}</span>
+        </span>
+        <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)' }} />
+      </button>
+
+      {open && IS_CLIENT ? createPortal(
+        <div
+          ref={menuRef}
+          className="fixed z-[100020] p-2 va-portal"
+          style={{
+            left: (menuPos?.left ?? 0),
+            top: (menuPos?.top ?? 0),
+            width: (menuPos?.width ?? (btnRef.current?.getBoundingClientRect().width ?? 280)),
+            background:'var(--vs-menu-bg, #101314)',
+            border:'1px solid var(--vs-menu-border, rgba(255,255,255,.16))',
+            borderRadius:10,
+            boxShadow:'0 24px 64px rgba(0,0,0,.60), 0 8px 20px rgba(0,0,0,.45), 0 0 0 1px rgba(0,255,194,.10)'
+          }}
+        >
+          {menuTop ? <div className="mb-2">{menuTop}</div> : null}
+
+          <div
+            className="flex items-center gap-2 mb-2 px-2 py-1.5 rounded-[8px]"
+            style={{ background:'var(--vs-input-bg, #101314)', border:'1px solid var(--vs-input-border, rgba(255,255,255,.14))', color:'var(--text)' }}
+          >
+            <Search className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
+            <input
+              ref={searchRef}
+              value={query}
+              onChange={(e)=>setQuery(e.target.value)}
+              placeholder="Filter…"
+              className="w-full bg-transparent outline-none text-sm"
+              style={{ color:'var(--text)' }}
+            />
+          </div>
+
+          <div className="max-h-72 overflow-y-auto pr-1" style={{ scrollbarWidth:'thin' }}>
+            {filtered.map(o => (
+              <button
+                key={o.value}
+                disabled={!!o.disabled}
+                onClick={()=>{ if (o.disabled) return; onChange(o.value); setOpen(false); }}
+                className="w-full text-left text-sm px-2.5 py-2 rounded-[8px] transition grid grid-cols-[18px_1fr_auto] items-center gap-2 disabled:opacity-60"
+                style={{
+                  color: o.disabled ? 'var(--text-muted)' : 'var(--text)',
+                  background:'transparent',
+                  border:'1px solid transparent',
+                  cursor:o.disabled?'not-allowed':'pointer',
+                }}
+                onMouseEnter={(e)=>{ if (o.disabled) return; const el=e.currentTarget as HTMLButtonElement; el.style.background = 'rgba(0,255,194,0.08)'; el.style.border = '1px solid rgba(0,255,194,0.25)'; }}
+                onMouseLeave={(e)=>{ const el=e.currentTarget as HTMLButtonElement; el.style.background = 'transparent'; el.style.border = '1px solid transparent'; }}
+              >
+                {o.disabled ? (
+                  <Lock className="w-3.5 h-3.5" />
+                ) : (
+                  <span className="inline-flex items-center justify-center w-3.5 h-3.5">
+                    {o.iconLeft || <Check className="w-3.5 h-3.5" style={{ opacity: o.value===value ? 1 : 0 }} />}
+                  </span>
+                )}
+                <span className="truncate">{o.label}</span>
+                <span />
+              </button>
+            ))}
+            {filtered.length===0 && (
+              <div className="px-3 py-6 text-sm" style={{ color:'var(--text-muted)' }}>No matches.</div>
+            )}
+          </div>
+        </div>,
+        document.body
+      ) : null}
+    </div>
+  );
 }
 
-/* ───────── File helpers (bundle-safe) ───────── */
+/* ─────────── Character-level diff (LCS) ─────────── */
+function diffCharsLCS(a: string, b: string){
+  const A = Array.from(a || '');
+  const B = Array.from(b || '');
+  const n = A.length, m = B.length;
+  const dp = Array.from({length:n+1},()=>new Array<number>(m+1).fill(0));
+  for (let i=1;i<=n;i++){
+    for (let j=1;j<=m;j++){
+      dp[i][j] = A[i-1]===B[j-1] ? dp[i-1][j-1]+1 : Math.max(dp[i-1][j], dp[i][j-1]);
+    }
+  }
+  const ops: Array<{t:'same'|'add'|'rem', ch:string}> = [];
+  let i=n, j=m;
+  while (i>0 && j>0){
+    if (A[i-1]===B[j-1]) { ops.push({t:'same', ch:A[i-1]}); i--; j--; }
+    else if (dp[i-1][j] >= dp[i][j-1]) { ops.push({t:'rem', ch:A[i-1]}); i--; }
+    else { ops.push({t:'add', ch:B[j-1]}); j--; }
+  }
+  while (i>0){ ops.push({t:'rem', ch:A[i-1]}); i--; }
+  while (j>0){ ops.push({t:'add', ch:B[j-1]}); j--; }
+  ops.reverse();
+  return ops;
+}
+
+function PromptDiffTyping({
+  base, next, onAccept, onDecline
+}:{ base:string; next:string; onAccept:()=>void; onDecline:()=>void }){
+  const ops = diffCharsLCS(base, next);
+  return (
+    <div
+      className="rounded-[8px] px-3 py-[10px]"
+      style={{ minHeight: 320, background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)', color:'var(--text)' }}
+    >
+      <pre style={{ whiteSpace:'pre-wrap', wordBreak:'break-word', lineHeight:'1.55', margin:0 }}>
+        {ops.map((o, i) => {
+          if (o.t==='same') return <span key={i}>{o.ch}</span>; // same = white
+          if (o.t==='add')  return <span key={i} style={{ background:'rgba(16,185,129,.14)', color:'#10b981' }}>{o.ch}</span>;
+          return <span key={i} style={{ background:'rgba(239,68,68,.18)', color:'#ef4444', textDecoration:'line-through' }}>{o.ch}</span>;
+        })}
+      </pre>
+
+      <div className="mt-3 flex gap-2">
+        <button className="h-9 px-3 rounded-[8px] font-semibold" style={{ background:'#10b981', color:'#ffffff' }} onClick={onAccept}>
+          Accept
+        </button>
+        <button className="h-9 px-3 rounded-[8px] font-semibold" style={{ background:'#ef4444', color:'#ffffff' }} onClick={onDecline}>
+          Decline
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ─────────── Files: read and summarize ─────────── */
 async function readFileAsText(f: File): Promise<string> {
   const name = f.name.toLowerCase();
 
+  // quick heuristic: .docx/.docs or any PK zip -> try parsing word/document.xml via CDN JSZip
   const looksZip = async () => {
     const buf = new Uint8Array(await f.slice(0,4).arrayBuffer());
-    return buf[0]===0x50 && buf[1]===0x4b; // PK..
+    return buf[0]===0x50 && buf[1]===0x4b;
   };
 
   if (name.endsWith('.docx') || name.endsWith('.docs') || await looksZip()) {
     try {
-      const JSZip = await loadJSZip();
+      // @ts-ignore
+      const JSZipModule = await import(
+        /* webpackIgnore: true */
+        'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js'
+      );
+      const JSZip = (JSZipModule?.default || (window as any).JSZip);
+      if (!JSZip) throw new Error('JSZip not loaded');
+
       const buf = await f.arrayBuffer();
       const zip = await JSZip.loadAsync(buf);
       const docXml = await zip.file('word/document.xml')?.async('string');
@@ -323,9 +441,7 @@ async function readFileAsText(f: File): Promise<string> {
         .replace(/<(.|\n)*?>/g,'')
         .replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>');
       return text.trim();
-    } catch {
-      return '';
-    }
+    } catch { return ''; }
   }
 
   if (name.endsWith('.doc')) {
@@ -347,78 +463,38 @@ async function readFileAsText(f: File): Promise<string> {
   });
 }
 
-/* ───────── Fallback: sectioned prompt from description ───────── */
-function makeFrontendPromptFromDescription(desc: string, baseName: string) {
-  const raw = shapePromptForScheduling(desc, { name: baseName, personaName: baseName, org: 'Your Business' }) || '';
-  const s = sanitizePrompt(raw);
+/** very small local “summary”: keep headings, compress blank lines, take the most informative lines first */
+function summarizeText(s: string, maxChars = 1200): string {
+  const cleaned = (s || '')
+    .replace(/\r/g,'')
+    .split('\n')
+    .map(l => l.trim())
+    .filter(Boolean)
+    .slice(0, 1200) // cap lines for perf
+    .join('\n');
 
-  const sections: Record<string, string> = {
-    'Identity': '',
-    'Style': '',
-    'Response Guidelines': '',
-    'Task & Goals': '',
-    'Error Handling / Fallback': '',
-  };
-
-  const lines = s.split('\n');
-  let current = '';
-  let buf: string[] = [];
-  const commit = () => {
-    if (!current) return;
-    const joined = buf.join('\n').trim();
-    if (joined) sections[current] = joined;
-    buf = [];
-  };
-
-  for (const line of lines) {
-    const m = line.match(/^\[(.+?)\]\s*$/);
-    if (m) { commit(); current = m[1]; }
-    else { buf.push(line); }
-  }
-  commit();
-
-  return [
-    '[Identity]',
-    sections['Identity'] || `- You are ${baseName}, a helpful AI assistant for this business.`,
-    '',
-    '[Style]',
-    sections['Style'] || '- Clear, concise, friendly. Use plain language and short sentences.',
-    '',
-    '[Response Guidelines]',
-    sections['Response Guidelines'] || '- Ask for missing info. Confirm key details back to the user. Provide one call-to-action.',
-    '',
-    '[Task & Goals]',
-    sections['Task & Goals'] || '- Help users complete their next best action (book, purchase, or escalate).',
-    '',
-    '[Error Handling / Fallback]',
-    sections['Error Handling / Fallback'] || '- If unsure, ask a specific clarifying question before proceeding.',
-  ].join('\n').trim();
-}
-
-/* ───────── Page ───────── */
-export default function VoiceAgentSection() {
-  /* Theme */
-  const [theme, setTheme] = useState<'light'|'dark'>(() => {
-    if (!IS_CLIENT) return 'dark';
-    try {
-      const keys = ['account.theme', 'app.theme', 'theme'];
-      for (const k of keys) {
-        const v = localStorage.getItem(k);
-        if (v === 'light' || v === 'dark') return v;
-      }
-      const ds = document.documentElement.dataset.theme;
-      if (ds === 'light' || ds === 'dark') return ds;
-    } catch {}
-    return 'dark';
+  // prefer lines that look like headings or long informative sentences
+  const lines = cleaned.split('\n');
+  const scored = lines.map(l => {
+    let score = 0;
+    if (/^#+\s/.test(l) || /^[A-Z][A-Za-z0-9\s\-:]{2,}$/.test(l)) score += 3;
+    if (/[.:;!?]$/.test(l)) score += 1;
+    score += Math.min(3, Math.floor(l.length / 50));
+    return { l, score };
   });
 
-  useEffect(() => {
-    if (!IS_CLIENT) return;
-    const apply = (t:'light'|'dark') => { document.documentElement.dataset.theme = t; setTheme(t); };
-    apply(theme);
-  }, [theme]);
+  const top = scored.sort((a,b)=>b.score-a.score).slice(0, 40).map(x=>x.l);
+  const uniq: string[] = [];
+  for (const t of top) { if (uniq.join('\n').length + t.length + 1 < maxChars) uniq.push(t); }
 
-  /* sidebar width sync */
+  // simple bullets
+  const bullets = uniq.map(t => (t.length > 3 && !t.startsWith('- ') ? `- ${t}` : t));
+  return bullets.join('\n');
+}
+
+/* ─────────── Page ─────────── */
+export default function VoiceAgentSection() {
+  // align sidebar width
   useEffect(() => {
     if (!IS_CLIENT) return;
     const candidates = ['[data-app-sidebar]','aside[aria-label="Sidebar"]','aside[class*="sidebar"]','#sidebar'];
@@ -434,191 +510,91 @@ export default function VoiceAgentSection() {
     return () => ro.disconnect();
   }, []);
 
+  const [data, setData] = useState<AgentData>(() => DEFAULT_AGENT);
   const [activeId, setActiveId] = useState<string>(() => {
     try { return IS_CLIENT ? localStorage.getItem(ACTIVE_KEY) || '' : ''; } catch { return ''; }
   });
-  const [data, setData] = useState<AgentData>(() => (activeId ? loadAgentData(activeId) : DEFAULT_AGENT));
 
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [toast, setToast] = useState<string>('');
   const [toastKind, setToastKind] = useState<'info'|'error'>('info');
 
-  // KEYS/PHONES
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [phoneNumbers, setPhoneNumbers] = useState<PhoneNum[]>([]);
   const [showCall, setShowCall] = useState(false);
 
-  // Generate modal
+  // Generate / diff preview
   const [showGenerate, setShowGenerate] = useState(false);
-
-  // Diff state (preview typing BEFORE accept/decline)
-  const [diffMode, setDiffMode] = useState(false);
-  const [basePrompt, setBasePrompt] = useState('');
-  const [candidatePrompt, setCandidatePrompt] = useState('');
-  const [previewTyped, setPreviewTyped] = useState('');
+  const [composerText, setComposerText] = useState('');
   const [isTypingPreview, setIsTypingPreview] = useState(false);
-  const pendingBackendRef = useRef<string>('');
+  const [diffCandidate, setDiffCandidate] = useState<string>('');
+  const basePromptRef = useRef<string>('');
+  const rafRef = useRef<number | null>(null);
 
-  // Website import overlay
-  const [showImport, setShowImport] = useState(false);
-
-  // models list
-  const { opts: openaiModels, loading: loadingModels } = useOpenAIModels();
-
-  // ===== Voice preview state =====
-  const audioRef = useRef<HTMLAudioElement|null>(null);
-  const [audioURL, setAudioURL] = useState<string>('');
-  const [audioLoading, setAudioLoading] = useState<boolean>(false);
-  const [audioPlaying, setAudioPlaying] = useState<boolean>(false);
-  const [audioProgress, setAudioProgress] = useState<number>(0);
-  const previewAbortRef = useRef<AbortController | null>(null);
-
+  // Voice preview (using browser speech)
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   useEffect(() => {
-    const el = audioRef.current;
-    if (!el) return;
-    const onTime = () => {
-      if (!el.duration || Number.isNaN(el.duration)) return setAudioProgress(0);
-      setAudioProgress((el.currentTime / el.duration) * 100);
-    };
-    const onEnd = () => { setAudioPlaying(false); setAudioProgress(0); };
-    el.addEventListener('timeupdate', onTime);
-    el.addEventListener('ended', onEnd);
-    return () => {
-      el.removeEventListener('timeupdate', onTime);
-      el.removeEventListener('ended', onEnd);
-    };
+    if (!IS_CLIENT || !('speechSynthesis' in window)) return;
+    const load = () => setVoices(window.speechSynthesis.getVoices());
+    load();
+    (window.speechSynthesis as any).onvoiceschanged = load;
+    return () => { (window.speechSynthesis as any).onvoiceschanged = null; };
   }, []);
-
-  async function fetchVoicePreview(text: string) {
-    const item = OPENAI_VOICES.find(v => v.value === data.voiceName);
-    const providerVoiceId = item?.id || 'alloy';
-    try {
-      setAudioLoading(true);
-      previewAbortRef.current?.abort();
-      const ctrl = new AbortController();
-      previewAbortRef.current = ctrl;
-
-      const r = await fetch(PREVIEW_TTS_ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          provider: data.ttsProvider,
-          voiceName: providerVoiceId,
-          text: text || `This is ${data.voiceName || 'the selected'} voice preview.`
-        }),
-        signal: ctrl.signal
-      });
-
-      if (!r.ok) throw new Error('Preview route not ready');
-      const blob = await r.blob();
-      const url = URL.createObjectURL(blob);
-      setAudioURL(prev => { if (prev) URL.revokeObjectURL(prev); return url; });
-    } catch {
-      if ('speechSynthesis' in window) {
-        const u = new SpeechSynthesisUtterance(text || `This is ${data.voiceName || 'the selected'} voice preview.`);
-        const voices = window.speechSynthesis.getVoices();
-        const en = voices.find(v => v.lang?.startsWith('en'));
-        if (en) u.voice = en;
-        window.speechSynthesis.cancel();
-        window.speechSynthesis.speak(u);
-      }
-    } finally {
-      setAudioLoading(false);
-    }
+  function speakPreview(line?: string){
+    if (!IS_CLIENT || !('speechSynthesis' in window)) return;
+    const u = new SpeechSynthesisUtterance(line || `Hi, I'm ${data.name || 'your assistant'}.`);
+    const byName = voices.find(v => v.name.toLowerCase().includes((data.voiceName || '').split(' ')[0]?.toLowerCase() || ''));
+    const en = voices.find(v => v.lang?.startsWith('en'));
+    if (byName) u.voice = byName; else if (en) u.voice = en;
+    window.speechSynthesis.cancel(); window.speechSynthesis.speak(u);
   }
+  const stopPreview = () => { if (IS_CLIENT && 'speechSynthesis' in window) window.speechSynthesis.cancel(); };
 
-  async function onClickPreview() {
-    if (audioPlaying) {
-      audioRef.current?.pause();
-      setAudioPlaying(false);
-      return;
-    }
-    if (!audioURL) {
-      await fetchVoicePreview(`Hi, I'm ${data.name || 'your assistant'}.`);
-    }
-    requestAnimationFrame(() => {
-      const el = audioRef.current;
-      if (!el) return;
-      el.currentTime = 0;
-      el.play().then(()=> setAudioPlaying(true)).catch(()=>{});
-    });
-  }
-
-  function stopPreview() {
-    try {
-      audioRef.current?.pause();
-      if (audioRef.current) audioRef.current.currentTime = 0;
-      setAudioPlaying(false);
-      setAudioProgress(0);
-    } catch {}
-    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
-  }
-
-  /* listen for active rail id */
+  // Active id listeners
   useEffect(() => {
     if (!IS_CLIENT) return;
     const handler = (e: Event) => setActiveId((e as CustomEvent<string>).detail);
     window.addEventListener('assistant:active', handler as EventListener);
     return () => window.removeEventListener('assistant:active', handler as EventListener);
   }, []);
-
   useEffect(() => {
     if (!activeId) return;
-    setData(loadAgentData(activeId));
+    try { const raw = localStorage.getItem(keyFor(activeId)); if (raw) setData(JSON.parse(raw)); } catch {}
     try { if (IS_CLIENT) localStorage.setItem(ACTIVE_KEY, activeId); } catch {}
   }, [activeId]);
+  useEffect(() => { try { if (IS_CLIENT && activeId) localStorage.setItem(keyFor(activeId), JSON.stringify(data)); } catch {} }, [activeId, data]);
 
-  useEffect(() => { if (activeId) saveAgentData(activeId, data); }, [activeId, data]);
-
-  // ===== API KEYS =====
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        const ss = await scopedStorage();
-        await ss.ensureOwnerGuard();
-
-        const v1 = await ss.getJSON<ApiKey[]>(LS_KEYS, []);
-        const legacy = await ss.getJSON<ApiKey[]>('apiKeys', []);
-        const merged = Array.isArray(v1) && v1.length ? v1 : Array.isArray(legacy) ? legacy : [];
-
-        const cleaned = merged
-          .filter(Boolean)
-          .map((k: any) => ({ id: String(k?.id || ''), name: String(k?.name || ''), key: String(k?.key || '') }))
-          .filter(k => k.id && k.name);
-
-        if (!mounted) return;
-        setApiKeys(cleaned);
-
-        const globalSelected = await ss.getJSON<string>(LS_SELECTED, '');
-        const chosen =
-          (data.apiKeyId && cleaned.some(k => k.id === data.apiKeyId)) ? data.apiKeyId! :
-          (globalSelected && cleaned.some(k => k.id === globalSelected)) ? globalSelected :
-          (cleaned[0]?.id || '');
-
-        if (chosen !== (data.apiKeyId || '')) {
-          setData(prev => ({ ...prev, apiKeyId: chosen }));
-        }
-        if (chosen) await ss.setJSON(LS_SELECTED, chosen);
-      } catch {
-        if (mounted) setApiKeys([]);
-      }
-    })();
-    return () => { mounted = false; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // ===== PHONE NUMBERS =====
+  // load keys & phones
   useEffect(() => {
     let mounted = true;
     (async () => {
       try {
         const store = await scopedStorage().catch(() => null);
         if (!mounted) return;
-        if (!store) { setPhoneNumbers([]); return; }
+        if (!store) { setApiKeys([]); setPhoneNumbers([]); return; }
 
         store.ensureOwnerGuard?.().catch(() => {});
+
+        const v1 = await store.getJSON<ApiKey[]>('apiKeys.v1', []).catch(() => []);
+        const legacy = await store.getJSON<ApiKey[]>('apiKeys', []).catch(() => []);
+        const merged = Array.isArray(v1) && v1.length ? v1 : Array.isArray(legacy) ? legacy : [];
+        const cleaned = merged
+          .filter(Boolean)
+          .map((k: any) => ({ id: String(k?.id || ''), name: String(k?.name || ''), key: String(k?.key || '') }))
+          .filter(k => k.id && k.name);
+        setApiKeys(cleaned);
+
+        const globalSelected = await store.getJSON<string>('apiKeys.selectedId', '').catch(() => '');
+        const chosenKeyId =
+          (data.apiKeyId && cleaned.some(k => k.id === data.apiKeyId)) ? data.apiKeyId! :
+          (globalSelected && cleaned.some(k => k.id === globalSelected)) ? globalSelected :
+          (cleaned[0]?.id || '');
+        if (chosenKeyId && chosenKeyId !== data.apiKeyId) {
+          setData(prev => ({ ...prev, apiKeyId: chosenKeyId }));
+          await store.setJSON('apiKeys.selectedId', chosenKeyId).catch(() => {});
+        }
+
         const phoneV1 = await store.getJSON<PhoneNum[]>(PHONE_LIST_KEY_V1, []).catch(() => []);
         const phoneLegacy = await store.getJSON<PhoneNum[]>(PHONE_LIST_KEY_LEG, []).catch(() => []);
         const phonesMerged = Array.isArray(phoneV1) && phoneV1.length ? phoneV1
@@ -627,7 +603,6 @@ export default function VoiceAgentSection() {
           .filter(Boolean)
           .map((p: any) => ({ id: String(p?.id || ''), name: String(p?.name || ''), number: String(p?.number || p?.phone || '') }))
           .filter(p => p.id && (p.number || p.name));
-
         setPhoneNumbers(phoneCleaned);
 
         const selPhone = await store.getJSON<string>(PHONE_SELECTED_ID, '').catch(() => '');
@@ -635,78 +610,101 @@ export default function VoiceAgentSection() {
           (data.phoneId && phoneCleaned.some(p => p.id === data.phoneId)) ? data.phoneId! :
           (selPhone && phoneCleaned.some(p => p.id === selPhone)) ? selPhone :
           (phoneCleaned[0]?.id || '');
-
         if (chosenPhoneId && chosenPhoneId !== data.phoneId) {
           setData(prev => ({ ...prev, phoneId: chosenPhoneId }));
           await store.setJSON(PHONE_SELECTED_ID, chosenPhoneId).catch(() => {});
         }
       } catch {
         if (!mounted) return;
-        setPhoneNumbers([]);
+        setApiKeys([]); setPhoneNumbers([]);
       }
     })();
     return () => { mounted = false; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function setField<K extends keyof AgentData>(k: K) {
     return (v: AgentData[K]) => setData(prev => ({ ...prev, [k]: v }));
   }
 
-  // Keep backend prompt mirrored (for manual edits)
+  // keep backend prompt mirrored as user edits
   useEffect(() => {
-    const raw = sanitizePrompt(data.systemPrompt || '');
-    if (!raw) return;
+    if (!data.systemPrompt) return;
     try {
-      const isFull = looksLikeFullPrompt ? looksLikeFullPrompt(raw) : true;
-      if (isFull && compilePrompt) {
-        const compiled = compilePrompt({ basePrompt: raw, userText: '' });
-        if (compiled?.backendString && compiled.backendString !== data.systemPromptBackend) {
-          setData(p => ({ ...p, systemPromptBackend: compiled.backendString }));
-        }
-      } else if (raw !== data.systemPromptBackend) {
-        setData(p => ({ ...p, systemPromptBackend: raw }));
+      const compiled = compilePrompt({ basePrompt: data.systemPrompt, userText: '' });
+      if (compiled?.backendString && compiled.backendString !== data.systemPromptBackend) {
+        setData(p => ({ ...p, systemPromptBackend: compiled.backendString }));
       }
-    } catch {
-      if (raw !== data.systemPromptBackend) {
-        setData(p => ({ ...p, systemPromptBackend: raw }));
-      }
-    }
-  }, [data.systemPrompt, setData, data.systemPromptBackend]);
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.systemPrompt]);
 
   async function doSave(){
     if (!activeId) { setToastKind('error'); setToast('Select or create an agent'); return; }
     setData(prev => ({ ...prev, firstMsg: (prev.firstMsgs?.[0] || prev.firstMsg || '') }));
     setSaving(true); setToast('');
     try {
-      await apiSave(activeId, {
-        ...data,
-        systemPrompt: sanitizePrompt(data.systemPrompt),
-        systemPromptBackend: sanitizePrompt(data.systemPromptBackend||''),
-        firstMsg: (data.firstMsgs?.[0] || data.firstMsg || '')
+      const r = await fetch(`/api/voice/agent/${activeId}/save`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...data, firstMsg: (data.firstMsgs?.[0] || data.firstMsg || '') })
       });
+      if (!r.ok) throw new Error();
       setToastKind('info'); setToast('Saved');
     } catch {
       setToastKind('error'); setToast('Save failed');
     } finally { setSaving(false); setTimeout(()=>setToast(''), 1400); }
   }
-
   async function doPublish(){
     if (!activeId) { setToastKind('error'); setToast('Select or create an agent'); return; }
     setPublishing(true); setToast('');
-    try { await apiPublish(activeId); setToastKind('info'); setToast('Published'); }
-    catch { setToastKind('error'); setToast('Publish failed'); }
-    finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
+    try {
+      const r = await fetch(`/api/voice/agent/${activeId}/publish`, { method:'POST' });
+      if (!r.ok) throw new Error();
+      setToastKind('info'); setToast('Published');
+    } catch {
+      setToastKind('error'); setToast('Publish failed');
+    } finally { setPublishing(false); setTimeout(()=>setToast(''), 1400); }
   }
 
-  /* files */
+  /* ===== Generate / Diff Preview (typing) ===== */
+  function startTypingPreview(targetText: string) {
+    basePromptRef.current = data.systemPrompt || DEFAULT_PROMPT_RT;
+    setIsTypingPreview(true);
+    setDiffCandidate('');
+    if (rafRef.current) cancelAnimationFrame(rafRef.current as any);
+    let i = 0;
+    const step = () => {
+      // smooth typing effect (preview only)
+      i += Math.max(1, Math.round(targetText.length / 140));
+      const slice = targetText.slice(0, i);
+      setDiffCandidate(slice);
+      if (i < targetText.length) rafRef.current = requestAnimationFrame(step);
+    };
+    rafRef.current = requestAnimationFrame(step);
+  }
+  const acceptPreview = () => {
+    // 🚫 No typing effect after Accept — commit instantly
+    const chosen = diffCandidate || data.systemPrompt;
+    setIsTypingPreview(false);
+    setDiffCandidate('');
+    setField('systemPrompt')(chosen);
+    try {
+      const compiled = compilePrompt({ basePrompt: chosen, userText: '' });
+      setField('systemPromptBackend')(compiled.backendString);
+    } catch {}
+  };
+  const declinePreview = () => {
+    setIsTypingPreview(false);
+    setDiffCandidate('');
+  };
+
+  /* ===== Files ===== */
   const fileInputRef = useRef<HTMLInputElement|null>(null);
   const rebuildContextText = (files:{name:string;text:string}[]) => {
     const merged = files.map(f => `# File: ${f.name}\n${(f.text||'').trim()}`).join('\n\n');
     setField('ctxFiles')(files);
     setField('contextText')(merged.trim());
   };
-
   const onPickFiles = async (files: File[]) => {
     if (!files?.length) return;
     const out: {name:string;text:string}[] = [...(data.ctxFiles||[])];
@@ -719,85 +717,76 @@ export default function VoiceAgentSection() {
     setToastKind('info'); setToast('File(s) added'); setTimeout(()=>setToast(''), 1200);
   };
 
-  // ── Diff helpers ──
-  const startDiff = async (nextText: string, backendForNext?: string) => {
-    const current = sanitizePrompt((data.systemPromptBackend || data.systemPrompt || DEFAULT_PROMPT_RT).trim());
-    const next = sanitizePrompt(nextText);
+  // Build an appended prompt with [Info] (summaries) + [Context] (full)
+  function buildPromptWithFiles(basePrompt: string, ctxFiles: {name:string;text:string}[], ctxMerged: string) {
+    const infoBlocks = ctxFiles.map(f => {
+      const summary = summarizeText(f.text || '');
+      return `## ${f.name}\n${summary || '- (no obvious summary)'}\n`;
+    }).join('\n');
 
-    setBasePrompt(current);
-    setCandidatePrompt(next);
-    pendingBackendRef.current = backendForNext ? sanitizePrompt(backendForNext) : next;
+    const base = (basePrompt || DEFAULT_PROMPT_RT).trim();
+    const info = infoBlocks.trim();
+    const ctx  = (ctxMerged || '').trim();
 
-    setDiffMode(true);
-    setPreviewTyped('');
-    setIsTypingPreview(true);
+    const appended = [
+      base,
+      info ? '\n[Info]\n' + info : '',
+      ctx  ? '\n[Context]\n' + ctx  : ''
+    ].join('').trim();
 
-    await typeIntoPrompt(next, (chunk) => setPreviewTyped(chunk), { cps: 120 });
-    setIsTypingPreview(false); // buttons show after typing finishes
-  };
+    return appended;
+  }
 
-  const acceptDiff = async () => {
-    const chosenFront = candidatePrompt;
-    const chosenBack  = pendingBackendRef.current || candidatePrompt;
-
-    // exit preview
-    setDiffMode(false);
-    setBasePrompt('');
-    setCandidatePrompt('');
-    pendingBackendRef.current = '';
-    setPreviewTyped('');
-    setIsTypingPreview(false);
-
-    // type accepted into the editor (no highlights afterwards)
-    await typeIntoPrompt(chosenFront, (chunk) => {
-      setData(prev => ({ ...prev, systemPrompt: chunk, systemPromptBackend: chosenBack }));
-    }, { cps: 120 });
-  };
-
-  const declineDiff = () => {
-    setDiffMode(false);
-    setBasePrompt('');
-    setCandidatePrompt('');
-    pendingBackendRef.current = '';
-    setPreviewTyped('');
-    setIsTypingPreview(false);
-  };
-
-  // Import files → propose appended prompt (engine not needed; just append context)
   const importFilesIntoPrompt = async () => {
-    const ctx  = sanitizePrompt((data.contextText || '').trim());
-    const base = sanitizePrompt((data.systemPromptBackend || data.systemPrompt || DEFAULT_PROMPT_RT).trim());
-    const next = ctx ? `${base}\n\n[Context]\n${ctx}`.trim() : base;
-    await startDiff(next, next);
-  };
-
-  /* Generate → prompt-engine: sectioned frontend + machine backend */
-  const onGenerateToDiff = async (userDesc:string) => {
+    const base = (data.systemPromptBackend || data.systemPrompt || DEFAULT_PROMPT_RT).trim();
+    const next = buildPromptWithFiles(base, data.ctxFiles || [], data.contextText || '');
+    startTypingPreview(next); // typing only in preview
+    // Precompile backend for fast commit
     try {
-      const base = sanitizePrompt((data.systemPrompt || DEFAULT_PROMPT_RT).trim());
-      const compiled = compilePrompt({ basePrompt: base, userText: userDesc });
-
-      const front = nonEmpty(compiled.frontendText) ? compiled.frontendText : base;
-      const back  = nonEmpty(compiled.backendString) ? compiled.backendString : front;
-
-      await startDiff(front, back);
-    } catch {
-      const front = makeFrontendPromptFromDescription(userDesc, data.name || 'Assistant');
-      await startDiff(front, front);
-    }
+      const compiled = compilePrompt({ basePrompt: next, userText: '' });
+      setField('systemPromptBackend')(compiled.backendString);
+    } catch {}
   };
 
-  /* call model */
-  const callModel = useMemo(() => {
-    const m = (data.model || '').toLowerCase();
-    if (m.includes('realtime')) return data.model;
-    return 'gpt-4o-realtime-preview';
-  }, [data.model]);
-
+  /* ===== Models list (simple static with fallback) ===== */
+  const selectedKey = apiKeys.find(k => k.id === data.apiKeyId)?.key || '';
+  const openaiModels: Opt[] = [
+    { value: 'gpt-5', label: 'GPT-5' },
+    { value: 'gpt-5-mini', label: 'GPT-5 Mini' },
+    { value: 'gpt-4.1', label: 'GPT-4.1' },
+    { value: 'gpt-4.1-mini', label: 'GPT-4.1 Mini' },
+    { value: 'gpt-4o', label: 'GPT-4o' },
+    { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
+    { value: 'o4', label: 'o4' },
+    { value: 'o4-mini', label: 'o4 Mini' },
+    { value: 'gpt-4o-realtime-preview', label: 'GPT-4o Realtime Preview' },
+    { value: 'gpt-4o-realtime-preview-mini', label: 'GPT-4o Realtime Preview Mini' },
+  ];
   const selectedModelLabel = useMemo(() => {
     const found = openaiModels.find(o => o.value === data.model);
     return found?.label || data.model || '—';
   }, [openaiModels, data.model]);
+
+  /* ===== UI ===== */
+  const providerOpts: Opt[] = [
+    { value: 'openai',     label: 'OpenAI',    iconLeft: <OpenAIStamp size={14} /> },
+    { value: 'anthropic',  label: 'Anthropic — coming soon', disabled: true },
+    { value: 'google',     label: 'Google — coming soon',    disabled: true },
+  ];
+  const ttsProviders: Opt[] = [
+    { value: 'openai',     label: 'OpenAI', iconLeft: <OpenAIStamp size={14} /> },
+    { value: 'elevenlabs', label: 'ElevenLabs — coming soon', disabled: true },
+    { value: 'google-tts', label: 'Google TTS — coming soon', disabled: true },
+  ];
+  const asrProviders: Opt[] = [
+    { value: 'deepgram',   label: 'Deepgram' },
+    { value: 'whisper',    label: 'Whisper — coming soon', disabled: true },
+    { value: 'assemblyai', label: 'AssemblyAI — coming soon', disabled: true },
+  ];
+  const asrModelsFor = (asr: string): Opt[] =>
+    asr === 'deepgram'
+      ? [{ value: 'Nova 2', label: 'Nova 2' }, { value: 'Nova', label: 'Nova' }]
+      : [{ value: 'coming', label: 'Models coming soon', disabled: true }];
 
   const [justAddedIndex, setJustAddedIndex] = useState<number | null>(null);
   const addFirstMessage = () => {
@@ -806,50 +795,42 @@ export default function VoiceAgentSection() {
     next.push('');
     setField('firstMsgs')(next);
     setJustAddedIndex(next.length - 1);
-    setTimeout(()=>setJustAddedIndex(null), 200);
+    setTimeout(()=>setJustAddedIndex(null), 260);
   };
 
-  const langToHint = (lang: AgentData['language']): 'en'|'nl'|'de'|'es'|'ar' => {
-    switch (lang) { case 'Dutch': return 'nl'; case 'German': return 'de'; case 'Spanish': return 'es'; case 'Arabic': return 'ar'; default: return 'en'; }
-  };
-
-  // Greeting logic
-  const greetingJoined = useMemo(() => {
-    if (data.firstMode !== 'Assistant speaks first') return '';
-    const list = (data.greetPick==='random'
-      ? [...(data.firstMsgs||[])].filter(Boolean).sort(()=>Math.random()-0.5)
-      : (data.firstMsgs||[]).filter(Boolean)
-    );
-    let s = list.join('\n').trim();
-    if (!s) s = 'Hello! How can I help you today?';
-    return s;
-  }, [data.greetPick, data.firstMsgs, data.firstMode]);
-
-  const hasApiKey = !!(data.apiKeyId && apiKeys.some(k=>k.id===data.apiKeyId && k.key));
-  const selectedKey = useMemo(
-    () => apiKeys.find(k => k.id === data.apiKeyId)?.key || '',
-    [apiKeys, data.apiKeyId]
-  );
+  const callModel = useMemo(() => {
+    const m = (data.model || '').toLowerCase();
+    if (m.includes('realtime')) return data.model;
+    return 'gpt-4o-realtime-preview';
+  }, [data.model]);
 
   return (
-    <section className="va-root">
-      <Tokens theme={theme} />
+    <section className="va-scope" style={{ background:'var(--bg)', color:'var(--text)' }}>
+      <Tokens />
 
       <div className="grid w-full" style={{ gridTemplateColumns: '260px 1fr' }}>
-        <div className="sticky top-0 h-screen" style={{ borderRight:'1px solid var(--border-weak)' }}>
+        <div className="sticky top-0 h-screen" style={{ borderRight:'1px solid rgba(255,255,255,.06)' }}>
           <RailBoundary><AssistantRail /></RailBoundary>
         </div>
 
-        <div className="px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w-[1160px]" style={{ fontSize:'14px', lineHeight:1.45, color:'var(--text)' }}>
+        <div className="px-3 md:px-5 lg:px-6 py-5 mx-auto w-full max-w-[1160px]" style={{ fontSize:'var(--fz-body)', lineHeight:'var(--lh-body)' }}>
+          {/* Top actions */}
           <div className="mb-4 flex flex-wrap items-center justify-end gap-3">
-            <button onClick={doSave} disabled={saving}
-              className="inline-flex items-center gap-2 rounded-[8px] px-4 text-sm"
-              style={{ height:'40px', background:'var(--panel-bg)', border:'1px solid var(--border-weak)' }}>
+            <button
+              onClick={doSave}
+              disabled={saving}
+              className="inline-flex items-center gap-2 rounded-[8px] px-4 text-sm transition hover:-translate-y-[1px] disabled:opacity-60"
+              style={{ height:'var(--control-h)', background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)', color:'var(--text)' }}
+            >
               {saving ? 'Saving…' : 'Save'}
             </button>
-            <button onClick={doPublish} disabled={publishing}
-              className="inline-flex items-center gap-2 rounded-[8px] px-4 text-sm"
-              style={{ height:'40px', background:'var(--panel-bg)', border:'1px solid var(--border-weak)' }}>
+
+            <button
+              onClick={doPublish}
+              disabled={publishing}
+              className="inline-flex items-center gap-2 rounded-[8px] px-4 text-sm transition hover:-translate-y-[1px] disabled:opacity-60"
+              style={{ height:'var(--control-h)', background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)', color:'var(--text)' }}
+            >
               <Rocket className="w-4 h-4" /> {publishing ? 'Publishing…' : 'Publish'}
             </button>
 
@@ -859,36 +840,57 @@ export default function VoiceAgentSection() {
 
             <button
               onClick={()=>{
-                if (!hasApiKey) {
-                  setToastKind('error'); setToast('Add your own OpenAI API key in API Keys.');
-                  setTimeout(()=>setToast(''), 2200);
-                  return;
-                }
+                const key = apiKeys.find(k => k.id === data.apiKeyId)?.key || '';
+                if (!key) { setToastKind('error'); setToast('Select an OpenAI API key first.'); setTimeout(()=>setToast(''), 2200); return; }
                 setShowCall(true);
               }}
-              className="inline-flex items-center gap-2 rounded-[8px] select-none va-cta"
-              style={{ height:'40px', padding:'0 16px', background:CTA, color:'#ffffff', fontWeight:700 }}
+              className="inline-flex items-center gap-2 rounded-[8px] select-none"
+              style={{ height:'var(--control-h)', padding:'0 16px', background:CTA, color:'#ffffff', fontWeight:700, boxShadow:'0 10px 22px rgba(89,217,179,.20)' }}
               onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA_HOVER)}
               onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = CTA)}
             >
               <PhoneFilled style={{ color:'#ffffff' }} />
-              <span>Talk to Assistant</span>
+              <span style={{ color:'#ffffff' }}>Talk to Assistant</span>
             </button>
           </div>
 
-          {!hasApiKey && (
-            <div className="mb-4 inline-flex items-center gap-2 px-3 py-1.5 rounded-[8px]"
-                 style={{ background: 'rgba(239,68,68,.12)', color: 'var(--text)', boxShadow:'0 0 0 1px rgba(239,68,68,.25) inset' }}>
-              <Lock className="w-4 h-4" /> No API key selected. Add one on the <b>&nbsp;API Keys&nbsp;</b> page.
+          {toast ? (
+            <div
+              className="mb-4 inline-flex items-center gap-2 px-3 py-1.5 rounded-[8px]"
+              style={{
+                background: toastKind === 'error' ? 'rgba(239,68,68,.12)' : 'rgba(89,217,179,.10)',
+                color: 'var(--text)',
+                boxShadow: toastKind === 'error'
+                  ? '0 0 0 1px rgba(239,68,68,.25) inset'
+                  : '0 0 0 1px rgba(89,217,179,.16) inset'
+              }}
+            >
+              <Check className="w-4 h-4" /> {toast}
             </div>
-          )}
+          ) : null}
+
+          {/* Quick metrics */}
+          <div className="grid gap-3 md:grid-cols-2 mb-3">
+            <div className="va-card">
+              <div className="va-head" style={{ minHeight: 56 }}>
+                <div className="text-xs" style={{ color:'var(--text-muted)' }}>Cost</div><div />
+              </div>
+              <div className="p-4"><div className="font-semibold" style={{ fontSize:'15px' }}>~$0.1/min</div></div>
+            </div>
+            <div className="va-card">
+              <div className="va-head" style={{ minHeight: 56 }}>
+                <div className="text-xs" style={{ color:'var(--text-muted)' }}>Latency</div><div />
+              </div>
+              <div className="p-4"><div className="font-semibold" style={{ fontSize:'15px' }}>~1050 ms</div></div>
+            </div>
+          </div>
 
           {/* Model */}
           <Section
             title="Model"
             icon={<Gauge className="w-4 h-4" style={{ color: CTA }} />}
-            desc="Configure the model, assistant name, greetings, and language."
-            defaultOpen
+            desc="Configure the model, assistant name, and first message(s)."
+            defaultOpen={true}
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
@@ -897,33 +899,21 @@ export default function VoiceAgentSection() {
                   value={data.name}
                   onChange={(e)=>setField('name')(e.target.value)}
                   className="w-full bg-transparent outline-none rounded-[8px] px-3"
-                  style={{ height:'40px', background:'var(--panel-bg)', border:'1px solid var(--border-weak)' }}
+                  style={{ height:'var(--control-h)', background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)', color:'var(--text)' }}
                   placeholder="e.g., Riley"
                 />
               </div>
               <div>
                 <div className="mb-2 text-[12.5px]">Provider</div>
-                <StyledSelect
-                  value={data.provider}
-                  onChange={(v)=>setField('provider')(v as AgentData['provider'])}
-                  options={[
-                    { value: 'openai', label: 'OpenAI' },
-                    { value: 'anthropic', label: 'Anthropic — coming soon', disabled: true },
-                    { value: 'google', label: 'Google — coming soon', disabled: true },
-                  ]}
-                />
+                <StyledSelect value={data.provider} onChange={(v)=>setField('provider')(v as AgentData['provider'])}
+                  options={providerOpts} placeholder="Choose a provider" />
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
               <div>
                 <div className="mb-2 text-[12.5px]">Model</div>
-                <StyledSelect
-                  value={data.model}
-                  onChange={setField('model')}
-                  options={openaiModels}
-                  placeholder={loadingModels ? 'Loading models…' : 'Choose a model'}
-                />
+                <StyledSelect value={data.model} onChange={setField('model')} options={openaiModels} placeholder="Choose a model" />
               </div>
               <div>
                 <div className="mb-2 text-[12.5px]">First Message Mode</div>
@@ -932,20 +922,6 @@ export default function VoiceAgentSection() {
                   { value: 'User speaks first', label: 'User speaks first' },
                   { value: 'Silent until tool required', label: 'Silent until tool required' },
                 ]}/>
-              </div>
-              <div>
-                <div className="mb-2 text-[12.5px]">Language</div>
-                <StyledSelect
-                  value={data.language}
-                  onChange={setField('language')}
-                  options={[
-                    { value: 'English', label: 'English' },
-                    { value: 'Dutch',   label: 'Dutch' },
-                    { value: 'German',  label: 'German' },
-                    { value: 'Spanish', label: 'Spanish' },
-                    { value: 'Arabic',  label: 'Arabic' },
-                  ]}
-                />
               </div>
             </div>
 
@@ -963,7 +939,7 @@ export default function VoiceAgentSection() {
                     type="button"
                     onClick={addFirstMessage}
                     className="inline-flex items-center gap-2 text-sm rounded-[8px] px-3 py-1.5"
-                    style={{ border:'1px solid var(--border-weak)' }}
+                    style={{ border:'1px solid rgba(255,255,255,.14)' }}
                   >
                     <Plus className="w-4 h-4" /> Add
                   </button>
@@ -981,7 +957,7 @@ export default function VoiceAgentSection() {
                       setField('firstMsg')(next[0] || '');
                     }}
                     className="w-full bg-transparent outline-none rounded-[8px] px-3"
-                    style={{ height:'40px', background:'var(--panel-bg)', border:'1px solid var(--border-weak)' }}
+                    style={{ height:'var(--control-h)', background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)', color:'var(--text)' }}
                     placeholder={`Message ${idx+1}`}
                   />
                   <button
@@ -992,7 +968,7 @@ export default function VoiceAgentSection() {
                       setField('firstMsg')((next[0]||''));
                     }}
                     className="w-10 h-10 grid place-items-center rounded-[8px]"
-                    style={{ border:'1px solid var(--border-weak)' }}
+                    style={{ border:'1px solid rgba(255,255,255,.12)' }}
                     aria-label="Remove"
                   >
                     <Trash2 className="w-4 h-4" />
@@ -1015,52 +991,29 @@ export default function VoiceAgentSection() {
                   <button
                     className="inline-flex items-center gap-2 rounded-[8px] text-sm"
                     style={{ height:34, padding:'0 12px', background:CTA, color:'#fff', border:'1px solid rgba(255,255,255,.08)' }}
-                    onClick={()=> setShowGenerate(true)}
+                    onClick={()=>{ setComposerText(''); setShowGenerate(true); }}
                   >
                     <Wand2 className="w-4 h-4" /> Generate
-                  </button>
-                  <button
-                    className="inline-flex items-center gap-2 rounded-[8px] text-sm"
-                    style={{ height:34, padding:'0 12px', background:'var(--panel-bg)', color:'var(--text)', border:'1px solid var(--border-weak)' }}
-                    onClick={()=> setShowImport(true)}
-                  >
-                    <Globe className="w-4 h-4" /> Import website
                   </button>
                 </div>
               </div>
 
-              {/* Accept/Decline appear only AFTER typing preview finishes */}
-              {diffMode && !isTypingPreview && (
-                <div className="mb-2 flex items-center gap-2">
-                  <button
-                    onClick={acceptDiff}
-                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-[8px] font-semibold"
-                    style={{ background:CTA, color:'#fff' }}
-                  >
-                    <Check className="w-4 h-4" /> Accept changes
-                  </button>
-                  <button
-                    onClick={declineDiff}
-                    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-[8px]"
-                    style={{ border:'1px solid var(--border-weak)' }}
-                  >
-                    <X className="w-4 h-4" /> Decline
-                  </button>
-                </div>
-              )}
-
+              {/* Prompt box / Diff preview */}
               <div className="relative">
-                {!diffMode ? (
+                {!isTypingPreview ? (
                   <textarea
                     className="w-full bg-transparent outline-none rounded-[8px] px-3 py-[10px]"
-                    style={{ minHeight: 320, background:'var(--panel-bg)', border:'1px solid var(--border-weak)' }}
+                    style={{ minHeight: 320, background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)', color:'var(--text)' }}
                     value={data.systemPrompt}
-                    onChange={(e)=> setField('systemPrompt')(sanitizePrompt(e.target.value))}
+                    onChange={(e)=> setField('systemPrompt')(e.target.value)}
                   />
                 ) : (
-                  <div className="rounded-[8px] border p-3 text-xs" style={{ borderColor:'var(--border-weak)', background:'var(--panel-bg)', minHeight: 320 }}>
-                    <PromptDiffView base={basePrompt} next={isTypingPreview ? previewTyped : candidatePrompt} />
-                  </div>
+                  <PromptDiffTyping
+                    base={basePromptRef.current}
+                    next={diffCandidate || data.systemPrompt}
+                    onAccept={acceptPreview}
+                    onDecline={declinePreview}
+                  />
                 )}
               </div>
 
@@ -1081,7 +1034,7 @@ export default function VoiceAgentSection() {
                       type="button"
                       onClick={()=>fileInputRef.current?.click()}
                       className="inline-flex items-center gap-2 text-sm rounded-[8px] px-3 py-1.5"
-                      style={{ border:'1px solid var(--border-weak)' }}
+                      style={{ border:'1px solid rgba(255,255,255,.14)' }}
                     >
                       Add file
                     </button>
@@ -1099,7 +1052,7 @@ export default function VoiceAgentSection() {
                           type="button"
                           onClick={()=>{ rebuildContextText([]); }}
                           className="inline-flex items-center gap-2 text-sm rounded-[8px] px-3 py-1.5"
-                          style={{ border:'1px solid var(--border-weak)' }}
+                          style={{ border:'1px solid rgba(255,255,255,.14)' }}
                         >
                           Clear
                         </button>
@@ -1110,10 +1063,10 @@ export default function VoiceAgentSection() {
 
                 {!(data.ctxFiles && data.ctxFiles.length) ? (
                   <div className="text-xs" style={{ color:'var(--text-muted)' }}>
-                    No files yet. Click <b>Add file</b> to upload (.txt, .md, .csv, .json, .docx or best-effort .doc / .docs).
+                    No files yet. Click <b>Add file</b> to upload (.txt, .md, .csv, .json, <b>.docx</b> or best-effort <b>.doc</b> / <b>.docs</b>).
                   </div>
                 ) : (
-                  <div className="rounded-[8px] p-3" style={{ background:'var(--panel-bg)', border:'1px solid var(--border-weak)' }}>
+                  <div className="rounded-[8px] p-3" style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)' }}>
                     {(data.ctxFiles||[]).map((f, idx) => (
                       <div key={idx} className="mb-3 last:mb-0">
                         <div className="flex items-center justify-between mb-1">
@@ -1124,7 +1077,7 @@ export default function VoiceAgentSection() {
                               rebuildContextText(next);
                             }}
                             className="text-xs rounded-[6px] px-2 py-1"
-                            style={{ border:'1px solid var(--border-weak)' }}
+                            style={{ border:'1px solid rgba(255,255,255,.14)' }}
                           >
                             Remove
                           </button>
@@ -1144,58 +1097,59 @@ export default function VoiceAgentSection() {
           <Section
             title="Voice"
             icon={<Volume2 className="w-4 h-4" style={{ color: CTA }} />}
-            desc="Choose TTS, language, and preview the voice."
-            defaultOpen
+            desc="Choose TTS, provider, and preview the voice."
+            defaultOpen={true}
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
                 <div className="mb-2 text-[12.5px]">Voice Provider</div>
-                <StyledSelect
-                  value={data.ttsProvider}
-                  onChange={(v)=>setField('ttsProvider')(v as AgentData['ttsProvider'])}
-                  options={[
-                    { value: 'openai', label: 'OpenAI' },
-                    { value: 'elevenlabs', label: 'ElevenLabs — coming soon', disabled: true },
-                    { value: 'google-tts', label: 'Google TTS — coming soon', disabled: true },
-                  ]}
-                />
+                <StyledSelect value={data.ttsProvider} onChange={(v)=>setField('ttsProvider')(v as AgentData['ttsProvider'])}
+                  options={ttsProviders} placeholder="Choose a TTS provider" />
+                <div className="mt-2 text-xs" style={{ color:'var(--text-muted)' }}>
+                  Only OpenAI is available right now.
+                </div>
               </div>
 
               <div>
                 <div className="mb-2 text-[12.5px]">Voice</div>
                 <StyledSelect
                   value={data.voiceName}
-                  onChange={(v)=>{ setField('voiceName')(v); stopPreview(); setAudioURL(''); setAudioProgress(0); }}
-                  options={OPENAI_VOICES.map(v => ({ value: v.value, label: v.label }))}
+                  onChange={(v)=>setField('voiceName')(v)}
+                  options={[
+                    { value: 'Alloy (American)', label: 'Alloy' },
+                    { value: 'Verse (American)', label: 'Verse' },
+                    { value: 'Coral (British)', label: 'Coral' },
+                    { value: 'Amber (Australian)', label: 'Amber' },
+                  ]}
                   placeholder="— Choose —"
+                  menuTop={
+                    <div className="flex items-center justify-between px-3 py-2 rounded-[8px]"
+                         style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)' }}
+                    >
+                      <div className="text-xs" style={{ color:'var(--text-muted)' }}>Preview</div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={()=>speakPreview(`This is ${data.voiceName || 'the selected'} voice preview.`)}
+                          className="w-8 h-8 rounded-full grid place-items-center"
+                          aria-label="Play voice"
+                          style={{ background: CTA, color:'#0a0f0d' }}
+                        >
+                          <Play className="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={stopPreview}
+                          className="w-8 h-8 rounded-full grid place-items-center border"
+                          aria-label="Stop preview"
+                          style={{ background: 'var(--panel)', color:'var(--text)', borderColor:'rgba(255,255,255,.10)' }}
+                        >
+                          <Square className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  }
                 />
-                <div className="mt-2 flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={onClickPreview}
-                    disabled={audioLoading}
-                    className="w-9 h-9 rounded-full grid place-items-center"
-                    aria-label="Play / Pause preview"
-                    style={{ background: CTA, color:'#0a0f0d' }}
-                  >
-                    {audioPlaying ? <Pause className="w-4 h-4"/> : <Play className="w-4 h-4" />}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={stopPreview}
-                    className="w-9 h-9 rounded-full grid place-items-center border"
-                    aria-label="Stop preview"
-                    style={{ background: 'var(--panel-bg)', color:'var(--text)', borderColor:'var(--border-weak)' }}
-                  >
-                    <Square className="w-4 h-4" />
-                  </button>
-
-                  <div className="flex-1 h-1 rounded-full overflow-hidden" style={{ minWidth: 120, background:'var(--border-weak)' }}>
-                    <div style={{ width: `${audioProgress}%`, height:'100%', background: CTA }} />
-                  </div>
-                  <audio ref={audioRef} src={audioURL || undefined} preload="auto" />
-                </div>
-                {audioLoading && <div className="mt-2 text-xs" style={{ color:'var(--text-muted)' }}>Generating preview…</div>}
               </div>
             </div>
           </Section>
@@ -1204,8 +1158,8 @@ export default function VoiceAgentSection() {
           <Section
             title="Credentials"
             icon={<Phone className="w-4 h-4" style={{ color: CTA }} />}
-            desc="Select the API key stored on the API Keys page."
-            defaultOpen
+            desc="Select the OpenAI API key and the phone number."
+            defaultOpen={true}
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
@@ -1216,15 +1170,16 @@ export default function VoiceAgentSection() {
                   value={data.apiKeyId || ''}
                   onChange={async (val)=>{
                     setField('apiKeyId')(val);
-                    try { const ss = await scopedStorage(); await ss.ensureOwnerGuard(); await ss.setJSON(LS_SELECTED, val); } catch {}
+                    try { const store = await scopedStorage(); await store.ensureOwnerGuard?.(); await store.setJSON('apiKeys.selectedId', val); } catch {}
                   }}
                   options={[
-                    { value: '', label: 'Select your API key…' },
-                    ...apiKeys.map(k=>({ value: k.id, label: `${k.name} ••••${(k.key||'').slice(-4).toUpperCase()}` }))
+                    { value: '', label: 'Select an API key…', iconLeft: <OpenAIStamp size={14} /> },
+                    ...apiKeys.map(k=>({ value: k.id, label: `${k.name} ••••${(k.key||'').slice(-4).toUpperCase()}`, iconLeft: <OpenAIStamp size={14} /> }))
                   ]}
+                  leftIcon={<OpenAIStamp size={14} />}
                 />
                 <div className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
-                  Keys are per-account via scoped storage. Add/manage them on the API Keys page.
+                  Keys are stored via scoped storage. Manage them in the API Keys page.
                 </div>
               </div>
 
@@ -1232,7 +1187,10 @@ export default function VoiceAgentSection() {
                 <div className="mb-2 text-[12.5px]">Phone Number</div>
                 <StyledSelect
                   value={data.phoneId || ''}
-                  onChange={async (val)=>{ setField('phoneId')(val); try { const ss = await scopedStorage(); await ss.ensureOwnerGuard(); await ss.setJSON(PHONE_SELECTED_ID, val); } catch {} }}
+                  onChange={async (val)=>{
+                    setField('phoneId')(val);
+                    try { const store = await scopedStorage(); await store.ensureOwnerGuard?.(); await store.setJSON(PHONE_SELECTED_ID, val); } catch {}
+                  }}
                   options={[
                     { value: '', label: 'Select a phone number…' },
                     ...phoneNumbers.map(p => ({ value: p.id, label: `${p.name ? `${p.name} • ` : ''}${p.number}` }))
@@ -1247,88 +1205,105 @@ export default function VoiceAgentSection() {
             title="Transcriber"
             icon={<Mic className="w-4 h-4" style={{ color: CTA }} />}
             desc="Transcription settings"
-            defaultOpen
+            defaultOpen={true}
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
                 <div className="mb-2 text-[12.5px]">Provider</div>
-                <StyledSelect
-                  value={data.asrProvider}
-                  onChange={(v)=>setField('asrProvider')(v as AgentData['asrProvider'])}
-                  options={[
-                    { value: 'deepgram', label: 'Deepgram' },
-                    { value: 'whisper', label: 'Whisper — coming soon', disabled: true },
-                    { value: 'assemblyai', label: 'AssemblyAI — coming soon', disabled: true },
-                  ]}
-                />
+                <StyledSelect value={data.asrProvider} onChange={(v)=>setField('asrProvider')(v as AgentData['asrProvider'])} options={asrProviders}/>
               </div>
               <div>
                 <div className="mb-2 text-[12.5px]">Model</div>
-                <StyledSelect
-                  value={data.asrModel}
-                  onChange={setField('asrModel')}
-                  options={[{ value: 'Nova 2', label: 'Nova 2' }, { value: 'Nova', label: 'Nova' }]}
-                />
+                <StyledSelect value={data.asrModel} onChange={setField('asrModel')} options={asrModelsFor(data.asrProvider)}/>
+              </div>
+            </div>
+            <div className="mt-4 grid sm:grid-cols-2 gap-3">
+              <div className="flex items-center justify-between p-3 rounded-[8px]" style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)' }}>
+                <span className="text-sm">Background Denoising</span>
+                <Toggle checked={data.denoise} onChange={setField('denoise')} />
+              </div>
+              <div className="flex items-center justify-between p-3 rounded-[8px]" style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)' }}>
+                <span className="text-sm">Use Numerals</span>
+                <Toggle checked={data.numerals} onChange={setField('numerals')} />
               </div>
             </div>
           </Section>
 
-          <div style={{ height: 72 }} />
+          <div style={{ height: 24 }} />
         </div>
       </div>
 
-      {/* Generate Prompt → engine compile → typing preview → Accept/Decline */}
-      <GeneratePromptModal
-        open={showGenerate}
-        onClose={() => setShowGenerate(false)}
-        onGenerate={async (userDescription: string) => {
-          const desc = safeTrim(userDescription);
-          if (!desc) return;
-          setShowGenerate(false);
-          await sleep(10);
-          await onGenerateToDiff(desc);
-        }}
-      />
+      {/* Generate modal */}
+      {showGenerate && IS_CLIENT ? createPortal(
+        <>
+          <div className="fixed inset-0" style={{ zIndex: 100000, background:'rgba(6,8,10,.62)', backdropFilter:'blur(6px)' }} onClick={()=> setShowGenerate(false)} />
+          <div className="fixed inset-0 grid place-items-center px-4" style={{ zIndex: 100001 }}>
+            <div className="w-full max-w-[640px] rounded-[8px] overflow-hidden"
+                 style={{ background: 'var(--panel)', color: 'var(--text)', border: `1px solid ${GREEN_LINE}`,
+                          boxShadow:'0 22px 44px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset, 0 0 0 1px rgba(89,217,179,.20)' }}>
+              <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom:`1px solid ${GREEN_LINE}` }}>
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg grid place-items-center" style={{ background:'rgba(89,217,179,.12)' }}>
+                    <span style={{ color: CTA }}><Wand2 className="w-5 h-5" /></span>
+                  </div>
+                  <div className="text-lg font-semibold">Describe how to update the prompt</div>
+                </div>
+                <button onClick={()=> setShowGenerate(false)} className="w-8 h-8 rounded-[6px] grid place-items-center" style={{ border:`1px solid ${GREEN_LINE}` }} aria-label="Close">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
 
-      {/* Import website — builds prompt blocks via prompt-builder → diff preview */}
-      <ImportWebsiteModal
-        open={showImport}
-        onClose={() => setShowImport(false)}
-        onImport={async (urls: string[])=>{
-          const list = urls.map(s=>s.trim()).filter(Boolean);
-          if (!list.length) return;
+              <div className="px-6 py-5 space-y-3">
+                <div className="text-xs" style={{ color:'var(--text-muted)' }}>
+                  Tip: “assistant for a dental clinic; tone friendly; handle booking and FAQs”.
+                </div>
+                <div className="rounded-[8px] p-2" style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)' }}>
+                  <textarea
+                    value={composerText}
+                    onChange={(e)=>setComposerText(e.target.value)}
+                    className="w-full bg-transparent outline-none rounded-[6px] px-3 py-2"
+                    placeholder="Describe changes…"
+                    style={{ minHeight: 160, maxHeight: '40vh', color:'var(--text)', resize:'vertical' }}
+                  />
+                </div>
+              </div>
 
-          const chunks: string[] = [];
-          for (const u of list) {
-            try {
-              const r = await fetch('/api/connectors/website-import', {
-                method:'POST',
-                headers:{'Content-Type':'application/json'},
-                body: JSON.stringify({ url: u })
-              });
-              const j = r.ok ? await r.json().catch(()=>null) : null;
-              const facts: string[] = Array.isArray(j?.facts) ? j.facts : [];
-              if (facts.length) {
-                chunks.push(`# ${u}`, ...facts.map(s => `- ${s}`), '');
-              } else {
-                chunks.push(`# ${u}`, '- No obvious facts extracted.', '');
-              }
-            } catch {
-              chunks.push(`# ${u}`, '- Fetch failed.', '');
-            }
-          }
+              <div className="px-6 pb-6 flex gap-3">
+                <button onClick={()=> setShowGenerate(false)} className="w-full h-[40px] rounded-[8px]"
+                        style={{ background:'var(--panel)', border:'1px solid rgba(255,255,255,.10)', color:'var(--text)', fontWeight:600 }}>
+                  Cancel
+                </button>
+                <button
+                  onClick={async ()=>{
+                    const raw = safeTrim(composerText);
+                    if (!raw) return;
+                    try {
+                      const base = nonEmpty(data.systemPrompt) ? data.systemPrompt : DEFAULT_PROMPT_RT;
+                      const compiled = compilePrompt({ basePrompt: base, userText: raw });
+                      setShowGenerate(false);
+                      // show preview diff (typing only in preview)
+                      setTimeout(()=> startTypingPreview(compiled.frontendText), 80);
+                      // prepare backend
+                      setField('systemPromptBackend')(compiled.backendString);
+                    } catch {
+                      setToastKind('error'); setToast('Generate failed — try simpler wording.');
+                      setTimeout(()=>setToast(''), 2200);
+                    }
+                  }}
+                  disabled={!composerText.trim()}
+                  className="w-full h-[40px] rounded-[8px] font-semibold inline-flex items-center justify-center gap-2"
+                  style={{ background:CTA, color:'#ffffff', opacity: (!composerText.trim() ? .6 : 1) }}
+                >
+                  <Wand2 className="w-4 h-4" /> Generate
+                </button>
+              </div>
+            </div>
+          </div>
+        </>,
+        document.body
+      ) : null}
 
-          const merged = chunks.join('\n').trim();
-          const base = sanitizePrompt((data.systemPromptBackend || data.systemPrompt || DEFAULT_PROMPT_RT).trim());
-          const next = buildPromptFromWebsite(merged, base);
-
-          setShowImport(false);
-          await sleep(10);
-          await startDiff(next, next);
-        }}
-      />
-
-      {/* Voice/Call overlay */}
+      {/* Web call overlay */}
       {IS_CLIENT ? createPortal(
         <>
           <div
@@ -1341,8 +1316,8 @@ export default function VoiceAgentSection() {
               model={callModel}
               systemPrompt={
                 (() => {
-                  const base = sanitizePrompt(data.systemPromptBackend || data.systemPrompt || '');
-                  const ctx  = sanitizePrompt((data.contextText || '').trim());
+                  const base = data.systemPromptBackend || data.systemPrompt || '';
+                  const ctx  = (data.contextText || '').trim();
                   return ctx ? `${base}\n\n[Context]\n${ctx}`.trim() : base;
                 })()
               }
@@ -1357,34 +1332,22 @@ export default function VoiceAgentSection() {
               onClose={()=> setShowCall(false)}
               prosody={{ fillerWords: true, microPausesMs: 200, phoneFilter: true, turnEndPauseMs: 120 }}
               firstMode={data.firstMode}
-              firstMsg={greetingJoined}
-              languageHint={langToHint(data.language)}
+              firstMsg={
+                (data.greetPick==='random'
+                  ? [...(data.firstMsgs||[])].filter(Boolean).sort(()=>Math.random()-0.5)
+                  : (data.firstMsgs||[]).filter(Boolean)
+                ).join('\n')
+              }
             />
           )}
         </>,
         document.body
       ) : null}
-
-      {/* Toast */}
-      {!!toast && (
-        <div
-          className="fixed bottom-4 right-4 rounded-[8px] px-3 py-2 text-sm"
-          style={{
-            zIndex: 100050,
-            background: toastKind==='error' ? 'rgba(239,68,68,.14)' : 'rgba(89,217,179,.12)',
-            color: 'var(--text)',
-            border: `1px solid ${toastKind==='error' ? 'rgba(239,68,68,.30)' : GREEN_LINE}`,
-            boxShadow: '0 10px 24px rgba(0,0,0,.18)'
-          }}
-        >
-          {toast}
-        </div>
-      )}
     </section>
   );
 }
 
-/* ───────── Section ───────── */
+/* ─────────── Section wrapper ─────────── */
 function Section({
   title, icon, desc, children, defaultOpen = true
 }:{
@@ -1418,9 +1381,10 @@ function Section({
         </button>
 
         <div
-          className="va-section-body"
           style={{
-            height: open ? h : 0, opacity: open ? 1 : 0, transform: open ? 'translateY(0)' : 'translateY(-4px)',
+            height: open ? h : 0,
+            opacity: open ? 1 : 0,
+            transform: open ? 'translateY(0)' : 'translateY(-4px)',
             transition: 'height 260ms var(--ease), opacity 230ms var(--ease), transform 260ms var(--ease)',
             overflow:'hidden'
           }}
