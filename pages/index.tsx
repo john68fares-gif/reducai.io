@@ -12,21 +12,10 @@ import { loadStripe } from '@stripe/stripe-js';
 import { supabase } from '@/lib/supabase-client';
 
 /* ───────────────────────── Config ───────────────────────── */
-/** 1) Prefer Payment Links. Paste your real links below.
- * If a link is blank, we will fall back to Checkout with PRICE_IDS.
- */
 const PAYMENT_LINKS = {
-  monthly: {
-    starter: '', // e.g. 'https://buy.stripe.com/xyzMonthlyStarter'
-    pro:     '', // e.g. 'https://buy.stripe.com/xyzMonthlyPro'
-  },
-  yearly: {
-    starter: '', // e.g. 'https://buy.stripe.com/xyzYearlyStarter'
-    pro:     '', // e.g. 'https://buy.stripe.com/xyzYearlyPro'
-  }
+  monthly: { starter: '', pro: '' },
+  yearly:  { starter: '', pro: '' },
 };
-
-/** 2) Fallback Stripe Price IDs (already provided) */
 const PRICE_IDS = {
   monthly: {
     starter: 'price_1SByXAHWdU8X80NMftriHWJW', // $19
@@ -37,26 +26,17 @@ const PRICE_IDS = {
     pro:     'price_1SByXRHWdU8X80NM7UwuAw0B', // $209
   }
 };
-
 const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PK || '');
-
-/** We store the pending plan selected pre-auth */
-const PENDING_KEY = 'checkout:pending'; // { period:'monthly'|'yearly', tier:'starter'|'pro' }
+const PENDING_KEY = 'checkout:pending'; // {period,tier}
 
 /* ───────────────────────── Theme Tokens ───────────────────────── */
 const Tokens = () => (
   <style jsx global>{`
     :root{
-      --bg:#0a0c0e;
-      --bg-2:#0b1013;
-      --bg-3:#0c1216;
-
-      /* Navbar: dark -> greener gradient */
+      --bg:#0a0c0e; --bg-2:#0b1013; --bg-3:#0c1216;
       --nav-grad: linear-gradient(90deg, rgba(10,12,14,.92) 0%, rgba(12,18,16,.92) 40%, rgba(20,36,31,.92) 100%);
-
-      /* Alternate section backgrounds for separation */
       --section-1:
-        radial-gradient(1100px 660px at 50% -10%, rgba(89,217,179,.18), transparent 60%),
+        radial-gradient(1100px 660px at 50% -10%, rgba(89,217,179,.20), transparent 60%),
         #0a0c0e;
       --section-2:
         radial-gradient(1000px 600px at 15% 10%, rgba(89,217,179,.12), transparent 60%),
@@ -64,38 +44,23 @@ const Tokens = () => (
       --section-3:
         radial-gradient(1000px 600px at 85% 12%, rgba(89,217,179,.12), transparent 60%),
         #0c1216;
-
-      --panel:#0f1417;
-      --card:#11181b;
-      --text:#e9f4f1;
-      --muted:#9eb7af;
-
-      --brand:#59d9b3;
-      --line:rgba(89,217,179,.22);
-      --border:rgba(255,255,255,.08);
-
-      --radius:22px;
-      --shadow:0 26px 64px rgba(0,0,0,.42);
+      --panel:#0f1417; --card:#11181b; --text:#e9f4f1; --muted:#9eb7af;
+      --brand:#59d9b3; --line:rgba(89,217,179,.22); --border:rgba(255,255,255,.08);
+      --radius:22px; --shadow:0 26px 64px rgba(0,0,0,.42);
     }
-
-    /* MovaTiff font */
     @font-face{
       font-family:'MovaTiff';
       src:url('/fonts/MovaTiff.woff2') format('woff2');
-      font-weight: 400 900;
-      font-style: normal;
-      font-display: swap;
+      font-weight: 400 900; font-style: normal; font-display: swap;
     }
-
     html,body{ background:var(--bg); color:var(--text); }
     body{ font-family: MovaTiff, Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
     .container{ width:100%; max-width:1160px; margin:0 auto; padding:0 20px; }
-    a{ text-decoration:none; color:inherit; }
+    a{ color:inherit; text-decoration:none; }
 
-    /* Buttons (white text always) */
+    /* Buttons */
     .btn{
-      position:relative;
-      display:inline-flex; align-items:center; justify-content:center; gap:10px;
+      position:relative; display:inline-flex; align-items:center; justify-content:center; gap:10px;
       height:48px; padding:0 22px; border-radius:9999px;
       background: var(--brand); color:#fff; border:1px solid var(--line);
       box-shadow:0 16px 44px rgba(89,217,179,.32), inset 0 0 0 1px rgba(255,255,255,.08);
@@ -107,68 +72,49 @@ const Tokens = () => (
     .btn:active{ transform: scale(0.985); }
     .btn.ghost{ background: transparent; color: var(--text); border-color: var(--line); }
     .btn.block{ width:100%; }
-    .btn::after{
-      content:''; position:absolute; inset:auto; width:0; height:0; border-radius:9999px; background:rgba(255,255,255,.35);
-      transform:translate(-50%,-50%); opacity:0; pointer-events:none;
-    }
+    .btn::after{ content:''; position:absolute; inset:auto; width:0; height:0; border-radius:9999px; background:rgba(255,255,255,.35); transform:translate(-50%,-50%); opacity:0; pointer-events:none; }
     .btn[data-clicked="true"]::after{ animation:ripple .5s ease; }
     @keyframes ripple { 0%{ width:0; height:0; opacity:.45; } 100%{ width:240px; height:240px; opacity:0; } }
 
-    /* Cards with soft green glow */
+    /* Cards + glow */
     .card{
-      background:
-        radial-gradient(120% 100% at 0% 0%, rgba(89,217,179,.16), transparent 55%),
-        var(--card);
-      border:1px solid var(--border);
-      border-radius:var(--radius);
-      box-shadow:var(--shadow);
+      background: radial-gradient(120% 100% at 0% 0%, rgba(89,217,179,.16), transparent 55%), var(--card);
+      border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow);
     }
-    .glow{
-      box-shadow:
-        0 0 0 1px rgba(89,217,179,.25) inset,
-        0 18px 60px rgba(89,217,179,.18);
-    }
+    .glow{ box-shadow: 0 0 0 1px rgba(89,217,179,.25) inset, 0 18px 60px rgba(89,217,179,.18); }
 
-    /* Navbar links */
     .navlink{ opacity:.85; transition: opacity .18s ease, transform .18s ease; }
     .navlink:hover{ opacity:1; transform: translateY(-1px); }
 
-    /* Monthly/Yearly toggle — text ALWAYS white */
+    /* Toggle - always white text */
     .toggle{ display:inline-flex; gap:10px; padding:8px; border:1px solid var(--line); border-radius:999px; background:#0f1517; }
-    .toggle .opt{
-      padding:8px 14px; border-radius:999px; cursor:pointer;
-      transition:transform .18s ease, box-shadow .18s ease, background .18s ease, color .18s ease;
-      color:#fff; background:transparent; opacity:.9;
-    }
+    .toggle .opt{ padding:8px 14px; border-radius:999px; cursor:pointer; color:#fff; background:transparent; opacity:.9; transition:.18s ease; }
     .toggle .opt:hover{ opacity:1; transform: translateY(-1px); }
-    .toggle .opt.active{
-      color:#fff; background:var(--brand);
-      box-shadow: 0 10px 30px rgba(89,217,179,.35);
-      opacity:1; position:relative;
-    }
-    .toggle .opt.active::after{
-      content:''; position:absolute; inset:-2px; border-radius:999px;
-      box-shadow:0 0 0 0 rgba(89,217,179,.0);
-      animation: optPulse .32s ease;
-    }
+    .toggle .opt.active{ color:#fff; background:var(--brand); box-shadow: 0 10px 30px rgba(89,217,179,.35); opacity:1; position:relative; }
+    .toggle .opt.active::after{ content:''; position:absolute; inset:-2px; border-radius:999px; box-shadow:0 0 0 0 rgba(89,217,179,.0); animation: optPulse .32s ease; }
     @keyframes optPulse{ 0%{ box-shadow:0 0 0 0 rgba(89,217,179,.45); } 100%{ box-shadow:0 0 0 16px rgba(89,217,179,0); } }
 
-    /* HERO grid behind headline (more visible) */
+    /* HERO grid (thicker + animated sweep) */
     .hero-wrap{ position:relative; isolation:isolate; }
     .hero-grid{
-      position:absolute; inset:0; pointer-events:none; z-index:0;
-      opacity:.35; /* more visible */
+      position:absolute; inset:0; pointer-events:none; z-index:0; opacity:.42;
       background:
-        linear-gradient(to right, rgba(89,217,179,.28) 1px, transparent 1px) 0 0/28px 28px,
-        linear-gradient(to bottom, rgba(89,217,179,.28) 1px, transparent 1px) 0 0/28px 28px;
-      filter: drop-shadow(0 0 24px rgba(89,217,179,.18));
-      mask-image: radial-gradient(70% 70% at 50% 40%, rgba(0,0,0,1), transparent 75%);
+        linear-gradient(to right, rgba(89,217,179,.34) 2px, transparent 2px) 0 0/36px 36px,
+        linear-gradient(to bottom, rgba(89,217,179,.28) 2px, transparent 2px) 0 0/36px 36px;
+      mask-image: radial-gradient(70% 70% at 50% 40%, rgba(0,0,0,1), transparent 78%);
     }
+    .hero-sheen{
+      position:absolute; inset:-20%; pointer-events:none; z-index:0;
+      background: linear-gradient(115deg, transparent 20%, rgba(89,217,179,.14) 50%, transparent 80%);
+      filter: blur(14px);
+      animation: sheen 6s linear infinite;
+    }
+    @keyframes sheen{ 0%{ transform: translateX(-40%) translateY(-10%) rotate(0.001deg);} 100%{ transform: translateX(40%) translateY(10%) rotate(0.001deg);} }
     .hero-content{ position:relative; z-index:1; }
   `}</style>
 );
 
-/* Click ripple helper */
+/* Ripple helper */
 const useClickedRipple = () =>
   (e: React.MouseEvent<HTMLElement>) => {
     const el = e.currentTarget as HTMLElement;
@@ -186,7 +132,7 @@ function AuthModal({ open, onClose }: { open:boolean; onClose:()=>void }) {
       setBusy(true); setErr('');
       await supabase.auth.signInWithOAuth({
         provider:'google',
-        options:{ redirectTo: `${window.location.origin}/` }
+        options:{ redirectTo: `${window.location.origin}/post-auth` } // important
       });
     }catch(e:any){
       setErr(e?.message || 'Sign-in failed');
@@ -213,7 +159,7 @@ function AuthModal({ open, onClose }: { open:boolean; onClose:()=>void }) {
           </div>
           <div className="p-5">
             <div className="text-sm mb-4" style={{ color:'var(--muted)' }}>
-              We’ll take you to Google, bring you back here, then open your Stripe payment.
+              We’ll take you to Google, bring you back to finish sign-in, then continue your plan.
             </div>
             <button className="btn block" onClick={startGoogle} disabled={busy}>
               {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <LogIn className="w-4 h-4" />}
@@ -236,26 +182,14 @@ export default function HomePage(){
   const [stripeErr,setStripeErr] = useState('');
   const clickRipple = useClickedRipple();
 
-  /* Keep authed state synced + resume pending checkout to LINK first */
+  // Keep authed state in sync (no client-side redirect here; /post-auth handles branching)
   useEffect(() => {
     let unsub: (() => void) | null = null;
     (async () => {
       const { data: { session } } = await supabase.auth.getSession();
       setAuthed(Boolean(session?.user?.id));
-
-      const sub = supabase.auth.onAuthStateChange(async (_evt, s) => {
-        const isIn = Boolean(s?.user?.id);
-        setAuthed(isIn);
-        if (isIn) {
-          const raw = localStorage.getItem(PENDING_KEY);
-          if (raw) {
-            try {
-              const { period, tier } = JSON.parse(raw);
-              localStorage.removeItem(PENDING_KEY);
-              await goToPayment(period, tier); // after auth, go straight to payment
-            } catch {}
-          }
-        }
+      const sub = supabase.auth.onAuthStateChange((_evt, s) => {
+        setAuthed(Boolean(s?.user?.id));
       });
       const maybe = (sub as any)?.data?.subscription || (sub as any)?.subscription;
       unsub = () => { try { maybe?.unsubscribe?.(); } catch {} };
@@ -263,37 +197,31 @@ export default function HomePage(){
     return () => { try { unsub?.(); } catch {} };
   }, []);
 
-  /** Unified flow:
-   * - If not authed: open Google modal + remember plan.
-   * - If authed: prefer Stripe Payment Link; else fallback to Checkout(Price ID).
-   */
+  // Unified plan flow
   const startPlanFlow = async (p:'monthly'|'yearly', tier:'starter'|'pro')=>{
     setStripeErr('');
     const { data: { session } } = await supabase.auth.getSession();
+
+    // Not signed in → remember choice and open Google
     if (!session?.user?.id) {
       localStorage.setItem(PENDING_KEY, JSON.stringify({ period:p, tier }));
       setAuthOpen(true);
       return;
     }
+
     await goToPayment(p, tier);
   };
 
   const goToPayment = async (p:'monthly'|'yearly', tier:'starter'|'pro')=>{
-    // 1) Payment Link if provided
     const link = PAYMENT_LINKS[p][tier];
-    if (link && /^https?:\/\//i.test(link)) {
-      window.location.href = link;
-      return;
-    }
+    if (link && /^https?:\/\//i.test(link)) { window.location.href = link; return; }
 
-    // 2) Fallback to Checkout with price IDs
     const price = PRICE_IDS[p][tier];
-    if (!price || !/^price_[A-Za-z0-9]+$/.test(price)) {
-      setStripeErr('No Payment Link set and Stripe Price ID looks invalid.');
-      return;
-    }
+    if (!price || !/^price_[A-Za-z0-9]+$/.test(price)) { setStripeErr('No payment link and Stripe Price ID looks invalid.'); return; }
+
     const stripe = await stripePromise;
     if (!stripe) { setStripeErr('Stripe not initialised. Check NEXT_PUBLIC_STRIPE_PK.'); return; }
+
     try{
       setBusy(`${p}:${tier}`);
       const { error } = await stripe.redirectToCheckout({
@@ -310,7 +238,6 @@ export default function HomePage(){
     }
   };
 
-  /* Button label: same wording for Sign in & Subscribe */
   const ctaLabel = authed ? 'Subscribe' : 'Continue with Google';
 
   return (
@@ -333,13 +260,12 @@ export default function HomePage(){
               <a className="navlink" href="#reviews">Reviews</a>
               <a className="navlink" href="#pricing">Pricing</a>
             </nav>
-            {/* Sign in uses the same flow: if not authed -> Google; if authed -> go pricing */}
             <button
               className="btn"
               style={{ height:40 }}
               onClick={() => {
-                if (!authed) { setAuthOpen(true); }
-                else { document.getElementById('pricing')?.scrollIntoView({ behavior:'smooth' }); }
+                if (!authed) setAuthOpen(true);
+                else document.getElementById('pricing')?.scrollIntoView({ behavior:'smooth' });
               }}
             >
               {ctaLabel}
@@ -348,10 +274,11 @@ export default function HomePage(){
         </div>
       </div>
 
-      {/* HERO with visible grid */}
+      {/* HERO with stronger grid + animated sheen */}
       <section style={{ minHeight:'100vh', padding:'10vh 0', display:'grid', placeItems:'center', background:'var(--section-1)' }}>
         <div className="container hero-wrap">
           <div className="hero-grid" />
+          <div className="hero-sheen" />
           <div className="hero-content text-center">
             <h1 style={{ fontSize:'86px', lineHeight:1.02, letterSpacing:'-.02em', fontWeight:900 }}>
               Build <span style={{ color:'var(--brand)' }}>AI Agents</span><br/>
@@ -373,7 +300,7 @@ export default function HomePage(){
         </div>
       </section>
 
-      {/* HOW IT WORKS — bigger, product-specific */}
+      {/* HOW IT WORKS */}
       <section id="how" style={{ background:'var(--section-2)' }}>
         <div className="container" style={{ padding:'108px 20px' }}>
           <div className="text-center mb-14">
@@ -398,7 +325,7 @@ export default function HomePage(){
         </div>
       </section>
 
-      {/* REVIEWS — five fully-filled stars */}
+      {/* REVIEWS — five filled stars */}
       <section id="reviews" style={{ background:'var(--section-3)' }}>
         <div className="container" style={{ padding:'108px 20px' }}>
           <div className="text-center mb-12">
@@ -464,13 +391,10 @@ export default function HomePage(){
                 <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4" style={{ color:'var(--brand)' }}/>Real-time voice</li>
                 <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4" style={{ color:'var(--brand)' }}/>Basic analytics</li>
               </ul>
-              <button
-                className="btn block mt-6"
-                onClick={async ()=>{
-                  (event?.currentTarget as any).dataset.clicked='true';
-                  await startPlanFlow(period,'starter');
-                }}
-              >
+              <button className="btn block mt-6" onClick={async ()=>{
+                (event?.currentTarget as any).dataset.clicked='true';
+                await startPlanFlow(period,'starter');
+              }}>
                 {busy===`${period}:starter` ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
                 <span>{ctaLabel}</span>
               </button>
@@ -480,15 +404,10 @@ export default function HomePage(){
             <div className="card glow p-7" style={{ position:'relative' }}>
               <div className="flex items-center justify-between">
                 <div className="text-xl font-semibold">Pro</div>
-                <div
-                  className="px-3 py-1 rounded-full"
-                  style={{
-                    background:'var(--brand)',
-                    color:'#0b0f0e',
-                    border:'1px solid var(--line)',
-                    boxShadow:'0 8px 28px rgba(89,217,179,.35)'
-                  }}
-                >
+                <div className="px-3 py-1 rounded-full" style={{
+                  background:'var(--brand)', color:'#fff', // white text as requested
+                  border:'1px solid var(--line)', boxShadow:'0 8px 28px rgba(89,217,179,.35)'
+                }}>
                   Most popular
                 </div>
               </div>
@@ -502,13 +421,10 @@ export default function HomePage(){
                 <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4" style={{ color:'var(--brand)' }}/>Unlimited AI builds</li>
                 <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4" style={{ color:'var(--brand)' }}/>Advanced prompt testing</li>
               </ul>
-              <button
-                className="btn block mt-6"
-                onClick={async ()=>{
-                  (event?.currentTarget as any).dataset.clicked='true';
-                  await startPlanFlow(period,'pro');
-                }}
-              >
+              <button className="btn block mt-6" onClick={async ()=>{
+                (event?.currentTarget as any).dataset.clicked='true';
+                await startPlanFlow(period,'pro');
+              }}>
                 {busy===`${period}:pro` ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
                 <span>{ctaLabel}</span>
               </button>
