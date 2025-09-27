@@ -1,7 +1,7 @@
 // components/voice/AssistantRail.tsx
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Search, Plus, Bot, Trash2, Edit3, AlertTriangle, Loader2,
   FolderPlus, Folder, ArrowLeft
@@ -372,11 +372,20 @@ export default function AssistantRail() {
 
   // Cloud
   const [userId, setUserId] = useState<string | null>(null);
-  const [syncing, setSyncing] = useState(false);
+  const [syncing, setSyncing] = useState(false);   // logic flag
+  const [syncHint, setSyncHint] = useState(false); // UI hint (3s)
+  const syncTimerRef = useRef<number | null>(null);
 
   // New Folder modal
   const [newFolderOpen,setNewFolderOpen] = useState(false);
   const [newFolderName,setNewFolderName] = useState('');
+
+  function showSyncHint() {
+    setSyncHint(true);
+    if (syncTimerRef.current) window.clearTimeout(syncTimerRef.current);
+    syncTimerRef.current = window.setTimeout(() => setSyncHint(false), 3000) as unknown as number;
+  }
+  useEffect(() => () => { if (syncTimerRef.current) window.clearTimeout(syncTimerRef.current); }, []);
 
   // body background like header
   useEffect(() => {
@@ -407,6 +416,7 @@ export default function AssistantRail() {
 
     if (uid) {
       setSyncing(true);
+      showSyncHint(); // NEW: timed toast
       try {
         const cloudList = await cloudFetchAssistants(uid);
         if (cloudList.length > 0) {
@@ -438,23 +448,27 @@ export default function AssistantRail() {
     const sub = supabase.auth.onAuthStateChange(async (_evt, sess) => {
       const uid = sess?.user?.id ?? null;
       setUserId(uid);
-      if (!ss) return;
-      if (uid) {
-        try {
-          setSyncing(true);
-          const cloud = await cloudFetchAssistants(uid);
-          if (cloud.length > 0) {
-            setAssistants(cloud);
-            await saveAssistants(ss, cloud);
-          } else if (assistants.length > 0) {
-            await cloudUpsertAssistants(uid, assistants.map(a => ({ ...a, updatedAt: Date.now() })));
+      if (!ss || !uid) return;
+
+      try {
+        setSyncing(true);
+        showSyncHint(); // NEW
+        const cloud = await cloudFetchAssistants(uid);
+        if (cloud.length > 0) {
+          setAssistants(cloud);
+          await saveAssistants(ss, cloud);
+        } else {
+          // fresh local (avoid stale closure)
+          const local = await loadAssistants(ss);
+          if (local.length > 0) {
+            await cloudUpsertAssistants(uid, local.map(a => ({ ...a, updatedAt: Date.now() })));
           }
-        } catch {/* noop */}
-        finally { setSyncing(false); }
-      }
+        }
+      } catch {/* noop */}
+      finally { setSyncing(false); }
     });
     return () => sub?.data?.subscription?.unsubscribe?.();
-  }, [ss, assistants]);
+  }, [ss]); // only depends on ss (not assistants)
 
   const filtered = useMemo(()=>{
     const s=q.trim().toLowerCase();
@@ -506,7 +520,7 @@ export default function AssistantRail() {
     await saveAssistants(ss, next);
     setCreateOpen(false);
 
-    if (userId) { try { await cloudUpsertAssistants(userId, [a]); } catch {} }
+    if (userId) { showSyncHint(); try { await cloudUpsertAssistants(userId, [a]); } catch {} }
 
     await select(a.id);
   }
@@ -520,7 +534,7 @@ export default function AssistantRail() {
     const changed = next.find(z => z.id === renId);
     setRenId(null);
 
-    if (userId && changed) { try { await cloudUpsertAssistants(userId, [changed]); } catch {} }
+    if (userId && changed) { showSyncHint(); try { await cloudUpsertAssistants(userId, [changed]); } catch {} }
   }
 
   async function confirmDelete(){
@@ -532,7 +546,7 @@ export default function AssistantRail() {
     setAssistants(next);
     await saveAssistants(ss, next);
 
-    if (userId && ids.length) { try { await cloudDeleteAssistants(userId, ids); } catch {} }
+    if (userId && ids.length) { showSyncHint(); try { await cloudDeleteAssistants(userId, ids); } catch {} }
 
     if (deletedActive) {
       const nid = next.find(a=> activeFolderId ? a.folderId===activeFolderId : !a.folderId)?.id || '';
@@ -548,6 +562,7 @@ export default function AssistantRail() {
     const next=[f, ...folders];
     setFolders(next);
     await saveFolders(ss, next);
+    // (Folder cloud sync can be added later if you create a table)
   }
 
   async function moveAssistantsToFolder(ids:string[], folderId:string|null){
@@ -559,6 +574,7 @@ export default function AssistantRail() {
 
     if (userId) {
       const changed = next.filter(a => ids.includes(a.id));
+      showSyncHint();
       try { await cloudUpsertAssistants(userId, changed); } catch {}
     }
   }
@@ -650,8 +666,8 @@ export default function AssistantRail() {
             )}
           </div>
 
-          {/* optional: tiny sync hint */}
-          {syncing && (
+          {/* Timed sync hint (auto hides ~3s after any sync starts) */}
+          {syncHint && (
             <div className="mt-2 flex items-center gap-2 text-[11px]" style={{ color:'var(--text-muted)' }}>
               <Loader2 className="w-3 h-3 animate-spin" />
               Syncing…
