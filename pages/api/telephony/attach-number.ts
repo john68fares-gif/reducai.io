@@ -48,6 +48,7 @@ export default async function attachNumberHandler(
       rate:     clampNum(b.rate,    60, 140, 100),     // -> ?rate=
       pitch:    clampNum(b.pitch,   -6, 6,   0),       // -> ?pitch=
       bargeIn:  !!b.bargeIn,                           // -> ?barge=
+      mode:     ((b.mode || '').toString().trim().toLowerCase() === 'assistant') ? 'assistant' : 'user', // -> ?mode=
     };
 
     // ---- Public base URL (must be https + public) ----
@@ -78,6 +79,7 @@ export default async function attachNumberHandler(
     if (cfg.greeting) voiceUrlObj.searchParams.set('greet', cfg.greeting);
     if (cfg.style)    voiceUrlObj.searchParams.set('style', cfg.style);
     if (agentId)      voiceUrlObj.searchParams.set('agent', agentId);
+    voiceUrlObj.searchParams.set('mode', cfg.mode); // NEW
     voiceUrlObj.searchParams.set('delay', String(cfg.delayMs));
     voiceUrlObj.searchParams.set('rate',  String(cfg.rate));
     voiceUrlObj.searchParams.set('pitch', String(cfg.pitch));
@@ -85,7 +87,7 @@ export default async function attachNumberHandler(
 
     const voiceUrl = voiceUrlObj.toString();
 
-    // Fallback URL (optional but helpful): same endpoint w/ flag
+    // Fallback URL
     const voiceFallbackUrlObj = new URL(voiceUrl);
     voiceFallbackUrlObj.searchParams.set('fallback', '1');
     const voiceFallbackUrl = voiceFallbackUrlObj.toString();
@@ -108,13 +110,10 @@ export default async function attachNumberHandler(
     }
     const pnSid: string = match.sid;
 
-    // 2) Update routing:
-    //    - clear VoiceApplicationSid (apps override VoiceUrl)
-    //    - set VoiceUrl / VoiceMethod
-    //    - set VoiceFallbackUrl / VoiceFallbackMethod
+    // 2) Update routing
     const updateUrl = `${apiBase}/IncomingPhoneNumbers/${pnSid}.json`;
     const form = new URLSearchParams();
-    form.set('VoiceApplicationSid', ''); // IMPORTANT: ensure URL mode is used
+    form.set('VoiceApplicationSid', '');
     form.set('VoiceUrl', voiceUrl);
     form.set('VoiceMethod', 'POST');
     form.set('VoiceFallbackUrl', voiceFallbackUrl);
@@ -133,24 +132,12 @@ export default async function attachNumberHandler(
       return res.status(updResp.status).json({ ok: false, error: `Twilio update failed: ${txt}` });
     }
 
-    // 3) Verify applied config by reading the number again
+    // 3) Verify
     const getResp = await fetch(`${apiBase}/IncomingPhoneNumbers/${pnSid}.json`, {
       method: 'GET',
       headers: { Authorization: authHeader },
     });
     const getJson: any = await getResp.json();
-    // If an app is still attached, VoiceUrl is ignored — surface that.
-    if (getJson?.voice_application_sid) {
-      return res.status(200).json({
-        ok: true,
-        data: {
-          sid: pnSid,
-          phoneNumber,
-          voiceUrl: getJson.voice_url || voiceUrl,
-          voiceFallbackUrl: getJson.voice_fallback_url || voiceFallbackUrl,
-        },
-      });
-    }
 
     return res.status(200).json({
       ok: true,
