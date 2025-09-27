@@ -1,30 +1,24 @@
 // pages/index.tsx
 import Head from 'next/head';
-import { useEffect, useMemo, useState } from 'react';
-import { loadStripe } from '@stripe/stripe-js';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
-import { supabase } from '@/lib/supabase-client';
 import { motion } from 'framer-motion';
 import {
   CheckCircle2, ArrowRight, Shield, Wand2, Mic, Zap, CreditCard,
 } from 'lucide-react';
+import { supabase } from '@/lib/supabase-client';
 
-const CTA = '#59d9b3'; // brand green
+const CTA = '#59d9b3';
 const GREEN_LINE = 'rgba(89,217,179,.20)';
-
-// -------- Stripe (client) --------
-const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || '');
 
 type BillingCycle = 'monthly' | 'annual';
 
-/** Your real Stripe price IDs (from your message) */
+/** Stripe Price IDs (from your message) */
 const PRICE_IDS = {
-  // Starter
   starter: {
     monthly: 'price_1SByXOHWdU8X80NM4jFrU6Nr',
     annual:  'price_1SByXAHWdU8X80NMftriHWJW',
   },
-  // Pro
   pro: {
     monthly: 'price_1SByXKHWdU8X80NMAw5IlrTc',
     annual:  'price_1SByXRHWdU8X80NM7UwuAw0B',
@@ -35,49 +29,41 @@ export default function Home() {
   const router = useRouter();
   const [checkingSession, setCheckingSession] = useState(true);
   const [cycle, setCycle] = useState<BillingCycle>('monthly');
-  const [loadingPlan, setLoadingPlan] = useState<string>('');
+  const [loadingPrice, setLoadingPrice] = useState<string>('');
 
-  // If already signed in, you can still show landing. (Remove redirect-on-load noise.)
   useEffect(() => {
+    // Keep landing public; we just avoid redirect noise here
     (async () => {
-      try {
-        await supabase.auth.getSession(); // don’t redirect here; let pricing be public
-      } finally {
-        setCheckingSession(false);
-      }
+      try { await supabase.auth.getSession(); } finally { setCheckingSession(false); }
     })();
   }, []);
 
   async function beginCheckout(priceId: string) {
     try {
-      setLoadingPlan(priceId);
+      setLoadingPrice(priceId);
       const res = await fetch('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type':'application/json' },
         body: JSON.stringify({
           priceId,
-          // free trial & card capture handled server-side
           mode: 'subscription',
-          // pass where to go after pay (server uses these)
-          successPath: '/builder',
+          successPath: '/auth/callback?from=%2Fbuilder', // after pay → session → /builder
           cancelPath:  '/#pricing',
         }),
       });
       if (!res.ok) throw new Error('checkout_failed');
-      const { sessionId } = await res.json();
-      const stripe = await stripePromise;
-      if (!stripe) throw new Error('stripe_missing');
-      await stripe.redirectToCheckout({ sessionId });
+      const { url } = await res.json() as { url?: string };
+      if (!url) throw new Error('missing_checkout_url');
+      window.location.href = url; // ← redirect to Stripe Checkout (no stripe-js)
     } catch (e) {
       console.error(e);
       alert('Could not start checkout. Please try again.');
     } finally {
-      setLoadingPlan('');
+      setLoadingPrice('');
     }
   }
 
-  const monthlyActive = cycle === 'monthly';
-
+  const monthly = cycle === 'monthly';
   if (checkingSession) return null;
 
   return (
@@ -87,7 +73,7 @@ export default function Home() {
         <meta name="description" content="ReduxAI: build and deploy AI voice agents fast." />
       </Head>
 
-      {/* Tokens (borrowed from your Account style) */}
+      {/* Tokens / style */}
       <style jsx global>{`
         .va-scope{
           --bg:#0b0c10; --panel:#0d0f11; --card:#0f1214; --text:#e6f1ef; --text-muted:#9fb4ad;
@@ -110,11 +96,6 @@ export default function Home() {
         .btn:hover { transform: translateY(-1px); }
         .btn-primary { background: var(--brand); color: #fff; }
         .btn-secondary { background: var(--panel); border-color: var(--border); color: var(--text); }
-        .pill {
-          display:inline-flex; align-items:center; gap:8px; padding: 6px 12px; border-radius: 999px;
-          background: color-mix(in oklab, var(--brand) 10%, var(--panel)); border:1px solid ${GREEN_LINE};
-          font-size: 12px; color: var(--text);
-        }
         .card {
           border-radius: var(--radius);
           border:1px solid var(--border-weak);
@@ -122,9 +103,12 @@ export default function Home() {
           box-shadow: var(--shadow-card);
           overflow: hidden;
         }
-        .section {
-          padding: 72px 0;
+        .pill {
+          display:inline-flex; align-items:center; gap:8px; padding: 6px 12px; border-radius: 999px;
+          background: color-mix(in oklab, var(--brand) 10%, var(--panel)); border:1px solid ${GREEN_LINE};
+          font-size: 12px; color: var(--text);
         }
+        .section { padding: 72px 0; }
       `}</style>
 
       <div className="va-scope" style={{ background:'var(--bg)', color:'var(--text)' }}>
@@ -139,20 +123,16 @@ export default function Home() {
               <a href="#features" className="text-sm" style={{ color:'var(--text-muted)' }}>Features</a>
             </div>
             <div className="flex items-center gap-8">
+              {/* No direct sign-in. Gate users via checkout first. */}
               <button
                 className="btn btn-secondary"
-                onClick={() => document.getElementById('auth-overlay-root')?.classList.remove('hidden')}
-                style={{ borderRadius: 999 }}
+                onClick={() => document.getElementById('pricing')?.scrollIntoView({ behavior:'smooth' })}
               >
                 Sign in
               </button>
               <button
                 className="btn btn-primary"
-                onClick={() => {
-                  // scroll to pricing (your flow: pick plan -> pay -> account)
-                  document.getElementById('pricing')?.scrollIntoView({ behavior:'smooth', block:'start' });
-                }}
-                style={{ borderRadius: 999 }}
+                onClick={() => document.getElementById('pricing')?.scrollIntoView({ behavior:'smooth' })}
               >
                 Start for free <ArrowRight className="w-4 h-4" />
               </button>
@@ -183,7 +163,7 @@ export default function Home() {
                   Get started free
                 </button>
                 <div className="flex items-center gap-2 text-sm" style={{ color:'var(--text-muted)' }}>
-                  <Shield className="w-4 h-4" /> Card required for free trial verification
+                  <Shield className="w-4 h-4" /> Card required for $0 verification
                 </div>
               </div>
 
@@ -206,7 +186,7 @@ export default function Home() {
                 </div>
               </div>
               <div className="mt-4 text-xs" style={{ color:'var(--text-muted)' }}>
-                This is a static preview. Configure the real assistant after checkout.
+                Configure the real assistant after checkout.
               </div>
             </div>
           </div>
@@ -242,7 +222,7 @@ export default function Home() {
                 <div className="pill"><CreditCard className="w-4 h-4" /> Pricing</div>
                 <h2 className="text-[28px] md:text-[32px] font-semibold mt-2">Simple plans, free trial included</h2>
                 <div className="text-sm mt-1" style={{ color:'var(--text-muted)' }}>
-                  Card required for a $0 verification. You’ll be charged after the trial unless you cancel.
+                  You’ll verify your card now with a $0 authorization. Charge happens after the trial unless you cancel.
                 </div>
               </div>
 
@@ -252,9 +232,9 @@ export default function Home() {
                   className="btn"
                   style={{
                     height:36, padding:'0 14px',
-                    background: monthlyActive ? 'var(--brand)' : 'var(--panel)',
-                    color: monthlyActive ? '#fff' : 'var(--text)',
-                    borderRadius: 999, border: `1px solid ${monthlyActive ? 'transparent' : 'var(--border)'}`
+                    background: monthly ? 'var(--brand)' : 'var(--panel)',
+                    color: monthly ? '#fff' : 'var(--text)',
+                    borderRadius: 999, border: `1px solid ${monthly ? 'transparent' : 'var(--border)'}`
                   }}
                   onClick={()=>setCycle('monthly')}
                 >
@@ -264,9 +244,9 @@ export default function Home() {
                   className="btn"
                   style={{
                     height:36, padding:'0 14px',
-                    background: !monthlyActive ? 'var(--brand)' : 'var(--panel)',
-                    color: !monthlyActive ? '#fff' : 'var(--text)',
-                    borderRadius: 999, border: `1px solid ${!monthlyActive ? 'transparent' : 'var(--border)'}`
+                    background: !monthly ? 'var(--brand)' : 'var(--panel)',
+                    color: !monthly ? '#fff' : 'var(--text)',
+                    borderRadius: 999, border: `1px solid ${!monthly ? 'transparent' : 'var(--border)'}`
                   }}
                   onClick={()=>setCycle('annual')}
                 >
@@ -279,7 +259,7 @@ export default function Home() {
               {/* Starter */}
               <PlanCard
                 title="Starter"
-                priceLabel={monthlyActive ? '€19/mo' : '€11/mo (billed yearly)'}
+                priceLabel={monthly ? '€19/mo' : '€11/mo (billed yearly)'}
                 blurb="Everything you need to launch a single voice agent."
                 features={[
                   '1 assistant',
@@ -287,7 +267,7 @@ export default function Home() {
                   'Basic analytics',
                   'Email support'
                 ]}
-                loading={loadingPlan === PRICE_IDS.starter[cycle]}
+                loading={loadingPrice === PRICE_IDS.starter[cycle]}
                 onSelect={() => beginCheckout(PRICE_IDS.starter[cycle])}
               />
 
@@ -295,7 +275,7 @@ export default function Home() {
               <PlanCard
                 title="Pro"
                 highlight
-                priceLabel={monthlyActive ? '€39/mo' : '€23/mo (billed yearly)'}
+                priceLabel={monthly ? '€39/mo' : '€23/mo (billed yearly)'}
                 blurb="Scale to multiple assistants and teams."
                 features={[
                   'Up to 5 assistants',
@@ -303,13 +283,13 @@ export default function Home() {
                   'Priority routing',
                   'Priority support'
                 ]}
-                loading={loadingPlan === PRICE_IDS.pro[cycle]}
+                loading={loadingPrice === PRICE_IDS.pro[cycle]}
                 onSelect={() => beginCheckout(PRICE_IDS.pro[cycle])}
               />
             </div>
 
             <div className="mt-5 text-xs" style={{ color:'var(--text-muted)' }}>
-              Prices are indicative UI labels. The actual amounts/intervals come from your Stripe <i>Price</i> objects.
+              UI prices are labels; real amount/interval comes from your Stripe <i>Price</i>.
             </div>
           </div>
         </section>
@@ -321,15 +301,11 @@ export default function Home() {
           </div>
         </footer>
       </div>
-
-      {/* Auth overlay (kept minimal, opens from navbar “Sign in”) */}
-      <AuthOverlay />
     </>
   );
 }
 
-/* ---------- Small components ---------- */
-
+/* ---------- Plan card ---------- */
 function PlanCard({
   title, blurb, priceLabel, features, onSelect, highlight, loading
 }:{
@@ -356,102 +332,9 @@ function PlanCard({
         ))}
       </ul>
 
-      <button
-        className="btn btn-primary w-full"
-        onClick={onSelect}
-        disabled={loading}
-      >
+      <button className="btn btn-primary w-full" onClick={onSelect} disabled={loading}>
         {loading ? 'Starting checkout…' : 'Start free trial'}
       </button>
     </motion.div>
-  );
-}
-
-/** Minimal sign-in overlay (email magic link + Google) */
-function AuthOverlay() {
-  const [email, setEmail] = useState('');
-  const [stage, setStage] = useState<'idle'|'sent'|'err'>('idle');
-
-  async function sendMagic() {
-    try {
-      setStage('idle');
-      const { error } = await supabase.auth.signInWithOtp({
-        email,
-        options: { emailRedirectTo: `${window.location.origin}/auth/callback` }
-      });
-      if (error) throw error;
-      setStage('sent');
-    } catch {
-      setStage('err');
-    }
-  }
-
-  async function signInGoogle() {
-    await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: { redirectTo: `${window.location.origin}/auth/callback` }
-    });
-  }
-
-  return (
-    <div id="auth-overlay-root" className="hidden fixed inset-0 z-[10000]">
-      <div
-        className="absolute inset-0"
-        style={{ background:'rgba(6,8,10,.62)', backdropFilter:'blur(6px)' }}
-        onClick={(e)=> {
-          if (e.target === e.currentTarget) (document.getElementById('auth-overlay-root') as HTMLDivElement)?.classList.add('hidden');
-        }}
-      />
-      <div className="absolute inset-0 px-4 flex items-center justify-center">
-        <div className="card w-full max-w-[520px]" style={{ border:`1px solid ${GREEN_LINE}` }}>
-          <div className="px-6 py-4" style={{ borderBottom:`1px solid ${GREEN_LINE}` }}>
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-[12px] grid place-items-center" style={{ background:'var(--brand-weak)' }}>
-                <Shield className="w-5 h-5" />
-              </div>
-              <div>
-                <div className="text-lg font-semibold">Sign in</div>
-                <div className="text-xs" style={{ color:'var(--text-muted)' }}>Continue with Google or email</div>
-              </div>
-            </div>
-          </div>
-
-          <div className="px-6 py-5">
-            <button className="btn btn-secondary w-full" onClick={signInGoogle}>
-              Continue with Google
-            </button>
-
-            <div className="mt-4 text-center text-xs" style={{ color:'var(--text-muted)' }}>or</div>
-
-            <div className="mt-3">
-              <label className="text-xs mb-1 block" style={{ color:'var(--text-muted)' }}>Email</label>
-              <input
-                value={email}
-                onChange={(e)=>setEmail(e.target.value)}
-                className="w-full h-[44px] px-3 text-sm outline-none"
-                placeholder="you@company.com"
-                style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, borderRadius: 10, color:'var(--text)' }}
-              />
-              <button className="btn btn-primary w-full mt-3" onClick={sendMagic}>Continue with email</button>
-
-              {stage === 'sent' && (
-                <div className="mt-3 text-xs" style={{ color: CTA }}>
-                  Check your inbox for a sign-in link.
-                </div>
-              )}
-              {stage === 'err' && (
-                <div className="mt-3 text-xs" style={{ color: 'crimson' }}>
-                  Couldn’t send link. Try again.
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="px-6 pb-5 text-xs" style={{ color:'var(--text-muted)' }}>
-            New here? Pick a plan below and complete checkout first — your account unlocks after payment.
-          </div>
-        </div>
-      </div>
-    </div>
   );
 }
