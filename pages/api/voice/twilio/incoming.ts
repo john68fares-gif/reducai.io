@@ -21,12 +21,12 @@ function baseUrl(req: NextApiRequest) {
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  // Pull config from query (set by attach-number.ts)
   const url = new URL(req.url || '', 'http://local');
   const q = url.searchParams;
 
   const agent   = q.get('agent') || '';
-  const greet   = q.get('greet') || 'Hello! Your AI agent is connected.';
+  const mode    = (q.get('mode') || 'assistant').toLowerCase(); // NEW: 'assistant' | 'user'
+  const greetQ  = q.get('greet') || '';                         // may be empty → no greeting
   const voice   = q.get('voice') || 'Polly.Joanna';
   const lang    = q.get('lang')  || 'en-US';
   const rate    = q.get('rate')  || '100';
@@ -40,7 +40,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return;
   }
 
-  // Keep params when we POST to the next step
   const nextUrl = new URL('/api/voice/twilio/next', base);
   if (agent) nextUrl.searchParams.set('agent', agent);
   nextUrl.searchParams.set('voice', voice);
@@ -52,23 +51,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const sayAttrs = `voice="${xmlEscape(voice)}" language="${xmlEscape(lang)}"`;
 
-  const twiml =
-    `<?xml version="1.0" encoding="UTF-8"?>` +
-    `<Response>` +
-      // Optional prosody controls; TwiML doesn't support rate/pitch attributes directly across all voices,
-      // so keep it simple and just <Say>. You can move to <Play> with generated audio later.
-      `<Say ${sayAttrs}>${xmlEscape(greet)}</Say>` +
+  // Build TwiML based on mode:
+  // - assistant: optional greeting first, then Gather
+  // - user: straight to Gather (no greeting)
+  let body = '';
 
-      // Prompt the caller so you can verify speech → webhook is working
-      `<Gather input="speech" action="${xmlEscape(nextUrl.toString())}" method="POST" speechTimeout="auto">` +
-        `<Say ${sayAttrs}>How can I help you today?</Say>` +
-      `</Gather>` +
+  if (mode === 'assistant' && greetQ) {
+    body += `<Say ${sayAttrs}>${xmlEscape(greetQ)}</Say>`;
+  }
 
-      `<Pause length="1"/>` +
-      `<Say ${sayAttrs}>Goodbye.</Say>` +
-      `<Hangup/>` +
-    `</Response>`;
+  // Go straight to gather for user-first (or after greeting)
+  body += `<Gather input="speech" action="${xmlEscape(nextUrl.toString())}" method="POST" speechTimeout="auto">` +
+            `<Say ${sayAttrs}>${xmlEscape(mode === 'assistant' && greetQ ? 'I\'m listening…' : 'Please speak after the tone. I\'m listening…')}</Say>` +
+          `</Gather>`;
 
+  // Optional end
+  body += `<Pause length="1"/><Say ${sayAttrs}>Goodbye.</Say><Hangup/>`;
+
+  const twiml = `<?xml version="1.0" encoding="UTF-8"?><Response>${body}</Response>`;
   res.setHeader('Content-Type', 'text/xml');
   res.status(200).send(twiml);
 }
