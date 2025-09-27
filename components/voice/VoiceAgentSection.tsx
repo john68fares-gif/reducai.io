@@ -18,7 +18,7 @@ import { loadJSZip } from '@/lib/jszip-loader';
 import { DEFAULT_PROMPT as BUILDER_DEFAULT, buildPromptFromWebsite } from '@/utils/prompt-builder';
 import { shapePromptForScheduling } from '@/components/voice/utils/prompt';
 
-// 🔧 Prompt engine (drives frontend+backend strings)
+// Prompt engine glue
 import {
   DEFAULT_PROMPT as ENGINE_DEFAULT,
   looksLikeFullPrompt,
@@ -69,7 +69,7 @@ const sleep = (ms:number) => new Promise(r=>setTimeout(r,ms));
 const STRIP_META_RE = /^(SYSTEM_SPEC|IDENTITY|STYLE|GUIDELINES|GOALS|FALLBACK|BUSINESS_FACTS|POLICY)::.*$/gmi;
 const sanitizePrompt = (s: string) => (s || '').replace(STRIP_META_RE, '').trim();
 
-/* ───────── typing effect helper (preview only) ───────── */
+/* ───────── typing effect helper ───────── */
 async function typeIntoPrompt(
   full: string,
   onTick: (current: string) => void,
@@ -141,30 +141,23 @@ function diffCharsLCS(a: string, b: string): DiffOp[] {
   while (i>0 && j>0){
     if (A[i-1]===B[j-1]) { ops.push({t:'same', ch:A[i-1]}); i--; j--; }
     else if (dp[i-1][j] >= dp[i][j-1]) { ops.push({t:'rem', ch:A[i-1]}); i--; }
-    else { ops.push({t:'add', ch:B[j-1]}); j--; }
+    else { ops.push({t:'add', ch:B[j-1]}); j--;
+    }
   }
   while (i>0){ ops.push({t:'rem', ch:A[i-1]}); i--; }
   while (j>0){ ops.push({t:'add', ch:B[j-1]}); j--; }
   ops.reverse();
   return ops;
 }
+
 function PromptDiffView({ base, next }: { base: string; next: string }) {
   const ops = diffCharsLCS(base, next);
   return (
     <pre className="whitespace-pre-wrap break-words m-0" style={{ lineHeight: 1.55 }}>
       {ops.map((o, i) => {
         if (o.t === 'same') return <span key={i}>{o.ch}</span>;
-        if (o.t === 'add')
-          return (
-            <span key={i} style={{ background:'rgba(16,185,129,.14)', color:'#10b981' }}>
-              {o.ch}
-            </span>
-          );
-        return (
-          <span key={i} style={{ background:'rgba(239,68,68,.18)', color:'#ef4444', textDecoration:'line-through' }}>
-              {o.ch}
-          </span>
-        );
+        if (o.t === 'add')  return <span key={i} style={{ background:'rgba(16,185,129,.14)', color:'#10b981' }}>{o.ch}</span>;
+        return <span key={i} style={{ background:'rgba(239,68,68,.18)', color:'#ef4444', textDecoration:'line-through' }}>{o.ch}</span>;
       })}
     </pre>
   );
@@ -187,7 +180,7 @@ type AgentData = {
   contextText?: string;
   ctxFiles?: { name:string; text:string }[];
   ttsProvider: 'openai' | 'elevenlabs' | 'google-tts';
-  voiceName: string;                 // friendly name (e.g., Alloy (American))
+  voiceName: string;
   apiKeyId?: string;
   phoneId?: string;
   asrProvider: 'deepgram' | 'whisper' | 'assemblyai';
@@ -206,7 +199,10 @@ const PROMPT_SKELETON = `[Identity]
 [Task & Goals]
 
 [Error Handling / Fallback]`;
-const DEFAULT_PROMPT_RT = nonEmpty(BUILDER_DEFAULT) ? BUILDER_DEFAULT! : (nonEmpty(ENGINE_DEFAULT) ? ENGINE_DEFAULT! : PROMPT_SKELETON);
+
+const DEFAULT_PROMPT_RT =
+  nonEmpty(BUILDER_DEFAULT) ? BUILDER_DEFAULT! :
+  (nonEmpty(ENGINE_DEFAULT) ? ENGINE_DEFAULT! : PROMPT_SKELETON);
 
 const DEFAULT_AGENT: AgentData = {
   name: 'Assistant',
@@ -248,7 +244,7 @@ const DEFAULT_AGENT: AgentData = {
 
 const keyFor = (id: string) => `va:agent:${id}`;
 
-/* Imported voices (front-end list → maps to provider voice ids for preview route) */
+/* Voices for preview */
 const OPENAI_VOICES: { value: string; label: string; id: string }[] = [
   { value: 'Alloy (American)', label: 'Alloy', id: 'alloy' },
   { value: 'Verse (American)', label: 'Verse', id: 'verse' },
@@ -351,56 +347,52 @@ async function readFileAsText(f: File): Promise<string> {
   });
 }
 
-/* ───────── Frontend prompt normalizer: ALWAYS output 5 sections ───────── */
-function forceFiveSections(frontend: string, assistantName: string) {
-  const wanted = [
-    'Identity',
-    'Style',
-    'Response Guidelines',
-    'Task & Goals',
-    'Error Handling / Fallback',
-  ];
+/* ───────── Fallback: sectioned prompt from description ───────── */
+function makeFrontendPromptFromDescription(desc: string, baseName: string) {
+  const raw = shapePromptForScheduling(desc, { name: baseName, personaName: baseName, org: 'Your Business' }) || '';
+  const s = sanitizePrompt(raw);
 
-  const txt = (normalizeFullPrompt?.(sanitizePrompt(frontend)) ?? sanitizePrompt(frontend)) || '';
-  const lines = txt.split('\n');
+  const sections: Record<string, string> = {
+    'Identity': '',
+    'Style': '',
+    'Response Guidelines': '',
+    'Task & Goals': '',
+    'Error Handling / Fallback': '',
+  };
 
-  const got: Record<string, string[]> = {};
-  let cur = '';
-  for (const h of wanted) got[h] = [];
+  const lines = s.split('\n');
+  let current = '';
+  let buf: string[] = [];
+  const commit = () => {
+    if (!current) return;
+    const joined = buf.join('\n').trim();
+    if (joined) sections[current] = joined;
+    buf = [];
+  };
 
   for (const line of lines) {
     const m = line.match(/^\[(.+?)\]\s*$/);
-    if (m && wanted.includes(m[1])) { cur = m[1]; continue; }
-    if (!cur) cur = 'Identity'; // anything before first header → Identity
-    got[cur].push(line);
+    if (m) { commit(); current = m[1]; }
+    else { buf.push(line); }
   }
+  commit();
 
-  const ensure = (s?: string[]) => (s?.join('\n').trim() || '');
-
-  const out = [
+  return [
     '[Identity]',
-    ensure(got['Identity']) || `- You are ${assistantName || 'Assistant'}, a helpful AI assistant for this business.`,
+    sections['Identity'] || `- You are ${baseName}, a helpful AI assistant for this business.`,
     '',
     '[Style]',
-    ensure(got['Style']) || '- Clear, concise, friendly.',
+    sections['Style'] || '- Clear, concise, friendly. Use plain language and short sentences.',
     '',
     '[Response Guidelines]',
-    ensure(got['Response Guidelines']) || '- Ask for missing info; confirm key details; provide one CTA.',
+    sections['Response Guidelines'] || '- Ask for missing info. Confirm key details back to the user. Provide one call-to-action.',
     '',
     '[Task & Goals]',
-    ensure(got['Task & Goals']) || '- Help users complete their next best action (book, purchase, escalate).',
+    sections['Task & Goals'] || '- Help users complete their next best action (book, purchase, or escalate).',
     '',
     '[Error Handling / Fallback]',
-    ensure(got['Error Handling / Fallback']) || '- If unsure, ask a specific clarifying question first.',
+    sections['Error Handling / Fallback'] || '- If unsure, ask a specific clarifying question before proceeding.',
   ].join('\n').trim();
-
-  return normalizeFullPrompt?.(out) ?? out;
-}
-
-/* ───────── Fallback: build sectioned prompt from a free-form description ───────── */
-function makeFrontendPromptFromDescription(desc: string, baseName: string) {
-  const raw = shapePromptForScheduling(desc, { name: baseName, personaName: baseName, org: 'Your Business' }) || '';
-  return forceFiveSections(raw, baseName);
 }
 
 /* ───────── Page ───────── */
@@ -419,6 +411,7 @@ export default function VoiceAgentSection() {
     } catch {}
     return 'dark';
   });
+
   useEffect(() => {
     if (!IS_CLIENT) return;
     const apply = (t:'light'|'dark') => { document.documentElement.dataset.theme = t; setTheme(t); };
@@ -481,7 +474,6 @@ export default function VoiceAgentSection() {
   const [audioProgress, setAudioProgress] = useState<number>(0);
   const previewAbortRef = useRef<AbortController | null>(null);
 
-  // Preview progress handler
   useEffect(() => {
     const el = audioRef.current;
     if (!el) return;
@@ -492,10 +484,12 @@ export default function VoiceAgentSection() {
     const onEnd = () => { setAudioPlaying(false); setAudioProgress(0); };
     el.addEventListener('timeupdate', onTime);
     el.addEventListener('ended', onEnd);
-    return () => { el.removeEventListener('timeupdate', onTime); el.removeEventListener('ended', onEnd); };
+    return () => {
+      el.removeEventListener('timeupdate', onTime);
+      el.removeEventListener('ended', onEnd);
+    };
   }, []);
 
-  // Real TTS preview (with graceful fallback)
   async function fetchVoicePreview(text: string) {
     const item = OPENAI_VOICES.find(v => v.value === data.voiceName);
     const providerVoiceId = item?.id || 'alloy';
@@ -533,6 +527,7 @@ export default function VoiceAgentSection() {
       setAudioLoading(false);
     }
   }
+
   async function onClickPreview() {
     if (audioPlaying) {
       audioRef.current?.pause();
@@ -549,8 +544,14 @@ export default function VoiceAgentSection() {
       el.play().then(()=> setAudioPlaying(true)).catch(()=>{});
     });
   }
+
   function stopPreview() {
-    try { audioRef.current?.pause(); if (audioRef.current) audioRef.current.currentTime = 0; setAudioPlaying(false); setAudioProgress(0); } catch {}
+    try {
+      audioRef.current?.pause();
+      if (audioRef.current) audioRef.current.currentTime = 0;
+      setAudioPlaying(false);
+      setAudioProgress(0);
+    } catch {}
     if ('speechSynthesis' in window) window.speechSynthesis.cancel();
   }
 
@@ -605,7 +606,7 @@ export default function VoiceAgentSection() {
       }
     })();
     return () => { mounted = false; };
-  // eslint-disable-next-line
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ===== PHONE NUMBERS =====
@@ -619,7 +620,7 @@ export default function VoiceAgentSection() {
 
         store.ensureOwnerGuard?.().catch(() => {});
         const phoneV1 = await store.getJSON<PhoneNum[]>(PHONE_LIST_KEY_V1, []).catch(() => []);
-        const phoneLegacy = await store.getJSON<PhoneNum[]>('phoneNumbers', []).catch(() => []);
+        const phoneLegacy = await store.getJSON<PhoneNum[]>(PHONE_LIST_KEY_LEG, []).catch(() => []);
         const phonesMerged = Array.isArray(phoneV1) && phoneV1.length ? phoneV1
                              : Array.isArray(phoneLegacy) ? phoneLegacy : [];
         const phoneCleaned = phonesMerged
@@ -645,7 +646,7 @@ export default function VoiceAgentSection() {
       }
     })();
     return () => { mounted = false; };
-  // eslint-disable-next-line
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function setField<K extends keyof AgentData>(k: K) {
@@ -671,7 +672,7 @@ export default function VoiceAgentSection() {
         setData(p => ({ ...p, systemPromptBackend: raw }));
       }
     }
-  }, [data.systemPrompt]);
+  }, [data.systemPrompt, setData, data.systemPromptBackend]);
 
   async function doSave(){
     if (!activeId) { setToastKind('error'); setToast('Select or create an agent'); return; }
@@ -689,6 +690,7 @@ export default function VoiceAgentSection() {
       setToastKind('error'); setToast('Save failed');
     } finally { setSaving(false); setTimeout(()=>setToast(''), 1400); }
   }
+
   async function doPublish(){
     if (!activeId) { setToastKind('error'); setToast('Select or create an agent'); return; }
     setPublishing(true); setToast('');
@@ -704,6 +706,7 @@ export default function VoiceAgentSection() {
     setField('ctxFiles')(files);
     setField('contextText')(merged.trim());
   };
+
   const onPickFiles = async (files: File[]) => {
     if (!files?.length) return;
     const out: {name:string;text:string}[] = [...(data.ctxFiles||[])];
@@ -730,14 +733,14 @@ export default function VoiceAgentSection() {
     setIsTypingPreview(true);
 
     await typeIntoPrompt(next, (chunk) => setPreviewTyped(chunk), { cps: 120 });
-    setIsTypingPreview(false); // buttons show only after preview finishes typing
+    setIsTypingPreview(false); // buttons show after typing finishes
   };
 
-  // ✅ Accept: apply instantly, no typing in editor, white text, removals gone
-  const acceptDiff = () => {
+  const acceptDiff = async () => {
     const chosenFront = candidatePrompt;
     const chosenBack  = pendingBackendRef.current || candidatePrompt;
 
+    // exit preview
     setDiffMode(false);
     setBasePrompt('');
     setCandidatePrompt('');
@@ -745,12 +748,10 @@ export default function VoiceAgentSection() {
     setPreviewTyped('');
     setIsTypingPreview(false);
 
-    // Apply immediately to state (no animation)
-    setData(prev => ({
-      ...prev,
-      systemPrompt: chosenFront,
-      systemPromptBackend: chosenBack,
-    }));
+    // type accepted into the editor (no highlights afterwards)
+    await typeIntoPrompt(chosenFront, (chunk) => {
+      setData(prev => ({ ...prev, systemPrompt: chunk, systemPromptBackend: chosenBack }));
+    }, { cps: 120 });
   };
 
   const declineDiff = () => {
@@ -770,24 +771,18 @@ export default function VoiceAgentSection() {
     await startDiff(next, next);
   };
 
-  /* Generate → engine compile → normalized 5-section frontend + backend → diff preview */
+  /* Generate → prompt-engine: sectioned frontend + machine backend */
   const onGenerateToDiff = async (userDesc:string) => {
     try {
       const base = sanitizePrompt((data.systemPrompt || DEFAULT_PROMPT_RT).trim());
       const compiled = compilePrompt({ basePrompt: base, userText: userDesc });
 
-      // Frontend: normalize + enforce all 5 sections
-      const frontRaw = nonEmpty(compiled.frontendText) ? compiled.frontendText : base;
-      const front = forceFiveSections(frontRaw, data.name || 'Assistant');
-
-      // Backend: prefer engine backendString; otherwise same as frontend (sanitized)
-      const backRaw = nonEmpty(compiled.backendString) ? compiled.backendString : front;
-      const back = sanitizePrompt(backRaw);
+      const front = nonEmpty(compiled.frontendText) ? compiled.frontendText : base;
+      const back  = nonEmpty(compiled.backendString) ? compiled.backendString : front;
 
       await startDiff(front, back);
     } catch {
-      // Fallback path still guarantees all sections
-      const front = forceFiveSections(makeFrontendPromptFromDescription(userDesc, data.name || 'Assistant'), data.name || 'Assistant');
+      const front = makeFrontendPromptFromDescription(userDesc, data.name || 'Assistant');
       await startDiff(front, front);
     }
   };
@@ -831,7 +826,10 @@ export default function VoiceAgentSection() {
   }, [data.greetPick, data.firstMsgs, data.firstMode]);
 
   const hasApiKey = !!(data.apiKeyId && apiKeys.some(k=>k.id===data.apiKeyId && k.key));
-  const selectedKey = useMemo(() => apiKeys.find(k => k.id === data.apiKeyId)?.key || '', [apiKeys, data.apiKeyId]);
+  const selectedKey = useMemo(
+    () => apiKeys.find(k => k.id === data.apiKeyId)?.key || '',
+    [apiKeys, data.apiKeyId]
+  );
 
   return (
     <section className="va-root">
@@ -1284,4 +1282,153 @@ export default function VoiceAgentSection() {
         open={showGenerate}
         onClose={() => setShowGenerate(false)}
         onGenerate={async (userDescription: string) => {
-          const desc
+          const desc = safeTrim(userDescription);
+          if (!desc) return;
+          setShowGenerate(false);
+          await sleep(10);
+          await onGenerateToDiff(desc);
+        }}
+      />
+
+      {/* Import website — builds prompt blocks via prompt-builder → diff preview */}
+      <ImportWebsiteModal
+        open={showImport}
+        onClose={() => setShowImport(false)}
+        onImport={async (urls: string[])=>{
+          const list = urls.map(s=>s.trim()).filter(Boolean);
+          if (!list.length) return;
+
+          const chunks: string[] = [];
+          for (const u of list) {
+            try {
+              const r = await fetch('/api/connectors/website-import', {
+                method:'POST',
+                headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({ url: u })
+              });
+              const j = r.ok ? await r.json().catch(()=>null) : null;
+              const facts: string[] = Array.isArray(j?.facts) ? j.facts : [];
+              if (facts.length) {
+                chunks.push(`# ${u}`, ...facts.map(s => `- ${s}`), '');
+              } else {
+                chunks.push(`# ${u}`, '- No obvious facts extracted.', '');
+              }
+            } catch {
+              chunks.push(`# ${u}`, '- Fetch failed.', '');
+            }
+          }
+
+          const merged = chunks.join('\n').trim();
+          const base = sanitizePrompt((data.systemPromptBackend || data.systemPrompt || DEFAULT_PROMPT_RT).trim());
+          const next = buildPromptFromWebsite(merged, base);
+
+          setShowImport(false);
+          await sleep(10);
+          await startDiff(next, next);
+        }}
+      />
+
+      {/* Voice/Call overlay */}
+      {IS_CLIENT ? createPortal(
+        <>
+          <div
+            className={`fixed inset-0 ${showCall ? '' : 'pointer-events-none'}`}
+            style={{ zIndex: 9996, background: showCall ? 'rgba(8,10,12,.78)' : 'transparent', opacity: showCall ? 1 : 0, transition: 'opacity .2s cubic-bezier(.22,.61,.36,1)' }}
+            onClick={()=> setShowCall(false)}
+          />
+          {showCall && (
+            <WebCallButton
+              model={callModel}
+              systemPrompt={
+                (() => {
+                  const base = sanitizePrompt(data.systemPromptBackend || data.systemPrompt || '');
+                  const ctx  = sanitizePrompt((data.contextText || '').trim());
+                  return ctx ? `${base}\n\n[Context]\n${ctx}`.trim() : base;
+                })()
+              }
+              voiceName={data.voiceName}
+              assistantName={data.name || 'Assistant'}
+              apiKey={selectedKey}
+              ephemeralEndpoint={EPHEMERAL_TOKEN_ENDPOINT}
+              onError={(err:any) => {
+                const msg = err?.message || err?.error?.message || (typeof err === 'string' ? err : '') || 'Call failed';
+                setToastKind('error'); setToast(msg);
+              }}
+              onClose={()=> setShowCall(false)}
+              prosody={{ fillerWords: true, microPausesMs: 200, phoneFilter: true, turnEndPauseMs: 120 }}
+              firstMode={data.firstMode}
+              firstMsg={greetingJoined}
+              languageHint={langToHint(data.language)}
+            />
+          )}
+        </>,
+        document.body
+      ) : null}
+
+      {/* Toast */}
+      {!!toast && (
+        <div
+          className="fixed bottom-4 right-4 rounded-[8px] px-3 py-2 text-sm"
+          style={{
+            zIndex: 100050,
+            background: toastKind==='error' ? 'rgba(239,68,68,.14)' : 'rgba(89,217,179,.12)',
+            color: 'var(--text)',
+            border: `1px solid ${toastKind==='error' ? 'rgba(239,68,68,.30)' : GREEN_LINE}`,
+            boxShadow: '0 10px 24px rgba(0,0,0,.18)'
+          }}
+        >
+          {toast}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/* ───────── Section ───────── */
+function Section({
+  title, icon, desc, children, defaultOpen = true
+}:{
+  title: string; icon: React.ReactNode; desc?: string; children: React.ReactNode; defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const innerRef = useRef<HTMLDivElement|null>(null);
+  const [h, setH] = useState<number>(0);
+  const measure = () => { if (innerRef.current) setH(innerRef.current.offsetHeight); };
+  useLayoutEffect(() => { measure(); }, [children, open]);
+
+  return (
+    <div className="mb-3">
+      <div className="mb-[6px] text-sm font-medium" style={{ color:'var(--text-muted)' }}>{title}</div>
+
+      <div className="va-card">
+        <button onClick={()=>setOpen(v=>!v)} className="va-head w-full text-left" style={{ color:'var(--text)' }}>
+          <span className="min-w-0 flex items-center gap-3">
+            <span className="inline-grid place-items-center w-7 h-7 rounded-full" style={{ background:'rgba(89,217,179,.12)' }}>
+              {icon}
+            </span>
+            <span className="min-w-0">
+              <span className="block font-semibold truncate" style={{ fontSize:'18px' }}>{title}</span>
+              {desc ? <span className="block text-xs truncate" style={{ color:'var(--text-muted)' }}>{desc}</span> : null}
+            </span>
+          </span>
+          <span className="justify-self-end">
+            {open ? <ChevronUp className="w-4 h-4" style={{ color:'var(--text-muted)' }}/> :
+                    <ChevronDown className="w-4 h-4" style={{ color:'var(--text-muted)' }}/>}
+          </span>
+        </button>
+
+        <div
+          className="va-section-body"
+          style={{
+            height: open ? h : 0, opacity: open ? 1 : 0, transform: open ? 'translateY(0)' : 'translateY(-4px)',
+            transition: 'height 260ms var(--ease), opacity 230ms var(--ease), transform 260ms var(--ease)',
+            overflow:'hidden'
+          }}
+          onTransitionEnd={() => { if (open) measure(); }}
+        >
+          <div ref={innerRef} className="p-5">{children}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
