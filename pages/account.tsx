@@ -8,14 +8,15 @@ import { useRouter } from 'next/router';
 import { supabase } from '@/lib/supabase-client';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  User as UserIcon, Mail, Calendar, Sun, Moon, LogOut, KeyRound,
-  CheckCircle2, AlertCircle, Crown, Zap, ShieldCheck, Loader2, LockKeyhole,
-  ShieldAlert, ChevronRight, Palette, Shield, CreditCard, Eye, EyeOff, BadgeCheck, Globe
+  User as UserIcon, Sun, Moon, LogOut, KeyRound,
+  CheckCircle2, AlertCircle, Crown, Zap, Loader2,
+  ChevronRight, Palette, Shield, CreditCard, Eye, EyeOff, BadgeCheck, Globe
 } from 'lucide-react';
 
-/* ───────────────── Tokens to match Voice Agent ───────────────── */
+/* ───────────────── Tokens (Dark + Light) ───────────────── */
 const Tokens = () => (
   <style jsx global>{`
+    /* Default/Dark (matches Voice Agent / Sidebar) */
     .va-scope{
       --bg:#0b0c10; --panel:#0d0f11; --card:#0f1214; --text:#e6f1ef; --text-muted:#9fb4ad;
       --brand:#59d9b3; --brand-weak:rgba(89,217,179,.22);
@@ -26,6 +27,25 @@ const Tokens = () => (
       --ease:cubic-bezier(.22,.61,.36,1);
       --control-h:40px;
     }
+
+    /* Light tokens (clean slate version of the same style) */
+    :root:not([data-theme="dark"]) .va-scope{
+      --bg:#f7faf9;                 /* very light teal-tinted bg */
+      --panel:#ffffff;              /* cards/panels are white */
+      --card:#f4f7f6;               /* subtle card tint */
+      --text:#0f172a;               /* slate-900 */
+      --text-muted:#64748b;         /* slate-500/600 */
+      --brand:#59d9b3;              /* same brand green */
+      --brand-weak:rgba(89,217,179,.18);
+      --border:rgba(15,23,42,.12);  /* darker border on light */
+      --border-weak:rgba(15,23,42,.12);
+      --shadow-soft:0 18px 48px rgba(2,6,12,.06);
+      --shadow-card:0 10px 24px rgba(2,6,12,.06), 0 0 0 1px rgba(15,23,42,.06) inset;
+      --radius-outer:8px; --radius-inner:8px;
+      --ease:cubic-bezier(.22,.61,.36,1);
+      --control-h:40px;
+    }
+
     .va-card{
       border-radius:var(--radius-outer);
       border:1px solid var(--border-weak);
@@ -40,7 +60,7 @@ const Tokens = () => (
       grid-template-columns:1fr auto;
       align-items:center;
       padding:0 16px;
-      border-bottom:1px solid rgba(255,255,255,.08);
+      border-bottom:1px solid color-mix(in oklab, var(--border) 80%, transparent);
       color:var(--text);
       background:linear-gradient(
         90deg,
@@ -56,6 +76,7 @@ const Tokens = () => (
       display: inline-block;
     }
     @keyframes shimmer { from { background-position: -200% 0; } to { background-position: 200% 0; } }
+
     input.va-input {
       height: var(--control-h);
       border-radius: 8px;
@@ -90,7 +111,7 @@ function fmtDate(iso?: string) {
   try { return new Date(iso).toLocaleString(); } catch { return iso; }
 }
 
-/* ───────────────── Expandable Section (matches Voice Agent) ───────────────── */
+/* ───────────────── Expandable Section ───────────────── */
 function Section({
   title, icon, desc, children, defaultOpen = true
 }:{
@@ -163,7 +184,7 @@ export default function AccountPage() {
   const [userCreated, setUserCreated] = useState<string | null>(null);
 
   // Providers
-  const [providers, setProviders] = useState<string[]>([]);
+  the const [providers, setProviders] = useState<string[]>([]);
   const [passwordEnabled, setPasswordEnabled] = useState<boolean>(false);
   const hasEmailPassword = providers.includes('email') || passwordEnabled;
   const hasGoogle = providers.includes('google');
@@ -263,9 +284,12 @@ export default function AccountPage() {
   /* Theme init + workspace guard */
   useEffect(() => {
     try {
-      const ls = (localStorage.getItem('ui:theme') as ThemeMode) || 'dark';
-      setTheme(ls === 'light' ? 'light' : 'dark');
-      document.documentElement.dataset.theme = ls === 'light' ? 'light' : 'dark';
+      // if not set, try system preference once
+      const stored = (localStorage.getItem('ui:theme') as ThemeMode | null);
+      const sys = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+      const mode: ThemeMode = stored === 'light' || stored === 'dark' ? stored : sys as ThemeMode;
+      setTheme(mode);
+      document.documentElement.dataset.theme = mode;
     } catch {}
     try {
       const owner = localStorage.getItem('workspace:owner');
@@ -291,6 +315,8 @@ export default function AccountPage() {
       const { error } = await supabase.auth.updateUser({ data: { ui_theme: mode } });
       if (error) throw error;
       setSaveMsg('ok');
+      // notify other parts (e.g., Sidebar) if they listen
+      try { window.dispatchEvent(new Event('theme:change')); } catch {}
     } catch {
       setSaveMsg('err');
     } finally {
@@ -316,6 +342,7 @@ export default function AccountPage() {
   };
 
   /* Password helpers */
+  const [pwError, setPwError] = useState('');
   const createPassword = async () => {
     if (!pw1 || pw1 !== pw2) { setNameMsg('idle'); setResetMsg('idle'); return setPwError('Passwords don’t match'); }
     if (pwStrength < 3) return setPwError('Use at least 8 chars with numbers & symbols');
@@ -331,7 +358,6 @@ export default function AccountPage() {
       setPwError('Could not set password. Try again.');
     }
   };
-  const [pwError, setPwError] = useState('');
 
   const sendReset = async () => {
     if (!userEmail) return;
@@ -411,7 +437,7 @@ export default function AccountPage() {
           {/* Right content */}
           <section className="space-y-6">
 
-            {/* Profile (trimmed down, editable name) */}
+            {/* Profile */}
             <div id="profile" className="scroll-mt-16">
               <Section
                 title="Profile"
@@ -502,7 +528,7 @@ export default function AccountPage() {
               </Section>
             </div>
 
-            {/* Security (single clean card, shows actual sign-in methods) */}
+            {/* Security */}
             <div id="security" className="scroll-mt-16">
               <Section
                 title="Account & Security"
@@ -635,7 +661,7 @@ export default function AccountPage() {
               </Section>
             </div>
 
-            {/* Appearance (instant switch; keep both, defaults dark) */}
+            {/* Appearance */}
             <div id="appearance" className="scroll-mt-16">
               <Section
                 title="Appearance"
@@ -671,7 +697,7 @@ export default function AccountPage() {
               </Section>
             </div>
 
-            {/* Plan & Billing (unchanged minimal) */}
+            {/* Plan & Billing */}
             <div id="billing" className="scroll-mt-16">
               <Section
                 title="Plan & Billing"
