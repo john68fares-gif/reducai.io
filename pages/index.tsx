@@ -1,317 +1,339 @@
-// pages/index.tsx
 'use client';
 
-import { useMemo, useState } from 'react';
-import Head from 'next/head';
-import { motion, AnimatePresence } from 'framer-motion';
-import { loadStripe } from '@stripe/stripe-js';
-import {
-  Sparkles, Wand2, CheckCircle2, PhoneCall, Mic, Gauge, Shield,
-  Rocket, Layers, PlugZap, Workflow, CreditCard, ChevronRight, Loader2
-} from 'lucide-react';
+import React, { useState } from 'react';
+import Link from 'next/link';
+import { ArrowRight, UsersRound, Flashlight } from 'lucide-react';
 
-/* ───────────────── Tokens (re-using your overlay vibe) ───────────────── */
-const CTA = '#59d9b3';
-const GREEN_LINE = 'rgba(89,217,179,.20)';
-const R_SM = 6;
-const R_MD = 8;
-const R_LG = 10;
-
-const Tokens = () => (
-  <style jsx global>{`
-    .lp-scope{
-      --bg:#0b0c10; --panel:#0d0f11; --card:#0f1214; --text:#e6f1ef; --text-muted:#9fb4ad;
-      --brand:${CTA}; --brand-weak:rgba(89,217,179,.12);
-      --border:rgba(255,255,255,.12);
-      --shadow-card:0 20px 40px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset;
-    }
-    :root:not([data-theme="dark"]) .lp-scope{
-      --bg:#f7faf9; --panel:#fff; --card:#f4f7f6; --text:#0f172a; --text-muted:#64748b;
-      --border:rgba(15,23,42,.12);
-      --shadow-card:0 10px 24px rgba(2,6,12,.06), 0 0 0 1px rgba(15,23,42,.06) inset;
-    }
-    .va-card{
-      border-radius:${R_MD}px;
-      border:1px solid ${GREEN_LINE};
-      background:var(--panel);
-      box-shadow:var(--shadow-card);
-    }
-    .va-ghost{
-      border-radius:${R_MD}px;
-      border:1px solid ${GREEN_LINE};
-      background:linear-gradient(180deg, color-mix(in oklab, var(--panel) 92%, black) 0%, var(--panel) 100%);
-      box-shadow:var(--shadow-card);
-    }
-    .muted{ color: var(--text-muted); }
-    .pill{ display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px; border:1px solid ${GREEN_LINE}; background:var(--panel); }
-    .btn{ height:44px; border-radius:${R_MD}px; font-weight:600; }
-    .btn-cta{ background:${CTA}; color:#0a1210; border:1px solid color-mix(in oklab, ${CTA} 40%, black); }
-    .btn-ghost{ background:var(--panel); color:var(--text); border:1px solid ${GREEN_LINE}; }
-    .row{ position:relative; }
-    .row::after{
-      content:''; position:absolute; inset:0; border-radius:${R_MD}px; background:${CTA};
-      mix-blend-mode:screen; opacity:0; transition:opacity .18s ease;
-    }
-    .row:hover::after{ opacity:.18; }
-  `}</style>
-);
-
-/* ───────────────── Stripe Price IDs (YOURS) ─────────────────
-   If any mapping is swapped, just move the IDs below.
----------------------------------------------------------------- */
+/* ------------------------ PRICES (LIVE) ------------------------ */
 const PRICE = {
-  STARTER_MONTHLY: 'price_1SByXAHWdU8X80NMftriHWJW',
-  PRO_MONTHLY:     'price_1SByXKHWdU8X80NMAw5IlrTc',
-  STARTER_ANNUAL:  'price_1SByXOHWdU8X80NM4jFrU6Nr',
-  PRO_ANNUAL:      'price_1SByXRHWdU8X80NM7UwuAw0B',
+  STARTER_MONTH: 'price_1SByXAHWdU8X80NMftriHWJW',
+  PRO_MONTH:     'price_1SByXKHWdU8X80NMAw5IlrTc',
+  STARTER_YEAR:  'price_1SByXOHWdU8X80NM4jFrU6Nr',
+  PRO_YEAR:      'price_1SByXRHWdU8X80NM7UwuAw0B',
 } as const;
 
-/* ───────────────── Helpers ───────────────── */
-async function beginCheckout(priceId: string) {
-  const res = await fetch('/api/checkout', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ priceId, mode: 'subscription' }),
-  });
-  if (!res.ok) throw new Error(await res.text());
-  const { sessionId, publishableKey } = await res.json();
-  const stripe = await loadStripe(publishableKey);
-  const { error } = await stripe!.redirectToCheckout({ sessionId });
-  if (error) throw error;
+/* ------------------------ CHECKOUT ----------------------------- */
+async function startCheckout(priceId: string, setBusy?: (b: boolean)=>void){
+  try{
+    setBusy?.(true);
+    const res = await fetch('/api/stripe/checkout', {
+      method: 'POST',
+      headers: { 'content-type':'application/json' },
+      body: JSON.stringify({ priceId }),
+    });
+    const data = await res.json();
+    if(!res.ok) throw new Error(data?.detail || data?.error || 'Failed to create session');
+
+    const { loadStripe } = await import('@stripe/stripe-js');
+    const stripe = await loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!);
+    const { error } = await stripe!.redirectToCheckout({ sessionId: data.id });
+    if (error) throw error;
+  } catch (e:any){
+    console.error(e);
+    alert(`Could not start checkout. Check Stripe keys + Price IDs (open console).\n\n${e?.message||e}`);
+  } finally{
+    setBusy?.(false);
+  }
 }
 
-/* ───────────────── Component ───────────────── */
-export default function Landing() {
-  const [billing, setBilling] = useState<'monthly' | 'annual'>('monthly');
-  const [busy, setBusy] = useState<string>('');
-
-  const SKUs = useMemo(() => {
-    return billing === 'monthly'
-      ? [
-          { key: 'starter', name: 'Starter', price: '€19/mo', priceId: PRICE.STARTER_MONTHLY, bullets: ['1 assistant', 'Real-time voice', 'Basic analytics', 'Email support'] },
-          { key: 'pro',     name: 'Pro',     price: '€39/mo', priceId: PRICE.PRO_MONTHLY,     bullets: ['Up to 5 assistants', 'Advanced analytics', 'Priority routing', 'Priority support'] },
-        ]
-      : [
-          { key: 'starter', name: 'Starter', price: '€136/yr', priceId: PRICE.STARTER_ANNUAL, bullets: ['1 assistant', 'Real-time voice', 'Basic analytics', 'Email support'] },
-          { key: 'pro',     name: 'Pro',     price: '€326/yr', priceId: PRICE.PRO_ANNUAL,     bullets: ['Up to 5 assistants', 'Advanced analytics', 'Priority routing', 'Priority support'] },
-        ];
-  }, [billing]);
-
-  const go = async (skuKey: string, priceId: string) => {
-    try {
-      setBusy(skuKey);
-      await beginCheckout(priceId);
-    } catch (e) {
-      console.error(e);
-      alert('Could not start checkout. Check Stripe keys + Price IDs (open console).');
-    } finally {
-      setBusy('');
-    }
-  };
-
+/* ------------------------ PAGE ------------------------ */
+export default function Page(){
   return (
     <>
-      <Head><title>ReduxAI — Build AI voice agents</title></Head>
-      <Tokens />
-      <div className="lp-scope min-h-screen" style={{ background:'var(--bg)', color:'var(--text)' }}>
-        <main className="max-w-[1160px] mx-auto px-5 lg:px-6 pb-24">
+      <Navbar />
+      <Hero />
+      <Steps />
+      <Pricing />
+      <FAQ />
+      <Footer />
 
-          {/* ───── HERO / WELCOME ───── */}
-          <section className="pt-16 md:pt-20">
-            <div className="pill mb-4">
-              <Sparkles className="w-4 h-4" style={{ color: CTA }} />
-              <span className="text-sm">Welcome to <b>ReduxAI</b></span>
-            </div>
+      {/* ----- GLOBAL STYLES (rail-like) ----- */}
+      <style jsx global>{`
+        :root{
+          --bg: #0b0f0e;
+          --panel: #0f1413;
+          --text: #ecfdf5;
+          --text-dim: color-mix(in oklab, var(--text) 70%, black 30%);
+          --muted: #8aa39d;
+          --line: rgba(89,217,179,.20);
+          --cta: #59d9b3;
+        }
+        html,body{ background: var(--bg); color: var(--text); }
+        .section{ padding: 96px 0; position: relative; }
+        .container{ max-width: 1120px; margin: 0 auto; padding: 0 20px; }
 
-            <div className="va-ghost p-7 md:p-9">
-              <div className="flex items-start gap-4">
-                <div className="grid place-items-center w-12 h-12 rounded-[10px]" style={{ background:'var(--brand-weak)' }}>
-                  <Wand2 className="w-6 h-6" style={{ color: CTA }} />
-                </div>
-                <div className="min-w-0">
-                  <h1 className="text-3xl md:text-[40px] leading-tight font-extrabold">
-                    Build AI <span style={{ color: CTA }}>Voice Agents</span> that sound natural.
-                  </h1>
-                  <p className="muted mt-3 text-[15px] max-w-2xl">
-                    Connect data, pick a voice, and go live in minutes. Clean UI, low-latency calls, and safe-by-design storage.
-                  </p>
+        .bg-grid{
+          background:
+            radial-gradient(1200px 600px at 50% -20%, rgba(89,217,179,.10), transparent 70%),
+            linear-gradient(90deg,var(--panel) 0%, color-mix(in oklab,var(--panel) 97%, white 3%) 50%, var(--panel) 100%),
+            repeating-linear-gradient(0deg, transparent, transparent 28px, rgba(255,255,255,.04) 29px, transparent 30px),
+            repeating-linear-gradient(90deg, transparent, transparent 28px, rgba(255,255,255,.04) 29px, transparent 30px);
+        }
 
-                  <div className="mt-6 flex flex-wrap gap-3">
-                    <a
-                      href="#pricing"
-                      className="btn btn-cta inline-grid place-items-center px-5"
-                      style={{ borderColor: GREEN_LINE }}
-                    >
-                      Start free trial <ChevronRight className="w-4 h-4 ml-1" />
-                    </a>
-                    <a href="#how" className="btn btn-ghost inline-grid place-items-center px-5">
-                      See how it works
-                    </a>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>
+        .btn{
+          display:inline-flex; align-items:center; justify-content:center; gap:.6rem;
+          height:48px; padding:0 18px; border-radius:10px; font-weight:800;
+          color:#fff; background: var(--cta); border:1px solid var(--line);
+          box-shadow: 0 10px 30px rgba(89,217,179,.22), 0 1px 0 rgba(255,255,255,.06) inset;
+          transition: transform .15s ease, box-shadow .15s ease, opacity .15s ease;
+        }
+        .btn:active{ transform: translateY(1px); }
+        .btn.secondary{
+          background: #111414; color: #fff; border-color: rgba(255,255,255,.08);
+          box-shadow: 0 8px 24px rgba(0,0,0,.45);
+        }
+        .btn.small{ height:40px; padding:0 14px; border-radius:9px; font-weight:700; }
 
-          {/* ───── HOW IT WORKS (4 steps) ───── */}
-          <section id="how" className="mt-10">
-            <div className="va-card p-6 md:p-8">
-              <h2 className="text-xl font-semibold mb-1">Set up in 4 steps</h2>
-              <p className="muted text-sm mb-6">From prompt to production in minutes.</p>
+        h1.big{
+          font-weight: 900; letter-spacing: -0.02em; line-height: 1.04;
+          font-size: clamp(40px, 6.2vw, 80px);
+        }
+        h2.section-title{
+          font-weight: 900; letter-spacing: -0.02em;
+          font-size: clamp(28px, 4.2vw, 54px);
+        }
+        .lead{ color: var(--text-dim); font-size: clamp(16px, 1.6vw, 18px); }
+        .soft-line{ height:1px; background: var(--line); }
 
-              <div className="grid gap-3">
-                {[
-                  { icon: Mic,       title:'Create an Assistant',   desc:'Name it, set goals, and pick a natural voice.' },
-                  { icon: Layers,    title:'Design Prompts',        desc:'Give it structure and guardrails. Test instantly.' },
-                  { icon: PlugZap,   title:'Connect Channels',      desc:'Website widget, SMS, socials—wherever your users are.' },
-                  { icon: Rocket,    title:'Deploy & Monitor',      desc:'Track calls, see analytics, and iterate safely.' },
-                ].map((s, i) => (
-                  <div key={s.title} className="row flex items-start gap-3 p-3 md:p-4 rounded-[8px]">
-                    <div className="grid place-items-center w-10 h-10 rounded-[8px]" style={{ background:'var(--brand-weak)' }}>
-                      <s.icon className="w-5 h-5" style={{ color: CTA }} />
-                    </div>
-                    <div>
-                      <div className="font-semibold">{i+1}. {s.title}</div>
-                      <div className="muted text-sm">{s.desc}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </section>
+        .badge{
+          display:inline-grid; place-items:center; height:28px; padding:0 10px; font-size:12px;
+          border-radius:999px; color:#0b0f0e; background:#bff2e3; font-weight:900; letter-spacing:.08em;
+        }
+        .kbd{
+          border:1px solid rgba(255,255,255,.2); background:#0d1211; padding:.38rem .6rem; border-radius:10px; font-size:12px;
+          color:#dbfff3; font-weight:700;
+        }
 
-          {/* ───── HIGHLIGHTS / FEATURES ───── */}
-          <section id="features" className="mt-10">
-            <div className="va-card p-6 md:p-8">
-              <h2 className="text-xl font-semibold mb-1">Why ReduxAI</h2>
-              <p className="muted text-sm mb-6">Everything you need to launch a human-sounding agent.</p>
+        .cardish{ border:1px solid var(--line); border-radius:12px;
+          background: linear-gradient(180deg, rgba(255,255,255,.02), transparent 60%); }
 
-              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {[
-                  { icon: PhoneCall, title:'Real-time voice', desc:'Low-latency audio with natural pauses.' },
-                  { icon: Gauge,     title:'Performance',     desc:'Snappy UX, offline-first data handling.' },
-                  { icon: Shield,    title:'Privacy-first',   desc:'Auth-gated app and safe storage by design.' },
-                  { icon: Workflow,  title:'Simple flows',    desc:'Opinionated tooling for fast iteration.' },
-                  { icon: Layers,    title:'Composable',      desc:'Stack your tools, bring your own models.' },
-                  { icon: CreditCard,title:'Billing that fits',desc:'Monthly or annual. Trial included.' },
-                ].map((f) => (
-                  <div key={f.title} className="row p-4 rounded-[8px]" style={{ border:'1px solid var(--border)', background:'var(--card)' }}>
-                    <div className="flex items-center gap-2 mb-1">
-                      <f.icon className="w-4 h-4" style={{ color: CTA }} />
-                      <div className="font-semibold">{f.title}</div>
-                    </div>
-                    <div className="muted text-sm">{f.desc}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </section>
+        .pill-toggle{ display:inline-flex; gap:4px; padding:4px; border-radius:999px; border:1px solid var(--line); background:#0d1211; }
+        .pill-toggle > button{
+          height:32px; padding:0 12px; border-radius:999px; font-weight:800; color:#cfe9e2; border:1px solid transparent;
+          background: transparent;
+        }
+        .pill-toggle > button[data-active="true"]{
+          background: #123229; color:#bff2e3; border-color: var(--line);
+          box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 6px 18px rgba(89,217,179,.15);
+        }
 
-          {/* ───── PRICING ───── */}
-          <section id="pricing" className="mt-10">
-            <div className="va-ghost p-6 md:p-8">
-              <div className="flex items-center justify-between gap-3 flex-wrap">
-                <div>
-                  <h2 className="text-xl font-semibold">Simple plans, free trial included</h2>
-                  <div className="muted text-sm">We verify your card with a €0 authorization. First charge after the trial unless you cancel.</div>
-                </div>
-                <div className="pill">
-                  <button
-                    onClick={() => setBilling('monthly')}
-                    className="px-3 py-1 rounded-[999px] text-sm"
-                    style={{ background: billing==='monthly' ? 'color-mix(in oklab, var(--brand) 18%, var(--panel))' : 'transparent' }}
-                  >
-                    Monthly
-                  </button>
-                  <button
-                    onClick={() => setBilling('annual')}
-                    className="px-3 py-1 rounded-[999px] text-sm"
-                    style={{ background: billing==='annual' ? 'color-mix(in oklab, var(--brand) 18%, var(--panel))' : 'transparent' }}
-                  >
-                    Annual <span className="muted">(save ~40%)</span>
-                  </button>
-                </div>
-              </div>
-
-              <div className="grid md:grid-cols-2 gap-6 mt-6">
-                {SKUs.map((p) => (
-                  <motion.div
-                    key={p.key}
-                    initial={{ opacity: 0, y: 10 }}
-                    whileInView={{ opacity: 1, y: 0 }}
-                    viewport={{ once: true }}
-                    className="va-card p-6"
-                    style={{ borderRadius: R_LG, borderColor: GREEN_LINE }}
-                  >
-                    <div className="text-sm muted mb-1">{p.name}</div>
-                    <div className="text-2xl font-extrabold mb-1">{p.price}</div>
-                    <ul className="space-y-2 text-sm mb-5">
-                      {p.bullets.map((b) => (
-                        <li key={b} className="flex items-center gap-2">
-                          <CheckCircle2 className="w-4 h-4" style={{ color: CTA }} /> {b}
-                        </li>
-                      ))}
-                    </ul>
-
-                    <button
-                      onClick={() => go(p.key, p.priceId)}
-                      disabled={busy === p.key}
-                      className="btn btn-cta w-full inline-flex items-center justify-center gap-2"
-                    >
-                      {busy === p.key ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                      {busy === p.key ? 'Starting checkout…' : 'Start free trial'}
-                    </button>
-                  </motion.div>
-                ))}
-              </div>
-
-              <div className="muted text-[12px] mt-4">
-                UI prices are labels; actual amount/interval come from your Stripe Price.
-              </div>
-            </div>
-          </section>
-
-          {/* ───── FAQ ───── */}
-          <section className="mt-10">
-            <div className="va-card p-6 md:p-8">
-              <h2 className="text-xl font-semibold mb-1">Frequently asked</h2>
-              <div className="muted text-sm mb-4">Short answers to common questions.</div>
-
-              <div className="grid gap-3">
-                {[
-                  { q:'Do you offer a free trial?', a:'Yes. We authorize your card for €0 and only charge after the trial unless you cancel.' },
-                  { q:'Can I cancel anytime?', a:'Absolutely. Cancel from your account page and you will not be charged next period.' },
-                  { q:'Is my data safe?', a:'Yes. Auth-gated app and safe storage by design. You control your keys.' },
-                ].map((f) => (
-                  <details key={f.q} className="va-card p-4">
-                    <summary className="font-semibold cursor-pointer">{f.q}</summary>
-                    <div className="muted text-sm mt-2">{f.a}</div>
-                  </details>
-                ))}
-              </div>
-            </div>
-          </section>
-
-          {/* ───── FOOTER ───── */}
-          <footer className="mt-12 pb-8 muted text-sm">
-            <div className="grid md:grid-cols-3 gap-6">
-              <div className="va-card p-4">
-                <div className="font-semibold mb-1">ReduxAI</div>
-                <div>Build voice agents that actually sound human.</div>
-              </div>
-              <div className="va-card p-4">
-                <div className="font-semibold mb-1">Support</div>
-                <div>support@reducai.com</div>
-              </div>
-              <div className="va-card p-4">
-                <div className="font-semibold mb-1">Legal</div>
-                <div>Terms • Privacy</div>
-              </div>
-            </div>
-            <div className="mt-6 text-center">© {new Date().getFullYear()} ReduxAI — All rights reserved.</div>
-          </footer>
-        </main>
-      </div>
+        header.stickyhead{ position:sticky; top:0; z-index:50; backdrop-filter: blur(8px); }
+      `}</style>
     </>
+  );
+}
+
+/* ------------------------ NAVBAR ------------------------ */
+function Navbar(){
+  return (
+    <header className="bg-grid stickyhead">
+      <div className="container h-[70px] flex items-center justify-between">
+        <Link href="/" className="flex items-center gap-3">
+          <div style={{width:36,height:36,borderRadius:10,background:'var(--cta)'}} />
+          <strong className="text-lg">ReduxAI</strong>
+        </Link>
+
+        <nav className="hidden md:flex items-center gap-10 text-sm" style={{color:'var(--text-dim)'}}>
+          <a href="#how">How it works</a>
+          <a href="#features">Features</a>
+          <a href="#pricing">Pricing</a>
+          <Link href="/signin" className="btn small secondary">Sign in</Link>
+        </nav>
+      </div>
+      <div className="soft-line" />
+    </header>
+  );
+}
+
+/* ------------------------ HERO ------------------------ */
+function Hero(){
+  return (
+    <section className="section bg-grid">
+      <div className="container text-center">
+        <div className="badge mb-6">Welcome to <b style={{marginLeft:6}}>ReduxAI</b></div>
+        <h1 className="big">
+          Build <span style={{color:'var(--cta)'}}>AI Voice Agents</span><br/>
+          that real businesses use
+        </h1>
+        <p className="lead mt-5">
+          One platform to design, test, and deploy production-grade agents—fast.
+        </p>
+
+        <div className="mt-8 flex items-center justify-center gap-3">
+          <Link href="/app" className="btn">
+            Start building <ArrowRight size={18}/>
+          </Link>
+          <Link href="/marketplace" className="btn secondary">
+            <UsersRound size={18}/> Find clients
+          </Link>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ------------------------ 4 STEPS ------------------------ */
+function Steps(){
+  const steps = [
+    { n:'1', title:'Prompt Agent', copy:'Create detailed instructions with the AI Prompter in minutes.' },
+    { n:'2', title:'Demo Agent', copy:'Share a live demo to collect feedback fast.' },
+    { n:'3', title:'Connect Agent', copy:'Add phone, web, SMS or social integrations.' },
+    { n:'4', title:'Deploy Agent', copy:'Go live and track conversations in one place.' },
+  ];
+  return (
+    <section id="how" className="section">
+      <div className="container">
+        <h2 className="section-title text-center">Setup agents in <span style={{color:'var(--cta)'}}>4 steps</span></h2>
+        <p className="lead text-center mt-3">From idea to real tasks in under an hour.</p>
+
+        <div className="mt-12 grid md:grid-cols-4 gap-8">
+          {steps.map(s => (
+            <div key={s.n} className="space-y-3">
+              <div className="badge" style={{background:'#15332b', color:'#bff2e3'}}>{s.n}</div>
+              <div className="text-xl font-extrabold">{s.title}</div>
+              <p style={{color:'var(--text-dim)'}} className="text-[15px]">{s.copy}</p>
+              <div className="h-[160px] rounded-xl cardish" />
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ------------------------ PRICING ------------------------ */
+function Pricing(){
+  const [billing, setBilling] = useState<'month'|'year'>('month');
+  const [busy, setBusy] = useState<string>('');
+
+  const tiers = [
+    {
+      name: 'Starter',
+      bullets: ['1 assistant', 'Real-time voice', 'Basic analytics', 'Email support'],
+      monthly: { price: 131,  priceId: PRICE.STARTER_MONTH },
+      yearly:  { price: 0,    priceId: PRICE.STARTER_YEAR },
+    },
+    {
+      name: 'Pro',
+      bullets: ['Up to 5 assistants', 'Advanced analytics', 'Priority routing', 'Priority support'],
+      monthly: { price: 209,  priceId: PRICE.PRO_MONTH },
+      yearly:  { price: 0,    priceId: PRICE.PRO_YEAR },
+      highlight: true,
+    },
+  ] as const;
+
+  return (
+    <section id="pricing" className="section bg-grid">
+      <div className="container">
+        <h2 className="section-title text-center">Simple plans, <span style={{color:'var(--cta)'}}>free trial</span> included</h2>
+        <p className="lead text-center mt-3">We verify your card with a €0 authorization. First charge after the trial unless you cancel.</p>
+
+        <div className="mt-8 flex items-center justify-center">
+          <div className="pill-toggle">
+            <button data-active={billing==='month'} onClick={()=>setBilling('month')}>Monthly</button>
+            <button data-active={billing==='year'}  onClick={()=>setBilling('year')}>
+              Annual <span style={{marginLeft:6,color:'var(--cta)'}}>(save ~40%)</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-12 grid md:grid-cols-2 gap-8">
+          {tiers.map(t => {
+            const plan = billing==='month' ? t.monthly : t.yearly;
+            const isBusy = busy === t.name;
+            const disabled = !plan.priceId;
+            return (
+              <div
+                key={t.name}
+                className="p-6 rounded-2xl"
+                style={{
+                  background: 'linear-gradient(180deg, rgba(255,255,255,.02), transparent 60%)',
+                  border: `1px solid var(--line)`,
+                  boxShadow: t.highlight ? '0 30px 120px rgba(89,217,179,.15)' : 'none'
+                }}
+              >
+                {t.highlight && (
+                  <div className="badge mb-4" style={{background:'#bff2e3', color:'#0b0f0e'}}>Most Popular</div>
+                )}
+                <div className="text-2xl font-extrabold">{t.name}</div>
+                <div className="mt-2" style={{color:'var(--text-dim)'}}>
+                  {t.name==='Starter'
+                    ? 'Everything you need to launch a single voice agent.'
+                    : 'Scale to multiple assistants and teams.'}
+                </div>
+
+                <div className="mt-6 flex items-baseline gap-2">
+                  {plan.price ? (
+                    <>
+                      <div className="text-5xl font-black">${plan.price}</div>
+                      <div className="text-sm" style={{color:'var(--text-dim)'}}>{billing==='month'?'month':'year'}</div>
+                    </>
+                  ) : (
+                    <div className="text-5xl font-black">—</div>
+                  )}
+                </div>
+
+                <ul className="mt-6 space-y-2 text-[15px]">
+                  {t.bullets.map(b => (
+                    <li key={b} className="flex items-center gap-2">
+                      <span>✓</span> {b}
+                    </li>
+                  ))}
+                </ul>
+
+                <button
+                  disabled={disabled || isBusy}
+                  onClick={()=>startCheckout(plan.priceId, (b)=>setBusy(b? t.name : ''))}
+                  className="btn w-full mt-8 disabled:opacity-50"
+                >
+                  <Flashlight size={18}/>
+                  {isBusy ? 'Starting checkout…' : (billing==='month' ? 'Start free trial' : 'Subscribe')}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ------------------------ FAQ ------------------------ */
+function FAQ(){
+  return (
+    <section className="section">
+      <div className="container">
+        <h2 className="section-title text-center">Frequently asked</h2>
+        <div className="mt-10 grid md:grid-cols-2 gap-8">
+          <div className="cardish p-6 rounded-xl">
+            <div className="font-bold">Do you offer a free trial?</div>
+            <p className="mt-2" style={{color:'var(--text-dim)'}}>Yes—card is verified with €0 hold. Cancel any time during the trial.</p>
+          </div>
+          <div className="cardish p-6 rounded-xl">
+            <div className="font-bold">Can I change plans later?</div>
+            <p className="mt-2" style={{color:'var(--text-dim)'}}>Upgrades/downgrades are prorated automatically.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ------------------------ FOOTER ------------------------ */
+function Footer(){
+  return (
+    <footer className="section pt-12">
+      <div className="soft-line mb-8" />
+      <div className="container text-sm" style={{color:'var(--text-dim)'}}>
+        <div className="flex flex-col md:flex-row gap-8 md:items-center md:justify-between">
+          <div>© {new Date().getFullYear()} ReduxAI — All rights reserved.</div>
+          <div className="flex gap-6">
+            <a href="/privacy">Privacy</a>
+            <a href="/terms">Terms</a>
+            <a href="mailto:support@reducai.com">support@reducai.com</a>
+          </div>
+        </div>
+      </div>
+    </footer>
   );
 }
