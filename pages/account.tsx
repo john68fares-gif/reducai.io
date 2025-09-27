@@ -16,7 +16,7 @@ import {
 /* ───────────────── Tokens (Dark + Light) ───────────────── */
 const Tokens = () => (
   <style jsx global>{`
-    /* Default/Dark (matches Voice Agent / Sidebar) */
+    /* Dark (default) */
     .va-scope{
       --bg:#0b0c10; --panel:#0d0f11; --card:#0f1214; --text:#e6f1ef; --text-muted:#9fb4ad;
       --brand:#59d9b3; --brand-weak:rgba(89,217,179,.22);
@@ -27,17 +27,16 @@ const Tokens = () => (
       --ease:cubic-bezier(.22,.61,.36,1);
       --control-h:40px;
     }
-
-    /* Light tokens (clean slate version of the same style) */
+    /* Light */
     :root:not([data-theme="dark"]) .va-scope{
-      --bg:#f7faf9;                 /* very light teal-tinted bg */
-      --panel:#ffffff;              /* cards/panels are white */
-      --card:#f4f7f6;               /* subtle card tint */
-      --text:#0f172a;               /* slate-900 */
-      --text-muted:#64748b;         /* slate-500/600 */
-      --brand:#59d9b3;              /* same brand green */
+      --bg:#f7faf9;
+      --panel:#ffffff;
+      --card:#f4f7f6;
+      --text:#0f172a;
+      --text-muted:#64748b;
+      --brand:#59d9b3;
       --brand-weak:rgba(89,217,179,.18);
-      --border:rgba(15,23,42,.12);  /* darker border on light */
+      --border:rgba(15,23,42,.12);
       --border-weak:rgba(15,23,42,.12);
       --shadow-soft:0 18px 48px rgba(2,6,12,.06);
       --shadow-card:0 10px 24px rgba(2,6,12,.06), 0 0 0 1px rgba(15,23,42,.06) inset;
@@ -45,7 +44,6 @@ const Tokens = () => (
       --ease:cubic-bezier(.22,.61,.36,1);
       --control-h:40px;
     }
-
     .va-card{
       border-radius:var(--radius-outer);
       border:1px solid var(--border-weak);
@@ -76,7 +74,6 @@ const Tokens = () => (
       display: inline-block;
     }
     @keyframes shimmer { from { background-position: -200% 0; } to { background-position: 200% 0; } }
-
     input.va-input {
       height: var(--control-h);
       border-radius: 8px;
@@ -184,7 +181,7 @@ export default function AccountPage() {
   const [userCreated, setUserCreated] = useState<string | null>(null);
 
   // Providers
-  the const [providers, setProviders] = useState<string[]>([]);
+  const [providers, setProviders] = useState<string[]>([]);
   const [passwordEnabled, setPasswordEnabled] = useState<boolean>(false);
   const hasEmailPassword = providers.includes('email') || passwordEnabled;
   const hasGoogle = providers.includes('google');
@@ -284,10 +281,9 @@ export default function AccountPage() {
   /* Theme init + workspace guard */
   useEffect(() => {
     try {
-      // if not set, try system preference once
       const stored = (localStorage.getItem('ui:theme') as ThemeMode | null);
       const sys = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
-      const mode: ThemeMode = stored === 'light' || stored === 'dark' ? stored : sys as ThemeMode;
+      const mode: ThemeMode = stored === 'light' || stored === 'dark' ? stored : (sys as ThemeMode);
       setTheme(mode);
       document.documentElement.dataset.theme = mode;
     } catch {}
@@ -315,7 +311,6 @@ export default function AccountPage() {
       const { error } = await supabase.auth.updateUser({ data: { ui_theme: mode } });
       if (error) throw error;
       setSaveMsg('ok');
-      // notify other parts (e.g., Sidebar) if they listen
       try { window.dispatchEvent(new Event('theme:change')); } catch {}
     } catch {
       setSaveMsg('err');
@@ -538,7 +533,6 @@ export default function AccountPage() {
               >
                 <div className="grid gap-4">
 
-                  {/* How they actually signed in */}
                   <div className="row">
                     <span className="text-sm" style={{ color:'var(--text-muted)' }}>Signed in with</span>
                     <div className="flex flex-wrap items-center gap-6">
@@ -562,7 +556,6 @@ export default function AccountPage() {
                     <span />
                   </div>
 
-                  {/* Password area */}
                   {hasEmailPassword ? (
                     <>
                       <div className="row">
@@ -770,6 +763,7 @@ function ThemeTile({ label, active, onClick, icon }: { label: string; active: bo
         boxShadow: active ? 'inset 0 0 14px color-mix(in oklab, var(--brand) 14%, transparent), var(--shadow-card)' : 'var(--shadow-card)',
         color: 'var(--text)',
       }}
+      onClickCapture={onClick}
     >
       <div className="flex items-center gap-2">
         <div className="w-8 h-8 rounded-[8px] grid place-items-center" style={{ background: 'var(--panel)', border: '1px solid var(--border)' }}>
