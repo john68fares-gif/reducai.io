@@ -1,337 +1,336 @@
 // components/ui/Sidebar.tsx
 'use client';
 
-import { useEffect, useMemo, useState, cloneElement } from 'react';
+import { useEffect, useState, cloneElement } from 'react';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import {
   Home, Hammer, Mic, Rocket,
   Phone, Key, HelpCircle,
   ChevronLeft, ChevronRight,
-  Bot, User as UserIcon,
+  User as UserIcon, Bot,
+  Users             // ← NEW: icon for Subaccounts
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase-client';
 
-/* ───────────────────────────────── TOKENS ───────────────────────────────── */
-const W_EXPANDED   = 228;     // slim but readable (fits best-practice banding)
-const W_COLLAPSED  = 58;
+const W_EXPANDED = 260;
+const W_COLLAPSED = 68;
 const LS_COLLAPSED = 'ui:sidebarCollapsed';
 
-const CTA     = '#59d9b3';                                        // brand green
-const TXT_DARK= '#0f172a';
-const TXT     = 'rgba(236,242,247,.92)';                          // light text
-const MUTED   = 'rgba(176,196,210,.62)';                          // secondary
-const BORDER  = 'rgba(89,217,179,.10)';                           // greeny sep
-const BASE_DK = '#0b0f11';                                        // deep blue-teal
-const BASE_LT = '#ffffff';
+// brand
+const BRAND = '#10b981';
+const BRAND_DEEP = '#12a989';
+const BRAND_WEAK = 'rgba(0,255,194,.10)';
 
-const SHOW_GROUP_TAGS = false; // flip to true if you want WORKSPACE/RESOURCES labels
-
-/* ultra-subtle side bands (center darker, sides +≤0.8%) */
-function railBands(isDark: boolean, steps = 13, cap = 0.008) {
-  const base = isDark ? BASE_DK : BASE_LT;
-  const bw = 100 / steps;
-  const mid = Math.floor(steps / 2);
-  const parts: string[] = [];
-  for (let i = 0; i < steps; i++) {
-    const lift = Math.min(Math.abs(i - mid) * 0.004, cap); // 0.4% per step, max 0.8%
-    const col = `color-mix(in oklab, ${base} ${100 - lift * 100}%, ${CTA} ${lift * 100}%)`;
-    parts.push(`${col} ${i * bw}%, ${col} ${(i + 1) * bw}%`);
-  }
-  return `linear-gradient(90deg, ${parts.join(',')})`;
-}
-
-/* ─────────────────────────────── NAV (exact names) ─────────────────────────────── */
-type NavItem = {
-  id: 'build'|'improve'|'demo'|'launch'|'market'|'mentor'|'keys';
-  href: string; label: string; sub?: string; icon: JSX.Element;
-  group: 'workspace'|'resources';
-};
-const NAV: NavItem[] = [
-  { id:'build',   href:'/builder',     label:'Build',   sub:'Create AI agent',        icon:<Home/>,   group:'workspace' },
-  { id:'improve', href:'/improve',     label:'Improve', sub:'Integrate and Improve',  icon:<Hammer/>, group:'workspace' },
-  { id:'demo',    href:'/voice-agent', label:'Demo',    sub:'Showcase to clients',    icon:<Mic/>,    group:'workspace' },
-  { id:'launch',  href:'/launch',      label:'Launch',  sub:'Deploy to production',   icon:<Rocket/>, group:'workspace' },
-
-  { id:'market',  href:'/marketplace', label:'Marketplace',                           icon:<Phone/>,       group:'resources' },
-  { id:'mentor',  href:'/ai-mentor',   label:'AI Mentor',                             icon:<Key/>,         group:'resources' },
-  { id:'keys',    href:'/apikeys',     label:'API Key',                               icon:<HelpCircle/>,  group:'resources' },
-];
-
-/* ─────────────────────────── helpers ─────────────────────────── */
-function getDisplayName(name?:string|null, email?:string|null){
+function getDisplayName(name?: string | null, email?: string | null) {
   if (name && name.trim()) return name.trim();
   if (email && email.includes('@')) return email.split('@')[0];
   return 'Account';
 }
-const isDarkMode = () =>
-  (typeof window !== 'undefined' && (localStorage.getItem('theme') || 'dark')) === 'dark';
 
-/* ─────────────────────────── COMPONENT ─────────────────────────── */
+type NavItem = {
+  href: string;
+  label: string;
+  sub?: string;
+  icon: JSX.Element;
+  group: 'workspace' | 'resources';
+  id: string;
+};
+
+const NAV: NavItem[] = [
+  { id: 'create', href: '/builder',      label: 'Create',       sub: 'Design your agent',     icon: <Home />,   group: 'workspace' },
+  { id: 'tuning', href: '/improve',      label: 'Tuning',       sub: 'Integrate & optimize',  icon: <Hammer />, group: 'workspace' },
+  { id: 'voice',  href: '/voice-agent',  label: 'Voice Studio', sub: 'Calls & persona',       icon: <Mic />,    group: 'workspace' },
+
+  // ← NEW: Subaccounts (only addition you asked for)
+  { id: 'subaccounts', href: '/subaccounts', label: 'Subaccounts', sub: 'Transcripts', icon: <Users />, group: 'workspace' },
+
+  { id: 'launch', href: '/launch',       label: 'Launchpad',    sub: 'Go live',               icon: <Rocket />, group: 'workspace' },
+
+  { id: 'numbers', href: '/phone-numbers', label: 'Numbers',    sub: 'Twilio & BYO',          icon: <Phone />,  group: 'resources' },
+  { id: 'keys',    href: '/apikeys',       label: 'API Keys',    sub: 'Models & access',       icon: <Key />,    group: 'resources' },
+  { id: 'help',    href: '/support',       label: 'Help',        sub: 'Guides & FAQ',          icon: <HelpCircle />, group: 'resources' },
+];
+
 export default function Sidebar() {
   const pathname = usePathname();
-  const router = useRouter();
 
   const [collapsed, setCollapsed] = useState<boolean>(() => {
-    try { return JSON.parse(localStorage.getItem(LS_COLLAPSED) || 'false'); } catch { return false; }
+    try {
+      const raw = localStorage.getItem(LS_COLLAPSED);
+      return raw ? JSON.parse(raw) : false;
+    } catch { return false; }
   });
-  const [dark, setDark] = useState<boolean>(() => isDarkMode());
-
   useEffect(() => {
     try { localStorage.setItem(LS_COLLAPSED, JSON.stringify(collapsed)); } catch {}
-    document.documentElement.style.setProperty('--sidebar-w', `${collapsed ? W_COLLAPSED : W_EXPANDED}px`);
+    document.documentElement.style.setProperty('--sidebar-w', ${collapsed ? W_COLLAPSED : W_EXPANDED}px);
   }, [collapsed]);
 
-  /* listen for theme changes from your account settings page */
-  useEffect(() => {
-    const onTheme = () => setDark(isDarkMode());
-    window.addEventListener('theme:change', onTheme);
-    return () => window.removeEventListener('theme:change', onTheme);
-  }, []);
+  // user
+  const [userLoading, setUserLoading] = useState(true);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [userName, setUserName] = useState<string | null>(null);
 
-  // auth (no spinner UI here; we keep the row clean)
-  const [userEmail, setUserEmail] = useState<string|null>(null);
-  const [userName, setUserName] = useState<string|null>(null);
   useEffect(() => {
-    let unsub:any;
+    let unsub: any;
     (async () => {
-      const { data:{ user } } = await supabase.auth.getUser();
+      const { data: { user } } = await supabase.auth.getUser();
       setUserEmail(user?.email ?? null);
       setUserName((user?.user_metadata as any)?.full_name ?? user?.user_metadata?.name ?? null);
-      unsub = supabase.auth.onAuthStateChange((_e, s) => {
-        const u = s?.user;
+      setUserLoading(false);
+      unsub = supabase.auth.onAuthStateChange((_e, session) => {
+        const u = session?.user;
         setUserEmail(u?.email ?? null);
         setUserName((u?.user_metadata as any)?.full_name ?? u?.user_metadata?.name ?? null);
+        setUserLoading(false);
       });
     })();
     return () => unsub?.data?.subscription?.unsubscribe?.();
   }, []);
 
-  const isActive = (item: NavItem) => {
+  const pathnameActive = (item: NavItem) => {
     const p = pathname || '';
     if (item.href === '/launch') return p === '/launch';
     return p.startsWith(item.href);
   };
 
-  /* visual sizes — smaller icons, squarer plates */
-  const plateSize  = 36;  // was 34; still compact
-  const plateRad   = 10;
-  const iconPx     = 15;
+  const isWorkspace = (id: string) => NAV.find(n => n.id === id)?.group === 'workspace';
 
-  const iconize = (n: JSX.Element) =>
-    cloneElement(n, { className: `w-[${iconPx}px] h-[${iconPx}px] shrink-0`, strokeWidth: 2 });
+  // center/size lucide icons
+  const renderIcon = (node: JSX.Element) =>
+    cloneElement(node, { className: 'w-[18px] h-[18px] shrink-0', strokeWidth: 2 });
 
-  /* plate variants */
-  const Plate = ({ children, tone }:{
-    children: React.ReactNode; tone: 'workspace'|'resources';
-  }) => {
-    const isWorkspace = tone === 'workspace';
-    const bg = isWorkspace
-      ? `color-mix(in oklab, ${dark ? '#12191d' : '#e6fffa'} ${dark?88:94}%, ${CTA} ${dark?12:6}%)`
-      : (dark ? 'rgba(255,255,255,.06)' : 'rgba(15,23,42,.06)');
-    const border = isWorkspace ? 'rgba(89,217,179,.20)'
-                               : (dark ? 'rgba(255,255,255,.10)' : 'rgba(15,23,42,.12)');
-    const color = isWorkspace ? CTA : (dark ? 'rgba(255,255,255,.86)' : TXT_DARK);
+  const Item = ({ item, active }: { item: NavItem; active: boolean }) => {
+    const green = isWorkspace(item.id);
+
+    const bg = collapsed && active ? 'rgba(16,185,129,.14)' : 'var(--sb-icon-bg)';
+    const border = collapsed && active ? 'rgba(16,185,129,.45)' : 'var(--sb-icon-border)';
+    const halo = active
+      ? 0 0 0 1px ${BRAND_WEAK}, 0 8px 18px rgba(0,0,0,.22), 0 0 18px rgba(16,185,129,.25)
+      : 'inset 0 0 10px rgba(0,0,0,.16)';
 
     return (
-      <div
-        className="grid place-items-center plate"
-        style={{
-          width: plateSize, height: plateSize,
-          borderRadius: plateRad,
-          background: bg,
-          border: `1px solid ${border}`,
-          color,
-          transition: 'box-shadow 180ms ease, transform 180ms ease, background 180ms ease'
-        }}
-      >
-        {children}
-        <style jsx>{`
-          .plate:has(> svg) {}
-        `}</style>
-      </div>
-    );
-  };
-
-  const Item = ({ item }: { item: NavItem }) => {
-    const active = isActive(item);
-    const isWorkspace = item.group === 'workspace';
-
-    return (
-      <Link href={item.href} className="block group" title={collapsed ? item.label : undefined}>
+      <Link href={item.href} className="block group">
         <div
-          className="relative flex items-center h-[46px] rounded-[10px] pr-2"
+          className="relative flex items-center h-10 rounded-[12px] pr-2"
           style={{
-            paddingLeft: collapsed ? 0 : 12,
-            gap: collapsed ? 0 : 12,
-            transition: 'all 220ms cubic-bezier(0.16,1,0.3,1)'
+            transition: 'gap 380ms cubic-bezier(0.16,1,0.3,1), padding 380ms cubic-bezier(0.16,1,0.3,1)',
+            paddingLeft: collapsed ? 0 : 10,
+            gap: collapsed ? 0 : 10,
           }}
         >
-          <Plate tone={isWorkspace ? 'workspace' : 'resources'}>
-            {iconize(item.icon)}
-          </Plate>
+          <div
+            className="w-10 h-10 rounded-[12px] grid place-items-center"
+            style={{
+              background: bg,
+              border: 1px solid ${border},
+              boxShadow: halo,
+              color: green ? BRAND_DEEP : 'var(--sidebar-text)',
+            }}
+            title={collapsed ? item.label : undefined}
+          >
+            {renderIcon(item.icon)}
+          </div>
 
           <div
             className="overflow-hidden"
             style={{
-              maxWidth: collapsed ? 0 : 160,
+              transition: 'max-width 380ms cubic-bezier(0.16,1,0.3,1), opacity 380ms cubic-bezier(0.16,1,0.3,1), transform 380ms cubic-bezier(0.16,1,0.3,1)',
+              maxWidth: collapsed ? 0 : 200,
               opacity: collapsed ? 0 : 1,
               transform: collapsed ? 'translateX(-6px)' : 'translateX(0)',
-              transition: 'all 220ms cubic-bezier(0.16,1,0.3,1)',
-              lineHeight: 1.08
+              lineHeight: 1.1,
             }}
           >
-            <div className="font-movatif" style={{ fontSize: 13.5, fontWeight: 520, color: dark ? TXT : TXT_DARK }}>
+            <div className="text-[13px] font-semibold" style={{ color: 'var(--sidebar-text)' }}>
               {item.label}
             </div>
-            {isWorkspace && item.sub && (
-              <div style={{ fontSize: 11.5, marginTop: 2, opacity: .6, color: dark ? TXT : TXT_DARK }}>
+            {item.sub && (
+              <div className="text-[11px]" style={{ color: 'var(--sidebar-muted)', marginTop: 3 }}>
                 {item.sub}
               </div>
             )}
           </div>
 
-          {/* tiny green dot when active & expanded */}
+          {/* NEW: tiny green dot on the far right when active & expanded */}
           {!collapsed && active && (
-            <span aria-hidden className="ml-auto rounded-full" style={{ width: 7, height: 7, background: CTA }} />
+            <span
+              aria-hidden
+              className="ml-auto rounded-full"
+              style={{ width: 8, height: 8, background: BRAND }}
+            />
           )}
-
-          {/* hover bloom like the photo (workspace stronger, resources softer) */}
-          <style jsx>{`
-            a.block.group:hover .plate{
-              box-shadow: ${isWorkspace
-                ? '0 16px 26px rgba(0,0,0,.22), 0 0 18px rgba(89,217,179,.18)'
-                : '0 10px 20px rgba(0,0,0,.18), 0 0 12px rgba(255,255,255,.10)'};
-              transform: translateY(-1px);
-            }
-          `}</style>
         </div>
+
+        <div
+          className="h-[2px] rounded-full"
+          style={{
+            transition: 'background 380ms cubic-bezier(0.16,1,0.3,1), margin 380ms cubic-bezier(0.16,1,0.3,1)',
+            marginLeft: collapsed ? 16 : 12,
+            marginRight: 12,
+            background: active
+              ? 'linear-gradient(90deg, transparent, rgba(16,185,129,.35), transparent)'
+              : 'linear-gradient(90deg, transparent, rgba(16,185,129,.0), transparent)',
+          }}
+        />
       </Link>
     );
   };
-
-  /* computed lists */
-  const workspace = useMemo(() => NAV.filter(n => n.group === 'workspace'), []);
-  const resources = useMemo(() => NAV.filter(n => n.group === 'resources'), []);
 
   return (
     <aside
       className="fixed left-0 top-0 h-screen z-50 font-movatif"
       style={{
         width: collapsed ? W_COLLAPSED : W_EXPANDED,
-        transition: 'width 300ms cubic-bezier(0.16,1,0.3,1)',
-        background: railBands(dark),               // blended bands (no bands on brand/account)
-        color: dark ? TXT : TXT_DARK,
-        borderRight: `1px solid ${BORDER}`,
-        boxShadow: 'inset 0 0 18px rgba(0,0,0,.28), 14px 0 28px rgba(0,0,0,.42)'
+        transition: 'width 420ms cubic-bezier(0.16, 1, 0.3, 1)',
+        willChange: 'width',
+        background: 'var(--sidebar-bg)',
+        color: 'var(--sidebar-text)',
+        borderRight: '1px solid var(--sidebar-border)',
+        boxShadow: 'var(--sb-shell-shadow, inset 0 0 18px rgba(0,0,0,0.28))',
       }}
       aria-label="Primary"
     >
       <div className="relative h-full flex flex-col">
-        {/* BRAND — centered; white AI icon + “Reduc AI”; NO separators here */}
-        <div className="px-3 pt-5 pb-4" style={{ background: dark ? BASE_DK : BASE_LT }}>
-          <div className="flex flex-col items-center gap-2">
-            <div className="grid place-items-center"
-                 style={{
-                   width: 40, height: 40, borderRadius: 12,
-                   background: dark ? 'rgba(255,255,255,.14)' : 'rgba(15,23,42,.10)',
-                   border: dark ? '1px solid rgba(255,255,255,.18)' : '1px solid rgba(15,23,42,.16)'
-                 }}>
-              <Bot className="w-5 h-5" style={{ color:'#fff' }} />
+        {/* Header — ONLY logo + name (subtitle removed) */}
+        <div className="px-4 pt-5 pb-4">
+          <div className="flex items-center gap-3">
+            <div
+              className="w-9 h-9 rounded-xl grid place-items-center shrink-0"
+              style={{ background: BRAND, boxShadow: '0 0 10px rgba(0,255,194,0.35)' }}
+            >
+              <Bot className="w-5 h-5 text-black" />
             </div>
-            {!collapsed && (
-              <div className="font-movatif" style={{ fontSize: 17, fontWeight: 560, color: dark ? '#fff' : TXT_DARK }}>
-                Reduc <span style={{ color: CTA, fontWeight: 520 }}>AI</span>
+            <div
+              className="overflow-hidden"
+              style={{
+                transition: 'max-width 420ms cubic-bezier(0.16,1,0.3,1), opacity 420ms cubic-bezier(0.16,1,0.3,1), transform 420ms cubic-bezier(0.16,1,0.3,1)',
+                maxWidth: collapsed ? 0 : 200,
+                opacity: collapsed ? 0 : 1,
+                transform: collapsed ? 'translateX(-6px)' : 'translateX(0)',
+              }}
+            >
+              <div className="text-[17px] font-semibold tracking-wide" style={{ color: 'var(--sidebar-text)' }}>
+                reduc<span style={{ color: BRAND }}>ai.io</span>
               </div>
-            )}
+            </div>
           </div>
         </div>
 
-        {/* optional thin divider under brand for structure */}
-        <div aria-hidden style={{ height: 1, background: BORDER }} />
+        {/* Rail-aligned divider under the header */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute left-0 right-0"
+          style={{
+            top: 'var(--rail-h,56px)',
+            borderTop: '1px solid var(--sidebar-border)',
+            boxShadow: '0 1px 0 rgba(0,0,0,.04)',
+          }}
+        />
 
-        {/* WORKSPACE */}
-        <div className="px-3 mt-2">
-          {SHOW_GROUP_TAGS && !collapsed && (
-            <div className="mb-2" style={{ color: MUTED, fontSize: 10, letterSpacing: '.14em', fontWeight: 520 }}>
+        {/* Groups */}
+        <div className="flex-1 min-h-0 overflow-y-auto px-3 pb-6">
+          {!collapsed && (
+            <div className="inline-flex items-center h-6 px-2 rounded-full border text-[10px] font-semibold tracking-[.14em] mb-2"
+                 style={{ color: 'var(--sidebar-muted)', borderColor: 'var(--sidebar-border)', background: 'var(--sb-tag-bg)' }}>
               WORKSPACE
             </div>
           )}
           <nav className="space-y-[6px]">
-            {workspace.map(item => <Item key={item.id} item={item} />)}
+            {NAV.filter(n => n.group === 'workspace').map(item => (
+              <Item key={item.id} item={item} active={pathnameActive(item)} />
+            ))}
           </nav>
-        </div>
 
-        {/* push RESOURCES to bottom */}
-        <div className="flex-1" />
+          <div style={{ height: 14 }} />
 
-        {/* full-width subtle green separator (edge→edge) */}
-        <div aria-hidden className="mx-3" style={{ height: 1, background: BORDER }} />
-
-        {/* RESOURCES (white icons on dark plates; low opacity feel via plate) */}
-        <div className="px-3 mt-2 mb-2">
-          {SHOW_GROUP_TAGS && !collapsed && (
-            <div className="mb-2" style={{ color: MUTED, fontSize: 10, letterSpacing: '.14em', fontWeight: 520 }}>
+          {!collapsed && (
+            <div className="inline-flex items-center h-6 px-2 rounded-full border text-[10px] font-semibold tracking-[.14em] mb-2"
+                 style={{ color: 'var(--sidebar-muted)', borderColor: 'var(--sidebar-border)', background: 'var(--sb-tag-bg)' }}>
               RESOURCES
             </div>
           )}
           <nav className="space-y-[6px]">
-            {resources.map(item => <Item key={item.id} item={item} />)}
+            {NAV.filter(n => n.group === 'resources').map(item => (
+              <Item key={item.id} item={item} active={pathnameActive(item)} />
+            ))}
           </nav>
         </div>
 
-        {/* ACCOUNT — solid card, no bands; polished gradient avatar; no “Loading…” */}
-        <div className="px-3 pb-4" style={{ background: dark ? BASE_DK : BASE_LT }}>
-          <button
-            onClick={() => router.push('/account')}
-            className="w-full rounded-2xl px-3 py-3 flex items-center gap-3 text-left"
-            style={{
-              background: dark ? 'rgba(255,255,255,.04)' : 'rgba(15,23,42,.05)',
-              border: dark ? '1px solid rgba(255,255,255,.10)' : '1px solid rgba(15,23,42,.12)',
-              boxShadow: 'inset 0 0 10px rgba(0,0,0,.18)',
-              color: dark ? TXT : TXT_DARK
-            }}
-          >
-            <div
-              className="grid place-items-center"
-              style={{
-                width: 32, height: 32, borderRadius: 10,
-                background: 'radial-gradient(60% 60% at 50% 40%, rgba(255,255,255,.22), rgba(255,255,255,.08))',
-                border: dark ? '1px solid rgba(255,255,255,.24)' : '1px solid rgba(15,23,42,.28)'
-              }}
+        {/* Account */}
+        <div className="px-3 pb-4">
+          {!collapsed ? (
+            <Link
+              href="/account"
+              className="w-full rounded-2xl px-3 py-3 flex items-center gap-3 text-left transition-colors duration-300"
+              style={{ background: 'var(--acct-bg)', border: '1px solid var(--acct-border)', boxShadow: 'inset 0 0 10px rgba(0,0,0,.18)', color: 'var(--sidebar-text)' }}
             >
-              <UserIcon className="w-4 h-4" style={{ color:'#0b0f0e' }} />
-            </div>
-            {!collapsed && (
+              <div className="w-8 h-8 rounded-full grid place-items-center" style={{ background: BRAND, boxShadow: '0 0 8px rgba(0,0,0,.25)' }}>
+                <UserIcon className="w-4 h-4 text-black/80" />
+              </div>
               <div className="min-w-0 flex-1">
-                <div className="truncate" style={{ fontSize: 13, fontWeight: 560 }}>
-                  {getDisplayName(userName, userEmail)}
+                <div className="text-sm font-semibold truncate">
+                  {userLoading ? 'Loading…' : getDisplayName(userName, userEmail)}
                 </div>
-                <div className="truncate" style={{ fontSize: 11, opacity: .62 }}>
-                  {userEmail || 'Open account'}
+                <div className="text-[11px] truncate" style={{ color: 'var(--sidebar-muted)' }}>
+                  {userEmail || ''}
                 </div>
               </div>
-            )}
-          </button>
+              <span className="text-xs" style={{ color: 'var(--sidebar-muted)' }}>Account</span>
+            </Link>
+          ) : (
+            <Link
+              href="/account"
+              title="Account"
+              className="block mx-auto rounded-full"
+              style={{
+                width: 40, height: 40,
+                background: 'var(--sb-icon-bg)',
+                border: '1px solid var(--sb-icon-border)',
+                boxShadow: 'inset 0 0 10px rgba(0,0,0,.16)'
+              }}
+            >
+              <div className="w-full h-full grid place-items-center">
+                <UserIcon className="w-5 h-5" style={{ color: 'var(--sidebar-text)' }} />
+              </div>
+            </Link>
+          )}
         </div>
 
-        {/* collapse handle (mid-rail) */}
+        {/* Collapse handle */}
         <button
-          onClick={() => setCollapsed(c => !c)}
-          className="absolute top-1/2 -right-3 translate-y-[-50%] rounded-full p-1.5"
+          onClick={() => setCollapsed((c) => !c)}
+          className="absolute top-1/2 -right-3 translate-y-[-50%] rounded-full p-1.5 transition-colors duration-200"
           style={{
-            border: `1px solid rgba(89,217,179,.26)`,
-            background: 'rgba(89,217,179,.10)',
-            boxShadow: '0 2px 12px rgba(0,0,0,0.18), 0 0 10px rgba(0,255,194,0.10)'
+            border: '1px solid var(--sidebar-border)',
+            background: 'var(--acct-bg)',
+            boxShadow: '0 2px 12px rgba(0,0,0,0.18), 0 0 10px rgba(0,255,194,0.06)',
           }}
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          title={collapsed ? 'Expand' : 'Collapse'}
         >
-          {collapsed
-            ? <ChevronRight className="w-4 h-4" style={{ color: CTA }} />
-            : <ChevronLeft  className="w-4 h-4" style={{ color: CTA }} />}
+          {collapsed ? <ChevronRight className="w-4 h-4" style={{ color: 'var(--sidebar-text)' }} />
+                     : <ChevronLeft className="w-4 h-4"  style={{ color: 'var(--sidebar-text)' }} />}
         </button>
       </div>
+
+      <style jsx>{
+        :global(:root:not([data-theme="dark"])) .fixed.left-0 {
+          --sb-icon-bg: var(--card);
+          --sb-icon-border: var(--border);
+          --acct-bg: var(--card);
+          --acct-border: var(--border);
+          --sb-tag-bg: var(--panel);
+          --sb-shell-shadow: inset 0 0 18px rgba(0,0,0,.06);
+        }
+        :global([data-theme="dark"]) .fixed.left-0 {
+          --sb-icon-bg: rgba(255,255,255,.06);
+          --sb-icon-border: rgba(255,255,255,.12);
+          --acct-bg: rgba(15,18,20,.85);
+          --acct-border: rgba(255,255,255,.10);
+          --sb-tag-bg: rgba(255,255,255,.03);
+          --sb-shell-shadow: inset 0 0 18px rgba(0,0,0,.28), 14px 0 28px rgba(0,0,0,.42);
+        }
+      }</style>
     </aside>
   );
 }
