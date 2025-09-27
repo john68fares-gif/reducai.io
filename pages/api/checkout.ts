@@ -2,46 +2,53 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import Stripe from 'stripe';
 
-const stripeSecret = process.env.STRIPE_SECRET_KEY || '';
-const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || ''; // optional, else we’ll build from req
+const stripeSecret = process.env.STRIPE_SECRET_KEY!;
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
 
-const stripe = new Stripe(stripeSecret, { apiVersion: '2024-06-20' });
+const stripe = new Stripe(stripeSecret, {
+  apiVersion: '2024-06-20',
+});
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== 'POST') return res.status(405).send('Method not allowed');
-
   try {
-    if (!stripeSecret) return res.status(500).send('STRIPE_SECRET_KEY missing');
+    if (req.method !== 'POST') return res.status(405).json({ error: 'method_not_allowed' });
 
-    const { priceId, planName, successPath = '/builder', cancelPath = '/' } = req.body || {};
-    if (!priceId) return res.status(400).send('Missing priceId');
+    const { priceId, successPath = '/builder', cancelPath = '/#pricing' } = req.body as {
+      priceId?: string;
+      successPath?: string;
+      cancelPath?: string;
+    };
 
-    // figure out URL origin (for local & vercel)
-    const origin =
-      siteUrl ||
-      `${req.headers['x-forwarded-proto'] || 'https'}://${req.headers.host}`;
+    if (!priceId) return res.status(400).json({ error: 'missing_price' });
+    if (!stripeSecret) return res.status(500).json({ error: 'stripe_secret_missing' });
 
-    // Create a subscription checkout with trial AND require card up-front
+    // IMPORTANT: The priceId MUST come from the same Stripe mode (Live or Test) as STRIPE_SECRET_KEY.
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',
       line_items: [{ price: priceId, quantity: 1 }],
-      subscription_data: {
-        trial_period_days: 30, // charge after ~1 month
+      // If your Price already has a trial configured, Stripe will use it automatically.
+      // Otherwise you can uncomment the next line to force a 30d trial:
+      // subscription_data: { trial_period_days: 30 },
+
+      // Make sure we always create a Customer (so you can map it later).
+      customer_creation: 'always',
+
+      // Require a card upfront (Stripe will often place a $0/€0 verification hold automatically).
+      payment_method_collection: 'always',
+      payment_method_types: ['card'],
+
+      success_url: `${siteUrl}${successPath}?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${siteUrl}${cancelPath}`,
+
+      allow_promotion_codes: true,
+      metadata: {
+        app: 'reduxcai',
       },
-      payment_method_collection: 'always', // capture card now
-      allow_promotion_codes: false,
-      // If you want to restrict to test cards only in dev, add payment_method_types
-      // payment_method_types: ['card'],
-
-      success_url: `${origin}${successPath}?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${origin}${cancelPath}`,
-
-      metadata: planName ? { planName } : undefined,
     });
 
     return res.status(200).json({ sessionId: session.id });
   } catch (err: any) {
-    console.error('Stripe error', err);
-    return res.status(500).send(err?.message || 'Stripe error');
+    console.error('[checkout] error:', err?.message || err);
+    return res.status(400).json({ error: 'checkout_failed', message: err?.message });
   }
 }
