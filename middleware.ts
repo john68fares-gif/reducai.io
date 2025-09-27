@@ -5,15 +5,15 @@ import { NextResponse } from 'next/server';
 /** Public, no-auth pages */
 const PUBLIC = new Set<string>([
   '/',
-  '/auth/callback',   // Supabase OAuth callback
-  '/post-auth',       // land here after OAuth; client finishes auth
+  '/auth/callback',
+  '/post-auth',      // <-- must be fully public so PKCE exchange can happen on the page
   '/pricing',
   '/contact',
   '/privacy',
-  '/terms'
+  '/terms',
 ]);
 
-/** Asset/API paths (always allowed) */
+/** Bypass assets & API */
 function isBypassedPath(p: string) {
   return (
     p.startsWith('/_next') ||
@@ -21,14 +21,14 @@ function isBypassedPath(p: string) {
     p.startsWith('/images') ||
     p.startsWith('/fonts') ||
     p.startsWith('/static') ||
-    p.startsWith('/api')      // do NOT run middleware on API routes
+    p.startsWith('/api')           // never run middleware on API routes
   );
 }
 
-/** Basic “am I signed in” check using Supabase cookies */
+/** Very light “am I signed in” check (Supabase cookies or our hint cookie) */
 function isAuthed(req: NextRequest) {
   const c = req.cookies;
-  if (c.get('ra_session')?.value === '1') return true; // your own flag if set in _app
+  if (c.get('ra_session')?.value === '1') return true;
   const hasSb =
     c.get('sb-access-token') ||
     c.get('sb-refresh-token') ||
@@ -39,12 +39,17 @@ function isAuthed(req: NextRequest) {
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // Always bypass assets & API
+  // Always bypass static and API
   if (isBypassedPath(pathname)) return NextResponse.next();
 
   const authed = isAuthed(req);
 
-  // If user is signed in and visits "/", send them to the app
+  // Let /post-auth run even when NOT authed so the code exchange can complete
+  if (pathname === '/post-auth') {
+    return NextResponse.next();
+  }
+
+  // If already signed in and they hit the landing page, send to the app
   if (pathname === '/' && authed) {
     const url = req.nextUrl.clone();
     url.pathname = '/builder';
@@ -52,7 +57,7 @@ export async function middleware(req: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // Public routes are open — and /post-auth must always pass through
+  // All other public routes are open
   if (PUBLIC.has(pathname)) {
     return NextResponse.next();
   }
@@ -65,11 +70,10 @@ export async function middleware(req: NextRequest) {
     return NextResponse.redirect(back);
   }
 
-  // Auth-only pages allowed
   return NextResponse.next();
 }
 
 export const config = {
-  // Exclude _next assets, static, AND api from middleware
+  // Exclude static and API from middleware
   matcher: ['/((?!_next/|favicon|images/|fonts/|static/|api/).*)'],
 };
