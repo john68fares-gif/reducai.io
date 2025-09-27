@@ -1,456 +1,371 @@
 // /pages/index.tsx
 import Head from 'next/head';
-import { useRouter } from 'next/router';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter } from 'next/router';
 import { supabase } from '@/lib/supabase-client';
 import {
-  ArrowRight, Check, Sparkles, Mic, Phone, Zap, Shield, MessageSquare,
-  Globe, Cpu, Headphones, Play, Wand2, Lock
+  Menu as MenuIcon, X, ArrowRight, CheckCircle2, Loader2, Mail, Globe, Shield, Zap,
 } from 'lucide-react';
 
-const ACCENT = '#6af7d1';
-const ACCENT_DARK = '#45dcb5';
+/** --- Design Tokens (dark-first) --- */
+const Tokens = () => (
+  <style jsx global>{`
+    :root {
+      --bg:#0b0c10; --panel:#0d0f11; --card:#0f1214; --text:#e6f1ef; --muted:#9fb4ad;
+      --brand:#59d9b3; --brand-weak:rgba(89,217,179,.16);
+      --border:rgba(255,255,255,.10);
+      --radius:12px; --ease:cubic-bezier(.22,.61,.36,1);
+      --shadow:0 30px 80px rgba(0,0,0,.35), 0 0 0 1px rgba(255,255,255,.06) inset;
+      --shadow-soft:0 18px 48px rgba(0,0,0,.22);
+      --max:1160px;
+    }
+    body { background: var(--bg); color: var(--text); }
+    .container { width:100%; max-width: var(--max); margin: 0 auto; padding: 0 20px; }
+    .btn { height:44px; padding:0 16px; border-radius:10px; display:inline-flex; align-items:center; gap:10px; font-weight:700; border:1px solid transparent; }
+    .btn-primary { background: var(--brand); color:#fff; box-shadow: 0 10px 24px rgba(89,217,179,.35); }
+    .btn-primary:hover { filter: brightness(1.02); transform: translateY(-1px); transition: all .15s var(--ease); }
+    .btn-ghost { background: transparent; border-color: var(--border); color: var(--text); }
+    .card { background: var(--panel); border:1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
+    .pill { border-radius:999px; padding:6px 10px; border:1px solid color-mix(in oklab, var(--brand) 40%, var(--border)); background: color-mix(in oklab, var(--brand) 8%, var(--panel)); font-size:12px; color: var(--text); }
+    .muted { color: var(--muted); }
+    .section { padding: 96px 0; }
+    .hero { padding: 120px 0 80px; position: relative; overflow: clip; }
+    .hero::before{
+      content:''; position:absolute; inset:-20% -10% auto -10%; height: 560px;
+      background: radial-gradient(700px 350px at 0% 0%, var(--brand-weak), transparent 60%);
+      pointer-events:none; filter: blur(0.5px);
+    }
+    .grid-2 { display:grid; grid-template-columns: 1fr; gap: 28px; }
+    @media (min-width: 980px){ .grid-2 { grid-template-columns: 1.2fr 1fr; } }
+    .logo-dot { width:14px; height:14px; border-radius:4px; background: var(--brand); display:inline-block; box-shadow: 0 0 0 3px rgba(89,217,179,.15); }
+    nav a { color: var(--muted); text-decoration:none; }
+    nav a:hover { color: var(--text); }
+    .feature { display:flex; align-items:flex-start; gap:12px; }
+    .hr { height:1px; background: var(--border); border:0; }
+    .pricing-card { position:relative; overflow:hidden; }
+    .pricing-card .badge { position:absolute; right:12px; top:12px; }
+    .modal-backdrop { position:fixed; inset:0; background:rgba(8,10,12,.72); display:grid; place-items:center; z-index:10000; }
+    .modal { width:100%; max-width: 520px; border-radius:14px; background:linear-gradient(180deg, #0d1012, #0c0f10); border:1px solid rgba(89,217,179,.18); box-shadow: var(--shadow-soft); }
+    .input { height:44px; border-radius:10px; background: var(--panel); border:1px solid var(--border); color: var(--text); padding: 0 12px; outline:none; width:100%; }
+    .otp { letter-spacing: .28em; text-align:center; }
+  `}</style>
+);
 
+/** --- Sign-in Modal (Email OTP or Google) --- */
+function SignInModal({
+  open, onClose, defaultEmail = '', postLoginPath = '/builder',
+}: { open: boolean; onClose: () => void; defaultEmail?: string; postLoginPath?: string }) {
+  const router = useRouter();
+  const [email, setEmail] = useState(defaultEmail);
+  const [stage, setStage] = useState<'method'|'code'|'sending'|'verifying'>('method');
+  const [code, setCode] = useState('');
+  const [error, setError] = useState('');
+
+  useEffect(()=>{ if(!open){ setStage('method'); setEmail(defaultEmail); setCode(''); setError(''); } }, [open, defaultEmail]);
+
+  const sendOtp = async () => {
+    try {
+      if (!email || !email.includes('@')) { setError('Enter a valid email.'); return; }
+      setError(''); setStage('sending');
+      const origin = typeof window !== 'undefined' ? window.location.origin : '';
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: { emailRedirectTo: `${origin}/auth/callback` },
+      });
+      if (error) throw error;
+      setStage('code');
+    } catch (e:any) {
+      setStage('method'); setError(e?.message || 'Could not send code.');
+    }
+  };
+
+  const verifyOtp = async () => {
+    try {
+      if (!email || !code) return;
+      setError(''); setStage('verifying');
+      const { data, error } = await supabase.auth.verifyOtp({ email, token: code.trim(), type: 'email' });
+      if (error) throw error;
+      if (data?.session) { onClose(); router.replace(postLoginPath); }
+      else throw new Error('Invalid code.');
+    } catch (e:any) {
+      setStage('code'); setError(e?.message || 'Invalid code, try again.');
+    }
+  };
+
+  const loginGoogle = async () => {
+    try {
+      const origin = typeof window !== 'undefined' ? window.location.origin : '';
+      await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo: `${origin}/auth/callback` },
+      });
+      // OAuth will redirect; no further action here.
+    } catch (e:any) {
+      setError(e?.message || 'Google sign-in failed.');
+    }
+  };
+
+  if (!open) return null;
+  return (
+    <div className="modal-backdrop" onClick={onClose} aria-modal aria-label="Sign in">
+      <div className="modal card" onClick={(e)=>e.stopPropagation()}>
+        {/* Header */}
+        <div style={{ padding:'16px 18px', borderBottom:'1px solid rgba(89,217,179,.18)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+          <div style={{ fontWeight:700, fontSize:18 }}>Welcome Back</div>
+          <button onClick={onClose} className="btn btn-ghost" style={{ height:34, padding:'0 10px' }} aria-label="Close"><X className="w-4 h-4"/></button>
+        </div>
+
+        {/* Body */}
+        <div style={{ padding:18 }}>
+          {stage === 'method' && (
+            <>
+              <label className="muted" style={{ fontSize:12 }}>Email Address</label>
+              <input className="input" placeholder="you@example.com" value={email} onChange={(e)=>setEmail(e.target.value)} />
+              <button className="btn btn-primary" style={{ width:'100%', marginTop:12 }}
+                onClick={sendOtp}>
+                <Mail className="w-4 h-4" /> Continue with Email
+              </button>
+
+              <div style={{ display:'grid', gridTemplateColumns:'1fr auto 1fr', alignItems:'center', gap:8, marginTop:14 }}>
+                <span className="hr" />
+                <span className="muted" style={{ fontSize:12 }}>or continue with</span>
+                <span className="hr" />
+              </div>
+
+              <button className="btn btn-ghost" style={{ width:'100%', marginTop:12, background:'#fff', color:'#222', borderColor:'rgba(0,0,0,.12)' }}
+                onClick={loginGoogle}>
+                <img alt="" src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width={18} height={18}/>
+                Continue with Google
+              </button>
+            </>
+          )}
+
+          {stage === 'sending' && (
+            <div style={{ display:'flex', gap:10, alignItems:'center', padding:'8px 0' }}>
+              <Loader2 className="w-4 h-4 animate-spin"/><div>Sending code to <b>{email}</b>…</div>
+            </div>
+          )}
+
+          {stage === 'code' && (
+            <>
+              <div className="muted" style={{ fontSize:14, marginBottom:6 }}>
+                We emailed a 6-digit code to <b style={{ color:'#fff' }}>{email}</b>.
+              </div>
+              <input
+                className="input otp"
+                placeholder="••••••"
+                maxLength={6}
+                value={code}
+                onChange={(e)=>setCode(e.target.value.replace(/[^0-9]/g,''))}
+              />
+              <button className="btn btn-primary" style={{ width:'100%', marginTop:12 }} onClick={verifyOtp}>
+                {stage === 'verifying' ? <Loader2 className="w-4 h-4 animate-spin"/> : <CheckCircle2 className="w-4 h-4" />}
+                Verify & Continue
+              </button>
+              <button className="btn btn-ghost" style={{ width:'100%', marginTop:8 }} onClick={()=>setStage('method')}>
+                Use a different email
+              </button>
+            </>
+          )}
+
+          {!!error && <div style={{ marginTop:10, color:'#ff6b6b', fontSize:12 }}>{error}</div>}
+
+          <div className="muted" style={{ fontSize:12, marginTop:14 }}>
+            By signing in you agree to our Terms of Service & Privacy Policy.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** --- Page --- */
 export default function Home() {
   const router = useRouter();
+  const [modalOpen, setModalOpen] = useState(false);
   const [authed, setAuthed] = useState(false);
-  const [authOpen, setAuthOpen] = useState(false);
 
-  // If logged-in → /builder
   useEffect(() => {
-    let sub: ReturnType<typeof supabase.auth.onAuthStateChange> | null = null;
     (async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        setAuthed(true);
-        router.replace('/builder');
-        return;
-      }
-      // Listen for sign-in that returns to this page
-      sub = supabase.auth.onAuthStateChange((_e, sess) => {
-        if (sess) {
-          setAuthed(true);
-          router.replace('/builder');
-        }
-      }) as any;
+      setAuthed(Boolean(session));
     })();
-    return () => { sub?.data?.subscription?.unsubscribe?.(); };
-  }, [router]);
+  }, []);
 
-  const openAuth = () => setAuthOpen(true);
+  const goPricing = () => router.push('/pricing'); // trial/plan flows page
+  const goBuilderIfAuthed = () => authed ? router.push('/builder') : setModalOpen(true);
 
   return (
     <>
       <Head>
-        <title>Reduc.ai — Build a voice agent in minutes</title>
-        <meta name="description" content="Ship a production-ready voice agent in minutes. Natural, fast, and integrated with your stack." />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Reduc.ai — Ship voice that sells</title>
+        <meta name="description" content="Build a natural-sounding voice agent your users actually enjoy." />
       </Head>
+      <Tokens />
 
-      <main className="min-h-screen" style={{ background: 'var(--bg, #0b0c10)', color: 'var(--text, #e6f1ef)' }}>
-        {/* NAV */}
-        <nav className="w-full">
-          <div className="mx-auto max-w-7xl px-5 py-4 flex items-center gap-3">
-            <Logo />
-            <span className="ml-2 text-sm opacity-70">Ship voice that sells.</span>
-            <span className="ml-auto" />
-            <a href="#features" className="text-sm opacity-80 hover:opacity-100 transition">Features</a>
-            <a href="#how" className="text-sm opacity-80 hover:opacity-100 transition ml-5">How it works</a>
-            <a href="#faq" className="text-sm opacity-80 hover:opacity-100 transition ml-5">FAQ</a>
-            <button
-              onClick={openAuth}
-              className="ml-6 h-10 px-4 rounded-[10px] font-semibold"
-              style={{ background: ACCENT, color: '#0b0c10', boxShadow: '0 10px 22px rgba(106,247,209,.25)' }}
-              onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = ACCENT_DARK)}
-              onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = ACCENT)}
-            >
-              {authed ? 'Go to Builder' : 'Sign in / Sign up'}
-            </button>
+      {/* Nav */}
+      <header style={{ position:'sticky', top:0, zIndex:50, borderBottom:'1px solid var(--border)', background:'rgba(11,12,16,.78)', backdropFilter:'blur(6px)' }}>
+        <div className="container" style={{ display:'flex', alignItems:'center', height:66, gap:16 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:10, fontWeight:800 }}>
+            <span className="logo-dot" aria-hidden />
+            <span>Reduc.ai</span>
           </div>
-        </nav>
+          <nav style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:18, fontSize:14 }}>
+            <a href="#features">Features</a>
+            <a href="#how">How it works</a>
+            <a href="#faq">FAQ</a>
+            <button className="btn btn-primary" onClick={()=>setModalOpen(true)}>Sign in / Sign up</button>
+          </nav>
+        </div>
+      </header>
 
-        {/* HERO */}
-        <section className="relative overflow-hidden">
-          <div
-            aria-hidden
-            className="pointer-events-none absolute -top-[22%] -left-[28%] w-[76%] h-[76%] rounded-full"
-            style={{
-              background: 'radial-gradient(circle, rgba(106,247,209,.20) 0%, transparent 70%)',
-              filter: 'blur(42px)'
-            }}
-          />
-          <div className="mx-auto max-w-7xl px-5 pt-16 pb-20 grid md:grid-cols-2 gap-10 items-center">
-            <div>
-              <div className="inline-flex items-center gap-2 text-xs tracking-wide px-3 py-1.5 rounded-[20px] border"
-                   style={{ borderColor:'rgba(255,255,255,.14)', background:'rgba(255,255,255,.04)' }}>
-                <Sparkles className="w-3.5 h-3.5" style={{ color: ACCENT }} />
-                Launch a voice agent in minutes
-              </div>
-              <h1 className="mt-4 text-4xl md:text-6xl font-semibold leading-[1.05]">
-                Build a <span style={{ color: ACCENT }}>natural-sounding</span> voice agent
-                <br className="hidden md:block" /> your users actually enjoy.
-              </h1>
-              <p className="mt-4 text-base md:text-lg opacity-80 max-w-2xl">
-                Reduc.ai gives you realtime voice, smart call flow, and tool integrations —
-                without the yak-shaving. Ship a production agent today, not next quarter.
-              </p>
+      {/* Hero */}
+      <section className="hero">
+        <div className="container grid-2" style={{ alignItems:'center' }}>
+          <div>
+            <div className="pill" style={{ display:'inline-flex', alignItems:'center', gap:8, marginBottom:14 }}>
+              <Zap className="w-4 h-4" /> Launch a voice agent in minutes
+            </div>
+            <h1 style={{ fontSize:48, lineHeight:1.05, margin:'8px 0 16px', fontWeight:800 }}>
+              Build a <span style={{ color:'var(--brand)' }}>natural-sounding</span> voice agent your users actually enjoy.
+            </h1>
+            <p className="muted" style={{ maxWidth:640 }}>
+              Reduc.ai gives you realtime voice, smart call flow, and tool integrations—without the yak-shaving.
+              Ship a production agent today, not next quarter.
+            </p>
 
-              <div className="mt-6 flex flex-wrap gap-3">
-                <button
-                  onClick={openAuth}
-                  className="h-12 px-6 rounded-[14px] font-semibold inline-flex items-center gap-2"
-                  style={{ background: ACCENT, color: '#0b0c10', boxShadow: '0 12px 30px rgba(106,247,209,.28)' }}
-                  onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = ACCENT_DARK)}
-                  onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = ACCENT)}
-                >
-                  Try free <ArrowRight className="w-4 h-4" />
-                </button>
-                <a
-                  href="#how"
-                  className="h-12 px-5 rounded-[14px] font-semibold inline-flex items-center gap-2"
-                  style={{ border:'1px solid rgba(255,255,255,.16)' }}
-                >
-                  See how it works
-                </a>
-              </div>
-
-              <div className="mt-6 grid grid-cols-3 gap-4 max-w-md text-sm opacity-80">
-                <Pill icon={<Zap className="w-4 h-4" />} text="Low latency" />
-                <Pill icon={<Headphones className="w-4 h-4" />} text="Realtime turn-taking" />
-                <Pill icon={<Shield className="w-4 h-4" />} text="Safe by default" />
-              </div>
+            <div style={{ display:'flex', gap:12, marginTop:16, flexWrap:'wrap' }}>
+              <button className="btn btn-primary" onClick={goPricing}>
+                Try free <ArrowRight className="w-4 h-4" />
+              </button>
+              <button className="btn btn-ghost" onClick={goBuilderIfAuthed}>
+                See how it works
+              </button>
             </div>
 
-            <HeroCard />
+            <div style={{ display:'flex', gap:18, marginTop:18, flexWrap:'wrap' }}>
+              <span className="muted" style={{ display:'inline-flex', alignItems:'center', gap:8 }}>
+                <Shield className="w-4 h-4" /> Safe by default
+              </span>
+              <span className="muted" style={{ display:'inline-flex', alignItems:'center', gap:8 }}>
+                <Globe className="w-4 h-4" /> Realtime turn-taking
+              </span>
+            </div>
           </div>
-        </section>
 
-        {/* TRUST / LOGOS (placeholder) */}
-        <section className="py-8 opacity-80">
-          <div className="mx-auto max-w-7xl px-5 grid grid-cols-2 md:grid-cols-5 gap-6 place-items-center">
-            {['Acme','Globex','Umbrella','Stark','Hooli'].map((n,i)=>(
-              <div key={i} className="text-sm tracking-wide uppercase opacity-60">{n}</div>
+          <div className="card" style={{ padding:16 }}>
+            <div className="muted" style={{ fontSize:12, marginBottom:8 }}>Live demo preview</div>
+            <div className="card" style={{ padding:14 }}>
+              <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:10 }}>
+                <div className="pill" style={{ background:'rgba(89,217,179,.12)' }}>Riley (Scheduling)</div>
+                <span className="muted" style={{ fontSize:12, marginLeft:'auto' }}>Uses your own key</span>
+              </div>
+              <div className="card" style={{ padding:14 }}>
+                “Hi! I can help you book, reschedule, or answer questions. What can I do for you today?”
+              </div>
+              <div className="muted" style={{ fontSize:12, marginTop:8 }}>
+                Barge-in • Filler word control • Micro-pauses • Phone filtering
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Logos spacer */}
+      <section className="section" style={{ paddingTop:24 }}>
+        <div className="container" style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr)', gap:18, opacity:.8 }}>
+          <div className="muted" style={{ textAlign:'center' }}>ACME</div>
+          <div className="muted" style={{ textAlign:'center' }}>GLOBEX</div>
+          <div className="muted" style={{ textAlign:'center' }}>UMBRELLA</div>
+          <div className="muted" style={{ textAlign:'center' }}>STARK</div>
+          <div className="muted" style={{ textAlign:'center' }}>HOOLI</div>
+        </div>
+      </section>
+
+      {/* Features */}
+      <section id="features" className="section">
+        <div className="container">
+          <h2 style={{ fontSize:32, fontWeight:800, marginBottom:8 }}>Everything you need</h2>
+          <p className="muted" style={{ marginBottom:24 }}>Production voice, tool calls, analytics, and guardrails.</p>
+
+          <div className="grid-2" style={{ gridTemplateColumns:'repeat(2,1fr)' as any }}>
+            {[
+              ['Realtime, human-like voice', 'Natural back-and-forth with micro-pauses and barge-in.'],
+              ['Smart call flow', 'Guide users toward booking, purchase, or escalation.'],
+              ['Tool integrations', 'Connect to calendars, CRMs, and your APIs.'],
+              ['Safe by default', 'Policies and fallbacks prevent awkward outcomes.'],
+            ].map(([t, s], i)=>(
+              <div key={i} className="card" style={{ padding:18 }}>
+                <div className="feature">
+                  <CheckCircle2 className="w-5 h-5" style={{ color:'var(--brand)' }}/>
+                  <div>
+                    <div style={{ fontWeight:700, marginBottom:4 }}>{t}</div>
+                    <div className="muted">{s}</div>
+                  </div>
+                </div>
+              </div>
             ))}
           </div>
-        </section>
-
-        {/* FEATURES */}
-        <section id="features" className="py-12">
-          <div className="mx-auto max-w-7xl px-5">
-            <h2 className="text-2xl md:text-3xl font-semibold">Everything you need to ship voice</h2>
-            <p className="mt-2 opacity-80">Fast setup, flexible prompts, real tools, real outcomes.</p>
-
-            <div className="mt-8 grid md:grid-cols-3 gap-6">
-              <Card
-                icon={<Mic className="w-5 h-5" style={{ color: ACCENT }} />}
-                title="Natural conversation"
-                body="Streaming ASR + neural TTS + barge-in. Your agent sounds human and never waits on long turns."
-              />
-              <Card
-                icon={<Wand2 className="w-5 h-5" style={{ color: ACCENT }} />}
-                title="Prompt, not plumbing"
-                body="Describe your business and goals; we compile a production-ready system prompt with fallbacks."
-              />
-              <Card
-                icon={<MessageSquare className="w-5 h-5" style={{ color: ACCENT }} />}
-                title="Tools & actions"
-                body="Connect calendars, CRMs, or your own APIs to let the agent actually do things, not just chat."
-              />
-              <Card
-                icon={<Phone className="w-5 h-5" style={{ color: ACCENT }} />}
-                title="Web & phone"
-                body="Drop-in web widget and phone numbers. One agent, all channels."
-              />
-              <Card
-                icon={<Cpu className="w-5 h-5" style={{ color: ACCENT }} />}
-                title="Model-flexible"
-                body="Use GPT-4o / Realtime or your preferred stack. Swap without rewrites."
-              />
-              <Card
-                icon={<Globe className="w-5 h-5" style={{ color: ACCENT }} />}
-                title="Multi-lingual"
-                body="Serve customers in their language. The agent auto-detects and adapts."
-              />
-            </div>
-          </div>
-        </section>
-
-        {/* HOW IT WORKS */}
-        <section id="how" className="py-14">
-          <div className="mx-auto max-w-7xl px-5">
-            <h2 className="text-2xl md:text-3xl font-semibold">From zero to live calls in 3 steps</h2>
-            <div className="mt-6 grid md:grid-cols-3 gap-6">
-              <Step n={1} title="Describe your business"
-                    body="Paste your site or write a short blurb. We generate a clean, structured system prompt." />
-              <Step n={2} title="Connect tools"
-                    body="Add your API key, calendar, or custom endpoints. The agent can now take action." />
-              <Step n={3} title="Go live"
-                    body="Embed the web call button, or attach a phone number. Start taking calls immediately." />
-            </div>
-
-            <div className="mt-8">
-              <button
-                onClick={openAuth}
-                className="h-12 px-6 rounded-[14px] font-semibold inline-flex items-center gap-2"
-                style={{ background: ACCENT, color: '#0b0c10', boxShadow: '0 12px 30px rgba(106,247,209,.28)' }}
-                onMouseEnter={(e)=>((e.currentTarget as HTMLButtonElement).style.background = ACCENT_DARK)}
-                onMouseLeave={(e)=>((e.currentTarget as HTMLButtonElement).style.background = ACCENT)}
-              >
-                Start free <ArrowRight className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        </section>
-
-        {/* FAQ */}
-        <section id="faq" className="py-14">
-          <div className="mx-auto max-w-5xl px-5">
-            <h2 className="text-2xl md:text-3xl font-semibold">FAQ</h2>
-            <ul className="mt-6 space-y-5">
-              <Faq q="Do I need to bring my own API key?"
-                   a="Yes. Your usage is billed directly by your LLM provider. We never store your secret in the browser; we reference an id and resolve server-side." />
-              <Faq q="Can I port my prompt from elsewhere?"
-                   a="Totally. Paste it as-is or let the builder re-shape it into our structured format (with error handling and fallbacks)." />
-              <Faq q="Does it work on the phone?"
-                   a="Yes—web calls and phone numbers use the same agent and prompt. Activate a number and you’re live." />
-            </ul>
-          </div>
-        </section>
-
-        {/* FOOTER */}
-        <footer className="py-10 border-t" style={{ borderColor:'rgba(255,255,255,.08)' }}>
-          <div className="mx-auto max-w-7xl px-5 flex items-center gap-4">
-            <Logo />
-            <span className="opacity-70 text-sm">© {new Date().getFullYear()} Reduc.ai. All rights reserved.</span>
-            <span className="ml-auto opacity-70 text-sm">Made for teams who ship.</span>
-          </div>
-        </footer>
-      </main>
-
-      {/* SIGN IN / UP OVERLAY (no separate page) */}
-      {authOpen && <AuthOverlay onClose={()=>setAuthOpen(false)} />}
-    </>
-  );
-}
-
-/* ───────────────────────── Components ───────────────────────── */
-
-function Logo() {
-  return (
-    <div className="inline-flex items-center gap-2">
-      <div className="w-7 h-7 rounded-lg grid place-items-center" style={{ background:'rgba(106,247,209,.15)' }}>
-        <Play className="w-4 h-4" style={{ color: ACCENT }} />
-      </div>
-      <b>Reduc.ai</b>
-    </div>
-  );
-}
-
-function Pill({ icon, text }: { icon: React.ReactNode; text: string }) {
-  return (
-    <div className="inline-flex items-center gap-2">
-      <span style={{ color: ACCENT }}>{icon}</span>
-      <span className="truncate">{text}</span>
-    </div>
-  );
-}
-
-function Card({ icon, title, body }: { icon: React.ReactNode; title: string; body: string }) {
-  return (
-    <div className="rounded-[16px] p-5"
-         style={{ background:'rgba(255,255,255,.03)', border:'1px solid rgba(255,255,255,.10)', boxShadow:'0 20px 40px rgba(0,0,0,.18)' }}>
-      <div className="w-9 h-9 rounded-lg grid place-items-center mb-2" style={{ background:'rgba(106,247,209,.12)' }}>
-        {icon}
-      </div>
-      <div className="text-lg font-semibold">{title}</div>
-      <p className="mt-1 opacity-80 text-sm">{body}</p>
-      <ul className="mt-3 space-y-1 text-sm opacity-80">
-        {[0,1,2].map(i=>(
-          <li key={i} className="flex items-center gap-2">
-            <Check className="w-4 h-4" style={{ color: ACCENT }} />
-            <span>Production-ready out of the box</span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-function Step({ n, title, body }: { n: number; title: string; body: string }) {
-  return (
-    <div className="rounded-[16px] p-5"
-         style={{ background:'rgba(255,255,255,.03)', border:'1px solid rgba(255,255,255,.10)' }}>
-      <div className="text-xs opacity-70">Step {n}</div>
-      <div className="text-lg font-semibold mt-1">{title}</div>
-      <p className="opacity-80 text-sm mt-1">{body}</p>
-    </div>
-  );
-}
-
-function Faq({ q, a }: { q: string; a: string }) {
-  return (
-    <li className="rounded-[16px] p-5"
-        style={{ background:'rgba(255,255,255,.03)', border:'1px solid rgba(255,255,255,.10)' }}>
-      <div className="font-semibold">{q}</div>
-      <p className="opacity-80 mt-1 text-sm">{a}</p>
-    </li>
-  );
-}
-
-function HeroCard() {
-  return (
-    <div className="rounded-[22px] p-5 md:p-6"
-         style={{ border:'1px solid rgba(255,255,255,.10)', background:'linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02))', boxShadow:'0 28px 70px rgba(0,0,0,.22)' }}>
-      <div className="text-sm opacity-80">Live demo preview</div>
-      <div className="mt-3 rounded-[14px] p-4 grid gap-3"
-           style={{ background:'rgba(255,255,255,.03)', border:'1px solid rgba(255,255,255,.08)' }}>
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg grid place-items-center" style={{ background:'rgba(106,247,209,.12)' }}>
-            <Mic className="w-4 h-4" style={{ color: ACCENT }} />
-          </div>
-          <div className="font-semibold">Riley (Scheduling)</div>
-          <span className="ml-auto text-xs opacity-70 inline-flex items-center gap-1">
-            <Lock className="w-3.5 h-3.5" /> Uses your own key
-          </span>
         </div>
-        <div className="rounded-[10px] p-3 text-sm"
-             style={{ background:'rgba(255,255,255,.03)', border:'1px solid rgba(255,255,255,.08)' }}>
-          “Hi! I can help you book, reschedule, or answer questions. What can I do for you today?”
-        </div>
-        <div className="text-xs opacity-70">Barge-in • Filler word control • Micro-pauses • Phone filtering</div>
-      </div>
-    </div>
-  );
-}
+      </section>
 
-/* ───────────────────────── Auth Overlay ───────────────────────── */
-
-function AuthOverlay({ onClose }: { onClose: () => void }) {
-  const [mode, setMode] = useState<'signin'|'signup'>('signin');
-  const [email, setEmail] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [sent, setSent] = useState(false);
-
-  const title = mode === 'signin' ? 'Welcome back' : 'Create your account';
-
-  async function signInWithProvider(provider: 'google' | 'github') {
-    if (busy) return;
-    try {
-      setBusy(true);
-      const origin = typeof window !== 'undefined' ? window.location.origin : undefined;
-      await supabase.auth.signInWithOAuth({
-        provider,
-        options: { redirectTo: origin }, // return to /, middleware/index will send to /builder on session
-      });
-      // Supabase will redirect; no-op here.
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function sendMagicLink(e: React.FormEvent) {
-    e.preventDefault();
-    if (!email.trim() || busy) return;
-    try {
-      setBusy(true);
-      const origin = typeof window !== 'undefined' ? window.location.origin : undefined;
-      const { error } = await supabase.auth.signInWithOtp({
-        email: email.trim(),
-        options: { emailRedirectTo: origin },
-      });
-      if (error) throw error;
-      setSent(true);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <>
-      <div className="fixed inset-0" style={{ zIndex: 100000, background:'rgba(0,0,0,.72)' }} onClick={busy ? undefined : onClose} />
-      <div className="fixed inset-0 grid place-items-center px-4" style={{ zIndex: 100001 }}>
-        <div className="w-full max-w-[620px] rounded-[16px] overflow-hidden"
-             style={{ background:'#0d0f11', color:'#e6f1ef', border:'1px solid rgba(255,255,255,.10)', boxShadow:'0 24px 64px rgba(0,0,0,.36)' }}
-             role="dialog" aria-modal="true" aria-label="Authentication">
-          {/* Header */}
-          <div className="px-6 py-5 border-b" style={{ borderColor:'rgba(255,255,255,.10)' }}>
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-lg grid place-items-center" style={{ background:'rgba(106,247,209,.12)' }}>
-                <Wand2 className="w-4 h-4" style={{ color: ACCENT }} />
-              </div>
-              <div className="text-lg font-semibold">{title}</div>
-              <span className="ml-auto" />
-              <button onClick={busy ? undefined : onClose}
-                      className="h-9 px-3 rounded-[8px]" style={{ border:'1px solid rgba(255,255,255,.14)' }}>
-                Close
+      {/* How it works */}
+      <section id="how" className="section">
+        <div className="container grid-2">
+          <div>
+            <h2 style={{ fontSize:32, fontWeight:800, marginBottom:8 }}>How it works</h2>
+            <ol className="muted" style={{ lineHeight:1.7 }}>
+              <li><b>Pick a template</b> (Scheduling, Support, Sales).</li>
+              <li><b>Paste your business facts</b> or import your website.</li>
+              <li><b>Connect tools</b> (calendars, webhooks).</li>
+              <li><b>Click “Publish”</b> and share the number or embed the widget.</li>
+            </ol>
+            <div style={{ marginTop:16 }}>
+              <button className="btn btn-primary" onClick={()=>setModalOpen(true)}>
+                Get started free
               </button>
             </div>
           </div>
-
-          {/* Body */}
-          <div className="px-6 py-6 grid md:grid-cols-2 gap-6">
-            <div>
-              <button
-                disabled={busy}
-                onClick={()=>signInWithProvider('google')}
-                className="w-full h-11 rounded-[10px] font-semibold"
-                style={{ background: ACCENT, color:'#0b0c10' }}
-              >
-                Continue with Google
-              </button>
-              <button
-                disabled={busy}
-                onClick={()=>signInWithProvider('github')}
-                className="w-full h-11 rounded-[10px] font-semibold mt-3"
-                style={{ background: 'rgba(255,255,255,.06)', border:'1px solid rgba(255,255,255,.14)' }}
-              >
-                Continue with GitHub
-              </button>
-
-              <div className="text-xs opacity-70 mt-3">
-                By continuing you agree to our Terms and Privacy.
-              </div>
-            </div>
-
-            <div>
-              <div className="text-sm opacity-80 mb-2">Or use a magic link</div>
-              {sent ? (
-                <div className="rounded-[10px] p-3 text-sm"
-                     style={{ background:'rgba(106,247,209,.12)', border:'1px solid rgba(106,247,209,.28)', color:'#cbfff1' }}>
-                  Check your email for a sign-in link. You can close this window.
-                </div>
-              ) : (
-                <form onSubmit={sendMagicLink} className="grid gap-3">
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e)=>setEmail(e.target.value)}
-                    placeholder="you@company.com"
-                    required
-                    className="h-11 px-3 rounded-[10px] bg-transparent outline-none"
-                    style={{ border:'1px solid rgba(255,255,255,.14)', color:'#e6f1ef' }}
-                  />
-                  <button
-                    disabled={busy || !email.trim()}
-                    className="h-11 rounded-[10px] font-semibold"
-                    style={{ background: ACCENT, color:'#0b0c10', opacity: busy || !email.trim() ? .7 : 1 }}
-                  >
-                    {mode === 'signin' ? 'Send sign-in link' : 'Create account'}
-                  </button>
-                </form>
-              )}
-
-              <div className="mt-3 text-xs opacity-80">
-                {mode === 'signin' ? (
-                  <>New here? <button onClick={()=>setMode('signup')} className="underline">Create an account</button></>
-                ) : (
-                  <>Already have an account? <button onClick={()=>setMode('signin')} className="underline">Sign in</button></>
-                )}
-              </div>
-            </div>
+          <div className="card" style={{ padding:18 }}>
+            <div className="muted" style={{ fontSize:12, marginBottom:6 }}>Sample flow</div>
+            <img alt="" src="https://dummyimage.com/680x420/0f1214/59d9b3.png&text=Flow+Builder" style={{ width:'100%', borderRadius:10, border:'1px solid var(--border)' }}/>
           </div>
         </div>
-      </div>
+      </section>
+
+      {/* FAQ */}
+      <section id="faq" className="section">
+        <div className="container">
+          <h2 style={{ fontSize:32, fontWeight:800, marginBottom:8 }}>FAQ</h2>
+          <div className="grid-2" style={{ gridTemplateColumns:'repeat(2,1fr)' as any }}>
+            {[
+              ['Is there a free trial?', 'Yes. Start on the Starter plan with a 3-week free trial.'],
+              ['Can I use Google to sign in?', 'Yes, one click with Google or use a code sent to your email.'],
+              ['Can it call my APIs?', 'Yep. Use webhooks or connect common tools.'],
+              ['Is my data safe?', 'Sessions are secured with Supabase Auth and stored in your region.'],
+            ].map(([q, a], i)=>(
+              <div key={i} className="card" style={{ padding:18 }}>
+                <div style={{ fontWeight:700, marginBottom:6 }}>{q}</div>
+                <div className="muted">{a}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Footer */}
+      <footer style={{ borderTop:'1px solid var(--border)' }}>
+        <div className="container" style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'20px 0' }}>
+          <div className="muted">© {new Date().getFullYear()} Reduc.ai</div>
+          <div className="muted" style={{ display:'flex', gap:14 }}>
+            <a href="/privacy">Privacy</a>
+            <a href="/terms">Terms</a>
+          </div>
+        </div>
+      </footer>
+
+      {/* Auth Modal */}
+      <SignInModal open={modalOpen} onClose={()=>setModalOpen(false)} />
     </>
   );
 }
