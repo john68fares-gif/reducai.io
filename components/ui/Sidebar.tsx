@@ -8,19 +8,21 @@ import {
   Home, Hammer, Mic, Rocket,
   Phone, Key, HelpCircle,
   ChevronLeft, ChevronRight,
-  User as UserIcon, Bot,
-  Users             // ← NEW: icon for Subaccounts
+  User as UserIcon, Bot
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase-client';
 
+/** Layout widths */
 const W_EXPANDED = 260;
 const W_COLLAPSED = 68;
 const LS_COLLAPSED = 'ui:sidebarCollapsed';
 
-// brand
-const BRAND = '#10b981';
-const BRAND_DEEP = '#12a989';
-const BRAND_WEAK = 'rgba(0,255,194,.10)';
+/** Brand (match overlay tiles from AssistantRail) */
+const CTA        = '#59d9b3';
+const GREEN_LINE = 'rgba(89,217,179,.20)';
+const PANEL_DARK = 'rgba(12,17,20,1)'; // subtle plate base
+const TEXT_COL   = 'var(--sidebar-text)';
+const MUTED_COL  = 'var(--sidebar-muted)';
 
 function getDisplayName(name?: string | null, email?: string | null) {
   if (name && name.trim()) return name.trim();
@@ -37,20 +39,42 @@ type NavItem = {
   id: string;
 };
 
+/** NOTE: Subaccounts removed per your request */
 const NAV: NavItem[] = [
-  { id: 'create', href: '/builder',      label: 'Create',       sub: 'Design your agent',     icon: <Home />,   group: 'workspace' },
-  { id: 'tuning', href: '/improve',      label: 'Tuning',       sub: 'Integrate & optimize',  icon: <Hammer />, group: 'workspace' },
-  { id: 'voice',  href: '/voice-agent',  label: 'Voice Studio', sub: 'Calls & persona',       icon: <Mic />,    group: 'workspace' },
+  { id: 'create',  href: '/builder',      label: 'Create',       sub: 'Design your agent',     icon: <Home />,   group: 'workspace' },
+  { id: 'tuning',  href: '/improve',      label: 'Tuning',       sub: 'Integrate & optimize',  icon: <Hammer />, group: 'workspace' },
+  { id: 'voice',   href: '/voice-agent',  label: 'Voice Studio', sub: 'Calls & persona',       icon: <Mic />,    group: 'workspace' },
+  { id: 'launch',  href: '/launch',       label: 'Launchpad',    sub: 'Go live',               icon: <Rocket />, group: 'workspace' },
 
-  // ← NEW: Subaccounts (only addition you asked for)
-  { id: 'subaccounts', href: '/subaccounts', label: 'Subaccounts', sub: 'Transcripts', icon: <Users />, group: 'workspace' },
-
-  { id: 'launch', href: '/launch',       label: 'Launchpad',    sub: 'Go live',               icon: <Rocket />, group: 'workspace' },
-
-  { id: 'numbers', href: '/phone-numbers', label: 'Numbers',    sub: 'Twilio & BYO',          icon: <Phone />,  group: 'resources' },
-  { id: 'keys',    href: '/apikeys',       label: 'API Keys',    sub: 'Models & access',       icon: <Key />,    group: 'resources' },
-  { id: 'help',    href: '/support',       label: 'Help',        sub: 'Guides & FAQ',          icon: <HelpCircle />, group: 'resources' },
+  { id: 'numbers', href: '/phone-numbers', label: 'Numbers',     sub: 'Twilio & BYO',          icon: <Phone />,  group: 'resources' },
+  { id: 'keys',    href: '/apikeys',       label: 'API Keys',     sub: 'Models & access',       icon: <Key />,    group: 'resources' },
+  { id: 'help',    href: '/support',       label: 'Help',         sub: 'Guides & FAQ',          icon: <HelpCircle />, group: 'resources' },
 ];
+
+/** Icon plate that matches overlay tiles */
+function IconPlate({ children, active, title }: { children: JSX.Element; active?: boolean; title?: string }) {
+  return (
+    <div
+      title={title}
+      className="grid place-items-center rounded-[12px]"
+      style={{
+        width: 40,
+        height: 40,
+        /** subtle green-tinted plate, same vibe as overlays */
+        background: `linear-gradient(180deg, rgba(89,217,179,.08), rgba(89,217,179,.02)),
+                     color-mix(in oklab, ${PANEL_DARK} 90%, ${CTA} 10%)`,
+        border: `1px solid ${GREEN_LINE}`,
+        /** quiet until active/hover */
+        boxShadow: active
+          ? `0 0 0 1px rgba(89,217,179,.18), 0 10px 26px rgba(89,217,179,.12)`
+          : 'inset 0 0 0 1px rgba(255,255,255,.03)',
+        color: CTA
+      }}
+    >
+      {children}
+    </div>
+  );
+}
 
 export default function Sidebar() {
   const pathname = usePathname();
@@ -61,6 +85,7 @@ export default function Sidebar() {
       return raw ? JSON.parse(raw) : false;
     } catch { return false; }
   });
+
   useEffect(() => {
     try { localStorage.setItem(LS_COLLAPSED, JSON.stringify(collapsed)); } catch {}
     document.documentElement.style.setProperty('--sidebar-w', `${collapsed ? W_COLLAPSED : W_EXPANDED}px`);
@@ -94,21 +119,10 @@ export default function Sidebar() {
     return p.startsWith(item.href);
   };
 
-  const isWorkspace = (id: string) => NAV.find(n => n.id === id)?.group === 'workspace';
-
-  // center/size lucide icons
   const renderIcon = (node: JSX.Element) =>
     cloneElement(node, { className: 'w-[18px] h-[18px] shrink-0', strokeWidth: 2 });
 
   const Item = ({ item, active }: { item: NavItem; active: boolean }) => {
-    const green = isWorkspace(item.id);
-
-    const bg = collapsed && active ? 'rgba(16,185,129,.14)' : 'var(--sb-icon-bg)';
-    const border = collapsed && active ? 'rgba(16,185,129,.45)' : 'var(--sb-icon-border)';
-    const halo = active
-      ? `0 0 0 1px ${BRAND_WEAK}, 0 8px 18px rgba(0,0,0,.22), 0 0 18px rgba(16,185,129,.25)`
-      : 'inset 0 0 10px rgba(0,0,0,.16)';
-
     return (
       <Link href={item.href} className="block group">
         <div
@@ -119,19 +133,11 @@ export default function Sidebar() {
             gap: collapsed ? 0 : 10,
           }}
         >
-          <div
-            className="w-10 h-10 rounded-[12px] grid place-items-center"
-            style={{
-              background: bg,
-              border: `1px solid ${border}`,
-              boxShadow: halo,
-              color: green ? BRAND_DEEP : 'var(--sidebar-text)',
-            }}
-            title={collapsed ? item.label : undefined}
-          >
+          <IconPlate active={active} title={collapsed ? item.label : undefined}>
             {renderIcon(item.icon)}
-          </div>
+          </IconPlate>
 
+          {/* labels */}
           <div
             className="overflow-hidden"
             style={{
@@ -142,26 +148,27 @@ export default function Sidebar() {
               lineHeight: 1.1,
             }}
           >
-            <div className="text-[13px] font-semibold" style={{ color: 'var(--sidebar-text)' }}>
+            <div className="text-[13px] font-semibold" style={{ color: TEXT_COL }}>
               {item.label}
             </div>
             {item.sub && (
-              <div className="text-[11px]" style={{ color: 'var(--sidebar-muted)', marginTop: 3 }}>
+              <div className="text-[11px]" style={{ color: MUTED_COL, marginTop: 3 }}>
                 {item.sub}
               </div>
             )}
           </div>
 
-          {/* NEW: tiny green dot on the far right when active & expanded */}
+          {/* tiny green dot when active & expanded */}
           {!collapsed && active && (
             <span
               aria-hidden
               className="ml-auto rounded-full"
-              style={{ width: 8, height: 8, background: BRAND }}
+              style={{ width: 8, height: 8, background: CTA }}
             />
           )}
         </div>
 
+        {/* soft divider line under each item (faint green pulse when active) */}
         <div
           className="h-[2px] rounded-full"
           style={{
@@ -169,8 +176,8 @@ export default function Sidebar() {
             marginLeft: collapsed ? 16 : 12,
             marginRight: 12,
             background: active
-              ? 'linear-gradient(90deg, transparent, rgba(16,185,129,.35), transparent)'
-              : 'linear-gradient(90deg, transparent, rgba(16,185,129,.0), transparent)',
+              ? 'linear-gradient(90deg, transparent, rgba(89,217,179,.35), transparent)'
+              : 'linear-gradient(90deg, transparent, rgba(89,217,179,.00), transparent)',
           }}
         />
       </Link>
@@ -185,19 +192,22 @@ export default function Sidebar() {
         transition: 'width 420ms cubic-bezier(0.16, 1, 0.3, 1)',
         willChange: 'width',
         background: 'var(--sidebar-bg)',
-        color: 'var(--sidebar-text)',
+        color: TEXT_COL,
         borderRight: '1px solid var(--sidebar-border)',
         boxShadow: 'var(--sb-shell-shadow, inset 0 0 18px rgba(0,0,0,0.28))',
       }}
       aria-label="Primary"
     >
       <div className="relative h-full flex flex-col">
-        {/* Header — ONLY logo + name (subtitle removed) */}
+        {/* Header: logo + name */}
         <div className="px-4 pt-5 pb-4">
           <div className="flex items-center gap-3">
             <div
               className="w-9 h-9 rounded-xl grid place-items-center shrink-0"
-              style={{ background: BRAND, boxShadow: '0 0 10px rgba(0,255,194,0.35)' }}
+              style={{
+                background: CTA,
+                boxShadow: '0 0 10px rgba(89,217,179,0.35)'
+              }}
             >
               <Bot className="w-5 h-5 text-black" />
             </div>
@@ -210,14 +220,14 @@ export default function Sidebar() {
                 transform: collapsed ? 'translateX(-6px)' : 'translateX(0)',
               }}
             >
-              <div className="text-[17px] font-semibold tracking-wide" style={{ color: 'var(--sidebar-text)' }}>
-                reduc<span style={{ color: BRAND }}>ai.io</span>
+              <div className="text-[17px] font-semibold tracking-wide" style={{ color: TEXT_COL }}>
+                reduc<span style={{ color: CTA }}>ai.io</span>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Rail-aligned divider under the header */}
+        {/* Rail-aligned divider */}
         <div
           aria-hidden
           className="pointer-events-none absolute left-0 right-0"
@@ -231,8 +241,10 @@ export default function Sidebar() {
         {/* Groups */}
         <div className="flex-1 min-h-0 overflow-y-auto px-3 pb-6">
           {!collapsed && (
-            <div className="inline-flex items-center h-6 px-2 rounded-full border text-[10px] font-semibold tracking-[.14em] mb-2"
-                 style={{ color: 'var(--sidebar-muted)', borderColor: 'var(--sidebar-border)', background: 'var(--sb-tag-bg)' }}>
+            <div
+              className="inline-flex items-center h-6 px-2 rounded-full border text-[10px] font-semibold tracking-[.14em] mb-2"
+              style={{ color: MUTED_COL, borderColor: 'var(--sidebar-border)', background: 'var(--sb-tag-bg)' }}
+            >
               WORKSPACE
             </div>
           )}
@@ -245,8 +257,10 @@ export default function Sidebar() {
           <div style={{ height: 14 }} />
 
           {!collapsed && (
-            <div className="inline-flex items-center h-6 px-2 rounded-full border text-[10px] font-semibold tracking-[.14em] mb-2"
-                 style={{ color: 'var(--sidebar-muted)', borderColor: 'var(--sidebar-border)', background: 'var(--sb-tag-bg)' }}>
+            <div
+              className="inline-flex items-center h-6 px-2 rounded-full border text-[10px] font-semibold tracking-[.14em] mb-2"
+              style={{ color: MUTED_COL, borderColor: 'var(--sidebar-border)', background: 'var(--sb-tag-bg)' }}
+            >
               RESOURCES
             </div>
           )}
@@ -263,20 +277,21 @@ export default function Sidebar() {
             <Link
               href="/account"
               className="w-full rounded-2xl px-3 py-3 flex items-center gap-3 text-left transition-colors duration-300"
-              style={{ background: 'var(--acct-bg)', border: '1px solid var(--acct-border)', boxShadow: 'inset 0 0 10px rgba(0,0,0,.18)', color: 'var(--sidebar-text)' }}
+              style={{ background: 'var(--acct-bg)', border: '1px solid var(--acct-border)', boxShadow: 'inset 0 0 10px rgba(0,0,0,.18)', color: TEXT_COL }}
             >
-              <div className="w-8 h-8 rounded-full grid place-items-center" style={{ background: BRAND, boxShadow: '0 0 8px rgba(0,0,0,.25)' }}>
+              <div className="w-8 h-8 rounded-full grid place-items-center"
+                   style={{ background: CTA, boxShadow: '0 0 8px rgba(0,0,0,.25)' }}>
                 <UserIcon className="w-4 h-4 text-black/80" />
               </div>
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-semibold truncate">
                   {userLoading ? 'Loading…' : getDisplayName(userName, userEmail)}
                 </div>
-                <div className="text-[11px] truncate" style={{ color: 'var(--sidebar-muted)' }}>
+                <div className="text-[11px] truncate" style={{ color: MUTED_COL }}>
                   {userEmail || ''}
                 </div>
               </div>
-              <span className="text-xs" style={{ color: 'var(--sidebar-muted)' }}>Account</span>
+              <span className="text-xs" style={{ color: MUTED_COL }}>Account</span>
             </Link>
           ) : (
             <Link
@@ -291,7 +306,7 @@ export default function Sidebar() {
               }}
             >
               <div className="w-full h-full grid place-items-center">
-                <UserIcon className="w-5 h-5" style={{ color: 'var(--sidebar-text)' }} />
+                <UserIcon className="w-5 h-5" style={{ color: TEXT_COL }} />
               </div>
             </Link>
           )}
@@ -304,12 +319,12 @@ export default function Sidebar() {
           style={{
             border: '1px solid var(--sidebar-border)',
             background: 'var(--acct-bg)',
-            boxShadow: '0 2px 12px rgba(0,0,0,0.18), 0 0 10px rgba(0,255,194,0.06)',
+            boxShadow: '0 2px 12px rgba(0,0,0,0.18), 0 0 10px rgba(89,217,179,0.10)',
           }}
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
-          {collapsed ? <ChevronRight className="w-4 h-4" style={{ color: 'var(--sidebar-text)' }} />
-                     : <ChevronLeft className="w-4 h-4"  style={{ color: 'var(--sidebar-text)' }} />}
+          {collapsed ? <ChevronRight className="w-4 h-4" style={{ color: TEXT_COL }} />
+                     : <ChevronLeft  className="w-4 h-4" style={{ color: TEXT_COL }} />}
         </button>
       </div>
 
