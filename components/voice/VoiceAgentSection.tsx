@@ -1,4 +1,3 @@
-// FILE: components/voice/VoiceAgentSection.tsx
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
@@ -20,7 +19,7 @@ import { shapePromptForScheduling } from '@/components/voice/utils/prompt';
 
 /* ───────── constants ───────── */
 const EPHEMERAL_TOKEN_ENDPOINT = '/api/voice/ephemeral';
-const PREVIEW_TTS_ENDPOINT     = '/api/voice/tts/preview'; // <- returns audio blob
+const PREVIEW_TTS_ENDPOINT     = '/api/voice/tts/preview';
 const CTA = '#59d9b3';
 const CTA_HOVER = '#54cfa9';
 const GREEN_LINE = 'rgba(89,217,179,.20)';
@@ -61,18 +60,19 @@ const sleep = (ms:number) => new Promise(r=>setTimeout(r,ms));
 const STRIP_META_RE = /^(SYSTEM_SPEC|IDENTITY|STYLE|GUIDELINES|GOALS|FALLBACK|BUSINESS_FACTS|POLICY)::.*$/gmi;
 const sanitizePrompt = (s: string) => (s || '').replace(STRIP_META_RE, '').trim();
 
-/* typing effect for prompt box */
+/* ───────── typing effect helper ───────── */
 async function typeIntoPrompt(
-  fullText: string,
-  onChunk: (s: string) => void,
-  step = 3,
-  delayMs = 8
+  full: string,
+  onTick: (current: string) => void,
+  opts: { cps?: number } = {}
 ) {
-  onChunk('');
-  for (let i = 0; i < fullText.length; i += step) {
-    onChunk(fullText.slice(0, i + step));
-    // eslint-disable-next-line no-await-in-loop
-    await new Promise(r => setTimeout(r, delayMs));
+  const cps = opts.cps ?? 90; // chars/sec
+  const delay = Math.max(6, Math.round(1000 / cps));
+  let out = '';
+  for (let i = 0; i < full.length; i++) {
+    out += full[i];
+    onTick(out);
+    await new Promise(r => setTimeout(r, full[i] === '\n' ? delay * 2 : delay));
   }
 }
 
@@ -178,7 +178,7 @@ type AgentData = {
   contextText?: string;
   ctxFiles?: { name:string; text:string }[];
   ttsProvider: 'openai' | 'elevenlabs' | 'google-tts';
-  voiceName: string;                 // friendly name (e.g., Alloy (American))
+  voiceName: string;
   apiKeyId?: string;
   phoneId?: string;
   asrProvider: 'deepgram' | 'whisper' | 'assemblyai';
@@ -343,13 +343,11 @@ async function readFileAsText(f: File): Promise<string> {
   });
 }
 
-/* ───────── Helper: make a clean front-end prompt from a description ───────── */
+/* ───────── Helper: front-end prompt from description ───────── */
 function makeFrontendPromptFromDescription(desc: string, baseName: string) {
-  // Use your existing smart scheduler shaper, then ensure all sections are present and human-friendly
   const raw = shapePromptForScheduling(desc, { name: baseName, personaName: baseName, org: 'Your Business' }) || '';
   const s = sanitizePrompt(raw);
 
-  // Ensure all sections exist; add headings if missing
   const sections: Record<string, string> = {
     'Identity': '',
     'Style': '',
@@ -358,7 +356,6 @@ function makeFrontendPromptFromDescription(desc: string, baseName: string) {
     'Error Handling / Fallback': '',
   };
 
-  // Split by bracketed headings
   const lines = s.split('\n');
   let current = '';
   let buf: string[] = [];
@@ -371,17 +368,12 @@ function makeFrontendPromptFromDescription(desc: string, baseName: string) {
 
   for (const line of lines) {
     const m = line.match(/^\[(.+?)\]\s*$/);
-    if (m) {
-      commit();
-      current = m[1];
-    } else {
-      buf.push(line);
-    }
+    if (m) { commit(); current = m[1]; }
+    else { buf.push(line); }
   }
   commit();
 
-  // Build final prompt in a consistent pretty format
-  const final = [
+  return [
     '[Identity]',
     sections['Identity'] || `- You are ${baseName}, a helpful AI assistant for this business.`,
     '',
@@ -397,8 +389,6 @@ function makeFrontendPromptFromDescription(desc: string, baseName: string) {
     '[Error Handling / Fallback]',
     sections['Error Handling / Fallback'] || '- If unsure, ask a specific clarifying question before proceeding.',
   ].join('\n').trim();
-
-  return final;
 }
 
 /* ───────── Page ───────── */
@@ -413,7 +403,7 @@ export default function VoiceAgentSection() {
         if (v === 'light' || v === 'dark') return v;
       }
       const ds = document.documentElement.dataset.theme;
-      if (ds === 'light' || 'dark') return (ds as 'light'|'dark');
+      if (ds === 'light' || ds === 'dark') return ds;
     } catch {}
     return 'dark';
   });
@@ -457,7 +447,7 @@ export default function VoiceAgentSection() {
   // Generate modal
   const [showGenerate, setShowGenerate] = useState(false);
 
-  // Diff/Generate flow (kept for website import compare view)
+  // Diff state
   const [diffMode, setDiffMode] = useState(false);
   const [basePrompt, setBasePrompt] = useState('');
   const [candidatePrompt, setCandidatePrompt] = useState('');
@@ -468,7 +458,7 @@ export default function VoiceAgentSection() {
   // models list
   const { opts: openaiModels, loading: loadingModels } = useOpenAIModels();
 
-  // Voice preview state
+  // ===== Voice preview state =====
   const audioRef = useRef<HTMLAudioElement|null>(null);
   const [audioURL, setAudioURL] = useState<string>('');
   const [audioLoading, setAudioLoading] = useState<boolean>(false);
@@ -494,7 +484,6 @@ export default function VoiceAgentSection() {
   async function fetchVoicePreview(text: string) {
     const item = OPENAI_VOICES.find(v => v.value === data.voiceName);
     const providerVoiceId = item?.id || 'alloy';
-
     try {
       setAudioLoading(true);
       previewAbortRef.current?.abort();
@@ -517,7 +506,6 @@ export default function VoiceAgentSection() {
       const url = URL.createObjectURL(blob);
       setAudioURL(prev => { if (prev) URL.revokeObjectURL(prev); return url; });
     } catch {
-      // Fallback to speechSynthesis
       if ('speechSynthesis' in window) {
         const u = new SpeechSynthesisUtterance(text || `This is ${data.voiceName || 'the selected'} voice preview.`);
         const voices = window.speechSynthesis.getVoices();
@@ -547,7 +535,7 @@ export default function VoiceAgentSection() {
     });
   }
   function stopPreview() {
-    try { audioRef.current?.pause(); audioRef.current && (audioRef.current.currentTime = 0); setAudioPlaying(false); setAudioProgress(0); } catch {}
+    try { audioRef.current?.pause(); if (audioRef.current) audioRef.current.currentTime = 0; setAudioPlaying(false); setAudioProgress(0); } catch {}
     if ('speechSynthesis' in window) window.speechSynthesis.cancel();
   }
 
@@ -649,7 +637,7 @@ export default function VoiceAgentSection() {
     return (v: AgentData[K]) => setData(prev => ({ ...prev, [k]: v }));
   }
 
-  // Keep backend prompt mirrored (no external compiler)
+  // Keep backend prompt mirrored
   useEffect(() => {
     if (!data.systemPrompt) return;
     const s = sanitizePrompt(data.systemPrompt);
@@ -709,12 +697,14 @@ export default function VoiceAgentSection() {
     setCandidatePrompt(next);
     setDiffMode(true);
   };
-  const acceptDiff = () => {
+  const acceptDiff = async () => {
     const chosen = candidatePrompt;
-    setData(prev => ({ ...prev, systemPrompt: chosen, systemPromptBackend: chosen }));
     setDiffMode(false);
     setBasePrompt('');
     setCandidatePrompt('');
+    await typeIntoPrompt(chosen, (chunk) => {
+      setData(prev => ({ ...prev, systemPrompt: chunk, systemPromptBackend: chunk }));
+    });
   };
   const declineDiff = () => {
     setDiffMode(false);
@@ -730,12 +720,10 @@ export default function VoiceAgentSection() {
     startDiff(next);
   };
 
-  /* Generate → translate into structured front-end prompt, then type it in */
-  const onGenerateToPrompt = async (userDesc:string) => {
+  /* Generate → translate into structured front-end prompt, then diff */
+  const onGenerateToDiff = async (userDesc:string) => {
     const next = makeFrontendPromptFromDescription(userDesc, data.name || 'Assistant');
-    await typeIntoPrompt(next, (chunk) => {
-      setData(prev => ({ ...prev, systemPrompt: chunk, systemPromptBackend: chunk }));
-    });
+    startDiff(next);
   };
 
   /* call model */
@@ -764,7 +752,7 @@ export default function VoiceAgentSection() {
     switch (lang) { case 'Dutch': return 'nl'; case 'German': return 'de'; case 'Spanish': return 'es'; case 'Arabic': return 'ar'; default: return 'en'; }
   };
 
-  // Greeting logic (STRICT)
+  // Greeting logic
   const greetingJoined = useMemo(() => {
     if (data.firstMode !== 'Assistant speaks first') return '';
     const list = (data.greetPick==='random'
@@ -977,7 +965,7 @@ export default function VoiceAgentSection() {
                 </div>
               </div>
 
-              {/* Accept/Decline above the prompt when diffing (for website import) */}
+              {/* Accept/Decline above the prompt when diffing */}
               {diffMode && (
                 <div className="mb-2 flex items-center gap-2">
                   <button
@@ -1225,7 +1213,7 @@ export default function VoiceAgentSection() {
         </div>
       </div>
 
-      {/* Generate Prompt → translate, then type in */}
+      {/* Generate Prompt → translate, then diff */}
       <GeneratePromptModal
         open={showGenerate}
         onClose={() => setShowGenerate(false)}
@@ -1234,7 +1222,7 @@ export default function VoiceAgentSection() {
           if (!desc) return;
           setShowGenerate(false);
           await sleep(10);
-          await onGenerateToPrompt(desc);
+          onGenerateToDiff(desc);
         }}
       />
 
