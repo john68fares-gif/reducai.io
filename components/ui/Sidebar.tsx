@@ -1,117 +1,101 @@
 // components/ui/Sidebar.tsx
 'use client';
 
-import { useEffect, useState, cloneElement } from 'react';
+import { useEffect, useMemo, useState, cloneElement } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import {
-  Cpu, Wrench, Presentation, Rocket,
-  Store, Brain, Key, Grid2x2, PlayCircle, LifeBuoy, Users,
-  ChevronLeft, ChevronRight, Bot as BotIcon, User as UserIcon
+  Home, Hammer, Mic, Rocket,
+  Phone, Key, HelpCircle,
+  ChevronLeft, ChevronRight,
+  Bot, User as UserIcon,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase-client';
 
-/* =======================
-   Brand & Theme Tokens
-   ======================= */
-const BRAND        = '#59d9b3';                       // CTA green
-const BRAND_DEEP   = '#3cc2a0';
-const PANEL_DARK   = '#0b0f11';                       // rail base (dark)
-const PANEL_LIGHT  = '#ffffff';                       // rail base (light)
-const TXT_LIGHT    = 'rgba(236,242,247,.92)';
-const TXT_DARK     = '#0f172a';
-const SEP_GREEN    = 'rgba(89,217,179,.12)';          // faint separators
-const ICON_WHITE   = 'rgba(255,255,255,.92)';
-const ICON_WEAK    = 'rgba(255,255,255,.72)';
-
-const W_EXPANDED   = 228;                             // narrower
+/* ───────────────────────────────── TOKENS ───────────────────────────────── */
+const W_EXPANDED   = 228;     // slim but readable (fits best-practice banding)
 const W_COLLAPSED  = 58;
 const LS_COLLAPSED = 'ui:sidebarCollapsed';
-const LS_THEME     = 'theme';                         // 'dark' | 'light'
 
-/* ultra-subtle banding for the rail (not used on brand/account rows) */
-function railBands(isDark: boolean) {
-  const base = isDark ? PANEL_DARK : PANEL_LIGHT;
-  const steps = 13, bw = 100 / steps, center = Math.floor(steps / 2);
+const CTA     = '#59d9b3';                                        // brand green
+const TXT_DARK= '#0f172a';
+const TXT     = 'rgba(236,242,247,.92)';                          // light text
+const MUTED   = 'rgba(176,196,210,.62)';                          // secondary
+const BORDER  = 'rgba(89,217,179,.10)';                           // greeny sep
+const BASE_DK = '#0b0f11';                                        // deep blue-teal
+const BASE_LT = '#ffffff';
+
+const SHOW_GROUP_TAGS = false; // flip to true if you want WORKSPACE/RESOURCES labels
+
+/* ultra-subtle side bands (center darker, sides +≤0.8%) */
+function railBands(isDark: boolean, steps = 13, cap = 0.008) {
+  const base = isDark ? BASE_DK : BASE_LT;
+  const bw = 100 / steps;
+  const mid = Math.floor(steps / 2);
   const parts: string[] = [];
   for (let i = 0; i < steps; i++) {
-    const dist = Math.abs(i - center);
-    const lift = Math.min(dist * 0.004, 0.008); // ≤ 0.8% at far edges
-    const col = `color-mix(in oklab, ${base} ${100 - lift * 100}%, ${BRAND} ${lift * 100}%)`;
+    const lift = Math.min(Math.abs(i - mid) * 0.004, cap); // 0.4% per step, max 0.8%
+    const col = `color-mix(in oklab, ${base} ${100 - lift * 100}%, ${CTA} ${lift * 100}%)`;
     parts.push(`${col} ${i * bw}%, ${col} ${(i + 1) * bw}%`);
   }
   return `linear-gradient(90deg, ${parts.join(',')})`;
 }
 
-/* =======================
-   Nav Items
-   ======================= */
+/* ─────────────────────────────── NAV (exact names) ─────────────────────────────── */
 type NavItem = {
-  id: string;
-  href: string;
-  label: string;
-  sub?: string;
-  icon: JSX.Element;
-  group: 'workspace' | 'resources';
+  id: 'build'|'improve'|'demo'|'launch'|'market'|'mentor'|'keys';
+  href: string; label: string; sub?: string; icon: JSX.Element;
+  group: 'workspace'|'resources';
 };
-
-// ✱ Names = exactly as you wanted (no renames), no Subaccounts
 const NAV: NavItem[] = [
-  { id: 'build',   href: '/builder',     label: 'Build',   sub: 'Create AI agent',         icon: <Cpu />,          group: 'workspace' },
-  { id: 'improve', href: '/improve',     label: 'Improve', sub: 'Integrate and Improve',   icon: <Wrench />,       group: 'workspace' },
-  { id: 'demo',    href: '/demo',        label: 'Demo',    sub: 'Showcase to clients',     icon: <Presentation />, group: 'workspace' },
-  { id: 'launch',  href: '/launch',      label: 'Launch',  sub: 'Deploy to production',    icon: <Rocket />,       group: 'workspace' },
+  { id:'build',   href:'/builder',     label:'Build',   sub:'Create AI agent',        icon:<Home/>,   group:'workspace' },
+  { id:'improve', href:'/improve',     label:'Improve', sub:'Integrate and Improve',  icon:<Hammer/>, group:'workspace' },
+  { id:'demo',    href:'/voice-agent', label:'Demo',    sub:'Showcase to clients',    icon:<Mic/>,    group:'workspace' },
+  { id:'launch',  href:'/launch',      label:'Launch',  sub:'Deploy to production',   icon:<Rocket/>, group:'workspace' },
 
-  { id: 'market',  href: '/marketplace', label: 'Marketplace',        icon: <Store />,      group: 'resources' },
-  { id: 'mentor',  href: '/mentor',      label: 'AI Mentor',          icon: <Brain />,      group: 'resources' },
-  { id: 'keys',    href: '/apikeys',     label: 'API Key',            icon: <Key />,        group: 'resources' },
-  { id: 'bulk',    href: '/bulk',        label: 'Bulk Tester',        icon: <Grid2x2 />,    group: 'resources' },
-  { id: 'videos',  href: '/videos',      label: 'Video Guides',       icon: <PlayCircle />, group: 'resources' },
-  { id: 'support', href: '/support',     label: 'Support',            icon: <LifeBuoy />,   group: 'resources' },
-  { id: 'aff',     href: '/affiliates',  label: 'Affiliate Program',  icon: <Users />,      group: 'resources' },
+  { id:'market',  href:'/marketplace', label:'Marketplace',                           icon:<Phone/>,       group:'resources' },
+  { id:'mentor',  href:'/ai-mentor',   label:'AI Mentor',                             icon:<Key/>,         group:'resources' },
+  { id:'keys',    href:'/apikeys',     label:'API Key',                               icon:<HelpCircle/>,  group:'resources' },
 ];
 
-/* lucide helper: center + consistent size */
-const iconize = (node: JSX.Element, size = 15) =>
-  cloneElement(node, { className: `w-[${size}px] h-[${size}px] shrink-0`, strokeWidth: 2 });
+/* ─────────────────────────── helpers ─────────────────────────── */
+function getDisplayName(name?:string|null, email?:string|null){
+  if (name && name.trim()) return name.trim();
+  if (email && email.includes('@')) return email.split('@')[0];
+  return 'Account';
+}
+const isDarkMode = () =>
+  (typeof window !== 'undefined' && (localStorage.getItem('theme') || 'dark')) === 'dark';
 
-/* =======================
-   Sidebar
-   ======================= */
+/* ─────────────────────────── COMPONENT ─────────────────────────── */
 export default function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
 
-  /* collapsed state */
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     try { return JSON.parse(localStorage.getItem(LS_COLLAPSED) || 'false'); } catch { return false; }
   });
-
-  /* theme (syncs with localStorage and an optional window event) */
-  const [theme, setTheme] = useState<'dark'|'light'>(() => {
-    try { return (localStorage.getItem(LS_THEME) as 'dark'|'light') || 'dark'; } catch { return 'dark'; }
-  });
-  const isDark = theme === 'dark';
+  const [dark, setDark] = useState<boolean>(() => isDarkMode());
 
   useEffect(() => {
     try { localStorage.setItem(LS_COLLAPSED, JSON.stringify(collapsed)); } catch {}
     document.documentElement.style.setProperty('--sidebar-w', `${collapsed ? W_COLLAPSED : W_EXPANDED}px`);
   }, [collapsed]);
 
+  /* listen for theme changes from your account settings page */
   useEffect(() => {
-    const onTheme = () => {
-      try { setTheme((localStorage.getItem(LS_THEME) as any) || 'dark'); } catch {}
-    };
+    const onTheme = () => setDark(isDarkMode());
     window.addEventListener('theme:change', onTheme);
     return () => window.removeEventListener('theme:change', onTheme);
   }, []);
 
-  /* user (no “loading” text) */
-  const [userEmail, setUserEmail] = useState<string | null>(null);
-  const [userName,  setUserName]  = useState<string | null>(null);
+  // auth (no spinner UI here; we keep the row clean)
+  const [userEmail, setUserEmail] = useState<string|null>(null);
+  const [userName, setUserName] = useState<string|null>(null);
   useEffect(() => {
-    let unsub: any;
+    let unsub:any;
     (async () => {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data:{ user } } = await supabase.auth.getUser();
       setUserEmail(user?.email ?? null);
       setUserName((user?.user_metadata as any)?.full_name ?? user?.user_metadata?.name ?? null);
       unsub = supabase.auth.onAuthStateChange((_e, s) => {
@@ -123,219 +107,231 @@ export default function Sidebar() {
     return () => unsub?.data?.subscription?.unsubscribe?.();
   }, []);
 
-  const active = (n: NavItem) => (pathname || '').startsWith(n.href);
+  const isActive = (item: NavItem) => {
+    const p = pathname || '';
+    if (item.href === '/launch') return p === '/launch';
+    return p.startsWith(item.href);
+  };
 
-  /* Single nav row chip. Top 4 = “overlay” style, resources = darker & white icons */
-  function Item({ item }: { item: NavItem }) {
-    const a = active(item);
-    const isWorkspace = item.group === 'workspace';
+  /* visual sizes — smaller icons, squarer plates */
+  const plateSize  = 36;  // was 34; still compact
+  const plateRad   = 10;
+  const iconPx     = 15;
 
-    // Plate look
-    const plateRadius = 10;                       // less rounded
-    const plateSize   = 38;                       // compact
-    const plateBg     = isWorkspace
-      ? `color-mix(in oklab, ${PANEL_DARK} ${isDark ? 86 : 94}%, ${BRAND} ${isDark ? 14 : 6}%)`
-      : (isDark ? 'rgba(255,255,255,.06)' : 'rgba(15,23,42,.06)');
-    const plateBorder = isWorkspace ? 'rgba(89,217,179,.20)'
-      : (isDark ? 'rgba(255,255,255,.10)' : 'rgba(15,23,42,.12)');
-    const iconColor   = isWorkspace ? BRAND_DEEP : (isDark ? ICON_WHITE : TXT_DARK);
+  const iconize = (n: JSX.Element) =>
+    cloneElement(n, { className: `w-[${iconPx}px] h-[${iconPx}px] shrink-0`, strokeWidth: 2 });
 
-    // Hover glow (workspace only)
-    const hoverShadow = isWorkspace
-      ? '0 16px 26px rgba(0,0,0,.22), 0 0 18px rgba(89,217,179,.18)'
-      : 'inset 0 0 10px rgba(0,0,0,.12)';
+  /* plate variants */
+  const Plate = ({ children, tone }:{
+    children: React.ReactNode; tone: 'workspace'|'resources';
+  }) => {
+    const isWorkspace = tone === 'workspace';
+    const bg = isWorkspace
+      ? `color-mix(in oklab, ${dark ? '#12191d' : '#e6fffa'} ${dark?88:94}%, ${CTA} ${dark?12:6}%)`
+      : (dark ? 'rgba(255,255,255,.06)' : 'rgba(15,23,42,.06)');
+    const border = isWorkspace ? 'rgba(89,217,179,.20)'
+                               : (dark ? 'rgba(255,255,255,.10)' : 'rgba(15,23,42,.12)');
+    const color = isWorkspace ? CTA : (dark ? 'rgba(255,255,255,.86)' : TXT_DARK);
 
     return (
-      <Link href={item.href} className="block group">
+      <div
+        className="grid place-items-center plate"
+        style={{
+          width: plateSize, height: plateSize,
+          borderRadius: plateRad,
+          background: bg,
+          border: `1px solid ${border}`,
+          color,
+          transition: 'box-shadow 180ms ease, transform 180ms ease, background 180ms ease'
+        }}
+      >
+        {children}
+        <style jsx>{`
+          .plate:has(> svg) {}
+        `}</style>
+      </div>
+    );
+  };
+
+  const Item = ({ item }: { item: NavItem }) => {
+    const active = isActive(item);
+    const isWorkspace = item.group === 'workspace';
+
+    return (
+      <Link href={item.href} className="block group" title={collapsed ? item.label : undefined}>
         <div
-          className="flex items-center h-[46px] rounded-[12px] pr-2"
-          style={{ paddingLeft: collapsed ? 0 : 10, gap: collapsed ? 0 : 10 }}
+          className="relative flex items-center h-[46px] rounded-[10px] pr-2"
+          style={{
+            paddingLeft: collapsed ? 0 : 12,
+            gap: collapsed ? 0 : 12,
+            transition: 'all 220ms cubic-bezier(0.16,1,0.3,1)'
+          }}
         >
-          <div
-            className="grid place-items-center transition-shadow"
-            style={{
-              width: plateSize, height: plateSize, borderRadius: plateRadius,
-              background: plateBg, border: `1px solid ${plateBorder}`,
-              boxShadow: a ? (isWorkspace
-                ? '0 0 0 1px rgba(89,217,179,.10), 0 14px 28px rgba(0,0,0,.18), 0 0 22px rgba(89,217,179,.22)'
-                : 'inset 0 0 10px rgba(0,0,0,.16)')
-                : 'inset 0 0 10px rgba(0,0,0,.10)',
-              color: iconColor,
-            }}
-          >
-            {iconize(item.icon, 15)}
-          </div>
+          <Plate tone={isWorkspace ? 'workspace' : 'resources'}>
+            {iconize(item.icon)}
+          </Plate>
 
           <div
             className="overflow-hidden"
             style={{
-              transition: 'max-width .32s cubic-bezier(.16,1,.3,1), opacity .32s, transform .32s',
-              maxWidth: collapsed ? 0 : 170,
+              maxWidth: collapsed ? 0 : 160,
               opacity: collapsed ? 0 : 1,
-              transform: collapsed ? 'translateX(-6px)' : 'translateX(0)'
+              transform: collapsed ? 'translateX(-6px)' : 'translateX(0)',
+              transition: 'all 220ms cubic-bezier(0.16,1,0.3,1)',
+              lineHeight: 1.08
             }}
           >
-            <div
-              className="text-[13.5px] font-medium leading-[1.15] font-movatif"
-              style={{ color: isDark ? TXT_LIGHT : TXT_DARK }}
-            >
+            <div className="font-movatif" style={{ fontSize: 13.5, fontWeight: 520, color: dark ? TXT : TXT_DARK }}>
               {item.label}
             </div>
-            {item.sub && isWorkspace && (
-              <div
-                className="text-[11.5px] leading-[1.1] mt-[2px] font-movatif"
-                style={{ color: isDark ? 'rgba(236,242,247,.60)' : 'rgba(15,23,42,.62)' }}
-              >
+            {isWorkspace && item.sub && (
+              <div style={{ fontSize: 11.5, marginTop: 2, opacity: .6, color: dark ? TXT : TXT_DARK }}>
                 {item.sub}
               </div>
             )}
           </div>
 
-          {/* green dot on the far right for active workspace items (expanded only) */}
-          {!collapsed && a && isWorkspace && (
-            <span aria-hidden className="ml-auto rounded-full" style={{ width: 7, height: 7, background: BRAND }} />
+          {/* tiny green dot when active & expanded */}
+          {!collapsed && active && (
+            <span aria-hidden className="ml-auto rounded-full" style={{ width: 7, height: 7, background: CTA }} />
           )}
-        </div>
 
-        {/* hover bloom effect (workspace only) */}
-        <style jsx>{`
-          a.block.group > div:hover > div:first-child{
-            box-shadow: ${hoverShadow};
-          }
-          /* Resources: icons start softer (low opacity), brighten on hover/active */
-          a.block.group > div > div:first-child{
-            color: ${isWorkspace ? iconColor : (isDark ? 'rgba(255,255,255,.76)' : 'rgba(15,23,42,.78)')};
-          }
-          a.block.group:hover > div > div:first-child{
-            color: ${isWorkspace ? iconColor : (isDark ? 'rgba(255,255,255,.94)' : '#0f172a')};
-          }
-        `}</style>
+          {/* hover bloom like the photo (workspace stronger, resources softer) */}
+          <style jsx>{`
+            a.block.group:hover .plate{
+              box-shadow: ${isWorkspace
+                ? '0 16px 26px rgba(0,0,0,.22), 0 0 18px rgba(89,217,179,.18)'
+                : '0 10px 20px rgba(0,0,0,.18), 0 0 12px rgba(255,255,255,.10)'};
+              transform: translateY(-1px);
+            }
+          `}</style>
+        </div>
       </Link>
     );
-  }
+  };
+
+  /* computed lists */
+  const workspace = useMemo(() => NAV.filter(n => n.group === 'workspace'), []);
+  const resources = useMemo(() => NAV.filter(n => n.group === 'resources'), []);
 
   return (
     <aside
       className="fixed left-0 top-0 h-screen z-50 font-movatif"
       style={{
         width: collapsed ? W_COLLAPSED : W_EXPANDED,
-        transition: 'width .40s cubic-bezier(.16,1,.3,1)',
-        background: railBands(isDark),                   // subtle bands on rail
-        color: isDark ? TXT_LIGHT : TXT_DARK,
-        borderRight: `1px solid ${SEP_GREEN}`,
-        boxShadow: 'inset 0 0 18px rgba(0,0,0,.28)'
+        transition: 'width 300ms cubic-bezier(0.16,1,0.3,1)',
+        background: railBands(dark),               // blended bands (no bands on brand/account)
+        color: dark ? TXT : TXT_DARK,
+        borderRight: `1px solid ${BORDER}`,
+        boxShadow: 'inset 0 0 18px rgba(0,0,0,.28), 14px 0 28px rgba(0,0,0,.42)'
       }}
       aria-label="Primary"
     >
       <div className="relative h-full flex flex-col">
-
-        {/* ===== Brand row (filled like reducai.com; NO bands here) ===== */}
-        <div
-          className="px-3 pt-5 pb-4"
-          style={{
-            background: isDark ? PANEL_DARK : PANEL_LIGHT,
-            boxShadow: isDark ? '0 1px 0 rgba(0,0,0,.35)' : '0 1px 0 rgba(15,23,42,.08)'
-          }}
-        >
-          <div className="flex items-center justify-center gap-3">
-            <div
-              className="w-9 h-9 rounded-xl grid place-items-center shrink-0"
-              style={{
-                background: isDark ? 'rgba(255,255,255,.10)' : 'rgba(15,23,42,.08)',
-                border: isDark ? '1px solid rgba(255,255,255,.18)' : '1px solid rgba(15,23,42,.16)'
-              }}
-              title="Reduc AI"
-            >
-              <BotIcon className="w-5 h-5" style={{ color: '#fff' }} />
+        {/* BRAND — centered; white AI icon + “Reduc AI”; NO separators here */}
+        <div className="px-3 pt-5 pb-4" style={{ background: dark ? BASE_DK : BASE_LT }}>
+          <div className="flex flex-col items-center gap-2">
+            <div className="grid place-items-center"
+                 style={{
+                   width: 40, height: 40, borderRadius: 12,
+                   background: dark ? 'rgba(255,255,255,.14)' : 'rgba(15,23,42,.10)',
+                   border: dark ? '1px solid rgba(255,255,255,.18)' : '1px solid rgba(15,23,42,.16)'
+                 }}>
+              <Bot className="w-5 h-5" style={{ color:'#fff' }} />
             </div>
             {!collapsed && (
-              <div
-                className="text-[17px] font-medium tracking-wide"
-                style={{ color: isDark ? '#fff' : '#0f172a' }}
-              >
-                Reduc <span style={{ color: BRAND }}>AI</span>
+              <div className="font-movatif" style={{ fontSize: 17, fontWeight: 560, color: dark ? '#fff' : TXT_DARK }}>
+                Reduc <span style={{ color: CTA, fontWeight: 520 }}>AI</span>
               </div>
             )}
           </div>
         </div>
 
-        {/* Separator (full width, faint) */}
-        <div aria-hidden style={{ height: 1, background: SEP_GREEN }} />
+        {/* optional thin divider under brand for structure */}
+        <div aria-hidden style={{ height: 1, background: BORDER }} />
 
-        {/* ===== Lists (no section headers; just items) ===== */}
-        <div className="flex-1 min-h-0 overflow-y-auto">
-          {/* Workspace */}
-          <div className="px-3 pt-6">
-            <nav className="space-y-[6px]">
-              {NAV.filter(n => n.group === 'workspace').map(n => <Item key={n.id} item={n} />)}
-            </nav>
-          </div>
-
-          {/* Faint divider between groups */}
-          <div aria-hidden className="my-10" style={{ height: 1, background: SEP_GREEN }} />
-
-          {/* Resources (lower opacity, dark plates, white icons) */}
-          <div className="px-3 pb-4">
-            <nav className="space-y-[6px]">
-              {NAV.filter(n => n.group === 'resources').map(n => <Item key={n.id} item={n} />)}
-            </nav>
-          </div>
+        {/* WORKSPACE */}
+        <div className="px-3 mt-2">
+          {SHOW_GROUP_TAGS && !collapsed && (
+            <div className="mb-2" style={{ color: MUTED, fontSize: 10, letterSpacing: '.14em', fontWeight: 520 }}>
+              WORKSPACE
+            </div>
+          )}
+          <nav className="space-y-[6px]">
+            {workspace.map(item => <Item key={item.id} item={item} />)}
+          </nav>
         </div>
 
-        {/* ===== Account (cleaner, same gradient avatar vibe) ===== */}
-        <div className="px-3 pb-4" style={{ background: isDark ? PANEL_DARK : PANEL_LIGHT }}>
-          <Link
-            href="/account"
+        {/* push RESOURCES to bottom */}
+        <div className="flex-1" />
+
+        {/* full-width subtle green separator (edge→edge) */}
+        <div aria-hidden className="mx-3" style={{ height: 1, background: BORDER }} />
+
+        {/* RESOURCES (white icons on dark plates; low opacity feel via plate) */}
+        <div className="px-3 mt-2 mb-2">
+          {SHOW_GROUP_TAGS && !collapsed && (
+            <div className="mb-2" style={{ color: MUTED, fontSize: 10, letterSpacing: '.14em', fontWeight: 520 }}>
+              RESOURCES
+            </div>
+          )}
+          <nav className="space-y-[6px]">
+            {resources.map(item => <Item key={item.id} item={item} />)}
+          </nav>
+        </div>
+
+        {/* ACCOUNT — solid card, no bands; polished gradient avatar; no “Loading…” */}
+        <div className="px-3 pb-4" style={{ background: dark ? BASE_DK : BASE_LT }}>
+          <button
+            onClick={() => router.push('/account')}
             className="w-full rounded-2xl px-3 py-3 flex items-center gap-3 text-left"
             style={{
-              background: isDark ? 'rgba(255,255,255,.04)' : 'rgba(15,23,42,.04)',
-              border: isDark ? '1px solid rgba(255,255,255,.10)' : '1px solid rgba(15,23,42,.12)',
-              boxShadow: 'inset 0 0 10px rgba(0,0,0,.18)'
+              background: dark ? 'rgba(255,255,255,.04)' : 'rgba(15,23,42,.05)',
+              border: dark ? '1px solid rgba(255,255,255,.10)' : '1px solid rgba(15,23,42,.12)',
+              boxShadow: 'inset 0 0 10px rgba(0,0,0,.18)',
+              color: dark ? TXT : TXT_DARK
             }}
           >
             <div
-              className="w-8 h-8 rounded-full grid place-items-center"
+              className="grid place-items-center"
               style={{
+                width: 32, height: 32, borderRadius: 10,
                 background: 'radial-gradient(60% 60% at 50% 40%, rgba(255,255,255,.22), rgba(255,255,255,.08))',
-                border: isDark ? '1px solid rgba(255,255,255,.24)' : '1px solid rgba(15,23,42,.28)'
+                border: dark ? '1px solid rgba(255,255,255,.24)' : '1px solid rgba(15,23,42,.28)'
               }}
             >
-              <UserIcon className="w-4 h-4" style={{ color: '#0b0f0e' }} />
+              <UserIcon className="w-4 h-4" style={{ color:'#0b0f0e' }} />
             </div>
             {!collapsed && (
               <div className="min-w-0 flex-1">
-                <div className="text-sm font-medium truncate" style={{ color: isDark ? '#fff' : '#0f172a' }}>
-                  {userName?.trim() || userEmail?.split('@')[0] || 'Account'}
+                <div className="truncate" style={{ fontSize: 13, fontWeight: 560 }}>
+                  {getDisplayName(userName, userEmail)}
                 </div>
-                <div className="text-[11px] truncate" style={{ color: isDark ? 'rgba(236,242,247,.60)' : 'rgba(15,23,42,.62)' }}>
-                  {userEmail || ''}
+                <div className="truncate" style={{ fontSize: 11, opacity: .62 }}>
+                  {userEmail || 'Open account'}
                 </div>
               </div>
             )}
-          </Link>
+          </button>
         </div>
 
-        {/* Collapse handle (unchanged location; colors tuned) */}
+        {/* collapse handle (mid-rail) */}
         <button
           onClick={() => setCollapsed(c => !c)}
           className="absolute top-1/2 -right-3 translate-y-[-50%] rounded-full p-1.5"
           style={{
-            border: `1px solid ${SEP_GREEN}`,
-            background: isDark ? PANEL_DARK : PANEL_LIGHT,
-            boxShadow: '0 2px 12px rgba(0,0,0,.18), 0 0 10px rgba(0,255,194,0.06)'
+            border: `1px solid rgba(89,217,179,.26)`,
+            background: 'rgba(89,217,179,.10)',
+            boxShadow: '0 2px 12px rgba(0,0,0,0.18), 0 0 10px rgba(0,255,194,0.10)'
           }}
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          title={collapsed ? 'Expand' : 'Collapse'}
         >
           {collapsed
-            ? <ChevronRight className="w-4 h-4" style={{ color: isDark ? ICON_WEAK : '#334155' }} />
-            : <ChevronLeft  className="w-4 h-4" style={{ color: isDark ? ICON_WEAK : '#334155' }} />}
+            ? <ChevronRight className="w-4 h-4" style={{ color: CTA }} />
+            : <ChevronLeft  className="w-4 h-4" style={{ color: CTA }} />}
         </button>
       </div>
-
-      {/* Light/Dark text color var for non-rail areas (we mostly inline colors to match your tokens) */}
-      <style jsx>{`
-        :global(.font-movatif){ font-weight: 500; } /* less bold default */
-      `}</style>
     </aside>
   );
 }
