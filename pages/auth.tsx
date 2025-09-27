@@ -1,6 +1,4 @@
 // pages/post-auth.tsx
-'use client';
-
 import { useEffect, useState } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
@@ -34,7 +32,6 @@ const Tokens = () => (
       --shadow:0 26px 64px rgba(0,0,0,.42);
     }
 
-    /* MovaTiff font to match index */
     @font-face{
       font-family:'MovaTiff';
       src:url('/fonts/MovaTiff.woff2') format('woff2');
@@ -83,19 +80,23 @@ export default function PostAuth() {
   const [msg, setMsg] = useState<string>('Completing sign-in…');
 
   useEffect(() => {
+    // Run only in the browser
+    if (typeof window === 'undefined') return;
+
     (async () => {
       try {
-        // 1) Finish the PKCE/code exchange so Supabase sets the session
-        const { error } = await supabase.auth.exchangeCodeForSession(window.location.href);
-        if (error) throw error;
+        // If we already have a session, skip the exchange
+        const { data: s1 } = await supabase.auth.getSession();
+        if (!s1.session) {
+          const { error } = await supabase.auth.exchangeCodeForSession(window.location.href);
+          if (error) throw error;
+        }
 
-        // 2) Ask backend about account/subscription
         setStatus('checking');
         setMsg('Checking your account…');
 
         const resp = await fetch('/api/user-status', { credentials: 'include' });
 
-        // If API is missing or fails, go to builder (fail-open)
         if (!resp.ok) {
           setStatus('redirecting');
           setMsg('Loading your dashboard…');
@@ -109,7 +110,6 @@ export default function PostAuth() {
           paymentLink?: string | null;
         };
 
-        // 3) Route based on status
         if (data.hasAccount || data.hasSubscription) {
           setStatus('redirecting');
           setMsg('Welcome back! Loading your dashboard…');
@@ -154,17 +154,14 @@ export default function PostAuth() {
           background:'var(--section-1)'
         }}
       >
-        {/* grid behind everything */}
         <div className="hero-grid" />
 
-        {/* content */}
         <div className="card relative z-[1] w-[92%] max-w-[560px] p-8 text-center">
           <h1 style={{ fontSize:'38px', fontWeight:900, letterSpacing:'-.02em' }}>
             Welcome to <span style={{ color:'var(--brand)' }}>ReducAI</span>
           </h1>
           <p className="mt-3" style={{ color:'var(--muted)' }}>{msg}</p>
 
-          {/* nice little loader while we redirect */}
           {status !== 'error' && (
             <div className="mt-6 inline-flex items-center gap-3" aria-live="polite">
               <span
