@@ -11,7 +11,7 @@ import Sidebar from "@/components/ui/Sidebar";
 import { ThemeProvider } from "@/components/providers/ThemeProvider";
 import GlobalRouteLoader from "@/components/ui/GlobalRouteLoader";
 
-const PUBLIC_ROUTES = ["/", "/auth", "/auth/callback"];
+const PUBLIC_ROUTES = ["/", "/auth", "/auth/callback", "/post-auth"];
 
 /** Section titles (used in the top rail) */
 const TITLES: Record<string, string> = {
