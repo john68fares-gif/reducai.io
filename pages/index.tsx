@@ -1,7 +1,7 @@
 // pages/index.tsx
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Head from 'next/head';
 import { motion, AnimatePresence } from 'framer-motion';
 import { createPortal } from 'react-dom';
@@ -12,7 +12,6 @@ import { loadStripe } from '@stripe/stripe-js';
 import { supabase } from '@/lib/supabase-client';
 
 /* ───────────────────────── Config ───────────────────────── */
-// Stripe price IDs (EXACT values you gave me)
 const PRICE_IDS = {
   monthly: {
     starter: 'price_1SByXAHWdU8X80NMftriHWJW', // $19
@@ -24,9 +23,7 @@ const PRICE_IDS = {
   }
 };
 const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PK || '');
-
-// pending checkout key to resume after OAuth redirect
-const PENDING_KEY = 'checkout:pending'; // {period:'monthly'|'yearly', tier:'starter'|'pro'}
+const PENDING_KEY = 'checkout:pending';
 
 /* ───────────────────────── Theme Tokens ───────────────────────── */
 const Tokens = () => (
@@ -36,18 +33,16 @@ const Tokens = () => (
       --bg-2:#0b1013;
       --bg-3:#0c1216;
 
-      /* darker -> greener gradient navbar */
-      --nav-grad: linear-gradient(
-        90deg,
-        rgba(10,12,14,.92) 0%,
-        rgba(12,18,16,.92) 40%,
-        rgba(20,36,31,.92) 100%
-      );
-
-      /* alternating section backgrounds (clear separation) */
-      --section-1: radial-gradient(1000px 600px at 50% -10%, rgba(89,217,179,.14), transparent 60%), #0a0c0e;
-      --section-2: radial-gradient(960px 600px at 15% 10%, rgba(89,217,179,.10), transparent 60%), #0b1013;
-      --section-3: radial-gradient(960px 600px at 85% 12%, rgba(89,217,179,.10), transparent 60%), #0c1216;
+      --nav-grad: linear-gradient(90deg, rgba(10,12,14,.92) 0%, rgba(12,18,16,.92) 40%, rgba(20,36,31,.92) 100%);
+      --section-1:
+        radial-gradient(1000px 600px at 50% -10%, rgba(89,217,179,.14), transparent 60%),
+        #0a0c0e;
+      --section-2:
+        radial-gradient(960px 600px at 15% 10%, rgba(89,217,179,.10), transparent 60%),
+        #0b1013;
+      --section-3:
+        radial-gradient(960px 600px at 85% 12%, rgba(89,217,179,.10), transparent 60%),
+        #0c1216;
 
       --panel:#0f1417;
       --card:#11181b;
@@ -58,7 +53,7 @@ const Tokens = () => (
       --line:rgba(89,217,179,.22);
       --border:rgba(255,255,255,.08);
 
-      --radius:22px;             /* softer */
+      --radius:22px;
       --shadow:0 26px 64px rgba(0,0,0,.42);
     }
 
@@ -76,7 +71,7 @@ const Tokens = () => (
     .container{ width:100%; max-width:1160px; margin:0 auto; padding:0 20px; }
     a{ text-decoration:none; color:inherit; }
 
-    /* Buttons (pill, white text, hover grow, click ripple) */
+    /* Buttons */
     .btn{
       position:relative;
       display:inline-flex; align-items:center; justify-content:center; gap:10px;
@@ -91,20 +86,14 @@ const Tokens = () => (
     .btn:active{ transform: scale(0.985); }
     .btn.ghost{ background: transparent; color: var(--text); border-color: var(--line); }
     .btn.block{ width:100%; }
-    /* Click ripple */
     .btn::after{
       content:''; position:absolute; inset:auto; width:0; height:0; border-radius:9999px; background:rgba(255,255,255,.35);
       transform:translate(-50%,-50%); opacity:0; pointer-events:none;
     }
-    .btn[data-clicked="true"]::after{
-      animation:ripple .5s ease;
-    }
-    @keyframes ripple {
-      0%{ width:0; height:0; opacity:.45; }
-      100%{ width:240px; height:240px; opacity:0; }
-    }
+    .btn[data-clicked="true"]::after{ animation:ripple .5s ease; }
+    @keyframes ripple { 0%{ width:0; height:0; opacity:.45; } 100%{ width:240px; height:240px; opacity:0; } }
 
-    /* Cards with soft glow */
+    /* Cards */
     .card{
       background:
         radial-gradient(120% 100% at 0% 0%, rgba(89,217,179,.14), transparent 55%),
@@ -119,24 +108,24 @@ const Tokens = () => (
         0 18px 60px rgba(89,217,179,.18);
     }
 
-    /* Stars */
-    .stars{ display:inline-flex; gap:4px; opacity:.95 }
-
-    /* Navbar links (hover lift) */
+    /* Navbar links */
     .navlink{ opacity:.85; transition: opacity .18s ease, transform .18s ease; }
     .navlink:hover{ opacity:1; transform: translateY(-1px); }
 
-    /* Monthly/Yearly toggle with green pulse when active */
+    /* Monthly/Yearly toggle — text ALWAYS white */
     .toggle{ display:inline-flex; gap:10px; padding:8px; border:1px solid var(--line); border-radius:999px; background:#0f1517; }
     .toggle .opt{
-      padding:8px 14px; border-radius:999px; cursor:pointer; transition:transform .18s ease, box-shadow .18s ease, background .18s ease;
-      color:var(--muted);
+      padding:8px 14px; border-radius:999px; cursor:pointer; transition:transform .18s ease, box-shadow .18s ease, background .18s ease, color .18s ease;
+      color:#fff;                /* <- always white */
       background:transparent;
+      opacity:.82;
     }
+    .toggle .opt:hover{ opacity:1; transform: translateY(-1px); }
     .toggle .opt.active{
-      color:#0b0f0e; background:var(--brand);
+      color:#fff;                /* <- stay white when active too */
+      background:var(--brand);
       box-shadow: 0 10px 30px rgba(89,217,179,.35);
-      transform: translateY(-1px);
+      opacity:1;
       position:relative;
     }
     .toggle .opt.active::after{
@@ -144,23 +133,36 @@ const Tokens = () => (
       box-shadow:0 0 0 0 rgba(89,217,179,.0);
       animation: optPulse .32s ease;
     }
-    @keyframes optPulse{
-      0%{ box-shadow:0 0 0 0 rgba(89,217,179,.45); }
-      100%{ box-shadow:0 0 0 16px rgba(89,217,179,0); }
+    @keyframes optPulse{ 0%{ box-shadow:0 0 0 0 rgba(89,217,179,.45); } 100%{ box-shadow:0 0 0 16px rgba(89,217,179,0); } }
+
+    /* HERO grid background behind headline */
+    .hero-wrap{
+      position:relative;
+      isolation:isolate;
     }
+    .hero-grid{
+      position:absolute;
+      inset:0;
+      mask-image: radial-gradient(60% 60% at 50% 40%, rgba(0,0,0,.9), transparent 70%);
+      pointer-events:none;
+      opacity:.22;
+      z-index:0;
+      background:
+        linear-gradient(to right, rgba(89,217,179,.2) 1px, transparent 1px) 0 0/36px 36px,
+        linear-gradient(to bottom, rgba(89,217,179,.2) 1px, transparent 1px) 0 0/36px 36px;
+      filter: drop-shadow(0 0 20px rgba(89,217,179,.15));
+    }
+    .hero-content{ position:relative; z-index:1; }
   `}</style>
 );
 
-/* ───────────────────────── Small helpers ───────────────────────── */
-const ease = { duration:.22, ease:'easeOut' };
-
-function useClickedRipple() {
-  return (e: React.MouseEvent<HTMLElement>) => {
+/* ripple helper */
+const useClickedRipple = () =>
+  (e: React.MouseEvent<HTMLElement>) => {
     const el = e.currentTarget as HTMLElement;
     el.dataset.clicked = 'true';
     setTimeout(()=>{ delete el.dataset.clicked; }, 520);
   };
-}
 
 /* ───────────────────────── Auth Modal ───────────────────────── */
 function AuthModal({ open, onClose }: { open:boolean; onClose:()=>void }) {
@@ -186,7 +188,7 @@ function AuthModal({ open, onClose }: { open:boolean; onClose:()=>void }) {
       <motion.div className="fixed inset-0 z-[1000]" initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}
         style={{ background:'rgba(6,8,10,.62)', backdropFilter:'blur(6px)' }} onClick={onClose} />
       <motion.div className="fixed inset-0 z-[1001] flex items-center justify-center px-4"
-        initial={{opacity:0,y:10,scale:.98}} animate={{opacity:1,y:0,scale:1}} exit={{opacity:0,y:8,scale:.98}} transition={ease}>
+        initial={{opacity:0,y:10,scale:.98}} animate={{opacity:1,y:0,scale:1}} exit={{opacity:0,y:8,scale:.98}}>
         <div className="card w-full max-w-[520px] overflow-hidden" onClick={e=>e.stopPropagation()}>
           <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom:'1px solid var(--border)' }}>
             <div className="flex items-center gap-3">
@@ -215,25 +217,17 @@ function AuthModal({ open, onClose }: { open:boolean; onClose:()=>void }) {
 
 /* ───────────────────────── Main Page ───────────────────────── */
 export default function HomePage(){
-  const [authed,setAuthed] = useState(false);
   const [authOpen,setAuthOpen] = useState(false);
   const [period,setPeriod] = useState<'monthly'|'yearly'>('monthly');
   const [busy,setBusy] = useState('');
   const [stripeErr,setStripeErr] = useState('');
   const clickRipple = useClickedRipple();
 
-  // boot: check session and resume pending checkout (safe cleanup → no “null is not an object”)
   useEffect(() => {
     let unsub: (() => void) | null = null;
-
     (async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      setAuthed(Boolean(session?.user?.id));
-
       const sub = supabase.auth.onAuthStateChange(async (_evt, s) => {
-        const isIn = Boolean(s?.user?.id);
-        setAuthed(isIn);
-        if (isIn) {
+        if (s?.user?.id) {
           const raw = localStorage.getItem(PENDING_KEY);
           if (raw) {
             try {
@@ -244,11 +238,9 @@ export default function HomePage(){
           }
         }
       });
-
       const maybe = (sub as any)?.data?.subscription || (sub as any)?.subscription;
       unsub = () => { try { maybe?.unsubscribe?.(); } catch {} };
     })();
-
     return () => { try { unsub?.(); } catch {} };
   }, []);
 
@@ -257,21 +249,16 @@ export default function HomePage(){
     const price = PRICE_IDS[p][tier];
     if (!price || !/^price_[A-Za-z0-9]+$/.test(price)) {
       setStripeErr('Stripe price ID is invalid (must start with price_…).');
-      console.error('Bad price ID:', price);
       return;
     }
-
-    // Require auth
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user?.id) {
       localStorage.setItem(PENDING_KEY, JSON.stringify({ period:p, tier }));
       setAuthOpen(true);
       return;
     }
-
     const stripe = await stripePromise;
     if (!stripe) { setStripeErr('Stripe not initialised. Check NEXT_PUBLIC_STRIPE_PK.'); return; }
-
     try{
       setBusy(`${p}:${tier}`);
       const { error } = await stripe.redirectToCheckout({
@@ -293,7 +280,7 @@ export default function HomePage(){
       <Head><title>ReducAI — Build AI Agents</title></Head>
       <Tokens />
 
-      {/* NAVBAR (full width, greenish gradient, sticky) */}
+      {/* NAVBAR */}
       <div style={{ position:'sticky', top:0, zIndex:50, backdropFilter:'blur(10px)', background: 'var(--nav-grad)' }}>
         <div className="container" style={{ padding:'14px 20px' }}>
           <div className="flex items-center justify-between">
@@ -308,7 +295,6 @@ export default function HomePage(){
               <a className="navlink" href="#reviews">Reviews</a>
               <a className="navlink" href="#pricing">Pricing</a>
             </nav>
-            {/* Sign in opens overlay (not #pricing) */}
             <button className="btn" style={{ height:40 }} onClick={() => setAuthOpen(true)}>
               Sign in
             </button>
@@ -316,11 +302,12 @@ export default function HomePage(){
         </div>
       </div>
 
-      {/* HERO (full viewport, fills screen) */}
+      {/* HERO with grid behind the headline */}
       <section style={{ minHeight:'100vh', padding:'10vh 0', display:'grid', placeItems:'center', background:'var(--section-1)' }}>
-        <div className="container">
-          <div className="text-center">
-            <h1 style={{ fontSize:'82px', lineHeight:1.02, letterSpacing:'-.02em', fontWeight:900 }}>
+        <div className="container hero-wrap">
+          <div className="hero-grid" />
+          <div className="hero-content text-center">
+            <h1 style={{ fontSize:'84px', lineHeight:1.02, letterSpacing:'-.02em', fontWeight:900 }}>
               Build <span style={{ color:'var(--brand)' }}>AI Agents</span><br/>
               for businesses that need them
             </h1>
@@ -337,47 +324,47 @@ export default function HomePage(){
         </div>
       </section>
 
-      {/* HOW IT WORKS (your style, spaced, distinct bg) */}
+      {/* HOW IT WORKS — larger, product-specific wording */}
       <section id="how" style={{ background:'var(--section-2)' }}>
-        <div className="container" style={{ padding:'88px 20px' }}>
+        <div className="container" style={{ padding:'96px 20px' }}>
           <div className="text-center mb-12">
-            <h2 style={{ fontSize:'48px', fontWeight:900, letterSpacing:'-.02em' }}>
+            <h2 style={{ fontSize:'52px', fontWeight:900, letterSpacing:'-.02em' }}>
               Setup in <span style={{ color:'var(--brand)' }}>4 steps</span>
             </h2>
           </div>
-          <div className="grid md:grid-cols-4 gap-6">
+          <div className="grid md:grid-cols-4 gap-8">
             {[
-              { n:'01', h:'Prompt Agent', d:'Create detailed instructions with the Prompter.' },
-              { n:'02', h:'Demo Agent',   d:'Share the agent for instant feedback.' },
-              { n:'03', h:'Connect Agent',d:'Widget, DMs, SMS, and more integrations.' },
-              { n:'04', h:'Deploy Agent', d:'Launch and track conversations in real time.' },
+              { n:'01', h:'Create Voice & Text Agents', d:'Spin up agents with Build My Agent: voice quality + prompt controls.' },
+              { n:'02', h:'Test & Demo Fast', d:'Share links, gather feedback, iterate prompts in minutes.' },
+              { n:'03', h:'Connect Channels', d:'Widget, WhatsApp/DMs, SMS & more with simple switches.' },
+              { n:'04', h:'Deploy & Track', d:'Go live, monitor conversations, improve outcomes.' },
             ].map((s, i) => (
-              <div key={i} className="card p-6">
+              <div key={i} className="card p-7">
                 <div className="text-sm" style={{ color:'var(--muted)' }}>{s.n}</div>
-                <div className="text-xl font-semibold mt-1">{s.h}</div>
-                <div className="text-sm mt-2" style={{ color:'var(--muted)' }}>{s.d}</div>
+                <div className="mt-1" style={{ fontSize:'22px', fontWeight:800 }}>{s.h}</div>
+                <div className="text-sm mt-3 leading-relaxed" style={{ color:'var(--muted)' }}>{s.d}</div>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* REVIEWS (5-star with reasons) */}
+      {/* REVIEWS — all five stars with reasons */}
       <section id="reviews" style={{ background:'var(--section-3)' }}>
-        <div className="container" style={{ padding:'88px 20px' }}>
-          <div className="text-center mb-8">
-            <h2 style={{ fontSize:'48px', fontWeight:900, letterSpacing:'-.02em' }}>
+        <div className="container" style={{ padding:'96px 20px' }}>
+          <div className="text-center mb-10">
+            <h2 style={{ fontSize:'52px', fontWeight:900, letterSpacing:'-.02em' }}>
               Hear from <span style={{ color:'var(--brand)' }}>users</span>
             </h2>
           </div>
-          <div className="grid md:grid-cols-3 gap-6">
+          <div className="grid md:grid-cols-3 gap-8">
             {[
-              { n:'Maya R.',  t:'“The green UI is slick and the agents feel fast. Love the hover animations and the clean overlays.”' },
-              { n:'David L.', t:'“We built 3 voice + 3 text agents on Starter. The limits pushed us to focus. Great value.”' },
-              { n:'Tyler V.', t:'“Toggle pulse + checkout flow are on point. OAuth → Stripe just works after setup.”' },
-              { n:'Chris K.', t:'“Prompt testing tools saved us hours. The glow on pricing cards draws the eye nicely.”' },
-              { n:'Aaron P.', t:'“Support was helpful getting Google auth URLs right. Deployed the same day.”' },
-              { n:'Nina S.',  t:'“Navbar gradient + section separation = chef’s kiss. The product feels premium.”' },
+              { n:'Maya R.',  t:'“Voice agents sound natural and on-brand. Prompts are easy to tune and deploy.”' },
+              { n:'David L.', t:'“Built 3 voice + 3 text agents on Starter and closed our first client in a week.”' },
+              { n:'Tyler V.', t:'“Auth → Stripe flow works smoothly. Love the hover animations and clean overlays.”' },
+              { n:'Chris K.', t:'“Pricing cards glow nicely; more important: the analytics helped us iterate fast.”' },
+              { n:'Aaron P.', t:'“Support guided our Google auth URLs. We launched same-day. Totally worth it.”' },
+              { n:'Nina S.',  t:'“Sections are clearly separated; UI feels premium. Clients were impressed.”' },
             ].map((r,idx)=>(
               <div key={idx} className="card p-6">
                 <Quote className="w-5 h-5 mb-3" style={{ color:'var(--brand)' }} />
@@ -399,11 +386,11 @@ export default function HomePage(){
         </div>
       </section>
 
-      {/* PRICING (dark, glow, Most Popular green thing; exact prices + limits) */}
+      {/* PRICING */}
       <section id="pricing" style={{ background:'var(--section-2)' }}>
-        <div className="container" style={{ padding:'88px 20px 120px' }}>
+        <div className="container" style={{ padding:'96px 20px 124px' }}>
           <div className="text-center mb-8">
-            <h2 style={{ fontSize:'48px', fontWeight:900, letterSpacing:'-.02em' }}>
+            <h2 style={{ fontSize:'52px', fontWeight:900, letterSpacing:'-.02em' }}>
               Build agents with <span style={{ color:'var(--brand)' }}>confidence</span>
             </h2>
             <div className="mt-6 toggle inline-flex">
