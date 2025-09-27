@@ -18,12 +18,12 @@ const PAYMENT_LINKS = {
 };
 const PRICE_IDS = {
   monthly: {
-    starter: 'price_1SByXAHWdU8X80NMftriHWJW', // $19
-    pro:     'price_1SByXKHWdU8X80NMAw5IlrTc', // $29
+    starter: 'price_1SByXAHWdU8X80NMftriHWJW',
+    pro:     'price_1SByXKHWdU8X80NMAw5IlrTc',
   },
   yearly: {
-    starter: 'price_1SByXOHWdU8X80NM4jFrU6Nr', // $131
-    pro:     'price_1SByXRHWdU8X80NM7UwuAw0B', // $209
+    starter: 'price_1SByXOHWdU8X80NM4jFrU6Nr',
+    pro:     'price_1SByXRHWdU8X80NM7UwuAw0B',
   }
 };
 const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PK || '');
@@ -67,9 +67,8 @@ const Tokens = () => (
       transform: translateZ(0);
       transition: transform .18s ease, box-shadow .18s ease, background .18s ease;
       overflow:hidden;
-      font-size:16px;
     }
-    .btn-lg{ height:56px; padding:0 26px; font-size:17px; }
+    .btn.lg{ height:56px; padding:0 26px; font-size:16px; }
     .btn:hover{ transform: scale(1.04); box-shadow: 0 24px 64px rgba(89,217,179,.38), inset 0 0 0 1px rgba(255,255,255,.10); }
     .btn:active{ transform: scale(0.985); }
     .btn.ghost{ background: transparent; color: var(--text); border-color: var(--line); }
@@ -96,13 +95,14 @@ const Tokens = () => (
     .toggle .opt.active::after{ content:''; position:absolute; inset:-2px; border-radius:999px; box-shadow:0 0 0 0 rgba(89,217,179,.0); animation: optPulse .32s ease; }
     @keyframes optPulse{ 0%{ box-shadow:0 0 0 0 rgba(89,217,179,.45); } 100%{ box-shadow:0 0 0 16px rgba(89,217,179,0); } }
 
-    /* HERO grid — cover whole section (no mask) */
-    .hero-wrap{ position:relative; isolation:isolate; }
+    /* ===== FULL-BLEED HERO GRID =====
+       Put the grid directly under the <section> so it spans the entire width.
+       No mask, no container clipping. */
     .hero-grid{
       position:absolute; inset:0; pointer-events:none; z-index:0; opacity:.42;
       background:
-        linear-gradient(to right, rgba(89,217,179,.34) 2px, transparent 2px) 0 0/36px 36px,
-        linear-gradient(to bottom, rgba(89,217,179,.28) 2px, transparent 2px) 0 0/36px 36px;
+        linear-gradient(to right, rgba(89,217,179,.28) 2px, transparent 2px) 0 0/36px 36px,
+        linear-gradient(to bottom, rgba(89,217,179,.22) 2px, transparent 2px) 0 0/36px 36px;
     }
     .hero-content{ position:relative; z-index:1; }
   `}</style>
@@ -126,7 +126,7 @@ function AuthModal({ open, onClose }: { open:boolean; onClose:()=>void }) {
       setBusy(true); setErr('');
       await supabase.auth.signInWithOAuth({
         provider:'google',
-        options:{ redirectTo: `${window.location.origin}/post-auth` } // IMPORTANT
+        options:{ redirectTo: `${window.location.origin}/post-auth` } // important
       });
     }catch(e:any){
       setErr(e?.message || 'Sign-in failed');
@@ -176,6 +176,7 @@ export default function HomePage(){
   const [stripeErr,setStripeErr] = useState('');
   const clickRipple = useClickedRipple();
 
+  // Keep authed state in sync
   useEffect(() => {
     let unsub: (() => void) | null = null;
     (async () => {
@@ -190,6 +191,7 @@ export default function HomePage(){
     return () => { try { unsub?.(); } catch {} };
   }, []);
 
+  // Plan flow
   const startPlanFlow = async (p:'monthly'|'yearly', tier:'starter'|'pro')=>{
     setStripeErr('');
     const { data: { session } } = await supabase.auth.getSession();
@@ -204,10 +206,13 @@ export default function HomePage(){
   const goToPayment = async (p:'monthly'|'yearly', tier:'starter'|'pro')=>{
     const link = PAYMENT_LINKS[p][tier];
     if (link && /^https?:\/\//i.test(link)) { window.location.href = link; return; }
+
     const price = PRICE_IDS[p][tier];
     if (!price || !/^price_[A-Za-z0-9]+$/.test(price)) { setStripeErr('No payment link and Stripe Price ID looks invalid.'); return; }
+
     const stripe = await stripePromise;
     if (!stripe) { setStripeErr('Stripe not initialised. Check NEXT_PUBLIC_STRIPE_PK.'); return; }
+
     try{
       setBusy(`${p}:${tier}`);
       const { error } = await stripe.redirectToCheckout({
@@ -260,10 +265,21 @@ export default function HomePage(){
         </div>
       </div>
 
-      {/* HERO with full-section grid */}
-      <section style={{ minHeight:'100vh', padding:'10vh 0', display:'grid', placeItems:'center', background:'var(--section-1)' }}>
-        <div className="container hero-wrap">
-          <div className="hero-grid" />
+      {/* ===== HERO (full-bleed grid) ===== */}
+      <section
+        style={{
+          minHeight:'100vh',
+          padding:'10vh 0',
+          display:'grid',
+          placeItems:'center',
+          background:'var(--section-1)',
+          position:'relative'            // <— so the grid can absolutely fill the section
+        }}
+      >
+        {/* Full-bleed grid sits directly under the section */}
+        <div className="hero-grid" />
+
+        <div className="container">
           <div className="hero-content text-center">
             <h1 style={{ fontSize:'86px', lineHeight:1.02, letterSpacing:'-.02em', fontWeight:900 }}>
               Build <span style={{ color:'var(--brand)' }}>AI Agents</span><br/>
@@ -279,8 +295,8 @@ export default function HomePage(){
               >
                 <Zap className="w-4 h-4" /><span>Start building</span><ArrowRight className="w-4 h-4" />
               </button>
-              {/* bigger How it works */}
-              <a className="btn btn-lg ghost" href="#how">How it works</a>
+              {/* Bigger ghost button */}
+              <a className="btn ghost lg" href="#how">How it works</a>
             </div>
           </div>
         </div>
@@ -311,7 +327,7 @@ export default function HomePage(){
         </div>
       </section>
 
-      {/* REVIEWS — five filled stars */}
+      {/* REVIEWS */}
       <section id="reviews" style={{ background:'var(--section-3)' }}>
         <div className="container" style={{ padding:'108px 20px' }}>
           <div className="text-center mb-12">
@@ -397,7 +413,7 @@ export default function HomePage(){
                   Most popular
                 </div>
               </div>
-              <div className="text-[46px] font-extrabold mt-2">
+              <div className="text:[46px] font-extrabold mt-2">
                 {period==='monthly' ? '$29' : '$209'}
                 <span className="text-sm font-semibold opacity-70">/{period==='monthly'?'mo':'yr'}</span>
               </div>
