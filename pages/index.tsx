@@ -1,371 +1,325 @@
-// /pages/index.tsx
+// pages/index.tsx
+'use client';
+
 import Head from 'next/head';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/router';
+import { ArrowRight, Sparkles, Shield, Rocket, Play, CheckCircle2, Mail, LogIn } from 'lucide-react';
 import { supabase } from '@/lib/supabase-client';
-import {
-  Menu as MenuIcon, X, ArrowRight, CheckCircle2, Loader2, Mail, Globe, Shield, Zap,
-} from 'lucide-react';
 
-/** --- Design Tokens (dark-first) --- */
-const Tokens = () => (
-  <style jsx global>{`
-    :root {
-      --bg:#0b0c10; --panel:#0d0f11; --card:#0f1214; --text:#e6f1ef; --muted:#9fb4ad;
-      --brand:#59d9b3; --brand-weak:rgba(89,217,179,.16);
-      --border:rgba(255,255,255,.10);
-      --radius:12px; --ease:cubic-bezier(.22,.61,.36,1);
-      --shadow:0 30px 80px rgba(0,0,0,.35), 0 0 0 1px rgba(255,255,255,.06) inset;
-      --shadow-soft:0 18px 48px rgba(0,0,0,.22);
-      --max:1160px;
-    }
-    body { background: var(--bg); color: var(--text); }
-    .container { width:100%; max-width: var(--max); margin: 0 auto; padding: 0 20px; }
-    .btn { height:44px; padding:0 16px; border-radius:10px; display:inline-flex; align-items:center; gap:10px; font-weight:700; border:1px solid transparent; }
-    .btn-primary { background: var(--brand); color:#fff; box-shadow: 0 10px 24px rgba(89,217,179,.35); }
-    .btn-primary:hover { filter: brightness(1.02); transform: translateY(-1px); transition: all .15s var(--ease); }
-    .btn-ghost { background: transparent; border-color: var(--border); color: var(--text); }
-    .card { background: var(--panel); border:1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
-    .pill { border-radius:999px; padding:6px 10px; border:1px solid color-mix(in oklab, var(--brand) 40%, var(--border)); background: color-mix(in oklab, var(--brand) 8%, var(--panel)); font-size:12px; color: var(--text); }
-    .muted { color: var(--muted); }
-    .section { padding: 96px 0; }
-    .hero { padding: 120px 0 80px; position: relative; overflow: clip; }
-    .hero::before{
-      content:''; position:absolute; inset:-20% -10% auto -10%; height: 560px;
-      background: radial-gradient(700px 350px at 0% 0%, var(--brand-weak), transparent 60%);
-      pointer-events:none; filter: blur(0.5px);
-    }
-    .grid-2 { display:grid; grid-template-columns: 1fr; gap: 28px; }
-    @media (min-width: 980px){ .grid-2 { grid-template-columns: 1.2fr 1fr; } }
-    .logo-dot { width:14px; height:14px; border-radius:4px; background: var(--brand); display:inline-block; box-shadow: 0 0 0 3px rgba(89,217,179,.15); }
-    nav a { color: var(--muted); text-decoration:none; }
-    nav a:hover { color: var(--text); }
-    .feature { display:flex; align-items:flex-start; gap:12px; }
-    .hr { height:1px; background: var(--border); border:0; }
-    .pricing-card { position:relative; overflow:hidden; }
-    .pricing-card .badge { position:absolute; right:12px; top:12px; }
-    .modal-backdrop { position:fixed; inset:0; background:rgba(8,10,12,.72); display:grid; place-items:center; z-index:10000; }
-    .modal { width:100%; max-width: 520px; border-radius:14px; background:linear-gradient(180deg, #0d1012, #0c0f10); border:1px solid rgba(89,217,179,.18); box-shadow: var(--shadow-soft); }
-    .input { height:44px; border-radius:10px; background: var(--panel); border:1px solid var(--border); color: var(--text); padding: 0 12px; outline:none; width:100%; }
-    .otp { letter-spacing: .28em; text-align:center; }
-  `}</style>
-);
+// If you created components/ui/Overlay.tsx from earlier, import it:
+// import { OverlayShell, OverlayHeader } from '@/components/ui/Overlay';
 
-/** --- Sign-in Modal (Email OTP or Google) --- */
-function SignInModal({
-  open, onClose, defaultEmail = '', postLoginPath = '/builder',
-}: { open: boolean; onClose: () => void; defaultEmail?: string; postLoginPath?: string }) {
-  const router = useRouter();
-  const [email, setEmail] = useState(defaultEmail);
-  const [stage, setStage] = useState<'method'|'code'|'sending'|'verifying'>('method');
-  const [code, setCode] = useState('');
-  const [error, setError] = useState('');
+// Minimal local copies so this page is self-contained:
+import { motion, AnimatePresence } from 'framer-motion';
+import { createPortal } from 'react-dom';
 
-  useEffect(()=>{ if(!open){ setStage('method'); setEmail(defaultEmail); setCode(''); setError(''); } }, [open, defaultEmail]);
+const GREEN = '#59d9b3';
+const GREEN_LINE = 'rgba(89,217,179,.20)';
 
-  const sendOtp = async () => {
-    try {
-      if (!email || !email.includes('@')) { setError('Enter a valid email.'); return; }
-      setError(''); setStage('sending');
-      const origin = typeof window !== 'undefined' ? window.location.origin : '';
-      const { error } = await supabase.auth.signInWithOtp({
-        email,
-        options: { emailRedirectTo: `${origin}/auth/callback` },
-      });
-      if (error) throw error;
-      setStage('code');
-    } catch (e:any) {
-      setStage('method'); setError(e?.message || 'Could not send code.');
-    }
-  };
+function OverlayShell({
+  open, onClose, children, maxWidth = 560
+}:{ open:boolean; onClose?:()=>void; children:React.ReactNode; maxWidth?:number; }) {
+  if (typeof document === 'undefined' || !open) return null;
+  return createPortal(
+    <AnimatePresence>
+      <motion.div
+        key="bg"
+        className="fixed inset-0 z-[100000]"
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        onClick={onClose}
+        style={{ background:'rgba(6,8,10,.62)', backdropFilter:'blur(6px)' }}
+      />
+      <div className="fixed inset-0 z-[100001] flex items-center justify-center px-4">
+        <motion.div
+          key="panel"
+          initial={{ opacity: 0, y: 10, scale: 0.98 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: 8, scale: 0.98 }}
+          transition={{ duration: .18, ease: 'easeOut' }}
+          className="w-full overflow-hidden"
+          style={{
+            maxWidth,
+            background:'var(--panel)',
+            color:'var(--text)',
+            border:`1px solid ${GREEN_LINE}`,
+            borderRadius: 12,
+            boxShadow:'0 20px 40px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset'
+          }}
+        >
+          {children}
+        </motion.div>
+      </div>
+    </AnimatePresence>, document.body
+  );
+}
 
-  const verifyOtp = async () => {
-    try {
-      if (!email || !code) return;
-      setError(''); setStage('verifying');
-      const { data, error } = await supabase.auth.verifyOtp({ email, token: code.trim(), type: 'email' });
-      if (error) throw error;
-      if (data?.session) { onClose(); router.replace(postLoginPath); }
-      else throw new Error('Invalid code.');
-    } catch (e:any) {
-      setStage('code'); setError(e?.message || 'Invalid code, try again.');
-    }
-  };
-
-  const loginGoogle = async () => {
-    try {
-      const origin = typeof window !== 'undefined' ? window.location.origin : '';
-      await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: { redirectTo: `${origin}/auth/callback` },
-      });
-      // OAuth will redirect; no further action here.
-    } catch (e:any) {
-      setError(e?.message || 'Google sign-in failed.');
-    }
-  };
-
-  if (!open) return null;
+function OverlayHeader({ title, icon, subtitle }:{
+  title:string; icon?:React.ReactNode; subtitle?:string;
+}) {
   return (
-    <div className="modal-backdrop" onClick={onClose} aria-modal aria-label="Sign in">
-      <div className="modal card" onClick={(e)=>e.stopPropagation()}>
-        {/* Header */}
-        <div style={{ padding:'16px 18px', borderBottom:'1px solid rgba(89,217,179,.18)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-          <div style={{ fontWeight:700, fontSize:18 }}>Welcome Back</div>
-          <button onClick={onClose} className="btn btn-ghost" style={{ height:34, padding:'0 10px' }} aria-label="Close"><X className="w-4 h-4"/></button>
-        </div>
-
-        {/* Body */}
-        <div style={{ padding:18 }}>
-          {stage === 'method' && (
-            <>
-              <label className="muted" style={{ fontSize:12 }}>Email Address</label>
-              <input className="input" placeholder="you@example.com" value={email} onChange={(e)=>setEmail(e.target.value)} />
-              <button className="btn btn-primary" style={{ width:'100%', marginTop:12 }}
-                onClick={sendOtp}>
-                <Mail className="w-4 h-4" /> Continue with Email
-              </button>
-
-              <div style={{ display:'grid', gridTemplateColumns:'1fr auto 1fr', alignItems:'center', gap:8, marginTop:14 }}>
-                <span className="hr" />
-                <span className="muted" style={{ fontSize:12 }}>or continue with</span>
-                <span className="hr" />
-              </div>
-
-              <button className="btn btn-ghost" style={{ width:'100%', marginTop:12, background:'#fff', color:'#222', borderColor:'rgba(0,0,0,.12)' }}
-                onClick={loginGoogle}>
-                <img alt="" src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width={18} height={18}/>
-                Continue with Google
-              </button>
-            </>
-          )}
-
-          {stage === 'sending' && (
-            <div style={{ display:'flex', gap:10, alignItems:'center', padding:'8px 0' }}>
-              <Loader2 className="w-4 h-4 animate-spin"/><div>Sending code to <b>{email}</b>…</div>
-            </div>
-          )}
-
-          {stage === 'code' && (
-            <>
-              <div className="muted" style={{ fontSize:14, marginBottom:6 }}>
-                We emailed a 6-digit code to <b style={{ color:'#fff' }}>{email}</b>.
-              </div>
-              <input
-                className="input otp"
-                placeholder="••••••"
-                maxLength={6}
-                value={code}
-                onChange={(e)=>setCode(e.target.value.replace(/[^0-9]/g,''))}
-              />
-              <button className="btn btn-primary" style={{ width:'100%', marginTop:12 }} onClick={verifyOtp}>
-                {stage === 'verifying' ? <Loader2 className="w-4 h-4 animate-spin"/> : <CheckCircle2 className="w-4 h-4" />}
-                Verify & Continue
-              </button>
-              <button className="btn btn-ghost" style={{ width:'100%', marginTop:8 }} onClick={()=>setStage('method')}>
-                Use a different email
-              </button>
-            </>
-          )}
-
-          {!!error && <div style={{ marginTop:10, color:'#ff6b6b', fontSize:12 }}>{error}</div>}
-
-          <div className="muted" style={{ fontSize:12, marginTop:14 }}>
-            By signing in you agree to our Terms of Service & Privacy Policy.
+    <div
+      className="flex items-center justify-between px-6 py-4"
+      style={{
+        background:'linear-gradient(90deg,var(--panel) 0%,color-mix(in oklab,var(--panel) 97%, white 3%) 50%,var(--panel) 100%)',
+        borderBottom:`1px solid ${GREEN_LINE}`
+      }}
+    >
+      <div className="flex items-center gap-3">
+        {icon ? (
+          <div className="grid place-items-center" style={{ width:40, height:40, borderRadius:10, background:'var(--brand-weak)' }}>
+            <span style={{ color: GREEN, filter:'drop-shadow(0 0 8px rgba(89,217,179,.35))' }}>{icon}</span>
           </div>
+        ) : null}
+        <div className="min-w-0">
+          <div className="text-lg font-semibold" style={{ color:'var(--text)' }}>{title}</div>
+          {subtitle ? <div className="text-xs" style={{ color:'var(--text-muted)' }}>{subtitle}</div> : null}
         </div>
       </div>
+      <span style={{ width:20, height:20 }} />
     </div>
   );
 }
 
-/** --- Page --- */
+/* ───────────────── Tokens copied from your overlay look ───────────────── */
+const Tokens = () => (
+  <style jsx global>{`
+    /* Dark default */
+    :root {
+      --bg:#0b0c10; --panel:#0d0f11; --card:#0f1214;
+      --text:#e6f1ef; --text-muted:#9fb4ad;
+      --brand:${GREEN}; --brand-weak:rgba(89,217,179,.22);
+      --border:rgba(255,255,255,.10);
+      --radius:14px;
+    }
+    :root:not([data-theme="dark"]) {
+      --bg:#f7faf9; --panel:#ffffff; --card:#f4f7f6;
+      --text:#0f172a; --text-muted:#64748b;
+      --brand:${GREEN}; --brand-weak:rgba(89,217,179,.18);
+      --border:rgba(15,23,42,.12);
+    }
+    body { background:var(--bg); color:var(--text); }
+    .x-card {
+      background: var(--panel);
+      border: 1px solid ${GREEN_LINE};
+      border-radius: 12px;
+      box-shadow: 0 20px 40px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset;
+    }
+    .x-btn {
+      height: 48px; border-radius: 999px; padding: 0 18px;
+      font-weight: 600; letter-spacing: .01em;
+    }
+    .x-btn--primary {
+      background: var(--brand); color: #fff; border: 1px solid ${GREEN_LINE};
+    }
+    .x-btn--ghost {
+      background: transparent; color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .x-bullet { display:inline-flex; align-items:center; gap:8px; font-size:13px; color:var(--text-muted); }
+  `}</style>
+);
+
+/* ───────────────── Auth Overlay (magic link + Google) ───────────────── */
+function AuthOverlay({ open, onClose }:{ open:boolean; onClose:()=>void }) {
+  const [email,setEmail] = useState('');
+  const [busy,setBusy] = useState(false);
+  const [sent,setSent] = useState(false);
+
+  async function withEmail() {
+    if (!email) return;
+    setBusy(true);
+    try {
+      await supabase.auth.signInWithOtp({
+        email,
+        options: { emailRedirectTo: `${window.location.origin}/auth/callback` }
+      });
+      setSent(true);
+    } finally { setBusy(false); }
+  }
+
+  async function withGoogle() {
+    setBusy(true);
+    try {
+      await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo: `${window.location.origin}/auth/callback` }
+      });
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <OverlayShell open={open} onClose={onClose} maxWidth={520}>
+      <OverlayHeader title="Welcome back" subtitle="Choose your preferred sign-in" icon={<LogIn className="w-5 h-5" />} />
+      <div className="px-6 py-6">
+        {!sent ? (
+          <>
+            <label className="block text-xs mb-2" style={{ color:'var(--text-muted)' }}>Email address</label>
+            <input
+              value={email}
+              onChange={(e)=>setEmail(e.target.value)}
+              placeholder="you@example.com"
+              className="w-full h-[48px] px-3"
+              style={{ background:'var(--panel)', border:`1px solid var(--border)`, color:'var(--text)', borderRadius:'12px' }}
+            />
+            <div className="mt-3 grid gap-2">
+              <button onClick={withEmail} disabled={busy} className="x-btn x-btn--primary">
+                {busy ? 'Sending…' : <>Continue with Email <ArrowRight className="inline-block w-4 h-4 ml-1" /></>}
+              </button>
+              <button onClick={withGoogle} disabled={busy} className="x-btn x-btn--ghost">
+                <svg width="18" height="18" viewBox="0 0 48 48" className="mr-1 inline-block" style={{ verticalAlign:'-3px' }}>
+                  <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3 0 5.7 1.1 7.8 3l5.7-5.7C33.5 6.2 28.9 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20c10.7 0 19.5-8 19.5-20 0-1.3-.1-2.2-.3-3.5z"/>
+                  <path fill="#FF3D00" d="M6.3 14.7l6.6 4.9C14.7 16.2 19 12 24 12c3 0 5.7 1.1 7.8 3l5.7-5.7C33.5 6.2 28.9 4 24 4 15.5 4 8.3 9.1 6.3 14.7z"/>
+                  <path fill="#4CAF50" d="M24 44c5.2 0 10-2 13.5-5.3l-6.2-5.2C29.3 36 26.8 37 24 37c-5.2 0-9.6-3.3-11.3-7.9l-6.6 5.1C8.2 39 15.6 44 24 44z"/>
+                  <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-1.3 3.7-4.8 6-9.3 6-5.2 0-9.6-3.3-11.3-7.9l-6.6 5.1C8.2 39 15.6 44 24 44c10.7 0 19.5-8 19.5-20 0-1.3-.1-2.2-.3-3.5z"/>
+                </svg>
+                Continue with Google
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="x-card p-4 text-sm">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4" style={{ color: GREEN }} />
+              Magic link sent to <b>{email}</b>. Check your inbox.
+            </div>
+          </div>
+        )}
+      </div>
+    </OverlayShell>
+  );
+}
+
+/* ───────────────── Page ───────────────── */
 export default function Home() {
   const router = useRouter();
-  const [modalOpen, setModalOpen] = useState(false);
-  const [authed, setAuthed] = useState(false);
-
-  useEffect(() => {
-    (async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      setAuthed(Boolean(session));
-    })();
-  }, []);
-
-  const goPricing = () => router.push('/pricing'); // trial/plan flows page
-  const goBuilderIfAuthed = () => authed ? router.push('/builder') : setModalOpen(true);
+  const [authOpen, setAuthOpen] = useState(false);
 
   return (
     <>
-      <Head>
-        <title>Reduc.ai — Ship voice that sells</title>
-        <meta name="description" content="Build a natural-sounding voice agent your users actually enjoy." />
-      </Head>
+      <Head><title>Reduc.ai — Voice that sells</title></Head>
       <Tokens />
 
-      {/* Nav */}
-      <header style={{ position:'sticky', top:0, zIndex:50, borderBottom:'1px solid var(--border)', background:'rgba(11,12,16,.78)', backdropFilter:'blur(6px)' }}>
-        <div className="container" style={{ display:'flex', alignItems:'center', height:66, gap:16 }}>
-          <div style={{ display:'flex', alignItems:'center', gap:10, fontWeight:800 }}>
-            <span className="logo-dot" aria-hidden />
-            <span>Reduc.ai</span>
+      {/* NAV — calm, roomy, rounded CTAs */}
+      <header className="w-full" style={{ borderBottom:`1px solid ${GREEN_LINE}` }}>
+        <div className="mx-auto max-w-[1160px] px-5 lg:px-6 h-[64px] flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="grid place-items-center w-7 h-7 rounded-md" style={{ background:'var(--brand-weak)' }}>
+              <Sparkles className="w-4 h-4" style={{ color: GREEN }} />
+            </div>
+            <div className="text-sm" style={{ color:'var(--text)' }}>Reduc.ai</div>
           </div>
-          <nav style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:18, fontSize:14 }}>
-            <a href="#features">Features</a>
-            <a href="#how">How it works</a>
-            <a href="#faq">FAQ</a>
-            <button className="btn btn-primary" onClick={()=>setModalOpen(true)}>Sign in / Sign up</button>
-          </nav>
+          <div className="flex items-center gap-8">
+            <button className="x-btn x-btn--ghost" onClick={()=>router.push('#features')}>Features</button>
+            <button className="x-btn x-btn--primary" onClick={()=>setAuthOpen(true)}>Sign in / Sign up</button>
+          </div>
         </div>
       </header>
 
-      {/* Hero */}
-      <section className="hero">
-        <div className="container grid-2" style={{ alignItems:'center' }}>
-          <div>
-            <div className="pill" style={{ display:'inline-flex', alignItems:'center', gap:8, marginBottom:14 }}>
-              <Zap className="w-4 h-4" /> Launch a voice agent in minutes
-            </div>
-            <h1 style={{ fontSize:48, lineHeight:1.05, margin:'8px 0 16px', fontWeight:800 }}>
-              Build a <span style={{ color:'var(--brand)' }}>natural-sounding</span> voice agent your users actually enjoy.
-            </h1>
-            <p className="muted" style={{ maxWidth:640 }}>
-              Reduc.ai gives you realtime voice, smart call flow, and tool integrations—without the yak-shaving.
-              Ship a production agent today, not next quarter.
-            </p>
+      {/* HERO — “welcome”, lighter weight, big spacing */}
+      <main>
+        <section
+          className="pt-20 pb-16"
+          style={{
+            background: 'radial-gradient(900px 420px at 0% -10%, var(--brand-weak), transparent 60%), var(--bg)'
+          }}
+        >
+          <div className="mx-auto max-w-[1160px] px-5 lg:px-6 grid grid-cols-1 lg:grid-cols-[1.1fr,.9fr] gap-10 items-center">
+            <div>
+              <div className="inline-flex items-center gap-2 x-card px-3 h-[36px] text-xs mb-5"
+                   style={{ borderRadius: 999 }}>
+                <Play className="w-3.5 h-3.5" style={{ color: GREEN }} />
+                Launch a voice agent in minutes
+              </div>
 
-            <div style={{ display:'flex', gap:12, marginTop:16, flexWrap:'wrap' }}>
-              <button className="btn btn-primary" onClick={goPricing}>
-                Try free <ArrowRight className="w-4 h-4" />
-              </button>
-              <button className="btn btn-ghost" onClick={goBuilderIfAuthed}>
-                See how it works
-              </button>
+              <h1 className="leading-tight" style={{ fontSize: '44px', fontWeight: 700 }}>
+                Welcome to <span style={{ color: GREEN }}>Reduc.ai</span> — a calm way to build
+                <br /> a natural-sounding voice agent.
+              </h1>
+
+              <p className="mt-4" style={{ color:'var(--text-muted)', fontSize:16, lineHeight:1.6 }}>
+                Clean onboarding. Clear pricing. Secure sessions. No clutter — just the pieces you need to ship.
+              </p>
+
+              <div className="mt-6 flex flex-wrap items-center gap-3">
+                <button className="x-btn x-btn--primary" onClick={()=>setAuthOpen(true)}>
+                  Try free <ArrowRight className="inline-block w-4 h-4 ml-1" />
+                </button>
+                <button className="x-btn x-btn--ghost" onClick={()=>router.push('#how')}>
+                  See how it works
+                </button>
+              </div>
+
+              <div className="mt-6 flex flex-wrap gap-5">
+                <span className="x-bullet"><Shield className="w-4 h-4" /> Secure by Supabase Auth</span>
+                <span className="x-bullet"><Rocket className="w-4 h-4" /> Realtime & low latency</span>
+                <span className="x-bullet"><Mail className="w-4 h-4" /> Magic links or Google</span>
+              </div>
             </div>
 
-            <div style={{ display:'flex', gap:18, marginTop:18, flexWrap:'wrap' }}>
-              <span className="muted" style={{ display:'inline-flex', alignItems:'center', gap:8 }}>
-                <Shield className="w-4 h-4" /> Safe by default
-              </span>
-              <span className="muted" style={{ display:'inline-flex', alignItems:'center', gap:8 }}>
-                <Globe className="w-4 h-4" /> Realtime turn-taking
-              </span>
+            {/* Right preview card (quiet) */}
+            <div className="x-card p-5">
+              <div className="text-sm mb-3" style={{ color:'var(--text-muted)' }}>Live demo preview</div>
+              <div className="x-card p-4" style={{ background:'var(--card)' }}>
+                “Hi! I can help you book or reschedule. How can I help today?”
+              </div>
+              <div className="text-xs mt-3" style={{ color:'var(--text-muted)' }}>
+                Barge-in • Micro-pauses • Tool integrations
+              </div>
             </div>
           </div>
+        </section>
 
-          <div className="card" style={{ padding:16 }}>
-            <div className="muted" style={{ fontSize:12, marginBottom:8 }}>Live demo preview</div>
-            <div className="card" style={{ padding:14 }}>
-              <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:10 }}>
-                <div className="pill" style={{ background:'rgba(89,217,179,.12)' }}>Riley (Scheduling)</div>
-                <span className="muted" style={{ fontSize:12, marginLeft:'auto' }}>Uses your own key</span>
-              </div>
-              <div className="card" style={{ padding:14 }}>
-                “Hi! I can help you book, reschedule, or answer questions. What can I do for you today?”
-              </div>
-              <div className="muted" style={{ fontSize:12, marginTop:8 }}>
-                Barge-in • Filler word control • Micro-pauses • Phone filtering
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Logos spacer */}
-      <section className="section" style={{ paddingTop:24 }}>
-        <div className="container" style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr)', gap:18, opacity:.8 }}>
-          <div className="muted" style={{ textAlign:'center' }}>ACME</div>
-          <div className="muted" style={{ textAlign:'center' }}>GLOBEX</div>
-          <div className="muted" style={{ textAlign:'center' }}>UMBRELLA</div>
-          <div className="muted" style={{ textAlign:'center' }}>STARK</div>
-          <div className="muted" style={{ textAlign:'center' }}>HOOLI</div>
-        </div>
-      </section>
-
-      {/* Features */}
-      <section id="features" className="section">
-        <div className="container">
-          <h2 style={{ fontSize:32, fontWeight:800, marginBottom:8 }}>Everything you need</h2>
-          <p className="muted" style={{ marginBottom:24 }}>Production voice, tool calls, analytics, and guardrails.</p>
-
-          <div className="grid-2" style={{ gridTemplateColumns:'repeat(2,1fr)' as any }}>
+        {/* FEATURES — airy spacing, lighter fonts */}
+        <section id="features" className="py-18 md:py-24">
+          <div className="mx-auto max-w-[1160px] px-5 lg:px-6 grid gap-6 md:grid-cols-3">
             {[
-              ['Realtime, human-like voice', 'Natural back-and-forth with micro-pauses and barge-in.'],
-              ['Smart call flow', 'Guide users toward booking, purchase, or escalation.'],
-              ['Tool integrations', 'Connect to calendars, CRMs, and your APIs.'],
-              ['Safe by default', 'Policies and fallbacks prevent awkward outcomes.'],
-            ].map(([t, s], i)=>(
-              <div key={i} className="card" style={{ padding:18 }}>
-                <div className="feature">
-                  <CheckCircle2 className="w-5 h-5" style={{ color:'var(--brand)' }}/>
-                  <div>
-                    <div style={{ fontWeight:700, marginBottom:4 }}>{t}</div>
-                    <div className="muted">{s}</div>
+              { icon:<Shield className="w-5 h-5"/>, title:'Secure sessions', body:'OAuth or magic link. Your data stays yours.'},
+              { icon:<Rocket className="w-5 h-5"/>, title:'Production ready', body:'Realtime voice, smart call flow, tool hooks.'},
+              { icon:<Sparkles className="w-5 h-5"/>, title:'Calm UI', body:'Less noise, more signal. Ship faster.'},
+            ].map((f,i)=>(
+              <div key={i} className="x-card p-5">
+                <div className="flex items-center gap-3">
+                  <div className="grid place-items-center w-9 h-9 rounded-md" style={{ background:'var(--brand-weak)' }}>
+                    <span style={{ color: GREEN }}>{f.icon}</span>
                   </div>
+                  <div className="font-semibold">{f.title}</div>
                 </div>
+                <p className="mt-3 text-sm" style={{ color:'var(--text-muted)' }}>{f.body}</p>
               </div>
             ))}
           </div>
-        </div>
-      </section>
+        </section>
 
-      {/* How it works */}
-      <section id="how" className="section">
-        <div className="container grid-2">
-          <div>
-            <h2 style={{ fontSize:32, fontWeight:800, marginBottom:8 }}>How it works</h2>
-            <ol className="muted" style={{ lineHeight:1.7 }}>
-              <li><b>Pick a template</b> (Scheduling, Support, Sales).</li>
-              <li><b>Paste your business facts</b> or import your website.</li>
-              <li><b>Connect tools</b> (calendars, webhooks).</li>
-              <li><b>Click “Publish”</b> and share the number or embed the widget.</li>
-            </ol>
-            <div style={{ marginTop:16 }}>
-              <button className="btn btn-primary" onClick={()=>setModalOpen(true)}>
-                Get started free
-              </button>
+        {/* HOW — simple, spaced */}
+        <section id="how" className="pb-24">
+          <div className="mx-auto max-w-[900px] px-5 lg:px-6">
+            <div className="x-card p-6 md:p-8">
+              <div className="text-lg font-semibold mb-2">How it works</div>
+              <ol className="grid gap-3 text-sm" style={{ color:'var(--text-muted)' }}>
+                <li>1. Create your account (Google or email link).</li>
+                <li>2. Pick the Starter plan (free trial), or skip for now.</li>
+                <li>3. Build an agent, hook tools, test live, deploy.</li>
+              </ol>
+              <div className="mt-4">
+                <button className="x-btn x-btn--primary" onClick={()=>setAuthOpen(true)}>
+                  Start free <ArrowRight className="inline-block w-4 h-4 ml-1" />
+                </button>
+              </div>
             </div>
           </div>
-          <div className="card" style={{ padding:18 }}>
-            <div className="muted" style={{ fontSize:12, marginBottom:6 }}>Sample flow</div>
-            <img alt="" src="https://dummyimage.com/680x420/0f1214/59d9b3.png&text=Flow+Builder" style={{ width:'100%', borderRadius:10, border:'1px solid var(--border)' }}/>
-          </div>
-        </div>
-      </section>
+        </section>
+      </main>
 
-      {/* FAQ */}
-      <section id="faq" className="section">
-        <div className="container">
-          <h2 style={{ fontSize:32, fontWeight:800, marginBottom:8 }}>FAQ</h2>
-          <div className="grid-2" style={{ gridTemplateColumns:'repeat(2,1fr)' as any }}>
-            {[
-              ['Is there a free trial?', 'Yes. Start on the Starter plan with a 3-week free trial.'],
-              ['Can I use Google to sign in?', 'Yes, one click with Google or use a code sent to your email.'],
-              ['Can it call my APIs?', 'Yep. Use webhooks or connect common tools.'],
-              ['Is my data safe?', 'Sessions are secured with Supabase Auth and stored in your region.'],
-            ].map(([q, a], i)=>(
-              <div key={i} className="card" style={{ padding:18 }}>
-                <div style={{ fontWeight:700, marginBottom:6 }}>{q}</div>
-                <div className="muted">{a}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Footer */}
-      <footer style={{ borderTop:'1px solid var(--border)' }}>
-        <div className="container" style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'20px 0' }}>
-          <div className="muted">© {new Date().getFullYear()} Reduc.ai</div>
-          <div className="muted" style={{ display:'flex', gap:14 }}>
-            <a href="/privacy">Privacy</a>
-            <a href="/terms">Terms</a>
-          </div>
+      {/* FOOTER */}
+      <footer className="py-10" style={{ borderTop:`1px solid ${GREEN_LINE}` }}>
+        <div className="mx-auto max-w-[1160px] px-5 lg:px-6 text-sm" style={{ color:'var(--text-muted)' }}>
+          © {new Date().getFullYear()} Reduc.ai — Ship voice that sells.
         </div>
       </footer>
 
-      {/* Auth Modal */}
-      <SignInModal open={modalOpen} onClose={()=>setModalOpen(false)} />
+      {/* Auth modal */}
+      <AuthOverlay open={authOpen} onClose={()=>setAuthOpen(false)} />
     </>
   );
 }
