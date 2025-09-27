@@ -1,26 +1,50 @@
 // components/ui/Sidebar.tsx
 'use client';
 
-import { useEffect, useState, cloneElement } from 'react';
+import { useEffect, useMemo, useState, cloneElement } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   Home, Hammer, Mic, Rocket,
-  Phone, Key, HelpCircle,
-  ChevronLeft, ChevronRight,
-  User as UserIcon, Bot,
-  Users             // ← NEW: icon for Subaccounts
+  ShoppingBag, GraduationCap, KeyRound,
+  Layers3, PlayCircle, LifeBuoy, Users,
+  ChevronLeft, ChevronRight, Bot, User as UserIcon
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase-client';
 
-const W_EXPANDED = 260;
-const W_COLLAPSED = 68;
+/* ────────────────────────────────────────────────────────────────────────── */
+/* Sizing & tokens                                                          */
+const W_EXPANDED = 228;                 // slim width (fits the screenshots)
+const W_COLLAPSED = 58;
 const LS_COLLAPSED = 'ui:sidebarCollapsed';
 
-// brand
-const BRAND = '#10b981';
-const BRAND_DEEP = '#12a989';
-const BRAND_WEAK = 'rgba(0,255,194,.10)';
+const CTA   = '#59d9b3';                // brand green
+const SEP   = 'rgba(89,217,179,.10)';   // separators
+const DARK_BASE = '#0b0f11';
+const LIGHT_BASE = '#ffffff';
+const TXT_DARK  = 'rgba(236,242,247,.92)';
+const TXT_LIGHT = '#0f172a';
+
+const PLATE_SIZE = 36;                  // square icon plate
+const PLATE_RADIUS = 10;                // less rounded
+const ICON_PX = 15;                     // slightly smaller icons
+
+/* Subtle line-gradient bands: center darkest, sides lighten ≤0.5% */
+function railBands(isDark: boolean) {
+  const base = isDark ? DARK_BASE : LIGHT_BASE;
+  const steps = 13, bw = 100 / steps, mid = Math.floor(steps / 2);
+  const parts: string[] = [];
+  for (let i = 0; i < steps; i++) {
+    const lift = Math.min(Math.abs(i - mid) * 0.005, 0.005); // ≤ 0.5%
+    const col = `color-mix(in oklab, ${base} ${100 - lift * 100}%, ${CTA} ${lift * 100}%)`;
+    parts.push(`${col} ${i * bw}%, ${col} ${(i + 1) * bw}%`);
+  }
+  return `linear-gradient(90deg, ${parts.join(',')})`;
+}
+
+/* Helpers */
+const iconize = (node: JSX.Element, px = ICON_PX) =>
+  cloneElement(node, { className: `w-[${px}px] h-[${px}px] shrink-0`, strokeWidth: 2 });
 
 function getDisplayName(name?: string | null, email?: string | null) {
   if (name && name.trim()) return name.trim();
@@ -28,45 +52,57 @@ function getDisplayName(name?: string | null, email?: string | null) {
   return 'Account';
 }
 
-type NavItem = {
-  href: string;
-  label: string;
-  sub?: string;
-  icon: JSX.Element;
-  group: 'workspace' | 'resources';
-  id: string;
+/* Your OWN names (not buildmyagent’s) — adjust labels/hrefs freely */
+type Nav = {
+  id: string; href: string; label: string; sub?: string;
+  icon: JSX.Element; group: 'workspace' | 'resources';
 };
 
-const NAV: NavItem[] = [
-  { id: 'create', href: '/builder',      label: 'Create',       sub: 'Design your agent',     icon: <Home />,   group: 'workspace' },
-  { id: 'tuning', href: '/improve',      label: 'Tuning',       sub: 'Integrate & optimize',  icon: <Hammer />, group: 'workspace' },
-  { id: 'voice',  href: '/voice-agent',  label: 'Voice Studio', sub: 'Calls & persona',       icon: <Mic />,    group: 'workspace' },
+const NAV: Nav[] = [
+  // WORKSPACE (top four)
+  { id:'create',  href:'/builder',     label:'Create',     sub:'Design your agent',      icon:<Home/>,        group:'workspace' },
+  { id:'tuning',  href:'/improve',     label:'Tuning',     sub:'Integrate & optimize',   icon:<Hammer/>,      group:'workspace' },
+  { id:'showcase',href:'/voice-agent', label:'Showcase',   sub:'Demos & persona',        icon:<Mic/>,         group:'workspace' },
+  { id:'launch',  href:'/launch',      label:'Launchpad',  sub:'Go live',                icon:<Rocket/>,      group:'workspace' },
 
-  // ← NEW: Subaccounts (only addition you asked for)
-  { id: 'subaccounts', href: '/subaccounts', label: 'Subaccounts', sub: 'Transcripts', icon: <Users />, group: 'workspace' },
-
-  { id: 'launch', href: '/launch',       label: 'Launchpad',    sub: 'Go live',               icon: <Rocket />, group: 'workspace' },
-
-  { id: 'numbers', href: '/phone-numbers', label: 'Numbers',    sub: 'Twilio & BYO',          icon: <Phone />,  group: 'resources' },
-  { id: 'keys',    href: '/apikeys',       label: 'API Keys',    sub: 'Models & access',       icon: <Key />,    group: 'resources' },
-  { id: 'help',    href: '/support',       label: 'Help',        sub: 'Guides & FAQ',          icon: <HelpCircle />, group: 'resources' },
+  // RESOURCES (muted)
+  { id:'market',  href:'/market',      label:'Market',                                 icon:<ShoppingBag/>, group:'resources' },
+  { id:'mentor',  href:'/mentor',      label:'AI Mentor',                             icon:<GraduationCap/>,group:'resources' },
+  { id:'keys',    href:'/apikeys',     label:'API Keys',                              icon:<KeyRound/>,     group:'resources' },
+  { id:'bulk',    href:'/bulk-tester', label:'Bulk Tester',                           icon:<Layers3/>,      group:'resources' },
+  { id:'videos',  href:'/videos',      label:'Video Guides',                          icon:<PlayCircle/>,   group:'resources' },
+  { id:'support', href:'/support',     label:'Support',                               icon:<LifeBuoy/>,     group:'resources' },
+  { id:'aff',     href:'/affiliate',   label:'Affiliate',                             icon:<Users/>,        group:'resources' },
 ];
+
+/* ────────────────────────────────────────────────────────────────────────── */
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
 
+  /* collapsed state */
   const [collapsed, setCollapsed] = useState<boolean>(() => {
-    try {
-      const raw = localStorage.getItem(LS_COLLAPSED);
-      return raw ? JSON.parse(raw) : false;
-    } catch { return false; }
+    try { return JSON.parse(localStorage.getItem(LS_COLLAPSED) ?? 'false'); }
+    catch { return false; }
   });
   useEffect(() => {
     try { localStorage.setItem(LS_COLLAPSED, JSON.stringify(collapsed)); } catch {}
-    document.documentElement.style.setProperty('--sidebar-w', ${collapsed ? W_COLLAPSED : W_EXPANDED}px);
+    document.documentElement.style.setProperty('--sidebar-w', `${collapsed ? W_COLLAPSED : W_EXPANDED}px`);
   }, [collapsed]);
 
-  // user
+  /* theme (light/dark) — derive from attribute or localStorage.theme */
+  const [isDark, setIsDark] = useState(true);
+  useEffect(() => {
+    const get = () =>
+      (document.documentElement.getAttribute('data-theme') ?? localStorage.getItem('theme') ?? 'dark') === 'dark';
+    setIsDark(get());
+    const onChange = () => setIsDark(get());
+    window.addEventListener('theme:change', onChange);
+    return () => window.removeEventListener('theme:change', onChange);
+  }, []);
+
+  /* auth (for account row) */
   const [userLoading, setUserLoading] = useState(true);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [userName, setUserName] = useState<string | null>(null);
@@ -88,249 +124,228 @@ export default function Sidebar() {
     return () => unsub?.data?.subscription?.unsubscribe?.();
   }, []);
 
-  const pathnameActive = (item: NavItem) => {
+  const textColor = isDark ? TXT_DARK : TXT_LIGHT;
+  const subColor  = isDark ? 'rgba(176,196,210,.62)' : 'rgba(60,72,88,.74)';
+
+  const isActive = (item: Nav) => {
     const p = pathname || '';
-    if (item.href === '/launch') return p === '/launch';
+    if (item.href === '/launch') return p === '/launch'; // exact on launch
     return p.startsWith(item.href);
   };
 
-  const isWorkspace = (id: string) => NAV.find(n => n.id === id)?.group === 'workspace';
+  /* Plates */
+  const WorkPlate = ({ children, active }: {children: React.ReactNode; active?: boolean}) => (
+    <div
+      className="grid place-items-center"
+      style={{
+        width: PLATE_SIZE, height: PLATE_SIZE, borderRadius: PLATE_RADIUS,
+        background: isDark
+          ? 'color-mix(in oklab, #12191d 88%, #59d9b3 12%)'
+          : 'color-mix(in oklab, #eaf3ef 92%, #10b981 8%)',
+        border: `1px solid ${isDark ? 'rgba(89,217,179,.22)' : 'rgba(16,185,129,.28)'}`,
+        color: active ? CTA : textColor,
+        transition: 'box-shadow .18s ease, transform .18s ease'
+      }}
+    >
+      {children}
+    </div>
+  );
 
-  // center/size lucide icons
-  const renderIcon = (node: JSX.Element) =>
-    cloneElement(node, { className: 'w-[18px] h-[18px] shrink-0', strokeWidth: 2 });
+  const ResPlate = ({ children }: {children: React.ReactNode}) => (
+    <div
+      className="grid place-items-center plate-res"
+      style={{
+        width: PLATE_SIZE, height: PLATE_SIZE, borderRadius: PLATE_RADIUS,
+        background: isDark ? 'rgba(255,255,255,.06)' : 'rgba(15,23,42,.06)',
+        border: isDark ? '1px solid rgba(255,255,255,.12)' : '1px solid rgba(15,23,42,.12)',
+        color: isDark ? 'rgba(255,255,255,.82)' : '#0f172a',
+        transition: 'opacity .18s ease'
+      }}
+    >
+      {children}
+    </div>
+  );
 
-  const Item = ({ item, active }: { item: NavItem; active: boolean }) => {
-    const green = isWorkspace(item.id);
+  const Item = ({ item, active, white }: { item: Nav; active: boolean; white?: boolean }) => (
+    <Link href={item.href} className="block group" title={collapsed ? item.label : undefined}>
+      <div
+        className="relative flex items-center h-[46px] rounded-[10px] pr-2"
+        style={{
+          paddingLeft: collapsed ? 0 : 12,
+          gap: collapsed ? 0 : 12,
+          transition: 'all 220ms cubic-bezier(0.16,1,0.3,1)'
+        }}
+      >
+        {white
+          ? <ResPlate>{iconize(item.icon)}</ResPlate>
+          : <WorkPlate active={active}>{iconize(item.icon)}</WorkPlate>
+        }
 
-    const bg = collapsed && active ? 'rgba(16,185,129,.14)' : 'var(--sb-icon-bg)';
-    const border = collapsed && active ? 'rgba(16,185,129,.45)' : 'var(--sb-icon-border)';
-    const halo = active
-      ? 0 0 0 1px ${BRAND_WEAK}, 0 8px 18px rgba(0,0,0,.22), 0 0 18px rgba(16,185,129,.25)
-      : 'inset 0 0 10px rgba(0,0,0,.16)';
-
-    return (
-      <Link href={item.href} className="block group">
+        {/* labels (hidden in collapsed) */}
         <div
-          className="relative flex items-center h-10 rounded-[12px] pr-2"
+          className="overflow-hidden"
           style={{
-            transition: 'gap 380ms cubic-bezier(0.16,1,0.3,1), padding 380ms cubic-bezier(0.16,1,0.3,1)',
-            paddingLeft: collapsed ? 0 : 10,
-            gap: collapsed ? 0 : 10,
+            maxWidth: collapsed ? 0 : 160,
+            opacity: collapsed ? 0 : 1,
+            transform: collapsed ? 'translateX(-6px)' : 'translateX(0)',
+            transition: 'all 220ms cubic-bezier(0.16,1,0.3,1)',
+            lineHeight: 1.05
           }}
         >
-          <div
-            className="w-10 h-10 rounded-[12px] grid place-items-center"
-            style={{
-              background: bg,
-              border: 1px solid ${border},
-              boxShadow: halo,
-              color: green ? BRAND_DEEP : 'var(--sidebar-text)',
-            }}
-            title={collapsed ? item.label : undefined}
-          >
-            {renderIcon(item.icon)}
+          <div className="font-movatif" style={{ fontSize: 13.5, fontWeight: 500, color: textColor }}>
+            {item.label}
           </div>
-
-          <div
-            className="overflow-hidden"
-            style={{
-              transition: 'max-width 380ms cubic-bezier(0.16,1,0.3,1), opacity 380ms cubic-bezier(0.16,1,0.3,1), transform 380ms cubic-bezier(0.16,1,0.3,1)',
-              maxWidth: collapsed ? 0 : 200,
-              opacity: collapsed ? 0 : 1,
-              transform: collapsed ? 'translateX(-6px)' : 'translateX(0)',
-              lineHeight: 1.1,
-            }}
-          >
-            <div className="text-[13px] font-semibold" style={{ color: 'var(--sidebar-text)' }}>
-              {item.label}
+          {item.sub && item.group === 'workspace' && (
+            <div className="font-movatif" style={{ fontSize: 11.5, opacity: .6, color: subColor, marginTop: 2, fontWeight: 450 }}>
+              {item.sub}
             </div>
-            {item.sub && (
-              <div className="text-[11px]" style={{ color: 'var(--sidebar-muted)', marginTop: 3 }}>
-                {item.sub}
-              </div>
-            )}
-          </div>
-
-          {/* NEW: tiny green dot on the far right when active & expanded */}
-          {!collapsed && active && (
-            <span
-              aria-hidden
-              className="ml-auto rounded-full"
-              style={{ width: 8, height: 8, background: BRAND }}
-            />
           )}
         </div>
 
-        <div
-          className="h-[2px] rounded-full"
-          style={{
-            transition: 'background 380ms cubic-bezier(0.16,1,0.3,1), margin 380ms cubic-bezier(0.16,1,0.3,1)',
-            marginLeft: collapsed ? 16 : 12,
-            marginRight: 12,
-            background: active
-              ? 'linear-gradient(90deg, transparent, rgba(16,185,129,.35), transparent)'
-              : 'linear-gradient(90deg, transparent, rgba(16,185,129,.0), transparent)',
-          }}
-        />
-      </Link>
-    );
-  };
+        {/* tiny active dot (expanded only) */}
+        {!collapsed && active && (
+          <span aria-hidden className="ml-auto rounded-full" style={{ width: 7, height: 7, background: CTA }} />
+        )}
+      </div>
+
+      <style jsx>{`
+        /* hover */
+        a.block.group > div:hover > div:first-child{ /* the plate */
+          ${white
+            ? 'opacity:.94;'
+            : 'box-shadow:0 0 0 1px rgba(89,217,179,.32), 0 0 18px rgba(89,217,179,.14); transform: translateY(-1px);'
+          }
+        }
+      `}</style>
+    </Link>
+  );
+
+  const workspace = useMemo(() => NAV.filter(n => n.group === 'workspace'), []);
+  const resources = useMemo(() => NAV.filter(n => n.group === 'resources'), []);
 
   return (
     <aside
-      className="fixed left-0 top-0 h-screen z-50 font-movatif"
+      className="fixed left-0 top-0 h-screen z-50 font-movatif sidebar"
       style={{
         width: collapsed ? W_COLLAPSED : W_EXPANDED,
-        transition: 'width 420ms cubic-bezier(0.16, 1, 0.3, 1)',
-        willChange: 'width',
-        background: 'var(--sidebar-bg)',
-        color: 'var(--sidebar-text)',
-        borderRight: '1px solid var(--sidebar-border)',
-        boxShadow: 'var(--sb-shell-shadow, inset 0 0 18px rgba(0,0,0,0.28))',
+        transition: 'width 300ms cubic-bezier(0.16,1,0.3,1)',
+        background: railBands(isDark),               // bands only on rail body
+        color: textColor,
+        borderRight: `1px solid ${SEP}`,
+        boxShadow: 'inset 0 0 18px rgba(0,0,0,.28), 14px 0 28px rgba(0,0,0,.42)'
       }}
       aria-label="Primary"
     >
       <div className="relative h-full flex flex-col">
-        {/* Header — ONLY logo + name (subtitle removed) */}
-        <div className="px-4 pt-5 pb-4">
-          <div className="flex items-center gap-3">
+
+        {/* BRAND (filled block; NO bands inside) */}
+        <div style={{ padding: '16px 12px 12px', background: isDark ? DARK_BASE : LIGHT_BASE }}>
+          <div className="flex flex-col items-center gap-2">
             <div
-              className="w-9 h-9 rounded-xl grid place-items-center shrink-0"
-              style={{ background: BRAND, boxShadow: '0 0 10px rgba(0,255,194,0.35)' }}
-            >
-              <Bot className="w-5 h-5 text-black" />
-            </div>
-            <div
-              className="overflow-hidden"
+              className="grid place-items-center"
               style={{
-                transition: 'max-width 420ms cubic-bezier(0.16,1,0.3,1), opacity 420ms cubic-bezier(0.16,1,0.3,1), transform 420ms cubic-bezier(0.16,1,0.3,1)',
-                maxWidth: collapsed ? 0 : 200,
-                opacity: collapsed ? 0 : 1,
-                transform: collapsed ? 'translateX(-6px)' : 'translateX(0)',
+                width: 40, height: 40, borderRadius: 12,
+                background: isDark ? 'rgba(255,255,255,.12)' : 'rgba(15,23,42,.08)',
+                border: isDark ? '1px solid rgba(255,255,255,.18)' : '1px solid rgba(15,23,42,.16)'
               }}
             >
-              <div className="text-[17px] font-semibold tracking-wide" style={{ color: 'var(--sidebar-text)' }}>
-                reduc<span style={{ color: BRAND }}>ai.io</span>
-              </div>
+              <Bot className="w-5 h-5" style={{ color: '#fff' }} />
             </div>
+            {!collapsed && (
+              <div className="font-movatif" style={{ fontSize: 16, fontWeight: 550, color: isDark ? '#fff' : '#0f172a' }}>
+                Reduc <span style={{ color: CTA, fontWeight: 520 }}>AI</span>
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Rail-aligned divider under the header */}
-        <div
-          aria-hidden
-          className="pointer-events-none absolute left-0 right-0"
-          style={{
-            top: 'var(--rail-h,56px)',
-            borderTop: '1px solid var(--sidebar-border)',
-            boxShadow: '0 1px 0 rgba(0,0,0,.04)',
-          }}
-        />
-
-        {/* Groups */}
-        <div className="flex-1 min-h-0 overflow-y-auto px-3 pb-6">
-          {!collapsed && (
-            <div className="inline-flex items-center h-6 px-2 rounded-full border text-[10px] font-semibold tracking-[.14em] mb-2"
-                 style={{ color: 'var(--sidebar-muted)', borderColor: 'var(--sidebar-border)', background: 'var(--sb-tag-bg)' }}>
-              WORKSPACE
-            </div>
-          )}
+        {/* WORKSPACE (top 4) */}
+        <div className="px-3 pt-1">
           <nav className="space-y-[6px]">
-            {NAV.filter(n => n.group === 'workspace').map(item => (
-              <Item key={item.id} item={item} active={pathnameActive(item)} />
-            ))}
-          </nav>
-
-          <div style={{ height: 14 }} />
-
-          {!collapsed && (
-            <div className="inline-flex items-center h-6 px-2 rounded-full border text-[10px] font-semibold tracking-[.14em] mb-2"
-                 style={{ color: 'var(--sidebar-muted)', borderColor: 'var(--sidebar-border)', background: 'var(--sb-tag-bg)' }}>
-              RESOURCES
-            </div>
-          )}
-          <nav className="space-y-[6px]">
-            {NAV.filter(n => n.group === 'resources').map(item => (
-              <Item key={item.id} item={item} active={pathnameActive(item)} />
+            {workspace.map(item => (
+              <Item key={item.id} item={item} active={isActive(item)} />
             ))}
           </nav>
         </div>
 
-        {/* Account */}
-        <div className="px-3 pb-4">
-          {!collapsed ? (
-            <Link
-              href="/account"
-              className="w-full rounded-2xl px-3 py-3 flex items-center gap-3 text-left transition-colors duration-300"
-              style={{ background: 'var(--acct-bg)', border: '1px solid var(--acct-border)', boxShadow: 'inset 0 0 10px rgba(0,0,0,.18)', color: 'var(--sidebar-text)' }}
-            >
-              <div className="w-8 h-8 rounded-full grid place-items-center" style={{ background: BRAND, boxShadow: '0 0 8px rgba(0,0,0,.25)' }}>
-                <UserIcon className="w-4 h-4 text-black/80" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="text-sm font-semibold truncate">
-                  {userLoading ? 'Loading…' : getDisplayName(userName, userEmail)}
-                </div>
-                <div className="text-[11px] truncate" style={{ color: 'var(--sidebar-muted)' }}>
-                  {userEmail || ''}
-                </div>
-              </div>
-              <span className="text-xs" style={{ color: 'var(--sidebar-muted)' }}>Account</span>
-            </Link>
-          ) : (
-            <Link
-              href="/account"
-              title="Account"
-              className="block mx-auto rounded-full"
+        {/* push resources down */}
+        <div className="flex-1" />
+
+        {/* full-width separator (left→right), low opacity */}
+        <div aria-hidden className="mx-3" style={{ height: 1, background: SEP }} />
+
+        {/* RESOURCES (muted; white icons on dark) */}
+        <div className="px-3 mt-2 mb-2">
+          <nav className="space-y-[6px]">
+            {resources.map(item => (
+              <Item key={item.id} item={item} active={isActive(item)} white />
+            ))}
+          </nav>
+        </div>
+
+        {/* ACCOUNT (teal-ish card; not grey) — also no bands */}
+        <div className="px-3 pb-4" style={{ background: isDark ? DARK_BASE : LIGHT_BASE }}>
+          <button
+            onClick={() => router.push('/account')}
+            className="w-full rounded-xl px-3 py-3 flex items-center gap-3 text-left"
+            style={{
+              background: isDark ? 'linear-gradient(180deg, rgba(23,34,37,.92), rgba(11,18,20,.9))'
+                                  : 'linear-gradient(180deg, rgba(240,244,246,.92), rgba(232,237,239,.94))',
+              border: `1px solid ${isDark ? 'rgba(255,255,255,.10)' : 'rgba(15,23,42,.12)'}`,
+              boxShadow: 'inset 0 0 8px rgba(0,0,0,.18)',
+              color: textColor
+            }}
+          >
+            <div
+              className="grid place-items-center"
               style={{
-                width: 40, height: 40,
-                background: 'var(--sb-icon-bg)',
-                border: '1px solid var(--sb-icon-border)',
-                boxShadow: 'inset 0 0 10px rgba(0,0,0,.16)'
+                width: 32, height: 32, borderRadius: 10,
+                background: CTA
               }}
             >
-              <div className="w-full h-full grid place-items-center">
-                <UserIcon className="w-5 h-5" style={{ color: 'var(--sidebar-text)' }} />
+              <UserIcon className="w-4 h-4 text-black/85" />
+            </div>
+
+            {!collapsed && (
+              <div className="min-w-0 flex-1">
+                <div className="text-[13px] truncate" style={{ fontWeight: 560 }}>
+                  {userLoading ? 'Account' : getDisplayName(userName, userEmail)}
+                </div>
+                <div className="text-[11px] truncate" style={{ color: subColor }}>
+                  {userEmail || 'Open account'}
+                </div>
               </div>
-            </Link>
-          )}
+            )}
+
+            {!collapsed && (
+              <span className="text-[11px]" style={{ color: subColor }}>Open</span>
+            )}
+          </button>
         </div>
 
-        {/* Collapse handle */}
+        {/* Collapse handle (mid-rail) */}
         <button
-          onClick={() => setCollapsed((c) => !c)}
-          className="absolute top-1/2 -right-3 translate-y-[-50%] rounded-full p-1.5 transition-colors duration-200"
+          onClick={() => setCollapsed(c => !c)}
+          className="absolute top-1/2 -right-3 translate-y-[-50%] rounded-full p-1.5"
           style={{
-            border: '1px solid var(--sidebar-border)',
-            background: 'var(--acct-bg)',
-            boxShadow: '0 2px 12px rgba(0,0,0,0.18), 0 0 10px rgba(0,255,194,0.06)',
+            border: `1px solid rgba(89,217,179,.26)`,
+            background: 'rgba(89,217,179,.10)',
+            boxShadow: '0 2px 12px rgba(0,0,0,.18), 0 0 10px rgba(0,255,194,.10)',
           }}
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
-          {collapsed ? <ChevronRight className="w-4 h-4" style={{ color: 'var(--sidebar-text)' }} />
-                     : <ChevronLeft className="w-4 h-4"  style={{ color: 'var(--sidebar-text)' }} />}
+          {collapsed
+            ? <ChevronRight className="w-4 h-4" style={{ color: CTA }} />
+            : <ChevronLeft  className="w-4 h-4" style={{ color: CTA }} />}
         </button>
       </div>
-
-      <style jsx>{
-        :global(:root:not([data-theme="dark"])) .fixed.left-0 {
-          --sb-icon-bg: var(--card);
-          --sb-icon-border: var(--border);
-          --acct-bg: var(--card);
-          --acct-border: var(--border);
-          --sb-tag-bg: var(--panel);
-          --sb-shell-shadow: inset 0 0 18px rgba(0,0,0,.06);
-        }
-        :global([data-theme="dark"]) .fixed.left-0 {
-          --sb-icon-bg: rgba(255,255,255,.06);
-          --sb-icon-border: rgba(255,255,255,.12);
-          --acct-bg: rgba(15,18,20,.85);
-          --acct-border: rgba(255,255,255,.10);
-          --sb-tag-bg: rgba(255,255,255,.03);
-          --sb-shell-shadow: inset 0 0 18px rgba(0,0,0,.28), 14px 0 28px rgba(0,0,0,.42);
-        }
-      }</style>
     </aside>
+
+    /* Minor light/dark overrides (icon plates for resources flip in light) */
+    <style jsx global>{`
+      :root:not([data-theme="dark"]) .sidebar .plate-res {
+        color: #0f172a;
+      }
+    `}</style>
   );
 }
