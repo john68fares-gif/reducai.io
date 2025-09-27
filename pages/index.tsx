@@ -1,325 +1,457 @@
 // pages/index.tsx
-'use client';
-
 import Head from 'next/head';
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { loadStripe } from '@stripe/stripe-js';
 import { useRouter } from 'next/router';
-import { ArrowRight, Sparkles, Shield, Rocket, Play, CheckCircle2, Mail, LogIn } from 'lucide-react';
 import { supabase } from '@/lib/supabase-client';
+import { motion } from 'framer-motion';
+import {
+  CheckCircle2, ArrowRight, Shield, Wand2, Mic, Zap, CreditCard,
+} from 'lucide-react';
 
-// If you created components/ui/Overlay.tsx from earlier, import it:
-// import { OverlayShell, OverlayHeader } from '@/components/ui/Overlay';
-
-// Minimal local copies so this page is self-contained:
-import { motion, AnimatePresence } from 'framer-motion';
-import { createPortal } from 'react-dom';
-
-const GREEN = '#59d9b3';
+const CTA = '#59d9b3'; // brand green
 const GREEN_LINE = 'rgba(89,217,179,.20)';
 
-function OverlayShell({
-  open, onClose, children, maxWidth = 560
-}:{ open:boolean; onClose?:()=>void; children:React.ReactNode; maxWidth?:number; }) {
-  if (typeof document === 'undefined' || !open) return null;
-  return createPortal(
-    <AnimatePresence>
-      <motion.div
-        key="bg"
-        className="fixed inset-0 z-[100000]"
-        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-        onClick={onClose}
-        style={{ background:'rgba(6,8,10,.62)', backdropFilter:'blur(6px)' }}
-      />
-      <div className="fixed inset-0 z-[100001] flex items-center justify-center px-4">
-        <motion.div
-          key="panel"
-          initial={{ opacity: 0, y: 10, scale: 0.98 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0, y: 8, scale: 0.98 }}
-          transition={{ duration: .18, ease: 'easeOut' }}
-          className="w-full overflow-hidden"
-          style={{
-            maxWidth,
-            background:'var(--panel)',
-            color:'var(--text)',
-            border:`1px solid ${GREEN_LINE}`,
-            borderRadius: 12,
-            boxShadow:'0 20px 40px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset'
-          }}
-        >
-          {children}
-        </motion.div>
-      </div>
-    </AnimatePresence>, document.body
-  );
-}
+// -------- Stripe (client) --------
+const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || '');
 
-function OverlayHeader({ title, icon, subtitle }:{
-  title:string; icon?:React.ReactNode; subtitle?:string;
-}) {
-  return (
-    <div
-      className="flex items-center justify-between px-6 py-4"
-      style={{
-        background:'linear-gradient(90deg,var(--panel) 0%,color-mix(in oklab,var(--panel) 97%, white 3%) 50%,var(--panel) 100%)',
-        borderBottom:`1px solid ${GREEN_LINE}`
-      }}
-    >
-      <div className="flex items-center gap-3">
-        {icon ? (
-          <div className="grid place-items-center" style={{ width:40, height:40, borderRadius:10, background:'var(--brand-weak)' }}>
-            <span style={{ color: GREEN, filter:'drop-shadow(0 0 8px rgba(89,217,179,.35))' }}>{icon}</span>
-          </div>
-        ) : null}
-        <div className="min-w-0">
-          <div className="text-lg font-semibold" style={{ color:'var(--text)' }}>{title}</div>
-          {subtitle ? <div className="text-xs" style={{ color:'var(--text-muted)' }}>{subtitle}</div> : null}
-        </div>
-      </div>
-      <span style={{ width:20, height:20 }} />
-    </div>
-  );
-}
+type BillingCycle = 'monthly' | 'annual';
 
-/* ───────────────── Tokens copied from your overlay look ───────────────── */
-const Tokens = () => (
-  <style jsx global>{`
-    /* Dark default */
-    :root {
-      --bg:#0b0c10; --panel:#0d0f11; --card:#0f1214;
-      --text:#e6f1ef; --text-muted:#9fb4ad;
-      --brand:${GREEN}; --brand-weak:rgba(89,217,179,.22);
-      --border:rgba(255,255,255,.10);
-      --radius:14px;
-    }
-    :root:not([data-theme="dark"]) {
-      --bg:#f7faf9; --panel:#ffffff; --card:#f4f7f6;
-      --text:#0f172a; --text-muted:#64748b;
-      --brand:${GREEN}; --brand-weak:rgba(89,217,179,.18);
-      --border:rgba(15,23,42,.12);
-    }
-    body { background:var(--bg); color:var(--text); }
-    .x-card {
-      background: var(--panel);
-      border: 1px solid ${GREEN_LINE};
-      border-radius: 12px;
-      box-shadow: 0 20px 40px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset;
-    }
-    .x-btn {
-      height: 48px; border-radius: 999px; padding: 0 18px;
-      font-weight: 600; letter-spacing: .01em;
-    }
-    .x-btn--primary {
-      background: var(--brand); color: #fff; border: 1px solid ${GREEN_LINE};
-    }
-    .x-btn--ghost {
-      background: transparent; color: var(--text);
-      border: 1px solid var(--border);
-    }
-    .x-bullet { display:inline-flex; align-items:center; gap:8px; font-size:13px; color:var(--text-muted); }
-  `}</style>
-);
-
-/* ───────────────── Auth Overlay (magic link + Google) ───────────────── */
-function AuthOverlay({ open, onClose }:{ open:boolean; onClose:()=>void }) {
-  const [email,setEmail] = useState('');
-  const [busy,setBusy] = useState(false);
-  const [sent,setSent] = useState(false);
-
-  async function withEmail() {
-    if (!email) return;
-    setBusy(true);
-    try {
-      await supabase.auth.signInWithOtp({
-        email,
-        options: { emailRedirectTo: `${window.location.origin}/auth/callback` }
-      });
-      setSent(true);
-    } finally { setBusy(false); }
+/** Your real Stripe price IDs (from your message) */
+const PRICE_IDS = {
+  // Starter
+  starter: {
+    monthly: 'price_1SByXOHWdU8X80NM4jFrU6Nr',
+    annual:  'price_1SByXAHWdU8X80NMftriHWJW',
+  },
+  // Pro
+  pro: {
+    monthly: 'price_1SByXKHWdU8X80NMAw5IlrTc',
+    annual:  'price_1SByXRHWdU8X80NM7UwuAw0B',
   }
+};
 
-  async function withGoogle() {
-    setBusy(true);
-    try {
-      await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: { redirectTo: `${window.location.origin}/auth/callback` }
-      });
-    } finally { setBusy(false); }
-  }
-
-  return (
-    <OverlayShell open={open} onClose={onClose} maxWidth={520}>
-      <OverlayHeader title="Welcome back" subtitle="Choose your preferred sign-in" icon={<LogIn className="w-5 h-5" />} />
-      <div className="px-6 py-6">
-        {!sent ? (
-          <>
-            <label className="block text-xs mb-2" style={{ color:'var(--text-muted)' }}>Email address</label>
-            <input
-              value={email}
-              onChange={(e)=>setEmail(e.target.value)}
-              placeholder="you@example.com"
-              className="w-full h-[48px] px-3"
-              style={{ background:'var(--panel)', border:`1px solid var(--border)`, color:'var(--text)', borderRadius:'12px' }}
-            />
-            <div className="mt-3 grid gap-2">
-              <button onClick={withEmail} disabled={busy} className="x-btn x-btn--primary">
-                {busy ? 'Sending…' : <>Continue with Email <ArrowRight className="inline-block w-4 h-4 ml-1" /></>}
-              </button>
-              <button onClick={withGoogle} disabled={busy} className="x-btn x-btn--ghost">
-                <svg width="18" height="18" viewBox="0 0 48 48" className="mr-1 inline-block" style={{ verticalAlign:'-3px' }}>
-                  <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3 0 5.7 1.1 7.8 3l5.7-5.7C33.5 6.2 28.9 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20c10.7 0 19.5-8 19.5-20 0-1.3-.1-2.2-.3-3.5z"/>
-                  <path fill="#FF3D00" d="M6.3 14.7l6.6 4.9C14.7 16.2 19 12 24 12c3 0 5.7 1.1 7.8 3l5.7-5.7C33.5 6.2 28.9 4 24 4 15.5 4 8.3 9.1 6.3 14.7z"/>
-                  <path fill="#4CAF50" d="M24 44c5.2 0 10-2 13.5-5.3l-6.2-5.2C29.3 36 26.8 37 24 37c-5.2 0-9.6-3.3-11.3-7.9l-6.6 5.1C8.2 39 15.6 44 24 44z"/>
-                  <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-1.3 3.7-4.8 6-9.3 6-5.2 0-9.6-3.3-11.3-7.9l-6.6 5.1C8.2 39 15.6 44 24 44c10.7 0 19.5-8 19.5-20 0-1.3-.1-2.2-.3-3.5z"/>
-                </svg>
-                Continue with Google
-              </button>
-            </div>
-          </>
-        ) : (
-          <div className="x-card p-4 text-sm">
-            <div className="flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4" style={{ color: GREEN }} />
-              Magic link sent to <b>{email}</b>. Check your inbox.
-            </div>
-          </div>
-        )}
-      </div>
-    </OverlayShell>
-  );
-}
-
-/* ───────────────── Page ───────────────── */
 export default function Home() {
   const router = useRouter();
-  const [authOpen, setAuthOpen] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
+  const [cycle, setCycle] = useState<BillingCycle>('monthly');
+  const [loadingPlan, setLoadingPlan] = useState<string>('');
+
+  // If already signed in, you can still show landing. (Remove redirect-on-load noise.)
+  useEffect(() => {
+    (async () => {
+      try {
+        await supabase.auth.getSession(); // don’t redirect here; let pricing be public
+      } finally {
+        setCheckingSession(false);
+      }
+    })();
+  }, []);
+
+  async function beginCheckout(priceId: string) {
+    try {
+      setLoadingPlan(priceId);
+      const res = await fetch('/api/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json' },
+        body: JSON.stringify({
+          priceId,
+          // free trial & card capture handled server-side
+          mode: 'subscription',
+          // pass where to go after pay (server uses these)
+          successPath: '/builder',
+          cancelPath:  '/#pricing',
+        }),
+      });
+      if (!res.ok) throw new Error('checkout_failed');
+      const { sessionId } = await res.json();
+      const stripe = await stripePromise;
+      if (!stripe) throw new Error('stripe_missing');
+      await stripe.redirectToCheckout({ sessionId });
+    } catch (e) {
+      console.error(e);
+      alert('Could not start checkout. Please try again.');
+    } finally {
+      setLoadingPlan('');
+    }
+  }
+
+  const monthlyActive = cycle === 'monthly';
+
+  if (checkingSession) return null;
 
   return (
     <>
-      <Head><title>Reduc.ai — Voice that sells</title></Head>
-      <Tokens />
+      <Head>
+        <title>ReduxAI — Build voice agents in minutes</title>
+        <meta name="description" content="ReduxAI: build and deploy AI voice agents fast." />
+      </Head>
 
-      {/* NAV — calm, roomy, rounded CTAs */}
-      <header className="w-full" style={{ borderBottom:`1px solid ${GREEN_LINE}` }}>
-        <div className="mx-auto max-w-[1160px] px-5 lg:px-6 h-[64px] flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="grid place-items-center w-7 h-7 rounded-md" style={{ background:'var(--brand-weak)' }}>
-              <Sparkles className="w-4 h-4" style={{ color: GREEN }} />
-            </div>
-            <div className="text-sm" style={{ color:'var(--text)' }}>Reduc.ai</div>
-          </div>
-          <div className="flex items-center gap-8">
-            <button className="x-btn x-btn--ghost" onClick={()=>router.push('#features')}>Features</button>
-            <button className="x-btn x-btn--primary" onClick={()=>setAuthOpen(true)}>Sign in / Sign up</button>
-          </div>
-        </div>
-      </header>
+      {/* Tokens (borrowed from your Account style) */}
+      <style jsx global>{`
+        .va-scope{
+          --bg:#0b0c10; --panel:#0d0f11; --card:#0f1214; --text:#e6f1ef; --text-muted:#9fb4ad;
+          --brand:${CTA}; --brand-weak:rgba(89,217,179,.22);
+          --border:rgba(255,255,255,.10); --border-weak:rgba(255,255,255,.10);
+          --shadow-card:0 20px 40px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset;
+          --radius:14px; --ease:cubic-bezier(.22,.61,.36,1);
+        }
+        :root:not([data-theme="dark"]) .va-scope{
+          --bg:#f7faf9; --panel:#ffffff; --card:#f4f7f6; --text:#0f172a; --text-muted:#64748b;
+          --brand:${CTA}; --brand-weak:rgba(89,217,179,.18);
+          --border:rgba(15,23,42,.12); --border-weak:rgba(15,23,42,.12);
+          --shadow-card:0 10px 24px rgba(2,6,12,.06), 0 0 0 1px rgba(15,23,42,.06) inset;
+        }
+        .btn {
+          height: 44px; padding: 0 18px; border-radius: 999px; font-weight: 600;
+          display:inline-flex; align-items:center; gap:8px; border:1px solid transparent;
+          transition: transform .15s var(--ease), box-shadow .15s var(--ease);
+        }
+        .btn:hover { transform: translateY(-1px); }
+        .btn-primary { background: var(--brand); color: #fff; }
+        .btn-secondary { background: var(--panel); border-color: var(--border); color: var(--text); }
+        .pill {
+          display:inline-flex; align-items:center; gap:8px; padding: 6px 12px; border-radius: 999px;
+          background: color-mix(in oklab, var(--brand) 10%, var(--panel)); border:1px solid ${GREEN_LINE};
+          font-size: 12px; color: var(--text);
+        }
+        .card {
+          border-radius: var(--radius);
+          border:1px solid var(--border-weak);
+          background: var(--panel);
+          box-shadow: var(--shadow-card);
+          overflow: hidden;
+        }
+        .section {
+          padding: 72px 0;
+        }
+      `}</style>
 
-      {/* HERO — “welcome”, lighter weight, big spacing */}
-      <main>
-        <section
-          className="pt-20 pb-16"
-          style={{
-            background: 'radial-gradient(900px 420px at 0% -10%, var(--brand-weak), transparent 60%), var(--bg)'
-          }}
-        >
-          <div className="mx-auto max-w-[1160px] px-5 lg:px-6 grid grid-cols-1 lg:grid-cols-[1.1fr,.9fr] gap-10 items-center">
-            <div>
-              <div className="inline-flex items-center gap-2 x-card px-3 h-[36px] text-xs mb-5"
-                   style={{ borderRadius: 999 }}>
-                <Play className="w-3.5 h-3.5" style={{ color: GREEN }} />
-                Launch a voice agent in minutes
+      <div className="va-scope" style={{ background:'var(--bg)', color:'var(--text)' }}>
+        {/* NAV */}
+        <header className="w-full" style={{ borderBottom:`1px solid ${GREEN_LINE}` }}>
+          <nav className="mx-auto max-w-[1160px] px-5 lg:px-6 h-[66px] flex items-center justify-between">
+            <div className="flex items-center gap-10">
+              <div className="text-base font-semibold" style={{ letterSpacing: '.2px' }}>
+                ReduxAI<span style={{ color: CTA }}>.</span>com
               </div>
+              <a href="#pricing" className="text-sm" style={{ color:'var(--text-muted)' }}>Pricing</a>
+              <a href="#features" className="text-sm" style={{ color:'var(--text-muted)' }}>Features</a>
+            </div>
+            <div className="flex items-center gap-8">
+              <button
+                className="btn btn-secondary"
+                onClick={() => document.getElementById('auth-overlay-root')?.classList.remove('hidden')}
+                style={{ borderRadius: 999 }}
+              >
+                Sign in
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={() => {
+                  // scroll to pricing (your flow: pick plan -> pay -> account)
+                  document.getElementById('pricing')?.scrollIntoView({ behavior:'smooth', block:'start' });
+                }}
+                style={{ borderRadius: 999 }}
+              >
+                Start for free <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
+          </nav>
+        </header>
 
-              <h1 className="leading-tight" style={{ fontSize: '44px', fontWeight: 700 }}>
-                Welcome to <span style={{ color: GREEN }}>Reduc.ai</span> — a calm way to build
-                <br /> a natural-sounding voice agent.
+        {/* HERO */}
+        <section className="section">
+          <div className="mx-auto max-w-[1160px] px-5 lg:px-6 grid md:grid-cols-2 gap-10 items-center">
+            <div>
+              <div className="pill mb-3">
+                <Wand2 className="w-4 h-4" />
+                Welcome to <b>ReduxAI.com</b>
+              </div>
+              <h1 className="text-[36px] md:text-[42px] leading-[1.12] font-semibold" style={{ letterSpacing: '.2px' }}>
+                Build & launch AI voice agents — in minutes.
               </h1>
-
-              <p className="mt-4" style={{ color:'var(--text-muted)', fontSize:16, lineHeight:1.6 }}>
-                Clean onboarding. Clear pricing. Secure sessions. No clutter — just the pieces you need to ship.
+              <p className="mt-3 text-[15px]" style={{ color:'var(--text-muted)' }}>
+                Clean UI, rounded controls, less noise. Connect your data, choose a voice, and start taking calls.
               </p>
 
-              <div className="mt-6 flex flex-wrap items-center gap-3">
-                <button className="x-btn x-btn--primary" onClick={()=>setAuthOpen(true)}>
-                  Try free <ArrowRight className="inline-block w-4 h-4 ml-1" />
+              <div className="mt-6 flex flex-wrap gap-10 items-center">
+                <button
+                  className="btn btn-primary"
+                  onClick={() => document.getElementById('pricing')?.scrollIntoView({ behavior:'smooth' })}
+                >
+                  Get started free
                 </button>
-                <button className="x-btn x-btn--ghost" onClick={()=>router.push('#how')}>
-                  See how it works
-                </button>
-              </div>
-
-              <div className="mt-6 flex flex-wrap gap-5">
-                <span className="x-bullet"><Shield className="w-4 h-4" /> Secure by Supabase Auth</span>
-                <span className="x-bullet"><Rocket className="w-4 h-4" /> Realtime & low latency</span>
-                <span className="x-bullet"><Mail className="w-4 h-4" /> Magic links or Google</span>
-              </div>
-            </div>
-
-            {/* Right preview card (quiet) */}
-            <div className="x-card p-5">
-              <div className="text-sm mb-3" style={{ color:'var(--text-muted)' }}>Live demo preview</div>
-              <div className="x-card p-4" style={{ background:'var(--card)' }}>
-                “Hi! I can help you book or reschedule. How can I help today?”
-              </div>
-              <div className="text-xs mt-3" style={{ color:'var(--text-muted)' }}>
-                Barge-in • Micro-pauses • Tool integrations
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* FEATURES — airy spacing, lighter fonts */}
-        <section id="features" className="py-18 md:py-24">
-          <div className="mx-auto max-w-[1160px] px-5 lg:px-6 grid gap-6 md:grid-cols-3">
-            {[
-              { icon:<Shield className="w-5 h-5"/>, title:'Secure sessions', body:'OAuth or magic link. Your data stays yours.'},
-              { icon:<Rocket className="w-5 h-5"/>, title:'Production ready', body:'Realtime voice, smart call flow, tool hooks.'},
-              { icon:<Sparkles className="w-5 h-5"/>, title:'Calm UI', body:'Less noise, more signal. Ship faster.'},
-            ].map((f,i)=>(
-              <div key={i} className="x-card p-5">
-                <div className="flex items-center gap-3">
-                  <div className="grid place-items-center w-9 h-9 rounded-md" style={{ background:'var(--brand-weak)' }}>
-                    <span style={{ color: GREEN }}>{f.icon}</span>
-                  </div>
-                  <div className="font-semibold">{f.title}</div>
+                <div className="flex items-center gap-2 text-sm" style={{ color:'var(--text-muted)' }}>
+                  <Shield className="w-4 h-4" /> Card required for free trial verification
                 </div>
-                <p className="mt-3 text-sm" style={{ color:'var(--text-muted)' }}>{f.body}</p>
               </div>
-            ))}
-          </div>
-        </section>
 
-        {/* HOW — simple, spaced */}
-        <section id="how" className="pb-24">
-          <div className="mx-auto max-w-[900px] px-5 lg:px-6">
-            <div className="x-card p-6 md:p-8">
-              <div className="text-lg font-semibold mb-2">How it works</div>
-              <ol className="grid gap-3 text-sm" style={{ color:'var(--text-muted)' }}>
-                <li>1. Create your account (Google or email link).</li>
-                <li>2. Pick the Starter plan (free trial), or skip for now.</li>
-                <li>3. Build an agent, hook tools, test live, deploy.</li>
-              </ol>
-              <div className="mt-4">
-                <button className="x-btn x-btn--primary" onClick={()=>setAuthOpen(true)}>
-                  Start free <ArrowRight className="inline-block w-4 h-4 ml-1" />
-                </button>
+              <div className="mt-6 flex gap-6 text-sm" style={{ color:'var(--text-muted)' }}>
+                <div className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4" /> Real-time voice</div>
+                <div className="flex items-center gap-2"><Mic className="w-4 h-4" /> Call routing</div>
+                <div className="flex items-center gap-2"><Zap className="w-4 h-4" /> Fast setup</div>
+              </div>
+            </div>
+
+            <div className="card p-6">
+              <div className="text-sm mb-2" style={{ color:'var(--text-muted)' }}>Preview</div>
+              <div className="rounded-[12px]" style={{
+                border:`1px solid ${GREEN_LINE}`,
+                background:`linear-gradient(180deg, color-mix(in oklab, var(--brand) 14%, transparent), transparent 60%)`
+              }}>
+                <div className="p-5">
+                  <div className="text-[15px] font-medium">“Hi! I’m your AI receptionist. How can I help?”</div>
+                  <div className="mt-2 text-sm" style={{ color:'var(--text-muted)' }}>Natural voice. Smart handoffs. Business-aware.</div>
+                </div>
+              </div>
+              <div className="mt-4 text-xs" style={{ color:'var(--text-muted)' }}>
+                This is a static preview. Configure the real assistant after checkout.
               </div>
             </div>
           </div>
         </section>
-      </main>
 
-      {/* FOOTER */}
-      <footer className="py-10" style={{ borderTop:`1px solid ${GREEN_LINE}` }}>
-        <div className="mx-auto max-w-[1160px] px-5 lg:px-6 text-sm" style={{ color:'var(--text-muted)' }}>
-          © {new Date().getFullYear()} Reduc.ai — Ship voice that sells.
-        </div>
-      </footer>
+        {/* FEATURES */}
+        <section id="features" className="section" style={{ borderTop:`1px solid ${GREEN_LINE}` }}>
+          <div className="mx-auto max-w-[1160px] px-5 lg:px-6">
+            <div className="grid md:grid-cols-3 gap-6">
+              {[
+                { icon:<Wand2 className="w-5 h-5" />, title:'No fiddly setup', desc:'Connect data & pick a voice. We handle the rest.' },
+                { icon:<Mic className="w-5 h-5" />, title:'Great call quality', desc:'Low-latency, natural speech, smart pauses.' },
+                { icon:<Shield className="w-5 h-5" />, title:'Secure & private', desc:'Auth-gated app and safe storage by design.' },
+              ].map((f,i)=>(
+                <div key={i} className="card p-5">
+                  <div className="w-10 h-10 rounded-[10px] grid place-items-center mb-3"
+                       style={{ background:'var(--brand-weak)', border:`1px solid ${GREEN_LINE}` }}>
+                    {f.icon}
+                  </div>
+                  <div className="text-[16px] font-semibold">{f.title}</div>
+                  <div className="mt-1 text-[14px]" style={{ color:'var(--text-muted)' }}>{f.desc}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
 
-      {/* Auth modal */}
-      <AuthOverlay open={authOpen} onClose={()=>setAuthOpen(false)} />
+        {/* PRICING */}
+        <section id="pricing" className="section" style={{ borderTop:`1px solid ${GREEN_LINE}` }}>
+          <div className="mx-auto max-w-[1160px] px-5 lg:px-6">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <div className="pill"><CreditCard className="w-4 h-4" /> Pricing</div>
+                <h2 className="text-[28px] md:text-[32px] font-semibold mt-2">Simple plans, free trial included</h2>
+                <div className="text-sm mt-1" style={{ color:'var(--text-muted)' }}>
+                  Card required for a $0 verification. You’ll be charged after the trial unless you cancel.
+                </div>
+              </div>
+
+              {/* Cycle toggle */}
+              <div className="card p-1 flex items-center gap-1">
+                <button
+                  className="btn"
+                  style={{
+                    height:36, padding:'0 14px',
+                    background: monthlyActive ? 'var(--brand)' : 'var(--panel)',
+                    color: monthlyActive ? '#fff' : 'var(--text)',
+                    borderRadius: 999, border: `1px solid ${monthlyActive ? 'transparent' : 'var(--border)'}`
+                  }}
+                  onClick={()=>setCycle('monthly')}
+                >
+                  Monthly
+                </button>
+                <button
+                  className="btn"
+                  style={{
+                    height:36, padding:'0 14px',
+                    background: !monthlyActive ? 'var(--brand)' : 'var(--panel)',
+                    color: !monthlyActive ? '#fff' : 'var(--text)',
+                    borderRadius: 999, border: `1px solid ${!monthlyActive ? 'transparent' : 'var(--border)'}`
+                  }}
+                  onClick={()=>setCycle('annual')}
+                >
+                  Annual <span className="ml-1 text-xs" style={{ opacity:.9 }}>(save ~40%)</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="grid md:grid-cols-2 gap-6">
+              {/* Starter */}
+              <PlanCard
+                title="Starter"
+                priceLabel={monthlyActive ? '€19/mo' : '€11/mo (billed yearly)'}
+                blurb="Everything you need to launch a single voice agent."
+                features={[
+                  '1 assistant',
+                  'Real-time voice',
+                  'Basic analytics',
+                  'Email support'
+                ]}
+                loading={loadingPlan === PRICE_IDS.starter[cycle]}
+                onSelect={() => beginCheckout(PRICE_IDS.starter[cycle])}
+              />
+
+              {/* Pro */}
+              <PlanCard
+                title="Pro"
+                highlight
+                priceLabel={monthlyActive ? '€39/mo' : '€23/mo (billed yearly)'}
+                blurb="Scale to multiple assistants and teams."
+                features={[
+                  'Up to 5 assistants',
+                  'Advanced analytics',
+                  'Priority routing',
+                  'Priority support'
+                ]}
+                loading={loadingPlan === PRICE_IDS.pro[cycle]}
+                onSelect={() => beginCheckout(PRICE_IDS.pro[cycle])}
+              />
+            </div>
+
+            <div className="mt-5 text-xs" style={{ color:'var(--text-muted)' }}>
+              Prices are indicative UI labels. The actual amounts/intervals come from your Stripe <i>Price</i> objects.
+            </div>
+          </div>
+        </section>
+
+        {/* FOOTER */}
+        <footer className="section" style={{ borderTop:`1px solid ${GREEN_LINE}`, paddingTop: 40 }}>
+          <div className="mx-auto max-w-[1160px] px-5 lg:px-6 text-sm" style={{ color:'var(--text-muted)' }}>
+            © {new Date().getFullYear()} ReduxAI — All rights reserved.
+          </div>
+        </footer>
+      </div>
+
+      {/* Auth overlay (kept minimal, opens from navbar “Sign in”) */}
+      <AuthOverlay />
     </>
+  );
+}
+
+/* ---------- Small components ---------- */
+
+function PlanCard({
+  title, blurb, priceLabel, features, onSelect, highlight, loading
+}:{
+  title:string; blurb:string; priceLabel:string; features:string[]; onSelect:()=>void; highlight?:boolean; loading?:boolean;
+}) {
+  return (
+    <motion.div
+      className="card p-5"
+      initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+      style={{
+        outline: highlight ? `2px solid ${CTA}` : 'none',
+        boxShadow: highlight ? '0 0 0 1px rgba(89,217,179,.18), var(--shadow-card)' : 'var(--shadow-card)'
+      }}
+    >
+      <div className="text-sm mb-1" style={{ color:'var(--text-muted)' }}>{title}</div>
+      <div className="text-[24px] font-semibold">{priceLabel}</div>
+      <div className="text-sm mt-1 mb-3" style={{ color:'var(--text-muted)' }}>{blurb}</div>
+
+      <ul className="text-sm space-y-2 mb-5">
+        {features.map((f,i)=>(
+          <li key={i} className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4" style={{ color: CTA }} /> {f}
+          </li>
+        ))}
+      </ul>
+
+      <button
+        className="btn btn-primary w-full"
+        onClick={onSelect}
+        disabled={loading}
+      >
+        {loading ? 'Starting checkout…' : 'Start free trial'}
+      </button>
+    </motion.div>
+  );
+}
+
+/** Minimal sign-in overlay (email magic link + Google) */
+function AuthOverlay() {
+  const [email, setEmail] = useState('');
+  const [stage, setStage] = useState<'idle'|'sent'|'err'>('idle');
+
+  async function sendMagic() {
+    try {
+      setStage('idle');
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: { emailRedirectTo: `${window.location.origin}/auth/callback` }
+      });
+      if (error) throw error;
+      setStage('sent');
+    } catch {
+      setStage('err');
+    }
+  }
+
+  async function signInGoogle() {
+    await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: `${window.location.origin}/auth/callback` }
+    });
+  }
+
+  return (
+    <div id="auth-overlay-root" className="hidden fixed inset-0 z-[10000]">
+      <div
+        className="absolute inset-0"
+        style={{ background:'rgba(6,8,10,.62)', backdropFilter:'blur(6px)' }}
+        onClick={(e)=> {
+          if (e.target === e.currentTarget) (document.getElementById('auth-overlay-root') as HTMLDivElement)?.classList.add('hidden');
+        }}
+      />
+      <div className="absolute inset-0 px-4 flex items-center justify-center">
+        <div className="card w-full max-w-[520px]" style={{ border:`1px solid ${GREEN_LINE}` }}>
+          <div className="px-6 py-4" style={{ borderBottom:`1px solid ${GREEN_LINE}` }}>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-[12px] grid place-items-center" style={{ background:'var(--brand-weak)' }}>
+                <Shield className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="text-lg font-semibold">Sign in</div>
+                <div className="text-xs" style={{ color:'var(--text-muted)' }}>Continue with Google or email</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="px-6 py-5">
+            <button className="btn btn-secondary w-full" onClick={signInGoogle}>
+              Continue with Google
+            </button>
+
+            <div className="mt-4 text-center text-xs" style={{ color:'var(--text-muted)' }}>or</div>
+
+            <div className="mt-3">
+              <label className="text-xs mb-1 block" style={{ color:'var(--text-muted)' }}>Email</label>
+              <input
+                value={email}
+                onChange={(e)=>setEmail(e.target.value)}
+                className="w-full h-[44px] px-3 text-sm outline-none"
+                placeholder="you@company.com"
+                style={{ background:'var(--panel)', border:`1px solid ${GREEN_LINE}`, borderRadius: 10, color:'var(--text)' }}
+              />
+              <button className="btn btn-primary w-full mt-3" onClick={sendMagic}>Continue with email</button>
+
+              {stage === 'sent' && (
+                <div className="mt-3 text-xs" style={{ color: CTA }}>
+                  Check your inbox for a sign-in link.
+                </div>
+              )}
+              {stage === 'err' && (
+                <div className="mt-3 text-xs" style={{ color: 'crimson' }}>
+                  Couldn’t send link. Try again.
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="px-6 pb-5 text-xs" style={{ color:'var(--text-muted)' }}>
+            New here? Pick a plan below and complete checkout first — your account unlocks after payment.
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
