@@ -6,37 +6,43 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
   apiVersion: '2024-06-20',
 });
 
+function getOrigin(req: NextApiRequest) {
+  const envUrl = process.env.NEXT_PUBLIC_SITE_URL || process.env.SITE_URL;
+  if (envUrl) return envUrl.replace(/\/$/, '');
+  const proto = (req.headers['x-forwarded-proto'] as string) || 'https';
+  const host = (req.headers['x-forwarded-host'] as string) || req.headers.host;
+  return `${proto}://${host}`;
+}
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
-    const { priceId, mode, successPath = '/builder', cancelPath = '/#pricing' } = req.body || {};
+    const { priceId, planName, fromPath } = req.body as {
+      priceId: string; planName?: string; fromPath?: string;
+    };
     if (!priceId) return res.status(400).json({ error: 'Missing priceId' });
 
-    // Create a Checkout Session (subscription) with $0 trial + card capture
-    const session = await stripe.checkout.sessions.create({
-      mode: mode === 'payment' ? 'payment' : 'subscription',
-      line_items: [{ price: String(priceId), quantity: 1 }],
-      allow_promotion_codes: true,
-      // Require a payment method up front, but don’t charge until trial ends:
-      subscription_data: {
-        trial_settings: { end_behavior: { missing_payment_method: 'cancel' } },
-        // Set one of these on the Price itself, OR uncomment to force 30 days here:
-        // trial_period_days: 30,
-      },
-      // If you want to strictly require a card even with $0 due “today”:
-      payment_method_collection: 'always',
-      // Optional: Pre-fill metadata for provisioning later
-      metadata: { app_plan_price_id: String(priceId) },
+    const origin = getOrigin(req);
 
-      // Where Stripe sends users back
-      success_url: `${req.headers.origin}${successPath}?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url:  `${req.headers.origin}${cancelPath}`,
+    const session = await stripe.checkout.sessions.create({
+      mode: 'subscription',
+      line_items: [{ price: priceId, quantity: 1 }],
+      payment_method_collection: 'always',
+      subscription_data: {
+        trial_period_days: 21, // or 30
+        metadata: { plan_name: planName || 'unknown' },
+      },
+      allow_promotion_codes: true,
+      client_reference_id: '', // optionally your user id
+      metadata: { from_path: fromPath || '/' },
+      success_url: `${origin}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${origin}/#pricing`,
     });
 
     return res.status(200).json({ sessionId: session.id });
-  } catch (err: any) {
-    console.error('[checkout] error:', err);
-    return res.status(500).json({ error: 'Failed to create session' });
+  } catch (err) {
+    console.error('checkout error', err);
+    return res.status(500).json({ error: 'Checkout session failed' });
   }
 }
