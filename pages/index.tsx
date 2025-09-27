@@ -1,370 +1,324 @@
 // pages/index.tsx
+'use client';
+
 import Head from 'next/head';
-import { useState } from 'react';
-import { motion } from 'framer-motion';
+import { useEffect, useMemo, useState } from 'react';
+import { loadStripe } from '@stripe/stripe-js';
 import {
-  Wand2, Mic, Shield, Cpu, MessageSquare, Phone, ArrowRight, CheckCircle2,
-  CreditCard, Sparkles, Globe, BarChart3, Timer, Lock, Headphones, Rocket, Star
+  ArrowRight, CheckCircle2, Zap, Shield, Wand2, HeadphonesIcon, ChevronRight
 } from 'lucide-react';
 
-/* ───────────────────────────────
-   Overlay tokens (same vibe as AssistantRail)
-   ─────────────────────────────── */
-const CTA = '#59d9b3';
-const GREEN_LINE = 'rgba(89,217,179,.20)';
-const EASE = 'cubic-bezier(.22,.61,.36,1)';
+const ACCENT = '#59d9b3';
 
-// IMPORTANT: replace these with your actual Price IDs from Stripe (test OR live to match STRIPE_SECRET_KEY)
-const PRICE_IDS = {
-  starter: { monthly: 'price_xxx_starter_m', annual: 'price_xxx_starter_y' },
-  pro: { monthly: 'price_xxx_pro_m', annual: 'price_xxx_pro_y' },
-};
-
-type Billing = 'monthly' | 'annual';
+function useStripe() {
+  const [stripe, setStripe] = useState<ReturnType<typeof loadStripe> | null>(null);
+  useEffect(() => {
+    const pk = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || '';
+    setStripe(loadStripe(pk));
+  }, []);
+  return stripe;
+}
 
 export default function Home() {
-  const [billing, setBilling] = useState<Billing>('monthly');
-  const [loadingId, setLoadingId] = useState<string>('');
+  const stripePromise = useStripe();
+  const [billingCycle, setBillingCycle] = useState<'month'|'year'>('month');
+  const [busy, setBusy] = useState<string>('');
 
-  async function startCheckout(priceId: string, opts?: { trialDays?: number }) {
+  const price = useMemo(() => ({
+    starter: billingCycle === 'month'
+      ? process.env.NEXT_PUBLIC_PRICE_STARTER_MONTHLY || ''
+      : process.env.NEXT_PUBLIC_PRICE_STARTER_YEARLY || '',
+    pro: billingCycle === 'month'
+      ? process.env.NEXT_PUBLIC_PRICE_PRO_MONTHLY || ''
+      : process.env.NEXT_PUBLIC_PRICE_PRO_YEARLY || '',
+  }), [billingCycle]);
+
+  async function startCheckout(tier: 'starter' | 'pro') {
     try {
-      setLoadingId(priceId);
-      const r = await fetch('/api/checkout', {
+      setBusy(tier);
+      const pid = price[tier];
+      if (!pid) throw new Error('Missing Price ID env variable');
+
+      const res = await fetch('/api/checkout', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type':'application/json' },
         body: JSON.stringify({
-          priceId,
+          priceId: pid,
           mode: 'subscription',
-          successPath: '/builder',
-          cancelPath: '/#pricing',
-          trialDays: opts?.trialDays ?? undefined,
-        }),
+        })
       });
-      const json = await safeJSON(r);
-      if (!r.ok || !json?.url) {
-        console.error('Checkout error', json);
-        alert('Could not start checkout. Check Stripe keys + Price IDs (open console).');
-        return;
+      if (!res.ok) {
+        const t = await res.text();
+        throw new Error(t || 'Checkout failed');
       }
-      window.location.href = json.url as string;
-    } catch (e) {
-      console.error(e);
-      alert('Could not start checkout. Please try again.');
+      const { sessionId, publishableKey } = await res.json();
+
+      // Ensure stripe instance (use key from server for safety)
+      const stripe = await loadStripe(publishableKey);
+      if (!stripe) throw new Error('Stripe not loaded');
+
+      const { error } = await stripe.redirectToCheckout({ sessionId });
+      if (error) throw error;
+    } catch (err:any) {
+      // Surface the real console error so you can see exactly which var is missing
+      console.error('[checkout]', err);
+      alert('Could not start checkout. Check Stripe keys + Price IDs (open console).');
     } finally {
-      setLoadingId('');
+      setBusy('');
     }
   }
-
-  const isMonthly = billing === 'monthly';
-  const pStarter = PRICE_IDS.starter[billing];
-  const pPro = PRICE_IDS.pro[billing];
 
   return (
     <>
       <Head>
-        <title>ReduxAI — Build AI voice agents in minutes</title>
-        <meta name="description" content="Overlay-quality UI. Natural voice. Smart routing. Ship voice agents fast." />
+        <title>ReduxAI — Build AI voice agents</title>
+        <meta name="description" content="Build AI agents and connect them to real-world channels." />
       </Head>
 
-      {/* Global overlay tokens */}
+      {/* Tokens */}
       <style jsx global>{`
-        .va-scope{
-          --bg:#0b0c10; --panel:#0d0f11; --card:#0f1214; --text:#e6f1ef; --text-muted:#9fb4ad;
-          --brand:${CTA}; --brand-weak:rgba(89,217,179,.22);
-          --border:rgba(255,255,255,.10); --border-weak:rgba(255,255,255,.10);
-          --shadow-card:0 20px 40px rgba(0,0,0,.28), 0 0 0 1px rgba(255,255,255,.06) inset;
-          --radius:12px; --ease:${EASE};
+        :root {
+          --bg:#0b0c10; --panel:#0d0f11; --card:#0f1214; --text:#e6f1ef; --muted:#9fb4ad;
+          --brand:${ACCENT}; --brand-weak:rgba(89,217,179,.18);
+          --border:rgba(255,255,255,.10);
+          --radius:12px; --ease:cubic-bezier(.22,.61,.36,1);
+          --shadow:0 20px 50px rgba(0,0,0,.45);
         }
-        :root:not([data-theme="dark"]) .va-scope{
-          --bg:#f7faf9; --panel:#ffffff; --card:#f4f7f6; --text:#0f172a; --text-muted:#64748b;
-          --brand:${CTA}; --brand-weak:rgba(89,217,179,.18);
-          --border:rgba(15,23,42,.12); --border-weak:rgba(15,23,42,.12);
-          --shadow-card:0 10px 24px rgba(2,6,12,.06), 0 0 0 1px rgba(15,23,42,.06) inset;
+        :root:not([data-theme="dark"]) {
+          --bg:#f7faf9; --panel:#ffffff; --card:#f6faf9; --text:#0f172a; --muted:#64748b;
+          --border:rgba(15,23,42,.12);
+          --shadow:0 14px 36px rgba(2,6,12,.10);
         }
-        .va-card{ border:1px solid var(--border-weak); background:var(--panel); border-radius:var(--radius); box-shadow:var(--shadow-card); overflow:hidden; isolation:isolate; }
-        .pill{ display:inline-flex; align-items:center; gap:8px; padding:6px 12px; border-radius:999px;
-               background: color-mix(in oklab, var(--brand) 10%, var(--panel)); border:1px solid ${GREEN_LINE}; color: var(--text); font-size:12px; }
-        .btn{ height:44px; padding:0 18px; border-radius:999px; font-weight:600; display:inline-flex; align-items:center; justify-content:center; gap:8px;
-              transition: transform .15s var(--ease); border:1px solid transparent; }
-        .btn:hover{ transform: translateY(-1px); }
-        .btn-primary{ background:var(--brand); color:#fff; }
-        .btn-secondary{ background:var(--panel); color:var(--text); border:1px solid var(--border); }
-        .section{ padding:80px 0; }
-        .lift:hover{ transform: translateY(-2px); transition: transform .18s var(--ease); }
+        html,body,#__next{height:100%}
+        body{background:var(--bg); color:var(--text);}
+        .grid-bg{
+          position:relative; isolation:isolate;
+          background:
+            radial-gradient(800px 400px at 50% -10%, var(--brand-weak), transparent 60%),
+            linear-gradient(180deg, rgba(0,0,0,.08), transparent 30%),
+            var(--bg);
+        }
+        .grid-bg::after{
+          content:''; position:absolute; inset:0; opacity:.2; z-index:0;
+          background:
+            radial-gradient(300px 300px at 20% 10%, rgba(89,217,179,.10), transparent 60%),
+            radial-gradient(300px 300px at 80% 0%, rgba(89,217,179,.10), transparent 60%),
+            repeating-linear-gradient(90deg, transparent 0 48px, rgba(255,255,255,.06) 48px 49px),
+            repeating-linear-gradient(0deg, transparent 0 48px, rgba(255,255,255,.06) 48px 49px);
+          mask: radial-gradient(100% 60% at 50% 0%, #000 40%, transparent 100%);
+        }
+        .card{
+          background:var(--card); border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow);
+        }
+        .glow{
+          box-shadow: 0 0 0 1px color-mix(in oklab, var(--brand) 30%, var(--border)),
+                      0 12px 40px color-mix(in oklab, var(--brand) 25%, transparent);
+        }
+        .pill{border:1px solid color-mix(in oklab, var(--brand) 30%, var(--border)); background:color-mix(in oklab, var(--brand) 8%, var(--panel));}
+        .muted{color:var(--muted)}
+        .btn{
+          display:inline-flex; align-items:center; justify-content:center; gap:.5rem; font-weight:600;
+          height:44px; padding:0 18px; border-radius:10px; border:1px solid var(--border);
+          background:color-mix(in oklab, var(--brand) 8%, var(--panel)); color:var(--text);
+          transition: transform .15s var(--ease), box-shadow .2s var(--ease), background .2s var(--ease);
+        }
+        .btn:hover{ transform:translateY(-1px); box-shadow:0 10px 30px rgba(0,0,0,.25) }
+        .btn-cta{ background: var(--brand); color:#07231b; border-color: color-mix(in oklab, var(--brand) 60%, var(--border)); }
+        .btn-cta:hover{ box-shadow: 0 18px 48px color-mix(in oklab, var(--brand) 40%, transparent) }
+        .h1{font-size: clamp(2.4rem, 6vw, 4.25rem); line-height:1.1; letter-spacing:-.02em; font-weight:800}
+        .h2{font-size: clamp(1.6rem, 3.4vw, 2.6rem); line-height:1.12; letter-spacing:-.01em; font-weight:800}
+        .h3{font-size: 1.125rem; font-weight:700}
+        .k{font-size: 14px; font-weight:700; letter-spacing:.14em; color:var(--muted)}
+        .list li{display:flex; align-items:flex-start; gap:.5rem; margin: .35rem 0}
+        .list svg{color: var(--brand)}
+        .switch{
+          display:inline-flex; align-items:center; gap:10px; padding:6px; border-radius:999px; border:1px solid var(--border);
+          background: var(--panel);
+        }
+        .switch button{
+          height:34px; min-width:120px; padding:0 14px; border-radius:999px; border:1px solid var(--border);
+          background: transparent; color: var(--text); font-weight:600;
+        }
+        .switch button[data-active="true"]{
+          border-color: color-mix(in oklab, var(--brand) 40%, var(--border));
+          background: color-mix(in oklab, var(--brand) 12%, var(--panel));
+          box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--brand) 24%, transparent);
+        }
       `}</style>
 
-      {/* Page */}
-      <div className="va-scope" style={{ background:'var(--bg)', color:'var(--text)' }}>
-
-        {/* NAV */}
-        <header style={{ borderBottom:`1px solid ${GREEN_LINE}` }}>
-          <nav className="mx-auto max-w-[1160px] px-5 lg:px-6 h-[66px] flex items-center justify-between">
-            <div className="flex items-center gap-10">
-              <div className="text-base font-semibold">ReduxAI<span style={{ color:CTA }}>.</span>com</div>
-              <NavLink href="#features">Features</NavLink>
-              <NavLink href="#pricing">Pricing</NavLink>
-              <NavLink href="#faq">FAQ</NavLink>
+      {/* NAV */}
+      <header className="grid-bg">
+        <div className="mx-auto max-w-[1200px] px-5 py-5 flex items-center justify-between relative z-[1]">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg grid place-items-center" style={{background:'color-mix(in oklab, var(--brand) 20%, var(--card))', border:'1px solid var(--border)'}}>
+              <Wand2 className="w-4 h-4" />
             </div>
-            <div className="flex items-center gap-8">
-              <a className="btn btn-secondary" href="/login">Sign in</a>
-              <button className="btn btn-primary" onClick={() => document.getElementById('pricing')?.scrollIntoView({ behavior:'smooth' })}>
-                Start free <ArrowRight className="w-4 h-4" />
-              </button>
-            </div>
-          </nav>
-        </header>
+            <div className="font-semibold">ReduxAI</div>
+          </div>
+          <div className="hidden md:flex items-center gap-8 text-sm muted">
+            <a href="#features">Features</a>
+            <a href="#how">How it works</a>
+            <a href="#pricing">Pricing</a>
+          </div>
+          <div className="flex items-center gap-3">
+            <a className="btn" href="/login">Sign in</a>
+            <a className="btn btn-cta" href="/signup">Get started <ArrowRight className="w-4 h-4"/></a>
+          </div>
+        </div>
 
         {/* HERO */}
-        <section className="section">
-          <div className="mx-auto max-w-[1160px] px-5 lg:px-6 grid md:grid-cols-2 gap-12 items-center">
-            <div>
-              <div className="pill mb-3"><Sparkles className="w-4 h-4" /> Overlay-clean UI</div>
-              <h1 className="text-[36px] md:text-[44px] leading-[1.05] font-semibold">Build & launch <span style={{ color:CTA }}>AI voice agents</span> in minutes.</h1>
-              <p className="mt-3 text-[15px]" style={{ color:'var(--text-muted)' }}>
-                Natural speech. Smart routing. Clean controls. The same visual language as your in-app overlays.
-              </p>
-              <div className="mt-6 flex flex-wrap gap-10 items-center">
-                <button className="btn btn-primary" onClick={() => document.getElementById('pricing')?.scrollIntoView({ behavior:'smooth' })}>Get started free</button>
-                <div className="flex items-center gap-2 text-sm" style={{ color:'var(--text-muted)' }}>
-                  <Shield className="w-4 h-4" /> Card verification required
-                </div>
-              </div>
-              <div className="mt-6 grid grid-cols-3 gap-6 text-sm">
-                <Tag icon={<Mic className="w-4 h-4" />} label="Real-time voice" />
-                <Tag icon={<Cpu className="w-4 h-4" />} label="LLM orchestrations" />
-                <Tag icon={<Lock className="w-4 h-4" />} label="Auth-gated & private" />
-              </div>
-            </div>
+        <section className="mx-auto max-w-[1200px] px-5 pb-20 pt-10 relative z-[1]">
+          <div className="pill inline-flex items-center gap-2 px-3 h-8 rounded-full text-xs muted">
+            <Shield className="w-3.5 h-3.5"/> Secure by design
+          </div>
 
-            {/* Right: overlay preview */}
-            <div className="va-card p-6 lift">
-              <div className="text-sm mb-2" style={{ color:'var(--text-muted)' }}>Overlay preview</div>
-              <div className="rounded-[12px] p-5"
-                   style={{ border:`1px solid ${GREEN_LINE}`,
-                            background:`linear-gradient(180deg, color-mix(in oklab, var(--brand) 14%, transparent), transparent 60%)` }}>
-                <div className="text-[15px] font-medium">“Hi! I’m your AI receptionist. How can I help?”</div>
-                <div className="mt-2 text-sm" style={{ color:'var(--text-muted)' }}>Warm, natural prosody. Pause-aware. Interrupt-friendly.</div>
-              </div>
-              <div className="mt-4 text-xs" style={{ color:'var(--text-muted)' }}>Configured after checkout. Import your prompts and routes.</div>
+          <h1 className="h1 mt-4">
+            Build <span style={{color:ACCENT}}>AI Agents</span><br/> and launch them fast
+          </h1>
+          <p className="muted mt-3 max-w-[640px]">
+            Connect data, pick a voice, and deploy. Beautiful rails, low-latency calls, and a clean billing flow.
+          </p>
+
+          <div className="mt-6 flex flex-wrap gap-3">
+            <a className="btn btn-cta" href="/app">Start building <ArrowRight className="w-4 h-4"/></a>
+            <a className="btn" href="#pricing">See pricing</a>
+          </div>
+
+          {/* hero cards */}
+          <div className="grid md:grid-cols-3 gap-4 mt-12">
+            <div className="card p-5">
+              <div className="h3 flex items-center gap-2"><Zap className="w-4 h-4" style={{color:ACCENT}}/> No fiddly setup</div>
+              <p className="muted mt-2">Connect data & pick a voice. We handle the rest.</p>
+            </div>
+            <div className="card p-5">
+              <div className="h3 flex items-center gap-2"><HeadphonesIcon className="w-4 h-4" style={{color:ACCENT}}/> Great call quality</div>
+              <p className="muted mt-2">Low-latency, natural speech with smart pauses.</p>
+            </div>
+            <div className="card p-5">
+              <div className="h3 flex items-center gap-2"><Shield className="w-4 h-4" style={{color:ACCENT}}/> Secure & private</div>
+              <p className="muted mt-2">Auth-gated app and safe storage by design.</p>
             </div>
           </div>
         </section>
+      </header>
 
-        {/* TRUST / METRICS */}
-        <section className="section" style={{ paddingTop:0 }}>
-          <div className="mx-auto max-w-[1160px] px-5 lg:px-6">
-            <div className="va-card grid grid-cols-2 md:grid-cols-4 gap-6 p-6">
-              <Metric k="120ms" v="Avg. latency" icon={<Timer className="w-4 h-4" />} />
-              <Metric k="99.9%" v="Uptime" icon={<Globe className="w-4 h-4" />} />
-              <Metric k="A+" v="Call quality" icon={<Phone className="w-4 h-4" />} />
-              <Metric k="4.9★" v="User rating" icon={<Star className="w-4 h-4" />} />
+      {/* FEATURES */}
+      <section id="features" className="mx-auto max-w-[1200px] px-5 py-20">
+        <div className="k mb-2">FEATURES</div>
+        <h2 className="h2">Setup agents in <span style={{color:ACCENT}}>4 steps</span></h2>
+        <div className="grid lg:grid-cols-2 gap-6 mt-8">
+          {[
+            {title:'Prompt Agent', desc:'Create detailed instructions with the AI Prompter in minutes.'},
+            {title:'Demo Agent', desc:'Share your Agent with clients and teammates in a live demo.'},
+            {title:'Connect Agent', desc:'Add integrations (Web widget, Instagram, Messenger, SMS).'},
+            {title:'Deploy Agent', desc:'Launch to the real world and track conversations in one place.'},
+          ].map((s, i)=>(
+            <div key={i} className="card p-6 glow">
+              <div className="k">STEP {i+1}</div>
+              <div className="h3 mt-2">{s.title}</div>
+              <p className="muted mt-2">{s.desc}</p>
             </div>
+          ))}
+        </div>
+      </section>
+
+      {/* PRICING */}
+      <section id="pricing" className="mx-auto max-w-[1200px] px-5 py-20">
+        <div className="k mb-2">PRICING</div>
+        <h2 className="h2">Build agents with <span style={{color:ACCENT}}>confidence</span></h2>
+
+        <div className="mt-6">
+          <div className="switch">
+            <button data-active={billingCycle==='month'} onClick={()=>setBillingCycle('month')}>Monthly</button>
+            <button data-active={billingCycle==='year'} onClick={()=>setBillingCycle('year')}>Annual <span className="muted">(save ~40%)</span></button>
           </div>
-        </section>
+        </div>
 
-        {/* FEATURES */}
-        <section id="features" className="section" style={{ borderTop:`1px solid ${GREEN_LINE}` }}>
-          <div className="mx-auto max-w-[1160px] px-5 lg:px-6">
-            <div className="grid md:grid-cols-3 gap-6">
-              {[
-                { icon:<Wand2 className="w-5 h-5" />, title:'No fiddly setup', desc:'Connect your data & pick a voice. We handle infra.' },
-                { icon:<MessageSquare className="w-5 h-5" />, title:'Natural speech', desc:'Low-latency prosody, smart pauses, barging.' },
-                { icon:<Shield className="w-5 h-5" />, title:'Secure by design', desc:'Auth-gated app. Stable storage. Privacy-first.' },
-                { icon:<BarChart3 className="w-5 h-5" />, title:'Analytics', desc:'Turns, intents, handoffs, outcomes.' },
-                { icon:<Headphones className="w-5 h-5" />, title:'Live handoff', desc:'Route to human agents or numbers when needed.' },
-                { icon:<Rocket className="w-5 h-5" />, title:'Launch fast', desc:'Opinionated defaults. Overlay-clean controls.' },
-              ].map((f,i)=>(
-                <div key={i} className="va-card p-5 lift">
-                  <div className="w-10 h-10 rounded-[10px] grid place-items-center mb-3"
-                       style={{ background:'var(--brand-weak)', border:`1px solid ${GREEN_LINE}` }}>
-                    {f.icon}
-                  </div>
-                  <div className="text-[16px] font-semibold">{f.title}</div>
-                  <div className="mt-1 text-[14px]" style={{ color:'var(--text-muted)' }}>{f.desc}</div>
-                </div>
-              ))}
+        <div className="grid md:grid-cols-2 gap-6 mt-10">
+          {/* Starter */}
+          <div className="card p-6 relative overflow-hidden">
+            <div className="absolute inset-0 pointer-events-none"
+                 style={{background:'radial-gradient(60% 80% at 50% 0%, rgba(89,217,179,.10), transparent)'}}/>
+            <div className="h3">Starter</div>
+            <div className="mt-2 text-3xl font-extrabold">
+              {billingCycle==='month' ? '€19/mo' : '€142/yr'}
             </div>
+            <ul className="list mt-4 muted">
+              <li><CheckCircle2 className="w-4 h-4"/><span>1 assistant</span></li>
+              <li><CheckCircle2 className="w-4 h-4"/><span>Real-time voice</span></li>
+              <li><CheckCircle2 className="w-4 h-4"/><span>Basic analytics</span></li>
+              <li><CheckCircle2 className="w-4 h-4"/><span>Email support</span></li>
+            </ul>
+            <button
+              disabled={busy==='starter'}
+              onClick={()=>startCheckout('starter')}
+              className="btn btn-cta w-full mt-6"
+            >
+              {busy==='starter' ? 'Starting checkout…' : 'Start free trial'}
+              <ChevronRight className="w-4 h-4"/>
+            </button>
+            <div className="mt-3 text-xs muted">Card required for a €0 authorization. First charge after the trial unless you cancel.</div>
           </div>
-        </section>
 
-        {/* STEPS */}
-        <section className="section" style={{ borderTop:`1px solid ${GREEN_LINE}` }}>
-          <div className="mx-auto max-w-[1160px] px-5 lg:px-6 grid md:grid-cols-3 gap-6">
-            {[
-              { n:'01', t:'Connect', d:'Hook up data sources and phone endpoints.' },
-              { n:'02', t:'Configure', d:'Pick a voice, compose call logic and handoffs.' },
-              { n:'03', t:'Go live', d:'Ship your first assistant in minutes.' },
-            ].map((s, i)=>(
-              <div key={i} className="va-card p-5">
-                <div className="text-xs mb-1" style={{ color:'var(--text-muted)' }}>Step {s.n}</div>
-                <div className="text-[18px] font-semibold">{s.t}</div>
-                <div className="text-sm mt-1" style={{ color:'var(--text-muted)' }}>{s.d}</div>
-              </div>
-            ))}
+          {/* Pro */}
+          <div className="card p-6 glow relative overflow-hidden" style={{borderColor:'color-mix(in oklab, var(--brand) 40%, var(--border))'}}>
+            <div className="absolute inset-0 pointer-events-none"
+                 style={{background:'radial-gradient(60% 80% at 50% 0%, rgba(89,217,179,.14), transparent)'}}/>
+            <div className="h3 flex items-center gap-2">
+              Pro <span className="pill text-xs px-2 py-1 rounded-full">Most popular</span>
+            </div>
+            <div className="mt-2 text-3xl font-extrabold">
+              {billingCycle==='month' ? '€39/mo' : '€462/yr'}
+            </div>
+            <ul className="list mt-4 muted">
+              <li><CheckCircle2 className="w-4 h-4"/><span>Up to 5 assistants</span></li>
+              <li><CheckCircle2 className="w-4 h-4"/><span>Advanced analytics</span></li>
+              <li><CheckCircle2 className="w-4 h-4"/><span>Priority routing</span></li>
+              <li><CheckCircle2 className="w-4 h-4"/><span>Priority support</span></li>
+            </ul>
+            <button
+              disabled={busy==='pro'}
+              onClick={()=>startCheckout('pro')}
+              className="btn btn-cta w-full mt-6"
+            >
+              {busy==='pro' ? 'Starting checkout…' : 'Start free trial'}
+              <ChevronRight className="w-4 h-4"/>
+            </button>
+            <div className="mt-3 text-xs muted">UI prices are labels; actual amount/interval comes from your Stripe Price.</div>
           </div>
-        </section>
+        </div>
+      </section>
 
-        {/* SHOWCASE / SCREENSHOT STUB */}
-        <section className="section" style={{ borderTop:`1px solid ${GREEN_LINE}` }}>
-          <div className="mx-auto max-w-[1160px] px-5 lg:px-6 grid md:grid-cols-[1.2fr,.8fr] gap-12 items-center">
-            <div className="va-card p-6 lift">
-              <div className="text-sm mb-2" style={{ color:'var(--text-muted)' }}>Dashboard preview</div>
-              <div className="rounded-[12px] h-[260px] grid place-items-center"
-                   style={{ border:`1px solid ${GREEN_LINE}`, background:'linear-gradient(180deg, color-mix(in oklab, var(--brand) 8%, transparent), transparent 70%)' }}>
-                <div className="text-sm" style={{ color:'var(--text-muted)' }}>Drop your real screenshot here later.</div>
-              </div>
-            </div>
-            <div>
-              <div className="pill"><Shield className="w-4 h-4" /> Secure & private</div>
-              <h3 className="text-[28px] font-semibold mt-2">A calm, overlay-clean surface for serious work.</h3>
-              <p className="mt-2 text-[15px]" style={{ color:'var(--text-muted)' }}>
-                Same gradients, same rounded corners, same glow lines as your AssistantRail. No mess. Everything feels cohesive.
-              </p>
-            </div>
+      {/* FOOTER */}
+      <footer className="mt-10 border-t" style={{borderColor:'var(--border)'}}>
+        <div className="mx-auto max-w-[1200px] px-5 py-10 grid md:grid-cols-4 gap-8 muted">
+          <div>
+            <div className="h3">ReduxAI</div>
+            <p className="mt-2 text-sm">Build and launch AI agents that perform real-world tasks.</p>
           </div>
-        </section>
-
-        {/* PRICING */}
-        <section id="pricing" className="section" style={{ borderTop:`1px solid ${GREEN_LINE}` }}>
-          <div className="mx-auto max-w-[1160px] px-5 lg:px-6">
-            <div className="flex items-center justify-between mb-8 gap-6 flex-wrap">
-              <div>
-                <div className="pill"><CreditCard className="w-4 h-4" /> Pricing</div>
-                <h2 className="text-[28px] md:text-[32px] font-semibold mt-2">Simple plans, free trial included</h2>
-                <div className="text-sm mt-1" style={{ color:'var(--text-muted)' }}>
-                  We verify your card with a €0 authorization. First charge after the trial unless you cancel.
-                </div>
-              </div>
-              <BillingToggle billing={billing} setBilling={setBilling} />
-            </div>
-
-            <div className="grid md:grid-cols-2 gap-6">
-              <PlanCard
-                title="Starter"
-                price={isMonthly ? '€19/mo' : '€11/mo (billed yearly)'}
-                note="Everything you need to launch a single voice agent."
-                features={['1 assistant', 'Real-time voice', 'Basic analytics', 'Email support']}
-                cta="Start free trial"
-                loading={loadingId === pStarter}
-                onClick={() => startCheckout(pStarter, { trialDays: 7 })}
-              />
-              <PlanCard
-                highlight
-                title="Pro"
-                price={isMonthly ? '€39/mo' : '€23/mo (billed yearly)'}
-                note="Scale to multiple assistants and teams."
-                features={['Up to 5 assistants', 'Advanced analytics', 'Priority routing', 'Priority support']}
-                cta="Start free trial"
-                loading={loadingId === pPro}
-                onClick={() => startCheckout(pPro, { trialDays: 14 })}
-              />
-            </div>
-
-            <div className="mt-5 text-xs" style={{ color:'var(--text-muted)' }}>
-              UI labels are indicative; actual amount/interval come from your Stripe <i>Price</i>.
-            </div>
+          <div>
+            <div className="k mb-2">PRODUCT</div>
+            <ul className="space-y-2 text-sm">
+              <li><a href="#features">Features</a></li>
+              <li><a href="#pricing">Pricing</a></li>
+            </ul>
           </div>
-        </section>
-
-        {/* FAQ */}
-        <section id="faq" className="section" style={{ borderTop:`1px solid ${GREEN_LINE}` }}>
-          <div className="mx-auto max-w-[900px] px-5 lg:px-6">
-            <h3 className="text-[26px] font-semibold mb-6">Frequently asked</h3>
-            <div className="grid gap-3">
-              {FAQS.map((f,i)=>(
-                <details key={i} className="va-card p-5">
-                  <summary className="font-medium cursor-pointer">{f.q}</summary>
-                  <p className="mt-2 text-[14px]" style={{ color:'var(--text-muted)' }}>{f.a}</p>
-                </details>
-              ))}
-            </div>
+          <div>
+            <div className="k mb-2">COMPANY</div>
+            <ul className="space-y-2 text-sm">
+              <li><a href="/privacy">Privacy</a></li>
+              <li><a href="/terms">Terms</a></li>
+            </ul>
           </div>
-        </section>
-
-        {/* FOOTER */}
-        <footer className="section" style={{ borderTop:`1px solid ${GREEN_LINE}`, paddingTop:40 }}>
-          <div className="mx-auto max-w-[1160px] px-5 lg:px-6 text-sm" style={{ color:'var(--text-muted)' }}>
-            © {new Date().getFullYear()} ReduxAI — All rights reserved.
+          <div>
+            <div className="k mb-2">SUPPORT</div>
+            <ul className="space-y-2 text-sm">
+              <li><a href="mailto:support@reducai.com">support@reducai.com</a></li>
+            </ul>
           </div>
-        </footer>
-      </div>
+        </div>
+        <div className="px-5 pb-10 text-center text-xs muted">© {new Date().getFullYear()} ReduxAI — All rights reserved.</div>
+      </footer>
     </>
   );
 }
-
-/* ───────────────── helpers & atoms ───────────────── */
-
-function NavLink({ href, children }:{ href:string; children:React.ReactNode }) {
-  return <a href={href} className="text-sm hover:opacity-90" style={{ color:'var(--text-muted)' }}>{children}</a>;
-}
-
-function Tag({ icon, label }:{ icon:React.ReactNode; label:string }) {
-  return <div className="flex items-center gap-2 text-sm"><span style={{ color:CTA }}>{icon}</span>{label}</div>;
-}
-
-function Metric({ k, v, icon }:{ k:string; v:string; icon:React.ReactNode }) {
-  return (
-    <div className="flex items-center gap-3">
-      <div className="w-8 h-8 rounded-[10px] grid place-items-center" style={{ background:'var(--brand-weak)', border:`1px solid ${GREEN_LINE}` }}>
-        {icon}
-      </div>
-      <div>
-        <div className="text-[18px] font-semibold leading-none">{k}</div>
-        <div className="text-xs mt-[2px]" style={{ color:'var(--text-muted)' }}>{v}</div>
-      </div>
-    </div>
-  );
-}
-
-function BillingToggle({ billing, setBilling }:{ billing:'monthly'|'annual'; setBilling:(b:'monthly'|'annual')=>void }) {
-  const monthlyActive = billing === 'monthly';
-  return (
-    <div className="va-card p-1 flex items-center gap-1">
-      <button className="btn" style={{ height:36, padding:'0 14px', background: monthlyActive ? 'var(--brand)' : 'var(--panel)', color: monthlyActive ? '#fff' : 'var(--text)', borderRadius:999, border:`1px solid ${monthlyActive ? 'transparent' : 'var(--border)'}` }} onClick={()=>setBilling('monthly')}>Monthly</button>
-      <button className="btn" style={{ height:36, padding:'0 14px', background: !monthlyActive ? 'var(--brand)' : 'var(--panel)', color: !monthlyActive ? '#fff' : 'var(--text)', borderRadius:999, border:`1px solid ${!monthlyActive ? 'transparent' : 'var(--border)'}` }} onClick={()=>setBilling('annual')}>
-        Annual <span className="ml-1 text-xs" style={{ opacity:.9 }}>(save ~40%)</span>
-      </button>
-    </div>
-  );
-}
-
-function PlanCard({
-  title, price, note, features, cta, onClick, highlight, loading
-}:{
-  title:string; price:string; note:string; features:string[]; cta:string; onClick:()=>void; highlight?:boolean; loading?:boolean;
-}) {
-  return (
-    <motion.div
-      className="va-card p-5"
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      style={{
-        outline: highlight ? `2px solid ${CTA}` : 'none',
-        boxShadow: highlight ? '0 0 0 1px rgba(89,217,179,.18), var(--shadow-card)' : 'var(--shadow-card)',
-      }}
-    >
-      <div className="text-sm mb-1" style={{ color:'var(--text-muted)' }}>{title}</div>
-      <div className="text-[24px] font-semibold">{price}</div>
-      <div className="text-sm mt-1 mb-3" style={{ color:'var(--text-muted)' }}>{note}</div>
-      <ul className="text-sm space-y-2 mb-5">
-        {features.map((f,i)=>(
-          <li key={i} className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4" style={{ color: CTA }} /> {f}
-          </li>
-        ))}
-      </ul>
-      <button className="btn btn-primary w-full" onClick={onClick} disabled={!!loading}>
-        {loading ? 'Starting checkout…' : cta}
-      </button>
-    </motion.div>
-  );
-}
-
-const FAQS = [
-  { q: 'Do you offer a free trial?', a: 'Yes. We verify your card for €0 and start the trial. Cancel any time before it ends to avoid a charge.' },
-  { q: 'Can I bring my own LLM & voice provider?', a: 'Yes. You can plug in your providers and switch per-assistant.' },
-  { q: 'How do handoffs work?', a: 'Define routes and conditions. The assistant escalates to a real number or agent when needed.' },
-  { q: 'Is my data safe?', a: 'Yes. The app is auth-gated and designed to minimize data exposure. You own your data.' },
-];
-
-async function safeJSON(r:Response){ try{ return await r.json(); } catch { return {}; } }
