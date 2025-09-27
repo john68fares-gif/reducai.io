@@ -6,118 +6,89 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   Home, Hammer, Mic, Rocket,
-  Key, HelpCircle,
+  Phone, Key, HelpCircle,
   ChevronLeft, ChevronRight,
-  User as UserIcon, Bot,
-  ShoppingBag, Brain, Grid2X2, PlayCircle, LifeBuoy
+  User as UserIcon, Bot
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase-client';
 
-/* ---------- Sizes & storage ---------- */
-const W_EXPANDED = 220;     // narrower
+/* -------- Sizes / storage -------- */
+const W_EXPANDED = 220;     // narrower than before
 const W_COLLAPSED = 64;
 const LS_COLLAPSED = 'ui:sidebarCollapsed';
 
-/* ---------- Palette ---------- */
-const GREEN = '#59d9b3';
+/* -------- Brand / theme -------- */
+const CTA        = '#59d9b3';
 const GREEN_LINE = 'rgba(89,217,179,.22)';
-const BLUE_BASE = '#0b1013';
-const BLUE_SIDE = '#0f1519';
-const TEXT = 'rgba(236,242,247,.92)';
-const MUTED = 'rgba(176,196,210,.60)';
+const TEXT       = 'rgba(236,242,247,.92)';
+const MUTED      = 'rgba(176,196,210,.60)';
+const PANEL_DARK = '#0b0f11'; // panel tone used for plates
 
-/* Subtle banded BG: dark middle → slight lighter edges */
-function bandedSidebarBg(steps = 17, cap = 0.06) {
+/* Very subtle banded lines: dark middle → slightly lighter sides */
+function banded(steps = 17, cap = 0.055) {
   const parts: string[] = [];
   const center = Math.ceil(steps / 2);
   const bw = 100 / steps;
   for (let i = 1; i <= steps; i++) {
     const dist = Math.abs(i - center);
     const lighten = Math.min((cap / (center - 1)) * dist, cap);
-    const col = `color-mix(in oklab,
-      ${BLUE_BASE} ${100 - lighten * 100}%,
-      color-mix(in oklab, ${BLUE_SIDE} 85%, ${GREEN} 15%) ${lighten * 100}%
-    )`;
+    const col = `color-mix(in oklab, #0a0e10 ${100 - lighten * 100}%, ${CTA} ${lighten * 100}%)`;
     parts.push(`${col} ${(i - 1) * bw}%, ${col} ${i * bw}%`);
   }
   return `linear-gradient(90deg, ${parts.join(',')})`;
 }
 
+/* Thin section header strip (same concept as your rail’s top) */
+const sectionStrip = () =>
+  `linear-gradient(90deg, ${PANEL_DARK} 0%,
+                    color-mix(in oklab, ${PANEL_DARK} 97%, white 3%) 50%,
+                    ${PANEL_DARK} 100%)`;
+
+/* -------- Helpers -------- */
 function getDisplayName(name?: string | null, email?: string | null) {
   if (name && name.trim()) return name.trim();
   if (email && email.includes('@')) return email.split('@')[0];
   return 'Account';
 }
 
-/* ---------- Types & nav ---------- */
 type NavItem = {
+  id: string;
   href: string;
   label: string;
   sub?: string;
   icon: JSX.Element;
   group: 'workspace' | 'resources';
-  id: string;
 };
 
+/* ***** EXACT labels you asked for, NO Subaccounts ***** */
 const NAV: NavItem[] = [
-  { id: 'build',   href: '/builder',      label: 'Build',   sub: 'Create AI agent',      icon: <Home />,   group: 'workspace' },
-  { id: 'improve', href: '/improve',      label: 'Improve', sub: 'Integrate and Improve',icon: <Hammer />, group: 'workspace' },
-  { id: 'demo',    href: '/demo',         label: 'Demo',    sub: 'Showcase to clients',  icon: <Mic />,    group: 'workspace' },
-  { id: 'launch',  href: '/launch',       label: 'Launch',  sub: 'Deploy to production', icon: <Rocket />, group: 'workspace' },
+  { id: 'create', href: '/builder',      label: 'Create',       sub: 'Create AI agent',       icon: <Home />,   group: 'workspace' },
+  { id: 'tuning', href: '/improve',      label: 'Tuning',       sub: 'Integrate & optimize',  icon: <Hammer />, group: 'workspace' },
+  { id: 'voice',  href: '/voice-agent',  label: 'Voice Studio', sub: 'Calls & persona',       icon: <Mic />,    group: 'workspace' },
+  { id: 'launch', href: '/launch',       label: 'Launchpad',    sub: 'Go live',               icon: <Rocket />, group: 'workspace' },
 
-  { id: 'market',  href: '/marketplace',  label: 'Marketplace',  icon: <ShoppingBag />, group: 'resources' },
-  { id: 'mentor',  href: '/ai-mentor',    label: 'AI Mentor',    icon: <Brain />,       group: 'resources' },
-  { id: 'keys',    href: '/apikeys',      label: 'API Key',      icon: <Key />,         group: 'resources' },
-  { id: 'bulk',    href: '/bulk-tester',  label: 'Bulk Tester',  icon: <Grid2X2 />,     group: 'resources' },
-  { id: 'videos',  href: '/videos',       label: 'Video Guides', icon: <PlayCircle />,  group: 'resources' },
-  { id: 'support', href: '/support',      label: 'Support',      icon: <LifeBuoy />,    group: 'resources' },
+  { id: 'numbers', href: '/phone-numbers', label: 'Numbers',      icon: <Phone />,       group: 'resources' },
+  { id: 'keys',    href: '/apikeys',       label: 'API Keys',     icon: <Key />,         group: 'resources' },
+  { id: 'help',    href: '/support',       label: 'Help',         icon: <HelpCircle />,  group: 'resources' },
 ];
-
-/* Icon plate — smaller & less rounded */
-function IconPlate({
-  children,
-  invert = false,  // resources = white icons on darker plate
-  active = false
-}: { children: React.ReactNode; invert?: boolean; active?: boolean }) {
-  const radius = 10;
-  return (
-    <div
-      className="grid place-items-center shrink-0"
-      style={{
-        width: 36, height: 36,
-        borderRadius: radius,
-        background: invert ? 'rgba(255,255,255,.06)' : 'rgba(89,217,179,.09)',
-        border: `1px solid ${invert ? 'rgba(255,255,255,.12)' : GREEN_LINE}`,
-        boxShadow: active
-          ? '0 0 0 1px rgba(0,255,194,.08), 0 8px 18px rgba(0,0,0,.22)'
-          : 'inset 0 0 10px rgba(0,0,0,.14)',
-        color: invert ? '#ffffff' : '#12a989'
-      }}
-    >
-      {children}
-    </div>
-  );
-}
 
 export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
 
   const [collapsed, setCollapsed] = useState<boolean>(() => {
-    try {
-      const raw = localStorage.getItem(LS_COLLAPSED);
-      return raw ? JSON.parse(raw) : false;
-    } catch { return false; }
+    try { return JSON.parse(localStorage.getItem(LS_COLLAPSED) || 'false'); } catch { return false; }
   });
   useEffect(() => {
     try { localStorage.setItem(LS_COLLAPSED, JSON.stringify(collapsed)); } catch {}
     document.documentElement.style.setProperty('--sidebar-w', `${collapsed ? W_COLLAPSED : W_EXPANDED}px`);
   }, [collapsed]);
 
+  // user
   const [userLoading, setUserLoading] = useState(true);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [userName, setUserName] = useState<string | null>(null);
-  const [veil, setVeil] = useState(false); // loading overlay for Account
+  const [veil, setVeil] = useState(false);
 
   useEffect(() => {
     let unsub: any;
@@ -136,53 +107,70 @@ export default function Sidebar() {
     return () => unsub?.data?.subscription?.unsubscribe?.();
   }, []);
 
-  const pathnameActive = (item: NavItem) =>
-    item.href === '/launch' ? (pathname || '') === '/launch' : (pathname || '').startsWith(item.href);
+  const pathnameActive = (item: NavItem) => {
+    const p = pathname || '';
+    if (item.href === '/launch') return p === '/launch';
+    return p.startsWith(item.href);
+  };
 
-  const isWorkspace = (id: string) => NAV.find(n => n.id === id)?.group === 'workspace';
+  // center/size lucide icons
+  const renderIcon = (node: JSX.Element) =>
+    cloneElement(node, { className: 'w-[16px] h-[16px] shrink-0', strokeWidth: 2 });
 
-  const renderIcon = (node: JSX.Element, invert?: boolean) =>
-    cloneElement(node, { className: 'w-[16px] h-[16px] shrink-0', strokeWidth: 2, style: { color: invert ? '#fff' : undefined } });
-
-  const Item = ({ item, active }: { item: NavItem; active: boolean }) => {
-    const workspace = isWorkspace(item.id);
-    return (
-      <Link href={item.href} className="block group">
+  const Item = ({ item, active }: { item: NavItem; active: boolean }) => (
+    <Link href={item.href} className="block group">
+      <div
+        className="relative flex items-center h-[42px] rounded-[10px] pr-2"
+        style={{
+          transition: 'gap 320ms cubic-bezier(0.16,1,0.3,1), padding 320ms cubic-bezier(0.16,1,0.3,1)',
+          paddingLeft: collapsed ? 0 : 10,
+          gap: collapsed ? 0 : 10,
+        }}
+      >
+        {/* small, less-rounded icon plate */}
         <div
-          className="relative flex items-center h-[42px] rounded-[10px] pr-2"
+          className="w-9 h-9 rounded-[10px] grid place-items-center"
           style={{
-            transition: 'gap 320ms cubic-bezier(0.16,1,0.3,1), padding 320ms cubic-bezier(0.16,1,0.3,1)',
-            paddingLeft: collapsed ? 0 : 10,
-            gap: collapsed ? 0 : 10,
+            background: 'rgba(255,255,255,.06)',
+            border: `1px solid rgba(255,255,255,.12)`,
+            boxShadow: active
+              ? '0 0 0 1px rgba(0,255,194,.08), 0 8px 18px rgba(0,0,0,.22)'
+              : 'inset 0 0 10px rgba(0,0,0,.14)',
+            color: active ? CTA : TEXT,
+          }}
+          title={collapsed ? item.label : undefined}
+        >
+          {renderIcon(item.icon)}
+        </div>
+
+        <div
+          className="overflow-hidden"
+          style={{
+            transition: 'max-width 320ms cubic-bezier(0.16,1,0.3,1), opacity 320ms, transform 320ms',
+            maxWidth: collapsed ? 0 : 180,
+            opacity: collapsed ? 0 : 1,
+            transform: collapsed ? 'translateX(-6px)' : 'translateX(0)',
+            lineHeight: 1.1,
           }}
         >
-          <IconPlate active={active} invert={!workspace}>
-            {renderIcon(item.icon, !workspace)}
-          </IconPlate>
-
-          <div
-            className="overflow-hidden"
-            style={{
-              transition: 'max-width 320ms cubic-bezier(0.16,1,0.3,1), opacity 320ms, transform 320ms',
-              maxWidth: collapsed ? 0 : 180,
-              opacity: collapsed ? 0 : 1,
-              transform: collapsed ? 'translateX(-6px)' : 'translateX(0)',
-              lineHeight: 1.1,
-            }}
-          >
-            <div className="text-[13px] font-semibold" style={{ color: TEXT }}>{item.label}</div>
-            {workspace && item.sub && (
-              <div className="text-[11px]" style={{ color: MUTED, marginTop: 3 }}>{item.sub}</div>
-            )}
+          <div className="text-[13px] font-semibold" style={{ color: TEXT }}>
+            {item.label}
           </div>
-
-          {!collapsed && active && (
-            <span aria-hidden className="ml-auto rounded-full" style={{ width: 7, height: 7, background: GREEN }} />
+          {item.sub && (
+            <div className="text-[11px]" style={{ color: MUTED, marginTop: 3 }}>
+              {item.sub}
+            </div>
           )}
         </div>
-      </Link>
-    );
-  };
+
+        {/* tiny green dot when active & expanded */}
+        {!collapsed && active && (
+          <span aria-hidden className="ml-auto rounded-full" style={{ width: 7, height: 7, background: CTA }} />
+        )}
+      </div>
+      {/* ✅ removed the underline/divider under each item */}
+    </Link>
+  );
 
   return (
     <>
@@ -192,7 +180,7 @@ export default function Sidebar() {
           width: collapsed ? W_COLLAPSED : W_EXPANDED,
           transition: 'width 380ms cubic-bezier(0.16, 1, 0.3, 1)',
           willChange: 'width',
-          background: bandedSidebarBg(),
+          background: banded(),            // <<< the subtle “lines” gradient
           color: TEXT,
           borderRight: '1px solid rgba(255,255,255,.08)',
           boxShadow: 'inset 0 0 18px rgba(0,0,0,.28), 14px 0 28px rgba(0,0,0,.42)',
@@ -200,12 +188,12 @@ export default function Sidebar() {
         aria-label="Primary"
       >
         <div className="relative h-full flex flex-col">
-          {/* Brand (longer header row) */}
+          {/* Top brand row (longer), same banded idea */}
           <div className="px-3 pt-5 pb-4">
             <div className="flex items-center gap-3">
               <div
                 className="w-9 h-9 rounded-xl grid place-items-center shrink-0"
-                style={{ background: GREEN, boxShadow: '0 0 12px rgba(0,255,194,.32)' }}
+                style={{ background: CTA, boxShadow: '0 0 12px rgba(0,255,194,.32)' }}
               >
                 <Bot className="w-5 h-5 text-black" />
               </div>
@@ -219,15 +207,22 @@ export default function Sidebar() {
                 }}
               >
                 <div className="text-[18px] font-semibold tracking-wide" style={{ color: TEXT }}>
-                  reduc<span style={{ color: GREEN }}>ai</span>.io
+                  reduc<span style={{ color: CTA }}>ai</span>.io
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Workspace */}
+          {/* WORKSPACE section (strip above items) */}
           <div className="px-3">
-            {!collapsed && <div className="text-[11px] font-semibold tracking-[.14em] mb-2" style={{ color: MUTED }}>WORKSPACE</div>}
+            {!collapsed && (
+              <div className="px-2 py-1 rounded-[8px] mb-2"
+                   style={{ background: sectionStrip(), border: `1px solid ${GREEN_LINE}` }}>
+                <div className="text-[11px] font-semibold tracking-[.14em]" style={{ color: MUTED }}>
+                  WORKSPACE
+                </div>
+              </div>
+            )}
             <nav className="space-y-[6px]">
               {NAV.filter(n => n.group === 'workspace').map(item => (
                 <Item key={item.id} item={item} active={pathnameActive(item)} />
@@ -235,12 +230,19 @@ export default function Sidebar() {
             </nav>
           </div>
 
-          {/* Divider between groups */}
+          {/* divider between groups */}
           <div className="my-3 mx-3" style={{ height: 1, background: 'rgba(255,255,255,.08)' }} />
 
-          {/* Resources */}
+          {/* RESOURCES section (same strip) */}
           <div className="px-3">
-            {!collapsed && <div className="text-[11px] font-semibold tracking-[.14em] mb-2" style={{ color: MUTED }}>RESOURCES</div>}
+            {!collapsed && (
+              <div className="px-2 py-1 rounded-[8px] mb-2"
+                   style={{ background: sectionStrip(), border: `1px solid ${GREEN_LINE}` }}>
+                <div className="text-[11px] font-semibold tracking-[.14em]" style={{ color: MUTED }}>
+                  RESOURCES
+                </div>
+              </div>
+            )}
             <nav className="space-y-[6px]">
               {NAV.filter(n => n.group === 'resources').map(item => (
                 <Item key={item.id} item={item} active={pathnameActive(item)} />
@@ -248,16 +250,13 @@ export default function Sidebar() {
             </nav>
           </div>
 
-          {/* Spacer */}
           <div className="flex-1" />
 
-          {/* Account (cleaner) */}
+          {/* Account (clean, with loading veil) */}
           <div className="px-3 pb-4">
-            {/* custom button to show a loading veil then route */}
             <button
               onClick={() => {
                 setVeil(true);
-                // brief delay to let veil render; then navigate
                 setTimeout(() => router.push('/account'), 120);
               }}
               className="w-full rounded-xl px-3 py-3 flex items-center gap-3 text-left"
@@ -301,23 +300,36 @@ export default function Sidebar() {
             aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           >
             {collapsed
-              ? <ChevronRight className="w-4 h-4" style={{ color: GREEN }} />
-              : <ChevronLeft  className="w-4 h-4" style={{ color: GREEN }} />}
+              ? <ChevronRight className="w-4 h-4" style={{ color: CTA }} />
+              : <ChevronLeft  className="w-4 h-4" style={{ color: CTA }} />}
           </button>
         </div>
       </aside>
 
-      {/* Loading veil for Account */}
+      {/* Loading veil */}
       {veil && (
         <div
           className="fixed inset-0 z-[99999] grid place-items-center"
           style={{ background: 'rgba(6,8,10,.62)', backdropFilter: 'blur(6px)' }}
         >
-          <div className="rounded-xl px-4 py-3" style={{ background: 'rgba(15,18,20,.92)', border: `1px solid ${GREEN_LINE}`, color: TEXT }}>
+          <div className="rounded-xl px-4 py-3"
+               style={{ background: 'rgba(15,18,20,.92)', border: `1px solid ${GREEN_LINE}`, color: TEXT }}>
             Loading account…
           </div>
         </div>
       )}
+
+      {/* Theme tokens for light/dark (kept minimal) */}
+      <style jsx>{`
+        :global(:root:not([data-theme="dark"])) .fixed.left-0 {
+          --sidebar-text: #0f172a;
+          --sidebar-muted: #64748b;
+        }
+        :global([data-theme="dark"]) .fixed.left-0 {
+          --sidebar-text: ${TEXT};
+          --sidebar-muted: ${MUTED};
+        }
+      `}</style>
     </>
   );
 }
